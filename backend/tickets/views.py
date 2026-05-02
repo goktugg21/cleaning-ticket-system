@@ -1,3 +1,115 @@
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404
+from rest_framework import generics, mixins, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
-# Create your views here.
+from accounts.models import UserRole
+from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
+from accounts.scoping import scope_tickets_for
+
+from .filters import TicketFilter
+from .models import Ticket, TicketMessage, TicketMessageType
+from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
+from .serializers import (
+    TicketCreateSerializer,
+    TicketDetailSerializer,
+    TicketListSerializer,
+    TicketMessageSerializer,
+    TicketStatusChangeSerializer,
+)
+
+
+class TicketViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    permission_classes = [IsAuthenticatedAndActive, CanViewTicket]
+    filterset_class = TicketFilter
+    search_fields = ["ticket_no", "title", "description", "room_label"]
+    ordering_fields = ["created_at", "updated_at", "priority", "status"]
+
+    def get_queryset(self):
+        qs = scope_tickets_for(self.request.user).select_related(
+            "company", "building", "customer", "created_by", "assigned_to"
+        )
+        if self.action == "retrieve":
+            qs = qs.prefetch_related("status_history", "status_history__changed_by")
+        return qs
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return TicketCreateSerializer
+        if self.action == "retrieve":
+            return TicketDetailSerializer
+        return TicketListSerializer
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [IsAuthenticatedAndActive()]
+        return super().get_permissions()
+
+    @action(detail=True, methods=["post"], url_path="status")
+    def change_status(self, request, pk=None):
+        ticket = self.get_object()
+        serializer = TicketStatusChangeSerializer(
+            data=request.data,
+            context={"request": request, "ticket": ticket},
+        )
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.save()
+        return Response(
+            TicketDetailSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class TicketMessageListCreateView(generics.ListCreateAPIView):
+    serializer_class = TicketMessageSerializer
+    permission_classes = [IsAuthenticatedAndActive, CanPostMessage]
+
+    def _get_ticket(self):
+        ticket_id = self.kwargs["ticket_id"]
+        ticket = get_object_or_404(Ticket, pk=ticket_id)
+        if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
+            self.permission_denied(self.request, message="Ticket not found in your scope.")
+        self.check_object_permissions(self.request, ticket)
+        return ticket
+
+    def get_queryset(self):
+        ticket = self._get_ticket()
+        qs = TicketMessage.objects.filter(ticket=ticket).select_related("author")
+        user = self.request.user
+        if not is_staff_role(user):
+            qs = qs.filter(is_hidden=False)
+            qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
+        return qs.order_by("created_at")
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["ticket"] = self._get_ticket()
+        return context
+
+    def perform_create(self, serializer):
+        ticket = self._get_ticket()
+        user = self.request.user
+
+        message_type = serializer.validated_data.get(
+            "message_type", TicketMessageType.PUBLIC_REPLY
+        )
+        if not is_staff_role(user):
+            message_type = TicketMessageType.PUBLIC_REPLY
+
+        message = serializer.save(
+            ticket=ticket,
+            author=user,
+            message_type=message_type,
+            is_hidden=(message_type == TicketMessageType.INTERNAL_NOTE),
+        )
+
+        # First staff response stamps first_response_at on the ticket.
+        if is_staff_role(user):
+            ticket.mark_first_response_if_needed()
+
+        return message
