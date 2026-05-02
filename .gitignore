@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env.*
+media/
+staticfiles/
+node_modules/
+.next/
+.DS_Store
+.idea/
+.vscode/
