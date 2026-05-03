@@ -60,6 +60,7 @@ Use this to inspect the current HEAD:
 - Final validation script exists.
 - Local HTTP demo script exists.
 - Server handoff guide exists for external HTTPS termination.
+- Local demo presentation flow exists.
 
 ## Remaining before real public launch
 
