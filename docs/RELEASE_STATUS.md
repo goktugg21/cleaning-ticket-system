@@ -4,7 +4,7 @@
 
 The cleaning ticket system is production-ready from the application and Docker Compose side.
 
-The following validation passed successfully:
+The following validation passed successfully after the media restore validation fix:
 
     ./scripts/final_validation.sh
 
@@ -24,13 +24,14 @@ This final validation includes:
 - Production Docker Compose smoke test
 - Production upload/download smoke test
 - PostgreSQL backup and restore smoke test against a clean isolated environment
+- Uploaded media backup and restore smoke test against a clean isolated environment
 - Uploaded media restore smoke test
 
 ## Latest validated code state
 
-The full production validation passed after adding:
+The latest full production validation passed after:
 
-    Add final production validation script
+    Fix media restore test compose project
 
 The current latest commit may include documentation-only release notes.
 Use this to inspect the current HEAD:
