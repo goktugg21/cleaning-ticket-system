@@ -1,9 +1,12 @@
+import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, getApiError } from "../api/client";
 import type { PaginatedResponse, TicketList, TicketStatus } from "../api/types";
 
 type Priority = "NORMAL" | "HIGH" | "URGENT";
+
+const PAGE_SIZE = 25;
 
 const STATUS_OPTIONS: TicketStatus[] = [
   "OPEN",
@@ -38,6 +41,10 @@ function formatDate(value: string): string {
 export function DashboardPage() {
   const [tickets, setTickets] = useState<TicketList[]>([]);
   const [count, setCount] = useState(0);
+  const [next, setNext] = useState<string | null>(null);
+  const [previous, setPrevious] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -46,23 +53,33 @@ export function DashboardPage() {
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
 
+  const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
+
   const queryParams = useMemo(() => {
-    const params: Record<string, string> = {};
+    const params: Record<string, string | number> = {
+      page,
+    };
+
     if (statusFilter) params.status = statusFilter;
     if (priorityFilter) params.priority = priorityFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
+
     return params;
-  }, [statusFilter, priorityFilter, searchActive]);
+  }, [page, statusFilter, priorityFilter, searchActive]);
 
   const loadTickets = useCallback(async () => {
     setLoading(true);
     setError("");
+
     try {
       const response = await api.get<PaginatedResponse<TicketList>>("/tickets/", {
         params: queryParams,
       });
+
       setTickets(response.data.results);
       setCount(response.data.count);
+      setNext(response.data.next);
+      setPrevious(response.data.previous);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -74,12 +91,24 @@ export function DashboardPage() {
     loadTickets();
   }, [loadTickets]);
 
-  function handleSearchSubmit(event: React.FormEvent) {
+  function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
+    setPage(1);
     setSearchActive(searchInput);
   }
 
+  function handleStatusChange(value: TicketStatus | "") {
+    setPage(1);
+    setStatusFilter(value);
+  }
+
+  function handlePriorityChange(value: Priority | "") {
+    setPage(1);
+    setPriorityFilter(value);
+  }
+
   function clearFilters() {
+    setPage(1);
     setStatusFilter("");
     setPriorityFilter("");
     setSearchInput("");
@@ -95,7 +124,9 @@ export function DashboardPage() {
           <p className="eyebrow">Dashboard</p>
           <h1>Tickets</h1>
           <p className="muted">
-            {loading ? "Loading…" : `${count} total · ${tickets.length} shown`}
+            {loading
+              ? "Loading…"
+              : `${count} total · ${tickets.length} shown · page ${page} of ${pageCount}`}
           </p>
         </div>
 
@@ -120,7 +151,9 @@ export function DashboardPage() {
             <span>Status</span>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as TicketStatus | "")}
+              onChange={(event) =>
+                handleStatusChange(event.target.value as TicketStatus | "")
+              }
             >
               <option value="">All</option>
               {STATUS_OPTIONS.map((option) => (
@@ -135,7 +168,9 @@ export function DashboardPage() {
             <span>Priority</span>
             <select
               value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value as Priority | "")}
+              onChange={(event) =>
+                handlePriorityChange(event.target.value as Priority | "")
+              }
             >
               <option value="">All</option>
               {PRIORITY_OPTIONS.map((option) => (
@@ -152,7 +187,7 @@ export function DashboardPage() {
               type="search"
               placeholder="Ticket no, title, description…"
               value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
+              onChange={(event) => setSearchInput(event.target.value)}
             />
           </label>
 
@@ -214,6 +249,30 @@ export function DashboardPage() {
                 : "No tickets yet."}
             </p>
           )}
+        </div>
+
+        <div className="pagination">
+          <button
+            type="button"
+            className="secondary"
+            disabled={loading || !previous || page <= 1}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            ← Previous
+          </button>
+
+          <span className="muted small">
+            Page {page} of {pageCount}
+          </span>
+
+          <button
+            type="button"
+            className="secondary"
+            disabled={loading || !next}
+            onClick={() => setPage((current) => current + 1)}
+          >
+            Next →
+          </button>
         </div>
       </section>
     </>
