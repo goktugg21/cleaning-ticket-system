@@ -43,6 +43,35 @@ function formatBytes(bytes: number): string {
   return `${(kb / 1024).toFixed(1)} MB`;
 }
 
+function getInitials(value: string | null | undefined): string {
+  if (!value) return "—";
+
+  const localPart = value.split("@")[0] || value;
+  const parts = localPart
+    .replace(/[._-]+/g, " ")
+    .split(" ")
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+
+  return localPart.slice(0, 2).toUpperCase();
+}
+
+function getFileExtension(filename: string): string {
+  const parts = filename.split(".");
+  if (parts.length < 2) return "FILE";
+
+  return (parts.pop() || "FILE").slice(0, 4).toUpperCase();
+}
+
+function getStatusLabel(status: string | null): string {
+  if (!status) return "Created";
+
+  return STATUS_LABEL[status as TicketStatus] ?? status;
+}
+
 export function TicketDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
@@ -443,178 +472,229 @@ export function TicketDetailPage() {
         </section>
       )}
 
-      <section className="card">
-        <h2>Attachments</h2>
-
-        <div className="attachments">
-          {attachments.length === 0 && (
-            <p className="empty">No attachments yet.</p>
-          )}
-
-          {attachments.map((item) => (
-            <article
-              className={`attachment ${item.is_hidden ? "internal" : ""}`}
-              key={item.id}
-            >
-              <div>
-                <button
-                  type="button"
-                  className="link-button attachment-name"
-                  onClick={() => downloadAttachment(item)}
-                  disabled={downloadingAttachmentId === item.id}
-                >
-                  {downloadingAttachmentId === item.id
-                    ? "Downloading…"
-                    : item.original_filename}
-                </button>
-                <p className="muted small">
-                  {item.uploaded_by_email} · {formatDate(item.created_at)} · {formatBytes(item.file_size)}
-                </p>
-              </div>
-
-              {item.is_hidden && (
-                <span className="badge priority-high">Internal</span>
-              )}
-            </article>
-          ))}
-        </div>
-
-        <form className="form attachment-form" onSubmit={submitAttachment}>
-          <label>
-            <span>Upload file</span>
-            <input
-              id="ticket-attachment-file"
-              type="file"
-              accept={ACCEPTED_ATTACHMENT_TYPES}
-              onChange={handleFileChange}
-              disabled={uploadingAttachment}
-              required
-            />
-            <p className="helper-text">{ATTACHMENT_HELPER_TEXT}</p>
-            {selectedFile && (
-              <p className="helper-text">
-                Selected: {selectedFile.name} · {formatBytes(selectedFile.size)}
+      <div className="grid detail-lower-grid">
+        <section className="card detail-activity-card">
+          <div className="section-title-row">
+            <div>
+              <p className="eyebrow">Activity</p>
+              <h2>Messages</h2>
+              <p className="muted">
+                Public replies and internal notes for this ticket.
               </p>
-            )}
-          </label>
-
-          {isStaff && (
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={attachmentHidden}
-                onChange={(event) => setAttachmentHidden(event.target.checked)}
-                disabled={uploadingAttachment}
-              />
-              <span>Internal attachment — hidden from customer users</span>
-            </label>
-          )}
-
-          <div className="actions">
-            <button disabled={uploadingAttachment || !selectedFile}>
-              {uploadingAttachment ? "Uploading attachment…" : "Upload attachment"}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="card">
-        <h2>Messages</h2>
-
-        <div className="messages">
-          {messages.length === 0 && (
-            <p className="empty">No messages yet. Be the first to reply.</p>
-          )}
-
-          {messages.map((item) => (
-            <article
-              className={`message ${
-                item.message_type === "INTERNAL_NOTE" ? "internal" : ""
-              }`}
-              key={item.id}
-            >
-              <div className="message-head">
-                <b>{item.author_email}</b>
-                <span>
-                  {item.message_type === "INTERNAL_NOTE"
-                    ? "Internal note"
-                    : "Public reply"}{" "}
-                  · {formatDate(item.created_at)}
-                </span>
-              </div>
-              <p>{item.message}</p>
-            </article>
-          ))}
-        </div>
-
-        <form className="form message-form" onSubmit={submitMessage}>
-          {isStaff && (
-            <fieldset className="message-type-toggle">
-              <legend className="sr-only">Message type</legend>
-              <label className={messageType === "PUBLIC_REPLY" ? "active" : ""}>
-                <input
-                  type="radio"
-                  name="message_type"
-                  value="PUBLIC_REPLY"
-                  checked={messageType === "PUBLIC_REPLY"}
-                  onChange={() => setMessageType("PUBLIC_REPLY")}
-                />
-                Public reply
-              </label>
-              <label className={messageType === "INTERNAL_NOTE" ? "active" : ""}>
-                <input
-                  type="radio"
-                  name="message_type"
-                  value="INTERNAL_NOTE"
-                  checked={messageType === "INTERNAL_NOTE"}
-                  onChange={() => setMessageType("INTERNAL_NOTE")}
-                />
-                Internal note
-              </label>
-            </fieldset>
-          )}
-
-          <label>
-            <span>Your message</span>
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              placeholder={
-                isStaff && messageType === "INTERNAL_NOTE"
-                  ? "Internal note — not visible to customer users."
-                  : "Write a reply…"
-              }
-              required
-            />
-          </label>
-
-          <div className="actions">
-            <button disabled={sendingMessage || !message.trim()}>
-              {sendingMessage ? "Sending…" : "Send message"}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="card">
-        <h2>Status history</h2>
-        <div className="history">
-          {ticket.status_history.length === 0 && (
-            <p className="empty">No status changes yet.</p>
-          )}
-          {ticket.status_history.map((item) => (
-            <div className="history-item" key={item.id}>
-              <b>
-                {item.old_status || "—"} → {item.new_status}
-              </b>
-              <span>
-                {item.changed_by_email} · {formatDate(item.created_at)}
-              </span>
-              <p>{item.note || "—"}</p>
             </div>
-          ))}
+            <span className="soft-count">{messages.length} entries</span>
+          </div>
+
+          <div className="activity-timeline">
+            {messages.length === 0 && (
+              <p className="empty">No messages yet. Be the first to reply.</p>
+            )}
+
+            {messages.map((item) => (
+              <article
+                className={`timeline-message ${
+                  item.message_type === "INTERNAL_NOTE" ? "internal" : ""
+                }`}
+                key={item.id}
+              >
+                <div className="timeline-avatar">
+                  {getInitials(item.author_email)}
+                </div>
+
+                <div className="timeline-content">
+                  <div className="timeline-head">
+                    <div>
+                      <b>{item.author_email}</b>
+                      <span>
+                        {item.message_type === "INTERNAL_NOTE"
+                          ? "Internal note"
+                          : "Public reply"}
+                      </span>
+                    </div>
+                    <time>{formatDate(item.created_at)}</time>
+                  </div>
+
+                  <p>{item.message}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <form className="form message-composer" onSubmit={submitMessage}>
+            {isStaff && (
+              <fieldset className="message-type-toggle">
+                <legend className="sr-only">Message type</legend>
+                <label className={messageType === "PUBLIC_REPLY" ? "active" : ""}>
+                  <input
+                    type="radio"
+                    name="message_type"
+                    value="PUBLIC_REPLY"
+                    checked={messageType === "PUBLIC_REPLY"}
+                    onChange={() => setMessageType("PUBLIC_REPLY")}
+                  />
+                  Public reply
+                </label>
+                <label className={messageType === "INTERNAL_NOTE" ? "active" : ""}>
+                  <input
+                    type="radio"
+                    name="message_type"
+                    value="INTERNAL_NOTE"
+                    checked={messageType === "INTERNAL_NOTE"}
+                    onChange={() => setMessageType("INTERNAL_NOTE")}
+                  />
+                  Internal note
+                </label>
+              </fieldset>
+            )}
+
+            <label>
+              <span>Your message</span>
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                placeholder={
+                  isStaff && messageType === "INTERNAL_NOTE"
+                    ? "Internal note — not visible to customer users."
+                    : "Write a reply…"
+                }
+                required
+              />
+            </label>
+
+            <div className="actions">
+              <button disabled={sendingMessage || !message.trim()}>
+                {sendingMessage ? "Sending…" : "Send message"}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <div className="detail-side-stack">
+          <section className="card">
+            <div className="section-title-row compact">
+              <div>
+                <p className="eyebrow">Files</p>
+                <h2>Attachments</h2>
+              </div>
+              <span className="soft-count">{attachments.length}</span>
+            </div>
+
+            <div className="attachment-list premium">
+              {attachments.length === 0 && (
+                <p className="empty">No attachments yet.</p>
+              )}
+
+              {attachments.map((item) => (
+                <article
+                  className={`attachment-card ${item.is_hidden ? "internal" : ""}`}
+                  key={item.id}
+                >
+                  <div className="file-chip">
+                    {getFileExtension(item.original_filename)}
+                  </div>
+
+                  <div className="attachment-card-body">
+                    <button
+                      type="button"
+                      className="link-button attachment-name"
+                      onClick={() => downloadAttachment(item)}
+                      disabled={downloadingAttachmentId === item.id}
+                    >
+                      {downloadingAttachmentId === item.id
+                        ? "Downloading…"
+                        : item.original_filename}
+                    </button>
+                    <p className="muted small">
+                      {item.uploaded_by_email}
+                    </p>
+                    <p className="muted small">
+                      {formatDate(item.created_at)} · {formatBytes(item.file_size)}
+                    </p>
+                  </div>
+
+                  {item.is_hidden && (
+                    <span className="internal-pill">Internal</span>
+                  )}
+                </article>
+              ))}
+            </div>
+
+            <form className="form attachment-form premium" onSubmit={submitAttachment}>
+              <label className="file-dropzone">
+                <span className="file-dropzone-icon">＋</span>
+                <strong>Upload attachment</strong>
+                <small>{ATTACHMENT_HELPER_TEXT}</small>
+                <input
+                  id="ticket-attachment-file"
+                  type="file"
+                  accept={ACCEPTED_ATTACHMENT_TYPES}
+                  onChange={handleFileChange}
+                  disabled={uploadingAttachment}
+                  required
+                />
+              </label>
+
+              {selectedFile && (
+                <p className="selected-file">
+                  Selected: <b>{selectedFile.name}</b> · {formatBytes(selectedFile.size)}
+                </p>
+              )}
+
+              {isStaff && (
+                <label className="checkbox-row soft-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={attachmentHidden}
+                    onChange={(event) => setAttachmentHidden(event.target.checked)}
+                    disabled={uploadingAttachment}
+                  />
+                  <span>Internal attachment — hidden from customer users</span>
+                </label>
+              )}
+
+              <div className="actions">
+                <button disabled={uploadingAttachment || !selectedFile}>
+                  {uploadingAttachment ? "Uploading…" : "Upload file"}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section className="card">
+            <div className="section-title-row compact">
+              <div>
+                <p className="eyebrow">Audit trail</p>
+                <h2>Status history</h2>
+              </div>
+              <span className="soft-count">{ticket.status_history.length}</span>
+            </div>
+
+            <div className="status-history-list">
+              {ticket.status_history.length === 0 && (
+                <p className="empty">No status changes yet.</p>
+              )}
+
+              {ticket.status_history.map((item) => (
+                <article className="status-history-card" key={item.id}>
+                  <div className="status-history-dot" />
+                  <div>
+                    <p className="status-history-change">
+                      <span>{getStatusLabel(item.old_status)}</span>
+                      <span>→</span>
+                      <b>{getStatusLabel(item.new_status)}</b>
+                    </p>
+                    <p className="muted small">
+                      {item.changed_by_email} · {formatDate(item.created_at)}
+                    </p>
+                    {item.note && <p className="history-note">{item.note}</p>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
         </div>
-      </section>
+      </div>
+
     </>
   );
 }
