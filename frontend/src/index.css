@@ -1337,3 +1337,205 @@ textarea:focus {
   }
 }
 
+
+/* ---------- Premium soft emerald theme override ---------- */
+
+:root {
+  --bg: #f7faf8;
+  --surface: #ffffff;
+  --surface-2: #f1f6f3;
+  --text: #18251f;
+  --text-muted: #6b7c73;
+  --border: #dde8e1;
+  --border-soft: #eaf1ed;
+
+  --primary: #147a55;
+  --primary-hover: #0f6044;
+  --primary-soft: #eaf6ef;
+
+  --danger: #b42318;
+  --danger-soft: #fff2f0;
+  --danger-border: #ffd6d1;
+
+  --warning: #9a6700;
+  --warning-soft: #fff7e6;
+
+  --success: #147a55;
+  --success-soft: #eaf6ef;
+
+  --shadow-sm: 0 4px 16px rgba(24, 37, 31, 0.05);
+  --shadow: 0 14px 42px rgba(24, 37, 31, 0.08);
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(20, 122, 85, 0.07), transparent 32rem),
+    var(--bg);
+}
+
+.sidebar {
+  background: linear-gradient(180deg, #0b4f38 0%, #093d2c 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 14px 0 40px rgba(9, 61, 44, 0.12);
+}
+
+.brand-mark {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.brand-title {
+  color: #ffffff;
+}
+
+.brand-sub,
+.sidebar .muted {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.nav-link {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.nav-link:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-link.active {
+  color: #ffffff;
+  background: rgba(45, 212, 148, 0.18);
+  box-shadow: inset 3px 0 0 #68d391;
+}
+
+.appbar {
+  background: rgba(255, 255, 255, 0.82);
+  border-bottom: 1px solid var(--border-soft);
+  backdrop-filter: blur(16px);
+}
+
+.card,
+.auth-card {
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.card:hover {
+  box-shadow: var(--shadow);
+}
+
+button,
+.button {
+  background: var(--primary);
+  box-shadow: 0 8px 18px rgba(20, 122, 85, 0.18);
+}
+
+button:hover:not(:disabled),
+.button:hover {
+  background: var(--primary-hover);
+}
+
+button.secondary,
+.button.secondary {
+  background: #ffffff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+button.secondary:hover:not(:disabled),
+.button.secondary:hover {
+  background: var(--surface-2);
+}
+
+.role-pill {
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+  border: 1px solid rgba(20, 122, 85, 0.18);
+}
+
+/* Less AI-looking status and priority badges */
+
+.badge {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.status-open,
+.status-reopened_by_admin,
+.status-in_progress {
+  background: #edf8f2;
+  color: #0f6044;
+  border-color: #cfe9da;
+}
+
+.status-waiting_customer_approval {
+  background: #fff7e6;
+  color: #8a5a00;
+  border-color: #f3dfb8;
+}
+
+.status-approved,
+.status-closed {
+  background: #f1f6f3;
+  color: #52645b;
+  border-color: #dbe7e0;
+}
+
+.status-rejected {
+  background: #fff2f0;
+  color: #b42318;
+  border-color: #ffd6d1;
+}
+
+.priority-normal {
+  background: #f1f6f3;
+  color: #52645b;
+  border-color: #dbe7e0;
+}
+
+.priority-high {
+  background: #fff7e6;
+  color: #9a6700;
+  border-color: #f3dfb8;
+}
+
+.priority-urgent {
+  background: #fff2f0;
+  color: #b42318;
+  border-color: #ffd6d1;
+}
+
+/* Softer table/list feel */
+
+.table-row {
+  border-color: var(--border-soft);
+}
+
+.table-link:hover {
+  background: #f3faf6;
+}
+
+input,
+select,
+textarea {
+  border-color: var(--border);
+  background: #ffffff;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(20, 122, 85, 0.13);
+}
+
+.auth-page {
+  background:
+    radial-gradient(circle at 20% 15%, rgba(20, 122, 85, 0.12), transparent 28rem),
+    linear-gradient(135deg, #f2f8f5 0%, #ffffff 70%);
+}
+
