@@ -60,7 +60,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Role-based ticket scoping is tested.
 - [x] Cross-company/customer access is tested.
 - [x] API throttling is configured.
-- [ ] Review JWT storage strategy before public launch.
+- [x] Review JWT storage strategy before public launch.
 - [x] Add stricter production rate limits.
 - [x] Add security headers at the proxy level.
 
