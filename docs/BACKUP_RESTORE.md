@@ -69,6 +69,25 @@ The test creates marker data, creates a PostgreSQL backup, removes the test data
 
 This script uses a separate Compose project name and removes its own test volumes at the end.
 
+
+## Uploaded media restore
+
+Restore requires explicit confirmation:
+
+    CONFIRM_RESTORE=YES ./scripts/restore_media.sh backups/media/media-YYYYMMDD-HHMMSS.tar.gz
+
+The restore process clears `/app/media` inside the backend container before extracting the backup archive.
+
+Do not run media restore against a production system unless you are certain the backup is correct.
+
+## Uploaded media restore smoke test
+
+Run a full media backup and restore validation against an isolated Docker Compose project:
+
+    MEDIA_RESTORE_TEST_CONFIRM=YES FRONTEND_PORT=18081 ./scripts/prod_media_restore_test.sh
+
+The test creates a marker file in the media volume, creates a media backup, wipes the media volume, restores the backup, and verifies that the marker file exists after restore.
+
 ## Important notes
 
 - Do not commit files under `backups/`.

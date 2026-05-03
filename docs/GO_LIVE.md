@@ -93,6 +93,10 @@ Create media backup:
 
     ./scripts/backup_media.sh
 
+Restore media only when needed:
+
+    CONFIRM_RESTORE=YES ./scripts/restore_media.sh backups/media/media-YYYYMMDD-HHMMSS.tar.gz
+
 Back up both PostgreSQL and media together.
 
 ## 8. Logs

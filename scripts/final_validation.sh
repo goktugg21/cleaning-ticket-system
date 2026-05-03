@@ -70,6 +70,12 @@ echo "======================================"
 RESTORE_TEST_CONFIRM=YES FRONTEND_PORT="$RESTORE_FRONTEND_PORT" ./scripts/prod_restore_test.sh
 
 echo
+echo
+echo "======================================"
+echo "10. PRODUCTION MEDIA RESTORE TEST"
+echo "======================================"
+MEDIA_RESTORE_TEST_CONFIRM=YES FRONTEND_PORT="$RESTORE_FRONTEND_PORT" ./scripts/prod_media_restore_test.sh
+
 echo "======================================"
 echo "FINAL VALIDATION PASSED"
 echo "======================================"

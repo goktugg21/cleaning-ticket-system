@@ -24,6 +24,7 @@ This final validation includes:
 - Production Docker Compose smoke test
 - Production upload/download smoke test
 - PostgreSQL backup and restore smoke test against a clean isolated environment
+- Uploaded media restore smoke test
 
 ## Latest validated code state
 
@@ -50,6 +51,8 @@ Use this to inspect the current HEAD:
 - PostgreSQL backup and restore scripts exist.
 - PostgreSQL restore smoke test exists.
 - Media backup script exists.
+- Media restore script exists.
+- Media restore smoke test exists.
 - API throttling is configured.
 - Stricter production throttle defaults are documented.
 - Security headers are configured.
