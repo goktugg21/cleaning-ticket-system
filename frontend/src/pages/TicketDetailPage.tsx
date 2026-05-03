@@ -1,9 +1,10 @@
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, getApiError } from "../api/client";
 import type {
   PaginatedResponse,
+  TicketAttachment,
   TicketDetail,
   TicketMessage,
   TicketMessageType,
@@ -30,18 +31,33 @@ function formatDate(value: string | null): string {
   }
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
 export function TicketDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
   const [statusBusy, setStatusBusy] = useState<TicketStatus | null>(null);
+
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<TicketMessageType>("PUBLIC_REPLY");
   const [sendingMessage, setSendingMessage] = useState(false);
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [attachmentHidden, setAttachmentHidden] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+
   const [error, setError] = useState("");
 
   const isStaff =
@@ -52,12 +68,14 @@ export function TicketDetailPage() {
   const loadTicket = useCallback(async () => {
     if (!id) return;
     try {
-      const [ticketResponse, messageResponse] = await Promise.all([
+      const [ticketResponse, messageResponse, attachmentResponse] = await Promise.all([
         api.get<TicketDetail>(`/tickets/${id}/`),
         api.get<PaginatedResponse<TicketMessage>>(`/tickets/${id}/messages/`),
+        api.get<PaginatedResponse<TicketAttachment>>(`/tickets/${id}/attachments/`),
       ]);
       setTicket(ticketResponse.data);
       setMessages(messageResponse.data.results);
+      setAttachments(attachmentResponse.data.results);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -105,6 +123,45 @@ export function TicketDetailPage() {
       setError(getApiError(err));
     } finally {
       setSendingMessage(false);
+    }
+  }
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setSelectedFile(event.target.files?.[0] ?? null);
+  }
+
+  async function submitAttachment(event: FormEvent) {
+    event.preventDefault();
+    if (!id || !selectedFile) return;
+
+    setError("");
+    setUploadingAttachment(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
+
+      if (isStaff) {
+        formData.append("is_hidden", attachmentHidden ? "true" : "false");
+      }
+
+      await api.post(`/tickets/${id}/attachments/`, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      setSelectedFile(null);
+      setAttachmentHidden(false);
+
+      const input = document.getElementById("ticket-attachment-file") as HTMLInputElement | null;
+      if (input) input.value = "";
+
+      await loadTicket();
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setUploadingAttachment(false);
     }
   }
 
@@ -218,7 +275,7 @@ export function TicketDetailPage() {
           ) : (
             <>
               <label>
-                <span>Status note (optional)</span>
+                <span>Status note optional</span>
                 <input
                   value={statusNote}
                   onChange={(event) => setStatusNote(event.target.value)}
@@ -244,6 +301,65 @@ export function TicketDetailPage() {
           )}
         </section>
       </div>
+
+      <section className="card">
+        <h2>Attachments</h2>
+
+        <div className="attachments">
+          {attachments.length === 0 && (
+            <p className="empty">No attachments yet.</p>
+          )}
+
+          {attachments.map((item) => (
+            <article
+              className={`attachment ${item.is_hidden ? "internal" : ""}`}
+              key={item.id}
+            >
+              <div>
+                <a href={item.file_url} target="_blank" rel="noreferrer" className="attachment-name">
+                  {item.original_filename}
+                </a>
+                <p className="muted small">
+                  {item.uploaded_by_email} · {formatDate(item.created_at)} · {formatBytes(item.file_size)}
+                </p>
+              </div>
+
+              {item.is_hidden && (
+                <span className="badge priority-high">Internal</span>
+              )}
+            </article>
+          ))}
+        </div>
+
+        <form className="form attachment-form" onSubmit={submitAttachment}>
+          <label>
+            <span>Upload file</span>
+            <input
+              id="ticket-attachment-file"
+              type="file"
+              onChange={handleFileChange}
+              required
+            />
+          </label>
+
+          {isStaff && (
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={attachmentHidden}
+                onChange={(event) => setAttachmentHidden(event.target.checked)}
+              />
+              <span>Internal attachment — hidden from customer users</span>
+            </label>
+          )}
+
+          <div className="actions">
+            <button disabled={uploadingAttachment || !selectedFile}>
+              {uploadingAttachment ? "Uploading…" : "Upload attachment"}
+            </button>
+          </div>
+        </form>
+      </section>
 
       <section className="card">
         <h2>Messages</h2>

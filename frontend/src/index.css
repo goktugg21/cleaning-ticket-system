@@ -818,3 +818,56 @@ label > span {
   padding-top: 16px;
   border-top: 1px solid var(--border-soft);
 }
+
+.attachments {
+  display: grid;
+  gap: 12px;
+}
+
+.attachment {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--surface-2);
+}
+
+.attachment.internal {
+  background: var(--warning-soft);
+  border-color: #ffe1a3;
+  border-left: 4px solid #d99a0c;
+}
+
+.attachment-name {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.attachment-name:hover {
+  text-decoration: underline;
+}
+
+.attachment-form {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 16px;
+  margin-top: 6px;
+}
+
+.checkbox-row {
+  display: flex;
+  grid-template-columns: unset;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.checkbox-row span {
+  color: var(--text-muted);
+}

@@ -117,3 +117,18 @@ export interface TicketMessage {
   is_hidden: boolean;
   created_at: string;
 }
+
+
+export interface TicketAttachment {
+  id: number;
+  ticket: number;
+  message: number | null;
+  uploaded_by: number;
+  uploaded_by_email: string;
+  file_url: string;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  is_hidden: boolean;
+  created_at: string;
+}
