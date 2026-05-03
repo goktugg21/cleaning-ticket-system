@@ -7,8 +7,8 @@ import { useAuth } from "../auth/AuthContext";
 export function LoginPage() {
   const navigate = useNavigate();
   const { me, login } = useAuth();
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("Admin12345!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -21,7 +21,7 @@ export function LoginPage() {
 
     try {
       await login(email, password);
-      navigate("/");
+      navigate("/", { replace: true });
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -34,29 +34,39 @@ export function LoginPage() {
       <section className="auth-card">
         <div>
           <p className="eyebrow">Cleaning Ticket System</p>
-          <h1>Login</h1>
-          <p className="muted">Django API token ile giriş.</p>
+          <h1>Sign in</h1>
+          <p className="muted">
+            Use your operations console credentials to continue.
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="form">
           <label>
-            Email
-            <input value={email} onChange={(event) => setEmail(event.target.value)} />
+            <span>Email</span>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
           </label>
 
           <label>
-            Password
+            <span>Password</span>
             <input
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              required
             />
           </label>
 
           {error && <div className="error">{error}</div>}
 
-          <button disabled={submitting}>
-            {submitting ? "Logging in..." : "Login"}
+          <button disabled={submitting || !email || !password}>
+            {submitting ? "Signing in…" : "Sign in"}
           </button>
         </form>
       </section>

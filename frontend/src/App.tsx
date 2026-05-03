@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { AppShell } from "./layout/AppShell";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -10,14 +11,18 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
 
   if (loading) {
-    return <main className="page"><p>Loading...</p></main>;
+    return (
+      <main className="auth-page">
+        <p className="muted">Loading…</p>
+      </main>
+    );
   }
 
   if (!me) {
     return <Navigate to="/login" replace />;
   }
 
-  return children;
+  return <AppShell>{children}</AppShell>;
 }
 
 export default function App() {
@@ -50,6 +55,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
