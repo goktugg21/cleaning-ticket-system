@@ -43,65 +43,109 @@ export function LoginPage() {
   }
 
   return (
-    <main className="auth-page">
-      <section className="auth-card">
-        <div>
-          <p className="eyebrow">Cleaning Ticket System</p>
-          <h1>Sign in</h1>
-          <p className="muted">
-            Use your operations console credentials to continue.
+    <main className="enterprise-login">
+      <section className="login-visual">
+        <div className="visual-grid"></div>
+        <div className="visual-glass">
+          <div className="visual-logo">FM</div>
+          <p className="visual-kicker">Facility Manager</p>
+          <h1>Operational excellence through precision ticketing.</h1>
+          <p>
+            Track cleaning requests, approvals, attachments, and service history from
+            one secure operations console.
           </p>
-        </div>
 
-        <div className="demo-login-panel">
-          <div>
-            <p className="demo-title">Local demo users</p>
-            <p className="muted small">Click one user, then sign in.</p>
-          </div>
-          <div className="demo-user-grid">
-            {DEMO_USERS.map((user) => (
-              <button
-                type="button"
-                className="demo-user-button"
-                key={user.email}
-                onClick={() => fillDemoUser(user.email, user.password)}
-              >
-                <span>{user.label}</span>
-                <small>{user.email}</small>
-              </button>
-            ))}
+          <div className="visual-proof-grid">
+            <div>
+              <strong>24/7</strong>
+              <span>Service desk visibility</span>
+            </div>
+            <div>
+              <strong>SLA</strong>
+              <span>Approval-ready workflows</span>
+            </div>
+            <div>
+              <strong>Audit</strong>
+              <span>Every action recorded</span>
+            </div>
           </div>
         </div>
+      </section>
 
-        <form onSubmit={handleSubmit} className="form">
-          <label>
-            <span>Email</span>
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-            />
-          </label>
+      <section className="login-panel">
+        <div className="login-card enterprise-card">
+          <div className="login-heading">
+            <p className="enterprise-eyebrow">Secure access</p>
+            <h2>Sign in</h2>
+            <p>
+              Enter your credentials to access the facility operations dashboard.
+            </p>
+          </div>
 
-          <label>
-            <span>Password</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
+          <div className="demo-login-panel enterprise-demo-panel">
+            <div>
+              <p className="demo-title">Local demo users</p>
+              <p className="muted small">Select a profile, then sign in.</p>
+            </div>
 
-          {error && <div className="error">{error}</div>}
+            <div className="demo-user-grid">
+              {DEMO_USERS.map((user) => (
+                <button
+                  type="button"
+                  className="demo-user-button enterprise-demo-user"
+                  key={user.email}
+                  onClick={() => fillDemoUser(user.email, user.password)}
+                >
+                  <span>{user.label}</span>
+                  <small>{user.email}</small>
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <button disabled={submitting || !email || !password}>
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+          <form onSubmit={handleSubmit} className="form enterprise-form">
+            <label>
+              <span>Email address</span>
+              <input
+                type="email"
+                autoComplete="email"
+                placeholder="manager@facility.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </label>
+
+            <label>
+              <span>Password</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+
+            <label className="login-check">
+              <input type="checkbox" />
+              <span>Remember this device for 30 days</span>
+            </label>
+
+            {error && <div className="error">{error}</div>}
+
+            <button className="login-submit" disabled={submitting || !email || !password}>
+              {submitting ? "Signing in…" : "Secure login"}
+              <span>→</span>
+            </button>
+          </form>
+
+          <div className="login-trust-row">
+            <span>Verified access</span>
+            <span>Encrypted session</span>
+          </div>
+        </div>
       </section>
     </main>
   );

@@ -32,10 +32,22 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
 
 function formatDate(value: string): string {
   try {
-    return new Date(value).toLocaleString();
+    return new Date(value).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
   } catch {
     return value;
   }
+}
+
+function statusClass(status: TicketStatus): string {
+  return `badge status-${status.toLowerCase()}`;
+}
+
+function priorityClass(priority: Priority): string {
+  return `badge priority-${priority.toLowerCase()}`;
 }
 
 export function DashboardPage() {
@@ -117,8 +129,8 @@ export function DashboardPage() {
 
   const hasActiveFilters = Boolean(statusFilter || priorityFilter || searchActive);
 
-  const visibleStats = useMemo(() => {
-    const openLike = tickets.filter((ticket) =>
+  const stats = useMemo(() => {
+    const active = tickets.filter((ticket) =>
       ["OPEN", "REOPENED_BY_ADMIN", "IN_PROGRESS"].includes(ticket.status),
     ).length;
 
@@ -127,214 +139,322 @@ export function DashboardPage() {
     ).length;
 
     const urgent = tickets.filter((ticket) => ticket.priority === "URGENT").length;
-
     const closed = tickets.filter((ticket) => ticket.status === "CLOSED").length;
 
     return {
-      openLike,
+      active,
       waitingApproval,
       urgent,
       closed,
+      visible: tickets.length,
     };
   }, [tickets]);
 
+  const healthScore = count === 0
+    ? 100
+    : Math.max(56, Math.min(98, Math.round(((stats.visible - stats.urgent) / Math.max(stats.visible, 1)) * 100)));
+
   return (
     <>
-      <header className="page-head">
+      <section className="enterprise-dashboard-head">
         <div>
-          <p className="eyebrow">Dashboard</p>
-          <h1>Tickets</h1>
-          <p className="muted">
+          <nav className="enterprise-breadcrumb">
+            <span>Site</span>
+            <span>›</span>
+            <span>Main campus</span>
+            <span>›</span>
+            <b>Operations overview</b>
+          </nav>
+
+          <p className="enterprise-eyebrow">Dashboard</p>
+          <h2>Ticket Management</h2>
+          <p>
             {loading
-              ? "Loading…"
-              : `${count} total · ${tickets.length} shown · page ${page} of ${pageCount}`}
+              ? "Loading operational ticket data…"
+              : `${count} total tickets · ${tickets.length} visible · page ${page} of ${pageCount}`}
           </p>
         </div>
 
-        <div className="actions">
+        <div className="enterprise-head-actions">
           <button
             type="button"
-            className="secondary"
+            className="button secondary"
             onClick={loadTickets}
             disabled={loading}
           >
-            ⟳ Refresh
+            Refresh
           </button>
           <Link className="button" to="/tickets/new">
-            ＋ New ticket
+            New ticket
           </Link>
         </div>
-      </header>
+      </section>
 
-      <section className="metric-grid" aria-label="Ticket summary">
-        <article className="metric-card">
-          <span className="metric-label">Visible tickets</span>
-          <strong>{tickets.length}</strong>
-          <small>{count} total in current scope</small>
+      <section className="enterprise-kpi-grid" aria-label="Ticket summary">
+        <article className="enterprise-kpi-card">
+          <div>
+            <p>Visible tickets</p>
+            <strong>{stats.visible}</strong>
+            <span>{count} total in current scope</span>
+          </div>
+          <i>▦</i>
         </article>
 
-        <article className="metric-card">
-          <span className="metric-label">Active work</span>
-          <strong>{visibleStats.openLike}</strong>
-          <small>Open, reopened, or in progress</small>
+        <article className="enterprise-kpi-card">
+          <div>
+            <p>Active work</p>
+            <strong>{stats.active}</strong>
+            <span>Open, reopened, or in progress</span>
+          </div>
+          <i>◷</i>
         </article>
 
-        <article className="metric-card">
-          <span className="metric-label">Waiting approval</span>
-          <strong>{visibleStats.waitingApproval}</strong>
-          <small>Needs customer response</small>
+        <article className="enterprise-kpi-card">
+          <div>
+            <p>Waiting approval</p>
+            <strong>{stats.waitingApproval}</strong>
+            <span>Needs customer response</span>
+          </div>
+          <i>✓</i>
         </article>
 
-        <article className="metric-card urgent">
-          <span className="metric-label">Urgent</span>
-          <strong>{visibleStats.urgent}</strong>
-          <small>High attention tickets</small>
+        <article className="enterprise-kpi-card urgent">
+          <div>
+            <p>Urgent</p>
+            <strong>{stats.urgent}</strong>
+            <span>High attention tickets</span>
+          </div>
+          <i>!</i>
         </article>
       </section>
 
-      <section className="card">
-        <form className="filter-bar" onSubmit={handleSearchSubmit}>
-          <label className="filter">
-            <span>Status</span>
-            <select
-              value={statusFilter}
-              onChange={(event) =>
-                handleStatusChange(event.target.value as TicketStatus | "")
-              }
-            >
-              <option value="">All</option>
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {STATUS_LABEL[option]}
-                </option>
-              ))}
-            </select>
-          </label>
+      <div className="enterprise-dashboard-grid">
+        <section className="enterprise-card enterprise-table-card">
+          <div className="enterprise-card-head">
+            <div>
+              <h3>Recent operational tickets</h3>
+              <p>Live ticket queue from the current permission scope.</p>
+            </div>
+            <span>{loading ? "Syncing…" : `${tickets.length} rows`}</span>
+          </div>
 
-          <label className="filter">
-            <span>Priority</span>
-            <select
-              value={priorityFilter}
-              onChange={(event) =>
-                handlePriorityChange(event.target.value as Priority | "")
-              }
-            >
-              <option value="">All</option>
-              {PRIORITY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <form className="enterprise-filter-bar" onSubmit={handleSearchSubmit}>
+            <label>
+              <span>Status</span>
+              <select
+                value={statusFilter}
+                onChange={(event) =>
+                  handleStatusChange(event.target.value as TicketStatus | "")
+                }
+              >
+                <option value="">All statuses</option>
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {STATUS_LABEL[option]}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="filter filter-grow">
-            <span>Search</span>
-            <input
-              type="search"
-              placeholder="Ticket no, title, description…"
-              value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
-            />
-          </label>
+            <label>
+              <span>Priority</span>
+              <select
+                value={priorityFilter}
+                onChange={(event) =>
+                  handlePriorityChange(event.target.value as Priority | "")
+                }
+              >
+                <option value="">All priorities</option>
+                {PRIORITY_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <div className="filter-actions">
-            <button type="submit" className="secondary">
-              Apply
-            </button>
-            {hasActiveFilters && (
-              <button type="button" className="ghost" onClick={clearFilters}>
-                Clear
+            <label className="filter-search">
+              <span>Search</span>
+              <input
+                type="search"
+                placeholder="Ticket no, title, description…"
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+              />
+            </label>
+
+            <div className="filter-actions">
+              <button type="submit" className="button secondary compact">
+                Apply
               </button>
-            )}
-          </div>
-        </form>
-      </section>
-
-      {error && <div className="error">{error}</div>}
-
-      <section className="card">
-        <div className="table">
-          <div className="table-row table-head">
-            <span>No</span>
-            <span>Title</span>
-            <span>Status</span>
-            <span>Priority</span>
-            <span>Building</span>
-            <span>Customer</span>
-            <span>Created</span>
-          </div>
-
-          {tickets.map((ticket) => (
-            <Link
-              to={`/tickets/${ticket.id}`}
-              className="table-row table-link"
-              key={ticket.id}
-            >
-              <span className="mono">{ticket.ticket_no}</span>
-              <span className="cell-strong">{ticket.title}</span>
-              <span>
-                <b className={`badge status-${ticket.status.toLowerCase()}`}>
-                  {STATUS_LABEL[ticket.status]}
-                </b>
-              </span>
-              <span>
-                <b className={`badge priority-${ticket.priority.toLowerCase()}`}>
-                  {ticket.priority}
-                </b>
-              </span>
-              <span>{ticket.building_name}</span>
-              <span>{ticket.customer_name}</span>
-              <span className="muted small">{formatDate(ticket.created_at)}</span>
-            </Link>
-          ))}
-
-          {!loading && tickets.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">✓</div>
-              <h3>{hasActiveFilters ? "No matching tickets" : "No tickets yet"}</h3>
-              <p>
-                {hasActiveFilters
-                  ? "Try clearing filters or searching for another ticket number, title, or customer."
-                  : "Create the first ticket to start tracking requests, complaints, and reports."}
-              </p>
-              {hasActiveFilters ? (
-                <button type="button" className="secondary" onClick={clearFilters}>
-                  Clear filters
+              {hasActiveFilters && (
+                <button type="button" className="button ghost compact" onClick={clearFilters}>
+                  Clear
                 </button>
-              ) : (
-                <Link className="button" to="/tickets/new">
-                  Create ticket
-                </Link>
               )}
             </div>
-          )}
-        </div>
+          </form>
 
-        <div className="pagination">
-          <button
-            type="button"
-            className="secondary"
-            disabled={loading || !previous || page <= 1}
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-          >
-            ← Previous
-          </button>
+          {error && <div className="error">{error}</div>}
 
-          <span className="muted small">
-            Page {page} of {pageCount}
-          </span>
+          <div className="enterprise-table-wrap">
+            <table className="enterprise-ticket-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Subject</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Facility</th>
+                  <th>Customer</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
 
-          <button
-            type="button"
-            className="secondary"
-            disabled={loading || !next}
-            onClick={() => setPage((current) => current + 1)}
-          >
-            Next →
-          </button>
-        </div>
-      </section>
+              <tbody>
+                {tickets.map((ticket) => (
+                  <tr key={ticket.id}>
+                    <td>
+                      <Link to={`/tickets/${ticket.id}`} className="ticket-id">
+                        {ticket.ticket_no}
+                      </Link>
+                    </td>
+                    <td>
+                      <Link to={`/tickets/${ticket.id}`} className="ticket-subject">
+                        {ticket.title}
+                      </Link>
+                    </td>
+                    <td>
+                      <span className={priorityClass(ticket.priority as Priority)}>
+                        {ticket.priority}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={statusClass(ticket.status)}>
+                        {STATUS_LABEL[ticket.status]}
+                      </span>
+                    </td>
+                    <td>{ticket.building_name}</td>
+                    <td>{ticket.customer_name}</td>
+                    <td>{formatDate(ticket.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {!loading && tickets.length === 0 && (
+              <div className="enterprise-empty-state">
+                <strong>{hasActiveFilters ? "No matching tickets" : "No tickets yet"}</strong>
+                <p>
+                  {hasActiveFilters
+                    ? "Try clearing filters or searching for another ticket number, title, or customer."
+                    : "Create the first ticket to start tracking requests, complaints, and reports."}
+                </p>
+                {hasActiveFilters ? (
+                  <button type="button" className="button secondary" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                ) : (
+                  <Link className="button" to="/tickets/new">
+                    Create ticket
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="enterprise-pagination">
+            <button
+              type="button"
+              className="button secondary compact"
+              disabled={loading || !previous || page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Previous
+            </button>
+
+            <span>
+              Page {page} of {pageCount}
+            </span>
+
+            <button
+              type="button"
+              className="button secondary compact"
+              disabled={loading || !next}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </section>
+
+        <aside className="enterprise-side-panel">
+          <section className="enterprise-card health-card">
+            <div className="enterprise-card-head">
+              <div>
+                <h3>Facility health</h3>
+                <p>Operational queue pressure</p>
+              </div>
+              <span>Live</span>
+            </div>
+
+            <div className="health-ring" style={{ "--score": healthScore } as React.CSSProperties}>
+              <div>
+                <strong>{healthScore}%</strong>
+                <span>Stable</span>
+              </div>
+            </div>
+
+            <div className="health-split">
+              <div>
+                <span>Closed</span>
+                <strong>{stats.closed}</strong>
+              </div>
+              <div>
+                <span>Urgent</span>
+                <strong>{stats.urgent}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="enterprise-card focus-card">
+            <div className="enterprise-card-head">
+              <div>
+                <h3>Urgent focus</h3>
+                <p>Tickets requiring attention</p>
+              </div>
+              <span>{stats.urgent}</span>
+            </div>
+
+            <div className="focus-list">
+              {tickets
+                .filter((ticket) => ticket.priority === "URGENT" || ticket.priority === "HIGH")
+                .slice(0, 4)
+                .map((ticket) => (
+                  <Link to={`/tickets/${ticket.id}`} key={ticket.id} className="focus-item">
+                    <b>{ticket.title}</b>
+                    <span>{ticket.building_name} · {STATUS_LABEL[ticket.status]}</span>
+                  </Link>
+                ))}
+
+              {tickets.filter((ticket) => ticket.priority === "URGENT" || ticket.priority === "HIGH").length === 0 && (
+                <p className="muted small">No urgent or high priority tickets in the visible queue.</p>
+              )}
+            </div>
+          </section>
+
+          <section className="enterprise-card map-card">
+            <div className="map-preview">
+              <div className="map-grid"></div>
+              <div className="map-pin">Main campus</div>
+            </div>
+            <div className="map-caption">
+              <h3>Site distribution</h3>
+              <p>Cleaning requests grouped by facility context.</p>
+            </div>
+          </section>
+        </aside>
+      </div>
     </>
   );
 }
