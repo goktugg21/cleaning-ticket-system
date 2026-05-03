@@ -51,9 +51,9 @@ This checklist tracks the minimum work required before running the cleaning tick
 ## Email and notifications
 
 - [ ] Configure SMTP settings.
-- [ ] Add ticket created notification.
-- [ ] Add ticket status changed notification.
-- [ ] Add ticket assignment notification.
+- [x] Add ticket created notification.
+- [x] Add ticket status changed notification.
+- [x] Add ticket assignment notification.
 
 ## Security
 

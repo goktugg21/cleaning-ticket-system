@@ -8,6 +8,11 @@ from rest_framework.response import Response
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
 from accounts.scoping import scope_tickets_for
+from notifications.services import (
+    send_ticket_assigned_email,
+    send_ticket_created_email,
+    send_ticket_status_changed_email,
+)
 
 from .filters import TicketFilter
 from .models import Ticket, TicketAttachment, TicketMessage, TicketMessageType
@@ -56,15 +61,26 @@ class TicketViewSet(
             return [IsAuthenticatedAndActive()]
         return super().get_permissions()
 
+    def perform_create(self, serializer):
+        ticket = serializer.save()
+        send_ticket_created_email(ticket, actor=self.request.user)
+
     @action(detail=True, methods=["post"], url_path="status")
     def change_status(self, request, pk=None):
         ticket = self.get_object()
+        old_status = ticket.status
         serializer = TicketStatusChangeSerializer(
             data=request.data,
             context={"request": request, "ticket": ticket},
         )
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+        send_ticket_status_changed_email(
+            updated,
+            old_status=old_status,
+            new_status=updated.status,
+            actor=request.user,
+        )
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
             status=status.HTTP_200_OK,
@@ -74,12 +90,22 @@ class TicketViewSet(
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
+        old_assigned_to = ticket.assigned_to
         serializer = TicketAssignSerializer(
             data=request.data,
             context={"request": request, "ticket": ticket},
         )
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+
+        old_assigned_to_id = old_assigned_to.id if old_assigned_to else None
+        if old_assigned_to_id != updated.assigned_to_id:
+            send_ticket_assigned_email(
+                updated,
+                old_assigned_to=old_assigned_to,
+                actor=request.user,
+            )
+
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
             status=status.HTTP_200_OK,
