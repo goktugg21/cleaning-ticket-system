@@ -65,3 +65,17 @@ When the real system is behind external SSL termination, only enable Django HTTP
     X-Forwarded-Proto: https
 
 Do not enable `DJANGO_SECURE_SSL_REDIRECT=True` until the proxy forwarding behavior is confirmed, otherwise redirect loops may happen.
+
+
+## Manager close and reopen behavior
+
+During the demo, the expected status flow is:
+
+1. Customer creates a ticket.
+2. Building manager moves the ticket through the work process.
+3. Building manager cannot close the ticket before customer approval.
+4. Customer approves the ticket.
+5. Building manager can close the ticket after customer approval.
+6. Building manager can reopen a closed ticket if additional work is needed.
+
+This is the intended workflow for the current release.
