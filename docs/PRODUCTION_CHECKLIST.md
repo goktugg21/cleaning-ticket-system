@@ -66,6 +66,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 
 ## Validation before launch
 
+- [ ] Run `./scripts/prod_env_check.sh` against final production `.env`.
 - [x] Run `./scripts/check_all.sh`.
 - [x] Run `docker compose -f docker-compose.prod.yml config`.
 - [x] Build production images.
