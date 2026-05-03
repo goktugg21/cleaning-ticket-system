@@ -58,6 +58,7 @@ Use this to inspect the current HEAD:
 - Media storage strategy has been selected and documented.
 - Production `.env` preflight check exists.
 - Final validation script exists.
+- Local HTTP demo script exists.
 
 ## Remaining before real public launch
 

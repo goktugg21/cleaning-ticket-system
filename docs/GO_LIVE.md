@@ -55,16 +55,22 @@ For restore validation:
 
     RESTORE_TEST_CONFIRM=YES FRONTEND_PORT=18080 ./scripts/prod_restore_test.sh
 
-## 5. Configure HTTPS
+## 5. HTTPS / firewall / reverse proxy
 
-Put the app behind HTTPS before real public launch.
+The application itself can run over plain HTTP on the server.
 
-Recommended simple production approach:
+Expected setup:
 
-- Use a reverse proxy such as Caddy or Nginx.
-- Forward `/` traffic to the frontend container.
-- Ensure Django receives the correct forwarded HTTPS header.
-- Confirm HTTPS works before enabling HSTS.
+- External firewall / Nginx Proxy Manager / reverse proxy handles HTTPS.
+- The request is forwarded internally to this app over HTTP.
+- The app listens on `FRONTEND_PORT`, for example `8080` or `80`.
+- Do not configure SSL certificates inside the app containers.
+
+Only enable Django HTTPS flags after confirming the proxy sends:
+
+    X-Forwarded-Proto: https
+
+Do not enable HSTS or SSL redirect until HTTPS routing is confirmed.
 
 ## 6. Test email notifications
 
@@ -106,3 +112,17 @@ Before accepting real users:
 - Confirm email notification delivery.
 - Confirm backup scripts work.
 - Confirm HTTPS and secure cookies work.
+
+## Local HTTP demo
+
+For a local or VPS HTTP-only demo, run:
+
+    FRONTEND_PORT=8080 ./scripts/demo_up.sh
+
+Then open:
+
+    http://localhost:8080
+
+Read:
+
+    docs/LOCAL_HTTP_DEMO.md
