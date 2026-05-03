@@ -13,3 +13,7 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+!.env.example
+!frontend/.env.example
+*.env
+frontend/.env
