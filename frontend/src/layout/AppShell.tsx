@@ -29,7 +29,7 @@ export function AppShell({ children }: AppShellProps) {
           <span className="brand-mark">CT</span>
           <div>
             <p className="brand-title">Cleaning Tickets</p>
-            <p className="brand-sub">Operations console</p>
+            <p className="brand-sub">Facility service desk</p>
           </div>
         </div>
 
@@ -43,7 +43,8 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
 
         <div className="sidebar-footer">
-          <p className="muted small">Need help? Contact your admin.</p>
+          <p className="muted small">Local HTTP demo ready.</p>
+          <p className="muted tiny">v0.2 UI preview</p>
         </div>
       </aside>
 
