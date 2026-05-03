@@ -25,15 +25,16 @@ This final validation includes:
 - Production upload/download smoke test
 - PostgreSQL backup and restore smoke test against a clean isolated environment
 
-## Latest validated commit
+## Latest validated code state
 
-Use:
-
-    git log --oneline -1
-
-Expected latest commit:
+The full production validation passed after adding:
 
     Add final production validation script
+
+The current latest commit may include documentation-only release notes.
+Use this to inspect the current HEAD:
+
+    git log --oneline -1
 
 ## Production-ready items
 
