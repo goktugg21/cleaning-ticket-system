@@ -20,3 +20,7 @@ frontend/.env
 
 # Local production backups
 backups/
+
+# Keep safe environment templates tracked
+!.env.example
+!.env.production.example
