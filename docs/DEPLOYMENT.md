@@ -96,3 +96,19 @@ To remove production volumes too, only when you intentionally want to delete pro
     docker compose -f docker-compose.prod.yml down -v
 
 Be careful: -v deletes database, Redis, and media volumes.
+
+## 7. Logs
+
+Production containers use Docker log rotation:
+
+- max-size: 10m
+- max-file: 5
+
+View recent production logs:
+
+    docker compose -f docker-compose.prod.yml logs --tail=200
+
+Follow logs live:
+
+    docker compose -f docker-compose.prod.yml logs -f --tail=100
+

@@ -30,7 +30,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Proxy `/api/` and `/admin/` to Django.
 - [x] Use a persistent Docker volume for PostgreSQL.
 - [x] Use a persistent Docker volume for uploaded media.
-- [ ] Add server-level log rotation.
+- [x] Add Docker container log rotation.
 - [ ] Add error monitoring.
 
 ## Files and uploads
