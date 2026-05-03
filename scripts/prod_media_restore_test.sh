@@ -76,7 +76,7 @@ ok "Marker media file created: $MARKER_FILE"
 
 echo
 echo "===== 5. CREATE MEDIA BACKUP ====="
-BACKUP_DIR="$BACKUP_DIR" COMPOSE_FILE="$COMPOSE_FILE" ./scripts/backup_media.sh
+BACKUP_DIR="$BACKUP_DIR" COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/backup_media.sh
 
 BACKUP_FILE="$(find "$BACKUP_DIR" -type f -name 'media-*.tar.gz' -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)"
 [[ -n "$BACKUP_FILE" ]] || fail "Backup file not found in $BACKUP_DIR"
@@ -100,7 +100,7 @@ ok "Media volume wiped"
 
 echo
 echo "===== 8. RESTORE MEDIA BACKUP ====="
-CONFIRM_RESTORE=YES COMPOSE_FILE="$COMPOSE_FILE" ./scripts/restore_media.sh "$BACKUP_FILE"
+CONFIRM_RESTORE=YES COMPOSE_FILE="$COMPOSE_FILE" COMPOSE_PROJECT_NAME="$PROJECT_NAME" ./scripts/restore_media.sh "$BACKUP_FILE"
 ok "Media backup restored"
 
 echo
