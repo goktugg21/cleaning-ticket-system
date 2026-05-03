@@ -117,6 +117,27 @@ export function DashboardPage() {
 
   const hasActiveFilters = Boolean(statusFilter || priorityFilter || searchActive);
 
+  const visibleStats = useMemo(() => {
+    const openLike = tickets.filter((ticket) =>
+      ["OPEN", "REOPENED_BY_ADMIN", "IN_PROGRESS"].includes(ticket.status),
+    ).length;
+
+    const waitingApproval = tickets.filter(
+      (ticket) => ticket.status === "WAITING_CUSTOMER_APPROVAL",
+    ).length;
+
+    const urgent = tickets.filter((ticket) => ticket.priority === "URGENT").length;
+
+    const closed = tickets.filter((ticket) => ticket.status === "CLOSED").length;
+
+    return {
+      openLike,
+      waitingApproval,
+      urgent,
+      closed,
+    };
+  }, [tickets]);
+
   return (
     <>
       <header className="page-head">
@@ -144,6 +165,32 @@ export function DashboardPage() {
           </Link>
         </div>
       </header>
+
+      <section className="metric-grid" aria-label="Ticket summary">
+        <article className="metric-card">
+          <span className="metric-label">Visible tickets</span>
+          <strong>{tickets.length}</strong>
+          <small>{count} total in current scope</small>
+        </article>
+
+        <article className="metric-card">
+          <span className="metric-label">Active work</span>
+          <strong>{visibleStats.openLike}</strong>
+          <small>Open, reopened, or in progress</small>
+        </article>
+
+        <article className="metric-card">
+          <span className="metric-label">Waiting approval</span>
+          <strong>{visibleStats.waitingApproval}</strong>
+          <small>Needs customer response</small>
+        </article>
+
+        <article className="metric-card urgent">
+          <span className="metric-label">Urgent</span>
+          <strong>{visibleStats.urgent}</strong>
+          <small>High attention tickets</small>
+        </article>
+      </section>
 
       <section className="card">
         <form className="filter-bar" onSubmit={handleSearchSubmit}>
@@ -243,11 +290,24 @@ export function DashboardPage() {
           ))}
 
           {!loading && tickets.length === 0 && (
-            <p className="empty">
-              {hasActiveFilters
-                ? "No tickets match the current filters."
-                : "No tickets yet."}
-            </p>
+            <div className="empty-state">
+              <div className="empty-icon">✓</div>
+              <h3>{hasActiveFilters ? "No matching tickets" : "No tickets yet"}</h3>
+              <p>
+                {hasActiveFilters
+                  ? "Try clearing filters or searching for another ticket number, title, or customer."
+                  : "Create the first ticket to start tracking requests, complaints, and reports."}
+              </p>
+              {hasActiveFilters ? (
+                <button type="button" className="secondary" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              ) : (
+                <Link className="button" to="/tickets/new">
+                  Create ticket
+                </Link>
+              )}
+            </div>
           )}
         </div>
 

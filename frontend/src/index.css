@@ -1226,3 +1226,114 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ---------- Frontend polish: dashboard metrics + empty state ---------- */
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top right, rgba(29, 78, 216, 0.14), transparent 34%),
+    var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
+  min-height: 126px;
+  display: grid;
+  align-content: space-between;
+}
+
+.metric-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 16px 14px auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background: rgba(29, 78, 216, 0.08);
+}
+
+.metric-card.urgent {
+  background:
+    radial-gradient(circle at top right, rgba(162, 29, 29, 0.14), transparent 34%),
+    var(--surface);
+}
+
+.metric-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  font-size: 32px;
+  line-height: 1;
+  margin-top: 16px;
+}
+
+.metric-card small {
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.empty-state {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 46px 20px;
+  color: var(--text-muted);
+}
+
+.empty-state h3 {
+  color: var(--text);
+  margin: 4px 0 0;
+}
+
+.empty-state p {
+  max-width: 520px;
+  margin: 0 0 8px;
+}
+
+.empty-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 24px;
+  font-weight: 900;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 1100px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-card {
+    min-height: 112px;
+  }
+}
+
