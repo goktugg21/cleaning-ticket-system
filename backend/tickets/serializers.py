@@ -3,9 +3,9 @@ from pathlib import Path as FilePath
 
 from rest_framework import serializers
 
-from accounts.models import UserRole
+from accounts.models import User, UserRole
 from accounts.permissions import is_staff_role
-from buildings.models import Building
+from buildings.models import Building, BuildingManagerAssignment
 from customers.models import Customer
 
 from .models import (
@@ -342,3 +342,45 @@ class TicketStatusChangeSerializer(serializers.Serializer):
             )
         except TransitionError as exc:
             raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
+
+
+class TicketAssignSerializer(serializers.Serializer):
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(is_active=True, deleted_at__isnull=True),
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        ticket = self.context["ticket"]
+        request = self.context["request"]
+        user = request.user
+        assigned_to = attrs.get("assigned_to")
+
+        if not is_staff_role(user):
+            raise serializers.ValidationError(
+                {"detail": "Customer users cannot assign tickets."}
+            )
+
+        if assigned_to is None:
+            return attrs
+
+        if assigned_to.role != UserRole.BUILDING_MANAGER:
+            raise serializers.ValidationError(
+                {"assigned_to": "Ticket can only be assigned to a building manager."}
+            )
+
+        if not BuildingManagerAssignment.objects.filter(
+            user=assigned_to,
+            building_id=ticket.building_id,
+        ).exists():
+            raise serializers.ValidationError(
+                {"assigned_to": "Manager is not assigned to this ticket building."}
+            )
+
+        return attrs
+
+    def save(self, **kwargs):
+        ticket = self.context["ticket"]
+        ticket.assigned_to = self.validated_data["assigned_to"]
+        ticket.save(update_fields=["assigned_to", "updated_at"])
+        return ticket

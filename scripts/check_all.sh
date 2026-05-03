@@ -54,7 +54,13 @@ echo "======================================"
 
 echo
 echo "======================================"
-echo "9. FRONTEND BUILD"
+echo "9. ASSIGNMENT API TEST"
+echo "======================================"
+"$ROOT_DIR/scripts/assignment_api_test.sh"
+
+echo
+echo "======================================"
+echo "10. FRONTEND BUILD"
 echo "======================================"
 cd "$ROOT_DIR/frontend"
 npm run build

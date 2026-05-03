@@ -13,6 +13,7 @@ from .filters import TicketFilter
 from .models import Ticket, TicketAttachment, TicketMessage, TicketMessageType
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
 from .serializers import (
+    TicketAssignSerializer,
     TicketAttachmentSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
@@ -57,6 +58,21 @@ class TicketViewSet(
     def change_status(self, request, pk=None):
         ticket = self.get_object()
         serializer = TicketStatusChangeSerializer(
+            data=request.data,
+            context={"request": request, "ticket": ticket},
+        )
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.save()
+        return Response(
+            TicketDetailSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign(self, request, pk=None):
+        ticket = self.get_object()
+        serializer = TicketAssignSerializer(
             data=request.data,
             context={"request": request, "ticket": ticket},
         )
