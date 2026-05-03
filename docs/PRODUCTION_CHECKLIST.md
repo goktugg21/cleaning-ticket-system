@@ -12,7 +12,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [ ] Set `CORS_ALLOWED_ORIGINS` to the real frontend origin.
 - [ ] Set `CSRF_TRUSTED_ORIGINS` to the real frontend origin.
 - [ ] Use strong PostgreSQL credentials.
-- [ ] Do not commit `.env`.
+- [x] Do not commit `.env`.
 
 ## HTTPS and proxy
 
@@ -62,12 +62,12 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] API throttling is configured.
 - [ ] Review JWT storage strategy before public launch.
 - [ ] Add stricter production rate limits.
-- [ ] Add security headers at the proxy level.
+- [x] Add security headers at the proxy level.
 
 ## Validation before launch
 
-- [ ] Run `./scripts/check_all.sh`.
-- [ ] Run `docker compose -f docker-compose.prod.yml config`.
-- [ ] Build production images.
-- [ ] Run smoke test against production containers.
+- [x] Run `./scripts/check_all.sh`.
+- [x] Run `docker compose -f docker-compose.prod.yml config`.
+- [x] Build production images.
+- [x] Run smoke test against production containers.
 - [ ] Test upload/download on production containers.
