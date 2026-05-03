@@ -344,6 +344,13 @@ class TicketStatusChangeSerializer(serializers.Serializer):
             raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
 
 
+class TicketAssignableManagerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "email", "full_name", "role"]
+        read_only_fields = fields
+
+
 class TicketAssignSerializer(serializers.Serializer):
     assigned_to = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(is_active=True, deleted_at__isnull=True),

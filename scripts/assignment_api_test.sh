@@ -43,6 +43,17 @@ post_json_with_status() {
     -d "$body"
 }
 
+
+get_with_status() {
+  local url="$1"
+  local token="$2"
+  local output_file="$3"
+
+  curl -sS -o "$output_file" -w "%{http_code}" \
+    "$url" \
+    -H "Authorization: Bearer $token"
+}
+
 echo "===== 1. ENSURE BACKEND IS RUNNING ====="
 docker compose up -d backend >/dev/null
 docker compose exec -T backend python manage.py check >/dev/null
@@ -215,6 +226,37 @@ if [[ "$STATUS" == "200" || "$STATUS" == "201" ]]; then
   fail "Manager from another building was accepted"
 fi
 ok "Manager from another building rejected. HTTP=$STATUS"
+
+echo
+echo "===== 10. ASSIGNABLE MANAGERS LIST ====="
+STATUS=$(get_with_status "$API/tickets/$TICKET_ID/assignable-managers/" "$COMPANY_TOKEN" /tmp/assignment_managers_response.json)
+
+[[ "$STATUS" == "200" ]] || { cat /tmp/assignment_managers_response.json; fail "Assignable managers list failed. HTTP=$STATUS"; }
+
+python3 - "$MANAGER_ID" "$OTHER_MANAGER_ID" /tmp/assignment_managers_response.json <<'PY_CHECK'
+import json
+import sys
+from pathlib import Path
+
+manager_id = int(sys.argv[1])
+other_manager_id = int(sys.argv[2])
+data = json.loads(Path(sys.argv[3]).read_text())
+ids = {item["id"] for item in data}
+assert manager_id in ids, data
+assert other_manager_id not in ids, data
+assert all(item["role"] == "BUILDING_MANAGER" for item in data), data
+print("[OK] Assignable managers list is scoped to ticket building")
+PY_CHECK
+
+echo
+echo "===== 11. CUSTOMER CANNOT VIEW ASSIGNABLE MANAGERS ====="
+STATUS=$(get_with_status "$API/tickets/$TICKET_ID/assignable-managers/" "$CUSTOMER_TOKEN" /tmp/assignment_customer_managers_response.json)
+
+if [[ "$STATUS" == "200" ]]; then
+  cat /tmp/assignment_customer_managers_response.json
+  fail "Customer was able to view assignable managers"
+fi
+ok "Customer assignable managers list rejected. HTTP=$STATUS"
 
 echo
 echo "======================================"

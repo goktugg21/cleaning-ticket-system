@@ -11,8 +11,10 @@ from accounts.scoping import scope_tickets_for
 
 from .filters import TicketFilter
 from .models import Ticket, TicketAttachment, TicketMessage, TicketMessageType
+from buildings.models import BuildingManagerAssignment
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
 from .serializers import (
+    TicketAssignableManagerSerializer,
     TicketAssignSerializer,
     TicketAttachmentSerializer,
     TicketCreateSerializer,
@@ -80,6 +82,34 @@ class TicketViewSet(
         updated = serializer.save()
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    @action(detail=True, methods=["get"], url_path="assignable-managers")
+    def assignable_managers(self, request, pk=None):
+        ticket = self.get_object()
+
+        if not is_staff_role(request.user):
+            self.permission_denied(
+                request,
+                message="Customer users cannot view assignable managers.",
+            )
+
+        managers = [
+            assignment.user
+            for assignment in BuildingManagerAssignment.objects.filter(
+                building_id=ticket.building_id,
+                user__is_active=True,
+                user__deleted_at__isnull=True,
+                user__role=UserRole.BUILDING_MANAGER,
+            )
+            .select_related("user")
+            .order_by("user__email")
+        ]
+
+        return Response(
+            TicketAssignableManagerSerializer(managers, many=True).data,
             status=status.HTTP_200_OK,
         )
 
