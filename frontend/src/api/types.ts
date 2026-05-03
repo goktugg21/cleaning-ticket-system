@@ -132,3 +132,10 @@ export interface TicketAttachment {
   is_hidden: boolean;
   created_at: string;
 }
+
+export interface AssignableManager {
+  id: number;
+  email: string;
+  full_name: string;
+  role: "BUILDING_MANAGER";
+}

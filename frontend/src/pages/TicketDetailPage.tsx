@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, getApiError } from "../api/client";
 import type {
+  AssignableManager,
   PaginatedResponse,
   TicketAttachment,
   TicketDetail,
@@ -63,6 +64,10 @@ export function TicketDetailPage() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<number | null>(null);
 
+  const [assignableManagers, setAssignableManagers] = useState<AssignableManager[]>([]);
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>("");
+  const [assigningTicket, setAssigningTicket] = useState(false);
+
   const [error, setError] = useState("");
 
   const isStaff =
@@ -92,6 +97,48 @@ export function TicketDetailPage() {
     setLoading(true);
     loadTicket();
   }, [loadTicket]);
+
+  useEffect(() => {
+    setSelectedAssigneeId(
+      ticket && ticket.assigned_to !== null ? String(ticket.assigned_to) : "",
+    );
+  }, [ticket?.id, ticket?.assigned_to]);
+
+  useEffect(() => {
+    if (!isStaff || !id) return;
+    let cancelled = false;
+    api
+      .get<AssignableManager[]>(`/tickets/${id}/assignable-managers/`)
+      .then((response) => {
+        if (!cancelled) setAssignableManagers(response.data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(getApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isStaff]);
+
+  async function submitAssignment(event: FormEvent) {
+    event.preventDefault();
+    if (!id) return;
+    setError("");
+    setAssigningTicket(true);
+    try {
+      const assignedTo =
+        selectedAssigneeId === "" ? null : Number(selectedAssigneeId);
+      const response = await api.post<TicketDetail>(
+        `/tickets/${id}/assign/`,
+        { assigned_to: assignedTo },
+      );
+      setTicket(response.data);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setAssigningTicket(false);
+    }
+  }
 
   async function changeStatus(toStatus: TicketStatus) {
     if (!id) return;
@@ -348,6 +395,53 @@ export function TicketDetailPage() {
           )}
         </section>
       </div>
+
+      {isStaff && (
+        <section className="card">
+          <h2>Assignment</h2>
+
+          <p className="muted small">
+            Currently assigned to: <b>{ticket.assigned_to_email || "—"}</b>
+          </p>
+
+          <form className="form assignment-form" onSubmit={submitAssignment}>
+            <label>
+              <span>Assigned manager</span>
+              <select
+                value={selectedAssigneeId}
+                onChange={(event) => setSelectedAssigneeId(event.target.value)}
+                disabled={assigningTicket}
+              >
+                <option value="">Unassigned</option>
+                {ticket.assigned_to !== null &&
+                  !assignableManagers.some((m) => m.id === ticket.assigned_to) && (
+                    <option value={String(ticket.assigned_to)}>
+                      {ticket.assigned_to_email ?? `User #${ticket.assigned_to}`}
+                      {" (current)"}
+                    </option>
+                  )}
+                {assignableManagers.map((manager) => (
+                  <option key={manager.id} value={manager.id}>
+                    {manager.full_name?.trim() || manager.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="actions">
+              <button
+                disabled={
+                  assigningTicket ||
+                  selectedAssigneeId ===
+                    (ticket.assigned_to !== null ? String(ticket.assigned_to) : "")
+                }
+              >
+                {assigningTicket ? "Updating…" : "Update assignment"}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <section className="card">
         <h2>Attachments</h2>
