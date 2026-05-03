@@ -17,3 +17,6 @@ node_modules/
 !frontend/.env.example
 *.env
 frontend/.env
+
+# Local production backups
+backups/

@@ -43,10 +43,10 @@ This checklist tracks the minimum work required before running the cleaning tick
 
 ## Backups
 
-- [ ] Add PostgreSQL backup script.
-- [ ] Add restore instructions.
+- [x] Add PostgreSQL backup script.
+- [x] Add restore instructions.
 - [ ] Test restore on a clean environment.
-- [ ] Back up uploaded media volume.
+- [x] Add uploaded media backup script.
 
 ## Email and notifications
 
