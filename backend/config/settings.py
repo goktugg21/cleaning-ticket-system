@@ -156,6 +156,17 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "config.pagination.StandardResultsSetPagination",
     "PAGE_SIZE": 25,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": os.environ.get("DRF_THROTTLE_ANON_RATE", "1000/minute"),
+        "user": os.environ.get("DRF_THROTTLE_USER_RATE", "10000/hour"),
+        "auth_token": os.environ.get("DRF_THROTTLE_AUTH_TOKEN_RATE", "200/minute"),
+        "auth_token_refresh": os.environ.get("DRF_THROTTLE_AUTH_TOKEN_REFRESH_RATE", "300/minute"),
+    },
 }
 
 from datetime import timedelta
