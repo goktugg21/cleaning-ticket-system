@@ -48,7 +48,13 @@ echo "======================================"
 
 echo
 echo "======================================"
-echo "8. FRONTEND BUILD"
+echo "8. ATTACHMENT FILE TYPE TEST"
+echo "======================================"
+"$ROOT_DIR/scripts/attachment_file_type_test.sh"
+
+echo
+echo "======================================"
+echo "9. FRONTEND BUILD"
 echo "======================================"
 cd "$ROOT_DIR/frontend"
 npm run build

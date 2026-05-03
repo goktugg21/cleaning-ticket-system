@@ -1,4 +1,6 @@
 from django.urls import reverse
+from pathlib import Path as FilePath
+
 from rest_framework import serializers
 
 from accounts.models import UserRole
@@ -16,6 +18,30 @@ from .models import (
 )
 from .permissions import user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
+
+
+ALLOWED_ATTACHMENT_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".pdf",
+    ".heic",
+    ".heif",
+}
+
+ALLOWED_ATTACHMENT_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/pdf",
+    "image/heic",
+    "image/heif",
+}
+
+ALLOWED_ATTACHMENT_MESSAGE = (
+    "Only JPG, JPEG, PNG, WEBP, PDF, HEIC, and HEIF attachments are allowed."
+)
 
 
 class TicketStatusHistorySerializer(serializers.ModelSerializer):
@@ -264,12 +290,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
     def validate_file(self, value):
         max_size = 10 * 1024 * 1024
-        allowed_mime_types = {
-            "image/jpeg",
-            "image/png",
-            "image/webp",
-            "application/pdf",
-        }
+        allowed_mime_types = ALLOWED_ATTACHMENT_MIME_TYPES
 
         mime_type = getattr(value, "content_type", "") or "application/octet-stream"
         file_size = getattr(value, "size", 0)
@@ -279,7 +300,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
         if mime_type not in allowed_mime_types:
             raise serializers.ValidationError(
-                "Only JPG, PNG, WEBP, and PDF attachments are allowed."
+                ALLOWED_ATTACHMENT_MESSAGE
             )
 
         return value
