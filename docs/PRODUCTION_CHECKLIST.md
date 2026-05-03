@@ -70,4 +70,4 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Run `docker compose -f docker-compose.prod.yml config`.
 - [x] Build production images.
 - [x] Run smoke test against production containers.
-- [ ] Test upload/download on production containers.
+- [x] Test upload/download on production containers (`./scripts/prod_upload_download_test.sh`).

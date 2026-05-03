@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API="http://localhost:8000/api"
+API="${API:-http://localhost:8000/api}"
 
 fail() {
   echo "[FAIL] $*" >&2

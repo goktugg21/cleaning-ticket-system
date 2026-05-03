@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API="http://localhost:8000/api"
+API="${API:-http://localhost:8000/api}"
+BUILDING_ID="${BUILDING_ID:-1}"
+CUSTOMER_ID="${CUSTOMER_ID:-1}"
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -94,15 +96,15 @@ echo "===== 2. CREATE TEST TICKET ====="
 CREATE_RESP="$(curl -sS -X POST "$API/tickets/" \
   -H "Authorization: Bearer $CUSTOMER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "title":"Attachment download test ticket",
-    "description":"Testing protected attachment downloads.",
-    "room_label":"Attachment Download Room",
-    "type":"REPORT",
-    "priority":"NORMAL",
-    "building":1,
-    "customer":1
-  }')"
+  -d "{
+    \"title\":\"Attachment download test ticket\",
+    \"description\":\"Testing protected attachment downloads.\",
+    \"room_label\":\"Attachment Download Room\",
+    \"type\":\"REPORT\",
+    \"priority\":\"NORMAL\",
+    \"building\":${BUILDING_ID},
+    \"customer\":${CUSTOMER_ID}
+  }")"
 
 TICKET_ID="$(printf '%s' "$CREATE_RESP" | json_get_id)"
 ok "Ticket created id=$TICKET_ID"
