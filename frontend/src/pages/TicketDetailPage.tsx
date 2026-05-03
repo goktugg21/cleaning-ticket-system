@@ -23,7 +23,7 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
 };
 
 const ACCEPTED_ATTACHMENT_TYPES = ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
-const ATTACHMENT_HELPER_TEXT = "JPG, JPEG, PNG, WEBP, HEIC, HEIF, PDF allowed.";
+const ATTACHMENT_HELPER_TEXT = "JPG, JPEG, PNG, WEBP, HEIC, HEIF, PDF allowed. Maximum file size: 10 MB.";
 
 function formatDate(value: string | null): string {
   if (!value) return "—";

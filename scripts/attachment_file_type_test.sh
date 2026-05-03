@@ -109,6 +109,13 @@ printf '%s\n' '%PDF-1.4' > "$TMP_DIR/allowed.pdf"
 printf '\x00\x00\x00\x18ftypheic' > "$TMP_DIR/allowed.heic"
 printf '\x00\x00\x00\x18ftypheif' > "$TMP_DIR/allowed.heif"
 printf 'not allowed' > "$TMP_DIR/not-allowed.txt"
+python3 - "$TMP_DIR/too-large.pdf" <<'PY_CREATE_LARGE_FILE'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+path.write_bytes(b"%PDF-1.4\n" + (b"0" * ((10 * 1024 * 1024) + 1)))
+PY_CREATE_LARGE_FILE
 
 echo
 echo "===== 3. ALLOWED TYPES ====="
@@ -137,6 +144,11 @@ echo
 echo "===== 4. DISALLOWED TYPE ====="
 upload_and_expect_failure "$CUSTOMER_TOKEN" "$TICKET_ID" "$TMP_DIR/not-allowed.txt" "text/plain"
 ok "TXT rejected"
+
+echo
+echo "===== 5. FILE SIZE LIMIT ====="
+upload_and_expect_failure "$CUSTOMER_TOKEN" "$TICKET_ID" "$TMP_DIR/too-large.pdf" "application/pdf"
+ok "Oversized PDF rejected"
 
 echo
 echo "======================================"
