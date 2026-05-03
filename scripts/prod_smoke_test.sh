@@ -14,6 +14,29 @@ ok() {
   echo "[OK] $*"
 }
 
+wait_for_http() {
+  local label="$1"
+  local url="$2"
+  local expected="$3"
+  local output_file="$4"
+
+  local code="000"
+
+  for attempt in $(seq 1 30); do
+    code="$(curl -sS -o "$output_file" -w "%{http_code}" "$url" || true)"
+
+    if [[ "$code" == "$expected" ]]; then
+      ok "$label returns $expected"
+      return 0
+    fi
+
+    echo "[WAIT] $label expected HTTP $expected, got $code (attempt $attempt/30)"
+    sleep 2
+  done
+
+  fail "$label expected HTTP $expected, got $code"
+}
+
 echo "===== 1. PROD COMPOSE CONFIG ====="
 FRONTEND_PORT="$FRONTEND_PORT" docker compose -f "$COMPOSE_FILE" config >/tmp/cleaning-ticket-prod-compose.yml
 ok "Prod compose config valid"
@@ -35,17 +58,9 @@ ok "Backend checks passed"
 
 echo
 echo "===== 5. HTTP CHECKS ====="
-FRONTEND_HTTP="$(curl -sS -o /tmp/prod_frontend.html -w "%{http_code}" "$BASE_URL/")"
-[[ "$FRONTEND_HTTP" == "200" ]] || fail "Frontend expected HTTP 200, got $FRONTEND_HTTP"
-ok "Frontend / returns 200"
-
-API_ME_HTTP="$(curl -sS -o /tmp/prod_api_me.json -w "%{http_code}" "$BASE_URL/api/auth/me/")"
-[[ "$API_ME_HTTP" == "401" ]] || fail "API /api/auth/me/ expected HTTP 401 without token, got $API_ME_HTTP"
-ok "API auth/me returns 401 without token"
-
-ADMIN_HTTP="$(curl -sS -o /tmp/prod_admin.html -w "%{http_code}" "$BASE_URL/admin/login/")"
-[[ "$ADMIN_HTTP" == "200" ]] || fail "Admin login expected HTTP 200, got $ADMIN_HTTP"
-ok "Admin login returns 200"
+wait_for_http "Frontend /" "$BASE_URL/" "200" "/tmp/cleaning-ticket-prod-frontend.html"
+wait_for_http "API /api/auth/me/ without token" "$BASE_URL/api/auth/me/" "401" "/tmp/cleaning-ticket-prod-api-me.json"
+wait_for_http "Admin login" "$BASE_URL/admin/login/" "200" "/tmp/cleaning-ticket-prod-admin.html"
 
 echo
 echo "======================================"
