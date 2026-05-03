@@ -63,6 +63,22 @@ wait_for_http "API /api/auth/me/ without token" "$BASE_URL/api/auth/me/" "401" "
 wait_for_http "Admin login" "$BASE_URL/admin/login/" "200" "/tmp/cleaning-ticket-prod-admin.html"
 
 echo
+echo "===== 6. SECURITY HEADER CHECKS ====="
+HEADERS="$(curl -sSI "$BASE_URL/")"
+
+echo "$HEADERS" | grep -qi '^X-Content-Type-Options: nosniff' || fail "Missing X-Content-Type-Options header"
+ok "X-Content-Type-Options header exists"
+
+echo "$HEADERS" | grep -qi '^X-Frame-Options: SAMEORIGIN' || fail "Missing X-Frame-Options header"
+ok "X-Frame-Options header exists"
+
+echo "$HEADERS" | grep -qi '^Referrer-Policy: strict-origin-when-cross-origin' || fail "Missing Referrer-Policy header"
+ok "Referrer-Policy header exists"
+
+echo "$HEADERS" | grep -qi '^Permissions-Policy:' || fail "Missing Permissions-Policy header"
+ok "Permissions-Policy header exists"
+
+echo
 echo "======================================"
 echo "PRODUCTION SMOKE TEST PASSED"
 echo "Base URL: $BASE_URL"
