@@ -23,6 +23,7 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
 };
 
 const ACCEPTED_ATTACHMENT_TYPES = ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
+const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 const ATTACHMENT_HELPER_TEXT = "JPG, JPEG, PNG, WEBP, HEIC, HEIF, PDF allowed. Maximum file size: 10 MB.";
 
 function formatDate(value: string | null): string {
@@ -131,7 +132,17 @@ export function TicketDetailPage() {
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    setSelectedFile(event.target.files?.[0] ?? null);
+    const file = event.target.files?.[0] ?? null;
+
+    if (file && file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      setSelectedFile(null);
+      setError("Attachment file size cannot exceed 10 MB.");
+      event.target.value = "";
+      return;
+    }
+
+    setError("");
+    setSelectedFile(file);
   }
 
   async function downloadAttachment(item: TicketAttachment) {
@@ -164,6 +175,11 @@ export function TicketDetailPage() {
   async function submitAttachment(event: FormEvent) {
     event.preventDefault();
     if (!id || !selectedFile) return;
+
+    if (selectedFile.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      setError("Attachment file size cannot exceed 10 MB.");
+      return;
+    }
 
     setError("");
     setUploadingAttachment(true);
