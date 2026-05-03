@@ -192,3 +192,26 @@ Stop containers and delete all production volumes:
     docker compose -f docker-compose.prod.yml down -v
 
 Be careful: `-v` deletes database, Redis, and uploaded media volumes.
+
+## Amazon SES SMTP handoff
+
+Email delivery will be configured through Amazon SES SMTP.
+
+The application needs these values in `.env`:
+
+    EMAIL_HOST=
+    EMAIL_PORT=587
+    EMAIL_HOST_USER=
+    EMAIL_HOST_PASSWORD=
+    EMAIL_USE_TLS=True
+    DEFAULT_FROM_EMAIL=
+
+The real SMTP endpoint, username, password, and verified sender email must be provided by the production email/admin side.
+
+After the values are added, run:
+
+    ENV_FILE=.env ./scripts/prod_env_check.sh
+    ./scripts/notification_email_test.sh
+
+Do not commit real SMTP credentials.
+

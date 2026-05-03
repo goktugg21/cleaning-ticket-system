@@ -50,6 +50,8 @@ This checklist tracks the minimum work required before running the cleaning tick
 
 ## Email and notifications
 
+- [x] Document Amazon SES SMTP setup.
+
 - [ ] Configure SMTP settings.
 - [x] Add ticket created notification.
 - [x] Add ticket status changed notification.

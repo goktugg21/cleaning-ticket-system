@@ -45,18 +45,29 @@ For Docker Compose production:
 
 ## 6. Configure email
 
-SMTP is required if ticket email notifications should be sent:
+Email notifications use SMTP.
 
-    EMAIL_HOST=smtp.example.com
+For production, Amazon SES SMTP can be used:
+
+    EMAIL_HOST=email-smtp.<region>.amazonaws.com
     EMAIL_PORT=587
-    EMAIL_HOST_USER=replace-with-smtp-user
-    EMAIL_HOST_PASSWORD=replace-with-smtp-password
+    EMAIL_HOST_USER=replace-with-amazon-ses-smtp-user
+    EMAIL_HOST_PASSWORD=replace-with-amazon-ses-smtp-password
     EMAIL_USE_TLS=True
-    DEFAULT_FROM_EMAIL=no-reply@example.com
+    DEFAULT_FROM_EMAIL=no-reply@your-domain.com
+
+Use the real SMTP endpoint, username, password, and sender email provided by the production email provider/admin.
+
+Do not commit real SMTP credentials.
 
 After setting SMTP, run:
 
+    ENV_FILE=.env ./scripts/prod_env_check.sh
     ./scripts/notification_email_test.sh
+
+See also:
+
+    docs/SMTP_AMAZON_SES.md
 
 ## 7. Configure HTTPS flags
 

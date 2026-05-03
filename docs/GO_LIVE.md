@@ -29,7 +29,7 @@ Required real values:
 - `CORS_ALLOWED_ORIGINS`
 - `CSRF_TRUSTED_ORIGINS`
 - `POSTGRES_PASSWORD`
-- SMTP settings if email notifications are used
+- Amazon SES SMTP settings if email notifications are used
 
 Validate it:
 
@@ -74,9 +74,14 @@ Do not enable HSTS or SSL redirect until HTTPS routing is confirmed.
 
 ## 6. Test email notifications
 
-After SMTP is configured:
+After Amazon SES SMTP is configured in `.env`:
 
+    ENV_FILE=.env ./scripts/prod_env_check.sh
     ./scripts/notification_email_test.sh
+
+Read:
+
+    docs/SMTP_AMAZON_SES.md
 
 ## 7. Backups
 
