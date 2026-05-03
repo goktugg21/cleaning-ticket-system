@@ -61,7 +61,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Cross-company/customer access is tested.
 - [x] API throttling is configured.
 - [ ] Review JWT storage strategy before public launch.
-- [ ] Add stricter production rate limits.
+- [x] Add stricter production rate limits.
 - [x] Add security headers at the proxy level.
 
 ## Validation before launch
