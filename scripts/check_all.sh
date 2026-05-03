@@ -36,7 +36,13 @@ echo "======================================"
 
 echo
 echo "======================================"
-echo "6. FRONTEND BUILD"
+echo "6. ATTACHMENT API TEST"
+echo "======================================"
+"$ROOT_DIR/scripts/attachment_api_test.sh"
+
+echo
+echo "======================================"
+echo "7. FRONTEND BUILD"
 echo "======================================"
 cd "$ROOT_DIR/frontend"
 npm run build

@@ -7,6 +7,7 @@ from customers.models import Customer
 
 from .models import (
     Ticket,
+    TicketAttachment,
     TicketMessage,
     TicketMessageType,
     TicketStatus,
@@ -213,6 +214,92 @@ class TicketMessageSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         if not user_has_scope_for_ticket(user, ticket):
             raise serializers.ValidationError("You do not have access to this ticket.")
+        return attrs
+
+
+class TicketAttachmentSerializer(serializers.ModelSerializer):
+    uploaded_by_email = serializers.CharField(source="uploaded_by.email", read_only=True)
+    file = serializers.FileField(write_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TicketAttachment
+        fields = [
+            "id",
+            "ticket",
+            "message",
+            "uploaded_by",
+            "uploaded_by_email",
+            "file",
+            "file_url",
+            "original_filename",
+            "mime_type",
+            "file_size",
+            "is_hidden",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "ticket",
+            "message",
+            "uploaded_by",
+            "uploaded_by_email",
+            "file_url",
+            "original_filename",
+            "mime_type",
+            "file_size",
+            "created_at",
+        ]
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return ""
+        request = self.context.get("request")
+        url = obj.file.url
+        if request:
+            return request.build_absolute_uri(url)
+        return url
+
+    def validate_file(self, value):
+        max_size = 10 * 1024 * 1024
+        allowed_mime_types = {
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "application/pdf",
+        }
+
+        mime_type = getattr(value, "content_type", "") or "application/octet-stream"
+        file_size = getattr(value, "size", 0)
+
+        if file_size > max_size:
+            raise serializers.ValidationError("Attachment file size cannot exceed 10 MB.")
+
+        if mime_type not in allowed_mime_types:
+            raise serializers.ValidationError(
+                "Only JPG, PNG, WEBP, and PDF attachments are allowed."
+            )
+
+        return value
+
+    def validate_is_hidden(self, value):
+        request = self.context.get("request")
+        user = request.user if request else None
+
+        if value and not is_staff_role(user):
+            raise serializers.ValidationError(
+                "Customer users cannot upload hidden/internal attachments."
+            )
+
+        return value
+
+    def validate(self, attrs):
+        ticket = self.context["ticket"]
+        user = self.context["request"].user
+
+        if not user_has_scope_for_ticket(user, ticket):
+            raise serializers.ValidationError("You do not have access to this ticket.")
+
         return attrs
 
 

@@ -179,6 +179,7 @@ class TicketAttachment(models.Model):
     original_filename = models.CharField(max_length=255)
     mime_type = models.CharField(max_length=120)
     file_size = models.PositiveIntegerField()
+    is_hidden = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
 

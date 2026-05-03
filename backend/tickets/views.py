@@ -1,6 +1,7 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.models import UserRole
@@ -8,9 +9,10 @@ from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
 from accounts.scoping import scope_tickets_for
 
 from .filters import TicketFilter
-from .models import Ticket, TicketMessage, TicketMessageType
+from .models import Ticket, TicketAttachment, TicketMessage, TicketMessageType
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
 from .serializers import (
+    TicketAttachmentSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
     TicketListSerializer,
@@ -113,3 +115,58 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
             ticket.mark_first_response_if_needed()
 
         return message
+
+
+
+class TicketAttachmentListCreateView(generics.ListCreateAPIView):
+    serializer_class = TicketAttachmentSerializer
+    permission_classes = [IsAuthenticatedAndActive, CanViewTicket]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def _get_ticket(self):
+        ticket_id = self.kwargs["ticket_id"]
+        ticket = get_object_or_404(Ticket, pk=ticket_id)
+
+        if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
+            self.permission_denied(self.request, message="Ticket not found in your scope.")
+
+        self.check_object_permissions(self.request, ticket)
+        return ticket
+
+    def get_queryset(self):
+        ticket = self._get_ticket()
+        qs = TicketAttachment.objects.filter(ticket=ticket).select_related(
+            "uploaded_by",
+            "message",
+        )
+
+        user = self.request.user
+        if not is_staff_role(user):
+            qs = qs.filter(is_hidden=False)
+            qs = qs.exclude(message__is_hidden=True)
+            qs = qs.exclude(message__message_type=TicketMessageType.INTERNAL_NOTE)
+
+        return qs.order_by("-created_at")
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["ticket"] = self._get_ticket()
+        return context
+
+    def perform_create(self, serializer):
+        ticket = self._get_ticket()
+        user = self.request.user
+        uploaded_file = serializer.validated_data["file"]
+
+        is_hidden = serializer.validated_data.get("is_hidden", False)
+        if not is_staff_role(user):
+            is_hidden = False
+
+        serializer.save(
+            ticket=ticket,
+            uploaded_by=user,
+            original_filename=uploaded_file.name,
+            mime_type=getattr(uploaded_file, "content_type", "") or "application/octet-stream",
+            file_size=getattr(uploaded_file, "size", 0),
+            is_hidden=is_hidden,
+        )
