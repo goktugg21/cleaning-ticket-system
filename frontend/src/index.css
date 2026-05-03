@@ -892,3 +892,10 @@ label > span {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.helper-text {
+  margin: -6px 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}

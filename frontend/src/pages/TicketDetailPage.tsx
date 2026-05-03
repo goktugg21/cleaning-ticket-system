@@ -22,6 +22,9 @@ const STATUS_LABEL: Record<TicketStatus, string> = {
   REOPENED_BY_ADMIN: "Reopened",
 };
 
+const ACCEPTED_ATTACHMENT_TYPES = ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
+const ATTACHMENT_HELPER_TEXT = "JPG, JPEG, PNG, WEBP, HEIC, HEIF, PDF allowed.";
+
 function formatDate(value: string | null): string {
   if (!value) return "—";
   try {
@@ -372,9 +375,17 @@ export function TicketDetailPage() {
             <input
               id="ticket-attachment-file"
               type="file"
+              accept={ACCEPTED_ATTACHMENT_TYPES}
               onChange={handleFileChange}
+              disabled={uploadingAttachment}
               required
             />
+            <p className="helper-text">{ATTACHMENT_HELPER_TEXT}</p>
+            {selectedFile && (
+              <p className="helper-text">
+                Selected: {selectedFile.name} · {formatBytes(selectedFile.size)}
+              </p>
+            )}
           </label>
 
           {isStaff && (
@@ -383,6 +394,7 @@ export function TicketDetailPage() {
                 type="checkbox"
                 checked={attachmentHidden}
                 onChange={(event) => setAttachmentHidden(event.target.checked)}
+                disabled={uploadingAttachment}
               />
               <span>Internal attachment — hidden from customer users</span>
             </label>
@@ -390,7 +402,7 @@ export function TicketDetailPage() {
 
           <div className="actions">
             <button disabled={uploadingAttachment || !selectedFile}>
-              {uploadingAttachment ? "Uploading…" : "Upload attachment"}
+              {uploadingAttachment ? "Uploading attachment…" : "Upload attachment"}
             </button>
           </div>
         </form>
