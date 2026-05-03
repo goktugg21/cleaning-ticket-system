@@ -58,6 +58,17 @@ Backups are written to:
 backups/media/
 ```
 
+
+## PostgreSQL restore smoke test
+
+Run a full PostgreSQL backup and restore validation against an isolated Docker Compose project:
+
+    RESTORE_TEST_CONFIRM=YES FRONTEND_PORT=18080 ./scripts/prod_restore_test.sh
+
+The test creates marker data, creates a PostgreSQL backup, removes the test database volume, restores the backup into a clean database, and verifies that the marker ticket exists after restore.
+
+This script uses a separate Compose project name and removes its own test volumes at the end.
+
 ## Important notes
 
 - Do not commit files under `backups/`.
