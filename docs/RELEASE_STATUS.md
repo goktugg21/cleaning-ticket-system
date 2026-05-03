@@ -59,6 +59,7 @@ Use this to inspect the current HEAD:
 - Production `.env` preflight check exists.
 - Final validation script exists.
 - Local HTTP demo script exists.
+- Server handoff guide exists for external HTTPS termination.
 
 ## Remaining before real public launch
 

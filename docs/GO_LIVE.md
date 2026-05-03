@@ -126,3 +126,9 @@ Then open:
 Read:
 
     docs/LOCAL_HTTP_DEMO.md
+
+## Server handoff
+
+For VPS deployment where HTTPS is handled by firewall or Nginx Proxy Manager, read:
+
+    docs/SERVER_HANDOFF.md
