@@ -31,7 +31,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Use a persistent Docker volume for PostgreSQL.
 - [x] Use a persistent Docker volume for uploaded media.
 - [x] Add Docker container log rotation.
-- [ ] Add error monitoring.
+- [x] Add optional Sentry error monitoring.
 
 ## Files and uploads
 

@@ -199,3 +199,17 @@ EMAIL_BACKEND = os.environ.get(
     if EMAIL_HOST
     else "django.core.mail.backends.console.EmailBackend",
 )
+
+SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+        send_default_pii=False,
+    )

@@ -112,3 +112,15 @@ Follow logs live:
 
     docker compose -f docker-compose.prod.yml logs -f --tail=100
 
+## 8. Error monitoring
+
+Error monitoring is optional and disabled by default.
+
+To enable Sentry in production, set these values in `.env`:
+
+    SENTRY_DSN=https://your-sentry-dsn
+    SENTRY_ENVIRONMENT=production
+    SENTRY_TRACES_SAMPLE_RATE=0.0
+
+If `SENTRY_DSN` is empty, Sentry is not initialized.
+
