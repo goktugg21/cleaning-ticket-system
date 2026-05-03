@@ -124,3 +124,19 @@ To enable Sentry in production, set these values in `.env`:
 
 If `SENTRY_DSN` is empty, Sentry is not initialized.
 
+## 9. Uploaded media storage
+
+Production uploaded media is stored in the Docker volume:
+
+    backend_media_prod:/app/media
+
+For the first production release, media stays on the local Docker volume.
+
+Back up media together with PostgreSQL:
+
+    ./scripts/backup_media.sh
+    ./scripts/backup_postgres.sh
+
+Read the media storage decision:
+
+    cat docs/MEDIA_STORAGE.md

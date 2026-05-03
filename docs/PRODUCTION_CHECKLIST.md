@@ -39,7 +39,7 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Attachment file names are randomized in storage.
 - [x] Attachment MIME types are restricted.
 - [x] Attachment size is limited to 10 MB.
-- [ ] Decide whether production media stays on local volume or moves to object storage.
+- [x] Decide whether production media stays on local volume or moves to object storage.
 
 ## Backups
 
