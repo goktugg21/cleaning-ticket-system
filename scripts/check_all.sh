@@ -26,13 +26,13 @@ echo
 echo "======================================"
 echo "4. API SMOKE TEST"
 echo "======================================"
-./scripts/smoke_api_test.sh
+"$ROOT_DIR/scripts/smoke_api_test.sh"
 
 echo
 echo "======================================"
 echo "5. SCOPE ISOLATION TEST"
 echo "======================================"
-./scripts/scope_isolation_test.sh
+"$ROOT_DIR/scripts/scope_isolation_test.sh"
 
 echo
 echo "======================================"
@@ -42,7 +42,13 @@ echo "======================================"
 
 echo
 echo "======================================"
-echo "7. FRONTEND BUILD"
+echo "7. ATTACHMENT DOWNLOAD TEST"
+echo "======================================"
+"$ROOT_DIR/scripts/attachment_download_test.sh"
+
+echo
+echo "======================================"
+echo "8. FRONTEND BUILD"
 echo "======================================"
 cd "$ROOT_DIR/frontend"
 npm run build

@@ -57,6 +57,7 @@ export function TicketDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentHidden, setAttachmentHidden] = useState(false);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<number | null>(null);
 
   const [error, setError] = useState("");
 
@@ -128,6 +129,33 @@ export function TicketDetailPage() {
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setSelectedFile(event.target.files?.[0] ?? null);
+  }
+
+  async function downloadAttachment(item: TicketAttachment) {
+    if (!id) return;
+
+    setError("");
+    setDownloadingAttachmentId(item.id);
+
+    try {
+      const response = await api.get(
+        `/tickets/${id}/attachments/${item.id}/download/`,
+        { responseType: "blob" },
+      );
+
+      const blobUrl = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = item.original_filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
   }
 
   async function submitAttachment(event: FormEvent) {
@@ -316,9 +344,16 @@ export function TicketDetailPage() {
               key={item.id}
             >
               <div>
-                <a href={item.file_url} target="_blank" rel="noreferrer" className="attachment-name">
-                  {item.original_filename}
-                </a>
+                <button
+                  type="button"
+                  className="link-button attachment-name"
+                  onClick={() => downloadAttachment(item)}
+                  disabled={downloadingAttachmentId === item.id}
+                >
+                  {downloadingAttachmentId === item.id
+                    ? "Downloading…"
+                    : item.original_filename}
+                </button>
                 <p className="muted small">
                   {item.uploaded_by_email} · {formatDate(item.created_at)} · {formatBytes(item.file_size)}
                 </p>

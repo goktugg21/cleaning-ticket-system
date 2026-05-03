@@ -1,3 +1,6 @@
+from pathlib import Path as FilePath
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -33,7 +36,8 @@ class TicketMessageType(models.TextChoices):
 
 
 def ticket_attachment_upload_path(instance, filename):
-    return f"tickets/{instance.ticket_id}/{filename}"
+    extension = FilePath(filename).suffix.lower()
+    return f"tickets/{instance.ticket_id}/{uuid4().hex}{extension}"
 
 
 class Ticket(models.Model):

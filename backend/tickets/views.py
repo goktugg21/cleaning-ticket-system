@@ -1,3 +1,4 @@
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -169,4 +170,32 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
             mime_type=getattr(uploaded_file, "content_type", "") or "application/octet-stream",
             file_size=getattr(uploaded_file, "size", 0),
             is_hidden=is_hidden,
+        )
+
+
+class TicketAttachmentDownloadView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, ticket_id, attachment_id):
+        ticket = get_object_or_404(Ticket, pk=ticket_id)
+
+        if not scope_tickets_for(request.user).filter(pk=ticket.pk).exists():
+            self.permission_denied(request, message="Ticket not found in your scope.")
+
+        attachment = get_object_or_404(
+            TicketAttachment,
+            pk=attachment_id,
+            ticket=ticket,
+        )
+
+        if attachment.is_hidden and not is_staff_role(request.user):
+            self.permission_denied(request, message="Attachment not found in your scope.")
+
+        if not attachment.file:
+            raise Http404("File not found.")
+
+        return FileResponse(
+            attachment.file.open("rb"),
+            as_attachment=True,
+            filename=attachment.original_filename,
         )

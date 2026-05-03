@@ -1,3 +1,4 @@
+from django.urls import reverse
 from rest_framework import serializers
 
 from accounts.models import UserRole
@@ -252,13 +253,14 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         ]
 
     def get_file_url(self, obj):
-        if not obj.file:
-            return ""
         request = self.context.get("request")
-        url = obj.file.url
+        path = reverse(
+            "ticket-attachment-download",
+            kwargs={"ticket_id": obj.ticket_id, "attachment_id": obj.id},
+        )
         if request:
-            return request.build_absolute_uri(url)
-        return url
+            return request.build_absolute_uri(path)
+        return path
 
     def validate_file(self, value):
         max_size = 10 * 1024 * 1024
