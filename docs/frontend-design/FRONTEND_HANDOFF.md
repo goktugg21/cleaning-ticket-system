@@ -1,21 +1,37 @@
 # CleanOps — Frontend Implementation Brief
 
-**Reference mockup:** `claude-design-reference.html` (HTML/CSS prototype — port to React + TypeScript + Vite).
-**Target:** existing repo at `~/cleaning-ticket-system/frontend/` (React + TS + Vite + DRF backend).
+**Goal:** port the Claude/Stitch design into the existing React + TypeScript + Vite frontend without changing backend/security code.
+
+**Target app:** `~/cleaning-ticket-system/frontend/`
+
+**Design references in repo:**
+
+| Purpose | Path |
+|---|---|
+| Non-login pages source of truth | `docs/frontend-design/claude-design-reference.html` |
+| Final login visual target | `docs/frontend-design/login-page/login-page-target.png` |
+| Stitch login HTML reference | `docs/frontend-design/login-page/code.html` |
+| Stitch design notes / tokens | `docs/frontend-design/login-page/DESIGN.md` |
+| Actual login background asset used by React | `frontend/src/assets/hero.png` |
+
+The screenshot `docs/frontend-design/login-page/login-page-target.png` is the **final login target**. The Stitch HTML is only a reference for spacing/classes. Do **not** copy the external Google image URL from `code.html`; use the local `frontend/src/assets/hero.png` asset.
 
 ---
 
 ## Hard rules
 
-1. **Do NOT redesign or reinterpret the Claude-designed pages.** Copy them as closely as possible — colors, spacing, typography, card style, layout architecture, hierarchy. Responsive adjustments only.
-2. **Do NOT introduce Next.js, shadcn, or any new heavy UI library.** Use existing dependencies + `lucide-react` for icons.
-3. **Do NOT touch Django / backend / security code.** Frontend only.
-4. **Preserve existing P0 auth changes:**
-   - Refresh-token replacement flow
-   - Backend logout call
-   - Demo credentials gated behind `import.meta.env.DEV || import.meta.env.VITE_SHOW_DEMO_USERS === 'true'`
-5. **Keep TypeScript strict.** `npm run build` must pass.
-6. **Do NOT invent backend endpoints.** If a UI element needs data that doesn't exist, derive it from the existing ticket list/detail data in a typed helper, and add a `// TODO(backend): replace with /api/...` comment.
+1. **Do not redesign or reinterpret the Claude-designed pages.** Copy the references as closely as possible: colors, spacing, typography, card style, layout architecture, hierarchy. Responsive adjustments only.
+2. **Login page exception:** login must follow `login-page-target.png`, not the old Claude login.
+3. **Do not introduce Next.js, shadcn, Material UI, Chakra, Radix, or any new heavy UI library.** Use existing dependencies and `lucide-react` icons only.
+4. **Do not touch Django / backend / migrations / security code.** Frontend only.
+5. **Preserve existing P0 auth changes:**
+   - refresh-token replacement flow
+   - backend logout call
+   - password reset flow
+   - demo credentials gated behind `import.meta.env.DEV || import.meta.env.VITE_SHOW_DEMO_USERS === 'true'`
+6. **Keep TypeScript strict.** `npm run build` must pass.
+7. **Do not invent backend endpoints.** If a UI element needs data that does not exist, derive it from existing ticket list/detail data in a typed helper and add a `// TODO(backend): replace with /api/...` comment.
+8. **All text must be real DOM text.** Do not bake headings/taglines into images. The Stitch screenshot text is blurry because it is a reference render; the implementation must render sharp text in React.
 
 ---
 
@@ -28,47 +44,89 @@
 | Create ticket | `frontend/src/pages/CreateTicketPage.tsx` |
 | Ticket detail | `frontend/src/pages/TicketDetailPage.tsx` |
 | App shell / sidebar | `frontend/src/layout/AppShell.tsx` |
-| API client | `frontend/src/api/client.ts` (only if absolutely necessary) |
-| API types | `frontend/src/api/types.ts` (only if absolutely necessary) |
+| API client | `frontend/src/api/client.ts` only if absolutely necessary |
+| API types | `frontend/src/api/types.ts` only if absolutely necessary |
+| Login background asset | `frontend/src/assets/hero.png` |
 
 ---
 
-## 1. Login page — combine two Stitch references
+## 1. Login page — final target
 
-The login is the **only** page where two references are merged. Everything else is 1:1 from the mockup.
+Use `docs/frontend-design/login-page/login-page-target.png` as the visual source of truth.
 
-### Left side — photographic panel (from photo-based Stitch reference)
+### Overall layout
 
-- Full-bleed blurred facility / interior photo background.
-- Dark overlay so text reads cleanly.
-- **No** solid emerald/green illustration panel. **No** "24/7 Monitoring" / "SLA Enforcement" feature cards.
-- Bottom-left tagline:
-  - **Title:** "Precision. Efficiency. Excellence." (two lines, with break after "Efficiency.")
-  - **Subtitle:** "Empowering facility managers with the tools to maintain pristine environments seamlessly."
-- Mockup classes for reference: `.login-visual`, `.lv-tagline`, `.lv-tagline-title`, `.lv-tagline-sub`.
-- For the photo: use a real photo asset (drop one at `frontend/src/assets/login-bg.jpg`) — the mockup's CSS scene is a stand-in, not part of the spec.
+- Full viewport, two equal split panels on desktop.
+- Left: 50% width, full-height photo panel.
+- Right: 50% width, white background, form content vertically centered.
+- On small screens, hide or collapse the left image panel and make the form full-width.
+- Page background: white. No green solid panel.
 
-### Right side — premium form layout (from modern Stitch reference)
+### Left side — photographic panel
 
-Vertical order, top to bottom:
+Use `frontend/src/assets/hero.png` as the background image.
 
-1. **Compact brand row at top-left** — small green icon tile (32×32, rounded 8px) + "CleanOps" wordmark. Not centered.
-2. **Vertically centered card area** containing:
-   - **Welcome heading** (left-aligned):
-     - h2: "Welcome Back" (32px, 800, tight tracking)
-     - sub: "Access your CleanOps console."
-   - **Quick-access demo cards** — GATED, see below.
-   - **"Or continue with email" divider** — uppercase 10.5px label, hairlines on both sides.
-   - **Form:**
-     - Work Email field (mail icon left, placeholder `name@veridian.com`)
-     - Password field (lock icon left, **eye toggle on right**, placeholder dots)
-     - Inline label row above password: "Password" (left) + "Forgot password?" link (right, green, links to existing reset flow)
-     - "Remember my device for 30 days" checkbox (single row)
-     - **"Secure login"** primary button — full width, green, 44px tall
+Required style:
 
-### Demo quick-access cards — GATING IS REQUIRED
+- Full-bleed background image with `object-cover`.
+- Soft blur/washed look is acceptable, but do not blur the actual tagline text.
+- Dark bottom overlay so the tagline is readable.
+- No brand logo on the left.
+- No feature cards.
+- No `24/7 Monitoring` / `SLA Enforcement` copy.
 
-Render the entire `Quick access for demo` block **only** when:
+Bottom-left text, real DOM text:
+
+```text
+Precision. Efficiency.
+Excellence.
+```
+
+Subtitle:
+
+```text
+Empowering facility managers with the tools to maintain pristine environments seamlessly.
+```
+
+Recommended positioning:
+
+- Container: absolute bottom-left, about `left: 60px`, `bottom: 72px` on desktop.
+- Title: bold, white, around 40–44px, tight line-height.
+- Subtitle: 16–18px, light gray/white, max width around 520px.
+
+Important: `code.html` currently has empty `<h1>` and `<p>` inside the left panel. Ignore that blank HTML and implement the target screenshot text above.
+
+### Right side — premium form layout
+
+Match the right side from `login-page-target.png`.
+
+Content column:
+
+- Width around 560px max.
+- Left aligned, not centered as a card.
+- Vertically centered in the right half.
+- No outer card around the whole form.
+
+Vertical order:
+
+1. Heading block
+2. Demo quick-access cards, gated
+3. Divider
+4. Work email field
+5. Password field with forgot-password link
+6. Remember checkbox
+7. Primary button
+
+Heading:
+
+- `Welcome Back`
+- `Access your CleanOps console.`
+- Left-aligned.
+- Strong black/near-black title, muted subtitle.
+
+### Demo quick-access cards — gating required
+
+Render the whole `Quick access for demo` block only when:
 
 ```ts
 const SHOW_DEMO =
@@ -76,90 +134,217 @@ const SHOW_DEMO =
   import.meta.env.VITE_SHOW_DEMO_USERS === 'true';
 ```
 
-Card structure (2-column grid, gap 10px):
+If `SHOW_DEMO` is false:
 
-- **Card 1** — JD avatar (initials in green-faint pill) + "John Doe" / "Facility Mgr" + green dot pill "Admin Role" → fills `manager@example.com` / `Test12345!`
-- **Card 2** — AS avatar + "Anna Smith" / "Technician" + muted pill "Standard Role" → fills `customer@example.com` / `Test12345!`
+- Do not render the label.
+- Do not render the cards.
+- Do not leave empty vertical space.
+- Do not leave hidden DOM nodes with demo credentials.
 
-Clicking a card prefills email + password and visually marks the card as selected (green border + faint green bg). It does **not** auto-submit.
+Card layout:
 
-In production builds without `VITE_SHOW_DEMO_USERS=true`, the demo block must not render at all (no empty space, no hidden DOM).
+- Two-column grid.
+- Gap around 20px.
+- Each card around 112px tall.
+- Rounded 8–10px.
+- Light border.
+- Card 1 selected style by default is acceptable if it matches the screenshot, but clicking cards must update selected state.
 
-### Auth behavior — DO NOT BREAK
+Card 1:
 
-- Submit posts to existing login endpoint, stores tokens via existing storage layer.
-- Refresh-token replacement on 401 stays as implemented.
-- Logout calls the backend logout route as currently implemented.
-- "Forgot password?" links to existing password-reset route — do not remove or rewire.
+- Avatar: `JD`, dark green circle.
+- Name: `John Doe`
+- Role: `Facility Mgr`
+- Pill: green/teal dot + `Admin Role`
+- Click action: fill `manager@example.com` and `Test12345!`
+
+Card 2:
+
+- Avatar: `AS`, mint/teal circle.
+- Name: `Anna Smith`
+- Role: `Technician`
+- Pill: `Standard Role`
+- Click action: fill `customer@example.com` and `Test12345!`
+
+Clicking a card must prefill email/password and visually mark the card as selected. It must **not** auto-submit.
+
+### Divider
+
+- Text: `OR CONTINUE WITH EMAIL`
+- Uppercase, small, muted gray, semibold.
+- Hairline borders left and right.
+- Match screenshot spacing.
+
+### Form fields
+
+Email field:
+
+- Label: `Work Email`
+- Placeholder: `name@veridian.com`
+- Mail icon on the left.
+- Height around 56px.
+- Rounded 8–10px.
+- Light gray input background.
+
+Password field:
+
+- Label row: `Password` left, `Forgot password?` right.
+- `Forgot password?` must open/use the existing password reset flow. Do not remove reset functionality.
+- Lock icon on the left.
+- Eye / eye-off toggle on the right.
+- Placeholder dots.
+
+Remember checkbox:
+
+- Text: `Remember my device for 30 days`
+- Keep existing behavior if implemented; otherwise visual only is acceptable, but do not break login.
+
+Submit button:
+
+- Text: `Secure login`
+- Full width.
+- Dark green.
+- Around 56px high.
+- Rounded 8px.
+- Do not rename to plain `Sign In`.
+
+### Login page implementation notes
+
+- Use `lucide-react` icons: `Building2`, `Mail`, `LockKeyhole`, `Eye`, `EyeOff` if needed.
+- Use the existing auth context/client. Do not replace the auth flow.
+- The final screenshot has blurry text in the left image area because Stitch rendered a mock image. In React, the photo should be the background only; overlay/title/subtitle must be crisp DOM text.
 
 ---
 
-## 2. Dashboard page — 1:1 from mockup
+## 2. Dashboard page — 1:1 from Claude mockup
 
-Use the Claude design **exactly**. Composition stays as designed: enterprise console, not generic card grid.
+Use `docs/frontend-design/claude-design-reference.html` as the source of truth.
 
-- **Health Score / operational score:** if the mockup has it, implement it as a **deterministic** function of the existing ticket list. Document the formula in code comments. Do not display random or fake numbers. Example shape:
+- Preserve the enterprise console composition.
+- Do not turn it into a generic card grid.
+- Copy colors, spacing, typography, card treatment, hierarchy, and layout from the mockup.
+
+### Health / operational score
+
+If the mockup includes a Health Score / Operational Score, implement it deterministically from existing ticket data. Do not show a random/fake number.
+
+Example implementation shape:
 
 ```ts
 // TODO(backend): replace with GET /api/stats/health-score
 // Deterministic UI-side score until backend endpoint exists.
-// Formula: 100 - (urgent_open * 8) - (sla_breached * 5) - (overdue * 3), clamped [0,100].
-export function deriveHealthScore(tickets: Ticket[]): { score: number; breakdown: ... } { ... }
+// Formula: 100 - (openUrgent * 8) - (waitingApproval * 3) - (openHigh * 4), clamped [0, 100].
+function deriveHealthScore(tickets: Ticket[]): { score: number; breakdown: string[] } {
+  // typed implementation here
+}
 ```
 
-- All other dashboard widgets (queue counts, SLA panels, recent activity, etc.) must source from existing API data. If a widget genuinely has no data source, render it with a clear "—" or empty state — do not fabricate values.
+All other dashboard widgets must source from existing API data. If there is no real data source, render `—` or an empty state. Do not fabricate operational values.
 
 ---
 
-## 3. Ticket detail page — 1:1 from mockup
+## 3. Ticket detail page — 1:1 from Claude mockup
 
-Preserve the layout exactly: ticket header, priority/status badges, timeline, internal notes, attachments, assignment panel, ticket details, SLA/response panel.
+Use `docs/frontend-design/claude-design-reference.html` as the visual source of truth.
 
-**Functional requirements that must keep working:**
-- Status transitions (with existing permission checks)
-- Assignment changes
-- Messages / internal notes (including `internal: true` flag)
-- Attachments — including hidden/internal attachment visibility rules
-- Permission checks unchanged
+Preserve the layout exactly:
+
+- ticket header
+- priority/status badges
+- timeline / activity
+- internal notes
+- attachments
+- assignment panel
+- ticket details panel
+- SLA/response panel if present in the mockup
+
+Functional requirements that must continue working:
+
+- Status transitions with existing permission checks.
+- Assignment changes.
+- Messages and internal notes.
+- Attachments, including hidden/internal attachment visibility rules.
+- Password reset/login/logout/auth flow untouched.
+- Permission checks unchanged.
 
 ---
 
-## 4. Create ticket page — 1:1 from mockup
+## 4. Create ticket page — 1:1 from Claude mockup
 
-Preserve current create-ticket functionality: category, location, title, description, priority, attachments. Do not change the API payload shape unless the existing API requires a mapping — if you add a mapping, isolate it in `api/client.ts` with a comment explaining why.
+Use `docs/frontend-design/claude-design-reference.html` as the visual source of truth.
+
+Preserve existing create-ticket functionality:
+
+- category/type
+- building/customer/location
+- title
+- description
+- priority
+- attachments
+
+Do not change the API payload shape unless the existing API requires a mapping. If a mapping is needed, isolate it in `api/client.ts` with a clear comment.
 
 ---
 
-## 5. Sidebar / AppShell — 1:1 from mockup
+## 5. Sidebar / AppShell — 1:1 from Claude mockup
 
-Use the enterprise console shell exactly. Keep nav consistent across Dashboard, New Ticket, Ticket Detail. Disabled / future links may stay visually present but **must not** route to broken pages — wire them to a 404 / coming-soon component or omit the `<Link>`.
+Use the enterprise console shell exactly.
+
+- Keep nav consistent across Dashboard, New Ticket, and Ticket Detail.
+- Disabled/future links may stay visually present, but must not route to broken pages.
+- Either omit links for unavailable pages or route to a safe coming-soon/disabled state.
 
 ---
 
-## 6. Code-quality expectations
+## 6. Stitch downloaded files review
 
-- Components readable; extract small presentational components where it helps maintainability.
-- No giant untyped objects; type everything.
-- Icons from `lucide-react` only.
+`docs/frontend-design/login-page/code.html`:
+
+- Use it only as a visual/layout reference.
+- It uses Tailwind CDN and Google-hosted assets; do not copy those dependencies into the React app.
+- It has an external `googleusercontent.com` image URL; do not use it in production.
+- Its left-panel h1/p are blank; use the target screenshot text from this brief.
+
+`docs/frontend-design/login-page/DESIGN.md`:
+
+- Useful for design intent/tokens only.
+- Not a source of truth for app architecture or auth behavior.
+
+`docs/frontend-design/login-page/login-page-target.png`:
+
+- Final login visual target.
+- The text blur is not a problem; implementation text must be rendered as crisp React DOM text.
+
+`frontend/src/assets/login_page_photo.png`:
+
+- Actual background asset for the login page.
+- Import this file directly from `LoginPage.tsx`.
+
+---
+
+## 7. Code-quality expectations
+
+- Keep components readable.
+- Extract small presentational components where it helps maintainability.
+- Type everything.
+- Use `lucide-react` only for icons.
 - No new heavy UI library.
-- `npm run build` must pass with strict TS.
+- No backend changes.
+- `npm run build` must pass.
 
 ---
 
 ## Deliverable
 
+Run:
+
 ```bash
-cd frontend
+cd ~/cleaning-ticket-system/frontend
 npm run build
 ```
 
 Then report:
-- Files changed
-- Any `// TODO(backend): ...` comments added (with the endpoint they want)
-- Any place where the mockup couldn't be matched 1:1 and why
 
----
-
-## Mockup reference
-
-Open `claude-design-reference.html` in a browser and use the demo nav (or `showPage('login' | 'dashboard' | 'create' | 'detail')` in the console) to step through each screen. The mockup's HTML/CSS is the visual source of truth — port classes / layout / spacing values directly into your component styles (Tailwind, CSS modules, or whatever the existing project uses).
+- Files changed.
+- Any `// TODO(backend): ...` comments added and what endpoint/data they request.
+- Any place where the mockup could not be matched 1:1 and why.

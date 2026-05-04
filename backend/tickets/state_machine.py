@@ -82,6 +82,10 @@ def _user_passes_scope(user, ticket, scope):
 
 
 def can_transition(user, ticket, to_status):
+    # SUPER_ADMIN_CAN_TRANSITION_ANY_STATUS
+    if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        return str(to_status) != str(ticket.status)
+
     key = (ticket.status, to_status)
     role_scopes = ALLOWED_TRANSITIONS.get(key)
     if role_scopes is None:
@@ -137,6 +141,14 @@ def apply_transition(ticket, user, to_status, note=""):
 
 
 def allowed_next_statuses(user, ticket):
+    # SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES
+    if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        return [
+            status
+            for status, _label in TicketStatus.choices
+            if str(status) != str(ticket.status)
+        ]
+
     return [
         to_status
         for (from_status, to_status), role_scopes in ALLOWED_TRANSITIONS.items()

@@ -346,6 +346,27 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
 
 class TicketStatusChangeSerializer(serializers.Serializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        # CUSTOMER_REJECT_REQUIRES_NOTE
+        request = self.context.get("request")
+        current_user = getattr(request, "user", None)
+        note = (attrs.get("note") or "").strip()
+        attrs["note"] = note
+        to_status = attrs.get("to_status")
+
+        if (
+            getattr(current_user, "role", None) == "CUSTOMER_USER"
+            and str(to_status) == "REJECTED"
+            and not note
+        ):
+            raise serializers.ValidationError(
+                {"note": "Please explain why this ticket is rejected."}
+            )
+
+        return attrs
+
     to_status = serializers.ChoiceField(choices=TicketStatus.choices)
     note = serializers.CharField(required=False, allow_blank=True, default="")
 

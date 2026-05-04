@@ -1,5 +1,13 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import {
+  BarChart3,
+  Building2,
+  LayoutGrid,
+  PlusCircle,
+  Settings,
+  Star,
+} from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -28,7 +36,7 @@ function formatRole(role: string | undefined): string {
 }
 
 function navClass({ isActive }: { isActive: boolean }) {
-  return isActive ? "enterprise-nav-link active" : "enterprise-nav-link";
+  return isActive ? "nav-item active" : "nav-item";
 }
 
 interface AppShellProps {
@@ -39,18 +47,10 @@ export function AppShell({ children }: AppShellProps) {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
 
-  const currentUser = me as
-    | {
-        full_name?: string;
-        email?: string;
-        role?: string;
-      }
-    | null
-    | undefined;
-
-  const userName = currentUser?.full_name?.trim() || currentUser?.email || "Facility user";
-  const userEmail = currentUser?.email || "";
-  const roleLabel = formatRole(currentUser?.role);
+  const userName =
+    me?.full_name?.trim() || me?.email || "Facility user";
+  const userEmail = me?.email || "";
+  const roleLabel = formatRole(me?.role);
 
   function handleLogout() {
     logout();
@@ -58,93 +58,113 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="enterprise-shell">
-      <aside className="enterprise-sidebar">
-        <div className="enterprise-brand">
-          <div className="brand-mark">FM</div>
+    <div className="app">
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <div className="brand-icon">FM</div>
           <div>
-            <p className="brand-title">FacilityPro</p>
-            <p className="brand-subtitle">Cleaning operations</p>
+            <div className="brand-name">FacilityPro</div>
+            <div className="brand-tag">Cleaning operations</div>
           </div>
         </div>
 
-        <div className="enterprise-user-card">
-          <div className="user-avatar">{getInitials(userName)}</div>
-          <div>
-            <p className="user-name">{userName}</p>
-            <p className="user-meta">{roleLabel}</p>
+        <div className="sidebar-user">
+          <div className="user-avatar-block">{getInitials(userName)}</div>
+          <div style={{ minWidth: 0 }}>
+            <div className="user-name">{userName}</div>
+            <div className="user-role">{roleLabel}</div>
           </div>
         </div>
 
-        <nav className="enterprise-nav" aria-label="Main navigation">
+        <nav className="sidebar-nav" aria-label="Main navigation">
+          <div className="nav-group-label">Operations</div>
           <NavLink to="/" end className={navClass}>
-            <span className="nav-icon">▦</span>
-            <span>Dashboard</span>
+            <span className="nav-icon">
+              <LayoutGrid size={16} strokeWidth={2} />
+            </span>
+            Dashboard
           </NavLink>
-
           <NavLink to="/tickets/new" className={navClass}>
-            <span className="nav-icon">＋</span>
-            <span>New ticket</span>
+            <span className="nav-icon">
+              <PlusCircle size={16} strokeWidth={2} />
+            </span>
+            New ticket
           </NavLink>
 
-          <span className="enterprise-nav-link disabled">
-            <span className="nav-icon">⌂</span>
-            <span>Facilities</span>
+          <div className="nav-group-label" style={{ marginTop: 8 }}>
+            Portfolio
+          </div>
+          <span className="nav-item disabled">
+            <span className="nav-icon">
+              <Building2 size={16} strokeWidth={2} />
+            </span>
+            Facilities
+          </span>
+          <span className="nav-item disabled">
+            <span className="nav-icon">
+              <Star size={16} strokeWidth={2} />
+            </span>
+            Assets
           </span>
 
-          <span className="enterprise-nav-link disabled">
-            <span className="nav-icon">◇</span>
-            <span>Assets</span>
+          <div className="nav-group-label" style={{ marginTop: 8 }}>
+            Analytics
+          </div>
+          <span className="nav-item disabled">
+            <span className="nav-icon">
+              <BarChart3 size={16} strokeWidth={2} />
+            </span>
+            Reports
           </span>
 
-          <span className="enterprise-nav-link disabled">
-            <span className="nav-icon">◌</span>
-            <span>Reports</span>
-          </span>
-
-          <span className="enterprise-nav-link disabled">
-            <span className="nav-icon">⚙</span>
-            <span>Settings</span>
+          <div className="nav-group-label" style={{ marginTop: 8 }}>
+            System
+          </div>
+          <span className="nav-item disabled">
+            <span className="nav-icon">
+              <Settings size={16} strokeWidth={2} />
+            </span>
+            Settings
           </span>
         </nav>
 
-        <div className="enterprise-sidebar-footer">
+        <div className="sidebar-footer">
           <div>
-            <p className="system-name">VERIDIAN</p>
-            <p className="system-meta">Ops console v1.0</p>
+            <div className="footer-sys-name">VERIDIAN</div>
+            <div className="footer-sys-ver">Ops Console v1.0</div>
           </div>
-          <div className="system-status">
-            <span></span>
-            Online
-          </div>
+          <div className="status-dot">Online</div>
         </div>
       </aside>
 
-      <div className="enterprise-workspace">
-        <header className="enterprise-topbar">
-          <div>
-            <p className="topbar-kicker">Ticket Management</p>
-            <h1>Facility service desk</h1>
+      <div className="workspace">
+        <header className="topbar">
+          <div className="topbar-left">
+            <span className="topbar-kicker">Ticket Management</span>
+            <span className="topbar-title">Facility service desk</span>
           </div>
-
-          <div className="topbar-actions">
+          <div className="topbar-right">
             <div className="topbar-identity">
-              <div>
-                <p>{userName}</p>
-                <span>{userEmail}</span>
+              <div className="identity-text">
+                <div className="identity-name">{userName}</div>
+                {userEmail && (
+                  <div className="identity-email">{userEmail}</div>
+                )}
               </div>
-              <b>{roleLabel}</b>
+              <span className="identity-role">{roleLabel}</span>
             </div>
-
-            <button type="button" className="button secondary compact" onClick={handleLogout}>
-              Log out
+            <div className="topbar-divider" />
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleLogout}
+            >
+              Sign out
             </button>
           </div>
         </header>
 
-        <main className="enterprise-content">
-          {children ?? <Outlet />}
-        </main>
+        <main className="page-canvas">{children ?? <Outlet />}</main>
       </div>
     </div>
   );
