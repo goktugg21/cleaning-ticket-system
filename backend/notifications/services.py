@@ -101,12 +101,21 @@ def _ticket_summary(ticket):
     return "\n".join(lines)
 
 
-def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None):
+def send_logged_email(
+    *,
+    recipient_email,
+    subject,
+    body,
+    event_type,
+    ticket=None,
+    recipient_user=None,
+    actor=None,
+):
     log = NotificationLog.objects.create(
         ticket=ticket,
         recipient_user=recipient_user,
         triggered_by=actor,
-        recipient_email=recipient_user.email,
+        recipient_email=recipient_email,
         event_type=event_type,
         subject=subject,
         body=body,
@@ -117,7 +126,7 @@ def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None)
             subject=subject,
             message=body,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[recipient_user.email],
+            recipient_list=[recipient_email],
             fail_silently=False,
         )
 
@@ -129,6 +138,18 @@ def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None)
         log.mark_failed(exc)
 
     return log
+
+
+def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None):
+    return send_logged_email(
+        ticket=ticket,
+        recipient_user=recipient_user,
+        actor=actor,
+        recipient_email=recipient_user.email,
+        event_type=event_type,
+        subject=subject,
+        body=body,
+    )
 
 
 def _send_to_users(ticket, users, event_type, subject, body, actor=None):
@@ -220,4 +241,30 @@ def send_ticket_assigned_email(ticket, old_assigned_to=None, actor=None):
         subject=subject,
         body=body,
         actor=actor,
+    )
+
+
+def send_password_reset_email(user, uid, token, reset_url=None):
+    subject = "Reset your Cleaning Ticket System password"
+    body_lines = [
+        "A password reset was requested for your account.",
+        "",
+        f"UID: {uid}",
+        f"Token: {token}",
+    ]
+    if reset_url:
+        body_lines.extend(["", f"Reset link: {reset_url}"])
+    body_lines.extend(
+        [
+            "",
+            "If you did not request this reset, you can ignore this email.",
+        ]
+    )
+
+    return send_logged_email(
+        recipient_user=user,
+        recipient_email=user.email,
+        event_type=NotificationEventType.PASSWORD_RESET,
+        subject=subject,
+        body="\n".join(body_lines),
     )

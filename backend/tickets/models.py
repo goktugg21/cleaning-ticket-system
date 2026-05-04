@@ -2,7 +2,7 @@ from pathlib import Path as FilePath
 from uuid import uuid4
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 
@@ -70,7 +70,7 @@ class Ticket(models.Model):
         related_name="assigned_tickets",
     )
 
-    ticket_no = models.CharField(max_length=32, unique=True, blank=True)
+    ticket_no = models.CharField(max_length=32, unique=True, null=True, blank=True)
 
     title = models.CharField(max_length=255)
     description = models.TextField()
@@ -110,11 +110,16 @@ class Ticket(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
-        super().save(*args, **kwargs)
 
-        if is_new and not self.ticket_no:
-            self.ticket_no = f"TCK-{self.created_at.year}-{self.id:06d}"
-            super().save(update_fields=["ticket_no"])
+        if not is_new:
+            super().save(*args, **kwargs)
+            return
+
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if not self.ticket_no:
+                self.ticket_no = f"TCK-{self.created_at.year}-{self.id:06d}"
+                type(self).objects.filter(pk=self.pk).update(ticket_no=self.ticket_no)
 
     def mark_first_response_if_needed(self):
         if not self.first_response_at:

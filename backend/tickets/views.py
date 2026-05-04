@@ -69,6 +69,15 @@ class TicketViewSet(
     def change_status(self, request, pk=None):
         ticket = self.get_object()
         old_status = ticket.status
+        to_status = request.data.get("to_status")
+        if not is_staff_role(request.user) and to_status not in {
+            "APPROVED",
+            "REJECTED",
+        }:
+            self.permission_denied(
+                request,
+                message="Customer users cannot perform staff-only status transitions.",
+            )
         serializer = TicketStatusChangeSerializer(
             data=request.data,
             context={"request": request, "ticket": ticket},
@@ -90,6 +99,11 @@ class TicketViewSet(
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
+        if not is_staff_role(request.user):
+            self.permission_denied(
+                request,
+                message="Customer users cannot assign tickets.",
+            )
         old_assigned_to = ticket.assigned_to
         serializer = TicketAssignSerializer(
             data=request.data,
@@ -148,7 +162,7 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         ticket_id = self.kwargs["ticket_id"]
         ticket = get_object_or_404(Ticket, pk=ticket_id)
         if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
-            self.permission_denied(self.request, message="Ticket not found in your scope.")
+            raise Http404("Ticket not found.")
         self.check_object_permissions(self.request, ticket)
         return ticket
 
@@ -201,7 +215,7 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         ticket = get_object_or_404(Ticket, pk=ticket_id)
 
         if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
-            self.permission_denied(self.request, message="Ticket not found in your scope.")
+            raise Http404("Ticket not found.")
 
         self.check_object_permissions(self.request, ticket)
         return ticket
@@ -232,8 +246,6 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         uploaded_file = serializer.validated_data["file"]
 
         is_hidden = serializer.validated_data.get("is_hidden", False)
-        if not is_staff_role(user):
-            is_hidden = False
 
         serializer.save(
             ticket=ticket,
@@ -252,7 +264,7 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
         ticket = get_object_or_404(Ticket, pk=ticket_id)
 
         if not scope_tickets_for(request.user).filter(pk=ticket.pk).exists():
-            self.permission_denied(request, message="Ticket not found in your scope.")
+            raise Http404("Ticket not found.")
 
         attachment = get_object_or_404(
             TicketAttachment,
@@ -260,7 +272,14 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
             ticket=ticket,
         )
 
-        if attachment.is_hidden and not is_staff_role(request.user):
+        hidden_by_message = (
+            attachment.message_id
+            and (
+                attachment.message.is_hidden
+                or attachment.message.message_type == TicketMessageType.INTERNAL_NOTE
+            )
+        )
+        if (attachment.is_hidden or hidden_by_message) and not is_staff_role(request.user):
             self.permission_denied(request, message="Attachment not found in your scope.")
 
         if not attachment.file:

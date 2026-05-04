@@ -1,6 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { api } from "../api/client";
+import {
+  api,
+  clearAuthTokens,
+  getRefreshToken,
+  logoutRefreshToken,
+  setAuthTokens,
+} from "../api/client";
 import type { Me } from "../api/types";
 
 interface AuthContextValue {
@@ -28,16 +34,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
+    const refresh = getRefreshToken();
+    if (refresh) {
+      logoutRefreshToken(refresh).catch(() => {
+        // Local logout must succeed even if the server already rejected the token.
+      });
+    }
+    clearAuthTokens();
     delete api.defaults.headers.common.Authorization;
     setMe(null);
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await api.post<TokenResponse>("/auth/token/", { email, password });
-    localStorage.setItem("accessToken", response.data.access);
-    localStorage.setItem("refreshToken", response.data.refresh);
+    setAuthTokens(response.data.access, response.data.refresh);
     api.defaults.headers.common.Authorization = `Bearer ${response.data.access}`;
     await reloadMe();
   }, [reloadMe]);

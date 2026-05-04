@@ -4,12 +4,17 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
-const DEMO_USERS = [
-  { label: "Super admin", email: "admin@example.com", password: "Admin12345!" },
-  { label: "Company admin", email: "companyadmin@example.com", password: "Test12345!" },
-  { label: "Manager", email: "manager@example.com", password: "Test12345!" },
-  { label: "Customer", email: "customer@example.com", password: "Test12345!" },
-];
+const SHOW_DEMO_USERS =
+  import.meta.env.DEV || import.meta.env.VITE_SHOW_DEMO_USERS === "true";
+
+const DEMO_USERS = SHOW_DEMO_USERS
+  ? [
+      { label: "Super admin", email: "admin@example.com", password: "Admin12345!" },
+      { label: "Company admin", email: "companyadmin@example.com", password: "Test12345!" },
+      { label: "Manager", email: "manager@example.com", password: "Test12345!" },
+      { label: "Customer", email: "customer@example.com", password: "Test12345!" },
+    ]
+  : [];
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -82,26 +87,28 @@ export function LoginPage() {
             </p>
           </div>
 
-          <div className="demo-login-panel enterprise-demo-panel">
-            <div>
-              <p className="demo-title">Local demo users</p>
-              <p className="muted small">Select a profile, then sign in.</p>
-            </div>
+          {SHOW_DEMO_USERS && (
+            <div className="demo-login-panel enterprise-demo-panel">
+              <div>
+                <p className="demo-title">Local demo users</p>
+                <p className="muted small">Select a profile, then sign in.</p>
+              </div>
 
-            <div className="demo-user-grid">
-              {DEMO_USERS.map((user) => (
-                <button
-                  type="button"
-                  className="demo-user-button enterprise-demo-user"
-                  key={user.email}
-                  onClick={() => fillDemoUser(user.email, user.password)}
-                >
-                  <span>{user.label}</span>
-                  <small>{user.email}</small>
-                </button>
-              ))}
+              <div className="demo-user-grid">
+                {DEMO_USERS.map((user) => (
+                  <button
+                    type="button"
+                    className="demo-user-button enterprise-demo-user"
+                    key={user.email}
+                    onClick={() => fillDemoUser(user.email, user.password)}
+                  >
+                    <span>{user.label}</span>
+                    <small>{user.email}</small>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <form onSubmit={handleSubmit} className="form enterprise-form">
             <label>

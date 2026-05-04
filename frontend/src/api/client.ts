@@ -42,6 +42,10 @@ export function clearAuthTokens(): void {
   window.dispatchEvent(new Event("auth:logout"));
 }
 
+export async function logoutRefreshToken(refresh: string): Promise<void> {
+  await refreshApi.post("/auth/logout/", { refresh });
+}
+
 function isAuthTokenUrl(url?: string): boolean {
   if (!url) return false;
   return url.includes("/auth/token/");

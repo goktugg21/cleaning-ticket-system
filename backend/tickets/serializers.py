@@ -294,9 +294,13 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
         mime_type = getattr(value, "content_type", "") or "application/octet-stream"
         file_size = getattr(value, "size", 0)
+        extension = FilePath(getattr(value, "name", "")).suffix.lower()
 
         if file_size > max_size:
             raise serializers.ValidationError("Attachment file size cannot exceed 10 MB.")
+
+        if extension not in ALLOWED_ATTACHMENT_EXTENSIONS:
+            raise serializers.ValidationError(ALLOWED_ATTACHMENT_MESSAGE)
 
         if mime_type not in allowed_mime_types:
             raise serializers.ValidationError(
@@ -322,6 +326,21 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
         if not user_has_scope_for_ticket(user, ticket):
             raise serializers.ValidationError("You do not have access to this ticket.")
+
+        message = attrs.get("message")
+        if message and message.ticket_id != ticket.id:
+            raise serializers.ValidationError(
+                {"message": "Attachment message must belong to this ticket."}
+            )
+
+        if (
+            message
+            and not is_staff_role(user)
+            and (message.is_hidden or message.message_type == TicketMessageType.INTERNAL_NOTE)
+        ):
+            raise serializers.ValidationError(
+                {"message": "Customer users cannot attach files to hidden/internal messages."}
+            )
 
         return attrs
 
