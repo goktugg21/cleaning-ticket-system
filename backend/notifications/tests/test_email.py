@@ -8,6 +8,7 @@ from notifications.services import (
     send_ticket_assigned_email,
     send_ticket_created_email,
     send_ticket_status_changed_email,
+    send_ticket_unassigned_email,
 )
 from test_utils import TenantFixtureMixin
 
@@ -88,3 +89,44 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
         for log in logs:
             self.assertIn("Status changed", log.subject)
             self.assertNotIn("on behalf of customer", log.subject)
+
+    def test_previous_assignee_is_notified_on_reassignment(self):
+        # Simulate the assign-then-reassign flow: ticket ends up assigned to
+        # other_manager; the previous assignee was self.manager.
+        self.ticket.assigned_to = self.other_manager
+        self.ticket.save(update_fields=["assigned_to", "updated_at"])
+
+        logs = send_ticket_unassigned_email(
+            self.ticket,
+            recipient_user=self.manager,
+            actor=self.company_admin,
+        )
+
+        self.assertEqual([log.recipient_email for log in logs], [self.manager.email])
+        self.assertEqual(logs[0].event_type, NotificationEventType.TICKET_UNASSIGNED)
+        self.assertIn("Removed from your assigned tickets", logs[0].subject)
+
+    def test_previous_assignee_is_notified_on_unassign(self):
+        # Ticket is now unassigned (assigned_to = None) but the previous
+        # assignee was self.manager and must still receive the email.
+        self.ticket.assigned_to = None
+        self.ticket.save(update_fields=["assigned_to", "updated_at"])
+
+        logs = send_ticket_unassigned_email(
+            self.ticket,
+            recipient_user=self.manager,
+            actor=self.company_admin,
+        )
+
+        self.assertEqual([log.recipient_email for log in logs], [self.manager.email])
+
+    def test_self_unassign_does_not_email_the_actor(self):
+        # The previous assignee is also the actor (a manager removing themselves).
+        # _without_actor must drop them so they do not get an email.
+        logs = send_ticket_unassigned_email(
+            self.ticket,
+            recipient_user=self.manager,
+            actor=self.manager,
+        )
+
+        self.assertEqual(logs, [])

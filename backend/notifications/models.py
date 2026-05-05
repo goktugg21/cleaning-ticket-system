@@ -7,6 +7,7 @@ class NotificationEventType(models.TextChoices):
     TICKET_CREATED = "TICKET_CREATED", "Ticket created"
     TICKET_STATUS_CHANGED = "TICKET_STATUS_CHANGED", "Ticket status changed"
     TICKET_ASSIGNED = "TICKET_ASSIGNED", "Ticket assigned"
+    TICKET_UNASSIGNED = "TICKET_UNASSIGNED", "Ticket unassigned"
     PASSWORD_RESET = "PASSWORD_RESET", "Password reset"
 
 

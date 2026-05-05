@@ -276,6 +276,31 @@ def send_ticket_assigned_email(ticket, old_assigned_to=None, actor=None):
     )
 
 
+def send_ticket_unassigned_email(ticket, recipient_user, actor=None):
+    if recipient_user is None:
+        return []
+
+    subject = f"[{ticket.ticket_no}] Removed from your assigned tickets: {ticket.title}"
+    body = "\n".join(
+        [
+            "You are no longer assigned to this ticket.",
+            "",
+            _ticket_summary(ticket),
+        ]
+    )
+
+    # Reuse _send_to_users so the same actor-exclusion (self-unassign) and
+    # dedupe rules apply as the rest of the email pipeline.
+    return _send_to_users(
+        ticket=ticket,
+        users=[recipient_user],
+        event_type=NotificationEventType.TICKET_UNASSIGNED,
+        subject=subject,
+        body=body,
+        actor=actor,
+    )
+
+
 def send_password_reset_email(user, uid, token, reset_url=None):
     subject = "Reset your Cleaning Ticket System password"
     body_lines = [

@@ -13,6 +13,7 @@ from notifications.services import (
     send_ticket_assigned_email,
     send_ticket_created_email,
     send_ticket_status_changed_email,
+    send_ticket_unassigned_email,
 )
 
 from .filters import TicketFilter
@@ -135,6 +136,12 @@ class TicketViewSet(
                 old_assigned_to=old_assigned_to,
                 actor=request.user,
             )
+            if old_assigned_to is not None:
+                send_ticket_unassigned_email(
+                    updated,
+                    recipient_user=old_assigned_to,
+                    actor=request.user,
+                )
 
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
