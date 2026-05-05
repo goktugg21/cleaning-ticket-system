@@ -62,7 +62,7 @@ function isAdminCustomerDecisionOverride(
   role?: string,
 ): boolean {
   return (
-    role === "SUPER_ADMIN" &&
+    (role === "SUPER_ADMIN" || role === "COMPANY_ADMIN") &&
     currentStatus === "WAITING_CUSTOMER_APPROVAL" &&
     (nextStatus === "APPROVED" || nextStatus === "REJECTED")
   );
@@ -70,11 +70,11 @@ function isAdminCustomerDecisionOverride(
 
 function adminDecisionOverrideMessage(nextStatus: TicketStatus): string {
   if (nextStatus === "APPROVED") {
-    return "Normally the customer should approve this ticket. Click the button again to approve it as Super Admin override.";
+    return "Normally the customer should approve this ticket. Click the button again to approve it as admin override.";
   }
 
   if (nextStatus === "REJECTED") {
-    return "Normally the customer should reject this ticket and explain why. Click the button again to reject it as Super Admin override.";
+    return "Normally the customer should reject this ticket and explain why. Click the button again to reject it as admin override.";
   }
 
   return "";

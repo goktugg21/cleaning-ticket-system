@@ -77,6 +77,21 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
             self.assertIn(self.super_admin.email, log.subject)
             self.assertIn("on behalf of the customer", log.body)
 
+    def test_company_admin_override_uses_override_subject(self):
+        logs = send_ticket_status_changed_email(
+            self.ticket,
+            old_status="WAITING_CUSTOMER_APPROVAL",
+            new_status="REJECTED",
+            actor=self.company_admin,
+            is_admin_override=True,
+        )
+
+        self.assertTrue(logs)
+        for log in logs:
+            self.assertIn("Rejected on behalf of customer", log.subject)
+            self.assertIn(self.company_admin.email, log.subject)
+            self.assertIn("on behalf of the customer", log.body)
+
     def test_normal_status_change_does_not_use_override_copy(self):
         logs = send_ticket_status_changed_email(
             self.ticket,

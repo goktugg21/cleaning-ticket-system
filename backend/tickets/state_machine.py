@@ -28,10 +28,12 @@ ALLOWED_TRANSITIONS = {
     },
     (TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.APPROVED): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.CUSTOMER_USER: SCOPE_CUSTOMER_LINKED,
     },
     (TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.REJECTED): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.CUSTOMER_USER: SCOPE_CUSTOMER_LINKED,
     },
     (TicketStatus.REJECTED, TicketStatus.IN_PROGRESS): {
