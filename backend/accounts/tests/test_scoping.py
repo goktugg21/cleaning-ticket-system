@@ -30,3 +30,45 @@ class AccountScopingTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(self.response_ids(self.client.get("/api/companies/")), {self.company.id})
         self.assertEqual(self.response_ids(self.client.get("/api/buildings/")), {self.building.id})
         self.assertEqual(self.response_ids(self.client.get("/api/customers/")), {self.customer.id})
+
+    def test_me_company_ids_excludes_inactive_for_company_admin(self):
+        self.company.is_active = False
+        self.company.save(update_fields=["is_active"])
+
+        self.authenticate(self.company_admin)
+        response = self.client.get(reverse("auth_me"))
+
+        self.assertEqual(response.data["company_ids"], [])
+
+    def test_me_building_ids_excludes_inactive_for_customer_user(self):
+        self.building.is_active = False
+        self.building.save(update_fields=["is_active"])
+
+        self.authenticate(self.customer_user)
+        response = self.client.get(reverse("auth_me"))
+
+        self.assertEqual(response.data["building_ids"], [])
+
+    def test_me_customer_ids_excludes_inactive_for_customer_user(self):
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+
+        self.authenticate(self.customer_user)
+        response = self.client.get(reverse("auth_me"))
+
+        self.assertEqual(response.data["customer_ids"], [])
+
+    def test_me_super_admin_still_sees_inactive_entity_ids(self):
+        self.company.is_active = False
+        self.company.save(update_fields=["is_active"])
+        self.building.is_active = False
+        self.building.save(update_fields=["is_active"])
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(reverse("auth_me"))
+
+        self.assertIn(self.company.id, response.data["company_ids"])
+        self.assertIn(self.building.id, response.data["building_ids"])
+        self.assertIn(self.customer.id, response.data["customer_ids"])

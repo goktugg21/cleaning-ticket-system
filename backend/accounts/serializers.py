@@ -11,7 +11,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 
 from .models import LoginLog, User
-from .scoping import building_ids_for, company_ids_for, customer_ids_for
+from .scoping import scope_buildings_for, scope_companies_for, scope_customers_for
 
 
 FAILED_LOGIN_LIMIT = 5
@@ -104,14 +104,18 @@ class MeSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    # Routed through scope_*_for so /api/auth/me/ returns the same id sets the
+    # matching list endpoints expose. After CHANGE-6, those scope helpers
+    # filter inactive entities for non-super-admin users; super admins still
+    # see archived rows because scope_*_for falls through to .all() for them.
     def get_company_ids(self, obj):
-        return list(company_ids_for(obj))
+        return list(scope_companies_for(obj).values_list("id", flat=True))
 
     def get_building_ids(self, obj):
-        return list(building_ids_for(obj))
+        return list(scope_buildings_for(obj).values_list("id", flat=True))
 
     def get_customer_ids(self, obj):
-        return list(customer_ids_for(obj))
+        return list(scope_customers_for(obj).values_list("id", flat=True))
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
