@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 cd /work
+if [ ! -d node_modules/playwright ]; then
+  echo "Installing playwright@1.59.1 (one-time, ~5-10s on a warm npm cache)..."
+  npm install playwright@1.59.1 --no-save --silent
+fi
 node proxy.mjs &
 PROXY_PID=$!
 trap "kill $PROXY_PID 2>/dev/null || true" EXIT

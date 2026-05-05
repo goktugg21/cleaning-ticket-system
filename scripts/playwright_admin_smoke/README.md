@@ -1,15 +1,15 @@
 # Playwright admin UI smoke
 
-End-to-end UI audit for the operator admin workflow: sidebar gating per role, list/filter/search on every admin page, invitation creation across all four roles, membership management on company/building/customer detail pages, deactivate/reactivate flows, dialog UX, and cross-tenant scope enforcement (COMPANY_ADMIN attempting to read a different tenant's URL must 403/404 with no UI bypass). The script encodes 41 distinct assertions and runs them against a live dev stack — it does **not** mock the backend, so any regression in CRUD scoping, role mutability, or invitation lifecycle surfaces immediately.
+End-to-end UI audit for the operator admin workflow: sidebar gating per role, list/filter/search on every admin page, invitation creation across all four roles, membership management on company/building/customer detail pages, deactivate/reactivate flows, dialog UX, and cross-tenant scope enforcement (COMPANY_ADMIN attempting to read a different tenant's URL must 403/404 with no UI bypass). The script encodes 42 distinct assertions and runs them against a live dev stack — it does **not** mock the backend, so any regression in CRUD scoping, role mutability, or invitation lifecycle surfaces immediately.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `run.mjs` | Playwright runner with the 41 assertions. Logs in as four roles and walks the relevant pages. |
+| `run.mjs` | Playwright runner with the 42 assertions. Logs in as four roles and walks the relevant pages. |
 | `proxy.mjs` | Two HTTP+WS proxies that bridge the Playwright container to the WSL host: `127.0.0.1:18000` → Vite (with Host header rewritten so Vite's `allowedHosts` guard does not 403) and `127.0.0.1:8000` → backend (with `Access-Control-Allow-Origin` forced so axios calls from the proxy origin succeed). |
 | `runner.sh` | Boots `proxy.mjs` in the background, then runs `run.mjs` against the proxy ports. Expected to be mounted at `/work` inside the container. |
-| `package.json` | Marker for `npm`. The Playwright dependency is supplied by the base image; nothing to install if you use the Microsoft image below. |
+| `package.json` | Marker for `npm`. `runner.sh` installs `playwright@1.59.1` into a local `node_modules/` on first run; the install is gitignored. |
 
 ## Prerequisites
 
@@ -61,12 +61,14 @@ docker run --rm \
   bash runner.sh
 ```
 
+On first run the runner installs `playwright@1.59.1` into the local `node_modules/` (about 5–10 s on a warm npm cache); subsequent runs reuse it. The directory is gitignored under the repo's existing `node_modules/` rule.
+
 The runner cds to `/work`, starts `proxy.mjs` in the background, waits one second, and invokes `run.mjs` with `FRONTEND_URL=http://127.0.0.1:18000` and `BACKEND_URL=http://127.0.0.1:8000`. All assertions print to stdout as they run; the final block prints a counted summary plus any captured console errors.
 
 ## What success looks like
 
 ```
-PASS: 41
+PASS: 42
 FAIL: 0
 SKIP: 0
 Console errors: 12
@@ -82,7 +84,7 @@ If the run reports any FAIL, the first failure log line includes the role, the U
 - The bind mount path `$(pwd)/scripts/playwright_admin_smoke` resolves correctly when invoked from the repo root in WSL. Running it from a different working directory or with a Windows-style path (`C:\Users\...`) requires editing the `-v` argument; the mount target inside the container (`/work`) is hard-coded in `runner.sh`.
 - The Vite dev server's `allowedHosts` guard rejects requests whose `Host` header is not `localhost`. `proxy.mjs` rewrites Host before forwarding; do **not** point Playwright directly at `host.docker.internal:5173` to bypass the proxy — Vite will return 403 and the smoke will fail before the first assertion.
 - The proxy forces CORS response headers on backend traffic. If a future backend change adds genuine CORS logic (e.g. credentials-mode pinning), the forced headers may mask a real misconfiguration. Re-validate by hitting the backend directly from the host browser if anything in the auth flow starts behaving oddly.
-- The Microsoft `mcr.microsoft.com/playwright:v1.59.1-jammy` image bundles `playwright@1.59.1`. Bumping the runner version means bumping the image tag in lockstep — the local `package.json` is intentionally minimal so the in-image runtime is the source of truth.
+- The Microsoft `mcr.microsoft.com/playwright:v1.59.1-jammy` image ships the browser binaries under `/ms-playwright/` but does **not** preinstall the `playwright` Node module. `runner.sh` does an `npm install playwright@1.59.1 --no-save` into the bind-mounted `/work/node_modules/` on first run; the version pin matches the image tag and must be bumped in lockstep when the image tag changes.
 - Soft-deleted users created by previous runs accumulate in the dev DB. The smoke does not clean up after itself; running it many times in a row will inflate the user table. `docker compose exec backend python manage.py flush` (or a more targeted cleanup) resets it.
 
 ## When to re-run
