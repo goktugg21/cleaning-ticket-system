@@ -165,6 +165,15 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 {"customer": "Customer does not belong to the selected building."}
             )
 
+        if not building.is_active:
+            raise serializers.ValidationError(
+                {"building": "This building is inactive and cannot receive new tickets."}
+            )
+        if not customer.is_active:
+            raise serializers.ValidationError(
+                {"customer": "This customer is inactive and cannot receive new tickets."}
+            )
+
         if user.role == UserRole.SUPER_ADMIN:
             return attrs
 

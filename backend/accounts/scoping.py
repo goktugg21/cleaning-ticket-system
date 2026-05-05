@@ -75,7 +75,12 @@ def scope_companies_for(user):
         return Company.objects.none()
     if user.role == UserRole.SUPER_ADMIN:
         return Company.objects.all()
-    return Company.objects.filter(id__in=list(company_ids_for(user))).distinct()
+    # Non-super-admin reads are limited to active tenants. Super admins still
+    # see archived rows so they can re-activate or audit them.
+    return Company.objects.filter(
+        id__in=list(company_ids_for(user)),
+        is_active=True,
+    ).distinct()
 
 
 def scope_buildings_for(user):
@@ -83,7 +88,10 @@ def scope_buildings_for(user):
         return Building.objects.none()
     if user.role == UserRole.SUPER_ADMIN:
         return Building.objects.all()
-    return Building.objects.filter(id__in=list(building_ids_for(user))).distinct()
+    return Building.objects.filter(
+        id__in=list(building_ids_for(user)),
+        is_active=True,
+    ).distinct()
 
 
 def scope_customers_for(user):
@@ -91,7 +99,10 @@ def scope_customers_for(user):
         return Customer.objects.none()
     if user.role == UserRole.SUPER_ADMIN:
         return Customer.objects.all()
-    return Customer.objects.filter(id__in=list(customer_ids_for(user))).distinct()
+    return Customer.objects.filter(
+        id__in=list(customer_ids_for(user)),
+        is_active=True,
+    ).distinct()
 
 
 def scope_tickets_for(user):
