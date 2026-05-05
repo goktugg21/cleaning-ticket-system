@@ -91,7 +91,27 @@ After HTTPS is ready, production should use:
 
 Only enable HSTS after confirming HTTPS works correctly.
 
-## 8. Optional Sentry
+## 8. Celery (async email)
+
+The notification email pipeline is asynchronous. Email sending happens inside a Celery worker so a slow SMTP server cannot block ticket creation, status changes, assignment, or password reset.
+
+Required env vars:
+
+    CELERY_BROKER_URL=redis://redis:6379/1
+    CELERY_RESULT_BACKEND=redis://redis:6379/2
+    CELERY_TASK_ALWAYS_EAGER=False
+    NOTIFICATION_QUEUED_TIMEOUT_MINUTES=30
+
+What each one does:
+
+- `CELERY_BROKER_URL`: Redis connection string the producer uses to enqueue tasks. Defaults to db `1` so it does not collide with anything else on the existing redis container.
+- `CELERY_RESULT_BACKEND`: Redis connection string for the task result backend. Defaults to db `2` for the same reason.
+- `CELERY_TASK_ALWAYS_EAGER`: Dev-only override. When `True` the task runs inline in the request thread instead of being dispatched to the worker. The Django test runner forces this to `True` regardless of env so `manage.py test` does not need a running worker.
+- `NOTIFICATION_QUEUED_TIMEOUT_MINUTES`: How long a `NotificationLog` row may stay in `QUEUED` before a future sweeper task marks it `FAILED`. The sweeper itself ships in a later batch; the constant is in place so the value is decided up front.
+
+Production must keep `CELERY_TASK_ALWAYS_EAGER=False`. With eager mode in prod, slow SMTP would once again block the request thread, which is the exact problem this change is meant to remove.
+
+## 9. Optional Sentry
 
 Sentry is disabled when `SENTRY_DSN` is empty.
 
@@ -101,7 +121,7 @@ To enable it:
     SENTRY_ENVIRONMENT=production
     SENTRY_TRACES_SAMPLE_RATE=0.0
 
-## 9. Validate the final environment file
+## 10. Validate the final environment file
 
 Run:
 

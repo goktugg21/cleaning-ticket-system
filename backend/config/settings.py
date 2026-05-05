@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -200,6 +201,22 @@ SIMPLE_JWT = {
     "USER_AUTHENTICATION_RULE": "accounts.auth.user_authentication_rule",
 }
 
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", "False")
+CELERY_TASK_EAGER_PROPAGATES = env_bool("CELERY_TASK_EAGER_PROPAGATES", "True")
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_TIME_LIMIT = 120
+CELERY_TASK_SOFT_TIME_LIMIT = 90
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+
+NOTIFICATION_QUEUED_TIMEOUT_MINUTES = int(
+    os.environ.get("NOTIFICATION_QUEUED_TIMEOUT_MINUTES", "30")
+)
+
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
@@ -232,3 +249,7 @@ if SENTRY_DSN:
 from .security import validate_production_settings
 
 validate_production_settings(globals(), environ=os.environ)
+
+if "test" in sys.argv or os.environ.get("DJANGO_TEST", "") == "1":
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True

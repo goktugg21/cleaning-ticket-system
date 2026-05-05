@@ -59,6 +59,33 @@ This checklist tracks the minimum work required before running the cleaning tick
 - [x] Add ticket status changed notification.
 - [x] Add ticket assignment notification.
 
+## Celery worker (async email)
+
+Email sending runs in a Celery worker container. The web request thread enqueues the task and returns immediately, so a slow or failing SMTP server cannot block ticket creation, status changes, assignment, or password reset.
+
+- [ ] Set the four Celery env vars in production `.env` (the production `.env` is not in the repo, so set them manually):
+
+      CELERY_BROKER_URL=redis://redis:6379/1
+      CELERY_RESULT_BACKEND=redis://redis:6379/2
+      CELERY_TASK_ALWAYS_EAGER=False
+      NOTIFICATION_QUEUED_TIMEOUT_MINUTES=30
+
+  Recommended prod values: keep the defaults above unless an external Redis is being used. `CELERY_TASK_ALWAYS_EAGER` must remain `False` in production; setting it to `True` re-introduces the synchronous-SMTP blocking problem this change exists to remove.
+
+- [ ] Start the worker container alongside the rest of the stack:
+
+      docker compose -f docker-compose.prod.yml up -d worker
+
+  Or, more typically, bring everything up:
+
+      docker compose -f docker-compose.prod.yml up -d
+
+- [ ] Confirm the worker can reach the broker:
+
+      docker compose -f docker-compose.prod.yml exec worker celery -A config inspect ping
+
+  A healthy worker replies with `pong`.
+
 ## Security
 
 - [x] Role-based ticket scoping is tested.

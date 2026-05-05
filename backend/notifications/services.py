@@ -5,7 +5,22 @@ from django.db.models import Q
 from accounts.models import User, UserRole
 from tickets.models import TicketStatus
 
-from .models import NotificationEventType, NotificationLog
+from .models import NotificationEventType, NotificationLog, NotificationStatus
+
+# `send_mail` is re-exported here so that test code patching
+# notifications.services.send_mail can intercept the actual SMTP call. The
+# Celery worker task in notifications/tasks.py looks send_mail up via this
+# module at call time, not via a captured local binding, so a patch applied
+# to notifications.services.send_mail flows through into the task body.
+__all__ = (
+    "send_mail",
+    "send_logged_email",
+    "send_ticket_created_email",
+    "send_ticket_status_changed_email",
+    "send_ticket_assigned_email",
+    "send_ticket_unassigned_email",
+    "send_password_reset_email",
+)
 
 
 def _active_users():
@@ -111,6 +126,10 @@ def send_logged_email(
     recipient_user=None,
     actor=None,
 ):
+    # Local import keeps Django from importing notifications.tasks during the
+    # initial app-loading pass, which would in turn import this module again.
+    from .tasks import send_email_task
+
     log = NotificationLog.objects.create(
         ticket=ticket,
         recipient_user=recipient_user,
@@ -119,24 +138,21 @@ def send_logged_email(
         event_type=event_type,
         subject=subject,
         body=body,
+        status=NotificationStatus.QUEUED,
     )
 
-    try:
-        sent_count = send_mail(
-            subject=subject,
-            message=body,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[recipient_email],
-            fail_silently=False,
-        )
+    send_email_task.delay(
+        log_id=log.id,
+        recipient_email=recipient_email,
+        subject=subject,
+        body=body,
+    )
 
-        if sent_count:
-            log.mark_sent()
-        else:
-            log.mark_failed("Email backend returned 0 sent messages.")
-    except Exception as exc:
-        log.mark_failed(exc)
-
+    # Reflect any state transitions the task already performed (eager mode in
+    # tests will have flipped this row to SENT or FAILED before we return).
+    # In production the task runs out-of-process, so this re-read just
+    # confirms the QUEUED state at the moment the producer returns.
+    log.refresh_from_db()
     return log
 
 

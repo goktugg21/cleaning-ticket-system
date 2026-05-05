@@ -12,6 +12,7 @@ class NotificationEventType(models.TextChoices):
 
 
 class NotificationStatus(models.TextChoices):
+    QUEUED = "QUEUED", "Queued"
     SENT = "SENT", "Sent"
     FAILED = "FAILED", "Failed"
     SKIPPED = "SKIPPED", "Skipped"
@@ -72,3 +73,7 @@ class NotificationLog(models.Model):
         self.error_message = str(message)
         self.sent_at = None
         self.save(update_fields=["status", "error_message", "sent_at"])
+
+    def mark_queued(self):
+        self.status = NotificationStatus.QUEUED
+        self.save(update_fields=["status"])
