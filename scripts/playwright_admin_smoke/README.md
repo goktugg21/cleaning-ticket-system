@@ -57,7 +57,7 @@ docker run --rm \
   --add-host=host.docker.internal:host-gateway \
   -v "$(pwd)/scripts/playwright_admin_smoke:/work" \
   -w /work \
-  mcr.microsoft.com/playwright:v1.59.1-noble \
+  mcr.microsoft.com/playwright:v1.59.1-jammy \
   bash runner.sh
 ```
 
@@ -82,7 +82,7 @@ If the run reports any FAIL, the first failure log line includes the role, the U
 - The bind mount path `$(pwd)/scripts/playwright_admin_smoke` resolves correctly when invoked from the repo root in WSL. Running it from a different working directory or with a Windows-style path (`C:\Users\...`) requires editing the `-v` argument; the mount target inside the container (`/work`) is hard-coded in `runner.sh`.
 - The Vite dev server's `allowedHosts` guard rejects requests whose `Host` header is not `localhost`. `proxy.mjs` rewrites Host before forwarding; do **not** point Playwright directly at `host.docker.internal:5173` to bypass the proxy — Vite will return 403 and the smoke will fail before the first assertion.
 - The proxy forces CORS response headers on backend traffic. If a future backend change adds genuine CORS logic (e.g. credentials-mode pinning), the forced headers may mask a real misconfiguration. Re-validate by hitting the backend directly from the host browser if anything in the auth flow starts behaving oddly.
-- The Microsoft `mcr.microsoft.com/playwright:v1.59.1-noble` image bundles `playwright@1.59.1`. Bumping the runner version means bumping the image tag in lockstep — the local `package.json` is intentionally minimal so the in-image runtime is the source of truth.
+- The Microsoft `mcr.microsoft.com/playwright:v1.59.1-jammy` image bundles `playwright@1.59.1`. Bumping the runner version means bumping the image tag in lockstep — the local `package.json` is intentionally minimal so the in-image runtime is the source of truth.
 - Soft-deleted users created by previous runs accumulate in the dev DB. The smoke does not clean up after itself; running it many times in a row will inflate the user table. `docker compose exec backend python manage.py flush` (or a more targeted cleanup) resets it.
 
 ## When to re-run

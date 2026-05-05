@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { getApiError } from "../../api/client";
 import { listBuildings, listCompanies, listCustomers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { BuildingAdmin, CompanyAdmin, CustomerAdmin } from "../../api/types";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type ActiveFilter = "true" | "false" | "all";
 
 const DEBOUNCE_MS = 300;
 
 export function CustomersAdminPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -30,29 +30,11 @@ export function CustomersAdminPage() {
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
 
-  const [savedBanner, setSavedBanner] = useState("");
-
-  useEffect(() => {
-    const flags: Array<[string, string]> = [
-      ["saved", "Customer saved."],
-      ["deactivated", "Customer deactivated."],
-      ["reactivated", "Customer reactivated."],
-    ];
-    let banner = "";
-    let dirty = false;
-    for (const [key, message] of flags) {
-      if (searchParams.get(key) === "ok") {
-        banner = message;
-        dirty = true;
-      }
-    }
-    if (dirty) {
-      setSavedBanner(banner);
-      const next = new URLSearchParams(searchParams);
-      for (const [key] of flags) next.delete(key);
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
+  const [savedBanner] = useSavedBanner({
+    saved: "Customer saved.",
+    deactivated: "Customer deactivated.",
+    reactivated: "Customer reactivated.",
+  });
 
   // Companies for the filter dropdown.
   useEffect(() => {

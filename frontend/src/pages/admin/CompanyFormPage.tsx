@@ -1,13 +1,12 @@
-import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import type { FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { getApiError } from "../../api/client";
 import {
   addCompanyAdmin,
   createCompany,
   deactivateCompany,
-  extractAdminFieldErrors,
   getCompany,
   listCompanyAdmins,
   listUsers,
@@ -15,13 +14,17 @@ import {
   removeCompanyAdmin,
   updateCompany,
 } from "../../api/admin";
-import type { AdminFieldErrors } from "../../api/admin";
+import type { CompanyWritePayload } from "../../api/admin";
 import type {
   CompanyAdmin,
   CompanyAdminMembership,
   UserAdmin,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { useEntityForm } from "../../hooks/useEntityForm";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 const LANGUAGE_OPTIONS = [
   { value: "nl", label: "Dutch (nl)" },
@@ -32,26 +35,46 @@ export function CompanyFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
-  const numericId = isCreate ? null : Number(id);
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [savedBanner, setSavedBanner] = useState("");
-
-  const [loading, setLoading] = useState(!isCreate);
-  const [submitting, setSubmitting] = useState(false);
-  const [generalError, setGeneralError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<AdminFieldErrors>({});
+  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "Company saved." });
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [defaultLanguage, setDefaultLanguage] = useState("nl");
-  const [company, setCompany] = useState<CompanyAdmin | null>(null);
 
-  const deactivateDialogRef = useRef<HTMLDialogElement | null>(null);
-  const reactivateDialogRef = useRef<HTMLDialogElement | null>(null);
+  const form = useEntityForm<CompanyAdmin, CompanyWritePayload>({
+    id,
+    fetchFn: getCompany,
+    createFn: createCompany,
+    updateFn: updateCompany,
+    buildPayload: () => {
+      const payload: CompanyWritePayload = {
+        name: name.trim(),
+        default_language: defaultLanguage,
+      };
+      if (isCreate) {
+        if (slug.trim()) payload.slug = slug.trim();
+      } else if (isSuperAdmin) {
+        payload.slug = slug.trim();
+      }
+      return payload;
+    },
+    applyEntity: (entity) => {
+      setName(entity.name);
+      setSlug(entity.slug);
+      setDefaultLanguage(entity.default_language);
+    },
+    successPath: (entity) => `/admin/companies/${entity.id}?saved=ok`,
+    onEditSuccess: () => setSavedBanner("Company saved."),
+  });
+  const company = form.entity;
+  const numericId = form.numericId;
+
+  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
+  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
   // Membership section state. Independent of the main form.
@@ -61,42 +84,10 @@ export function CompanyFormPage() {
   const [memberError, setMemberError] = useState("");
   const [memberBusy, setMemberBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CompanyAdminMembership | null>(null);
-  const removeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const removeDialogRef = useRef<ConfirmDialogHandle>(null);
 
   // The API enforces this too; UI gates it for clarity.
   const forbidden = isCreate && !isSuperAdmin;
-
-  useEffect(() => {
-    if (searchParams.get("saved") === "ok") {
-      setSavedBanner("Company saved.");
-      const next = new URLSearchParams(searchParams);
-      next.delete("saved");
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (isCreate || numericId === null) return;
-    let cancelled = false;
-    setLoading(true);
-    getCompany(numericId)
-      .then((data) => {
-        if (cancelled) return;
-        setCompany(data);
-        setName(data.name);
-        setSlug(data.slug);
-        setDefaultLanguage(data.default_language);
-      })
-      .catch((err) => {
-        if (!cancelled) setGeneralError(getApiError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isCreate, numericId]);
 
   const slugReadOnly = useMemo(() => !isCreate && !isSuperAdmin, [isCreate, isSuperAdmin]);
 
@@ -143,7 +134,7 @@ export function CompanyFormPage() {
 
   function openRemoveDialog(membership: CompanyAdminMembership) {
     setRemoveTarget(membership);
-    removeDialogRef.current?.showModal();
+    removeDialogRef.current?.open();
   }
 
   async function handleConfirmRemove() {
@@ -186,57 +177,16 @@ export function CompanyFormPage() {
     );
   }
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setGeneralError("");
-    setFieldErrors({});
-    setSubmitting(true);
-    try {
-      if (isCreate) {
-        const payload: { name: string; slug?: string; default_language: string } = {
-          name: name.trim(),
-          default_language: defaultLanguage,
-        };
-        if (slug.trim()) payload.slug = slug.trim();
-        const created = await createCompany(payload);
-        navigate(`/admin/companies/${created.id}?saved=ok`, { replace: true });
-        return;
-      }
-      if (numericId === null) return;
-      const payload: { name: string; slug?: string; default_language: string } = {
-        name: name.trim(),
-        default_language: defaultLanguage,
-      };
-      if (isSuperAdmin) payload.slug = slug.trim();
-      const updated = await updateCompany(numericId, payload);
-      setCompany(updated);
-      setName(updated.name);
-      setSlug(updated.slug);
-      setDefaultLanguage(updated.default_language);
-      setSavedBanner("Company saved.");
-    } catch (err) {
-      const fields = extractAdminFieldErrors(err);
-      if (Object.keys(fields).length > 0) {
-        setFieldErrors(fields);
-        if (fields.detail) setGeneralError(fields.detail);
-      } else {
-        setGeneralError(getApiError(err));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await deactivateCompany(numericId);
       deactivateDialogRef.current?.close();
       navigate("/admin/companies?deactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       deactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -246,13 +196,13 @@ export function CompanyFormPage() {
   async function handleConfirmReactivate() {
     if (numericId === null) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await reactivateCompany(numericId);
       reactivateDialogRef.current?.close();
       navigate("/admin/companies?reactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       reactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -288,7 +238,7 @@ export function CompanyFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              onClick={() => reactivateDialogRef.current?.showModal()}
+              onClick={() => reactivateDialogRef.current?.open()}
             >
               Reactivate
             </button>
@@ -302,18 +252,18 @@ export function CompanyFormPage() {
         </div>
       )}
 
-      {generalError && (
+      {form.generalError && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
-          {generalError}
+          {form.generalError}
         </div>
       )}
 
-      {loading ? (
+      {form.loading ? (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card" onSubmit={handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
           <div className="field">
             <label className="field-label" htmlFor="company-name">
               Name *
@@ -326,9 +276,9 @@ export function CompanyFormPage() {
               onChange={(event) => setName(event.target.value)}
               required
             />
-            {fieldErrors.name && (
+            {form.fieldErrors.name && (
               <div className="alert-error login-error" role="alert">
-                {fieldErrors.name}
+                {form.fieldErrors.name}
               </div>
             )}
           </div>
@@ -351,9 +301,9 @@ export function CompanyFormPage() {
               readOnly={slugReadOnly}
               placeholder={isCreate ? "Leave blank to auto-generate from the name" : ""}
             />
-            {fieldErrors.slug && (
+            {form.fieldErrors.slug && (
               <div className="alert-error login-error" role="alert">
-                {fieldErrors.slug}
+                {form.fieldErrors.slug}
               </div>
             )}
           </div>
@@ -374,9 +324,9 @@ export function CompanyFormPage() {
                 </option>
               ))}
             </select>
-            {fieldErrors.default_language && (
+            {form.fieldErrors.default_language && (
               <div className="alert-error login-error" role="alert">
-                {fieldErrors.default_language}
+                {form.fieldErrors.default_language}
               </div>
             )}
           </div>
@@ -386,13 +336,13 @@ export function CompanyFormPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => deactivateDialogRef.current?.showModal()}
+                onClick={() => deactivateDialogRef.current?.open()}
               >
                 Deactivate
               </button>
             )}
-            <button type="submit" className="btn btn-primary" disabled={submitting || !name.trim()}>
-              {submitting ? "Saving…" : isCreate ? "Create company" : "Save changes"}
+            <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
+              {form.submitting ? "Saving…" : isCreate ? "Create company" : "Save changes"}
             </button>
           </div>
         </form>
@@ -492,95 +442,33 @@ export function CompanyFormPage() {
         </section>
       )}
 
-      <dialog
+      <ConfirmDialog
         ref={deactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Deactivate {company?.name ?? "company"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          It will be hidden from non-super-admin users. Tickets attached to it remain visible to
-          staff.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => deactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmDeactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Deactivating…" : "Deactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Deactivate ${company?.name ?? "company"}?`}
+        body="It will be hidden from non-super-admin users. Tickets attached to it remain visible to staff."
+        confirmLabel="Deactivate"
+        onConfirm={handleConfirmDeactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={reactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Reactivate {company?.name ?? "company"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Reactivating restores it for all roles. Existing memberships and tickets are unchanged.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => reactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmReactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Reactivating…" : "Reactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Reactivate ${company?.name ?? "company"}?`}
+        body="Reactivating restores it for all roles. Existing memberships and tickets are unchanged."
+        confirmLabel="Reactivate"
+        onConfirm={handleConfirmReactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={removeDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>
-          Remove {removeTarget?.user_email ?? "user"} from {company?.name ?? "company"}?
-        </h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Their other memberships are unaffected. They can be re-added later.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              removeDialogRef.current?.close();
-              setRemoveTarget(null);
-            }}
-            disabled={memberBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmRemove}
-            disabled={memberBusy}
-          >
-            {memberBusy ? "Removing…" : "Remove"}
-          </button>
-        </div>
-      </dialog>
+        title={`Remove ${removeTarget?.user_email ?? "user"} from ${company?.name ?? "company"}?`}
+        body="Their other memberships are unaffected. They can be re-added later."
+        confirmLabel="Remove"
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setRemoveTarget(null)}
+        busy={memberBusy}
+      />
     </div>
   );
 }

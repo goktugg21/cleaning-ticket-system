@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { getApiError } from "../../api/client";
 import { listBuildings, listCompanies } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type ActiveFilter = "true" | "false" | "all";
 
@@ -23,7 +24,6 @@ function formatDate(value: string): string {
 }
 
 export function BuildingsAdminPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -40,29 +40,11 @@ export function BuildingsAdminPage() {
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
 
-  const [savedBanner, setSavedBanner] = useState("");
-
-  useEffect(() => {
-    const flags: Array<[string, string]> = [
-      ["saved", "Building saved."],
-      ["deactivated", "Building deactivated."],
-      ["reactivated", "Building reactivated."],
-    ];
-    let banner = "";
-    let dirty = false;
-    for (const [key, message] of flags) {
-      if (searchParams.get(key) === "ok") {
-        banner = message;
-        dirty = true;
-      }
-    }
-    if (dirty) {
-      setSavedBanner(banner);
-      const next = new URLSearchParams(searchParams);
-      for (const [key] of flags) next.delete(key);
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
+  const [savedBanner] = useSavedBanner({
+    saved: "Building saved.",
+    deactivated: "Building deactivated.",
+    reactivated: "Building reactivated.",
+  });
 
   // Load companies once for the filter dropdown. The list is paginated server
   // side; pull a generous page so most installs fit in one request.

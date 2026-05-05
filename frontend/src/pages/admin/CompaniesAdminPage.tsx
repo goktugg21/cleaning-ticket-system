@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { getApiError } from "../../api/client";
 import { listCompanies } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type ActiveFilter = "true" | "false" | "all";
 
@@ -27,7 +28,6 @@ export function CompaniesAdminPage() {
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -40,31 +40,11 @@ export function CompaniesAdminPage() {
   const [searchActive, setSearchActive] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
 
-  const [savedBanner, setSavedBanner] = useState("");
-
-  // Surface success banners from the form pages and clean the URL so a
-  // refresh does not keep showing them.
-  useEffect(() => {
-    const flags: Array<[string, string]> = [
-      ["saved", "Company saved."],
-      ["deactivated", "Company deactivated."],
-      ["reactivated", "Company reactivated."],
-    ];
-    let banner = "";
-    let dirty = false;
-    for (const [key, message] of flags) {
-      if (searchParams.get(key) === "ok") {
-        banner = message;
-        dirty = true;
-      }
-    }
-    if (dirty) {
-      setSavedBanner(banner);
-      const next = new URLSearchParams(searchParams);
-      for (const [key] of flags) next.delete(key);
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
+  const [savedBanner] = useSavedBanner({
+    saved: "Company saved.",
+    deactivated: "Company deactivated.",
+    reactivated: "Company reactivated.",
+  });
 
   // Debounce the search input.
   useEffect(() => {

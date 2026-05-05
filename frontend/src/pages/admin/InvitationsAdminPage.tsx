@@ -20,6 +20,9 @@ import type {
   Role,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type StatusFilter = "all" | "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
 
@@ -91,7 +94,7 @@ export function InvitationsAdminPage() {
   const [listError, setListError] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("PENDING");
 
-  const [savedBanner, setSavedBanner] = useState("");
+  const [savedBanner, setSavedBanner] = useSavedBanner({});
 
   const load = useCallback(async () => {
     setListLoading(true);
@@ -275,13 +278,13 @@ export function InvitationsAdminPage() {
 
   // ---- Revoke flow -----------------------------------------------------
 
-  const revokeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const revokeDialogRef = useRef<ConfirmDialogHandle>(null);
   const [revokeTarget, setRevokeTarget] = useState<InvitationAdmin | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
 
   function openRevokeDialog(invitation: InvitationAdmin) {
     setRevokeTarget(invitation);
-    revokeDialogRef.current?.showModal();
+    revokeDialogRef.current?.open();
   }
 
   async function handleConfirmRevoke() {
@@ -642,38 +645,15 @@ export function InvitationsAdminPage() {
         )}
       </div>
 
-      <dialog
+      <ConfirmDialog
         ref={revokeDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>
-          Revoke invitation to {revokeTarget?.email ?? "user"}?
-        </h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          The invitation link will stop working immediately. You can send a new one if needed.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              revokeDialogRef.current?.close();
-              setRevokeTarget(null);
-            }}
-            disabled={revokeBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmRevoke}
-            disabled={revokeBusy}
-          >
-            {revokeBusy ? "Revoking…" : "Revoke"}
-          </button>
-        </div>
-      </dialog>
+        title={`Revoke invitation to ${revokeTarget?.email ?? "user"}?`}
+        body="The invitation link will stop working immediately. You can send a new one if needed."
+        confirmLabel="Revoke"
+        onConfirm={handleConfirmRevoke}
+        onCancel={() => setRevokeTarget(null)}
+        busy={revokeBusy}
+      />
     </div>
   );
 }

@@ -1,13 +1,12 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { getApiError } from "../../api/client";
 import {
   addCustomerUser,
   createCustomer,
   deactivateCustomer,
-  extractAdminFieldErrors,
   getCustomer,
   listBuildings,
   listCompanies,
@@ -17,7 +16,7 @@ import {
   removeCustomerUser,
   updateCustomer,
 } from "../../api/admin";
-import type { AdminFieldErrors } from "../../api/admin";
+import type { AdminFieldErrors, CustomerWritePayload } from "../../api/admin";
 import type {
   BuildingAdmin,
   CompanyAdmin,
@@ -26,6 +25,10 @@ import type {
   UserAdmin,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { useEntityForm } from "../../hooks/useEntityForm";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 const LANGUAGE_OPTIONS = [
   { value: "nl", label: "Dutch (nl)" },
@@ -36,24 +39,16 @@ export function CustomerFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
-  const numericId = isCreate ? null : Number(id);
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [savedBanner, setSavedBanner] = useState("");
-
-  const [loading, setLoading] = useState(!isCreate);
-  const [submitting, setSubmitting] = useState(false);
-  const [generalError, setGeneralError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<AdminFieldErrors>({});
+  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "Customer saved." });
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
 
-  const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
   const [company, setCompany] = useState<number | "">("");
   const [building, setBuilding] = useState<number | "">("");
   const [name, setName] = useState("");
@@ -61,8 +56,47 @@ export function CustomerFormPage() {
   const [phone, setPhone] = useState("");
   const [language, setLanguage] = useState("nl");
 
-  const deactivateDialogRef = useRef<HTMLDialogElement | null>(null);
-  const reactivateDialogRef = useRef<HTMLDialogElement | null>(null);
+  const form = useEntityForm<CustomerAdmin, CustomerWritePayload>({
+    id,
+    fetchFn: getCustomer,
+    createFn: createCustomer,
+    updateFn: updateCustomer,
+    validate: () => {
+      if (!isCreate) return null;
+      const errs: AdminFieldErrors = {};
+      if (company === "") errs.company = "Pick a company.";
+      if (building === "") errs.building = "Pick a building.";
+      return Object.keys(errs).length > 0 ? errs : null;
+    },
+    buildPayload: () => {
+      const payload: CustomerWritePayload = {
+        name: name.trim(),
+        contact_email: contactEmail.trim(),
+        phone: phone.trim(),
+        language,
+      };
+      if (isCreate) {
+        if (company !== "") payload.company = Number(company);
+        if (building !== "") payload.building = Number(building);
+      }
+      return payload;
+    },
+    applyEntity: (entity) => {
+      setCompany(entity.company);
+      setBuilding(entity.building);
+      setName(entity.name);
+      setContactEmail(entity.contact_email);
+      setPhone(entity.phone);
+      setLanguage(entity.language);
+    },
+    successPath: (entity) => `/admin/customers/${entity.id}?saved=ok`,
+    onEditSuccess: () => setSavedBanner("Customer saved."),
+  });
+  const customer = form.entity;
+  const numericId = form.numericId;
+
+  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
+  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
   // Membership section state.
@@ -72,7 +106,7 @@ export function CustomerFormPage() {
   const [memberError, setMemberError] = useState("");
   const [memberBusy, setMemberBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CustomerUserMembership | null>(null);
-  const removeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const removeDialogRef = useRef<ConfirmDialogHandle>(null);
 
   const reloadMembers = useMemo(
     () => async () => {
@@ -117,7 +151,7 @@ export function CustomerFormPage() {
 
   function openRemoveDialog(membership: CustomerUserMembership) {
     setRemoveTarget(membership);
-    removeDialogRef.current?.showModal();
+    removeDialogRef.current?.open();
   }
 
   async function handleConfirmRemove() {
@@ -136,15 +170,6 @@ export function CustomerFormPage() {
       setMemberBusy(false);
     }
   }
-
-  useEffect(() => {
-    if (searchParams.get("saved") === "ok") {
-      setSavedBanner("Customer saved.");
-      const next = new URLSearchParams(searchParams);
-      next.delete("saved");
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,96 +220,22 @@ export function CustomerFormPage() {
     }
   }, [isCreate, buildings, building]);
 
-  useEffect(() => {
-    if (isCreate || numericId === null) return;
-    let cancelled = false;
-    setLoading(true);
-    getCustomer(numericId)
-      .then((data) => {
-        if (cancelled) return;
-        setCustomer(data);
-        setCompany(data.company);
-        setBuilding(data.building);
-        setName(data.name);
-        setContactEmail(data.contact_email);
-        setPhone(data.phone);
-        setLanguage(data.language);
-      })
-      .catch((err) => {
-        if (!cancelled) setGeneralError(getApiError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isCreate, numericId]);
-
   const companyLocked = useMemo(
     () => !isCreate || (companiesLoaded && companies.length <= 1),
     [isCreate, companiesLoaded, companies.length],
   );
   const buildingLocked = !isCreate;
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setGeneralError("");
-    setFieldErrors({});
-    setSubmitting(true);
-    try {
-      if (isCreate) {
-        if (company === "" || building === "") {
-          setFieldErrors({
-            ...(company === "" ? { company: "Pick a company." } : {}),
-            ...(building === "" ? { building: "Pick a building." } : {}),
-          });
-          setSubmitting(false);
-          return;
-        }
-        const created = await createCustomer({
-          company: Number(company),
-          building: Number(building),
-          name: name.trim(),
-          contact_email: contactEmail.trim(),
-          phone: phone.trim(),
-          language,
-        });
-        navigate(`/admin/customers/${created.id}?saved=ok`, { replace: true });
-        return;
-      }
-      if (numericId === null) return;
-      const updated = await updateCustomer(numericId, {
-        name: name.trim(),
-        contact_email: contactEmail.trim(),
-        phone: phone.trim(),
-        language,
-      });
-      setCustomer(updated);
-      setSavedBanner("Customer saved.");
-    } catch (err) {
-      const fields = extractAdminFieldErrors(err);
-      if (Object.keys(fields).length > 0) {
-        setFieldErrors(fields);
-        if (fields.detail) setGeneralError(fields.detail);
-      } else {
-        setGeneralError(getApiError(err));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await deactivateCustomer(numericId);
       deactivateDialogRef.current?.close();
       navigate("/admin/customers?deactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       deactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -294,13 +245,13 @@ export function CustomerFormPage() {
   async function handleConfirmReactivate() {
     if (numericId === null) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await reactivateCustomer(numericId);
       reactivateDialogRef.current?.close();
       navigate("/admin/customers?reactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       reactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -336,7 +287,7 @@ export function CustomerFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              onClick={() => reactivateDialogRef.current?.showModal()}
+              onClick={() => reactivateDialogRef.current?.open()}
             >
               Reactivate
             </button>
@@ -350,18 +301,18 @@ export function CustomerFormPage() {
         </div>
       )}
 
-      {generalError && (
+      {form.generalError && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
-          {generalError}
+          {form.generalError}
         </div>
       )}
 
-      {loading ? (
+      {form.loading ? (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card" onSubmit={handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
           <div className="form-2col">
             <div className="field">
               <label className="field-label" htmlFor="customer-company">
@@ -392,9 +343,9 @@ export function CustomerFormPage() {
                     <option value={customer.company}>Company #{customer.company}</option>
                   )}
               </select>
-              {fieldErrors.company && (
+              {form.fieldErrors.company && (
                 <div className="alert-error login-error" role="alert">
-                  {fieldErrors.company}
+                  {form.fieldErrors.company}
                 </div>
               )}
             </div>
@@ -427,9 +378,9 @@ export function CustomerFormPage() {
                     <option value={customer.building}>Building #{customer.building}</option>
                   )}
               </select>
-              {fieldErrors.building && (
+              {form.fieldErrors.building && (
                 <div className="alert-error login-error" role="alert">
-                  {fieldErrors.building}
+                  {form.fieldErrors.building}
                 </div>
               )}
             </div>
@@ -447,9 +398,9 @@ export function CustomerFormPage() {
               onChange={(event) => setName(event.target.value)}
               required
             />
-            {fieldErrors.name && (
+            {form.fieldErrors.name && (
               <div className="alert-error login-error" role="alert">
-                {fieldErrors.name}
+                {form.fieldErrors.name}
               </div>
             )}
           </div>
@@ -466,9 +417,9 @@ export function CustomerFormPage() {
                 value={contactEmail}
                 onChange={(event) => setContactEmail(event.target.value)}
               />
-              {fieldErrors.contact_email && (
+              {form.fieldErrors.contact_email && (
                 <div className="alert-error login-error" role="alert">
-                  {fieldErrors.contact_email}
+                  {form.fieldErrors.contact_email}
                 </div>
               )}
             </div>
@@ -509,13 +460,13 @@ export function CustomerFormPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => deactivateDialogRef.current?.showModal()}
+                onClick={() => deactivateDialogRef.current?.open()}
               >
                 Deactivate
               </button>
             )}
-            <button type="submit" className="btn btn-primary" disabled={submitting || !name.trim()}>
-              {submitting ? "Saving…" : isCreate ? "Create customer" : "Save changes"}
+            <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
+              {form.submitting ? "Saving…" : isCreate ? "Create customer" : "Save changes"}
             </button>
           </div>
         </form>
@@ -615,95 +566,33 @@ export function CustomerFormPage() {
         </section>
       )}
 
-      <dialog
+      <ConfirmDialog
         ref={deactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Deactivate {customer?.name ?? "customer"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          It will be hidden from non-super-admin users. Tickets attached to it remain visible to
-          staff.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => deactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmDeactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Deactivating…" : "Deactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Deactivate ${customer?.name ?? "customer"}?`}
+        body="It will be hidden from non-super-admin users. Tickets attached to it remain visible to staff."
+        confirmLabel="Deactivate"
+        onConfirm={handleConfirmDeactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={reactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Reactivate {customer?.name ?? "customer"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Reactivating restores it for all roles. Existing memberships and tickets are unchanged.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => reactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmReactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Reactivating…" : "Reactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Reactivate ${customer?.name ?? "customer"}?`}
+        body="Reactivating restores it for all roles. Existing memberships and tickets are unchanged."
+        confirmLabel="Reactivate"
+        onConfirm={handleConfirmReactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={removeDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>
-          Remove {removeTarget?.user_email ?? "user"} from {customer?.name ?? "customer"}?
-        </h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Their other memberships are unaffected. They can be re-added later.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              removeDialogRef.current?.close();
-              setRemoveTarget(null);
-            }}
-            disabled={memberBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmRemove}
-            disabled={memberBusy}
-          >
-            {memberBusy ? "Removing…" : "Remove"}
-          </button>
-        </div>
-      </dialog>
+        title={`Remove ${removeTarget?.user_email ?? "user"} from ${customer?.name ?? "customer"}?`}
+        body="Their other memberships are unaffected. They can be re-added later."
+        confirmLabel="Remove"
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setRemoveTarget(null)}
+        busy={memberBusy}
+      />
     </div>
   );
 }

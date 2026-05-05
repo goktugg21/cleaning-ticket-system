@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { MailPlus, RefreshCw } from "lucide-react";
 import { getApiError } from "../../api/client";
 import { listUsers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { Role, UserAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type ActiveFilter = "true" | "false" | "all";
 
@@ -29,7 +30,6 @@ export function UsersAdminPage() {
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [searchParams, setSearchParams] = useSearchParams();
   const [users, setUsers] = useState<UserAdmin[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -46,35 +46,17 @@ export function UsersAdminPage() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
   const [roleFilter, setRoleFilter] = useState<Role[]>([]);
 
-  const [savedBanner, setSavedBanner] = useState("");
+  const [savedBanner] = useSavedBanner({
+    saved: "User saved.",
+    deactivated: "User deactivated.",
+    reactivated: "User reactivated.",
+  });
 
   // COMPANY_ADMIN can only meaningfully filter by the three roles they manage.
   const availableRoles: Role[] = useMemo(
     () => (isSuperAdmin ? ALL_ROLES : ALL_ROLES.filter((r) => r !== "SUPER_ADMIN")),
     [isSuperAdmin],
   );
-
-  useEffect(() => {
-    const flags: Array<[string, string]> = [
-      ["saved", "User saved."],
-      ["deactivated", "User deactivated."],
-      ["reactivated", "User reactivated."],
-    ];
-    let banner = "";
-    let dirty = false;
-    for (const [key, message] of flags) {
-      if (searchParams.get(key) === "ok") {
-        banner = message;
-        dirty = true;
-      }
-    }
-    if (dirty) {
-      setSavedBanner(banner);
-      const next = new URLSearchParams(searchParams);
-      for (const [key] of flags) next.delete(key);
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {

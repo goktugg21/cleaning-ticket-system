@@ -1,11 +1,9 @@
-import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { getApiError } from "../../api/client";
 import {
   deactivateUser,
-  extractAdminFieldErrors,
   getUser,
   listBuildings,
   listCompanies,
@@ -13,9 +11,18 @@ import {
   reactivateUser,
   updateUser,
 } from "../../api/admin";
-import type { AdminFieldErrors } from "../../api/admin";
 import type { Role, UserAdminDetail } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { useEntityForm } from "../../hooks/useEntityForm";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
+
+interface UserUpdatePayload {
+  full_name: string;
+  language: string;
+  role: Role;
+}
 
 const LANGUAGE_OPTIONS = [
   { value: "nl", label: "Dutch (nl)" },
@@ -39,20 +46,12 @@ const ALL_ROLES: Role[] = [
 export function UserFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const numericId = Number(id);
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [savedBanner, setSavedBanner] = useState("");
+  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "User saved." });
 
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [generalError, setGeneralError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<AdminFieldErrors>({});
-
-  const [user, setUser] = useState<UserAdminDetail | null>(null);
   const [fullName, setFullName] = useState("");
   const [language, setLanguage] = useState("nl");
   const [role, setRole] = useState<Role>("CUSTOMER_USER");
@@ -61,8 +60,28 @@ export function UserFormPage() {
   const [buildingNames, setBuildingNames] = useState<string[]>([]);
   const [customerNames, setCustomerNames] = useState<string[]>([]);
 
-  const deactivateDialogRef = useRef<HTMLDialogElement | null>(null);
-  const reactivateDialogRef = useRef<HTMLDialogElement | null>(null);
+  const form = useEntityForm<UserAdminDetail, UserUpdatePayload>({
+    id,
+    fetchFn: getUser,
+    updateFn: updateUser,
+    buildPayload: () => ({
+      full_name: fullName.trim(),
+      language,
+      role,
+    }),
+    applyEntity: (entity) => {
+      setFullName(entity.full_name);
+      setLanguage(entity.language);
+      setRole(entity.role);
+    },
+    successPath: (entity) => `/admin/users/${entity.id}?saved=ok`,
+    onEditSuccess: () => setSavedBanner("User saved."),
+  });
+  const user = form.entity;
+  const numericId = form.numericId ?? Number.NaN;
+
+  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
+  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
   const isSelf = me?.id === numericId;
@@ -81,38 +100,6 @@ export function UserFormPage() {
     if (isSuperAdmin) return ALL_ROLES;
     return ["BUILDING_MANAGER", "CUSTOMER_USER"];
   }, [isSuperAdmin]);
-
-  useEffect(() => {
-    if (searchParams.get("saved") === "ok") {
-      setSavedBanner("User saved.");
-      const next = new URLSearchParams(searchParams);
-      next.delete("saved");
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (!Number.isFinite(numericId)) return;
-    let cancelled = false;
-    setLoading(true);
-    getUser(numericId)
-      .then((data) => {
-        if (cancelled) return;
-        setUser(data);
-        setFullName(data.full_name);
-        setLanguage(data.language);
-        setRole(data.role);
-      })
-      .catch((err) => {
-        if (!cancelled) setGeneralError(getApiError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [numericId]);
 
   // Lazy-load membership names. Only fetch the lists the user actually has
   // memberships in. Each list call is bounded by page_size=200 so most
@@ -170,46 +157,16 @@ export function UserFormPage() {
     };
   }, [user]);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!user) return;
-    setGeneralError("");
-    setFieldErrors({});
-    setSubmitting(true);
-    try {
-      const updated = await updateUser(numericId, {
-        full_name: fullName.trim(),
-        language,
-        role,
-      });
-      setUser(updated);
-      setFullName(updated.full_name);
-      setLanguage(updated.language);
-      setRole(updated.role);
-      setSavedBanner("User saved.");
-    } catch (err) {
-      const fields = extractAdminFieldErrors(err);
-      if (Object.keys(fields).length > 0) {
-        setFieldErrors(fields);
-        if (fields.detail) setGeneralError(fields.detail);
-      } else {
-        setGeneralError(getApiError(err));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function handleConfirmDeactivate() {
     if (!user) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await deactivateUser(numericId);
       deactivateDialogRef.current?.close();
       navigate("/admin/users?deactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       deactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -219,13 +176,13 @@ export function UserFormPage() {
   async function handleConfirmReactivate() {
     if (!user) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await reactivateUser(numericId);
       reactivateDialogRef.current?.close();
       navigate("/admin/users?reactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       reactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -264,7 +221,7 @@ export function UserFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              onClick={() => reactivateDialogRef.current?.showModal()}
+              onClick={() => reactivateDialogRef.current?.open()}
             >
               Reactivate
             </button>
@@ -278,19 +235,19 @@ export function UserFormPage() {
         </div>
       )}
 
-      {generalError && (
+      {form.generalError && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
-          {generalError}
+          {form.generalError}
         </div>
       )}
 
-      {loading || !user ? (
+      {form.loading || !user ? (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
       ) : (
         <>
-          <form className="card" onSubmit={handleSubmit} style={{ padding: "20px 22px" }}>
+          <form className="card" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
             <div className="field">
               <label className="field-label" htmlFor="user-email">
                 Email
@@ -315,9 +272,9 @@ export function UserFormPage() {
                 value={fullName}
                 onChange={(event) => setFullName(event.target.value)}
               />
-              {fieldErrors.full_name && (
+              {form.fieldErrors.full_name && (
                 <div className="alert-error login-error" role="alert">
-                  {fieldErrors.full_name}
+                  {form.fieldErrors.full_name}
                 </div>
               )}
             </div>
@@ -368,9 +325,9 @@ export function UserFormPage() {
                     </option>
                   ))}
                 </select>
-                {fieldErrors.role && (
+                {form.fieldErrors.role && (
                   <div className="alert-error login-error" role="alert">
-                    {fieldErrors.role}
+                    {form.fieldErrors.role}
                   </div>
                 )}
               </div>
@@ -381,13 +338,13 @@ export function UserFormPage() {
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  onClick={() => deactivateDialogRef.current?.showModal()}
+                  onClick={() => deactivateDialogRef.current?.open()}
                 >
                   Deactivate
                 </button>
               )}
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? "Saving…" : "Save changes"}
+              <button type="submit" className="btn btn-primary" disabled={form.submitting}>
+                {form.submitting ? "Saving…" : "Save changes"}
               </button>
             </div>
           </form>
@@ -433,63 +390,23 @@ export function UserFormPage() {
         </>
       )}
 
-      <dialog
+      <ConfirmDialog
         ref={deactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Deactivate {user?.email ?? "user"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          They will lose access immediately. Their data and history are kept; a super admin can
-          reactivate them later.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => deactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmDeactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Deactivating…" : "Deactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Deactivate ${user?.email ?? "user"}?`}
+        body="They will lose access immediately. Their data and history are kept; a super admin can reactivate them later."
+        confirmLabel="Deactivate"
+        onConfirm={handleConfirmDeactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={reactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Reactivate {user?.email ?? "user"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Reactivating restores their account. They will regain access using their existing
-          password (or can request a reset).
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => reactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmReactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Reactivating…" : "Reactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Reactivate ${user?.email ?? "user"}?`}
+        body="Reactivating restores their account. They will regain access using their existing password (or can request a reset)."
+        confirmLabel="Reactivate"
+        onConfirm={handleConfirmReactivate}
+        busy={actionBusy}
+      />
     </div>
   );
 }

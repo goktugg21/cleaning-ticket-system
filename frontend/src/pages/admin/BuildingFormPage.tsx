@@ -1,13 +1,12 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { getApiError } from "../../api/client";
 import {
   addBuildingManager,
   createBuilding,
   deactivateBuilding,
-  extractAdminFieldErrors,
   getBuilding,
   listBuildingManagers,
   listCompanies,
@@ -16,7 +15,7 @@ import {
   removeBuildingManager,
   updateBuilding,
 } from "../../api/admin";
-import type { AdminFieldErrors } from "../../api/admin";
+import type { BuildingWritePayload } from "../../api/admin";
 import type {
   BuildingAdmin,
   BuildingManagerMembership,
@@ -24,28 +23,24 @@ import type {
   UserAdmin,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { useEntityForm } from "../../hooks/useEntityForm";
+import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 export function BuildingFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
-  const numericId = isCreate ? null : Number(id);
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [savedBanner, setSavedBanner] = useState("");
-
-  const [loading, setLoading] = useState(!isCreate);
-  const [submitting, setSubmitting] = useState(false);
-  const [generalError, setGeneralError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<AdminFieldErrors>({});
+  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "Building saved." });
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
 
-  const [building, setBuilding] = useState<BuildingAdmin | null>(null);
   const [company, setCompany] = useState<number | "">("");
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -53,8 +48,42 @@ export function BuildingFormPage() {
   const [country, setCountry] = useState("");
   const [postalCode, setPostalCode] = useState("");
 
-  const deactivateDialogRef = useRef<HTMLDialogElement | null>(null);
-  const reactivateDialogRef = useRef<HTMLDialogElement | null>(null);
+  const form = useEntityForm<BuildingAdmin, BuildingWritePayload>({
+    id,
+    fetchFn: getBuilding,
+    createFn: createBuilding,
+    updateFn: updateBuilding,
+    validate: () => {
+      if (isCreate && company === "") return { company: "Pick a company." };
+      return null;
+    },
+    buildPayload: () => {
+      const payload: BuildingWritePayload = {
+        name: name.trim(),
+        address: address.trim(),
+        city: city.trim(),
+        country: country.trim(),
+        postal_code: postalCode.trim(),
+      };
+      if (isCreate && company !== "") payload.company = Number(company);
+      return payload;
+    },
+    applyEntity: (entity) => {
+      setCompany(entity.company);
+      setName(entity.name);
+      setAddress(entity.address);
+      setCity(entity.city);
+      setCountry(entity.country);
+      setPostalCode(entity.postal_code);
+    },
+    successPath: (entity) => `/admin/buildings/${entity.id}?saved=ok`,
+    onEditSuccess: () => setSavedBanner("Building saved."),
+  });
+  const building = form.entity;
+  const numericId = form.numericId;
+
+  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
+  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
   // Membership section state.
@@ -64,7 +93,7 @@ export function BuildingFormPage() {
   const [memberError, setMemberError] = useState("");
   const [memberBusy, setMemberBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<BuildingManagerMembership | null>(null);
-  const removeDialogRef = useRef<HTMLDialogElement | null>(null);
+  const removeDialogRef = useRef<ConfirmDialogHandle>(null);
 
   const reloadMembers = useMemo(
     () => async () => {
@@ -109,7 +138,7 @@ export function BuildingFormPage() {
 
   function openRemoveDialog(membership: BuildingManagerMembership) {
     setRemoveTarget(membership);
-    removeDialogRef.current?.showModal();
+    removeDialogRef.current?.open();
   }
 
   async function handleConfirmRemove() {
@@ -130,15 +159,6 @@ export function BuildingFormPage() {
   }
 
   useEffect(() => {
-    if (searchParams.get("saved") === "ok") {
-      setSavedBanner("Building saved.");
-      const next = new URLSearchParams(searchParams);
-      next.delete("saved");
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
-
-  useEffect(() => {
     let cancelled = false;
     listCompanies({ is_active: "true", page_size: 200 })
       .then((response) => {
@@ -156,92 +176,20 @@ export function BuildingFormPage() {
     };
   }, [isCreate]);
 
-  useEffect(() => {
-    if (isCreate || numericId === null) return;
-    let cancelled = false;
-    setLoading(true);
-    getBuilding(numericId)
-      .then((data) => {
-        if (cancelled) return;
-        setBuilding(data);
-        setCompany(data.company);
-        setName(data.name);
-        setAddress(data.address);
-        setCity(data.city);
-        setCountry(data.country);
-        setPostalCode(data.postal_code);
-      })
-      .catch((err) => {
-        if (!cancelled) setGeneralError(getApiError(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isCreate, numericId]);
-
   // Company is locked in edit mode; for create it is locked when the actor
   // only sees one company (the COMPANY_ADMIN-with-one-company case).
   const companyLocked = !isCreate || (companiesLoaded && companies.length <= 1);
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setGeneralError("");
-    setFieldErrors({});
-    setSubmitting(true);
-    try {
-      if (isCreate) {
-        if (company === "") {
-          setFieldErrors({ company: "Pick a company." });
-          setSubmitting(false);
-          return;
-        }
-        const created = await createBuilding({
-          company: Number(company),
-          name: name.trim(),
-          address: address.trim(),
-          city: city.trim(),
-          country: country.trim(),
-          postal_code: postalCode.trim(),
-        });
-        navigate(`/admin/buildings/${created.id}?saved=ok`, { replace: true });
-        return;
-      }
-      if (numericId === null) return;
-      const updated = await updateBuilding(numericId, {
-        name: name.trim(),
-        address: address.trim(),
-        city: city.trim(),
-        country: country.trim(),
-        postal_code: postalCode.trim(),
-      });
-      setBuilding(updated);
-      setSavedBanner("Building saved.");
-    } catch (err) {
-      const fields = extractAdminFieldErrors(err);
-      if (Object.keys(fields).length > 0) {
-        setFieldErrors(fields);
-        if (fields.detail) setGeneralError(fields.detail);
-      } else {
-        setGeneralError(getApiError(err));
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await deactivateBuilding(numericId);
       deactivateDialogRef.current?.close();
       navigate("/admin/buildings?deactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       deactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -251,13 +199,13 @@ export function BuildingFormPage() {
   async function handleConfirmReactivate() {
     if (numericId === null) return;
     setActionBusy(true);
-    setGeneralError("");
+    form.setGeneralError("");
     try {
       await reactivateBuilding(numericId);
       reactivateDialogRef.current?.close();
       navigate("/admin/buildings?reactivated=ok", { replace: true });
     } catch (err) {
-      setGeneralError(getApiError(err));
+      form.setGeneralError(getApiError(err));
       reactivateDialogRef.current?.close();
     } finally {
       setActionBusy(false);
@@ -293,7 +241,7 @@ export function BuildingFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              onClick={() => reactivateDialogRef.current?.showModal()}
+              onClick={() => reactivateDialogRef.current?.open()}
             >
               Reactivate
             </button>
@@ -307,18 +255,18 @@ export function BuildingFormPage() {
         </div>
       )}
 
-      {generalError && (
+      {form.generalError && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
-          {generalError}
+          {form.generalError}
         </div>
       )}
 
-      {loading ? (
+      {form.loading ? (
         <div className="loading-bar">
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card" onSubmit={handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
           <div className="field">
             <label className="field-label" htmlFor="building-company">
               Company *
@@ -346,9 +294,9 @@ export function BuildingFormPage() {
                 <option value={building.company}>Company #{building.company}</option>
               )}
             </select>
-            {fieldErrors.company && (
+            {form.fieldErrors.company && (
               <div className="alert-error login-error" role="alert">
-                {fieldErrors.company}
+                {form.fieldErrors.company}
               </div>
             )}
           </div>
@@ -365,9 +313,9 @@ export function BuildingFormPage() {
               onChange={(event) => setName(event.target.value)}
               required
             />
-            {fieldErrors.name && (
+            {form.fieldErrors.name && (
               <div className="alert-error login-error" role="alert">
-                {fieldErrors.name}
+                {form.fieldErrors.name}
               </div>
             )}
           </div>
@@ -430,13 +378,13 @@ export function BuildingFormPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => deactivateDialogRef.current?.showModal()}
+                onClick={() => deactivateDialogRef.current?.open()}
               >
                 Deactivate
               </button>
             )}
-            <button type="submit" className="btn btn-primary" disabled={submitting || !name.trim()}>
-              {submitting ? "Saving…" : isCreate ? "Create building" : "Save changes"}
+            <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
+              {form.submitting ? "Saving…" : isCreate ? "Create building" : "Save changes"}
             </button>
           </div>
         </form>
@@ -536,95 +484,33 @@ export function BuildingFormPage() {
         </section>
       )}
 
-      <dialog
+      <ConfirmDialog
         ref={deactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Deactivate {building?.name ?? "building"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          It will be hidden from non-super-admin users. Tickets attached to it remain visible to
-          staff.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => deactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmDeactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Deactivating…" : "Deactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Deactivate ${building?.name ?? "building"}?`}
+        body="It will be hidden from non-super-admin users. Tickets attached to it remain visible to staff."
+        confirmLabel="Deactivate"
+        onConfirm={handleConfirmDeactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={reactivateDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>Reactivate {building?.name ?? "building"}?</h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Reactivating restores it for all roles. Existing memberships and tickets are unchanged.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => reactivateDialogRef.current?.close()}
-            disabled={actionBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmReactivate}
-            disabled={actionBusy}
-          >
-            {actionBusy ? "Reactivating…" : "Reactivate"}
-          </button>
-        </div>
-      </dialog>
+        title={`Reactivate ${building?.name ?? "building"}?`}
+        body="Reactivating restores it for all roles. Existing memberships and tickets are unchanged."
+        confirmLabel="Reactivate"
+        onConfirm={handleConfirmReactivate}
+        busy={actionBusy}
+      />
 
-      <dialog
+      <ConfirmDialog
         ref={removeDialogRef}
-        style={{ padding: 24, borderRadius: 8, border: "1px solid var(--border)", maxWidth: 460 }}
-      >
-        <h3 style={{ marginBottom: 8 }}>
-          Remove {removeTarget?.user_email ?? "manager"} from {building?.name ?? "building"}?
-        </h3>
-        <p style={{ color: "var(--text-muted)", marginBottom: 16 }}>
-          Their other memberships are unaffected. They can be re-added later.
-        </p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => {
-              removeDialogRef.current?.close();
-              setRemoveTarget(null);
-            }}
-            disabled={memberBusy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={handleConfirmRemove}
-            disabled={memberBusy}
-          >
-            {memberBusy ? "Removing…" : "Remove"}
-          </button>
-        </div>
-      </dialog>
+        title={`Remove ${removeTarget?.user_email ?? "manager"} from ${building?.name ?? "building"}?`}
+        body="Their other memberships are unaffected. They can be re-added later."
+        confirmLabel="Remove"
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setRemoveTarget(null)}
+        busy={memberBusy}
+      />
     </div>
   );
 }
