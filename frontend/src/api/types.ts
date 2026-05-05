@@ -178,3 +178,39 @@ export interface InvitationPreview {
   customer_names: string[];
   expires_at: string;
 }
+
+export interface CompanyAdmin {
+  id: number;
+  name: string;
+  slug: string;
+  default_language: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuildingAdmin {
+  id: number;
+  company: number;
+  name: string;
+  address: string;
+  city: string;
+  country: string;
+  postal_code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerAdmin {
+  id: number;
+  company: number;
+  building: number;
+  name: string;
+  contact_email: string;
+  phone: string;
+  language: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}

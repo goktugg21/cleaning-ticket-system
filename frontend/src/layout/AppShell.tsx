@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutGrid, PlusCircle } from "lucide-react";
+import { Building2, LayoutGrid, MapPin, PlusCircle, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+
+const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
 const ROLE_LABEL: Record<string, string> = {
   SUPER_ADMIN: "Super admin",
@@ -83,6 +85,32 @@ export function AppShell({ children }: AppShellProps) {
             </span>
             New ticket
           </NavLink>
+
+          {me?.role && STAFF_ROLES.has(me.role) && (
+            <>
+              <div className="nav-group-label" style={{ marginTop: 8 }}>
+                Admin
+              </div>
+              <NavLink to="/admin/companies" className={navClass}>
+                <span className="nav-icon">
+                  <Building2 size={16} strokeWidth={2} />
+                </span>
+                Companies
+              </NavLink>
+              <NavLink to="/admin/buildings" className={navClass}>
+                <span className="nav-icon">
+                  <MapPin size={16} strokeWidth={2} />
+                </span>
+                Buildings
+              </NavLink>
+              <NavLink to="/admin/customers" className={navClass}>
+                <span className="nav-icon">
+                  <Users size={16} strokeWidth={2} />
+                </span>
+                Customers
+              </NavLink>
+            </>
+          )}
         </nav>
 
         <div className="sidebar-footer">

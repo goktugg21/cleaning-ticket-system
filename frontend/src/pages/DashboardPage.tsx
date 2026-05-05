@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { api, getApiError } from "../api/client";
 import type {
@@ -83,6 +83,18 @@ export function DashboardPage() {
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [adminRequiredBanner, setAdminRequiredBanner] = useState("");
+
+  useEffect(() => {
+    if (searchParams.get("admin_required") === "ok") {
+      setAdminRequiredBanner("This area is for admins only.");
+      const next = new URLSearchParams(searchParams);
+      next.delete("admin_required");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
 
@@ -226,6 +238,12 @@ export function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {adminRequiredBanner && (
+        <div className="alert-info" style={{ marginBottom: 16 }} role="status">
+          {adminRequiredBanner}
+        </div>
+      )}
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
