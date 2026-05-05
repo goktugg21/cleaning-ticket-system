@@ -1,13 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import {
-  BarChart3,
-  Building2,
-  LayoutGrid,
-  PlusCircle,
-  Settings,
-  Star,
-} from "lucide-react";
+import { LayoutGrid, PlusCircle } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -90,42 +83,6 @@ export function AppShell({ children }: AppShellProps) {
             </span>
             New ticket
           </NavLink>
-
-          <div className="nav-group-label" style={{ marginTop: 8 }}>
-            Portfolio
-          </div>
-          <span className="nav-item disabled">
-            <span className="nav-icon">
-              <Building2 size={16} strokeWidth={2} />
-            </span>
-            Facilities
-          </span>
-          <span className="nav-item disabled">
-            <span className="nav-icon">
-              <Star size={16} strokeWidth={2} />
-            </span>
-            Assets
-          </span>
-
-          <div className="nav-group-label" style={{ marginTop: 8 }}>
-            Analytics
-          </div>
-          <span className="nav-item disabled">
-            <span className="nav-icon">
-              <BarChart3 size={16} strokeWidth={2} />
-            </span>
-            Reports
-          </span>
-
-          <div className="nav-group-label" style={{ marginTop: 8 }}>
-            System
-          </div>
-          <span className="nav-item disabled">
-            <span className="nav-icon">
-              <Settings size={16} strokeWidth={2} />
-            </span>
-            Settings
-          </span>
         </nav>
 
         <div className="sidebar-footer">
