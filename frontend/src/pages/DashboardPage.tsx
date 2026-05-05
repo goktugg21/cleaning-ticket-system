@@ -7,6 +7,8 @@ import type {
   PaginatedResponse,
   TicketList,
   TicketStats,
+  TicketStatsByBuildingResponse,
+  TicketStatsByBuildingRow,
   TicketStatus,
 } from "../api/types";
 
@@ -61,40 +63,6 @@ function priorityLabel(priority: string): string {
   return priority.charAt(0) + priority.slice(1).toLowerCase();
 }
 
-interface BuildingLoadRow {
-  name: string;
-  total: number;
-  urgent: number;
-  high: number;
-  normal: number;
-}
-
-// TODO(backend): replace with GET /api/stats/load-by-building.
-// Derived UI-side from the visible ticket page until backend exposes per-building counts.
-function deriveBuildingLoad(tickets: TicketList[]): BuildingLoadRow[] {
-  const map = new Map<string, BuildingLoadRow>();
-
-  for (const ticket of tickets) {
-    if (
-      ticket.status === "CLOSED" ||
-      ticket.status === "APPROVED" ||
-      ticket.status === "REJECTED"
-    ) {
-      continue;
-    }
-    const key = ticket.building_name || "Unassigned";
-    const row =
-      map.get(key) ?? { name: key, total: 0, urgent: 0, high: 0, normal: 0 };
-    row.total += 1;
-    if (ticket.priority === "URGENT") row.urgent += 1;
-    else if (ticket.priority === "HIGH") row.high += 1;
-    else row.normal += 1;
-    map.set(key, row);
-  }
-
-  return Array.from(map.values()).sort((a, b) => b.total - a.total);
-}
-
 export function DashboardPage() {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState<TicketList[]>([]);
@@ -107,6 +75,9 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(false);
 
   const [stats, setStats] = useState<TicketStats | null>(null);
+  const [byBuilding, setByBuilding] = useState<TicketStatsByBuildingRow[] | null>(
+    null,
+  );
 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
@@ -155,9 +126,21 @@ export function DashboardPage() {
     }
   }, []);
 
+  const loadStatsByBuilding = useCallback(async () => {
+    try {
+      const response = await api.get<TicketStatsByBuildingResponse>(
+        "/tickets/stats/by-building/",
+      );
+      setByBuilding(response.data);
+    } catch {
+      // Same posture as loadStats: card empties out if the endpoint fails.
+    }
+  }, []);
+
   useEffect(() => {
     loadStats();
-  }, [loadStats]);
+    loadStatsByBuilding();
+  }, [loadStats, loadStatsByBuilding]);
 
   function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
@@ -191,8 +174,6 @@ export function DashboardPage() {
     }
     return null;
   }, [stats]);
-
-  const buildingLoad = useMemo(() => deriveBuildingLoad(tickets), [tickets]);
 
   const focusItems = useMemo(
     () =>
@@ -578,7 +559,7 @@ export function DashboardPage() {
             <div className="section-head">
               <div>
                 <div className="section-head-title">Load by building</div>
-                <div className="section-head-sub">Open tickets, current view</div>
+                <div className="section-head-sub">Open / in progress / awaiting customer</div>
               </div>
               <span
                 style={{
@@ -590,53 +571,64 @@ export function DashboardPage() {
                   textTransform: "uppercase",
                 }}
               >
-                {buildingLoad.length} sites
+                {byBuilding ? `${byBuilding.length} sites` : ""}
               </span>
             </div>
             <div style={{ padding: "16px 20px 18px" }}>
-              {buildingLoad.length === 0 ? (
+              {byBuilding === null ? (
+                <p className="muted small">Loading…</p>
+              ) : byBuilding.length === 0 ? (
                 <p className="muted small">
-                  No open tickets in the current scope.
+                  No buildings in your current scope.
                 </p>
               ) : (
                 <div className="bld-list">
-                  {buildingLoad.slice(0, 5).map((row) => {
-                    const total = Math.max(row.total, 1);
+                  {byBuilding.slice(0, 5).map((row) => {
+                    const active =
+                      row.open + row.in_progress + row.waiting_customer_approval;
+                    const total = Math.max(active, 1);
                     return (
-                      <div key={row.name}>
+                      <div key={row.building_id}>
                         <div className="bld-row-head">
-                          <span className="bld-row-name">{row.name}</span>
-                          <span className="bld-row-count">{row.total} open</span>
+                          <span className="bld-row-name">{row.building_name}</span>
+                          <span className="bld-row-count">{active} active</span>
                         </div>
                         <div className="bld-bar">
-                          {row.urgent > 0 && (
-                            <div
-                              className="bld-bar-seg urg"
-                              style={{ width: `${(row.urgent / total) * 100}%` }}
-                            />
-                          )}
-                          {row.high > 0 && (
-                            <div
-                              className="bld-bar-seg hi"
-                              style={{ width: `${(row.high / total) * 100}%` }}
-                            />
-                          )}
-                          {row.normal > 0 && (
+                          {row.open > 0 && (
                             <div
                               className="bld-bar-seg no"
-                              style={{ width: `${(row.normal / total) * 100}%` }}
+                              style={{ width: `${(row.open / total) * 100}%` }}
+                            />
+                          )}
+                          {row.in_progress > 0 && (
+                            <div
+                              className="bld-bar-seg hi"
+                              style={{ width: `${(row.in_progress / total) * 100}%` }}
+                            />
+                          )}
+                          {row.waiting_customer_approval > 0 && (
+                            <div
+                              className="bld-bar-seg urg"
+                              style={{
+                                width: `${(row.waiting_customer_approval / total) * 100}%`,
+                              }}
                             />
                           )}
                         </div>
                         <div className="bld-row-foot">
+                          {row.open > 0 && (
+                            <span className="no">{row.open} open</span>
+                          )}
+                          {row.in_progress > 0 && (
+                            <span className="hi">{row.in_progress} in progress</span>
+                          )}
+                          {row.waiting_customer_approval > 0 && (
+                            <span className="urg">
+                              {row.waiting_customer_approval} awaiting customer
+                            </span>
+                          )}
                           {row.urgent > 0 && (
                             <span className="urg">{row.urgent} urgent</span>
-                          )}
-                          {row.high > 0 && (
-                            <span className="hi">{row.high} high</span>
-                          )}
-                          {row.normal > 0 && (
-                            <span className="no">{row.normal} normal</span>
                           )}
                         </div>
                       </div>

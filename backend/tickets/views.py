@@ -1,4 +1,4 @@
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
@@ -171,6 +171,44 @@ class TicketViewSet(
                 "waiting_customer_approval": waiting_customer_approval,
                 "urgent": urgent,
             },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats/by-building")
+    def stats_by_building(self, request):
+        scoped = scope_tickets_for(request.user)
+        closed_states = ["CLOSED", "APPROVED", "REJECTED"]
+
+        rows = (
+            scoped.values("building_id", "building__name")
+            .annotate(
+                total=Count("id"),
+                open=Count("id", filter=Q(status="OPEN")),
+                in_progress=Count("id", filter=Q(status="IN_PROGRESS")),
+                waiting_customer_approval=Count(
+                    "id", filter=Q(status="WAITING_CUSTOMER_APPROVAL")
+                ),
+                urgent=Count(
+                    "id",
+                    filter=Q(priority="URGENT") & ~Q(status__in=closed_states),
+                ),
+            )
+            .order_by("building__name")
+        )
+
+        return Response(
+            [
+                {
+                    "building_id": row["building_id"],
+                    "building_name": row["building__name"],
+                    "total": row["total"],
+                    "open": row["open"],
+                    "in_progress": row["in_progress"],
+                    "waiting_customer_approval": row["waiting_customer_approval"],
+                    "urgent": row["urgent"],
+                }
+                for row in rows
+            ],
             status=status.HTTP_200_OK,
         )
 

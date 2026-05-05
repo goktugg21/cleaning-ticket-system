@@ -148,3 +148,15 @@ export interface TicketStats {
   waiting_customer_approval: number;
   urgent: number;
 }
+
+export interface TicketStatsByBuildingRow {
+  building_id: number;
+  building_name: string;
+  total: number;
+  open: number;
+  in_progress: number;
+  waiting_customer_approval: number;
+  urgent: number;
+}
+
+export type TicketStatsByBuildingResponse = TicketStatsByBuildingRow[];
