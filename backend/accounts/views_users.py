@@ -19,7 +19,8 @@ from .serializers_users import (
 
 class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [CanManageUser]
-    filter_backends = [filters.OrderingFilter]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["email", "full_name"]
     ordering_fields = ["email", "full_name", "role", "is_active"]
     ordering = ["email"]
     http_method_names = ["get", "patch", "delete", "post", "head", "options"]

@@ -206,3 +206,56 @@ class UserCRUDTests(TenantFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    # ---- Search filter ----------------------------------------------------
+
+    def test_search_filter_matches_email_substring(self):
+        get_user_model().objects.create_user(
+            email="alice@findme.example",
+            password=self.password,
+            role=UserRole.CUSTOMER_USER,
+            full_name="Alice",
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"search": "findme"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"alice@findme.example"})
+
+    def test_search_filter_matches_full_name_substring(self):
+        get_user_model().objects.create_user(
+            email="bob@example.com",
+            password=self.password,
+            role=UserRole.CUSTOMER_USER,
+            full_name="Bob Searchable",
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"search": "Searchable"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"bob@example.com"})
+
+    def test_search_filter_combined_with_role_and_is_active(self):
+        # Same search token "needle", different roles. The role filter should
+        # narrow first, the search filter should further restrict within that
+        # set.
+        get_user_model().objects.create_user(
+            email="needle-manager@example.com",
+            password=self.password,
+            role=UserRole.BUILDING_MANAGER,
+            full_name="Needle Manager",
+        )
+        get_user_model().objects.create_user(
+            email="needle-customer@example.com",
+            password=self.password,
+            role=UserRole.CUSTOMER_USER,
+            full_name="Needle Customer",
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL,
+            {"search": "needle", "role": UserRole.BUILDING_MANAGER},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"needle-manager@example.com"})

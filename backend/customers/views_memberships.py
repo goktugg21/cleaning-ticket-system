@@ -4,6 +4,7 @@ from rest_framework.response import Response
 
 from accounts.models import User, UserRole
 from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
+from config.pagination import UnboundedPagination
 
 from .models import Customer, CustomerUserMembership
 from .serializers_memberships import CustomerUserMembershipSerializer
@@ -12,6 +13,7 @@ from .serializers_memberships import CustomerUserMembershipSerializer
 class CustomerUserListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
     serializer_class = CustomerUserMembershipSerializer
+    pagination_class = UnboundedPagination
 
     def _get_customer(self):
         customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])

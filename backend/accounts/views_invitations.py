@@ -3,11 +3,13 @@ from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, status, views
 from rest_framework.response import Response
 
 from notifications.services import send_invitation_email
 
+from .filters_invitations import InvitationFilter
 from .invitations import Invitation, InvitationStatus, hash_invitation_token
 from .models import UserRole
 from .permissions import IsAuthenticatedAndActive
@@ -29,6 +31,8 @@ class CanCreateInvitations(IsAuthenticatedAndActive):
 
 class InvitationListCreateView(generics.ListCreateAPIView):
     permission_classes = [CanCreateInvitations]
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = InvitationFilter
 
     def get_queryset(self):
         user = self.request.user

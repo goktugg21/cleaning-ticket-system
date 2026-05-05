@@ -4,6 +4,7 @@ from rest_framework.response import Response
 
 from accounts.models import User, UserRole
 from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
+from config.pagination import UnboundedPagination
 
 from .models import Building, BuildingManagerAssignment
 from .serializers_memberships import BuildingManagerAssignmentSerializer
@@ -12,6 +13,7 @@ from .serializers_memberships import BuildingManagerAssignmentSerializer
 class BuildingManagerListCreateView(generics.ListCreateAPIView):
     permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
     serializer_class = BuildingManagerAssignmentSerializer
+    pagination_class = UnboundedPagination
 
     def _get_building(self):
         building = get_object_or_404(Building, pk=self.kwargs["building_id"])

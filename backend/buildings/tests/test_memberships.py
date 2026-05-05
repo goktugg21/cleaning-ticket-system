@@ -94,3 +94,19 @@ class BuildingManagerMembershipTests(TenantFixtureMixin, APITestCase):
             self.detail_url(self.other_building.id, self.other_manager.id)
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_list_does_not_paginate_returns_all_in_one_response(self):
+        for i in range(5):
+            extra = get_user_model().objects.create_user(
+                email=f"extra-bm-{i}@example.com",
+                password=self.password,
+                role=UserRole.BUILDING_MANAGER,
+            )
+            BuildingManagerAssignment.objects.create(user=extra, building=self.building)
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.list_url(self.building.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 6)
+        self.assertIsNone(response.data["next"])
+        self.assertIsNone(response.data["previous"])
+        self.assertEqual(len(response.data["results"]), 6)

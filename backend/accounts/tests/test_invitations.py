@@ -510,3 +510,80 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
         emails = {row["email"] for row in response.data.get("results", response.data)}
         self.assertIn("own@example.com", emails)
         self.assertNotIn("other@example.com", emails)
+
+    # ---- Status filter ----------------------------------------------------
+
+    def _seed_status_fixture(self):
+        # Returns (pending, accepted, revoked, expired) Invitation rows.
+        pending, _ = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="pending@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        accepted, _ = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="accepted@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        accepted.accepted_at = timezone.now()
+        accepted.save(update_fields=["accepted_at"])
+        revoked, _ = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="revoked@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        revoked.revoked_at = timezone.now()
+        revoked.revoked_by = self.super_admin
+        revoked.save(update_fields=["revoked_at", "revoked_by"])
+        expired, _ = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="expired@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        expired.expires_at = timezone.now() - timedelta(seconds=1)
+        expired.save(update_fields=["expires_at"])
+        return pending, accepted, revoked, expired
+
+    def test_status_filter_pending_returns_only_pending(self):
+        self._seed_status_fixture()
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.LIST_URL, {"status": "PENDING"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"pending@example.com"})
+
+    def test_status_filter_accepted(self):
+        self._seed_status_fixture()
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.LIST_URL, {"status": "ACCEPTED"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"accepted@example.com"})
+
+    def test_status_filter_revoked(self):
+        self._seed_status_fixture()
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.LIST_URL, {"status": "REVOKED"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"revoked@example.com"})
+
+    def test_status_filter_expired(self):
+        self._seed_status_fixture()
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.LIST_URL, {"status": "EXPIRED"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"expired@example.com"})
+
+    def test_status_filter_multi_value(self):
+        self._seed_status_fixture()
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.LIST_URL, {"status": "PENDING,ACCEPTED"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertEqual(emails, {"pending@example.com", "accepted@example.com"})

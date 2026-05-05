@@ -106,3 +106,23 @@ class CompanyAdminMembershipTests(TenantFixtureMixin, APITestCase):
             self.detail_url(self.other_company.id, self.other_company_admin.id)
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_list_does_not_paginate_returns_all_in_one_response(self):
+        # Baseline fixture seats 1 admin (company_admin) in self.company.
+        # Add 5 more so the total exceeds the standard page_size of 25
+        # would not be triggered, but still proves the endpoint returns
+        # every row in a single response with next/previous null.
+        for i in range(5):
+            extra = get_user_model().objects.create_user(
+                email=f"extra-ca-{i}@example.com",
+                password=self.password,
+                role=UserRole.COMPANY_ADMIN,
+            )
+            CompanyUserMembership.objects.create(user=extra, company=self.company)
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.list_url(self.company.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 6)
+        self.assertIsNone(response.data["next"])
+        self.assertIsNone(response.data["previous"])
+        self.assertEqual(len(response.data["results"]), 6)
