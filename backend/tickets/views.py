@@ -39,8 +39,17 @@ class TicketViewSet(
 ):
     permission_classes = [IsAuthenticatedAndActive, CanViewTicket]
     filterset_class = TicketFilter
-    search_fields = ["ticket_no", "title", "description", "room_label"]
     ordering_fields = ["created_at", "updated_at", "priority", "status"]
+
+    @property
+    def search_fields(self):
+        # Only staff can substring-search across descriptions; for customer
+        # users descriptions can carry context that should stay scoped to the
+        # one ticket they were typed into. Implemented as a property because
+        # DRF's SearchFilter reads view.search_fields directly via getattr.
+        if is_staff_role(self.request.user):
+            return ["ticket_no", "title", "room_label", "description"]
+        return ["ticket_no", "title", "room_label"]
 
     def get_queryset(self):
         qs = scope_tickets_for(self.request.user).select_related(

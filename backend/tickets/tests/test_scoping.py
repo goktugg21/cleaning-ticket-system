@@ -68,3 +68,44 @@ class TicketScopingTests(TenantFixtureMixin, APITestCase):
         response = self.client.get(f"/api/tickets/{self.other_ticket.id}/messages/")
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_customer_search_does_not_match_description_words(self):
+        # Two tickets exist for the customer's company. A second ticket in
+        # the customer's scope contains a unique word in its description.
+        from tickets.models import Ticket
+
+        Ticket.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.customer_user,
+            title="Routine cleaning",
+            description="bluepenguin reference word",
+        )
+
+        self.authenticate(self.customer_user)
+        response = self.client.get("/api/tickets/", {"search": "bluepenguin"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Customer must not be able to substring-search the description.
+        results = response.data.get("results", response.data)
+        self.assertEqual(results, [])
+
+    def test_staff_search_still_matches_description_words(self):
+        from tickets.models import Ticket
+
+        Ticket.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.customer_user,
+            title="Routine cleaning",
+            description="bluepenguin reference word",
+        )
+
+        self.authenticate(self.manager)
+        response = self.client.get("/api/tickets/", {"search": "bluepenguin"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data.get("results", response.data)
+        self.assertEqual(len(results), 1)
