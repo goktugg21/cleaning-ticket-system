@@ -15,6 +15,9 @@ import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
+import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
+import { UserFormPage } from "./pages/admin/UserFormPage";
+import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -138,6 +141,30 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerFormPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <AdminRoute>
+                <UsersAdminPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/users/:id"
+            element={
+              <AdminRoute>
+                <UserFormPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/invitations"
+            element={
+              <AdminRoute>
+                <InvitationsAdminPage />
               </AdminRoute>
             }
           />

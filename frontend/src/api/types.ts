@@ -214,3 +214,62 @@ export interface CustomerAdmin {
   created_at: string;
   updated_at: string;
 }
+
+export interface UserAdmin {
+  id: number;
+  email: string;
+  full_name: string;
+  role: Role;
+  language: string;
+  is_active: boolean;
+  deleted_at: string | null;
+}
+
+export interface UserAdminDetail extends UserAdmin {
+  company_ids: number[];
+  building_ids: number[];
+  customer_ids: number[];
+}
+
+export interface InvitationAdmin {
+  id: number;
+  email: string;
+  full_name: string;
+  role: Role;
+  status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+  created_at: string;
+  expires_at: string;
+  created_by_email: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CompanyAdminMembership {
+  id: number;
+  company: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: Role;
+  created_at: string;
+}
+
+export interface BuildingManagerMembership {
+  id: number;
+  building: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: Role;
+  assigned_at: string;
+}
+
+export interface CustomerUserMembership {
+  id: number;
+  customer: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: Role;
+  created_at: string;
+}

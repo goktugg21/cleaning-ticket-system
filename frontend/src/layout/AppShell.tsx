@@ -1,6 +1,14 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, LayoutGrid, MapPin, PlusCircle, Users } from "lucide-react";
+import {
+  Building2,
+  LayoutGrid,
+  MailPlus,
+  MapPin,
+  PlusCircle,
+  UserCog,
+  Users,
+} from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
@@ -108,6 +116,18 @@ export function AppShell({ children }: AppShellProps) {
                   <Users size={16} strokeWidth={2} />
                 </span>
                 Customers
+              </NavLink>
+              <NavLink to="/admin/users" className={navClass}>
+                <span className="nav-icon">
+                  <UserCog size={16} strokeWidth={2} />
+                </span>
+                Users
+              </NavLink>
+              <NavLink to="/admin/invitations" className={navClass}>
+                <span className="nav-icon">
+                  <MailPlus size={16} strokeWidth={2} />
+                </span>
+                Invitations
               </NavLink>
             </>
           )}
