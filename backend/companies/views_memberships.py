@@ -24,7 +24,11 @@ class CompanyAdminListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         company = self._get_company()
-        return CompanyUserMembership.objects.filter(company=company).select_related("user")
+        return (
+            CompanyUserMembership.objects.filter(company=company)
+            .select_related("user")
+            .order_by("-created_at")
+        )
 
     def create(self, request, *args, **kwargs):
         company = self._get_company()

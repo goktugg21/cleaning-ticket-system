@@ -22,7 +22,11 @@ class BuildingManagerListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         building = self._get_building()
-        return BuildingManagerAssignment.objects.filter(building=building).select_related("user")
+        return (
+            BuildingManagerAssignment.objects.filter(building=building)
+            .select_related("user")
+            .order_by("-assigned_at")
+        )
 
     def create(self, request, *args, **kwargs):
         building = self._get_building()

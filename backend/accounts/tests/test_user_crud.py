@@ -259,3 +259,24 @@ class UserCRUDTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         emails = {row["email"] for row in response.data.get("results", response.data)}
         self.assertEqual(emails, {"needle-manager@example.com"})
+
+    # ---- Retrieve of soft-deleted users (CHANGE-17.6) --------------------
+
+    def test_super_admin_can_retrieve_inactive_user(self):
+        # Without the retrieve-action carve-out, the queryset filter
+        # `is_active=True` would 404 the soft-deleted user even for the super
+        # admin, leaving the Reactivate button on /admin/users/:id unreachable.
+        self.customer_user.soft_delete(deleted_by=self.super_admin)
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.detail_url(self.customer_user.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], self.customer_user.id)
+        self.assertFalse(response.data["is_active"])
+
+    def test_company_admin_cannot_retrieve_inactive_user(self):
+        # Boundary: only SUPER_ADMIN gets the carve-out. A company admin in the
+        # same scope must still get 404 for a soft-deleted user.
+        self.customer_user.soft_delete(deleted_by=self.super_admin)
+        self.authenticate(self.company_admin)
+        response = self.client.get(self.detail_url(self.customer_user.id))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

@@ -114,3 +114,21 @@ class BuildingCRUDTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.company_admin)
         response = self.client.post(self.reactivate_url(self.building.id))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    # ---- Retrieve of soft-deleted buildings (CHANGE-17.6 regression) -----
+
+    def test_super_admin_can_retrieve_inactive_building(self):
+        self.building.is_active = False
+        self.building.save(update_fields=["is_active"])
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.detail_url(self.building.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], self.building.id)
+        self.assertFalse(response.data["is_active"])
+
+    def test_company_admin_cannot_retrieve_inactive_building(self):
+        self.building.is_active = False
+        self.building.save(update_fields=["is_active"])
+        self.authenticate(self.company_admin)
+        response = self.client.get(self.detail_url(self.building.id))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

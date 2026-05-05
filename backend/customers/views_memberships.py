@@ -22,7 +22,11 @@ class CustomerUserListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         customer = self._get_customer()
-        return CustomerUserMembership.objects.filter(customer=customer).select_related("user")
+        return (
+            CustomerUserMembership.objects.filter(customer=customer)
+            .select_related("user")
+            .order_by("-created_at")
+        )
 
     def create(self, request, *args, **kwargs):
         customer = self._get_customer()

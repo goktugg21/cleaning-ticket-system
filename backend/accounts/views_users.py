@@ -29,13 +29,21 @@ class UserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         actor = self.request.user
+        is_super = actor.role == UserRole.SUPER_ADMIN
         is_active_param = self.request.query_params.get("is_active")
-        if is_active_param is not None and is_active_param.lower() == "false":
+
+        # The Users admin page navigates to /admin/users/:id from both the
+        # active and inactive lists, but does not pass ?is_active=false. Without
+        # this branch the inactive-user detail (and the Reactivate button it
+        # gates) is unreachable.
+        if is_super and self.action in ("retrieve", "reactivate"):
+            qs = User.objects.all()
+        elif is_active_param is not None and is_active_param.lower() == "false":
             qs = User.objects.filter(is_active=False)
         else:
             qs = User.objects.filter(is_active=True, deleted_at__isnull=True)
 
-        if actor.role == UserRole.SUPER_ADMIN:
+        if is_super:
             base = qs
         elif actor.role == UserRole.COMPANY_ADMIN:
             actor_company_ids = list(

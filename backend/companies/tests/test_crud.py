@@ -125,3 +125,21 @@ class CompanyCRUDTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         ids = self.response_ids(response)
         self.assertIn(self.company.id, ids)
+
+    # ---- Retrieve of soft-deleted companies (CHANGE-17.6 regression) -----
+
+    def test_super_admin_can_retrieve_inactive_company(self):
+        self.company.is_active = False
+        self.company.save(update_fields=["is_active"])
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.detail_url(self.company.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["id"], self.company.id)
+        self.assertFalse(response.data["is_active"])
+
+    def test_company_admin_cannot_retrieve_inactive_company(self):
+        self.company.is_active = False
+        self.company.save(update_fields=["is_active"])
+        self.authenticate(self.company_admin)
+        response = self.client.get(self.detail_url(self.company.id))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
