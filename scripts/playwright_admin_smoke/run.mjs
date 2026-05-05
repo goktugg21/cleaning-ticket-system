@@ -359,6 +359,9 @@ async function runSuperAdmin(browser) {
   await apiCtx2.post("/api/users/3/reactivate/");
   await apiCtx2.dispose();
 
+  // ---- Reports section ----
+  await runReportsForSuperAdmin(page);
+
   await ctx.close();
 }
 
@@ -433,6 +436,9 @@ async function runCompanyAdmin(browser) {
       `original="${original}" alerts=${savedAlert}`);
   }
 
+  // ---- Reports section ----
+  await runReportsForCompanyAdmin(page);
+
   await ctx.close();
 }
 
@@ -458,7 +464,298 @@ async function runNonStaff(browser, account, label) {
   const hasBanner = bannerText.includes("This area is for admins only.");
   record(G, 'Banner says "This area is for admins only."', hasBanner ? PASS : FAIL);
 
+  // Reports-section assertions for the non-staff roles.
+  if (label === "BUILDING_MANAGER") {
+    await runReportsForBuildingManager(page, G);
+  } else if (label === "CUSTOMER_USER") {
+    await runReportsForCustomerUser(page, G);
+  }
+
   await ctx.close();
+}
+
+// ---- /reports coverage ------------------------------------------------
+
+const CHART_TITLES = [
+  "Status distribution",
+  "Tickets created over time",
+  "Approved tickets per assignee",
+  "Open tickets by age",
+];
+
+// Scope selector for the four chart cards. The filter strip is also a
+// section.card but it has no h3.section-title, so :has() filters cleanly.
+const CHART_CARD_SELECTOR = "section.card:has(h3.section-title)";
+
+async function waitForReportsSettled(page) {
+  // Wait for either a chart svg OR an empty-state OR an alert-error inside
+  // each chart card. This indicates the underlying useReport finished its
+  // initial fetch one way or another.
+  await page.waitForFunction(
+    (selector) => {
+      const cards = Array.from(document.querySelectorAll(selector));
+      if (cards.length !== 4) return false;
+      return cards.every((card) =>
+        card.querySelector("svg") ||
+        card.querySelector(".alert-error") ||
+        Array.from(card.querySelectorAll(".muted.small")).some((el) =>
+          /no (tickets|managers|open tickets) /i.test(el.textContent || ""),
+        ),
+      );
+    },
+    CHART_CARD_SELECTOR,
+    { timeout: 15000 },
+  );
+}
+
+async function assertChartCardsPresent(page, group) {
+  await page.goto(`${FRONTEND}/reports`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h2.page-title:has-text('Operations reports')", {
+    timeout: 10000,
+  });
+  await waitForReportsSettled(page);
+  const titles = await page
+    .locator(`${CHART_CARD_SELECTOR} h3.section-title`)
+    .allInnerTexts();
+  const trimmed = titles.map((t) => t.trim());
+  const allFour = CHART_TITLES.every((t) => trimmed.includes(t));
+  record(
+    group,
+    "/reports renders four chart cards",
+    trimmed.length === 4 && allFour ? PASS : FAIL,
+    `titles=${trimmed.join("|")}`,
+  );
+}
+
+async function runReportsForSuperAdmin(page) {
+  const G = "SUPER_ADMIN";
+
+  // 1. Renders four chart cards.
+  await assertChartCardsPresent(page, G);
+
+  // 2. No inline errors on any chart card; each card has svg or empty-state.
+  const errorCount = await page
+    .locator(`${CHART_CARD_SELECTOR} .alert-error`)
+    .count();
+  const cardsWithContent = await page.evaluate((selector) => {
+    const cards = Array.from(document.querySelectorAll(selector));
+    return cards.filter(
+      (card) =>
+        card.querySelector("svg") ||
+        Array.from(card.querySelectorAll(".muted.small")).some((el) =>
+          /no (tickets|managers|open tickets) /i.test(el.textContent || ""),
+        ),
+    ).length;
+  }, CHART_CARD_SELECTOR);
+  record(
+    G,
+    "All four charts render without inline errors",
+    errorCount === 0 && cardsWithContent === 4 ? PASS : FAIL,
+    `errors=${errorCount} contentCards=${cardsWithContent}`,
+  );
+
+  // 3. Default range preset is "Last 30 days" and visually active.
+  const last30Pressed = await page
+    .locator('button:has-text("Last 30 days")')
+    .first()
+    .getAttribute("aria-pressed");
+  const last7Pressed = await page
+    .locator('button:has-text("Last 7 days")')
+    .first()
+    .getAttribute("aria-pressed");
+  const last90Pressed = await page
+    .locator('button:has-text("Last 90 days")')
+    .first()
+    .getAttribute("aria-pressed");
+  record(
+    G,
+    'Default range preset is "Last 30 days"',
+    last30Pressed === "true" && last7Pressed === "false" && last90Pressed === "false"
+      ? PASS
+      : FAIL,
+    `last30=${last30Pressed} last7=${last7Pressed} last90=${last90Pressed}`,
+  );
+
+  // 4. Click "Last 7 days" updates ?from= and ?to= URL params.
+  await page.locator('button:has-text("Last 7 days")').first().click();
+  await page.waitForURL(/[?&]from=\d{4}-\d{2}-\d{2}.*[?&]to=\d{4}-\d{2}-\d{2}/, {
+    timeout: 5000,
+  });
+  const url = new URL(page.url());
+  const fromIso = url.searchParams.get("from");
+  const toIso = url.searchParams.get("to");
+  const fromMs = Date.parse(`${fromIso}T00:00:00Z`);
+  const toMs = Date.parse(`${toIso}T00:00:00Z`);
+  const todayMs = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+  const spanDays = Math.round((toMs - fromMs) / 86400000);
+  // Allow ±1 day tolerance for midnight rollover during the run.
+  const spanOk = spanDays >= 5 && spanDays <= 7;
+  const toOk = Math.abs(toMs - todayMs) <= 86400000;
+  record(
+    G,
+    'Clicking "Last 7 days" sets ?from= and ?to=',
+    spanOk && toOk ? PASS : FAIL,
+    `from=${fromIso} to=${toIso} span=${spanDays}d`,
+  );
+  await waitForReportsSettled(page);
+
+  // 5. Selecting a specific company updates ?company= and reveals building dropdown.
+  const companySelect = page.locator(
+    'div.filter-field:has(span.filter-label:text-is("Company")) select',
+  );
+  // Pick the second option (first is "All companies").
+  const optionValues = await companySelect.locator("option").evaluateAll((els) =>
+    els.map((el) => el.getAttribute("value")),
+  );
+  const firstSpecificValue = optionValues.find((v) => v && v !== "");
+  if (!firstSpecificValue) {
+    record(G, "Selecting a company updates ?company=", FAIL, "no company options found");
+  } else {
+    await companySelect.selectOption(firstSpecificValue);
+    await page.waitForURL(new RegExp(`[?&]company=${firstSpecificValue}\\b`), {
+      timeout: 5000,
+    });
+    await page.waitForTimeout(300);
+    const buildingSelectVisible = await page
+      .locator('div.filter-field:has(span.filter-label:text-is("Building")) select')
+      .isVisible()
+      .catch(() => false);
+    record(
+      G,
+      "Selecting a company updates ?company= and reveals building dropdown",
+      buildingSelectVisible ? PASS : FAIL,
+      `company=${firstSpecificValue} buildingDropdown=${buildingSelectVisible}`,
+    );
+  }
+  await waitForReportsSettled(page);
+
+  // 6. Refresh button is present and clickable without crash.
+  const refreshBtn = page.locator(
+    "div.page-header-actions button:has-text('Refresh')",
+  );
+  const refreshVisible = await refreshBtn.isVisible().catch(() => false);
+  await refreshBtn.click().catch(() => {});
+  await page.waitForTimeout(400);
+  await waitForReportsSettled(page);
+  const stillRendered = (await page
+    .locator(`${CHART_CARD_SELECTOR} h3.section-title`)
+    .count()) === 4;
+  record(
+    G,
+    "Refresh button present and click does not crash",
+    refreshVisible && stillRendered ? PASS : FAIL,
+    `visible=${refreshVisible} cards=${stillRendered ? 4 : "missing"}`,
+  );
+}
+
+async function runReportsForCompanyAdmin(page) {
+  const G = "COMPANY_ADMIN";
+
+  // 7. /reports renders for COMPANY_ADMIN.
+  await assertChartCardsPresent(page, G);
+
+  // 8. Sidebar shows Reports link for COMPANY_ADMIN.
+  const sidebarLink = page.locator('aside.sidebar a.nav-item[href="/reports"]');
+  const sidebarVisible = await sidebarLink.isVisible().catch(() => false);
+  record(
+    G,
+    "Sidebar shows Reports link",
+    sidebarVisible ? PASS : FAIL,
+    `visible=${sidebarVisible}`,
+  );
+
+  // 9. Cross-tenant URL probe: ?company=<other> => inline errors on all 4 cards.
+  // Other company id is 2 in the fixture (matches the existing other-tenant
+  // probes in this script).
+  await page.goto(`${FRONTEND}/reports?company=2`, { waitUntil: "domcontentloaded" });
+  await waitForReportsSettled(page);
+  const errBanners = await page
+    .locator(`${CHART_CARD_SELECTOR} .alert-error`)
+    .count();
+  // One banner per chart card => 4 banners.
+  record(
+    G,
+    "Cross-tenant /reports?company= shows inline errors on all four cards",
+    errBanners === 4 ? PASS : FAIL,
+    `errBanners=${errBanners}`,
+  );
+}
+
+async function runReportsForBuildingManager(page, G) {
+  // 10. /reports renders for BUILDING_MANAGER.
+  await assertChartCardsPresent(page, G);
+
+  // 11. Building dropdown auto-selects + is disabled when only one assignment.
+  const buildingSelect = page.locator(
+    'div.filter-field:has(span.filter-label:text-is("Building")) select',
+  );
+  // Wait for both: a non-empty value AND disabled attribute.
+  let autoSelectOk = false;
+  try {
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector(
+          'div.filter-field select',
+        );
+        // The first filter-field select on the BM page is the building select
+        // (no Company dropdown for non-super-admin). Confirm it has both
+        // a non-empty value and the disabled attribute.
+        if (!sel) return false;
+        const value = sel.value;
+        const disabled = sel.disabled;
+        return value !== "" && disabled;
+      },
+      { timeout: 5000 },
+    );
+    autoSelectOk = true;
+  } catch {
+    autoSelectOk = false;
+  }
+  const value = await buildingSelect.inputValue().catch(() => "");
+  const disabled = await buildingSelect.isDisabled().catch(() => false);
+  record(
+    G,
+    "Building dropdown auto-selects sole assignment and is disabled",
+    autoSelectOk && value !== "" && disabled ? PASS : FAIL,
+    `value=${value} disabled=${disabled}`,
+  );
+
+  // 12. Sidebar shows Reports link for BUILDING_MANAGER.
+  const sidebarLink = page.locator('aside.sidebar a.nav-item[href="/reports"]');
+  const sidebarVisible = await sidebarLink.isVisible().catch(() => false);
+  record(
+    G,
+    "Sidebar shows Reports link",
+    sidebarVisible ? PASS : FAIL,
+    `visible=${sidebarVisible}`,
+  );
+}
+
+async function runReportsForCustomerUser(page, G) {
+  // 13. Sidebar does NOT show Reports link for CUSTOMER_USER.
+  const sidebarLink = page.locator('aside.sidebar a.nav-item[href="/reports"]');
+  const sidebarCount = await sidebarLink.count();
+  record(
+    G,
+    "Sidebar does not show Reports link",
+    sidebarCount === 0 ? PASS : FAIL,
+    `count=${sidebarCount}`,
+  );
+
+  // 14. Direct navigation to /reports redirects to /.
+  await page.goto(`${FRONTEND}/reports`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle");
+  await page.waitForTimeout(500);
+  const url = new URL(page.url());
+  const onDashboard = url.pathname === "/" || url.pathname === "";
+  const noChartTitles =
+    (await page.locator("h3.section-title").filter({ hasText: /Status distribution/ }).count()) === 0;
+  record(
+    G,
+    "Direct /reports redirects to /",
+    onDashboard && noChartTitles ? PASS : FAIL,
+    `url=${url.pathname} chartTitles=${!noChartTitles}`,
+  );
 }
 
 (async () => {
