@@ -188,21 +188,53 @@ def send_ticket_created_email(ticket, actor=None):
     )
 
 
-def send_ticket_status_changed_email(ticket, old_status, new_status, actor=None):
-    subject = (
-        f"[{ticket.ticket_no}] Status changed: "
-        f"{_status_label(old_status)} → {_status_label(new_status)}"
+def send_ticket_status_changed_email(
+    ticket,
+    old_status,
+    new_status,
+    actor=None,
+    is_admin_override=False,
+):
+    actor_label = getattr(actor, "email", "") or "an administrator"
+    override = (
+        is_admin_override
+        and str(new_status) in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
     )
-    body = "\n".join(
-        [
-            "A ticket status was changed.",
-            "",
-            f"Old status: {_status_label(old_status)}",
-            f"New status: {_status_label(new_status)}",
-            "",
-            _ticket_summary(ticket),
-        ]
-    )
+
+    if override:
+        decision_word = "Approved" if str(new_status) == str(TicketStatus.APPROVED) else "Rejected"
+        subject = (
+            f"[{ticket.ticket_no}] {decision_word} on behalf of customer by {actor_label}"
+        )
+        body = "\n".join(
+            [
+                f"This ticket was {decision_word.lower()} on behalf of the customer "
+                f"by {actor_label}.",
+                "",
+                f"Old status: {_status_label(old_status)}",
+                f"New status: {_status_label(new_status)}",
+                "",
+                "If you are the customer for this ticket and disagree with this decision, "
+                "reply to the ticket or contact your facility manager.",
+                "",
+                _ticket_summary(ticket),
+            ]
+        )
+    else:
+        subject = (
+            f"[{ticket.ticket_no}] Status changed: "
+            f"{_status_label(old_status)} → {_status_label(new_status)}"
+        )
+        body = "\n".join(
+            [
+                "A ticket status was changed.",
+                "",
+                f"Old status: {_status_label(old_status)}",
+                f"New status: {_status_label(new_status)}",
+                "",
+                _ticket_summary(ticket),
+            ]
+        )
 
     users = []
     users.extend(list(_ticket_staff_users(ticket)))

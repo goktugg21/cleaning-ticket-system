@@ -60,3 +60,31 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
         self.assertEqual(log.event_type, NotificationEventType.PASSWORD_RESET)
         self.assertEqual(log.recipient_email, self.customer_user.email)
         self.assertEqual(log.status, NotificationStatus.SENT)
+
+    def test_admin_override_subject_and_body_when_acting_for_customer(self):
+        logs = send_ticket_status_changed_email(
+            self.ticket,
+            old_status="WAITING_CUSTOMER_APPROVAL",
+            new_status="APPROVED",
+            actor=self.super_admin,
+            is_admin_override=True,
+        )
+
+        self.assertTrue(logs)
+        for log in logs:
+            self.assertIn("Approved on behalf of customer", log.subject)
+            self.assertIn(self.super_admin.email, log.subject)
+            self.assertIn("on behalf of the customer", log.body)
+
+    def test_normal_status_change_does_not_use_override_copy(self):
+        logs = send_ticket_status_changed_email(
+            self.ticket,
+            old_status="OPEN",
+            new_status="IN_PROGRESS",
+            actor=self.company_admin,
+        )
+
+        self.assertTrue(logs)
+        for log in logs:
+            self.assertIn("Status changed", log.subject)
+            self.assertNotIn("on behalf of customer", log.subject)

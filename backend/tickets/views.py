@@ -84,11 +84,17 @@ class TicketViewSet(
         )
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+        is_admin_override = (
+            is_staff_role(request.user)
+            and old_status == "WAITING_CUSTOMER_APPROVAL"
+            and updated.status in {"APPROVED", "REJECTED"}
+        )
         send_ticket_status_changed_email(
             updated,
             old_status=old_status,
             new_status=updated.status,
             actor=request.user,
+            is_admin_override=is_admin_override,
         )
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
