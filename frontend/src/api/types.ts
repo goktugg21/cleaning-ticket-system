@@ -139,3 +139,12 @@ export interface AssignableManager {
   full_name: string;
   role: "BUILDING_MANAGER";
 }
+
+export interface TicketStats {
+  total: number;
+  by_status: Partial<Record<TicketStatus, number>>;
+  by_priority: Partial<Record<string, number>>;
+  my_open: number;
+  waiting_customer_approval: number;
+  urgent: number;
+}

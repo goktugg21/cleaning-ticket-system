@@ -3,7 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { api, getApiError } from "../api/client";
-import type { PaginatedResponse, TicketList, TicketStatus } from "../api/types";
+import type {
+  PaginatedResponse,
+  TicketList,
+  TicketStats,
+  TicketStatus,
+} from "../api/types";
 
 type Priority = "NORMAL" | "HIGH" | "URGENT";
 
@@ -64,34 +69,6 @@ interface BuildingLoadRow {
   normal: number;
 }
 
-// TODO(backend): replace with GET /api/stats/health-score.
-// Deterministic UI-side score until backend exposes a health endpoint.
-// Formula: 100 - (urgent * 8) - (waitingApproval * 3) - (high * 4), clamped [0, 100].
-function deriveHealthScore(tickets: TicketList[]): number {
-  if (tickets.length === 0) return 100;
-
-  const openUrgent = tickets.filter(
-    (t) =>
-      t.priority === "URGENT" &&
-      t.status !== "CLOSED" &&
-      t.status !== "APPROVED" &&
-      t.status !== "REJECTED",
-  ).length;
-  const openHigh = tickets.filter(
-    (t) =>
-      t.priority === "HIGH" &&
-      t.status !== "CLOSED" &&
-      t.status !== "APPROVED" &&
-      t.status !== "REJECTED",
-  ).length;
-  const waitingApproval = tickets.filter(
-    (t) => t.status === "WAITING_CUSTOMER_APPROVAL",
-  ).length;
-
-  const score = 100 - openUrgent * 8 - waitingApproval * 3 - openHigh * 4;
-  return Math.max(0, Math.min(100, score));
-}
-
 // TODO(backend): replace with GET /api/stats/load-by-building.
 // Derived UI-side from the visible ticket page until backend exposes per-building counts.
 function deriveBuildingLoad(tickets: TicketList[]): BuildingLoadRow[] {
@@ -128,6 +105,8 @@ export function DashboardPage() {
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const [stats, setStats] = useState<TicketStats | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
@@ -167,6 +146,19 @@ export function DashboardPage() {
     loadTickets();
   }, [loadTickets]);
 
+  const loadStats = useCallback(async () => {
+    try {
+      const response = await api.get<TicketStats>("/tickets/stats/");
+      setStats(response.data);
+    } catch {
+      // Stats card just goes blank if the endpoint fails; ticket list still works.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
   function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
     setPage(1);
@@ -185,26 +177,21 @@ export function DashboardPage() {
     statusFilter || priorityFilter || searchActive,
   );
 
-  const stats = useMemo(() => {
-    const active = tickets.filter((ticket) =>
-      ["OPEN", "REOPENED_BY_ADMIN", "IN_PROGRESS"].includes(ticket.status),
-    ).length;
-    const waitingApproval = tickets.filter(
-      (ticket) => ticket.status === "WAITING_CUSTOMER_APPROVAL",
-    ).length;
-    const urgent = tickets.filter((ticket) => ticket.priority === "URGENT").length;
-    const closed = tickets.filter((ticket) => ticket.status === "CLOSED").length;
+  const kpis = useMemo(() => {
+    if (stats) {
+      const closed = stats.by_status.CLOSED ?? 0;
+      const active = stats.my_open;
+      return {
+        active,
+        waitingApproval: stats.waiting_customer_approval,
+        urgent: stats.urgent,
+        closed,
+        total: stats.total,
+      };
+    }
+    return null;
+  }, [stats]);
 
-    return {
-      active,
-      waitingApproval,
-      urgent,
-      closed,
-      visible: tickets.length,
-    };
-  }, [tickets]);
-
-  const healthScore = useMemo(() => deriveHealthScore(tickets), [tickets]);
   const buildingLoad = useMemo(() => deriveBuildingLoad(tickets), [tickets]);
 
   const focusItems = useMemo(
@@ -220,11 +207,6 @@ export function DashboardPage() {
         .slice(0, 4),
     [tickets],
   );
-
-  const ringRadius = 54;
-  const ringCircumference = 2 * Math.PI * ringRadius;
-  const ringDash = (healthScore / 100) * ringCircumference;
-  const ringRest = ringCircumference - ringDash;
 
   return (
     <div>
@@ -272,32 +254,32 @@ export function DashboardPage() {
 
       <div className="kpi-row">
         <div className="kpi-card">
-          <div className="kpi-label">Visible tickets</div>
+          <div className="kpi-label">Total in scope</div>
           <div className="kpi-row-2">
-            <div className="kpi-value">{stats.visible}</div>
+            <div className="kpi-value">{kpis ? kpis.total : "—"}</div>
           </div>
-          <div className="kpi-meta">{count} total in current scope</div>
+          <div className="kpi-meta">All tickets you can access</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Active work</div>
           <div className="kpi-row-2">
-            <div className="kpi-value">{stats.active}</div>
+            <div className="kpi-value">{kpis ? kpis.active : "—"}</div>
           </div>
-          <div className="kpi-meta">Open, reopened, or in progress</div>
+          <div className="kpi-meta">Open, in progress, waiting, reopened</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Awaiting approval</div>
           <div className="kpi-row-2">
-            <div className="kpi-value">{stats.waitingApproval}</div>
+            <div className="kpi-value">{kpis ? kpis.waitingApproval : "—"}</div>
           </div>
           <div className="kpi-meta">Needs customer response</div>
         </div>
         <div className="kpi-card kpi-urgent">
-          <div className="kpi-label">Urgent</div>
+          <div className="kpi-label">Urgent open</div>
           <div className="kpi-row-2">
-            <div className="kpi-value">{stats.urgent}</div>
+            <div className="kpi-value">{kpis ? kpis.urgent : "—"}</div>
           </div>
-          <div className="kpi-meta">High attention tickets</div>
+          <div className="kpi-meta">Urgent tickets not closed</div>
         </div>
       </div>
 
@@ -514,75 +496,39 @@ export function DashboardPage() {
         </div>
 
         <div className="dash-side">
-          <div className="card health-card">
+          <div className="card">
             <div className="section-head">
               <div>
-                <div className="section-head-title">Facility health</div>
-                <div className="section-head-sub">Queue pressure score</div>
+                <div className="section-head-title">Status breakdown</div>
+                <div className="section-head-sub">All tickets in your scope</div>
               </div>
-              <span
-                style={{
-                  fontFamily: "var(--f-head)",
-                  fontSize: 10,
-                  fontWeight: 800,
-                  letterSpacing: "0.1em",
-                  textTransform: "uppercase",
-                  color: "var(--green-2)",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
-                }}
-              >
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: "50%",
-                    background: "var(--green)",
-                    display: "inline-block",
-                  }}
-                />
-                Live
-              </span>
             </div>
-            <div className="health-inner">
-              <div className="ring-wrap">
-                <svg className="ring-svg" viewBox="0 0 120 120">
-                  <circle className="ring-track" cx="60" cy="60" r={ringRadius} />
-                  <circle
-                    className="ring-fill"
-                    cx="60"
-                    cy="60"
-                    r={ringRadius}
-                    strokeDasharray={`${ringDash.toFixed(1)} ${ringRest.toFixed(1)}`}
-                  />
-                </svg>
-                <div className="ring-center">
-                  <div className="ring-val">{healthScore}%</div>
-                  <div className="ring-label">
-                    {healthScore >= 80
-                      ? "Stable"
-                      : healthScore >= 60
-                        ? "Watch"
-                        : "Stressed"}
-                  </div>
+            <div style={{ padding: "14px 18px 18px" }}>
+              {!stats ? (
+                <p className="muted small">Loading…</p>
+              ) : (
+                <div className="bld-list">
+                  {(
+                    [
+                      ["OPEN", "Open"],
+                      ["IN_PROGRESS", "In progress"],
+                      ["WAITING_CUSTOMER_APPROVAL", "Waiting approval"],
+                      ["APPROVED", "Approved"],
+                      ["REJECTED", "Rejected"],
+                      ["CLOSED", "Closed"],
+                      ["REOPENED_BY_ADMIN", "Reopened"],
+                    ] as const
+                  ).map(([key, label]) => {
+                    const value = stats.by_status[key] ?? 0;
+                    return (
+                      <div key={key} className="bld-row-head">
+                        <span className="bld-row-name">{label}</span>
+                        <span className="bld-row-count">{value}</span>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
-              <div className="health-stats">
-                <div className="health-stat">
-                  <div className="health-stat-val">{stats.closed}</div>
-                  <div className="health-stat-label">Closed</div>
-                </div>
-                <div className="health-stat">
-                  <div
-                    className="health-stat-val"
-                    style={{ color: "var(--red)" }}
-                  >
-                    {stats.urgent}
-                  </div>
-                  <div className="health-stat-label">Urgent</div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 

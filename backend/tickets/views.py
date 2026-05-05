@@ -1,3 +1,4 @@
+from django.db.models import Count
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
@@ -131,6 +132,31 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        scoped = scope_tickets_for(request.user)
+
+        status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
+        priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
+
+        closed_states = {"CLOSED", "APPROVED", "REJECTED"}
+        my_open = sum(c for s, c in status_counts.items() if s not in closed_states)
+        waiting_customer_approval = status_counts.get("WAITING_CUSTOMER_APPROVAL", 0)
+        urgent = scoped.exclude(status__in=closed_states).filter(priority="URGENT").count()
+        total = sum(status_counts.values())
+
+        return Response(
+            {
+                "total": total,
+                "by_status": status_counts,
+                "by_priority": priority_counts,
+                "my_open": my_open,
+                "waiting_customer_approval": waiting_customer_approval,
+                "urgent": urgent,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="assignable-managers")
     def assignable_managers(self, request, pk=None):
