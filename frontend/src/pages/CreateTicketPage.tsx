@@ -1,6 +1,16 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import {
+  AlertTriangle,
+  ArrowRight,
+  ChevronLeft,
+  CircleCheck,
+  Clock,
+  Info,
+  TriangleAlert,
+  UploadCloud,
+} from "lucide-react";
 import { api, getApiError } from "../api/client";
 import type { Building, Customer, PaginatedResponse } from "../api/types";
 
@@ -14,29 +24,39 @@ interface CreateTicketForm {
   customer: string;
 }
 
+interface PriorityCard {
+  value: "NORMAL" | "HIGH" | "URGENT";
+  label: string;
+  helper: string;
+  icon: typeof Info;
+}
+
 const TICKET_TYPES = [
-  { value: "REPORT", label: "Report", helper: "Routine cleaning or facility report" },
-  { value: "COMPLAINT", label: "Complaint", helper: "Something needs attention" },
-  { value: "REQUEST", label: "Request", helper: "A service or maintenance request" },
-  { value: "SUGGESTION", label: "Suggestion", helper: "Improvement idea or feedback" },
-  { value: "QUOTE_REQUEST", label: "Quote request", helper: "Pricing or work estimate" },
+  { value: "REPORT", label: "Report" },
+  { value: "COMPLAINT", label: "Complaint" },
+  { value: "REQUEST", label: "Request" },
+  { value: "SUGGESTION", label: "Suggestion" },
+  { value: "QUOTE_REQUEST", label: "Quote request" },
 ];
 
-const PRIORITY_OPTIONS = [
+const PRIORITY_CARDS: PriorityCard[] = [
   {
     value: "NORMAL",
-    label: "Normal",
-    helper: "Standard follow-up",
+    label: "Medium",
+    helper: "Standard 24 h SLA",
+    icon: CircleCheck,
   },
   {
     value: "HIGH",
     label: "High",
-    helper: "Needs faster attention",
+    helper: "Expedited — 4 h SLA",
+    icon: TriangleAlert,
   },
   {
     value: "URGENT",
     label: "Urgent",
-    helper: "Critical operational issue",
+    helper: "Critical — 1 h SLA",
+    icon: AlertTriangle,
   },
 ];
 
@@ -58,6 +78,7 @@ export function CreateTicketPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<CreateTicketForm>(EMPTY_FORM);
+  const [stagedAttachment, setStagedAttachment] = useState<File | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,8 +108,10 @@ export function CreateTicketPage() {
 
         setForm((current) => ({
           ...current,
-          building: current.building || (firstBuilding ? String(firstBuilding.id) : ""),
-          customer: current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
+          building:
+            current.building || (firstBuilding ? String(firstBuilding.id) : ""),
+          customer:
+            current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
         }));
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
@@ -106,38 +129,38 @@ export function CreateTicketPage() {
 
   const filteredCustomers = useMemo(() => {
     if (!form.building) return customers;
-    return customers.filter((customer) => customer.building === Number(form.building));
+    return customers.filter(
+      (customer) => customer.building === Number(form.building),
+    );
   }, [customers, form.building]);
-
-  const selectedType = useMemo(
-    () => TICKET_TYPES.find((option) => option.value === form.type),
-    [form.type],
-  );
-
-  const selectedBuilding = useMemo(
-    () => buildings.find((building) => String(building.id) === form.building),
-    [buildings, form.building],
-  );
-
-  const selectedCustomer = useMemo(
-    () => customers.find((customer) => String(customer.id) === form.customer),
-    [customers, form.customer],
-  );
 
   useEffect(() => {
     if (!form.customer) return;
-
     const stillValid = filteredCustomers.some(
       (customer) => String(customer.id) === form.customer,
     );
-
     if (!stillValid) {
       setForm((current) => ({
         ...current,
-        customer: filteredCustomers[0] ? String(filteredCustomers[0].id) : "",
+        customer: filteredCustomers[0]
+          ? String(filteredCustomers[0].id)
+          : "",
       }));
     }
   }, [filteredCustomers, form.customer]);
+
+  const selectedBuilding = useMemo(
+    () => buildings.find((b) => String(b.id) === form.building),
+    [buildings, form.building],
+  );
+  const selectedCustomer = useMemo(
+    () => customers.find((c) => String(c.id) === form.customer),
+    [customers, form.customer],
+  );
+  const selectedType = useMemo(
+    () => TICKET_TYPES.find((t) => t.value === form.type),
+    [form.type],
+  );
 
   function update<K extends keyof CreateTicketForm>(
     name: K,
@@ -151,20 +174,17 @@ export function CreateTicketPage() {
     setError("");
 
     if (!form.title.trim()) {
-      setError("Title is required.");
+      setError("Short description is required.");
       return;
     }
-
     if (!form.description.trim()) {
-      setError("Description is required.");
+      setError("Detailed description is required.");
       return;
     }
-
     if (!form.building) {
-      setError("Please choose a building.");
+      setError("Please choose a location.");
       return;
     }
-
     if (!form.customer) {
       setError("Please choose a customer.");
       return;
@@ -183,7 +203,21 @@ export function CreateTicketPage() {
         customer: Number(form.customer),
       });
 
-      navigate(`/tickets/${response.data.id}`);
+      const newId = response.data.id;
+
+      if (stagedAttachment) {
+        try {
+          const formData = new FormData();
+          formData.append("file", stagedAttachment);
+          await api.post(`/tickets/${newId}/attachments/`, formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+        } catch {
+          // Non-fatal: surface but still navigate. The detail page lets users retry.
+        }
+      }
+
+      navigate(`/tickets/${newId}`);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -195,224 +229,356 @@ export function CreateTicketPage() {
     !loadingOptions && (buildings.length === 0 || customers.length === 0);
 
   return (
-    <>
-      <header className="page-head hero-head">
+    <div>
+      <div className="page-header">
         <div>
           <Link to="/" className="link-back">
-            ← Back to tickets
+            <ChevronLeft size={14} strokeWidth={2.5} />
+            Back to tickets
           </Link>
-          <p className="eyebrow">New ticket</p>
-          <h1>Create ticket</h1>
-          <p className="muted">
-            Capture the request clearly, assign the right location, and let the team move fast.
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            New ticket
+          </div>
+          <h2 className="page-title">Create ticket</h2>
+          <p className="page-sub">
+            Capture the request clearly and assign the right location.
           </p>
         </div>
-      </header>
+      </div>
 
       {loadingOptions && (
-        <section className="card soft-card">
-          <p className="muted">Loading buildings and customers…</p>
-        </section>
+        <div className="loading-bar">
+          <div className="loading-bar-fill" />
+        </div>
       )}
 
       {noOptions && !error && (
-        <div className="error">
-          You don't have access to any building or customer to create a ticket against.
+        <div className="alert-error" style={{ marginBottom: 16 }}>
+          You don't have access to any building or customer to create a ticket
+          against.
         </div>
       )}
 
-      <form className="create-ticket-layout" onSubmit={handleSubmit}>
-        <section className="card create-ticket-main">
-          <div className="form-section-head">
-            <div>
-              <p className="eyebrow">Ticket information</p>
-              <h2>Request details</h2>
+      <form className="create-layout" onSubmit={handleSubmit}>
+        <div className="card create-main">
+          <div className="form-section">
+            <div className="form-section-title">Issue details</div>
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="f-type">
+                  Category
+                </label>
+                <select
+                  id="f-type"
+                  className="field-select"
+                  value={form.type}
+                  onChange={(event) => update("type", event.target.value)}
+                >
+                  {TICKET_TYPES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="f-building">
+                  Location *
+                </label>
+                <select
+                  id="f-building"
+                  className="field-select"
+                  value={form.building}
+                  onChange={(event) => update("building", event.target.value)}
+                  disabled={buildings.length === 0}
+                  required
+                >
+                  <option value="" disabled>
+                    Select facility / zone…
+                  </option>
+                  {buildings.map((building) => (
+                    <option key={building.id} value={building.id}>
+                      {building.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <span className="quiet-pill">Required fields marked *</span>
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="f-customer">
+                  Customer *
+                </label>
+                <select
+                  id="f-customer"
+                  className="field-select"
+                  value={form.customer}
+                  onChange={(event) => update("customer", event.target.value)}
+                  disabled={filteredCustomers.length === 0}
+                  required
+                >
+                  <option value="" disabled>
+                    {filteredCustomers.length === 0
+                      ? "No customers in this location"
+                      : "Select customer…"}
+                  </option>
+                  {filteredCustomers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="f-room">
+                  Room / area
+                </label>
+                <input
+                  id="f-room"
+                  className="field-input"
+                  type="text"
+                  placeholder="e.g. Server Room A, Bldg 4"
+                  value={form.room_label}
+                  onChange={(event) => update("room_label", event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="f-title">
+                Short description *
+              </label>
+              <input
+                id="f-title"
+                className="field-input"
+                type="text"
+                placeholder="Brief summary of the issue"
+                maxLength={255}
+                value={form.title}
+                onChange={(event) => update("title", event.target.value)}
+                required
+              />
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="f-desc">
+                Detailed description *
+              </label>
+              <textarea
+                id="f-desc"
+                className="field-textarea"
+                placeholder="Provide as much context as possible — equipment, location, observed behaviour, urgency."
+                value={form.description}
+                onChange={(event) => update("description", event.target.value)}
+                required
+              />
+            </div>
           </div>
 
           <div className="form-section">
-            <label>
-              <span>Title *</span>
-              <input
-                value={form.title}
-                onChange={(event) => update("title", event.target.value)}
-                maxLength={255}
-                placeholder="e.g. Restroom cleaning needed on floor 2"
-                required
-              />
-            </label>
+            <div className="form-section-title">Priority level</div>
+            <div className="form-section-helper">
+              Select the impact level of this issue.
+            </div>
+            <div className="priority-grid">
+              {PRIORITY_CARDS.map((card) => {
+                const Icon = card.icon;
+                const isSelected = form.priority === card.value;
+                return (
+                  <button
+                    type="button"
+                    key={card.value}
+                    data-prio={card.value}
+                    className={`priority-card ${isSelected ? "selected" : ""}`}
+                    onClick={() => update("priority", card.value)}
+                  >
+                    <span className="priority-card-icon">
+                      <Icon size={16} strokeWidth={2} />
+                    </span>
+                    <span className="priority-card-label">{card.label}</span>
+                    <span className="priority-card-helper">{card.helper}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-            <label>
-              <span>Description *</span>
-              <textarea
-                value={form.description}
-                onChange={(event) => update("description", event.target.value)}
-                placeholder="Describe the issue, location, urgency, and any useful context."
-                required
+          <div className="form-section">
+            <div className="form-section-title">Attachments</div>
+            <div className="form-section-helper">
+              Optional. Photos and PDFs help the team respond faster.
+            </div>
+            <label className="upload-zone">
+              <UploadCloud
+                className="upload-icon"
+                size={22}
+                strokeWidth={2}
               />
-            </label>
-
-            <label>
-              <span>Room / area</span>
+              <span className="upload-title">
+                {stagedAttachment
+                  ? stagedAttachment.name
+                  : "Click to upload or drag and drop"}
+              </span>
+              <span className="upload-hint">
+                {stagedAttachment
+                  ? `${(stagedAttachment.size / 1024 / 1024).toFixed(2)} MB · click to replace`
+                  : "PNG, JPG, PDF up to 10 MB"}
+              </span>
               <input
-                value={form.room_label}
-                onChange={(event) => update("room_label", event.target.value)}
-                placeholder="e.g. Ground floor lobby"
+                type="file"
+                accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  if (file && file.size > 10 * 1024 * 1024) {
+                    setError("Attachment file size cannot exceed 10 MB.");
+                    event.target.value = "";
+                    return;
+                  }
+                  setError("");
+                  setStagedAttachment(file);
+                }}
               />
             </label>
           </div>
 
-          <div className="form-section split-section">
-            <div>
-              <p className="section-kicker">Location</p>
-              <div className="grid two">
-                <label>
-                  <span>Building *</span>
-                  <select
-                    value={form.building}
-                    onChange={(event) => update("building", event.target.value)}
-                    required
-                    disabled={buildings.length === 0}
-                  >
-                    <option value="" disabled>
-                      Select a building
-                    </option>
-                    {buildings.map((building) => (
-                      <option value={building.id} key={building.id}>
-                        {building.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  <span>Customer *</span>
-                  <select
-                    value={form.customer}
-                    onChange={(event) => update("customer", event.target.value)}
-                    required
-                    disabled={filteredCustomers.length === 0}
-                  >
-                    <option value="" disabled>
-                      {filteredCustomers.length === 0
-                        ? "No customers in this building"
-                        : "Select a customer"}
-                    </option>
-                    {filteredCustomers.map((customer) => (
-                      <option value={customer.id} key={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+          {error && (
+            <div
+              className="alert-error"
+              style={{ margin: "0 22px 18px" }}
+              role="alert"
+            >
+              {error}
             </div>
+          )}
 
-            <div>
-              <p className="section-kicker">Category</p>
-              <div className="grid two">
-                <label>
-                  <span>Type</span>
-                  <select
-                    value={form.type}
-                    onChange={(event) => update("type", event.target.value)}
-                  >
-                    {TICKET_TYPES.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label>
-                  <span>Priority</span>
-                  <select
-                    value={form.priority}
-                    onChange={(event) => update("priority", event.target.value)}
-                  >
-                    {PRIORITY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {error && <div className="error">{error}</div>}
-
-          <div className="actions form-actions">
-            <Link to="/" className="button secondary">
+          <div className="form-actions">
+            <Link to="/" className="btn btn-secondary">
               Cancel
             </Link>
-            <button disabled={submitting || loadingOptions || noOptions}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting || loadingOptions || noOptions}
+            >
               {submitting ? "Creating…" : "Create ticket"}
+              <ArrowRight size={14} strokeWidth={2.5} />
             </button>
           </div>
-        </section>
+        </div>
 
-        <aside className="create-ticket-side">
-          <section className="card side-card">
-            <p className="eyebrow">Priority</p>
-            <h2>Set urgency</h2>
-
-            <div className="priority-choice-list">
-              {PRIORITY_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={`priority-choice ${
-                    form.priority === option.value ? "selected" : ""
-                  }`}
-                  onClick={() => update("priority", option.value)}
-                >
-                  <span>
-                    <b>{option.label}</b>
-                    <small>{option.helper}</small>
-                  </span>
-                  <i aria-hidden />
-                </button>
-              ))}
+        <aside className="create-side">
+          <div className="card">
+            <div className="section-head">
+              <div className="section-head-title">Summary</div>
             </div>
-          </section>
+            <div className="side-card-body">
+              <div className="preview-list">
+                <div className="preview-row">
+                  <span className="preview-key">Location</span>
+                  <span className="preview-val">
+                    {selectedBuilding?.name || "—"}
+                  </span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-key">Customer</span>
+                  <span className="preview-val">
+                    {selectedCustomer?.name || "—"}
+                  </span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-key">Category</span>
+                  <span className="preview-val">
+                    {selectedType?.label || "Report"}
+                  </span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-key">Priority</span>
+                  <span className="preview-val">
+                    {form.priority.charAt(0) +
+                      form.priority.slice(1).toLowerCase()}
+                  </span>
+                </div>
+                <div className="preview-row">
+                  <span className="preview-key">Attachment</span>
+                  <span className="preview-val">
+                    {stagedAttachment ? stagedAttachment.name : "None"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
 
-          <section className="card side-card">
-            <p className="eyebrow">Summary</p>
-            <h2>Before submit</h2>
+          <div className="card">
+            <div className="section-head">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                }}
+              >
+                <Info
+                  size={16}
+                  strokeWidth={2}
+                  color="var(--green-2)"
+                />
+                <div className="section-head-title">Ticket guidelines</div>
+              </div>
+            </div>
+            <div style={{ padding: "14px 16px 16px" }}>
+              <ul className="guideline-list">
+                <li className="guideline-item">
+                  <CircleCheck size={14} strokeWidth={2.5} />
+                  <span>
+                    Be as specific as possible in the short description for
+                    faster routing.
+                  </span>
+                </li>
+                <li className="guideline-item">
+                  <CircleCheck size={14} strokeWidth={2.5} />
+                  <span>Include exact room numbers or asset IDs if known.</span>
+                </li>
+                <li className="guideline-item">
+                  <CircleCheck size={14} strokeWidth={2.5} />
+                  <span>
+                    Photos drastically improve response times for maintenance
+                    issues.
+                  </span>
+                </li>
+              </ul>
+            </div>
+          </div>
 
-            <dl className="preview-list">
-              <div>
-                <dt>Building</dt>
-                <dd>{selectedBuilding?.name || "Not selected"}</dd>
+          <div className="card">
+            <div className="section-head">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                }}
+              >
+                <Clock size={16} strokeWidth={2} color="var(--green-2)" />
+                <div className="section-head-title">Response SLAs</div>
               </div>
-              <div>
-                <dt>Customer</dt>
-                <dd>{selectedCustomer?.name || "Not selected"}</dd>
+            </div>
+            <div style={{ padding: "6px 16px 12px" }}>
+              <div className="sla-list">
+                <div className="sla-list-item" data-prio="NORMAL">
+                  <span className="sla-list-name">Medium priority</span>
+                  <span className="sla-list-time">24 hours</span>
+                </div>
+                <div className="sla-list-item" data-prio="HIGH">
+                  <span className="sla-list-name">High priority</span>
+                  <span className="sla-list-time">4 hours</span>
+                </div>
+                <div className="sla-list-item" data-prio="URGENT">
+                  <span className="sla-list-name">Urgent</span>
+                  <span className="sla-list-time">Immediate (1 h)</span>
+                </div>
               </div>
-              <div>
-                <dt>Type</dt>
-                <dd>{selectedType?.label || "Report"}</dd>
-              </div>
-              <div>
-                <dt>Attachments</dt>
-                <dd>Can be added after ticket creation</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section className="card side-card muted-card">
-            <h2>Next step</h2>
-            <p className="muted">
-              After creating the ticket, you can add files, send updates, assign a manager,
-              and move the ticket through the approval workflow.
-            </p>
-          </section>
+            </div>
+          </div>
         </aside>
       </form>
-    </>
+    </div>
   );
 }

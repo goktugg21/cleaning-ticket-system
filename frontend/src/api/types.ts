@@ -139,3 +139,137 @@ export interface AssignableManager {
   full_name: string;
   role: "BUILDING_MANAGER";
 }
+
+export interface TicketStats {
+  total: number;
+  by_status: Partial<Record<TicketStatus, number>>;
+  by_priority: Partial<Record<string, number>>;
+  my_open: number;
+  waiting_customer_approval: number;
+  urgent: number;
+}
+
+export interface TicketStatsByBuildingRow {
+  building_id: number;
+  building_name: string;
+  total: number;
+  open: number;
+  in_progress: number;
+  waiting_customer_approval: number;
+  urgent: number;
+}
+
+export type TicketStatsByBuildingResponse = TicketStatsByBuildingRow[];
+
+export type InvitationStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "REVOKED"
+  | "EXPIRED";
+
+export interface InvitationPreview {
+  email: string;
+  full_name: string;
+  role: Role;
+  inviter_email: string;
+  inviter_full_name: string;
+  company_names: string[];
+  building_names: string[];
+  customer_names: string[];
+  expires_at: string;
+}
+
+export interface CompanyAdmin {
+  id: number;
+  name: string;
+  slug: string;
+  default_language: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuildingAdmin {
+  id: number;
+  company: number;
+  name: string;
+  address: string;
+  city: string;
+  country: string;
+  postal_code: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerAdmin {
+  id: number;
+  company: number;
+  building: number;
+  name: string;
+  contact_email: string;
+  phone: string;
+  language: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserAdmin {
+  id: number;
+  email: string;
+  full_name: string;
+  role: Role;
+  language: string;
+  is_active: boolean;
+  deleted_at: string | null;
+}
+
+export interface UserAdminDetail extends UserAdmin {
+  company_ids: number[];
+  building_ids: number[];
+  customer_ids: number[];
+}
+
+export interface InvitationAdmin {
+  id: number;
+  email: string;
+  full_name: string;
+  role: Role;
+  status: "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+  created_at: string;
+  expires_at: string;
+  created_by_email: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CompanyAdminMembership {
+  id: number;
+  company: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: Role;
+  created_at: string;
+}
+
+export interface BuildingManagerMembership {
+  id: number;
+  building: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: Role;
+  assigned_at: string;
+}
+
+export interface CustomerUserMembership {
+  id: number;
+  customer: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_role: Role;
+  created_at: string;
+}

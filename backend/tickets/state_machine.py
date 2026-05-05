@@ -28,10 +28,12 @@ ALLOWED_TRANSITIONS = {
     },
     (TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.APPROVED): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.CUSTOMER_USER: SCOPE_CUSTOMER_LINKED,
     },
     (TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.REJECTED): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.CUSTOMER_USER: SCOPE_CUSTOMER_LINKED,
     },
     (TicketStatus.REJECTED, TicketStatus.IN_PROGRESS): {
@@ -55,12 +57,20 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+# Each entry stamps the field with the most-recent timestamp on entry to that
+# status. Loop transitions (REJECTED -> IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
+# -> APPROVED again) overwrite the value. For first/last/duration analytics use
+# TicketStatusHistory, which records every transition.
 TIMESTAMP_ON_ENTER = {
     TicketStatus.WAITING_CUSTOMER_APPROVAL: "sent_for_approval_at",
     TicketStatus.APPROVED: "approved_at",
     TicketStatus.REJECTED: "rejected_at",
     TicketStatus.CLOSED: "closed_at",
 }
+
+# resolved_at means "work is done, awaiting close" and is stamped on entry to
+# APPROVED. Same loop-overwrite semantics as TIMESTAMP_ON_ENTER.
+RESOLVED_AT_ON_STATUS = {TicketStatus.APPROVED}
 
 
 class TransitionError(Exception):
@@ -82,6 +92,10 @@ def _user_passes_scope(user, ticket, scope):
 
 
 def can_transition(user, ticket, to_status):
+    # SUPER_ADMIN_CAN_TRANSITION_ANY_STATUS
+    if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        return str(to_status) != str(ticket.status)
+
     key = (ticket.status, to_status)
     role_scopes = ALLOWED_TRANSITIONS.get(key)
     if role_scopes is None:
@@ -118,10 +132,14 @@ def apply_transition(ticket, user, to_status, note=""):
     locked.status = to_status
 
     update_fields = ["status", "updated_at"]
+    now = timezone.now()
     timestamp_field = TIMESTAMP_ON_ENTER.get(to_status)
     if timestamp_field:
-        setattr(locked, timestamp_field, timezone.now())
+        setattr(locked, timestamp_field, now)
         update_fields.append(timestamp_field)
+    if to_status in RESOLVED_AT_ON_STATUS:
+        locked.resolved_at = now
+        update_fields.append("resolved_at")
 
     locked.save(update_fields=update_fields)
     locked.mark_first_response_if_needed()
@@ -137,6 +155,14 @@ def apply_transition(ticket, user, to_status, note=""):
 
 
 def allowed_next_statuses(user, ticket):
+    # SUPER_ADMIN_ALLOWED_NEXT_ALL_STATUSES
+    if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        return [
+            status
+            for status, _label in TicketStatus.choices
+            if str(status) != str(ticket.status)
+        ]
+
     return [
         to_status
         for (from_status, to_status), role_scopes in ALLOWED_TRANSITIONS.items()

@@ -165,6 +165,15 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 {"customer": "Customer does not belong to the selected building."}
             )
 
+        if not building.is_active:
+            raise serializers.ValidationError(
+                {"building": "This building is inactive and cannot receive new tickets."}
+            )
+        if not customer.is_active:
+            raise serializers.ValidationError(
+                {"customer": "This customer is inactive and cannot receive new tickets."}
+            )
+
         if user.role == UserRole.SUPER_ADMIN:
             return attrs
 
@@ -294,9 +303,13 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
 
         mime_type = getattr(value, "content_type", "") or "application/octet-stream"
         file_size = getattr(value, "size", 0)
+        extension = FilePath(getattr(value, "name", "")).suffix.lower()
 
         if file_size > max_size:
             raise serializers.ValidationError("Attachment file size cannot exceed 10 MB.")
+
+        if extension not in ALLOWED_ATTACHMENT_EXTENSIONS:
+            raise serializers.ValidationError(ALLOWED_ATTACHMENT_MESSAGE)
 
         if mime_type not in allowed_mime_types:
             raise serializers.ValidationError(
@@ -323,10 +336,46 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         if not user_has_scope_for_ticket(user, ticket):
             raise serializers.ValidationError("You do not have access to this ticket.")
 
+        message = attrs.get("message")
+        if message and message.ticket_id != ticket.id:
+            raise serializers.ValidationError(
+                {"message": "Attachment message must belong to this ticket."}
+            )
+
+        if (
+            message
+            and not is_staff_role(user)
+            and (message.is_hidden or message.message_type == TicketMessageType.INTERNAL_NOTE)
+        ):
+            raise serializers.ValidationError(
+                {"message": "Customer users cannot attach files to hidden/internal messages."}
+            )
+
         return attrs
 
 
 class TicketStatusChangeSerializer(serializers.Serializer):
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+
+        # CUSTOMER_REJECT_REQUIRES_NOTE
+        request = self.context.get("request")
+        current_user = getattr(request, "user", None)
+        note = (attrs.get("note") or "").strip()
+        attrs["note"] = note
+        to_status = attrs.get("to_status")
+
+        if (
+            getattr(current_user, "role", None) == "CUSTOMER_USER"
+            and str(to_status) == "REJECTED"
+            and not note
+        ):
+            raise serializers.ValidationError(
+                {"note": "Please explain why this ticket is rejected."}
+            )
+
+        return attrs
+
     to_status = serializers.ChoiceField(choices=TicketStatus.choices)
     note = serializers.CharField(required=False, allow_blank=True, default="")
 

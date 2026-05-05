@@ -75,7 +75,12 @@ def scope_companies_for(user):
         return Company.objects.none()
     if user.role == UserRole.SUPER_ADMIN:
         return Company.objects.all()
-    return Company.objects.filter(id__in=list(company_ids_for(user))).distinct()
+    # Non-super-admin reads are limited to active tenants. Super admins still
+    # see archived rows so they can re-activate or audit them.
+    return Company.objects.filter(
+        id__in=list(company_ids_for(user)),
+        is_active=True,
+    ).distinct()
 
 
 def scope_buildings_for(user):
@@ -83,7 +88,10 @@ def scope_buildings_for(user):
         return Building.objects.none()
     if user.role == UserRole.SUPER_ADMIN:
         return Building.objects.all()
-    return Building.objects.filter(id__in=list(building_ids_for(user))).distinct()
+    return Building.objects.filter(
+        id__in=list(building_ids_for(user)),
+        is_active=True,
+    ).distinct()
 
 
 def scope_customers_for(user):
@@ -91,7 +99,10 @@ def scope_customers_for(user):
         return Customer.objects.none()
     if user.role == UserRole.SUPER_ADMIN:
         return Customer.objects.all()
-    return Customer.objects.filter(id__in=list(customer_ids_for(user))).distinct()
+    return Customer.objects.filter(
+        id__in=list(customer_ids_for(user)),
+        is_active=True,
+    ).distinct()
 
 
 def scope_tickets_for(user):
@@ -114,3 +125,31 @@ def scope_tickets_for(user):
         return Ticket.objects.filter(customer_id__in=customer_ids)
 
     return Ticket.objects.none()
+
+
+def _user_in_actor_company(actor, target_user):
+    """
+    True if `target_user` has any membership in any of `actor`'s companies.
+
+    Used by CanManageUser. Encapsulates the company-overlap check so callers
+    do not duplicate the union-of-three-membership-types query.
+    """
+    actor_company_ids = list(
+        CompanyUserMembership.objects.filter(user=actor).values_list("company_id", flat=True)
+    )
+    if not actor_company_ids:
+        return False
+
+    if CompanyUserMembership.objects.filter(
+        user=target_user, company_id__in=actor_company_ids
+    ).exists():
+        return True
+    if BuildingManagerAssignment.objects.filter(
+        user=target_user, building__company_id__in=actor_company_ids
+    ).exists():
+        return True
+    if CustomerUserMembership.objects.filter(
+        user=target_user, customer__company_id__in=actor_company_ids
+    ).exists():
+        return True
+    return False

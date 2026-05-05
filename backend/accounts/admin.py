@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
+from .invitations import Invitation
 from .models import LoginLog, User
 
 
@@ -38,3 +39,12 @@ class LoginLogAdmin(admin.ModelAdmin):
     list_filter = ("success", "created_at")
     search_fields = ("email", "user__email", "ip_address", "user_agent")
     readonly_fields = ("created_at",)
+
+
+@admin.register(Invitation)
+class InvitationAdmin(admin.ModelAdmin):
+    list_display = ("email", "role", "created_by", "created_at", "expires_at", "accepted_at", "revoked_at")
+    list_filter = ("role", "created_at", "accepted_at", "revoked_at")
+    search_fields = ("email", "full_name", "created_by__email")
+    readonly_fields = ("token_hash", "created_at", "accepted_at", "accepted_by", "revoked_at", "revoked_by")
+    filter_horizontal = ("companies", "buildings", "customers")

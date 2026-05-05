@@ -1,3 +1,4 @@
+from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
@@ -12,6 +13,7 @@ from notifications.services import (
     send_ticket_assigned_email,
     send_ticket_created_email,
     send_ticket_status_changed_email,
+    send_ticket_unassigned_email,
 )
 
 from .filters import TicketFilter
@@ -38,8 +40,17 @@ class TicketViewSet(
 ):
     permission_classes = [IsAuthenticatedAndActive, CanViewTicket]
     filterset_class = TicketFilter
-    search_fields = ["ticket_no", "title", "description", "room_label"]
     ordering_fields = ["created_at", "updated_at", "priority", "status"]
+
+    @property
+    def search_fields(self):
+        # Only staff can substring-search across descriptions; for customer
+        # users descriptions can carry context that should stay scoped to the
+        # one ticket they were typed into. Implemented as a property because
+        # DRF's SearchFilter reads view.search_fields directly via getattr.
+        if is_staff_role(self.request.user):
+            return ["ticket_no", "title", "room_label", "description"]
+        return ["ticket_no", "title", "room_label"]
 
     def get_queryset(self):
         qs = scope_tickets_for(self.request.user).select_related(
@@ -69,17 +80,32 @@ class TicketViewSet(
     def change_status(self, request, pk=None):
         ticket = self.get_object()
         old_status = ticket.status
+        to_status = request.data.get("to_status")
+        if not is_staff_role(request.user) and to_status not in {
+            "APPROVED",
+            "REJECTED",
+        }:
+            self.permission_denied(
+                request,
+                message="Customer users cannot perform staff-only status transitions.",
+            )
         serializer = TicketStatusChangeSerializer(
             data=request.data,
             context={"request": request, "ticket": ticket},
         )
         serializer.is_valid(raise_exception=True)
         updated = serializer.save()
+        is_admin_override = (
+            is_staff_role(request.user)
+            and old_status == "WAITING_CUSTOMER_APPROVAL"
+            and updated.status in {"APPROVED", "REJECTED"}
+        )
         send_ticket_status_changed_email(
             updated,
             old_status=old_status,
             new_status=updated.status,
             actor=request.user,
+            is_admin_override=is_admin_override,
         )
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
@@ -90,6 +116,11 @@ class TicketViewSet(
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
+        if not is_staff_role(request.user):
+            self.permission_denied(
+                request,
+                message="Customer users cannot assign tickets.",
+            )
         old_assigned_to = ticket.assigned_to
         serializer = TicketAssignSerializer(
             data=request.data,
@@ -105,12 +136,81 @@ class TicketViewSet(
                 old_assigned_to=old_assigned_to,
                 actor=request.user,
             )
+            if old_assigned_to is not None:
+                send_ticket_unassigned_email(
+                    updated,
+                    recipient_user=old_assigned_to,
+                    actor=request.user,
+                )
 
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
 
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        scoped = scope_tickets_for(request.user)
+
+        status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
+        priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
+
+        closed_states = {"CLOSED", "APPROVED", "REJECTED"}
+        my_open = sum(c for s, c in status_counts.items() if s not in closed_states)
+        waiting_customer_approval = status_counts.get("WAITING_CUSTOMER_APPROVAL", 0)
+        urgent = scoped.exclude(status__in=closed_states).filter(priority="URGENT").count()
+        total = sum(status_counts.values())
+
+        return Response(
+            {
+                "total": total,
+                "by_status": status_counts,
+                "by_priority": priority_counts,
+                "my_open": my_open,
+                "waiting_customer_approval": waiting_customer_approval,
+                "urgent": urgent,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats/by-building")
+    def stats_by_building(self, request):
+        scoped = scope_tickets_for(request.user)
+        closed_states = ["CLOSED", "APPROVED", "REJECTED"]
+
+        rows = (
+            scoped.values("building_id", "building__name")
+            .annotate(
+                total=Count("id"),
+                open=Count("id", filter=Q(status="OPEN")),
+                in_progress=Count("id", filter=Q(status="IN_PROGRESS")),
+                waiting_customer_approval=Count(
+                    "id", filter=Q(status="WAITING_CUSTOMER_APPROVAL")
+                ),
+                urgent=Count(
+                    "id",
+                    filter=Q(priority="URGENT") & ~Q(status__in=closed_states),
+                ),
+            )
+            .order_by("building__name")
+        )
+
+        return Response(
+            [
+                {
+                    "building_id": row["building_id"],
+                    "building_name": row["building__name"],
+                    "total": row["total"],
+                    "open": row["open"],
+                    "in_progress": row["in_progress"],
+                    "waiting_customer_approval": row["waiting_customer_approval"],
+                    "urgent": row["urgent"],
+                }
+                for row in rows
+            ],
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="assignable-managers")
     def assignable_managers(self, request, pk=None):
@@ -148,7 +248,7 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         ticket_id = self.kwargs["ticket_id"]
         ticket = get_object_or_404(Ticket, pk=ticket_id)
         if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
-            self.permission_denied(self.request, message="Ticket not found in your scope.")
+            raise Http404("Ticket not found.")
         self.check_object_permissions(self.request, ticket)
         return ticket
 
@@ -201,7 +301,7 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         ticket = get_object_or_404(Ticket, pk=ticket_id)
 
         if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
-            self.permission_denied(self.request, message="Ticket not found in your scope.")
+            raise Http404("Ticket not found.")
 
         self.check_object_permissions(self.request, ticket)
         return ticket
@@ -232,8 +332,6 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         uploaded_file = serializer.validated_data["file"]
 
         is_hidden = serializer.validated_data.get("is_hidden", False)
-        if not is_staff_role(user):
-            is_hidden = False
 
         serializer.save(
             ticket=ticket,
@@ -252,7 +350,7 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
         ticket = get_object_or_404(Ticket, pk=ticket_id)
 
         if not scope_tickets_for(request.user).filter(pk=ticket.pk).exists():
-            self.permission_denied(request, message="Ticket not found in your scope.")
+            raise Http404("Ticket not found.")
 
         attachment = get_object_or_404(
             TicketAttachment,
@@ -260,7 +358,14 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
             ticket=ticket,
         )
 
-        if attachment.is_hidden and not is_staff_role(request.user):
+        hidden_by_message = (
+            attachment.message_id
+            and (
+                attachment.message.is_hidden
+                or attachment.message.message_type == TicketMessageType.INTERNAL_NOTE
+            )
+        )
+        if (attachment.is_hidden or hidden_by_message) and not is_staff_role(request.user):
             self.permission_denied(request, message="Attachment not found in your scope.")
 
         if not attachment.file:

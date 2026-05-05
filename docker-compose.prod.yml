@@ -54,6 +54,24 @@ services:
       redis:
         condition: service_healthy
 
+  worker:
+    logging: *default-logging
+    build:
+      context: ./backend
+    container_name: cleaning_ticket_prod_worker
+    restart: unless-stopped
+    command: celery -A config worker -l info --concurrency=2
+    user: app
+    env_file:
+      - .env
+    volumes:
+      - backend_media_prod:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     logging: *default-logging
     build:

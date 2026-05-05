@@ -32,5 +32,19 @@ services:
       - db
       - redis
 
+  worker:
+    build:
+      context: ./backend
+    container_name: cleaning_ticket_worker
+    command: celery -A config worker -l info
+    user: app
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+
 volumes:
   postgres_data:

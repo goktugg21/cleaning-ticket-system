@@ -15,3 +15,11 @@ RUN pip install --upgrade pip \
     && pip install -r /app/requirements.txt
 
 COPY . /app/
+
+# Create a non-root user for services that opt in via compose `user:`.
+# Backend service still runs as root by default in this image; only the
+# worker service overrides `user:` in compose. Backend non-root is a
+# separate hardening change (it must verify writable paths for media,
+# staticfiles, and uploads).
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app \
+    && chown -R app:app /app

@@ -1,7 +1,10 @@
 import os
+import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 def env_bool(name: str, default: str = "False") -> bool:
@@ -39,6 +42,7 @@ INSTALLED_APPS = [
 
     "rest_framework",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "django_filters",
     "corsheaders",
 
@@ -83,16 +87,24 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "cleaning_ticket_db"),
-        "USER": os.environ.get("POSTGRES_USER", "cleaning_ticket_user"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "cleaning_ticket_password"),
-        "HOST": os.environ.get("POSTGRES_HOST", "db"),
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+if env_bool("USE_SQLITE", "False"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB", "cleaning_ticket_db"),
+            "USER": os.environ.get("POSTGRES_USER", "cleaning_ticket_user"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "cleaning_ticket_password"),
+            "HOST": os.environ.get("POSTGRES_HOST", "db"),
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        }
+    }
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -172,10 +184,10 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": os.environ.get("DRF_THROTTLE_ANON_RATE", "1000/minute"),
-        "user": os.environ.get("DRF_THROTTLE_USER_RATE", "10000/hour"),
-        "auth_token": os.environ.get("DRF_THROTTLE_AUTH_TOKEN_RATE", "200/minute"),
-        "auth_token_refresh": os.environ.get("DRF_THROTTLE_AUTH_TOKEN_REFRESH_RATE", "300/minute"),
+        "anon": os.environ.get("DRF_THROTTLE_ANON_RATE", "60/minute"),
+        "user": os.environ.get("DRF_THROTTLE_USER_RATE", "5000/hour"),
+        "auth_token": os.environ.get("DRF_THROTTLE_AUTH_TOKEN_RATE", "20/minute"),
+        "auth_token_refresh": os.environ.get("DRF_THROTTLE_AUTH_TOKEN_REFRESH_RATE", "60/minute"),
     },
 }
 
@@ -184,8 +196,31 @@ from datetime import timedelta
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
     "USER_AUTHENTICATION_RULE": "accounts.auth.user_authentication_rule",
 }
+
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/2")
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", "False")
+CELERY_TASK_EAGER_PROPAGATES = env_bool("CELERY_TASK_EAGER_PROPAGATES", "True")
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_TIME_LIMIT = 120
+CELERY_TASK_SOFT_TIME_LIMIT = 90
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+
+NOTIFICATION_QUEUED_TIMEOUT_MINUTES = int(
+    os.environ.get("NOTIFICATION_QUEUED_TIMEOUT_MINUTES", "30")
+)
+
+INVITATION_TTL_DAYS = int(os.environ.get("INVITATION_TTL_DAYS", "7"))
+INVITATION_ACCEPT_FRONTEND_URL = os.environ.get(
+    "INVITATION_ACCEPT_FRONTEND_URL", ""
+)
 
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
@@ -193,6 +228,7 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@example.com")
+PASSWORD_RESET_FRONTEND_URL = os.environ.get("PASSWORD_RESET_FRONTEND_URL", "")
 EMAIL_BACKEND = os.environ.get(
     "EMAIL_BACKEND",
     "django.core.mail.backends.smtp.EmailBackend"
@@ -213,3 +249,12 @@ if SENTRY_DSN:
         traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
         send_default_pii=False,
     )
+
+
+from .security import validate_production_settings
+
+validate_production_settings(globals(), environ=os.environ)
+
+if "test" in sys.argv or os.environ.get("DJANGO_TEST", "") == "1":
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = True

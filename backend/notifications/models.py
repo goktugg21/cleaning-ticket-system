@@ -7,9 +7,13 @@ class NotificationEventType(models.TextChoices):
     TICKET_CREATED = "TICKET_CREATED", "Ticket created"
     TICKET_STATUS_CHANGED = "TICKET_STATUS_CHANGED", "Ticket status changed"
     TICKET_ASSIGNED = "TICKET_ASSIGNED", "Ticket assigned"
+    TICKET_UNASSIGNED = "TICKET_UNASSIGNED", "Ticket unassigned"
+    PASSWORD_RESET = "PASSWORD_RESET", "Password reset"
+    INVITATION_SENT = "INVITATION_SENT", "Invitation sent"
 
 
 class NotificationStatus(models.TextChoices):
+    QUEUED = "QUEUED", "Queued"
     SENT = "SENT", "Sent"
     FAILED = "FAILED", "Failed"
     SKIPPED = "SKIPPED", "Skipped"
@@ -70,3 +74,7 @@ class NotificationLog(models.Model):
         self.error_message = str(message)
         self.sent_at = None
         self.save(update_fields=["status", "error_message", "sent_at"])
+
+    def mark_queued(self):
+        self.status = NotificationStatus.QUEUED
+        self.save(update_fields=["status"])
