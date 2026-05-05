@@ -125,3 +125,31 @@ def scope_tickets_for(user):
         return Ticket.objects.filter(customer_id__in=customer_ids)
 
     return Ticket.objects.none()
+
+
+def _user_in_actor_company(actor, target_user):
+    """
+    True if `target_user` has any membership in any of `actor`'s companies.
+
+    Used by CanManageUser. Encapsulates the company-overlap check so callers
+    do not duplicate the union-of-three-membership-types query.
+    """
+    actor_company_ids = list(
+        CompanyUserMembership.objects.filter(user=actor).values_list("company_id", flat=True)
+    )
+    if not actor_company_ids:
+        return False
+
+    if CompanyUserMembership.objects.filter(
+        user=target_user, company_id__in=actor_company_ids
+    ).exists():
+        return True
+    if BuildingManagerAssignment.objects.filter(
+        user=target_user, building__company_id__in=actor_company_ids
+    ).exists():
+        return True
+    if CustomerUserMembership.objects.filter(
+        user=target_user, customer__company_id__in=actor_company_ids
+    ).exists():
+        return True
+    return False
