@@ -61,6 +61,7 @@ services:
     container_name: cleaning_ticket_prod_worker
     restart: unless-stopped
     command: celery -A config worker -l info --concurrency=2
+    user: app
     env_file:
       - .env
     volumes:

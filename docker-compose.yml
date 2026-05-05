@@ -37,6 +37,7 @@ services:
       context: ./backend
     container_name: cleaning_ticket_worker
     command: celery -A config worker -l info
+    user: app
     volumes:
       - ./backend:/app
     env_file:
