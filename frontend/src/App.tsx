@@ -1,7 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { Suspense, lazy } from "react";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AdminRoute } from "./components/AdminRoute";
+import { ReportsRoute } from "./components/ReportsRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
@@ -18,6 +20,15 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { UserFormPage } from "./pages/admin/UserFormPage";
 import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
+
+// ReportsPage is the only consumer of recharts. Lazy-loaded so the
+// charting library lands in a separate chunk and the non-reports bundle
+// stays at the pre-Reports baseline. recharts 2.x does not tree-shake
+// cleanly from its main entry; route-level code splitting is the only
+// way to keep the initial bundle small.
+const ReportsPage = lazy(() =>
+  import("./pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
+);
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -166,6 +177,22 @@ export default function App() {
               <AdminRoute>
                 <InvitationsAdminPage />
               </AdminRoute>
+            }
+          />
+          <Route
+            path="/reports"
+            element={
+              <ReportsRoute>
+                <Suspense
+                  fallback={
+                    <div className="loading-bar">
+                      <div className="loading-bar-fill" />
+                    </div>
+                  }
+                >
+                  <ReportsPage />
+                </Suspense>
+              </ReportsRoute>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

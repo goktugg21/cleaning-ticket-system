@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  BarChart3,
   Building2,
   LayoutGrid,
   MailPlus,
@@ -12,6 +13,11 @@ import {
 import { useAuth } from "../auth/AuthContext";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+const REPORTS_ROLES = new Set([
+  "SUPER_ADMIN",
+  "COMPANY_ADMIN",
+  "BUILDING_MANAGER",
+]);
 
 const ROLE_LABEL: Record<string, string> = {
   SUPER_ADMIN: "Super admin",
@@ -93,6 +99,14 @@ export function AppShell({ children }: AppShellProps) {
             </span>
             New ticket
           </NavLink>
+          {me?.role && REPORTS_ROLES.has(me.role) && (
+            <NavLink to="/reports" className={navClass}>
+              <span className="nav-icon">
+                <BarChart3 size={16} strokeWidth={2} />
+              </span>
+              Reports
+            </NavLink>
+          )}
 
           {me?.role && STAFF_ROLES.has(me.role) && (
             <>
