@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
-import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Building2, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -48,6 +48,7 @@ const DEMO_USERS: DemoUser[] = [
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { me, login } = useAuth();
 
   const [email, setEmail] = useState("");
@@ -59,6 +60,15 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("reset") === "ok") {
+      setInfo("Your password has been updated. Sign in with the new password.");
+      const next = new URLSearchParams(searchParams);
+      next.delete("reset");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   if (me) return <Navigate to="/" replace />;
 

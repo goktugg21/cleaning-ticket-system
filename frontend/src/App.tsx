@@ -5,6 +5,7 @@ import { AppShell } from "./layout/AppShell";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -31,6 +32,10 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/password/reset/confirm"
+            element={<ResetPasswordConfirmPage />}
+          />
           <Route
             path="/"
             element={

@@ -69,6 +69,16 @@ See also:
 
     docs/SMTP_AMAZON_SES.md
 
+### Password reset link target
+
+The password reset email embeds the reset URL produced by `PASSWORD_RESET_FRONTEND_URL` from the environment. The URL is rendered with Python `str.format` so it must contain `{uid}` and `{token}` literal placeholders.
+
+Recommended value (matches the React route at `/password/reset/confirm`):
+
+    PASSWORD_RESET_FRONTEND_URL=https://tickets.example.com/password/reset/confirm?uid={uid}&token={token}
+
+If the variable is empty, the email still sends but contains the raw `uid` and `token` only, which is poor UX. Set this in production.
+
 ## 7. Configure HTTPS flags
 
 After HTTPS is ready, production should use:
