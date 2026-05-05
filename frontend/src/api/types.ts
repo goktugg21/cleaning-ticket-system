@@ -160,3 +160,21 @@ export interface TicketStatsByBuildingRow {
 }
 
 export type TicketStatsByBuildingResponse = TicketStatsByBuildingRow[];
+
+export type InvitationStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "REVOKED"
+  | "EXPIRED";
+
+export interface InvitationPreview {
+  email: string;
+  full_name: string;
+  role: Role;
+  inviter_email: string;
+  inviter_full_name: string;
+  company_names: string[];
+  building_names: string[];
+  customer_names: string[];
+  expires_at: string;
+}

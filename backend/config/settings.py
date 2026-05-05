@@ -217,6 +217,11 @@ NOTIFICATION_QUEUED_TIMEOUT_MINUTES = int(
     os.environ.get("NOTIFICATION_QUEUED_TIMEOUT_MINUTES", "30")
 )
 
+INVITATION_TTL_DAYS = int(os.environ.get("INVITATION_TTL_DAYS", "7"))
+INVITATION_ACCEPT_FRONTEND_URL = os.environ.get(
+    "INVITATION_ACCEPT_FRONTEND_URL", ""
+)
+
 EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")

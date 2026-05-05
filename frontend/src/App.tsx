@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AppShell } from "./layout/AppShell";
+import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -36,6 +37,7 @@ export default function App() {
             path="/password/reset/confirm"
             element={<ResetPasswordConfirmPage />}
           />
+          <Route path="/invite/accept" element={<AcceptInvitationPage />} />
           <Route
             path="/"
             element={

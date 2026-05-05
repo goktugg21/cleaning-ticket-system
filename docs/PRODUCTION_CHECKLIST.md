@@ -86,6 +86,23 @@ Email sending runs in a Celery worker container. The web request thread enqueues
 
   A healthy worker replies with `pong`.
 
+## Invitations
+
+User onboarding goes through one-time invitation links. The backend stores only the sha256 hash of each token; the raw token leaves the system once, in the email body.
+
+- [ ] Set the two new env vars in production `.env`:
+
+      INVITATION_TTL_DAYS=7
+      INVITATION_ACCEPT_FRONTEND_URL=https://<public-domain>/invite/accept?token={token}
+
+  Both `PASSWORD_RESET_FRONTEND_URL` and `INVITATION_ACCEPT_FRONTEND_URL` must be set; if either is empty, the matching email body shows a placeholder string instead of a real link.
+
+- [ ] Until the admin UI ships (CHANGE-16+), invitations can only be created via the API or via `manage.py shell`. For the first SUPER_ADMIN-issued company-admin invitation, open a shell on the backend container:
+
+      docker compose -f docker-compose.prod.yml exec backend python manage.py shell
+
+  Then run the snippet shown in `docs/ENV_SETUP.md` section 9 with the inviter, target company, and invitee email substituted in. The script prints the invitation id and writes the email through the worker. After CHANGE-16+ the same flow is available through the admin UI.
+
 ## Security
 
 - [x] Role-based ticket scoping is tested.

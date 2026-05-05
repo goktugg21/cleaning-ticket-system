@@ -9,6 +9,7 @@ class NotificationEventType(models.TextChoices):
     TICKET_ASSIGNED = "TICKET_ASSIGNED", "Ticket assigned"
     TICKET_UNASSIGNED = "TICKET_UNASSIGNED", "Ticket unassigned"
     PASSWORD_RESET = "PASSWORD_RESET", "Password reset"
+    INVITATION_SENT = "INVITATION_SENT", "Invitation sent"
 
 
 class NotificationStatus(models.TextChoices):

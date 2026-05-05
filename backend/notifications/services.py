@@ -20,6 +20,7 @@ __all__ = (
     "send_ticket_assigned_email",
     "send_ticket_unassigned_email",
     "send_password_reset_email",
+    "send_invitation_email",
 )
 
 
@@ -340,4 +341,56 @@ def send_password_reset_email(user, uid, token, reset_url=None):
         event_type=NotificationEventType.PASSWORD_RESET,
         subject=subject,
         body="\n".join(body_lines),
+    )
+
+
+def send_invitation_email(invitation, raw_token, accept_url):
+    """
+    Sends the invitation email to the invitee. Goes through the async Celery
+    task path; the request thread returns immediately after enqueue.
+
+    `raw_token` is the only place outside the email itself where the raw
+    token exists; the caller must not persist it.
+    """
+    inviter = invitation.created_by
+    inviter_label = inviter.full_name or inviter.email
+    role_label = dict(UserRole.choices).get(invitation.role, invitation.role)
+
+    scope_lines = []
+    company_names = list(invitation.companies.values_list("name", flat=True))
+    if company_names:
+        scope_lines.append("Companies: " + ", ".join(company_names))
+    building_names = list(invitation.buildings.values_list("name", flat=True))
+    if building_names:
+        scope_lines.append("Buildings: " + ", ".join(building_names))
+    customer_names = list(invitation.customers.values_list("name", flat=True))
+    if customer_names:
+        scope_lines.append("Customers: " + ", ".join(customer_names))
+
+    subject = f"You have been invited as {role_label}"
+    body_lines = [
+        "Hello,",
+        "",
+        f"{inviter_label} has invited you to join as {role_label}.",
+    ]
+    if scope_lines:
+        body_lines.append("")
+        body_lines.extend(scope_lines)
+    body_lines.extend([
+        "",
+        f"Accept this invitation by following the link below. The link expires on "
+        f"{invitation.expires_at:%Y-%m-%d %H:%M %Z}.",
+        "",
+        accept_url or "(operator: set INVITATION_ACCEPT_FRONTEND_URL)",
+        "",
+        "If you did not expect this invitation, you can ignore this email.",
+    ])
+
+    return send_logged_email(
+        recipient_email=invitation.email,
+        subject=subject,
+        body="\n".join(body_lines),
+        event_type=NotificationEventType.INVITATION_SENT,
+        recipient_user=None,
+        actor=inviter,
     )

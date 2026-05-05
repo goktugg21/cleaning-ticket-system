@@ -111,7 +111,23 @@ What each one does:
 
 Production must keep `CELERY_TASK_ALWAYS_EAGER=False`. With eager mode in prod, slow SMTP would once again block the request thread, which is the exact problem this change is meant to remove.
 
-## 9. Optional Sentry
+## 9. Invitations
+
+User onboarding goes through invitation links. The backend signs each invitation with a one-time, hashed-at-rest token; the raw token is only present in the email body.
+
+Required env vars:
+
+    INVITATION_TTL_DAYS=7
+    INVITATION_ACCEPT_FRONTEND_URL=https://tickets.example.com/invite/accept?token={token}
+
+What each one does:
+
+- `INVITATION_TTL_DAYS`: how long an invitation stays usable before it expires automatically. Default 7 days. Acceptable to lower for stricter policies; raising it weakens the security argument.
+- `INVITATION_ACCEPT_FRONTEND_URL`: the URL written into the email body. Must contain `{token}` as a literal placeholder. The backend formats it with the raw token at send time. If left empty, the email body shows a placeholder string instead of a link, which is bad UX. Set this in production.
+
+The matching React route is `/invite/accept`, which calls `GET /api/auth/invitations/preview/?token=...` on mount and submits to `POST /api/auth/invitations/accept/` with `{token, new_password}`.
+
+## 10. Optional Sentry
 
 Sentry is disabled when `SENTRY_DSN` is empty.
 
@@ -121,7 +137,7 @@ To enable it:
     SENTRY_ENVIRONMENT=production
     SENTRY_TRACES_SAMPLE_RATE=0.0
 
-## 10. Validate the final environment file
+## 11. Validate the final environment file
 
 Run:
 

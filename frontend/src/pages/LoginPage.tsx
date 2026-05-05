@@ -67,6 +67,11 @@ export function LoginPage() {
       const next = new URLSearchParams(searchParams);
       next.delete("reset");
       setSearchParams(next, { replace: true });
+    } else if (searchParams.get("invited") === "ok") {
+      setInfo("Account created. Sign in to continue.");
+      const next = new URLSearchParams(searchParams);
+      next.delete("invited");
+      setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
 
