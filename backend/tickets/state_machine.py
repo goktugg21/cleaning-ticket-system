@@ -55,12 +55,20 @@ ALLOWED_TRANSITIONS = {
 }
 
 
+# Each entry stamps the field with the most-recent timestamp on entry to that
+# status. Loop transitions (REJECTED -> IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
+# -> APPROVED again) overwrite the value. For first/last/duration analytics use
+# TicketStatusHistory, which records every transition.
 TIMESTAMP_ON_ENTER = {
     TicketStatus.WAITING_CUSTOMER_APPROVAL: "sent_for_approval_at",
     TicketStatus.APPROVED: "approved_at",
     TicketStatus.REJECTED: "rejected_at",
     TicketStatus.CLOSED: "closed_at",
 }
+
+# resolved_at means "work is done, awaiting close" and is stamped on entry to
+# APPROVED. Same loop-overwrite semantics as TIMESTAMP_ON_ENTER.
+RESOLVED_AT_ON_STATUS = {TicketStatus.APPROVED}
 
 
 class TransitionError(Exception):
@@ -122,10 +130,14 @@ def apply_transition(ticket, user, to_status, note=""):
     locked.status = to_status
 
     update_fields = ["status", "updated_at"]
+    now = timezone.now()
     timestamp_field = TIMESTAMP_ON_ENTER.get(to_status)
     if timestamp_field:
-        setattr(locked, timestamp_field, timezone.now())
+        setattr(locked, timestamp_field, now)
         update_fields.append(timestamp_field)
+    if to_status in RESOLVED_AT_ON_STATUS:
+        locked.resolved_at = now
+        update_fields.append("resolved_at")
 
     locked.save(update_fields=update_fields)
     locked.mark_first_response_if_needed()
