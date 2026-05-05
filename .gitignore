@@ -24,3 +24,6 @@ backups/
 # Keep safe environment templates tracked
 !.env.example
 !.env.production.example
+
+# Claude Code agent metadata
+.claude/
