@@ -11,6 +11,25 @@ import type {
   TicketStatsByBuildingRow,
   TicketStatus,
 } from "../api/types";
+import { SLABadge } from "../components/sla/SLABadge";
+
+type SLAFilterValue =
+  | ""
+  | "on_track"
+  | "at_risk"
+  | "breached"
+  | "paused"
+  | "completed"
+  | "historical";
+
+const SLA_FILTER_OPTIONS: { value: Exclude<SLAFilterValue, "">; label: string }[] = [
+  { value: "on_track", label: "On track" },
+  { value: "at_risk", label: "At risk" },
+  { value: "breached", label: "Breached" },
+  { value: "paused", label: "Paused" },
+  { value: "completed", label: "Completed" },
+  { value: "historical", label: "Historical" },
+];
 
 type Priority = "NORMAL" | "HIGH" | "URGENT";
 
@@ -85,6 +104,34 @@ export function DashboardPage() {
   const [searchActive, setSearchActive] = useState("");
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const slaFilter: SLAFilterValue = (() => {
+    const raw = searchParams.get("sla") || "";
+    const allowed: SLAFilterValue[] = [
+      "",
+      "on_track",
+      "at_risk",
+      "breached",
+      "paused",
+      "completed",
+      "historical",
+    ];
+    return allowed.includes(raw as SLAFilterValue)
+      ? (raw as SLAFilterValue)
+      : "";
+  })();
+  const setSlaFilter = useCallback(
+    (value: SLAFilterValue) => {
+      const next = new URLSearchParams(searchParams);
+      if (value) {
+        next.set("sla", value);
+      } else {
+        next.delete("sla");
+      }
+      setSearchParams(next, { replace: true });
+      setPage(1);
+    },
+    [searchParams, setSearchParams],
+  );
   const [adminRequiredBanner, setAdminRequiredBanner] = useState("");
 
   useEffect(() => {
@@ -103,8 +150,9 @@ export function DashboardPage() {
     if (statusFilter) params.status = statusFilter;
     if (priorityFilter) params.priority = priorityFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
+    if (slaFilter) params.sla = slaFilter;
     return params;
-  }, [page, statusFilter, priorityFilter, searchActive]);
+  }, [page, statusFilter, priorityFilter, searchActive, slaFilter]);
 
   const loadTickets = useCallback(async () => {
     setLoading(true);
@@ -166,10 +214,11 @@ export function DashboardPage() {
     setPriorityFilter("");
     setSearchInput("");
     setSearchActive("");
+    setSlaFilter("");
   }
 
   const hasActiveFilters = Boolean(
-    statusFilter || priorityFilter || searchActive,
+    statusFilter || priorityFilter || searchActive || slaFilter,
   );
 
   const kpis = useMemo(() => {
@@ -345,6 +394,23 @@ export function DashboardPage() {
                   ))}
                 </select>
               </div>
+              <div className="filter-field">
+                <span className="filter-label">SLA</span>
+                <select
+                  className="filter-control"
+                  value={slaFilter}
+                  onChange={(event) =>
+                    setSlaFilter(event.target.value as SLAFilterValue)
+                  }
+                >
+                  <option value="">All SLA states</option>
+                  {SLA_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="filter-field search">
                 <span className="filter-label">Search</span>
                 <input
@@ -385,6 +451,7 @@ export function DashboardPage() {
                     <th>Subject</th>
                     <th>Priority</th>
                     <th>Status</th>
+                    <th>SLA</th>
                     <th>Facility</th>
                     <th>Customer</th>
                     <th>Created</th>
@@ -424,6 +491,12 @@ export function DashboardPage() {
                           <i />
                           {STATUS_LABEL[ticket.status]}
                         </span>
+                      </td>
+                      <td>
+                        <SLABadge
+                          state={ticket.sla_display_state}
+                          remainingSeconds={ticket.sla_remaining_business_seconds}
+                        />
                       </td>
                       <td className="td-facility">{ticket.building_name}</td>
                       <td className="td-customer">{ticket.customer_name}</td>

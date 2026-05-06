@@ -24,6 +24,11 @@ import type {
   TicketStatus,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { SLABadge } from "../components/sla/SLABadge";
+import {
+  formatSLATime,
+  SLA_DISPLAY_STATE_LABEL,
+} from "../utils/sla";
 
 const STATUS_LABEL: Record<TicketStatus, string> = {
   OPEN: "Open",
@@ -149,46 +154,6 @@ function priorityLabelLong(priority: string): string {
 }
 
 
-// TODO(backend): replace with GET /api/tickets/:id/sla — UI derives SLA targets
-// from priority until backend exposes a real SLA tracker payload.
-function deriveSlaSummary(priority: string): {
-  target: string;
-  consumedPct: number;
-  consumedLabel: string;
-  level: string;
-} {
-  switch (priority) {
-    case "URGENT":
-      return {
-        target: "1 h",
-        consumedPct: 78,
-        consumedLabel: "1 h 14 m",
-        level: "Critical",
-      };
-    case "HIGH":
-      return {
-        target: "4 h",
-        consumedPct: 52,
-        consumedLabel: "3 h 22 m",
-        level: "High",
-      };
-    case "LOW":
-      return {
-        target: "48 h",
-        consumedPct: 24,
-        consumedLabel: "11 h 30 m",
-        level: "Routine",
-      };
-    default:
-      return {
-        target: "24 h",
-        consumedPct: 38,
-        consumedLabel: "9 h 06 m",
-        level: "Standard",
-      };
-  }
-}
-
 export function TicketDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
@@ -287,11 +252,6 @@ export function TicketDetailPage() {
       cancelled = true;
     };
   }, [id, isStaff]);
-
-  const sla = useMemo(
-    () => (ticket ? deriveSlaSummary(ticket.priority) : null),
-    [ticket],
-  );
 
   const visibleNextStatuses = useMemo(
     () => (ticket ? getVisibleWorkflowStatuses(ticket, me?.role) : []),
@@ -963,41 +923,81 @@ export function TicketDetailPage() {
             </div>
           </div>
 
-          {sla && (
-            <div className="card">
-              <div className="section-head">
-                <div
-                  className="section-head-title"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: "0.12em",
-                    textTransform: "uppercase",
-                    color: "var(--text-faint)",
-                  }}
-                >
-                  SLA tracker
-                </div>
-              </div>
-              <div style={{ padding: "16px 18px 18px" }}>
-                <div className="sla-tracker-row">
-                  <span className="sla-tracker-label">Resolution time</span>
-                  <span className="sla-tracker-value">
-                    {sla.consumedLabel}
-                  </span>
-                </div>
-                <div className="sla-bar">
-                  <div
-                    className="sla-bar-fill"
-                    style={{ width: `${sla.consumedPct}%` }}
-                  />
-                </div>
-                <div className="sla-tracker-foot">
-                  Target: {sla.target} · {sla.level}
-                </div>
+          <div className="card">
+            <div className="section-head">
+              <div
+                className="section-head-title"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "var(--text-faint)",
+                }}
+              >
+                SLA
               </div>
             </div>
-          )}
+            <div style={{ padding: "16px 18px 18px" }}>
+              <div className="sla-detail-row">
+                <SLABadge
+                  state={ticket.sla_display_state}
+                  remainingSeconds={ticket.sla_remaining_business_seconds}
+                  size="md"
+                />
+                <span style={{ color: "var(--text-2)", fontSize: 13 }}>
+                  {SLA_DISPLAY_STATE_LABEL[ticket.sla_display_state]}
+                  {ticket.sla_display_state !== "PAUSED" &&
+                    ticket.sla_display_state !== "COMPLETED" &&
+                    ticket.sla_display_state !== "HISTORICAL" &&
+                    ticket.sla_remaining_business_seconds !== null && (
+                      <>
+                        {" — "}
+                        {formatSLATime(
+                          ticket.sla_remaining_business_seconds,
+                        )}
+                      </>
+                    )}
+                </span>
+              </div>
+              <div className="sla-detail-meta">
+                {ticket.sla_due_at &&
+                  ticket.sla_display_state !== "HISTORICAL" &&
+                  ticket.sla_display_state !== "COMPLETED" && (
+                    <>
+                      <span className="sla-detail-meta-label">Due</span>
+                      <span className="sla-detail-meta-value">
+                        {formatDate(ticket.sla_due_at)}
+                      </span>
+                    </>
+                  )}
+                {ticket.sla_paused_at && (
+                  <>
+                    <span className="sla-detail-meta-label">Paused since</span>
+                    <span className="sla-detail-meta-value">
+                      {formatDate(ticket.sla_paused_at)}
+                    </span>
+                  </>
+                )}
+                {ticket.sla_first_breached_at && (
+                  <>
+                    <span className="sla-detail-meta-label">First breached</span>
+                    <span className="sla-detail-meta-value">
+                      {formatDate(ticket.sla_first_breached_at)}
+                    </span>
+                  </>
+                )}
+                {ticket.sla_completed_at && (
+                  <>
+                    <span className="sla-detail-meta-label">Completed</span>
+                    <span className="sla-detail-meta-value">
+                      {formatDate(ticket.sla_completed_at)}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="card">
             <div className="section-head">

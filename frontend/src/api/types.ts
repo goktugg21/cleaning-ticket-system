@@ -64,6 +64,15 @@ export interface Customer {
   is_active: boolean;
 }
 
+export type SLAStatus =
+  | "ON_TRACK"
+  | "AT_RISK"
+  | "BREACHED"
+  | "COMPLETED"
+  | "HISTORICAL";
+
+export type SLADisplayState = SLAStatus | "PAUSED";
+
 export interface TicketList {
   id: number;
   ticket_no: string;
@@ -80,6 +89,9 @@ export interface TicketList {
   assigned_to_email: string | null;
   created_at: string;
   updated_at: string;
+  sla_is_paused: boolean;
+  sla_remaining_business_seconds: number | null;
+  sla_display_state: SLADisplayState;
 }
 
 export interface TicketStatusHistory {
@@ -105,6 +117,13 @@ export interface TicketDetail extends TicketList {
   closed_at: string | null;
   status_history: TicketStatusHistory[];
   allowed_next_statuses: TicketStatus[];
+  sla_status: SLAStatus;
+  sla_due_at: string | null;
+  sla_started_at: string | null;
+  sla_completed_at: string | null;
+  sla_paused_at: string | null;
+  sla_paused_seconds: number;
+  sla_first_breached_at: string | null;
 }
 
 export interface TicketMessage {
