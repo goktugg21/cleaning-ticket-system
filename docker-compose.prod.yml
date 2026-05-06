@@ -72,6 +72,22 @@ services:
       redis:
         condition: service_healthy
 
+  beat:
+    logging: *default-logging
+    build:
+      context: ./backend
+    container_name: cleaning_ticket_prod_beat
+    restart: unless-stopped
+    command: celery -A config beat -l info --schedule /tmp/celerybeat-schedule
+    user: app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     logging: *default-logging
     build:

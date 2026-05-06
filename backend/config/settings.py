@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "tickets",
     "reports",
     "notifications",
+    "sla",
 ]
 
 MIDDLEWARE = [
@@ -212,6 +213,23 @@ CELERY_TASK_SOFT_TIME_LIMIT = 90
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_ENABLE_UTC = True
+
+# SLA engine configuration. See backend/sla/.
+SLA_DEFAULT_TARGET_BUSINESS_SECONDS = 24 * 60 * 60  # 24 business hours
+SLA_BUSINESS_HOURS_START = (9, 0)
+SLA_BUSINESS_HOURS_END = (17, 0)
+SLA_BUSINESS_DAYS = (0, 1, 2, 3, 4)  # Mon-Fri (Python weekday: Mon=0)
+SLA_AT_RISK_THRESHOLD = 0.8  # fraction of target consumed before AT_RISK
+# Tickets created before this date are marked HISTORICAL on backfill and never
+# accrue an SLA. Stored as ISO date in TIME_ZONE; converted at use sites.
+SLA_ENGINE_START_DATE = "2026-05-06"
+
+CELERY_BEAT_SCHEDULE = {
+    "reconcile-sla-states": {
+        "task": "sla.tasks.reconcile_sla_states",
+        "schedule": 5 * 60,
+    },
+}
 
 NOTIFICATION_QUEUED_TIMEOUT_MINUTES = int(
     os.environ.get("NOTIFICATION_QUEUED_TIMEOUT_MINUTES", "30")

@@ -102,6 +102,28 @@ class Ticket(models.Model):
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
+    # SLA tracking. Engine lives in backend/sla/. sla_first_breached_at is a
+    # permanent marker that survives reopens; the rest are recomputed by the
+    # engine and the periodic reconciliation task.
+    sla_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    sla_started_at = models.DateTimeField(null=True, blank=True)
+    sla_completed_at = models.DateTimeField(null=True, blank=True)
+    sla_paused_at = models.DateTimeField(null=True, blank=True)
+    sla_paused_seconds = models.PositiveIntegerField(default=0)
+    sla_first_breached_at = models.DateTimeField(null=True, blank=True)
+    sla_status = models.CharField(
+        max_length=16,
+        choices=[
+            ("ON_TRACK", "On track"),
+            ("AT_RISK", "At risk"),
+            ("BREACHED", "Breached"),
+            ("COMPLETED", "Completed"),
+            ("HISTORICAL", "Historical"),
+        ],
+        default="ON_TRACK",
+        db_index=True,
+    )
+
     class Meta:
         ordering = ["-created_at"]
 
