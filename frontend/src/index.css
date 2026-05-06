@@ -2027,3 +2027,67 @@ table.data-table {
   font-size: 13px;
   line-height: 1.45;
 }
+
+/* SLA badge — reuses existing palette tokens. Six display states map to:
+   on_track=green, at_risk=amber, breached=red, paused=teal,
+   completed=closed, historical=neutral muted. No new hex values. */
+.sla-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+.sla-badge-md { height: 26px; padding: 0 11px; font-size: 12px; }
+.sla-badge-time { font-weight: 600; opacity: 0.85; }
+.sla-badge-on_track {
+  background: var(--green-soft); color: var(--green);
+  border-color: rgba(11,107,66,0.2);
+}
+.sla-badge-at_risk {
+  background: var(--amber-soft); color: var(--amber);
+  border-color: var(--amber-border);
+}
+.sla-badge-breached {
+  background: var(--red-soft); color: var(--red);
+  border-color: var(--red-border);
+}
+.sla-badge-paused {
+  background: var(--teal-soft); color: var(--teal);
+  border-color: rgba(15,107,94,0.18);
+}
+.sla-badge-completed {
+  background: var(--closed-soft); color: var(--closed);
+  border-color: #CFDAD2;
+}
+.sla-badge-historical {
+  background: var(--surface-2); color: var(--text-faint);
+  border-color: var(--border);
+}
+
+/* SLA detail block — sits in the ticket detail right rail. */
+.sla-detail-row { display: flex; align-items: center; gap: 8px; }
+.sla-detail-meta {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  font-size: 12.5px;
+}
+.sla-detail-meta-label {
+  color: var(--text-faint);
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.sla-detail-meta-value { color: var(--text-2); }

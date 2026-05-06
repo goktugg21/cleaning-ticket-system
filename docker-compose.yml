@@ -46,5 +46,19 @@ services:
       - db
       - redis
 
+  beat:
+    build:
+      context: ./backend
+    container_name: cleaning_ticket_beat
+    command: celery -A config beat -l info --schedule /tmp/celerybeat-schedule
+    user: app
+    volumes:
+      - ./backend:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+
 volumes:
   postgres_data:

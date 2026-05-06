@@ -481,9 +481,12 @@ const CHART_TITLES = [
   "Tickets created over time",
   "Approved tickets per assignee",
   "Open tickets by age",
+  "SLA distribution",
+  "SLA breach rate over time",
 ];
+const CHART_CARD_COUNT = CHART_TITLES.length;
 
-// Scope selector for the four chart cards. The filter strip is also a
+// Scope selector for the chart cards. The filter strip is also a
 // section.card but it has no h3.section-title, so :has() filters cleanly.
 const CHART_CARD_SELECTOR = "section.card:has(h3.section-title)";
 
@@ -492,9 +495,9 @@ async function waitForReportsSettled(page) {
   // each chart card. This indicates the underlying useReport finished its
   // initial fetch one way or another.
   await page.waitForFunction(
-    (selector) => {
+    ({ selector, expectedCount }) => {
       const cards = Array.from(document.querySelectorAll(selector));
-      if (cards.length !== 4) return false;
+      if (cards.length !== expectedCount) return false;
       return cards.every((card) =>
         card.querySelector("svg") ||
         card.querySelector(".alert-error") ||
@@ -503,7 +506,7 @@ async function waitForReportsSettled(page) {
         ),
       );
     },
-    CHART_CARD_SELECTOR,
+    { selector: CHART_CARD_SELECTOR, expectedCount: CHART_CARD_COUNT },
     { timeout: 15000 },
   );
 }
@@ -518,11 +521,11 @@ async function assertChartCardsPresent(page, group) {
     .locator(`${CHART_CARD_SELECTOR} h3.section-title`)
     .allInnerTexts();
   const trimmed = titles.map((t) => t.trim());
-  const allFour = CHART_TITLES.every((t) => trimmed.includes(t));
+  const allPresent = CHART_TITLES.every((t) => trimmed.includes(t));
   record(
     group,
-    "/reports renders four chart cards",
-    trimmed.length === 4 && allFour ? PASS : FAIL,
+    `/reports renders ${CHART_CARD_COUNT} chart cards`,
+    trimmed.length === CHART_CARD_COUNT && allPresent ? PASS : FAIL,
     `titles=${trimmed.join("|")}`,
   );
 }
@@ -530,7 +533,7 @@ async function assertChartCardsPresent(page, group) {
 async function runReportsForSuperAdmin(page) {
   const G = "SUPER_ADMIN";
 
-  // 1. Renders four chart cards.
+  // 1. Renders all chart cards.
   await assertChartCardsPresent(page, G);
 
   // 2. No inline errors on any chart card; each card has svg or empty-state.
@@ -549,9 +552,35 @@ async function runReportsForSuperAdmin(page) {
   }, CHART_CARD_SELECTOR);
   record(
     G,
-    "All four charts render without inline errors",
-    errorCount === 0 && cardsWithContent === 4 ? PASS : FAIL,
+    "All charts render without inline errors",
+    errorCount === 0 && cardsWithContent === CHART_CARD_COUNT ? PASS : FAIL,
     `errors=${errorCount} contentCards=${cardsWithContent}`,
+  );
+
+  // 2b. SLA distribution chart specifically renders without inline error.
+  const slaDistCard = page.locator(
+    `${CHART_CARD_SELECTOR}:has(h3.section-title:has-text("SLA distribution"))`,
+  );
+  const slaDistVisible = (await slaDistCard.count()) === 1;
+  const slaDistError = (await slaDistCard.locator(".alert-error").count()) > 0;
+  record(
+    G,
+    "SLA distribution chart renders without inline error",
+    slaDistVisible && !slaDistError ? PASS : FAIL,
+    `visible=${slaDistVisible} hasError=${slaDistError}`,
+  );
+
+  // 2c. SLA breach rate chart specifically renders without inline error.
+  const slaBreachCard = page.locator(
+    `${CHART_CARD_SELECTOR}:has(h3.section-title:has-text("SLA breach rate over time"))`,
+  );
+  const slaBreachVisible = (await slaBreachCard.count()) === 1;
+  const slaBreachError = (await slaBreachCard.locator(".alert-error").count()) > 0;
+  record(
+    G,
+    "SLA breach rate chart renders without inline error",
+    slaBreachVisible && !slaBreachError ? PASS : FAIL,
+    `visible=${slaBreachVisible} hasError=${slaBreachError}`,
   );
 
   // 3. Default range preset is "Last 30 days" and visually active.
@@ -637,14 +666,15 @@ async function runReportsForSuperAdmin(page) {
   await refreshBtn.click().catch(() => {});
   await page.waitForTimeout(400);
   await waitForReportsSettled(page);
-  const stillRendered = (await page
+  const stillRenderedCount = await page
     .locator(`${CHART_CARD_SELECTOR} h3.section-title`)
-    .count()) === 4;
+    .count();
+  const stillRendered = stillRenderedCount === CHART_CARD_COUNT;
   record(
     G,
     "Refresh button present and click does not crash",
     refreshVisible && stillRendered ? PASS : FAIL,
-    `visible=${refreshVisible} cards=${stillRendered ? 4 : "missing"}`,
+    `visible=${refreshVisible} cards=${stillRendered ? CHART_CARD_COUNT : "missing"}`,
   );
 }
 
@@ -664,19 +694,19 @@ async function runReportsForCompanyAdmin(page) {
     `visible=${sidebarVisible}`,
   );
 
-  // 9. Cross-tenant URL probe: ?company=<other> => inline errors on all 4 cards.
+  // 9. Cross-tenant URL probe: ?company=<other> => inline errors on all cards.
   // Other company id is 2 in the fixture (matches the existing other-tenant
-  // probes in this script).
+  // probes in this script). Implicitly verifies the SLA cards' error path too.
   await page.goto(`${FRONTEND}/reports?company=2`, { waitUntil: "domcontentloaded" });
   await waitForReportsSettled(page);
   const errBanners = await page
     .locator(`${CHART_CARD_SELECTOR} .alert-error`)
     .count();
-  // One banner per chart card => 4 banners.
+  // One banner per chart card.
   record(
     G,
-    "Cross-tenant /reports?company= shows inline errors on all four cards",
-    errBanners === 4 ? PASS : FAIL,
+    "Cross-tenant /reports?company= shows inline errors on all chart cards",
+    errBanners === CHART_CARD_COUNT ? PASS : FAIL,
     `errBanners=${errBanners}`,
   );
 }

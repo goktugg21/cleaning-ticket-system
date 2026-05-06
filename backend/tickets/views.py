@@ -58,6 +58,27 @@ class TicketViewSet(
         )
         if self.action == "retrieve":
             qs = qs.prefetch_related("status_history", "status_history__changed_by")
+        if self.action == "list":
+            qs = self._apply_sla_filter(qs)
+        return qs
+
+    # Mirrors the frontend display-state priority. Paused overrides underlying
+    # state (?sla=breached excludes paused tickets); unknown values fall
+    # through to "all" rather than raising 400.
+    def _apply_sla_filter(self, qs):
+        value = (self.request.query_params.get("sla") or "all").lower()
+        if value == "paused":
+            return qs.filter(sla_paused_at__isnull=False)
+        if value == "historical":
+            return qs.filter(sla_status="HISTORICAL")
+        if value == "completed":
+            return qs.filter(sla_status="COMPLETED")
+        if value == "breached":
+            return qs.filter(sla_paused_at__isnull=True, sla_status="BREACHED")
+        if value == "at_risk":
+            return qs.filter(sla_paused_at__isnull=True, sla_status="AT_RISK")
+        if value == "on_track":
+            return qs.filter(sla_paused_at__isnull=True, sla_status="ON_TRACK")
         return qs
 
     def get_serializer_class(self):

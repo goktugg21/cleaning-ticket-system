@@ -289,6 +289,121 @@ def _age_in_days(now, created_at) -> int:
     return (now - created_at).days
 
 
+# Fixed display-state ordering, mirroring the B2 ticket-list priority. The
+# frontend relies on this order; do not reshuffle.
+SLA_DISPLAY_BUCKETS = [
+    ("ON_TRACK", "On track"),
+    ("AT_RISK", "At risk"),
+    ("BREACHED", "Breached"),
+    ("PAUSED", "Paused"),
+    ("COMPLETED", "Completed"),
+    ("HISTORICAL", "Historical"),
+]
+
+
+class SLADistributionView(_ReportView):
+    def get(self, request):
+        scope = self._resolved_scope(request)
+        qs = tickets_for_scope(request.user, scope)
+
+        # Each ticket falls into exactly one bucket per the priority rule:
+        # HISTORICAL > COMPLETED > PAUSED > BREACHED/AT_RISK/ON_TRACK.
+        counts = {
+            "HISTORICAL": qs.filter(sla_status="HISTORICAL").count(),
+            "COMPLETED": qs.filter(sla_status="COMPLETED").count(),
+            "PAUSED": qs.filter(sla_paused_at__isnull=False)
+            .exclude(sla_status__in=("HISTORICAL", "COMPLETED"))
+            .count(),
+            "ON_TRACK": qs.filter(
+                sla_status="ON_TRACK", sla_paused_at__isnull=True
+            ).count(),
+            "AT_RISK": qs.filter(
+                sla_status="AT_RISK", sla_paused_at__isnull=True
+            ).count(),
+            "BREACHED": qs.filter(
+                sla_status="BREACHED", sla_paused_at__isnull=True
+            ).count(),
+        }
+        buckets = [
+            {"state": state, "label": label, "count": int(counts[state])}
+            for state, label in SLA_DISPLAY_BUCKETS
+        ]
+        return Response(
+            {
+                "as_of": timezone.now().isoformat(),
+                "scope": scope.to_dict(),
+                "buckets": buckets,
+                "total": sum(b["count"] for b in buckets),
+            }
+        )
+
+
+class SLABreachRateOverTimeView(_ReportView):
+    def get(self, request):
+        scope = self._resolved_scope(request)
+        from_date, to_date = parse_date_range(
+            request.query_params.get("from"), request.query_params.get("to")
+        )
+        granularity = _pick_granularity(from_date, to_date)
+        bound_lo, bound_hi = date_range_to_aware_bounds(from_date, to_date)
+
+        # Tickets created in range, excluding pre-engine HISTORICAL ones —
+        # they don't have a real SLA cycle and shouldn't dilute the rate.
+        qs = (
+            tickets_for_scope(request.user, scope)
+            .filter(created_at__gte=bound_lo, created_at__lt=bound_hi)
+            .exclude(sla_status="HISTORICAL")
+        )
+        breached_qs = qs.filter(sla_first_breached_at__isnull=False)
+
+        rows_total = (
+            qs.annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(c=Count("id"))
+            .order_by("day")
+        )
+        rows_breached = (
+            breached_qs.annotate(day=TruncDate("created_at"))
+            .values("day")
+            .annotate(c=Count("id"))
+            .order_by("day")
+        )
+        day_total = {row["day"]: row["c"] for row in rows_total}
+        day_breached = {row["day"]: row["c"] for row in rows_breached}
+
+        series = []
+        current = _bucket_start(from_date, granularity)
+        end_exclusive = _next_bucket_start(
+            _bucket_start(to_date, granularity), granularity
+        )
+        while current < end_exclusive:
+            nxt = _next_bucket_start(current, granularity)
+            total = sum(c for d, c in day_total.items() if current <= d < nxt)
+            breached = sum(
+                c for d, c in day_breached.items() if current <= d < nxt
+            )
+            rate = round(breached / total, 4) if total > 0 else 0.0
+            series.append(
+                {
+                    "period_start": current.isoformat(),
+                    "total": int(total),
+                    "breached": int(breached),
+                    "breach_rate": rate,
+                }
+            )
+            current = nxt
+
+        return Response(
+            {
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "granularity": granularity,
+                "scope": scope.to_dict(),
+                "buckets": series,
+            }
+        )
+
+
 class AgeBucketsView(_ReportView):
     def get(self, request):
         scope = self._resolved_scope(request)

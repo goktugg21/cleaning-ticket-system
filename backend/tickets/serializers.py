@@ -1,4 +1,5 @@
 from django.urls import reverse
+from django.utils import timezone
 from pathlib import Path as FilePath
 
 from rest_framework import serializers
@@ -7,6 +8,7 @@ from accounts.models import User, UserRole
 from accounts.permissions import is_staff_role
 from buildings.models import Building, BuildingManagerAssignment
 from customers.models import Customer
+from sla import business_hours
 
 from .models import (
     Ticket,
@@ -18,6 +20,38 @@ from .models import (
 )
 from .permissions import user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
+
+
+def _sla_display_state(obj):
+    """Mirror of frontend getSLADisplayState — paused overrides underlying state."""
+    if obj.sla_status == "HISTORICAL":
+        return "HISTORICAL"
+    if obj.sla_status == "COMPLETED":
+        return "COMPLETED"
+    if obj.sla_paused_at is not None:
+        return "PAUSED"
+    if obj.sla_status == "BREACHED":
+        return "BREACHED"
+    if obj.sla_status == "AT_RISK":
+        return "AT_RISK"
+    return "ON_TRACK"
+
+
+def _sla_remaining_business_seconds(obj):
+    """
+    Positive when remaining, negative when overdue, None when not applicable
+    (paused / HISTORICAL / COMPLETED / no due date).
+    """
+    if obj.sla_paused_at is not None:
+        return None
+    if obj.sla_status in ("HISTORICAL", "COMPLETED"):
+        return None
+    if obj.sla_due_at is None:
+        return None
+    now = timezone.now()
+    if now <= obj.sla_due_at:
+        return business_hours.business_seconds_between(now, obj.sla_due_at)
+    return -business_hours.business_seconds_between(obj.sla_due_at, now)
 
 
 ALLOWED_ATTACHMENT_EXTENSIONS = {
@@ -65,6 +99,9 @@ class TicketListSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
+    sla_is_paused = serializers.SerializerMethodField()
+    sla_remaining_business_seconds = serializers.SerializerMethodField()
+    sla_display_state = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -84,8 +121,20 @@ class TicketListSerializer(serializers.ModelSerializer):
             "assigned_to_email",
             "created_at",
             "updated_at",
+            "sla_is_paused",
+            "sla_remaining_business_seconds",
+            "sla_display_state",
         ]
         read_only_fields = fields
+
+    def get_sla_is_paused(self, obj):
+        return obj.sla_paused_at is not None
+
+    def get_sla_remaining_business_seconds(self, obj):
+        return _sla_remaining_business_seconds(obj)
+
+    def get_sla_display_state(self, obj):
+        return _sla_display_state(obj)
 
 
 class TicketDetailSerializer(serializers.ModelSerializer):
@@ -95,6 +144,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
+    sla_is_paused = serializers.SerializerMethodField()
+    sla_remaining_business_seconds = serializers.SerializerMethodField()
+    sla_display_state = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -126,6 +178,16 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "closed_at",
             "status_history",
             "allowed_next_statuses",
+            "sla_status",
+            "sla_due_at",
+            "sla_started_at",
+            "sla_completed_at",
+            "sla_paused_at",
+            "sla_paused_seconds",
+            "sla_first_breached_at",
+            "sla_is_paused",
+            "sla_remaining_business_seconds",
+            "sla_display_state",
         ]
         read_only_fields = fields
 
@@ -134,6 +196,15 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return []
         return allowed_next_statuses(request.user, obj)
+
+    def get_sla_is_paused(self, obj):
+        return obj.sla_paused_at is not None
+
+    def get_sla_remaining_business_seconds(self, obj):
+        return _sla_remaining_business_seconds(obj)
+
+    def get_sla_display_state(self, obj):
+        return _sla_display_state(obj)
 
 
 class TicketCreateSerializer(serializers.ModelSerializer):

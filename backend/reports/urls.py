@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     AgeBucketsView,
     ManagerThroughputView,
+    SLABreachRateOverTimeView,
+    SLADistributionView,
     StatusDistributionView,
     TicketsOverTimeView,
 )
@@ -28,5 +30,15 @@ urlpatterns = [
         "age-buckets/",
         AgeBucketsView.as_view(),
         name="reports-age-buckets",
+    ),
+    path(
+        "sla-distribution/",
+        SLADistributionView.as_view(),
+        name="reports-sla-distribution",
+    ),
+    path(
+        "sla-breach-rate-over-time/",
+        SLABreachRateOverTimeView.as_view(),
+        name="reports-sla-breach-rate-over-time",
     ),
 ]
