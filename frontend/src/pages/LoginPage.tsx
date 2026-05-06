@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Building2, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import heroImage from "../assets/login_page_photo.png";
@@ -16,8 +17,11 @@ interface DemoUser {
   initials: string;
   avatarVariant: "dark" | "mint";
   name: string;
-  role: string;
-  pillLabel: string;
+  // role and pillLabel resolve through i18n keys at render time so the demo
+  // cards switch language with the rest of the page. The DEMO_USERS fixture
+  // only stores the key; the t() call decides the displayed string.
+  roleKey: "demo_role_manager" | "demo_role_customer";
+  pillKey: "demo_pill_manager" | "demo_pill_customer";
   pillVariant: "primary" | "muted";
 }
 
@@ -29,8 +33,8 @@ const DEMO_USERS: DemoUser[] = [
     initials: "JD",
     avatarVariant: "dark",
     name: "John Doe",
-    role: "Building Manager",
-    pillLabel: "Manager Role",
+    roleKey: "demo_role_manager",
+    pillKey: "demo_pill_manager",
     pillVariant: "primary",
   },
   {
@@ -40,8 +44,8 @@ const DEMO_USERS: DemoUser[] = [
     initials: "AS",
     avatarVariant: "mint",
     name: "Anna Smith",
-    role: "Customer User",
-    pillLabel: "Customer Role",
+    roleKey: "demo_role_customer",
+    pillKey: "demo_pill_customer",
     pillVariant: "muted",
   },
 ];
@@ -50,6 +54,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { me, login } = useAuth();
+  const { t } = useTranslation("login");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,17 +68,17 @@ export function LoginPage() {
 
   useEffect(() => {
     if (searchParams.get("reset") === "ok") {
-      setInfo("Your password has been updated. Sign in with the new password.");
+      setInfo(t("info_password_reset"));
       const next = new URLSearchParams(searchParams);
       next.delete("reset");
       setSearchParams(next, { replace: true });
     } else if (searchParams.get("invited") === "ok") {
-      setInfo("Account created. Sign in to continue.");
+      setInfo(t("info_invited"));
       const next = new URLSearchParams(searchParams);
       next.delete("invited");
       setSearchParams(next, { replace: true });
     }
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, t]);
 
   if (me) return <Navigate to="/" replace />;
 
@@ -95,6 +100,8 @@ export function LoginPage() {
       await login(email, password);
       navigate("/", { replace: true });
     } catch (err) {
+      // API errors are passed through verbatim; per-language API errors land
+      // in a later i18n batch via a DRF exception handler.
       setError(getApiError(err));
     } finally {
       setSubmitting(false);
@@ -106,14 +113,14 @@ export function LoginPage() {
     setInfo("");
 
     if (!email.trim()) {
-      setError("Enter your work email above first, then click Forgot password.");
+      setError(t("error_email_required"));
       return;
     }
 
     setResetBusy(true);
     try {
       await api.post("/auth/password/reset/", { email: email.trim() });
-      setInfo("If an account exists for that email, a reset link has been sent.");
+      setInfo(t("info_reset_sent"));
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -128,14 +135,11 @@ export function LoginPage() {
         <div className="login-visual-overlay" />
         <div className="login-visual-tagline">
           <h1>
-            Precision. Efficiency.
+            {t("tagline_line1")}
             <br />
-            Excellence.
+            {t("tagline_line2")}
           </h1>
-          <p>
-            Empowering facility managers with the tools to maintain pristine
-            environments seamlessly.
-          </p>
+          <p>{t("tagline_body")}</p>
         </div>
       </section>
 
@@ -149,13 +153,13 @@ export function LoginPage() {
           </div>
 
           <div className="login-welcome">
-            <h2 className="login-welcome-title">Welcome Back</h2>
-            <p className="login-welcome-sub">Access your CleanOps console.</p>
+            <h2 className="login-welcome-title">{t("welcome_title")}</h2>
+            <p className="login-welcome-sub">{t("welcome_sub")}</p>
           </div>
 
           {SHOW_DEMO_USERS && (
             <div className="qa-section">
-              <div className="qa-label">Quick access for demo</div>
+              <div className="qa-label">{t("demo_label")}</div>
               <div className="qa-grid">
                 {DEMO_USERS.map((user) => (
                   <button
@@ -170,13 +174,13 @@ export function LoginPage() {
                       </div>
                       <div className="qa-id">
                         <div className="qa-name">{user.name}</div>
-                        <div className="qa-title">{user.role}</div>
+                        <div className="qa-title">{t(user.roleKey)}</div>
                       </div>
                     </div>
                     <span
                       className={`qa-role-pill ${user.pillVariant === "muted" ? "muted" : ""}`}
                     >
-                      {user.pillLabel}
+                      {t(user.pillKey)}
                     </span>
                   </button>
                 ))}
@@ -185,14 +189,14 @@ export function LoginPage() {
           )}
 
           <div className="login-divider">
-            <span className="login-divider-label">Or continue with email</span>
+            <span className="login-divider-label">{t("divider")}</span>
           </div>
 
           <form className="login-form" onSubmit={handleSubmit} noValidate>
             <div className="login-field">
               <div className="login-field-row">
                 <label className="login-field-label" htmlFor="login-email">
-                  Work Email
+                  {t("email_label")}
                 </label>
               </div>
               <div className="login-field-wrap">
@@ -201,7 +205,7 @@ export function LoginPage() {
                   id="login-email"
                   className="login-field-input"
                   type="email"
-                  placeholder="name@veridian.com"
+                  placeholder={t("email_placeholder")}
                   autoComplete="email"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
@@ -213,7 +217,7 @@ export function LoginPage() {
             <div className="login-field">
               <div className="login-field-row">
                 <label className="login-field-label" htmlFor="login-password">
-                  Password
+                  {t("password_label")}
                 </label>
                 <button
                   type="button"
@@ -221,7 +225,7 @@ export function LoginPage() {
                   onClick={handleForgotPassword}
                   disabled={resetBusy}
                 >
-                  {resetBusy ? "Sending…" : "Forgot password?"}
+                  {resetBusy ? t("sending") : t("forgot_password")}
                 </button>
               </div>
               <div className="login-field-wrap">
@@ -244,7 +248,7 @@ export function LoginPage() {
                   type="button"
                   className="login-field-toggle"
                   aria-label={
-                    showPassword ? "Hide password" : "Show password"
+                    showPassword ? t("hide_password") : t("show_password")
                   }
                   onClick={() => setShowPassword((value) => !value)}
                 >
@@ -266,7 +270,7 @@ export function LoginPage() {
                 checked={remember}
                 onChange={(event) => setRemember(event.target.checked)}
               />
-              <span>Remember my device for 30 days</span>
+              <span>{t("remember_me")}</span>
             </label>
 
             {error && (
@@ -286,7 +290,7 @@ export function LoginPage() {
               className="login-submit"
               disabled={submitting || !email || !password}
             >
-              {submitting ? "Signing in…" : "Secure login"}
+              {submitting ? t("signing_in") : t("submit")}
             </button>
           </form>
         </div>
