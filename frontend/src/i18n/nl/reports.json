@@ -1,0 +1,55 @@
+{
+  "eyebrow": "Rapporten",
+  "title": "Operationele rapporten",
+  "subtitle": "Statusverdeling, doorvoer, achterstand en SLA. Filters gelden voor alle grafieken.",
+
+  "filter_date_range": "Periode",
+  "filter_from": "Van",
+  "filter_to": "Tot",
+  "filter_company": "Bedrijf",
+  "filter_building": "Gebouw",
+  "filter_all_companies": "Alle bedrijven",
+  "filter_all_buildings": "Alle gebouwen",
+  "preset_last_7": "Laatste 7 dagen",
+  "preset_last_30": "Laatste 30 dagen",
+  "preset_last_90": "Laatste 90 dagen",
+  "preset_custom": "Aangepast",
+
+  "retry": "Opnieuw proberen",
+  "granularity_prefix": "Granulariteit · {{value}}",
+  "granularity_daily": "dagelijks",
+  "granularity_weekly": "wekelijks",
+  "granularity_monthly": "maandelijks",
+  "tick_week_suffix": "(wk)",
+
+  "status_dist_title": "Statusverdeling",
+  "status_dist_subtitle": "Momentopname van alle tickets in scope. Niet beïnvloed door periode.",
+  "status_dist_total": "Totaal: {{count}}",
+  "status_dist_empty": "Geen tickets in deze scope.",
+
+  "tickets_over_time_title": "Aangemaakte tickets in de tijd",
+  "tickets_over_time_total": "Totaal: {{count}}",
+  "tickets_over_time_empty": "Geen tickets in deze periode.",
+
+  "manager_throughput_title": "Goedgekeurde tickets per uitvoerder",
+  "manager_throughput_subtitle": "In de geselecteerde periode. Inclusief gebouwbeheerders en bedrijfsbeheerders met minstens één toewijzing in scope.",
+  "manager_throughput_empty": "Geen uitvoerders in scope.",
+  "manager_throughput_tooltip_label": "Goedgekeurd",
+
+  "age_buckets_title": "Open tickets op leeftijd",
+  "age_buckets_subtitle": "Open = nog niet GOEDGEKEURD of AFGEWEZEN. Inclusief WACHT_OP_KLANT en HEROPEND.",
+  "age_buckets_total": "Totaal open: {{count}}",
+  "age_buckets_empty": "Geen open tickets in deze scope.",
+  "age_buckets_tooltip_label": "Open tickets",
+
+  "sla_dist_title": "SLA-verdeling",
+  "sla_dist_subtitle": "Momentopname van alle tickets in scope per SLA-status. Niet beïnvloed door periode.",
+  "sla_dist_total": "Totaal: {{count}}",
+  "sla_dist_empty": "Geen tickets in deze scope.",
+
+  "sla_breach_title": "SLA-overschrijdingspercentage in de tijd",
+  "sla_breach_subtitle": "Aandeel van in elke periode aangemaakte tickets dat ooit is overschreden",
+  "sla_breach_total": "Tickets in periode: {{count}}",
+  "sla_breach_empty": "Geen tickets in deze periode.",
+  "sla_breach_tooltip_label": "Overschrijdingspercentage"
+}

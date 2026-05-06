@@ -1,0 +1,55 @@
+{
+  "eyebrow": "Reports",
+  "title": "Operations reports",
+  "subtitle": "Status mix, throughput, aged backlog, and SLA. Filters apply to all charts.",
+
+  "filter_date_range": "Date range",
+  "filter_from": "From",
+  "filter_to": "To",
+  "filter_company": "Company",
+  "filter_building": "Building",
+  "filter_all_companies": "All companies",
+  "filter_all_buildings": "All buildings",
+  "preset_last_7": "Last 7 days",
+  "preset_last_30": "Last 30 days",
+  "preset_last_90": "Last 90 days",
+  "preset_custom": "Custom",
+
+  "retry": "Retry",
+  "granularity_prefix": "Granularity · {{value}}",
+  "granularity_daily": "daily",
+  "granularity_weekly": "weekly",
+  "granularity_monthly": "monthly",
+  "tick_week_suffix": "(wk)",
+
+  "status_dist_title": "Status distribution",
+  "status_dist_subtitle": "Snapshot of all tickets in scope. Not affected by date range.",
+  "status_dist_total": "Total: {{count}}",
+  "status_dist_empty": "No tickets in this scope.",
+
+  "tickets_over_time_title": "Tickets created over time",
+  "tickets_over_time_total": "Total: {{count}}",
+  "tickets_over_time_empty": "No tickets in this range.",
+
+  "manager_throughput_title": "Approved tickets per assignee",
+  "manager_throughput_subtitle": "In the selected date range. Includes Building Managers and Company Admins with at least one assignment in scope.",
+  "manager_throughput_empty": "No managers in scope.",
+  "manager_throughput_tooltip_label": "Approved",
+
+  "age_buckets_title": "Open tickets by age",
+  "age_buckets_subtitle": "Open = not yet APPROVED or REJECTED. Includes WAITING_CUSTOMER_APPROVAL and REOPENED_BY_ADMIN.",
+  "age_buckets_total": "Total open: {{count}}",
+  "age_buckets_empty": "No open tickets in this scope.",
+  "age_buckets_tooltip_label": "Open tickets",
+
+  "sla_dist_title": "SLA distribution",
+  "sla_dist_subtitle": "Snapshot of all tickets in scope by SLA state. Not affected by date range.",
+  "sla_dist_total": "Total: {{count}}",
+  "sla_dist_empty": "No tickets in this scope.",
+
+  "sla_breach_title": "SLA breach rate over time",
+  "sla_breach_subtitle": "share of tickets created in each bucket that ever breached",
+  "sla_breach_total": "Tickets in range: {{count}}",
+  "sla_breach_empty": "No tickets in this range.",
+  "sla_breach_tooltip_label": "Breach rate"
+}

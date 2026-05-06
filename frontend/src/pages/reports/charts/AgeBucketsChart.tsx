@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchAgeBuckets } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
@@ -21,6 +22,7 @@ export interface ChartProps {
 const BUCKET_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"];
 
 export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
+  const { t } = useTranslation("reports");
   const { data, loading, error, retry } = useReport({
     fetcher: fetchAgeBuckets,
     filters,
@@ -28,11 +30,14 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
   });
 
   return (
-    <section className="card" style={{ padding: "20px 22px", minHeight: 360 }}>
-      <h3 className="section-title">Open tickets by age</h3>
+    <section
+      className="card"
+      style={{ padding: "20px 22px", minHeight: 360 }}
+      data-testid="chart-card-age-buckets"
+    >
+      <h3 className="section-title">{t("age_buckets_title")}</h3>
       <p className="muted small" style={{ marginBottom: 8 }}>
-        Open = not yet APPROVED or REJECTED. Includes
-        WAITING_CUSTOMER_APPROVAL and REOPENED_BY_ADMIN.
+        {t("age_buckets_subtitle")}
       </p>
 
       {loading && (
@@ -49,7 +54,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
             onClick={retry}
             style={{ marginLeft: 8 }}
           >
-            Retry
+            {t("retry")}
           </button>
         </div>
       )}
@@ -57,6 +62,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
         data.total_open === 0 ? (
           <div
             className="muted small"
+            data-testid="chart-empty"
             style={{
               display: "flex",
               alignItems: "center",
@@ -64,7 +70,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
               height: 240,
             }}
           >
-            No open tickets in this scope.
+            {t("age_buckets_empty")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={260}>
@@ -76,7 +82,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
               <XAxis dataKey="label" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip
-                formatter={(value: number) => [value, "Open tickets"]}
+                formatter={(value: number) => [value, t("age_buckets_tooltip_label")]}
               />
               <Bar dataKey="count">
                 {data.buckets.map((bucket, idx) => (
@@ -92,7 +98,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
       )}
       {!loading && !error && data && (
         <p className="muted small" style={{ marginTop: 8 }}>
-          Total open: {data.total_open}
+          {t("age_buckets_total", { count: data.total_open })}
         </p>
       )}
     </section>

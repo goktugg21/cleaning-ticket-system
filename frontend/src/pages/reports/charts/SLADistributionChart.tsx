@@ -6,6 +6,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
+import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchSLADistribution } from "../../../api/reports";
 import type { SLADisplayState } from "../../../api/reports.types";
@@ -29,6 +30,7 @@ const SLA_STATE_COLOR: Record<SLADisplayState, string> = {
 };
 
 export function SLADistributionChart({ filters, refreshKey }: ChartProps) {
+  const { t } = useTranslation("reports");
   const { data, loading, error, retry } = useReport({
     fetcher: fetchSLADistribution,
     filters,
@@ -36,17 +38,21 @@ export function SLADistributionChart({ filters, refreshKey }: ChartProps) {
   });
 
   return (
-    <section className="card" style={{ padding: "20px 22px", minHeight: 360 }}>
-      <h3 className="section-title">SLA distribution</h3>
+    <section
+      className="card"
+      style={{ padding: "20px 22px", minHeight: 360 }}
+      data-testid="chart-card-sla-distribution"
+    >
+      <h3 className="section-title">{t("sla_dist_title")}</h3>
       <p className="muted small" style={{ marginBottom: 8 }}>
-        Snapshot of all tickets in scope by SLA state. Not affected by date range.
+        {t("sla_dist_subtitle")}
       </p>
 
       {loading && <ChartSkeleton />}
-      {error && <ChartError message={error} onRetry={retry} />}
+      {error && <ChartError message={error} onRetry={retry} retryLabel={t("retry")} />}
       {!loading && !error && data && (
         data.total === 0 ? (
-          <ChartEmpty message="No tickets in this scope." />
+          <ChartEmpty message={t("sla_dist_empty")} />
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
@@ -85,7 +91,7 @@ export function SLADistributionChart({ filters, refreshKey }: ChartProps) {
       )}
       {!loading && !error && data && (
         <p className="muted small" style={{ marginTop: 8 }}>
-          Total: {data.total}
+          {t("sla_dist_total", { count: data.total })}
         </p>
       )}
     </section>
@@ -100,7 +106,15 @@ function ChartSkeleton() {
   );
 }
 
-function ChartError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function ChartError({
+  message,
+  onRetry,
+  retryLabel,
+}: {
+  message: string;
+  onRetry: () => void;
+  retryLabel: string;
+}) {
   return (
     <div className="alert-error" role="alert" style={{ marginTop: 12 }}>
       {message}{" "}
@@ -110,7 +124,7 @@ function ChartError({ message, onRetry }: { message: string; onRetry: () => void
         onClick={onRetry}
         style={{ marginLeft: 8 }}
       >
-        Retry
+        {retryLabel}
       </button>
     </div>
   );
@@ -120,6 +134,7 @@ function ChartEmpty({ message }: { message: string }) {
   return (
     <div
       className="muted small"
+      data-testid="chart-empty"
       style={{
         display: "flex",
         alignItems: "center",

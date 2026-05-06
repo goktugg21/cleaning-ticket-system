@@ -7,6 +7,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useTranslation } from "react-i18next";
 import type { Granularity } from "../../../api/reports.types";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchSLABreachRateOverTime } from "../../../api/reports";
@@ -17,10 +18,10 @@ export interface ChartProps {
   refreshKey: number;
 }
 
-const GRANULARITY_LABEL: Record<Granularity, string> = {
-  day: "daily",
-  week: "weekly",
-  month: "monthly",
+const GRANULARITY_KEY: Record<Granularity, string> = {
+  day: "granularity_daily",
+  week: "granularity_weekly",
+  month: "granularity_monthly",
 };
 
 const MONTH_NAMES = [
@@ -28,14 +29,14 @@ const MONTH_NAMES = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-function formatTick(periodStart: string, granularity: Granularity): string {
+function formatTickEnglish(periodStart: string, granularity: Granularity, weekSuffix: string): string {
   const d = new Date(`${periodStart}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return periodStart;
   const month = MONTH_NAMES[d.getUTCMonth()];
   const day = d.getUTCDate();
   const year = d.getUTCFullYear();
   if (granularity === "day") return `${month} ${day}`;
-  if (granularity === "week") return `${month} ${day} (wk)`;
+  if (granularity === "week") return `${month} ${day} ${weekSuffix}`;
   return `${month} ${year}`;
 }
 
@@ -45,11 +46,15 @@ function rateToPct(rate: number): number {
 }
 
 export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
+  const { t } = useTranslation("reports");
   const { data, loading, error, retry } = useReport({
     fetcher: fetchSLABreachRateOverTime,
     filters,
     refreshKey,
   });
+
+  const formatTick = (periodStart: string, granularity: Granularity) =>
+    formatTickEnglish(periodStart, granularity, t("tick_week_suffix"));
 
   const totalTickets = data
     ? data.buckets.reduce((acc, b) => acc + b.total, 0)
@@ -65,12 +70,17 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
     : [];
 
   return (
-    <section className="card" style={{ padding: "20px 22px", minHeight: 360 }}>
-      <h3 className="section-title">SLA breach rate over time</h3>
+    <section
+      className="card"
+      style={{ padding: "20px 22px", minHeight: 360 }}
+      data-testid="chart-card-sla-breach-rate-over-time"
+    >
+      <h3 className="section-title">{t("sla_breach_title")}</h3>
       {data && (
         <p className="muted small" style={{ marginBottom: 8 }}>
-          Granularity · {GRANULARITY_LABEL[data.granularity]} · share of
-          tickets created in each bucket that ever breached
+          {t("granularity_prefix", { value: t(GRANULARITY_KEY[data.granularity]) })}
+          {" · "}
+          {t("sla_breach_subtitle")}
         </p>
       )}
 
@@ -88,7 +98,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
             onClick={retry}
             style={{ marginLeft: 8 }}
           >
-            Retry
+            {t("retry")}
           </button>
         </div>
       )}
@@ -96,6 +106,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
         totalTickets === 0 ? (
           <div
             className="muted small"
+            data-testid="chart-empty"
             style={{
               display: "flex",
               alignItems: "center",
@@ -103,7 +114,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
               height: 240,
             }}
           >
-            No tickets in this range.
+            {t("sla_breach_empty")}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={260}>
@@ -129,7 +140,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
                   };
                   return [
                     `${point.rate_pct}% (${point.breached} / ${point.total})`,
-                    "Breach rate",
+                    t("sla_breach_tooltip_label"),
                   ];
                 }}
               />
@@ -146,7 +157,7 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
       )}
       {!loading && !error && data && (
         <p className="muted small" style={{ marginTop: 8 }}>
-          Tickets in range: {totalTickets}
+          {t("sla_breach_total", { count: totalTickets })}
         </p>
       )}
     </section>

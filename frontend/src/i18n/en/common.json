@@ -4,6 +4,30 @@
   "nav_settings": "Settings",
   "sign_out": "Sign out",
 
+  "nav.operations_group": "Operations",
+  "nav.admin_group": "Admin",
+  "nav.dashboard": "Dashboard",
+  "nav.new_ticket": "New ticket",
+  "nav.reports": "Reports",
+  "nav.companies": "Companies",
+  "nav.buildings": "Buildings",
+  "nav.customers": "Customers",
+  "nav.users": "Users",
+  "nav.invitations": "Invitations",
+
+  "topbar.kicker": "Ticket Management",
+  "topbar.title": "Facility service desk",
+  "topbar.online": "Online",
+  "topbar.brand_tag": "Cleaning operations",
+  "topbar.user_fallback": "Facility user",
+
+  "roles.super_admin": "Super admin",
+  "roles.company_admin": "Company admin",
+  "roles.building_manager": "Manager",
+  "roles.customer_user": "Customer",
+  "roles.fallback": "User",
+
+
   "search": "Search",
   "filter": "Filter",
   "status": "Status",

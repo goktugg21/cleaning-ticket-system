@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { listBuildings, listCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
@@ -12,14 +13,18 @@ import { SLADistributionChart } from "./charts/SLADistributionChart";
 import { StatusDistributionChart } from "./charts/StatusDistributionChart";
 import { TicketsOverTimeChart } from "./charts/TicketsOverTimeChart";
 
-const RANGE_PRESETS: Array<{ key: "last_7" | "last_30" | "last_90"; label: string }> = [
-  { key: "last_7", label: "Last 7 days" },
-  { key: "last_30", label: "Last 30 days" },
-  { key: "last_90", label: "Last 90 days" },
+const RANGE_PRESETS: Array<{
+  key: "last_7" | "last_30" | "last_90";
+  labelKey: string;
+}> = [
+  { key: "last_7", labelKey: "preset_last_7" },
+  { key: "last_30", labelKey: "preset_last_30" },
+  { key: "last_90", labelKey: "preset_last_90" },
 ];
 
 export function ReportsPage() {
   const { me } = useAuth();
+  const { t } = useTranslation(["reports", "common"]);
   const { filters, setFilter, setRangePreset } = useReportsFilters();
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -109,21 +114,22 @@ export function ReportsPage() {
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Reports
+            {t("eyebrow")}
           </div>
-          <h2 className="page-title">Operations reports</h2>
-          <p className="page-sub">
-            Status mix, throughput, aged backlog, and SLA. Filters apply to all charts.
-          </p>
+          <h2 className="page-title" data-testid="reports-page-title">
+            {t("title")}
+          </h2>
+          <p className="page-sub">{t("subtitle")}</p>
         </div>
         <div className="page-header-actions">
           <button
             type="button"
             className="btn btn-secondary btn-sm"
+            data-testid="refresh-reports"
             onClick={() => setRefreshKey((n) => n + 1)}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("common:refresh")}
           </button>
         </div>
       </div>
@@ -141,7 +147,7 @@ export function ReportsPage() {
           }}
         >
           <div className="filter-field">
-            <span className="filter-label">Date range</span>
+            <span className="filter-label">{t("filter_date_range")}</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {RANGE_PRESETS.map((preset) => {
                 const active = filters.preset === preset.key;
@@ -150,10 +156,11 @@ export function ReportsPage() {
                     key={preset.key}
                     type="button"
                     className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+                    data-testid={`range-preset-${preset.key}`}
                     onClick={() => setRangePreset(preset.key)}
                     aria-pressed={active}
                   >
-                    {preset.label}
+                    {t(preset.labelKey)}
                   </button>
                 );
               })}
@@ -162,13 +169,13 @@ export function ReportsPage() {
                 style={{ cursor: "default" }}
                 aria-pressed={filters.preset === "custom"}
               >
-                Custom
+                {t("preset_custom")}
               </span>
             </div>
           </div>
 
           <div className="filter-field">
-            <span className="filter-label">From</span>
+            <span className="filter-label">{t("filter_from")}</span>
             <input
               className="filter-control"
               type="date"
@@ -177,7 +184,7 @@ export function ReportsPage() {
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">To</span>
+            <span className="filter-label">{t("filter_to")}</span>
             <input
               className="filter-control"
               type="date"
@@ -188,16 +195,17 @@ export function ReportsPage() {
 
           {isSuperAdmin && (
             <div className="filter-field">
-              <span className="filter-label">Company</span>
+              <span className="filter-label">{t("filter_company")}</span>
               <select
                 className="filter-control"
+                data-testid="filter-company"
                 value={filters.company === undefined ? "" : String(filters.company)}
                 onChange={(event) => {
                   const v = event.target.value;
                   setFilter("company", v === "" ? undefined : Number(v));
                 }}
               >
-                <option value="">All companies</option>
+                <option value="">{t("filter_all_companies")}</option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -209,9 +217,10 @@ export function ReportsPage() {
 
           {(isSuperAdmin && filters.company !== undefined) || isCompanyAdmin || isBuildingManager ? (
             <div className="filter-field">
-              <span className="filter-label">Building</span>
+              <span className="filter-label">{t("filter_building")}</span>
               <select
                 className="filter-control"
+                data-testid="filter-building"
                 value={filters.building === undefined ? "" : String(filters.building)}
                 onChange={(event) => {
                   const v = event.target.value;
@@ -219,7 +228,7 @@ export function ReportsPage() {
                 }}
                 disabled={buildingDropdownLocked || !buildingsLoaded}
               >
-                <option value="">All buildings</option>
+                <option value="">{t("filter_all_buildings")}</option>
                 {buildings.map((b) => (
                   <option key={b.id} value={b.id}>
                     {b.name}
