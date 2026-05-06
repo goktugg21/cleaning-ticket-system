@@ -13,6 +13,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import type {
   AssignableManager,
@@ -25,20 +26,8 @@ import type {
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { SLABadge } from "../components/sla/SLABadge";
-import {
-  formatSLATime,
-  SLA_DISPLAY_STATE_LABEL,
-} from "../utils/sla";
-
-const STATUS_LABEL: Record<TicketStatus, string> = {
-  OPEN: "Open",
-  IN_PROGRESS: "In progress",
-  WAITING_CUSTOMER_APPROVAL: "Waiting approval",
-  APPROVED: "Approved",
-  REJECTED: "Rejected",
-  CLOSED: "Closed",
-  REOPENED_BY_ADMIN: "Reopened",
-};
+import { useFormatSLATime } from "../utils/useFormatSLATime";
+import { useSLALabel } from "../utils/useSLALabel";
 
 const SUPER_ADMIN_UI_NEXT_STATUS: Record<TicketStatus, TicketStatus[]> = {
   OPEN: ["IN_PROGRESS"],
@@ -73,17 +62,6 @@ function isAdminCustomerDecisionOverride(
   );
 }
 
-function adminDecisionOverrideMessage(nextStatus: TicketStatus): string {
-  if (nextStatus === "APPROVED") {
-    return "Normally the customer should approve this ticket. Click the button again to approve it as admin override.";
-  }
-
-  if (nextStatus === "REJECTED") {
-    return "Normally the customer should reject this ticket and explain why. Click the button again to reject it as admin override.";
-  }
-
-  return "";
-}
 const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
@@ -123,8 +101,8 @@ function getInitials(value: string | null | undefined): string {
   return localPart.slice(0, 2).toUpperCase();
 }
 
-function humanName(email: string | null | undefined): string {
-  if (!email) return "Unassigned";
+function humanName(email: string | null | undefined, fallback: string): string {
+  if (!email) return fallback;
   const local = email.split("@")[0];
   return local
     .replace(/[._-]+/g, " ")
@@ -137,26 +115,35 @@ function getFileExtension(filename: string): string {
   return (parts.pop() || "FILE").slice(0, 4).toUpperCase();
 }
 
-function getStatusLabel(status: string | null): string {
-  if (!status) return "Created";
-  return STATUS_LABEL[status as TicketStatus] ?? status;
-}
-
-function priorityLabelLong(priority: string): string {
-  switch (priority) {
-    case "URGENT":
-      return "Critical Priority";
-    case "HIGH":
-      return "High Priority";
-    default:
-      return "Normal Priority";
-  }
-}
-
 
 export function TicketDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
+  const { t } = useTranslation(["ticket_detail", "common"]);
+  const slaLabel = useSLALabel();
+  const formatSLATime = useFormatSLATime();
+
+  const tStatus = (status: TicketStatus | string | null): string => {
+    if (!status) return t("status_default_created");
+    return t(`common:status.${status.toLowerCase()}`);
+  };
+
+  const priorityLabelLong = (priority: string): string => {
+    switch (priority) {
+      case "URGENT":
+        return t("priority_long_urgent");
+      case "HIGH":
+        return t("priority_long_high");
+      default:
+        return t("priority_long_normal");
+    }
+  };
+
+  const adminDecisionOverrideMessage = (nextStatus: TicketStatus): string => {
+    if (nextStatus === "APPROVED") return t("workflow_admin_override_approved");
+    if (nextStatus === "REJECTED") return t("workflow_admin_override_rejected");
+    return "";
+  };
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
@@ -190,8 +177,6 @@ export function TicketDetailPage() {
     me?.role === "SUPER_ADMIN" ||
     me?.role === "COMPANY_ADMIN" ||
     me?.role === "BUILDING_MANAGER";
-
-
 
   const loadTicket = useCallback(async () => {
     if (!id) return;
@@ -234,10 +219,6 @@ export function TicketDetailPage() {
   }, [ticket?.id, ticket?.status]);
 
   useEffect(() => {
-    setPendingAdminDecisionOverride(null);
-  }, [ticket?.id, ticket?.status]);
-
-  useEffect(() => {
     if (!isStaff || !id) return;
     let cancelled = false;
     api
@@ -258,7 +239,6 @@ export function TicketDetailPage() {
     [ticket, me?.role],
   );
 
-
   async function submitAssignment(event: FormEvent) {
     event.preventDefault();
     if (!id) return;
@@ -278,8 +258,6 @@ export function TicketDetailPage() {
       setAssigningTicket(false);
     }
   }
-
-
 
   async function changeStatus(toStatus: TicketStatus) {
     if (!id || !ticket) return;
@@ -306,7 +284,7 @@ export function TicketDetailPage() {
       toStatus === "REJECTED" &&
       !statusNote.trim()
     ) {
-      setError("Please write the rejection reason in the status note field first.");
+      setError(t("workflow_customer_rejection_required"));
       return;
     }
 
@@ -355,7 +333,7 @@ export function TicketDetailPage() {
     const file = event.target.files?.[0] ?? null;
     if (file && file.size > MAX_ATTACHMENT_SIZE_BYTES) {
       setSelectedFile(null);
-      setError("Attachment file size cannot exceed 10 MB.");
+      setError(t("attachment_too_large"));
       event.target.value = "";
       return;
     }
@@ -392,7 +370,7 @@ export function TicketDetailPage() {
     if (!id || !selectedFile) return;
 
     if (selectedFile.size > MAX_ATTACHMENT_SIZE_BYTES) {
-      setError("Attachment file size cannot exceed 10 MB.");
+      setError(t("attachment_too_large"));
       return;
     }
 
@@ -423,7 +401,7 @@ export function TicketDetailPage() {
       <div>
         <Link to="/" className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          Back to tickets
+          {t("back_to_tickets")}
         </Link>
         <div className="loading-bar">
           <div className="loading-bar-fill" />
@@ -438,9 +416,9 @@ export function TicketDetailPage() {
       <div>
         <Link to="/" className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          Back to tickets
+          {t("back_to_tickets")}
         </Link>
-        <div className="alert-error">{error || "Ticket not found."}</div>
+        <div className="alert-error">{error || t("ticket_not_found")}</div>
       </div>
     );
   }
@@ -450,7 +428,7 @@ export function TicketDetailPage() {
       <div className="detail-header">
         <Link to="/" className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          Back to tickets
+          {t("back_to_tickets")}
         </Link>
         <div className="detail-header-meta">
           <span className="detail-header-no">{ticket.ticket_no}</span>
@@ -458,7 +436,7 @@ export function TicketDetailPage() {
             {priorityLabelLong(ticket.priority)}
           </span>
           <span className={`badge badge-${ticket.status.toLowerCase()}`}>
-            {STATUS_LABEL[ticket.status]}
+            {tStatus(ticket.status)}
           </span>
         </div>
         <h1 className="detail-header-title">{ticket.title}</h1>
@@ -478,7 +456,9 @@ export function TicketDetailPage() {
               <span className="card-head-icon-glyph">
                 <Clock size={14} strokeWidth={2.2} />
               </span>
-              <span className="card-head-icon-title">Activity Timeline</span>
+              <span className="card-head-icon-title">
+                {t("card_activity_title")}
+              </span>
             </div>
             <div className="timeline">
               {ticket.status_history.length === 0 ? (
@@ -489,8 +469,16 @@ export function TicketDetailPage() {
                       {formatDate(ticket.created_at)}
                     </div>
                     <div className="timeline-text">
-                      <b>{humanName(ticket.created_by_email)}</b> created the
-                      ticket.
+                      <Trans
+                        i18nKey="ticket_detail:timeline_created"
+                        values={{
+                          name: humanName(
+                            ticket.created_by_email,
+                            t("unassigned"),
+                          ),
+                        }}
+                        components={{ b: <b /> }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -515,25 +503,30 @@ export function TicketDetailPage() {
                         {formatDate(entry.created_at)}
                       </div>
                       <div className="timeline-text">
-                        <b>{humanName(entry.changed_by_email)}</b>
+                        <b>
+                          {humanName(
+                            entry.changed_by_email,
+                            t("unassigned"),
+                          )}
+                        </b>
                         {entry.old_status ? (
                           <>
-                            {" "}changed status from{" "}
+                            {t("timeline_status_changed_from_to")}
                             <span
                               className={`pill ${entry.old_status === "OPEN" ? "open" : "progress"}`}
                             >
-                              {getStatusLabel(entry.old_status)}
-                            </span>{" "}
-                            to{" "}
+                              {tStatus(entry.old_status)}
+                            </span>
+                            {t("timeline_status_to")}
                             <span className="pill progress">
-                              {getStatusLabel(entry.new_status)}
+                              {tStatus(entry.new_status)}
                             </span>
                           </>
                         ) : (
                           <>
-                            {" "}created the ticket as{" "}
+                            {t("timeline_created_as")}
                             <span className="pill progress">
-                              {getStatusLabel(entry.new_status)}
+                              {tStatus(entry.new_status)}
                             </span>
                           </>
                         )}
@@ -552,7 +545,7 @@ export function TicketDetailPage() {
                 <MessageSquare size={14} strokeWidth={2.2} />
               </span>
               <span className="card-head-icon-title">
-                Messages &amp; internal notes
+                {t("card_messages_title")}
               </span>
             </div>
             <form className="notes-composer-body" onSubmit={submitMessage}>
@@ -560,8 +553,8 @@ export function TicketDetailPage() {
                 className="notes-textarea"
                 placeholder={
                   isStaff && messageType === "INTERNAL_NOTE"
-                    ? "Internal note — not visible to customers."
-                    : "Write a reply…"
+                    ? t("composer_internal_placeholder")
+                    : t("composer_public_placeholder")
                 }
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
@@ -580,7 +573,7 @@ export function TicketDetailPage() {
                         }`}
                         onClick={() => setMessageType("PUBLIC_REPLY")}
                       >
-                        Public reply
+                        {t("composer_public")}
                       </button>
                       <button
                         type="button"
@@ -593,7 +586,7 @@ export function TicketDetailPage() {
                         }`}
                         onClick={() => setMessageType("INTERNAL_NOTE")}
                       >
-                        Internal note
+                        {t("composer_internal")}
                       </button>
                     </div>
                   )}
@@ -603,7 +596,7 @@ export function TicketDetailPage() {
                   className="btn btn-primary btn-sm"
                   disabled={sendingMessage || !message.trim()}
                 >
-                  {sendingMessage ? "Sending…" : "Post message"}
+                  {sendingMessage ? t("sending") : t("post_message")}
                 </button>
               </div>
             </form>
@@ -616,7 +609,7 @@ export function TicketDetailPage() {
                   fontSize: 13,
                 }}
               >
-                No messages yet. Be the first to reply.
+                {t("no_messages")}
               </p>
             ) : (
               messages.map((item) => (
@@ -632,7 +625,7 @@ export function TicketDetailPage() {
                   <div>
                     <div className="note-bubble-head">
                       <span className="note-bubble-name">
-                        {humanName(item.author_email)}
+                        {humanName(item.author_email, t("unassigned"))}
                       </span>
                       <span className="note-bubble-time">
                         {formatDate(item.created_at)}
@@ -643,8 +636,8 @@ export function TicketDetailPage() {
                         }`}
                       >
                         {item.message_type === "INTERNAL_NOTE"
-                          ? "Internal note"
-                          : "Public reply"}
+                          ? t("tag_internal")
+                          : t("tag_public")}
                       </span>
                     </div>
                     <div className="note-bubble-text">{item.message}</div>
@@ -659,10 +652,15 @@ export function TicketDetailPage() {
               <span className="card-head-icon-glyph">
                 <Paperclip size={14} strokeWidth={2.2} />
               </span>
-              <span className="card-head-icon-title">Attachments</span>
+              <span className="card-head-icon-title">
+                {t("card_attachments_title")}
+              </span>
               <span className="card-head-icon-spacer" />
               <span className="card-head-icon-link">
-                {attachments.length} file{attachments.length === 1 ? "" : "s"}
+                {t(
+                  attachments.length === 1 ? "files_singular" : "files_plural",
+                  { count: attachments.length },
+                )}
               </span>
             </div>
 
@@ -680,12 +678,14 @@ export function TicketDetailPage() {
                       {getFileExtension(item.original_filename)}
                     </span>
                     {item.is_hidden && (
-                      <span className="att-thumb-internal-pill">Internal</span>
+                      <span className="att-thumb-internal-pill">
+                        {t("internal_pill")}
+                      </span>
                     )}
                   </button>
                   <div className="att-thumb-name">
                     {downloadingAttachmentId === item.id
-                      ? "Downloading…"
+                      ? t("downloading")
                       : item.original_filename}
                   </div>
                   <div className="att-thumb-size">
@@ -698,7 +698,7 @@ export function TicketDetailPage() {
               <label className="att-thumb-upload">
                 <UploadCloud size={22} strokeWidth={2} />
                 <span>
-                  {selectedFile ? "Replace selection" : "Upload File"}
+                  {selectedFile ? t("replace_selection") : t("upload_file")}
                 </span>
                 <input
                   type="file"
@@ -715,7 +715,7 @@ export function TicketDetailPage() {
                 onSubmit={submitAttachment}
               >
                 <span className="att-thumb-staged-text">
-                  Selected: <b>{selectedFile.name}</b> ·{" "}
+                  {t("selected")} <b>{selectedFile.name}</b> ·{" "}
                   {formatBytes(selectedFile.size)}
                 </span>
                 <div
@@ -736,7 +736,7 @@ export function TicketDetailPage() {
                         }
                         disabled={uploadingAttachment}
                       />
-                      <span>Internal only</span>
+                      <span>{t("internal_only")}</span>
                     </label>
                   )}
                   <button
@@ -744,7 +744,7 @@ export function TicketDetailPage() {
                     className="btn btn-primary btn-sm"
                     disabled={uploadingAttachment}
                   >
-                    {uploadingAttachment ? "Uploading…" : "Upload"}
+                    {uploadingAttachment ? t("uploading") : t("upload_button")}
                   </button>
                 </div>
               </form>
@@ -765,7 +765,7 @@ export function TicketDetailPage() {
                   color: "var(--text-faint)",
                 }}
               >
-                Assignment
+                {t("card_assignment_title")}
               </div>
             </div>
             <div className="assign-body">
@@ -776,13 +776,13 @@ export function TicketDetailPage() {
                 <div className="assignee-info">
                   <span className="assignee-name">
                     {ticket.assigned_to_email
-                      ? humanName(ticket.assigned_to_email)
-                      : "Unassigned"}
+                      ? humanName(ticket.assigned_to_email, t("unassigned"))
+                      : t("unassigned")}
                   </span>
                   <span className="assignee-role">
                     {ticket.assigned_to_email
-                      ? "Operations lead"
-                      : "Awaiting assignment"}
+                      ? t("operations_lead")
+                      : t("awaiting_assignment")}
                   </span>
                 </div>
               </div>
@@ -804,15 +804,17 @@ export function TicketDetailPage() {
                     }
                     disabled={assigningTicket}
                   >
-                    <option value="">Unassigned</option>
+                    <option value="">{t("unassigned")}</option>
                     {ticket.assigned_to !== null &&
                       !assignableManagers.some(
                         (m) => m.id === ticket.assigned_to,
                       ) && (
                         <option value={String(ticket.assigned_to)}>
                           {ticket.assigned_to_email ??
-                            `User #${ticket.assigned_to}`}
-                          {" (current)"}
+                            t("assignment_user_n", {
+                              id: ticket.assigned_to,
+                            })}
+                          {t("assignment_current")}
                         </option>
                       )}
                     {assignableManagers.map((manager) => (
@@ -834,7 +836,7 @@ export function TicketDetailPage() {
                     }
                   >
                     <UserPlus size={14} strokeWidth={2} />
-                    {assigningTicket ? "Updating…" : "Update assignment"}
+                    {assigningTicket ? t("updating") : t("update_assignment")}
                   </button>
                 </form>
               ) : null}
@@ -853,51 +855,51 @@ export function TicketDetailPage() {
                   color: "var(--text-faint)",
                 }}
               >
-                Ticket details
+                {t("card_details_title")}
               </div>
             </div>
             <div style={{ padding: "14px 18px 16px" }}>
               <div className="detail-kv-list">
                 <div className="detail-kv-row">
-                  <span className="detail-kv-label">Location</span>
+                  <span className="detail-kv-label">{t("details_location")}</span>
                   <span className="detail-kv-val">
                     <MapPin size={14} strokeWidth={2} />
                     {ticket.room_label || ticket.building_name}
                   </span>
                 </div>
                 <div className="detail-kv-row">
-                  <span className="detail-kv-label">Customer</span>
+                  <span className="detail-kv-label">{t("details_customer")}</span>
                   <span className="detail-kv-val">
                     <Users size={14} strokeWidth={2} />
                     {ticket.customer_name}
                   </span>
                 </div>
                 <div className="detail-kv-row">
-                  <span className="detail-kv-label">Category</span>
+                  <span className="detail-kv-label">{t("details_category")}</span>
                   <span className="detail-kv-val">{ticket.type}</span>
                 </div>
                 <div className="detail-kv-row">
-                  <span className="detail-kv-label">Created by</span>
+                  <span className="detail-kv-label">{t("details_created_by")}</span>
                   <span className="detail-kv-val">
                     {ticket.created_by_email}
                   </span>
                 </div>
                 <div className="detail-kv-row">
-                  <span className="detail-kv-label">Created</span>
+                  <span className="detail-kv-label">{t("details_created")}</span>
                   <span className="detail-kv-val">
                     <Clock size={14} strokeWidth={2} />
                     {formatDate(ticket.created_at)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
-                  <span className="detail-kv-label">First response</span>
+                  <span className="detail-kv-label">{t("details_first_response")}</span>
                   <span className="detail-kv-val">
                     {formatDate(ticket.first_response_at)}
                   </span>
                 </div>
                 {ticket.sent_for_approval_at && (
                   <div className="detail-kv-row">
-                    <span className="detail-kv-label">Sent for approval</span>
+                    <span className="detail-kv-label">{t("details_sent_for_approval")}</span>
                     <span className="detail-kv-val">
                       {formatDate(ticket.sent_for_approval_at)}
                     </span>
@@ -905,7 +907,7 @@ export function TicketDetailPage() {
                 )}
                 {ticket.approved_at && (
                   <div className="detail-kv-row">
-                    <span className="detail-kv-label">Approved</span>
+                    <span className="detail-kv-label">{t("details_approved")}</span>
                     <span className="detail-kv-val">
                       {formatDate(ticket.approved_at)}
                     </span>
@@ -913,7 +915,7 @@ export function TicketDetailPage() {
                 )}
                 {ticket.closed_at && (
                   <div className="detail-kv-row">
-                    <span className="detail-kv-label">Closed</span>
+                    <span className="detail-kv-label">{t("details_closed")}</span>
                     <span className="detail-kv-val">
                       {formatDate(ticket.closed_at)}
                     </span>
@@ -935,7 +937,7 @@ export function TicketDetailPage() {
                   color: "var(--text-faint)",
                 }}
               >
-                SLA
+                {t("card_sla_title")}
               </div>
             </div>
             <div style={{ padding: "16px 18px 18px" }}>
@@ -946,7 +948,7 @@ export function TicketDetailPage() {
                   size="md"
                 />
                 <span style={{ color: "var(--text-2)", fontSize: 13 }}>
-                  {SLA_DISPLAY_STATE_LABEL[ticket.sla_display_state]}
+                  {slaLabel(ticket.sla_display_state)}
                   {ticket.sla_display_state !== "PAUSED" &&
                     ticket.sla_display_state !== "COMPLETED" &&
                     ticket.sla_display_state !== "HISTORICAL" &&
@@ -965,7 +967,7 @@ export function TicketDetailPage() {
                   ticket.sla_display_state !== "HISTORICAL" &&
                   ticket.sla_display_state !== "COMPLETED" && (
                     <>
-                      <span className="sla-detail-meta-label">Due</span>
+                      <span className="sla-detail-meta-label">{t("sla_due_label")}</span>
                       <span className="sla-detail-meta-value">
                         {formatDate(ticket.sla_due_at)}
                       </span>
@@ -973,7 +975,7 @@ export function TicketDetailPage() {
                   )}
                 {ticket.sla_paused_at && (
                   <>
-                    <span className="sla-detail-meta-label">Paused since</span>
+                    <span className="sla-detail-meta-label">{t("sla_paused_since_label")}</span>
                     <span className="sla-detail-meta-value">
                       {formatDate(ticket.sla_paused_at)}
                     </span>
@@ -981,7 +983,7 @@ export function TicketDetailPage() {
                 )}
                 {ticket.sla_first_breached_at && (
                   <>
-                    <span className="sla-detail-meta-label">First breached</span>
+                    <span className="sla-detail-meta-label">{t("sla_first_breached_label")}</span>
                     <span className="sla-detail-meta-value">
                       {formatDate(ticket.sla_first_breached_at)}
                     </span>
@@ -989,7 +991,7 @@ export function TicketDetailPage() {
                 )}
                 {ticket.sla_completed_at && (
                   <>
-                    <span className="sla-detail-meta-label">Completed</span>
+                    <span className="sla-detail-meta-label">{t("sla_completed_label")}</span>
                     <span className="sla-detail-meta-value">
                       {formatDate(ticket.sla_completed_at)}
                     </span>
@@ -1011,13 +1013,13 @@ export function TicketDetailPage() {
                   color: "var(--text-faint)",
                 }}
               >
-                Workflow
+                {t("card_workflow_title")}
               </div>
             </div>
             <div className="workflow-body">
               {visibleNextStatuses.length === 0 ? (
                 <p className="muted small">
-                  No status transitions available for your role.
+                  {t("workflow_no_transitions")}
                 </p>
               ) : (
                 <>
@@ -1026,8 +1028,8 @@ export function TicketDetailPage() {
                       {me?.role === "CUSTOMER_USER" &&
                       ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
                       visibleNextStatuses.includes("REJECTED")
-                        ? "Rejection reason (required if rejecting)"
-                        : "Status note (optional)"}
+                        ? t("workflow_rejection_reason_label")
+                        : t("workflow_status_note_label")}
                     </label>
                     <input
                       id="status-note"
@@ -1038,8 +1040,8 @@ export function TicketDetailPage() {
                         me?.role === "CUSTOMER_USER" &&
                         ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
                         visibleNextStatuses.includes("REJECTED")
-                          ? "Explain why you reject this ticket"
-                          : "Add a short note for the audit trail"
+                          ? t("workflow_rejection_reason_placeholder")
+                          : t("workflow_status_note_placeholder")
                       }
                     />
                   </div>
@@ -1057,44 +1059,29 @@ export function TicketDetailPage() {
                     ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
                     visibleNextStatuses.includes("REJECTED") && (
                       <div className="alert-warning">
-                        If you reject this ticket, please write the reason in
-                        the status note field first.
+                        {t("workflow_customer_reject_warning")}
                       </div>
                     )}
 
                   <div className="status-actions">
-                    {visibleNextStatuses.map((status) => {
-                      const isOverrideConfirm =
-                        pendingAdminDecisionOverride &&
-                        ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
-                        status === "APPROVED" &&
-                        (me?.role === "SUPER_ADMIN" ||
-                          me?.role === "COMPANY_ADMIN");
-
-                      return (
-                        <button
-                          key={status}
-                          type="button"
-                          className="status-btn"
-                          disabled={statusBusy !== null}
-                          onClick={() => changeStatus(status)}
-                        >
-                          {statusBusy === status ? (
-                            "Updating…"
-                          ) : (
-                            <>
-                              {isOverrideConfirm
-                                ? <>
-                              Move to {STATUS_LABEL[status]}
-                              <span className="status-btn-arrow">→</span>
-                            </>
-                                : `Move to ${STATUS_LABEL[status]}`}
-                              <span className="status-btn-arrow">→</span>
-                            </>
-                          )}
-                        </button>
-                      );
-                    })}
+                    {visibleNextStatuses.map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className="status-btn"
+                        disabled={statusBusy !== null}
+                        onClick={() => changeStatus(status)}
+                      >
+                        {statusBusy === status ? (
+                          t("updating")
+                        ) : (
+                          <>
+                            {t("workflow_move_to", { status: tStatus(status) })}
+                            <span className="status-btn-arrow">→</span>
+                          </>
+                        )}
+                      </button>
+                    ))}
                   </div>
                 </>
               )}
@@ -1106,7 +1093,9 @@ export function TicketDetailPage() {
               <span className="card-head-icon-glyph">
                 <History size={14} strokeWidth={2.2} />
               </span>
-              <span className="card-head-icon-title">Status history</span>
+              <span className="card-head-icon-title">
+                {t("card_history_title")}
+              </span>
               <span className="card-head-icon-spacer" />
               <span
                 style={{
@@ -1126,7 +1115,7 @@ export function TicketDetailPage() {
                   className="muted small"
                   style={{ padding: "12px 0" }}
                 >
-                  No status changes yet.
+                  {t("history_empty")}
                 </p>
               ) : (
                 ticket.status_history.map((item) => (
@@ -1135,10 +1124,10 @@ export function TicketDetailPage() {
                     <div>
                       <div className="history-change">
                         <span className="from">
-                          {getStatusLabel(item.old_status)}
+                          {tStatus(item.old_status)}
                         </span>
                         <span className="arrow">→</span>
-                        <b>{getStatusLabel(item.new_status)}</b>
+                        <b>{tStatus(item.new_status)}</b>
                       </div>
                       <div className="history-meta">
                         {item.changed_by_email} · {formatDate(item.created_at)}
@@ -1165,7 +1154,9 @@ export function TicketDetailPage() {
                 >
                   <TriangleAlert size={14} strokeWidth={2.2} />
                 </span>
-                <span className="card-head-icon-title">Critical priority</span>
+                <span className="card-head-icon-title">
+                  {t("card_critical_title")}
+                </span>
               </div>
               <p
                 style={{
@@ -1175,8 +1166,7 @@ export function TicketDetailPage() {
                   lineHeight: 1.55,
                 }}
               >
-                This ticket is flagged urgent. Prioritise dispatch and update
-                the customer once an operator is on site.
+                {t("card_critical_body")}
               </p>
             </div>
           )}

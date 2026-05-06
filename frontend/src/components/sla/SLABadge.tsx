@@ -1,9 +1,8 @@
 import { Pause } from "lucide-react";
-import {
-  formatSLATime,
-  SLA_DISPLAY_STATE_LABEL,
-  type SLADisplayState,
-} from "../../utils/sla";
+import { useTranslation } from "react-i18next";
+import type { SLADisplayState } from "../../utils/sla";
+import { useFormatSLATime } from "../../utils/useFormatSLATime";
+import { useSLALabel } from "../../utils/useSLALabel";
 
 interface SLABadgeProps {
   state: SLADisplayState;
@@ -11,10 +10,10 @@ interface SLABadgeProps {
   size?: "sm" | "md";
 }
 
-const TOOLTIPS: Partial<Record<SLADisplayState, string>> = {
-  HISTORICAL: "This ticket predates the SLA engine.",
-  PAUSED: "Waiting on customer; SLA clock paused.",
-  COMPLETED: "Ticket reached a terminal status.",
+const TOOLTIP_KEYS: Partial<Record<SLADisplayState, string>> = {
+  HISTORICAL: "sla_tooltip_historical",
+  PAUSED: "sla_tooltip_paused",
+  COMPLETED: "sla_tooltip_completed",
 };
 
 export function SLABadge({
@@ -22,7 +21,11 @@ export function SLABadge({
   remainingSeconds,
   size = "sm",
 }: SLABadgeProps) {
-  const label = SLA_DISPLAY_STATE_LABEL[state];
+  const { t } = useTranslation("common");
+  const slaLabel = useSLALabel();
+  const formatSLATime = useFormatSLATime();
+
+  const label = slaLabel(state);
   const time =
     state === "PAUSED" || state === "COMPLETED" || state === "HISTORICAL"
       ? ""
@@ -30,9 +33,12 @@ export function SLABadge({
   const className =
     `sla-badge sla-badge-${state.toLowerCase()}` +
     (size === "md" ? " sla-badge-md" : "");
-  const title = TOOLTIPS[state];
+  const tooltipKey = TOOLTIP_KEYS[state];
+  // Tooltip strings live in common.json as optional keys; absence falls
+  // through to undefined (no tooltip).
+  const title = tooltipKey ? t(tooltipKey, { defaultValue: "" }) : undefined;
   return (
-    <span className={className} title={title}>
+    <span className={className} title={title || undefined}>
       {state === "PAUSED" && (
         <Pause size={11} strokeWidth={2.4} aria-hidden="true" />
       )}

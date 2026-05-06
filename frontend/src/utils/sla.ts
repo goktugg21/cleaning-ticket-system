@@ -3,6 +3,11 @@
 // The backend computes sla_display_state and sla_remaining_business_seconds
 // authoritatively, but components that don't go through the API (or want a
 // local re-derivation for safety) can call getSLADisplayState directly.
+//
+// Translation note: i18n B2 moved the user-visible label map and the
+// formatter from this module into hooks (useSLALabel / useFormatSLATime).
+// What remains here is type-only data plus the math constants — anything
+// that doesn't need the active language.
 
 export type SLADisplayState =
   | "ON_TRACK"
@@ -33,39 +38,7 @@ export function getSLADisplayState(ticket: SLAFields): SLADisplayState {
   return "ON_TRACK";
 }
 
-export const SLA_DISPLAY_STATE_LABEL: Record<SLADisplayState, string> = {
-  ON_TRACK: "On track",
-  AT_RISK: "At risk",
-  BREACHED: "Breached",
-  PAUSED: "Paused",
-  COMPLETED: "Completed",
-  HISTORICAL: "Historical",
-};
-
-const BUSINESS_HOURS_PER_DAY = 8;
-const SECONDS_PER_HOUR = 60 * 60;
-const SECONDS_PER_BUSINESS_DAY = BUSINESS_HOURS_PER_DAY * SECONDS_PER_HOUR;
-
-export function formatSLATime(businessSeconds: number | null): string {
-  if (businessSeconds === null) return "";
-  if (businessSeconds === 0) return "Due now";
-  const isOverdue = businessSeconds < 0;
-  const abs = Math.abs(businessSeconds);
-  const suffix = isOverdue ? "overdue" : "left";
-  if (abs < 60 * 60) {
-    const m = Math.max(1, Math.ceil(abs / 60));
-    return `${m}m ${suffix}`;
-  }
-  const totalMinutes = Math.floor(abs / 60);
-  if (abs < SECONDS_PER_BUSINESS_DAY) {
-    const h = Math.floor(totalMinutes / 60);
-    const m = totalMinutes % 60;
-    return m === 0 ? `${h}h ${suffix}` : `${h}h ${m}m ${suffix}`;
-  }
-  const totalHours = Math.floor(totalMinutes / 60);
-  const days = Math.floor(totalHours / BUSINESS_HOURS_PER_DAY);
-  const hoursRemainder = totalHours % BUSINESS_HOURS_PER_DAY;
-  return hoursRemainder === 0
-    ? `${days}d ${suffix}`
-    : `${days}d ${hoursRemainder}h ${suffix}`;
-}
+export const BUSINESS_HOURS_PER_DAY = 8;
+export const SECONDS_PER_HOUR = 60 * 60;
+export const SECONDS_PER_BUSINESS_DAY =
+  BUSINESS_HOURS_PER_DAY * SECONDS_PER_HOUR;
