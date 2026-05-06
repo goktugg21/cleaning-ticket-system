@@ -306,38 +306,42 @@ export function InvitationsAdminPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+      {/* page-form-narrow centers the header + form-section column. The
+          invitations table (further below) sits outside the wrapper and
+          retains its full-width treatment. */}
+      <div className="page-form-narrow">
+        <div className="page-header">
+          <div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>
+              Admin
+            </div>
+            <h2 className="page-title">Invitations</h2>
+            <p className="page-sub">
+              {listLoading
+                ? "Loading invitations…"
+                : `${count} ${count === 1 ? "invitation" : "invitations"}`}
+            </p>
           </div>
-          <h2 className="page-title">Invitations</h2>
-          <p className="page-sub">
-            {listLoading
-              ? "Loading invitations…"
-              : `${count} ${count === 1 ? "invitation" : "invitations"}`}
-          </p>
+          <div className="page-header-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={load}
+              disabled={listLoading}
+            >
+              <RefreshCw size={14} strokeWidth={2.5} />
+              Refresh
+            </button>
+          </div>
         </div>
-        <div className="page-header-actions">
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={load}
-            disabled={listLoading}
-          >
-            <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
-          </button>
-        </div>
-      </div>
 
-      {savedBanner && (
-        <div className="alert-info" style={{ marginBottom: 16 }} role="status">
-          {savedBanner}
-        </div>
-      )}
+        {savedBanner && (
+          <div className="alert-info" style={{ marginBottom: 16 }} role="status">
+            {savedBanner}
+          </div>
+        )}
 
-      <section className="card page-form-narrow" style={{ padding: "20px 22px" }}>
+      <section className="card" style={{ padding: "20px 22px" }}>
         <h3 className="section-title">Send a new invitation</h3>
         <p className="muted small" style={{ marginBottom: 12 }}>
           The invitee receives an email with a one-time link. They set their own password when
@@ -449,9 +453,9 @@ export function InvitationsAdminPage() {
               <p className="field-helper">
                 Pick one or more buildings the invitee will manage.
               </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {buildingOptions.length === 0 ? (
-                  <span className="muted small">
+                  <span className="field-empty-hint">
                     {formCompany === ""
                       ? "Select a company first."
                       : "No buildings in this company."}
@@ -487,9 +491,9 @@ export function InvitationsAdminPage() {
               <p className="field-helper">
                 Pick one or more customers the invitee will be linked to.
               </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {customerOptions.length === 0 ? (
-                  <span className="muted small">
+                  <span className="field-empty-hint">
                     {formCompany === ""
                       ? "Select a company first."
                       : "No customers in this company."}
@@ -520,12 +524,14 @@ export function InvitationsAdminPage() {
           )}
 
           <div className="form-actions">
+            <span className="form-meta-hint">* required</span>
             <button type="submit" className="btn btn-primary" disabled={submitting}>
               {submitting ? "Sending…" : "Send invitation"}
             </button>
           </div>
         </form>
       </section>
+      </div>
 
       <div className="card" style={{ overflow: "hidden", marginTop: 16 }}>
         <div className="filter-bar">

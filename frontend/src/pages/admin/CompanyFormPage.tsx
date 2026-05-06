@@ -210,7 +210,7 @@ export function CompanyFormPage() {
   }
 
   return (
-    <div>
+    <div className="page-form-narrow">
       <Link to="/admin/companies" className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
         Back to companies
@@ -263,7 +263,7 @@ export function CompanyFormPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
           <div className="field">
             <label className="field-label" htmlFor="company-name">
               Name *

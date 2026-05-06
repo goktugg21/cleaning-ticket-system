@@ -1342,11 +1342,14 @@ table.data-table {
   letter-spacing: 0.01em;
 }
 
-/* Narrow page wrapper for single-column form-only pages. Anchored to the
-   start of the page-canvas so the back-link and page-header keep their
-   left edge; the form columns just stop stretching beyond a comfortable
-   reading width on wide monitors. */
-.page-form-narrow { max-width: 720px; }
+/* Narrow page wrapper for single-column form-only pages. Centered in the
+   page-canvas so the back-link, page-header, and form share the same
+   horizontal axis. Apply to the outermost element of a form-only page so
+   header and form columns line up. */
+.page-form-narrow {
+  max-width: 720px;
+  margin-inline: auto;
+}
 /* Helper text below a label, distinct from a generic muted/small block.
    Used for inline form hints that need to read as guidance, not as an
    empty-state. Sits between label and input/widget. */
@@ -1355,7 +1358,29 @@ table.data-table {
   color: var(--text-muted);
   font-weight: 500;
   margin-top: -2px;
+  margin-bottom: 8px;
   line-height: 1.45;
+}
+/* Inline placeholder displayed where buttons/options would otherwise
+   render (e.g., "Select a company first."). Lighter than .muted.small —
+   reads as guidance in an empty UI slot, not as actionable copy. */
+.field-empty-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-style: italic;
+  padding: 6px 2px;
+}
+/* Secondary metadata text inside a form-actions row, anchored left to
+   counterweight the right-aligned submit button. Used for "* required"
+   reminders and similar non-status hints. Layout mirrors
+   .form-saved-indicator (margin-right: auto) but the styling is muted
+   rather than success-colored. */
+.form-meta-hint {
+  margin-right: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  letter-spacing: 0.01em;
 }
 
 /* Priority cards */

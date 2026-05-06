@@ -190,7 +190,7 @@ export function UserFormPage() {
   }
 
   return (
-    <div>
+    <div className="page-form-narrow">
       <Link to="/admin/users" className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
         Back to users
@@ -247,7 +247,7 @@ export function UserFormPage() {
         </div>
       ) : (
         <>
-          <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
+          <form className="card" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
             <div className="field">
               <label className="field-label" htmlFor="user-email">
                 Email
@@ -349,7 +349,7 @@ export function UserFormPage() {
             </div>
           </form>
 
-          <section className="card page-form-narrow" style={{ marginTop: 16, padding: "20px 22px" }}>
+          <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
             <h3 className="section-title">Memberships</h3>
             <p className="muted small" style={{ marginBottom: 12 }}>
               Read-only summary. Memberships are managed from the entity detail pages.

@@ -216,7 +216,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div>
+    <div className="page-form-narrow">
       <div className="page-header">
         <div>
           <div className="eyebrow">{t("eyebrow")}</div>
@@ -230,7 +230,6 @@ export function SettingsPage() {
           display: "flex",
           flexDirection: "column",
           gap: 16,
-          maxWidth: 720,
         }}
       >
         <form className="card" onSubmit={handleProfileSubmit} noValidate>
