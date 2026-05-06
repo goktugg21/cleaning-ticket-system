@@ -16,10 +16,12 @@ from .permissions import IsAuthenticatedAndActive
 from .serializers import (
     MeSerializer,
     MeUpdateSerializer,
+    NotificationPreferencesUpdateSerializer,
     PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ScopedTokenObtainPairSerializer,
+    serialize_notification_preferences,
 )
 
 
@@ -66,6 +68,30 @@ class PasswordChangeView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"detail": "Password updated."}, status=status.HTTP_200_OK)
+
+
+class NotificationPreferencesView(APIView):
+    """Self-service per-event mute toggles.
+
+    Lives in accounts/ alongside MeView and PasswordChangeView so all the
+    self-edit endpoints share the same module. The data model is in
+    notifications/, but the import direction (accounts → notifications) is
+    already established by views.py importing send_password_reset_email.
+    """
+
+    permission_classes = [IsAuthenticated, IsAuthenticatedAndActive]
+
+    def get(self, request):
+        return Response(serialize_notification_preferences(request.user))
+
+    def patch(self, request):
+        serializer = NotificationPreferencesUpdateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serialize_notification_preferences(request.user))
 
 
 class LogoutView(APIView):

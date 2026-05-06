@@ -263,6 +263,22 @@ export interface InvitationAdmin {
   revoked_at: string | null;
 }
 
+export type NotificationEventType =
+  | "TICKET_CREATED"
+  | "TICKET_STATUS_CHANGED"
+  | "TICKET_ASSIGNED"
+  | "TICKET_UNASSIGNED";
+
+export interface NotificationPreferenceEntry {
+  event_type: NotificationEventType;
+  label: string;
+  muted: boolean;
+}
+
+export interface NotificationPreferencesResponse {
+  preferences: NotificationPreferenceEntry[];
+}
+
 export interface CompanyAdminMembership {
   id: number;
   company: number;

@@ -1,9 +1,13 @@
 import type { FormEvent } from "react";
-import { useState } from "react";
-import { Save, ShieldCheck, UserCircle2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BellRing, Save, ShieldCheck, UserCircle2 } from "lucide-react";
 import axios from "axios";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import type {
+  NotificationPreferenceEntry,
+  NotificationPreferencesResponse,
+} from "../api/types";
 
 const LANGUAGE_OPTIONS = [
   { value: "nl", label: "Nederlands (nl)" },
@@ -50,6 +54,70 @@ export function SettingsPage() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordFieldErrors, setPasswordFieldErrors] =
     useState<FieldErrors>({});
+
+  const [preferences, setPreferences] = useState<NotificationPreferenceEntry[]>(
+    [],
+  );
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesSaved, setPreferencesSaved] = useState(false);
+  const [preferencesError, setPreferencesError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<NotificationPreferencesResponse>("/auth/notification-preferences/")
+      .then((response) => {
+        if (cancelled) return;
+        setPreferences(response.data.preferences);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPreferencesError(getApiError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setPreferencesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function togglePreference(eventType: string) {
+    setPreferencesSaved(false);
+    setPreferences((current) =>
+      current.map((entry) =>
+        entry.event_type === eventType
+          ? { ...entry, muted: !entry.muted }
+          : entry,
+      ),
+    );
+  }
+
+  async function handlePreferencesSubmit(event: FormEvent) {
+    event.preventDefault();
+    setPreferencesSaved(false);
+    setPreferencesError("");
+    setPreferencesSaving(true);
+
+    try {
+      const response = await api.patch<NotificationPreferencesResponse>(
+        "/auth/notification-preferences/",
+        {
+          preferences: preferences.map((entry) => ({
+            event_type: entry.event_type,
+            muted: entry.muted,
+          })),
+        },
+      );
+      setPreferences(response.data.preferences);
+      setPreferencesSaved(true);
+    } catch (err) {
+      setPreferencesError(getApiError(err));
+    } finally {
+      setPreferencesSaving(false);
+    }
+  }
 
   async function handleProfileSubmit(event: FormEvent) {
     event.preventDefault();
@@ -140,7 +208,9 @@ export function SettingsPage() {
         <div>
           <div className="eyebrow">Account</div>
           <h2 className="page-title">Settings</h2>
-          <p className="page-sub">Update your profile and password.</p>
+          <p className="page-sub">
+            Update your profile, password, and notification preferences.
+          </p>
         </div>
       </div>
 
@@ -337,6 +407,115 @@ export function SettingsPage() {
             >
               <Save size={14} strokeWidth={2.5} />
               {passwordSaving ? "Saving…" : "Update password"}
+            </button>
+          </div>
+        </form>
+
+        <form className="card" onSubmit={handlePreferencesSubmit} noValidate>
+          <div className="form-section">
+            <div
+              className="form-section-title"
+              style={{ display: "flex", alignItems: "center", gap: 8 }}
+            >
+              <BellRing size={16} strokeWidth={2} />
+              Notification preferences
+            </div>
+            <div className="form-section-helper">
+              Choose which events trigger an email to you. Security and
+              onboarding emails are always sent.
+            </div>
+
+            {preferencesLoading ? (
+              <div className="loading-bar">
+                <div className="loading-bar-fill" />
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                {preferences.map((entry) => {
+                  const checked = !entry.muted;
+                  const inputId = `pref-${entry.event_type}`;
+                  return (
+                    <label
+                      key={entry.event_type}
+                      htmlFor={inputId}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "10px 12px",
+                        border: "1px solid var(--border-soft)",
+                        borderRadius: "var(--r)",
+                        cursor: "pointer",
+                        gap: 12,
+                      }}
+                    >
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>
+                        {entry.label}
+                      </span>
+                      <span
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: checked
+                              ? "var(--green)"
+                              : "var(--text-faint)",
+                            minWidth: 28,
+                            textAlign: "right",
+                          }}
+                        >
+                          {checked ? "On" : "Off"}
+                        </span>
+                        <input
+                          id={inputId}
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => togglePreference(entry.event_type)}
+                          style={{
+                            width: 16,
+                            height: 16,
+                            cursor: "pointer",
+                            accentColor: "var(--green)",
+                          }}
+                        />
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {preferencesSaved && (
+              <div className="alert-info" role="status">
+                Notification preferences saved.
+              </div>
+            )}
+            {preferencesError && (
+              <div className="alert-error" role="alert">
+                {preferencesError}
+              </div>
+            )}
+          </div>
+          <div className="form-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={preferencesSaving || preferencesLoading}
+            >
+              <Save size={14} strokeWidth={2.5} />
+              {preferencesSaving ? "Saving…" : "Save preferences"}
             </button>
           </div>
         </form>

@@ -10,6 +10,8 @@ from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework import serializers
 
+from notifications.models import NotificationEventType, NotificationPreference
+
 from .models import LoginLog, User
 from .scoping import scope_buildings_for, scope_companies_for, scope_customers_for
 
@@ -214,3 +216,91 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
         return user
+
+
+_EVENT_TYPE_LABELS = dict(NotificationEventType.choices)
+
+
+class NotificationPreferenceEntrySerializer(serializers.Serializer):
+    """Single entry in the read or write payload for /auth/notification-preferences/.
+
+    The label is read-only and derived from NotificationEventType.choices so
+    the UI can render a human-readable name without re-encoding the enum
+    on the frontend.
+    """
+
+    event_type = serializers.ChoiceField(
+        choices=[(value, value) for value in NotificationPreference.USER_MUTABLE_EVENT_TYPES],
+    )
+    label = serializers.SerializerMethodField()
+    muted = serializers.BooleanField()
+
+    def get_label(self, obj):
+        return _EVENT_TYPE_LABELS.get(obj["event_type"], obj["event_type"])
+
+
+class NotificationPreferencesUpdateSerializer(serializers.Serializer):
+    """Write-side payload: a list of {event_type, muted} entries to upsert.
+
+    Entries with an event_type outside USER_MUTABLE_EVENT_TYPES are rejected
+    with a 400. Each entry is upserted into the (user, event_type) row via
+    update_or_create so repeat patches do not create duplicates and do not
+    require unique_together to fault as a fallback safety net.
+    """
+
+    preferences = serializers.ListField(
+        child=serializers.DictField(),
+        allow_empty=True,
+    )
+
+    def validate_preferences(self, value):
+        cleaned = []
+        for index, entry in enumerate(value):
+            event_type = entry.get("event_type")
+            muted = entry.get("muted")
+            if event_type not in NotificationPreference.USER_MUTABLE_EVENT_TYPES:
+                raise serializers.ValidationError(
+                    f"preferences[{index}].event_type "
+                    f"'{event_type}' is not a user-mutable notification type."
+                )
+            if not isinstance(muted, bool):
+                raise serializers.ValidationError(
+                    f"preferences[{index}].muted must be a boolean."
+                )
+            cleaned.append({"event_type": event_type, "muted": muted})
+        return cleaned
+
+    def save(self, **kwargs):
+        user = self.context["request"].user
+        for entry in self.validated_data["preferences"]:
+            NotificationPreference.objects.update_or_create(
+                user=user,
+                event_type=entry["event_type"],
+                defaults={"muted": entry["muted"]},
+            )
+        return user
+
+
+def serialize_notification_preferences(user):
+    """Build the GET payload — one entry per USER_MUTABLE event type.
+
+    Missing rows fill in muted=False so the client always sees the full set
+    and never has to know which event types exist. Stored rows take
+    precedence over the default.
+    """
+    stored = {
+        pref.event_type: pref.muted
+        for pref in NotificationPreference.objects.filter(
+            user=user,
+            event_type__in=NotificationPreference.USER_MUTABLE_EVENT_TYPES,
+        )
+    }
+    entries = [
+        {
+            "event_type": event_type,
+            "label": _EVENT_TYPE_LABELS.get(event_type, event_type),
+            "muted": stored.get(event_type, False),
+        }
+        for event_type in NotificationPreference.USER_MUTABLE_EVENT_TYPES
+    ]
+    return {"preferences": entries}
