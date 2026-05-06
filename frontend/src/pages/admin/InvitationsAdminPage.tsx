@@ -337,7 +337,7 @@ export function InvitationsAdminPage() {
         </div>
       )}
 
-      <section className="card" style={{ padding: "20px 22px" }}>
+      <section className="card page-form-narrow" style={{ padding: "20px 22px" }}>
         <h3 className="section-title">Send a new invitation</h3>
         <p className="muted small" style={{ marginBottom: 12 }}>
           The invitee receives an email with a one-time link. They set their own password when
@@ -446,10 +446,10 @@ export function InvitationsAdminPage() {
           {formRole === "BUILDING_MANAGER" && (
             <div className="field">
               <label className="field-label">Buildings *</label>
-              <p className="muted small" style={{ marginBottom: 8 }}>
+              <p className="field-helper">
                 Pick one or more buildings the invitee will manage.
               </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
                 {buildingOptions.length === 0 ? (
                   <span className="muted small">
                     {formCompany === ""
@@ -484,10 +484,10 @@ export function InvitationsAdminPage() {
           {formRole === "CUSTOMER_USER" && (
             <div className="field">
               <label className="field-label">Customers *</label>
-              <p className="muted small" style={{ marginBottom: 8 }}>
+              <p className="field-helper">
                 Pick one or more customers the invitee will be linked to.
               </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
                 {customerOptions.length === 0 ? (
                   <span className="muted small">
                     {formCompany === ""
@@ -519,7 +519,7 @@ export function InvitationsAdminPage() {
             </div>
           )}
 
-          <div className="form-actions" style={{ marginTop: 12 }}>
+          <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={submitting}>
               {submitting ? "Sending…" : "Send invitation"}
             </button>
