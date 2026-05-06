@@ -73,3 +73,43 @@ export interface AgeBucketsResponse {
   buckets: AgeBucket[];
   total_open: number;
 }
+
+// SLA distribution
+
+export type SLADisplayState =
+  | "ON_TRACK"
+  | "AT_RISK"
+  | "BREACHED"
+  | "PAUSED"
+  | "COMPLETED"
+  | "HISTORICAL";
+
+export interface SLADistributionBucket {
+  state: SLADisplayState;
+  label: string;
+  count: number;
+}
+
+export interface SLADistributionResponse {
+  as_of: string;
+  scope: ReportScope;
+  buckets: SLADistributionBucket[];
+  total: number;
+}
+
+// SLA breach rate over time
+
+export interface SLABreachRateBucket {
+  period_start: string; // YYYY-MM-DD
+  total: number;
+  breached: number;
+  breach_rate: number; // 0..1
+}
+
+export interface SLABreachRateOverTimeResponse {
+  from: string;
+  to: string;
+  granularity: Granularity;
+  scope: ReportScope;
+  buckets: SLABreachRateBucket[];
+}

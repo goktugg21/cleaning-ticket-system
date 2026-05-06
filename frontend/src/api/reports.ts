@@ -2,6 +2,8 @@ import { api } from "./client";
 import type {
   AgeBucketsResponse,
   ManagerThroughputResponse,
+  SLABreachRateOverTimeResponse,
+  SLADistributionResponse,
   StatusDistributionResponse,
   TicketsOverTimeResponse,
 } from "./reports.types";
@@ -57,6 +59,26 @@ export async function fetchAgeBuckets(
 ): Promise<AgeBucketsResponse> {
   const { data } = await api.get<AgeBucketsResponse>(
     "/reports/age-buckets/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
+export async function fetchSLADistribution(
+  filters: ReportFilters,
+): Promise<SLADistributionResponse> {
+  const { data } = await api.get<SLADistributionResponse>(
+    "/reports/sla-distribution/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
+export async function fetchSLABreachRateOverTime(
+  filters: ReportFilters,
+): Promise<SLABreachRateOverTimeResponse> {
+  const { data } = await api.get<SLABreachRateOverTimeResponse>(
+    "/reports/sla-breach-rate-over-time/",
     { params: paramsFor(filters) },
   );
   return data;

@@ -7,6 +7,8 @@ import { useAuth } from "../../auth/AuthContext";
 import { useReportsFilters } from "../../hooks/useReportsFilters";
 import { AgeBucketsChart } from "./charts/AgeBucketsChart";
 import { ManagerThroughputChart } from "./charts/ManagerThroughputChart";
+import { SLABreachRateChart } from "./charts/SLABreachRateChart";
+import { SLADistributionChart } from "./charts/SLADistributionChart";
 import { StatusDistributionChart } from "./charts/StatusDistributionChart";
 import { TicketsOverTimeChart } from "./charts/TicketsOverTimeChart";
 
@@ -111,7 +113,7 @@ export function ReportsPage() {
           </div>
           <h2 className="page-title">Operations reports</h2>
           <p className="page-sub">
-            Status mix, throughput, and aged backlog. Filters apply to all four charts.
+            Status mix, throughput, aged backlog, and SLA. Filters apply to all charts.
           </p>
         </div>
         <div className="page-header-actions">
@@ -241,6 +243,8 @@ export function ReportsPage() {
         <TicketsOverTimeChart filters={apiFilters} refreshKey={refreshKey} />
         <ManagerThroughputChart filters={apiFilters} refreshKey={refreshKey} />
         <AgeBucketsChart filters={apiFilters} refreshKey={refreshKey} />
+        <SLADistributionChart filters={apiFilters} refreshKey={refreshKey} />
+        <SLABreachRateChart filters={apiFilters} refreshKey={refreshKey} />
       </div>
     </div>
   );
