@@ -226,11 +226,11 @@ export function SettingsPage() {
       </div>
 
       <div
+        className="page-form-narrow"
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: 16,
-          maxWidth: 720,
+          gap: 18,
         }}
       >
         <form className="card" onSubmit={handleProfileSubmit} noValidate>

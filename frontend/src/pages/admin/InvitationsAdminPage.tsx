@@ -449,7 +449,7 @@ export function InvitationsAdminPage() {
               <p className="field-helper">
                 Pick one or more buildings the invitee will manage.
               </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {buildingOptions.length === 0 ? (
                   <span className="muted small">
                     {formCompany === ""
@@ -487,7 +487,7 @@ export function InvitationsAdminPage() {
               <p className="field-helper">
                 Pick one or more customers the invitee will be linked to.
               </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {customerOptions.length === 0 ? (
                   <span className="muted small">
                     {formCompany === ""
