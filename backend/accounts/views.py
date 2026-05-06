@@ -15,6 +15,8 @@ from notifications.services import send_password_reset_email
 from .permissions import IsAuthenticatedAndActive
 from .serializers import (
     MeSerializer,
+    MeUpdateSerializer,
+    PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     ScopedTokenObtainPairSerializer,
@@ -36,6 +38,34 @@ class MeView(APIView):
     def get(self, request):
         serializer = MeSerializer(request.user)
         return Response(serializer.data)
+
+    def patch(self, request):
+        # Write-side runs through MeUpdateSerializer (full_name, language only).
+        # Unknown fields like role/is_active/email are silently dropped by
+        # ModelSerializer rather than 400'd, so a forward-compatible client
+        # PATCH stays well-behaved. The response re-serializes via MeSerializer
+        # to keep the GET/PATCH shape identical.
+        serializer = MeUpdateSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(MeSerializer(request.user).data)
+
+
+class PasswordChangeView(APIView):
+    permission_classes = [IsAuthenticated, IsAuthenticatedAndActive]
+
+    def post(self, request):
+        serializer = PasswordChangeSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Password updated."}, status=status.HTTP_200_OK)
 
 
 class LogoutView(APIView):

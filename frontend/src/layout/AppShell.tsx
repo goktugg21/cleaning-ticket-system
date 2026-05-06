@@ -7,6 +7,7 @@ import {
   MailPlus,
   MapPin,
   PlusCircle,
+  Settings,
   UserCog,
   Users,
 } from "lucide-react";
@@ -107,6 +108,12 @@ export function AppShell({ children }: AppShellProps) {
               Reports
             </NavLink>
           )}
+          <NavLink to="/settings" className={navClass}>
+            <span className="nav-icon">
+              <Settings size={16} strokeWidth={2} />
+            </span>
+            Settings
+          </NavLink>
 
           {me?.role && STAFF_ROLES.has(me.role) && (
             <>
