@@ -35,13 +35,9 @@ export function SLADistributionChart({ filters, refreshKey }: ChartProps) {
     refreshKey,
   });
 
-  // h3.sla-chart-title (not h3.section-title) so the existing admin Playwright
-  // smoke runner — which scope-selects chart cards via
-  // `section.card:has(h3.section-title)` and asserts exactly 4 — does not see
-  // the new SLA charts. B4 will extend the smoke to count these.
   return (
     <section className="card" style={{ padding: "20px 22px", minHeight: 360 }}>
-      <h3 className="sla-chart-title">SLA distribution</h3>
+      <h3 className="section-title">SLA distribution</h3>
       <p className="muted small" style={{ marginBottom: 8 }}>
         Snapshot of all tickets in scope by SLA state. Not affected by date range.
       </p>

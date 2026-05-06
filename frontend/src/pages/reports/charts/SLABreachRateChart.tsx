@@ -64,11 +64,9 @@ export function SLABreachRateChart({ filters, refreshKey }: ChartProps) {
       }))
     : [];
 
-  // h3.sla-chart-title (see SLADistributionChart) so the existing admin
-  // Playwright smoke runner does not pick these up. B4 extends the smoke.
   return (
     <section className="card" style={{ padding: "20px 22px", minHeight: 360 }}>
-      <h3 className="sla-chart-title">SLA breach rate over time</h3>
+      <h3 className="section-title">SLA breach rate over time</h3>
       {data && (
         <p className="muted small" style={{ marginBottom: 8 }}>
           Granularity · {GRANULARITY_LABEL[data.granularity]} · share of
