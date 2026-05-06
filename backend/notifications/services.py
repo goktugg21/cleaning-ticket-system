@@ -5,7 +5,12 @@ from django.db.models import Q
 from accounts.models import User, UserRole
 from tickets.models import TicketStatus
 
-from .models import NotificationEventType, NotificationLog, NotificationStatus
+from .models import (
+    NotificationEventType,
+    NotificationLog,
+    NotificationPreference,
+    NotificationStatus,
+)
 
 # `send_mail` is re-exported here so that test code patching
 # notifications.services.send_mail can intercept the actual SMTP call. The
@@ -169,9 +174,45 @@ def _send_to_user(ticket, recipient_user, event_type, subject, body, actor=None)
     )
 
 
+def _drop_muted(users, event_type):
+    """Drop users who muted this event_type in their notification preferences.
+
+    No-op for transactional event types (PASSWORD_RESET, INVITATION_SENT) —
+    those bypass preferences entirely because operators must always receive
+    them. The transactional senders also never call this path (they go
+    through send_logged_email directly), but we keep the guard so any future
+    caller that lands here with a transactional type still sends.
+    """
+    if event_type not in NotificationPreference.USER_MUTABLE_EVENT_TYPES:
+        return users
+    if not users:
+        return users
+
+    user_ids = [user.id for user in users if user.id]
+    muted_ids = set(
+        NotificationPreference.objects.filter(
+            user_id__in=user_ids,
+            event_type=event_type,
+            muted=True,
+        ).values_list("user_id", flat=True)
+    )
+    if not muted_ids:
+        return users
+
+    return [user for user in users if user.id not in muted_ids]
+
+
 def _send_to_users(ticket, users, event_type, subject, body, actor=None):
+    # Recipient resolution layered as: dedupe → exclude-actor → drop-muted.
+    # The mute filter sits at the recipient layer (not the Celery task), so a
+    # user with muted=True never gets a NotificationLog row at all — no QUEUED
+    # rows that get marked SKIPPED later, just absent from the result set.
+    candidates = _drop_muted(
+        _dedupe_users(_without_actor(users, actor)),
+        event_type,
+    )
     logs = []
-    for user in _dedupe_users(_without_actor(users, actor)):
+    for user in candidates:
         logs.append(
             _send_to_user(
                 ticket=ticket,

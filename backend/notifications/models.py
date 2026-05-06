@@ -78,3 +78,43 @@ class NotificationLog(models.Model):
     def mark_queued(self):
         self.status = NotificationStatus.QUEUED
         self.save(update_fields=["status"])
+
+
+class NotificationPreference(models.Model):
+    """Per-user mute toggle for a notification event type.
+
+    Absence of a row is the default (unmuted). A row with muted=True silences
+    that event for the user. Only the user-mutable event types are stored
+    here; transactional types (PASSWORD_RESET, INVITATION_SENT) are never
+    read from this table — those mails always go out for security and
+    onboarding reasons.
+    """
+
+    USER_MUTABLE_EVENT_TYPES = (
+        NotificationEventType.TICKET_CREATED,
+        NotificationEventType.TICKET_STATUS_CHANGED,
+        NotificationEventType.TICKET_ASSIGNED,
+        NotificationEventType.TICKET_UNASSIGNED,
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notification_preferences",
+    )
+    event_type = models.CharField(
+        max_length=64,
+        choices=NotificationEventType.choices,
+    )
+    muted = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "event_type")
+        indexes = [
+            models.Index(fields=["user", "event_type"]),
+        ]
+
+    def __str__(self):
+        state = "muted" if self.muted else "unmuted"
+        return f"{self.user_id}/{self.event_type} → {state}"
