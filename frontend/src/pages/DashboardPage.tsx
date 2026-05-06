@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import type {
   PaginatedResponse,
@@ -22,15 +23,6 @@ type SLAFilterValue =
   | "completed"
   | "historical";
 
-const SLA_FILTER_OPTIONS: { value: Exclude<SLAFilterValue, "">; label: string }[] = [
-  { value: "on_track", label: "On track" },
-  { value: "at_risk", label: "At risk" },
-  { value: "breached", label: "Breached" },
-  { value: "paused", label: "Paused" },
-  { value: "completed", label: "Completed" },
-  { value: "historical", label: "Historical" },
-];
-
 type Priority = "NORMAL" | "HIGH" | "URGENT";
 
 const PAGE_SIZE = 25;
@@ -47,15 +39,17 @@ const STATUS_OPTIONS: TicketStatus[] = [
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
-const STATUS_LABEL: Record<TicketStatus, string> = {
-  OPEN: "Open",
-  IN_PROGRESS: "In progress",
-  WAITING_CUSTOMER_APPROVAL: "Waiting approval",
-  APPROVED: "Approved",
-  REJECTED: "Rejected",
-  CLOSED: "Closed",
-  REOPENED_BY_ADMIN: "Reopened",
-};
+// SLA filter values are URL params; the labels are read from common.json
+// (sla.on_track etc.) at render time so the dropdown matches the active
+// language.
+const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "">[] = [
+  "on_track",
+  "at_risk",
+  "breached",
+  "paused",
+  "completed",
+  "historical",
+];
 
 function formatDate(value: string): string {
   try {
@@ -77,13 +71,16 @@ function statusCellClass(status: TicketStatus): string {
   return `cell-tag cell-tag-${status.toLowerCase()}`;
 }
 
-function priorityLabel(priority: string): string {
-  if (!priority) return "Normal";
-  return priority.charAt(0) + priority.slice(1).toLowerCase();
-}
-
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation(["dashboard", "common"]);
+  const tStatus = (status: TicketStatus) =>
+    t(`common:status.${status.toLowerCase()}`);
+  const tPriority = (priority: string) =>
+    t(`common:priority.${priority.toLowerCase()}`);
+  const tSLAFilter = (value: Exclude<SLAFilterValue, "">) =>
+    t(`common:sla.${value}`);
+
   const [tickets, setTickets] = useState<TicketList[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -132,11 +129,11 @@ export function DashboardPage() {
     },
     [searchParams, setSearchParams],
   );
-  const [adminRequiredBanner, setAdminRequiredBanner] = useState("");
+  const [adminRequiredBanner, setAdminRequiredBanner] = useState(false);
 
   useEffect(() => {
     if (searchParams.get("admin_required") === "ok") {
-      setAdminRequiredBanner("This area is for admins only.");
+      setAdminRequiredBanner(true);
       const next = new URLSearchParams(searchParams);
       next.delete("admin_required");
       setSearchParams(next, { replace: true });
@@ -255,20 +252,25 @@ export function DashboardPage() {
       <div className="page-header">
         <div>
           <nav className="breadcrumb" aria-label="Breadcrumb">
-            <span>Site</span>
+            <span>{t("breadcrumb_site")}</span>
             <span className="breadcrumb-sep">›</span>
-            <span>Operations</span>
+            <span>{t("breadcrumb_operations")}</span>
             <span className="breadcrumb-sep">›</span>
-            <span className="breadcrumb-current">Tickets overview</span>
+            <span className="breadcrumb-current">{t("breadcrumb_current")}</span>
           </nav>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Dashboard
+            {t("eyebrow")}
           </div>
-          <h2 className="page-title">Ticket Management</h2>
+          <h2 className="page-title">{t("title")}</h2>
           <p className="page-sub">
             {loading
-              ? "Loading operational ticket data…"
-              : `${count} total tickets · ${tickets.length} visible · page ${page} of ${pageCount}`}
+              ? t("loading_data")
+              : t("subtitle_counts", {
+                  count,
+                  visible: tickets.length,
+                  page,
+                  pages: pageCount,
+                })}
           </p>
         </div>
         <div className="page-header-actions">
@@ -279,18 +281,23 @@ export function DashboardPage() {
             disabled={loading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("common:refresh")}
           </button>
           <Link className="btn btn-primary btn-sm" to="/tickets/new">
             <Plus size={14} strokeWidth={2.5} />
-            New ticket
+            {t("new_ticket")}
           </Link>
         </div>
       </div>
 
       {adminRequiredBanner && (
-        <div className="alert-info" style={{ marginBottom: 16 }} role="status">
-          {adminRequiredBanner}
+        <div
+          className="alert-info"
+          style={{ marginBottom: 16 }}
+          role="status"
+          data-testid="admin-required-banner"
+        >
+          {t("admin_required_banner")}
         </div>
       )}
 
@@ -302,32 +309,32 @@ export function DashboardPage() {
 
       <div className="kpi-row">
         <div className="kpi-card">
-          <div className="kpi-label">Total in scope</div>
+          <div className="kpi-label">{t("kpi_total_label")}</div>
           <div className="kpi-row-2">
             <div className="kpi-value">{kpis ? kpis.total : "—"}</div>
           </div>
-          <div className="kpi-meta">All tickets you can access</div>
+          <div className="kpi-meta">{t("kpi_total_meta")}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Active work</div>
+          <div className="kpi-label">{t("kpi_active_label")}</div>
           <div className="kpi-row-2">
             <div className="kpi-value">{kpis ? kpis.active : "—"}</div>
           </div>
-          <div className="kpi-meta">Open, in progress, waiting, reopened</div>
+          <div className="kpi-meta">{t("kpi_active_meta")}</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Awaiting approval</div>
+          <div className="kpi-label">{t("kpi_awaiting_label")}</div>
           <div className="kpi-row-2">
             <div className="kpi-value">{kpis ? kpis.waitingApproval : "—"}</div>
           </div>
-          <div className="kpi-meta">Needs customer response</div>
+          <div className="kpi-meta">{t("kpi_awaiting_meta")}</div>
         </div>
         <div className="kpi-card kpi-urgent">
-          <div className="kpi-label">Urgent open</div>
+          <div className="kpi-label">{t("kpi_urgent_label")}</div>
           <div className="kpi-row-2">
             <div className="kpi-value">{kpis ? kpis.urgent : "—"}</div>
           </div>
-          <div className="kpi-meta">Urgent tickets not closed</div>
+          <div className="kpi-meta">{t("kpi_urgent_meta")}</div>
         </div>
       </div>
 
@@ -337,10 +344,10 @@ export function DashboardPage() {
             <div className="section-head">
               <div>
                 <div className="section-head-title">
-                  Recent operational tickets
+                  {t("section_recent_title")}
                 </div>
                 <div className="section-head-sub">
-                  Live queue from your current permission scope
+                  {t("section_recent_sub")}
                 </div>
               </div>
               <span
@@ -353,13 +360,13 @@ export function DashboardPage() {
                   color: "var(--green-2)",
                 }}
               >
-                {tickets.length} rows
+                {t("rows_label", { count: tickets.length })}
               </span>
             </div>
 
             <form className="filter-bar" onSubmit={handleSearchSubmit}>
               <div className="filter-field">
-                <span className="filter-label">Status</span>
+                <span className="filter-label">{t("common:status")}</span>
                 <select
                   className="filter-control"
                   value={statusFilter}
@@ -368,16 +375,16 @@ export function DashboardPage() {
                     setStatusFilter(event.target.value as TicketStatus | "");
                   }}
                 >
-                  <option value="">All statuses</option>
+                  <option value="">{t("common:all_statuses")}</option>
                   {STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>
-                      {STATUS_LABEL[status]}
+                      {tStatus(status)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="filter-field">
-                <span className="filter-label">Priority</span>
+                <span className="filter-label">{t("common:priority")}</span>
                 <select
                   className="filter-control"
                   value={priorityFilter}
@@ -386,16 +393,16 @@ export function DashboardPage() {
                     setPriorityFilter(event.target.value as Priority | "");
                   }}
                 >
-                  <option value="">All priorities</option>
+                  <option value="">{t("common:all_priorities")}</option>
                   {PRIORITY_OPTIONS.map((option) => (
                     <option key={option} value={option}>
-                      {priorityLabel(option)}
+                      {tPriority(option)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="filter-field">
-                <span className="filter-label">SLA</span>
+                <span className="filter-label">{t("common:sla")}</span>
                 <select
                   className="filter-control"
                   value={slaFilter}
@@ -403,27 +410,27 @@ export function DashboardPage() {
                     setSlaFilter(event.target.value as SLAFilterValue)
                   }
                 >
-                  <option value="">All SLA states</option>
-                  {SLA_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
+                  <option value="">{t("common:all_sla_states")}</option>
+                  {SLA_FILTER_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {tSLAFilter(value)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="filter-field search">
-                <span className="filter-label">Search</span>
+                <span className="filter-label">{t("common:search")}</span>
                 <input
                   className="filter-control"
                   type="search"
-                  placeholder="Ticket no, title, customer…"
+                  placeholder={t("search_placeholder")}
                   value={searchInput}
                   onChange={(event) => setSearchInput(event.target.value)}
                 />
               </div>
               <div className="filter-actions">
                 <button type="submit" className="btn btn-secondary btn-sm">
-                  Apply
+                  {t("common:apply")}
                 </button>
                 {hasActiveFilters && (
                   <button
@@ -431,7 +438,7 @@ export function DashboardPage() {
                     className="btn btn-ghost btn-sm"
                     onClick={clearFilters}
                   >
-                    Clear
+                    {t("common:clear")}
                   </button>
                 )}
               </div>
@@ -447,14 +454,14 @@ export function DashboardPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>Subject</th>
-                    <th>Priority</th>
-                    <th>Status</th>
-                    <th>SLA</th>
-                    <th>Facility</th>
-                    <th>Customer</th>
-                    <th>Created</th>
+                    <th>{t("common:ticket_no")}</th>
+                    <th>{t("common:subject")}</th>
+                    <th>{t("common:priority")}</th>
+                    <th>{t("common:status")}</th>
+                    <th>{t("common:sla")}</th>
+                    <th>{t("common:facility")}</th>
+                    <th>{t("common:customer")}</th>
+                    <th>{t("common:created")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -483,13 +490,13 @@ export function DashboardPage() {
                       <td>
                         <span className={priorityCellClass(ticket.priority)}>
                           <i />
-                          {priorityLabel(ticket.priority)}
+                          {tPriority(ticket.priority)}
                         </span>
                       </td>
                       <td>
                         <span className={statusCellClass(ticket.status)}>
                           <i />
-                          {STATUS_LABEL[ticket.status]}
+                          {tStatus(ticket.status)}
                         </span>
                       </td>
                       <td>
@@ -513,13 +520,13 @@ export function DashboardPage() {
                   <div className="empty-icon">＋</div>
                   <div className="empty-title">
                     {hasActiveFilters
-                      ? "No matching tickets"
-                      : "No tickets yet"}
+                      ? t("empty_no_match_title")
+                      : t("empty_no_tickets_title")}
                   </div>
                   <p className="empty-sub">
                     {hasActiveFilters
-                      ? "Try clearing filters or searching for another ticket number, title, or customer."
-                      : "Create the first ticket to start tracking requests, complaints, and reports."}
+                      ? t("empty_no_match_sub")
+                      : t("empty_no_tickets_sub")}
                   </p>
                   {hasActiveFilters ? (
                     <button
@@ -527,11 +534,11 @@ export function DashboardPage() {
                       className="btn btn-secondary btn-sm"
                       onClick={clearFilters}
                     >
-                      Clear filters
+                      {t("clear_filters")}
                     </button>
                   ) : (
                     <Link className="btn btn-primary btn-sm" to="/tickets/new">
-                      Create ticket
+                      {t("create_ticket_cta")}
                     </Link>
                   )}
                 </div>
@@ -540,8 +547,12 @@ export function DashboardPage() {
 
             <div className="pagination">
               <span className="pagination-info">
-                Showing {tickets.length} of {count} tickets · Page {page} of{" "}
-                {pageCount}
+                {t("pagination_info", {
+                  visible: tickets.length,
+                  count,
+                  page,
+                  pages: pageCount,
+                })}
               </span>
               <div className="pagination-controls">
                 <button
@@ -552,7 +563,7 @@ export function DashboardPage() {
                     setPage((current) => Math.max(1, current - 1))
                   }
                 >
-                  Previous
+                  {t("common:previous")}
                 </button>
                 <button
                   type="button"
@@ -560,7 +571,7 @@ export function DashboardPage() {
                   disabled={loading || !next}
                   onClick={() => setPage((current) => current + 1)}
                 >
-                  Next
+                  {t("common:next")}
                 </button>
               </div>
             </div>
@@ -571,30 +582,24 @@ export function DashboardPage() {
           <div className="card">
             <div className="section-head">
               <div>
-                <div className="section-head-title">Status breakdown</div>
-                <div className="section-head-sub">All tickets in your scope</div>
+                <div className="section-head-title">
+                  {t("section_status_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("section_status_sub")}
+                </div>
               </div>
             </div>
             <div style={{ padding: "14px 18px 18px" }}>
               {!stats ? (
-                <p className="muted small">Loading…</p>
+                <p className="muted small">{t("loading")}</p>
               ) : (
                 <div className="bld-list">
-                  {(
-                    [
-                      ["OPEN", "Open"],
-                      ["IN_PROGRESS", "In progress"],
-                      ["WAITING_CUSTOMER_APPROVAL", "Waiting approval"],
-                      ["APPROVED", "Approved"],
-                      ["REJECTED", "Rejected"],
-                      ["CLOSED", "Closed"],
-                      ["REOPENED_BY_ADMIN", "Reopened"],
-                    ] as const
-                  ).map(([key, label]) => {
+                  {STATUS_OPTIONS.map((key) => {
                     const value = stats.by_status[key] ?? 0;
                     return (
                       <div key={key} className="bld-row-head">
-                        <span className="bld-row-name">{label}</span>
+                        <span className="bld-row-name">{tStatus(key)}</span>
                         <span className="bld-row-count">{value}</span>
                       </div>
                     );
@@ -607,9 +612,11 @@ export function DashboardPage() {
           <div className="card">
             <div className="section-head">
               <div>
-                <div className="section-head-title">Urgent focus</div>
+                <div className="section-head-title">
+                  {t("section_focus_title")}
+                </div>
                 <div className="section-head-sub">
-                  Tickets requiring attention
+                  {t("section_focus_sub")}
                 </div>
               </div>
               <span
@@ -633,15 +640,12 @@ export function DashboardPage() {
                   >
                     <span className="focus-item-title">{ticket.title}</span>
                     <span className="focus-item-meta">
-                      {ticket.building_name} ·{" "}
-                      {STATUS_LABEL[ticket.status]}
+                      {ticket.building_name} · {tStatus(ticket.status)}
                     </span>
                   </Link>
                 ))
               ) : (
-                <p className="focus-empty">
-                  No urgent or high priority tickets in current scope.
-                </p>
+                <p className="focus-empty">{t("focus_empty")}</p>
               )}
             </div>
           </div>
@@ -649,8 +653,12 @@ export function DashboardPage() {
           <div className="card">
             <div className="section-head">
               <div>
-                <div className="section-head-title">Load by building</div>
-                <div className="section-head-sub">Open / in progress / awaiting customer</div>
+                <div className="section-head-title">
+                  {t("section_byb_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("section_byb_sub")}
+                </div>
               </div>
               <span
                 style={{
@@ -662,16 +670,14 @@ export function DashboardPage() {
                   textTransform: "uppercase",
                 }}
               >
-                {byBuilding ? `${byBuilding.length} sites` : ""}
+                {byBuilding ? t("byb_sites", { count: byBuilding.length }) : ""}
               </span>
             </div>
             <div style={{ padding: "16px 20px 18px" }}>
               {byBuilding === null ? (
-                <p className="muted small">Loading…</p>
+                <p className="muted small">{t("loading")}</p>
               ) : byBuilding.length === 0 ? (
-                <p className="muted small">
-                  No buildings in your current scope.
-                </p>
+                <p className="muted small">{t("byb_no_buildings")}</p>
               ) : (
                 <div className="bld-list">
                   {byBuilding.slice(0, 5).map((row) => {
@@ -682,7 +688,9 @@ export function DashboardPage() {
                       <div key={row.building_id}>
                         <div className="bld-row-head">
                           <span className="bld-row-name">{row.building_name}</span>
-                          <span className="bld-row-count">{active} active</span>
+                          <span className="bld-row-count">
+                            {t("byb_active_count", { count: active })}
+                          </span>
                         </div>
                         <div className="bld-bar">
                           {row.open > 0 && (
@@ -708,18 +716,26 @@ export function DashboardPage() {
                         </div>
                         <div className="bld-row-foot">
                           {row.open > 0 && (
-                            <span className="no">{row.open} open</span>
+                            <span className="no">
+                              {t("byb_open", { count: row.open })}
+                            </span>
                           )}
                           {row.in_progress > 0 && (
-                            <span className="hi">{row.in_progress} in progress</span>
+                            <span className="hi">
+                              {t("byb_in_progress", { count: row.in_progress })}
+                            </span>
                           )}
                           {row.waiting_customer_approval > 0 && (
                             <span className="urg">
-                              {row.waiting_customer_approval} awaiting customer
+                              {t("byb_awaiting_customer", {
+                                count: row.waiting_customer_approval,
+                              })}
                             </span>
                           )}
                           {row.urgent > 0 && (
-                            <span className="urg">{row.urgent} urgent</span>
+                            <span className="urg">
+                              {t("byb_urgent", { count: row.urgent })}
+                            </span>
                           )}
                         </div>
                       </div>

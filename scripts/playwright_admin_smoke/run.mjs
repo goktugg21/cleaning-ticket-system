@@ -460,9 +460,12 @@ async function runNonStaff(browser, account, label) {
   const onDashboard = !/\/admin/.test(new URL(url).pathname);
   record(G, "Direct /admin/users redirects to dashboard", onDashboard ? PASS : FAIL, `url=${url}`);
 
-  const bannerText = await page.locator("body").innerText();
-  const hasBanner = bannerText.includes("This area is for admins only.");
-  record(G, 'Banner says "This area is for admins only."', hasBanner ? PASS : FAIL);
+  // Language-agnostic: select by data-testid instead of the translated text.
+  // Dashboard renders the banner with data-testid="admin-required-banner"
+  // when it sees ?admin_required=ok, regardless of the active language.
+  const hasBanner =
+    (await page.locator('[data-testid="admin-required-banner"]').count()) > 0;
+  record(G, "Admin-required banner is shown", hasBanner ? PASS : FAIL);
 
   // Reports-section assertions for the non-staff roles.
   if (label === "BUILDING_MANAGER") {

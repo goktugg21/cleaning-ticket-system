@@ -11,6 +11,7 @@ import {
   TriangleAlert,
   UploadCloud,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import type { Building, Customer, PaginatedResponse } from "../api/types";
 
@@ -24,38 +25,55 @@ interface CreateTicketForm {
   customer: string;
 }
 
+type TicketTypeValue =
+  | "REPORT"
+  | "COMPLAINT"
+  | "REQUEST"
+  | "SUGGESTION"
+  | "QUOTE_REQUEST";
+
+type PriorityValue = "NORMAL" | "HIGH" | "URGENT";
+
 interface PriorityCard {
-  value: "NORMAL" | "HIGH" | "URGENT";
-  label: string;
-  helper: string;
+  value: PriorityValue;
+  labelKey: string;
+  helperKey: string;
   icon: typeof Info;
 }
 
-const TICKET_TYPES = [
-  { value: "REPORT", label: "Report" },
-  { value: "COMPLAINT", label: "Complaint" },
-  { value: "REQUEST", label: "Request" },
-  { value: "SUGGESTION", label: "Suggestion" },
-  { value: "QUOTE_REQUEST", label: "Quote request" },
+const TICKET_TYPE_VALUES: TicketTypeValue[] = [
+  "REPORT",
+  "COMPLAINT",
+  "REQUEST",
+  "SUGGESTION",
+  "QUOTE_REQUEST",
 ];
+
+const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
+  REPORT: "type_report",
+  COMPLAINT: "type_complaint",
+  REQUEST: "type_request",
+  SUGGESTION: "type_suggestion",
+  QUOTE_REQUEST: "type_quote_request",
+};
 
 const PRIORITY_CARDS: PriorityCard[] = [
   {
     value: "NORMAL",
-    label: "Medium",
-    helper: "Standard 24 h SLA",
+    labelKey: "priority_normal_label",
+    helperKey: "priority_normal_helper",
     icon: CircleCheck,
   },
   {
     value: "HIGH",
-    label: "High",
-    helper: "Expedited — 4 h SLA",
+    labelKey: "priority_high_label",
+    helperKey: "priority_high_helper",
     icon: TriangleAlert,
   },
   {
     value: "URGENT",
-    label: "Urgent",
-    helper: "Critical — 1 h SLA",
+    labelKey: "priority_urgent_label",
+    helperKey: "priority_urgent_helper",
     icon: AlertTriangle,
   },
 ];
@@ -72,6 +90,8 @@ const EMPTY_FORM: CreateTicketForm = {
 
 export function CreateTicketPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation(["create_ticket", "common"]);
+
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(true);
@@ -157,10 +177,6 @@ export function CreateTicketPage() {
     () => customers.find((c) => String(c.id) === form.customer),
     [customers, form.customer],
   );
-  const selectedType = useMemo(
-    () => TICKET_TYPES.find((t) => t.value === form.type),
-    [form.type],
-  );
 
   function update<K extends keyof CreateTicketForm>(
     name: K,
@@ -174,19 +190,19 @@ export function CreateTicketPage() {
     setError("");
 
     if (!form.title.trim()) {
-      setError("Short description is required.");
+      setError(t("validation_title_required"));
       return;
     }
     if (!form.description.trim()) {
-      setError("Detailed description is required.");
+      setError(t("validation_description_required"));
       return;
     }
     if (!form.building) {
-      setError("Please choose a location.");
+      setError(t("validation_location_required"));
       return;
     }
     if (!form.customer) {
-      setError("Please choose a customer.");
+      setError(t("validation_customer_required"));
       return;
     }
 
@@ -234,15 +250,13 @@ export function CreateTicketPage() {
         <div>
           <Link to="/" className="link-back">
             <ChevronLeft size={14} strokeWidth={2.5} />
-            Back to tickets
+            {t("back_to_tickets")}
           </Link>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            New ticket
+            {t("eyebrow")}
           </div>
-          <h2 className="page-title">Create ticket</h2>
-          <p className="page-sub">
-            Capture the request clearly and assign the right location.
-          </p>
+          <h2 className="page-title">{t("title")}</h2>
+          <p className="page-sub">{t("subtitle")}</p>
         </div>
       </div>
 
@@ -254,19 +268,20 @@ export function CreateTicketPage() {
 
       {noOptions && !error && (
         <div className="alert-error" style={{ marginBottom: 16 }}>
-          You don't have access to any building or customer to create a ticket
-          against.
+          {t("no_access_message")}
         </div>
       )}
 
       <form className="create-layout" onSubmit={handleSubmit}>
         <div className="card create-main">
           <div className="form-section">
-            <div className="form-section-title">Issue details</div>
+            <div className="form-section-title">
+              {t("section_issue_title")}
+            </div>
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="f-type">
-                  Category
+                  {t("field_category_label")}
                 </label>
                 <select
                   id="f-type"
@@ -274,16 +289,16 @@ export function CreateTicketPage() {
                   value={form.type}
                   onChange={(event) => update("type", event.target.value)}
                 >
-                  {TICKET_TYPES.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
+                  {TICKET_TYPE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {t(TICKET_TYPE_KEYS[value])}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="f-building">
-                  Location *
+                  {t("field_location_label")}
                 </label>
                 <select
                   id="f-building"
@@ -294,7 +309,7 @@ export function CreateTicketPage() {
                   required
                 >
                   <option value="" disabled>
-                    Select facility / zone…
+                    {t("field_location_placeholder")}
                   </option>
                   {buildings.map((building) => (
                     <option key={building.id} value={building.id}>
@@ -307,7 +322,7 @@ export function CreateTicketPage() {
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="f-customer">
-                  Customer *
+                  {t("field_customer_label")}
                 </label>
                 <select
                   id="f-customer"
@@ -319,8 +334,8 @@ export function CreateTicketPage() {
                 >
                   <option value="" disabled>
                     {filteredCustomers.length === 0
-                      ? "No customers in this location"
-                      : "Select customer…"}
+                      ? t("field_customer_no_options")
+                      : t("field_customer_placeholder")}
                   </option>
                   {filteredCustomers.map((customer) => (
                     <option key={customer.id} value={customer.id}>
@@ -331,13 +346,13 @@ export function CreateTicketPage() {
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="f-room">
-                  Room / area
+                  {t("field_room_label")}
                 </label>
                 <input
                   id="f-room"
                   className="field-input"
                   type="text"
-                  placeholder="e.g. Server Room A, Bldg 4"
+                  placeholder={t("field_room_placeholder")}
                   value={form.room_label}
                   onChange={(event) => update("room_label", event.target.value)}
                 />
@@ -345,13 +360,13 @@ export function CreateTicketPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="f-title">
-                Short description *
+                {t("field_title_label")}
               </label>
               <input
                 id="f-title"
                 className="field-input"
                 type="text"
-                placeholder="Brief summary of the issue"
+                placeholder={t("field_title_placeholder")}
                 maxLength={255}
                 value={form.title}
                 onChange={(event) => update("title", event.target.value)}
@@ -360,12 +375,12 @@ export function CreateTicketPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="f-desc">
-                Detailed description *
+                {t("field_description_label")}
               </label>
               <textarea
                 id="f-desc"
                 className="field-textarea"
-                placeholder="Provide as much context as possible — equipment, location, observed behaviour, urgency."
+                placeholder={t("field_description_placeholder")}
                 value={form.description}
                 onChange={(event) => update("description", event.target.value)}
                 required
@@ -374,9 +389,11 @@ export function CreateTicketPage() {
           </div>
 
           <div className="form-section">
-            <div className="form-section-title">Priority level</div>
+            <div className="form-section-title">
+              {t("section_priority_title")}
+            </div>
             <div className="form-section-helper">
-              Select the impact level of this issue.
+              {t("section_priority_helper")}
             </div>
             <div className="priority-grid">
               {PRIORITY_CARDS.map((card) => {
@@ -393,8 +410,12 @@ export function CreateTicketPage() {
                     <span className="priority-card-icon">
                       <Icon size={16} strokeWidth={2} />
                     </span>
-                    <span className="priority-card-label">{card.label}</span>
-                    <span className="priority-card-helper">{card.helper}</span>
+                    <span className="priority-card-label">
+                      {t(card.labelKey)}
+                    </span>
+                    <span className="priority-card-helper">
+                      {t(card.helperKey)}
+                    </span>
                   </button>
                 );
               })}
@@ -402,9 +423,11 @@ export function CreateTicketPage() {
           </div>
 
           <div className="form-section">
-            <div className="form-section-title">Attachments</div>
+            <div className="form-section-title">
+              {t("section_attachments_title")}
+            </div>
             <div className="form-section-helper">
-              Optional. Photos and PDFs help the team respond faster.
+              {t("section_attachments_helper")}
             </div>
             <label className="upload-zone">
               <UploadCloud
@@ -415,12 +438,12 @@ export function CreateTicketPage() {
               <span className="upload-title">
                 {stagedAttachment
                   ? stagedAttachment.name
-                  : "Click to upload or drag and drop"}
+                  : t("attachment_drop_hint")}
               </span>
               <span className="upload-hint">
                 {stagedAttachment
-                  ? `${(stagedAttachment.size / 1024 / 1024).toFixed(2)} MB · click to replace`
-                  : "PNG, JPG, PDF up to 10 MB"}
+                  ? `${(stagedAttachment.size / 1024 / 1024).toFixed(2)} ${t("attachment_replace_hint")}`
+                  : t("attachment_size_hint")}
               </span>
               <input
                 type="file"
@@ -428,7 +451,7 @@ export function CreateTicketPage() {
                 onChange={(event) => {
                   const file = event.target.files?.[0] ?? null;
                   if (file && file.size > 10 * 1024 * 1024) {
-                    setError("Attachment file size cannot exceed 10 MB.");
+                    setError(t("attachment_too_large"));
                     event.target.value = "";
                     return;
                   }
@@ -451,14 +474,14 @@ export function CreateTicketPage() {
 
           <div className="form-actions">
             <Link to="/" className="btn btn-secondary">
-              Cancel
+              {t("cancel")}
             </Link>
             <button
               type="submit"
               className="btn btn-primary"
               disabled={submitting || loadingOptions || noOptions}
             >
-              {submitting ? "Creating…" : "Create ticket"}
+              {submitting ? t("creating") : t("submit")}
               <ArrowRight size={14} strokeWidth={2.5} />
             </button>
           </div>
@@ -467,39 +490,41 @@ export function CreateTicketPage() {
         <aside className="create-side">
           <div className="card">
             <div className="section-head">
-              <div className="section-head-title">Summary</div>
+              <div className="section-head-title">{t("summary_title")}</div>
             </div>
             <div className="side-card-body">
               <div className="preview-list">
                 <div className="preview-row">
-                  <span className="preview-key">Location</span>
+                  <span className="preview-key">{t("summary_location")}</span>
                   <span className="preview-val">
                     {selectedBuilding?.name || "—"}
                   </span>
                 </div>
                 <div className="preview-row">
-                  <span className="preview-key">Customer</span>
+                  <span className="preview-key">{t("summary_customer")}</span>
                   <span className="preview-val">
                     {selectedCustomer?.name || "—"}
                   </span>
                 </div>
                 <div className="preview-row">
-                  <span className="preview-key">Category</span>
+                  <span className="preview-key">{t("summary_category")}</span>
                   <span className="preview-val">
-                    {selectedType?.label || "Report"}
+                    {t(
+                      TICKET_TYPE_KEYS[form.type as TicketTypeValue] ??
+                        "type_report",
+                    )}
                   </span>
                 </div>
                 <div className="preview-row">
-                  <span className="preview-key">Priority</span>
+                  <span className="preview-key">{t("summary_priority")}</span>
                   <span className="preview-val">
-                    {form.priority.charAt(0) +
-                      form.priority.slice(1).toLowerCase()}
+                    {t(`common:priority.${form.priority.toLowerCase()}`)}
                   </span>
                 </div>
                 <div className="preview-row">
-                  <span className="preview-key">Attachment</span>
+                  <span className="preview-key">{t("summary_attachment")}</span>
                   <span className="preview-val">
-                    {stagedAttachment ? stagedAttachment.name : "None"}
+                    {stagedAttachment ? stagedAttachment.name : t("summary_none")}
                   </span>
                 </div>
               </div>
@@ -520,28 +545,24 @@ export function CreateTicketPage() {
                   strokeWidth={2}
                   color="var(--green-2)"
                 />
-                <div className="section-head-title">Ticket guidelines</div>
+                <div className="section-head-title">
+                  {t("guidelines_title")}
+                </div>
               </div>
             </div>
             <div style={{ padding: "14px 16px 16px" }}>
               <ul className="guideline-list">
                 <li className="guideline-item">
                   <CircleCheck size={14} strokeWidth={2.5} />
-                  <span>
-                    Be as specific as possible in the short description for
-                    faster routing.
-                  </span>
+                  <span>{t("guideline_1")}</span>
                 </li>
                 <li className="guideline-item">
                   <CircleCheck size={14} strokeWidth={2.5} />
-                  <span>Include exact room numbers or asset IDs if known.</span>
+                  <span>{t("guideline_2")}</span>
                 </li>
                 <li className="guideline-item">
                   <CircleCheck size={14} strokeWidth={2.5} />
-                  <span>
-                    Photos drastically improve response times for maintenance
-                    issues.
-                  </span>
+                  <span>{t("guideline_3")}</span>
                 </li>
               </ul>
             </div>
@@ -557,22 +578,24 @@ export function CreateTicketPage() {
                 }}
               >
                 <Clock size={16} strokeWidth={2} color="var(--green-2)" />
-                <div className="section-head-title">Response SLAs</div>
+                <div className="section-head-title">
+                  {t("response_slas_title")}
+                </div>
               </div>
             </div>
             <div style={{ padding: "6px 16px 12px" }}>
               <div className="sla-list">
                 <div className="sla-list-item" data-prio="NORMAL">
-                  <span className="sla-list-name">Medium priority</span>
-                  <span className="sla-list-time">24 hours</span>
+                  <span className="sla-list-name">{t("sla_medium_name")}</span>
+                  <span className="sla-list-time">{t("sla_medium_time")}</span>
                 </div>
                 <div className="sla-list-item" data-prio="HIGH">
-                  <span className="sla-list-name">High priority</span>
-                  <span className="sla-list-time">4 hours</span>
+                  <span className="sla-list-name">{t("sla_high_name")}</span>
+                  <span className="sla-list-time">{t("sla_high_time")}</span>
                 </div>
                 <div className="sla-list-item" data-prio="URGENT">
-                  <span className="sla-list-name">Urgent</span>
-                  <span className="sla-list-time">Immediate (1 h)</span>
+                  <span className="sla-list-name">{t("sla_urgent_name")}</span>
+                  <span className="sla-list-time">{t("sla_urgent_time")}</span>
                 </div>
               </div>
             </div>
