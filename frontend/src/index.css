@@ -1302,7 +1302,15 @@ table.data-table {
   .create-layout { grid-template-columns: 1fr; }
 }
 
-.form-section { padding: 22px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 16px; }
+.form-section { padding: 22px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 18px; }
+/* Forms that don't wrap fields in .form-section still need vertical
+   breathing room between rows. Targets admin form pages (UserForm,
+   Building/Company/CustomerForm) and the Invitations create-form,
+   where direct children of <form> are .field / .form-2col blocks. */
+form:not(:has(.form-section)) > .field,
+form:not(:has(.form-section)) > .form-2col {
+  margin-bottom: 18px;
+}
 .form-section:last-of-type { border-bottom: none; }
 .form-section-title {
   font-family: var(--f-head);
@@ -1325,7 +1333,7 @@ table.data-table {
   justify-content: flex-end;
   gap: 10px;
   border-top: 1px solid var(--border-soft);
-  background: var(--surface-2);
+  background: transparent;
   border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 /* Anchor a counterweight to the left edge of a form-actions row. The
@@ -1342,11 +1350,10 @@ table.data-table {
   letter-spacing: 0.01em;
 }
 
-/* Narrow page wrapper for single-column form-only pages. Anchored to the
-   start of the page-canvas so the back-link and page-header keep their
-   left edge; the form columns just stop stretching beyond a comfortable
-   reading width on wide monitors. */
-.page-form-narrow { max-width: 720px; }
+/* Narrow page wrapper for single-column form-only pages. Centered in
+   the canvas so the action-button row aligns to the form's right edge
+   (not the page's right edge) on wide screens. */
+.page-form-narrow { max-width: 720px; margin-inline: auto; }
 /* Helper text below a label, distinct from a generic muted/small block.
    Used for inline form hints that need to read as guidance, not as an
    empty-state. Sits between label and input/widget. */
