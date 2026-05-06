@@ -37,7 +37,7 @@
   "manager_throughput_tooltip_label": "Approved",
 
   "age_buckets_title": "Open tickets by age",
-  "age_buckets_subtitle": "Open = not yet APPROVED or REJECTED. Includes WAITING_CUSTOMER_APPROVAL and REOPENED_BY_ADMIN.",
+  "age_buckets_subtitle": "Open = not yet {{approved}} or {{rejected}}. Includes {{waiting}} and {{reopened}}.",
   "age_buckets_total": "Total open: {{count}}",
   "age_buckets_empty": "No open tickets in this scope.",
   "age_buckets_tooltip_label": "Open tickets",

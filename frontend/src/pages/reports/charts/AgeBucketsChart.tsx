@@ -22,11 +22,22 @@ export interface ChartProps {
 const BUCKET_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"];
 
 export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
-  const { t } = useTranslation("reports");
+  const { t } = useTranslation(["reports", "common"]);
   const { data, loading, error, retry } = useReport({
     fetcher: fetchAgeBuckets,
     filters,
     refreshKey,
+  });
+
+  // Subtitle stitches the four status names from the shared common.status.*
+  // namespace so the chart copy matches the labels rendered everywhere else
+  // (status filter, ticket detail header, etc.). Avoids leaking raw enum
+  // values like APPROVED / WAITING_CUSTOMER_APPROVAL into user copy.
+  const subtitle = t("age_buckets_subtitle", {
+    approved: t("common:status.approved"),
+    rejected: t("common:status.rejected"),
+    waiting: t("common:status.waiting_customer_approval"),
+    reopened: t("common:status.reopened_by_admin"),
   });
 
   return (
@@ -37,7 +48,7 @@ export function AgeBucketsChart({ filters, refreshKey }: ChartProps) {
     >
       <h3 className="section-title">{t("age_buckets_title")}</h3>
       <p className="muted small" style={{ marginBottom: 8 }}>
-        {t("age_buckets_subtitle")}
+        {subtitle}
       </p>
 
       {loading && (

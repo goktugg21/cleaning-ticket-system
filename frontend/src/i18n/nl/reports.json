@@ -37,7 +37,7 @@
   "manager_throughput_tooltip_label": "Goedgekeurd",
 
   "age_buckets_title": "Open tickets op leeftijd",
-  "age_buckets_subtitle": "Open = nog niet GOEDGEKEURD of AFGEWEZEN. Inclusief WACHT_OP_KLANT en HEROPEND.",
+  "age_buckets_subtitle": "Open = nog niet {{approved}} of {{rejected}}. Inclusief {{waiting}} en {{reopened}}.",
   "age_buckets_total": "Totaal open: {{count}}",
   "age_buckets_empty": "Geen open tickets in deze scope.",
   "age_buckets_tooltip_label": "Open tickets",

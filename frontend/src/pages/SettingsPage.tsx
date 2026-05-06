@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { BellRing, Save, ShieldCheck, UserCircle2 } from "lucide-react";
+import { BellRing, Check, Save, ShieldCheck, UserCircle2 } from "lucide-react";
 import axios from "axios";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
@@ -300,11 +300,6 @@ export function SettingsPage() {
               )}
             </div>
 
-            {profileSaved && (
-              <div className="alert-info" role="status">
-                {t("profile_saved")}
-              </div>
-            )}
             {profileError && (
               <div className="alert-error" role="alert">
                 {profileError}
@@ -312,6 +307,12 @@ export function SettingsPage() {
             )}
           </div>
           <div className="form-actions">
+            {profileSaved && (
+              <span className="form-saved-indicator" role="status">
+                <Check size={13} strokeWidth={2.5} />
+                {t("profile_saved")}
+              </span>
+            )}
             <button
               type="submit"
               className="btn btn-primary"
@@ -394,11 +395,6 @@ export function SettingsPage() {
               )}
             </div>
 
-            {passwordSaved && (
-              <div className="alert-info" role="status">
-                {t("password_saved")}
-              </div>
-            )}
             {passwordError && (
               <div className="alert-error" role="alert">
                 {passwordError}
@@ -406,6 +402,12 @@ export function SettingsPage() {
             )}
           </div>
           <div className="form-actions">
+            {passwordSaved && (
+              <span className="form-saved-indicator" role="status">
+                <Check size={13} strokeWidth={2.5} />
+                {t("password_saved")}
+              </span>
+            )}
             <button
               type="submit"
               className="btn btn-primary"
@@ -508,11 +510,6 @@ export function SettingsPage() {
               </div>
             )}
 
-            {preferencesSaved && (
-              <div className="alert-info" role="status">
-                {t("notifications_saved")}
-              </div>
-            )}
             {preferencesError && (
               <div className="alert-error" role="alert">
                 {preferencesError}
@@ -520,6 +517,12 @@ export function SettingsPage() {
             )}
           </div>
           <div className="form-actions">
+            {preferencesSaved && (
+              <span className="form-saved-indicator" role="status">
+                <Check size={13} strokeWidth={2.5} />
+                {t("notifications_saved")}
+              </span>
+            )}
             <button
               type="submit"
               className="btn btn-primary"

@@ -1328,6 +1328,35 @@ table.data-table {
   background: var(--surface-2);
   border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
+/* Anchor a counterweight to the left edge of a form-actions row. The
+   submit button still sits on the right via the parent's flex-end; the
+   indicator's auto right-margin pushes everything else to the right. */
+.form-saved-indicator {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 0.01em;
+}
+
+/* Narrow page wrapper for single-column form-only pages. Anchored to the
+   start of the page-canvas so the back-link and page-header keep their
+   left edge; the form columns just stop stretching beyond a comfortable
+   reading width on wide monitors. */
+.page-form-narrow { max-width: 720px; }
+/* Helper text below a label, distinct from a generic muted/small block.
+   Used for inline form hints that need to read as guidance, not as an
+   empty-state. Sits between label and input/widget. */
+.field-helper {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: -2px;
+  line-height: 1.45;
+}
 
 /* Priority cards */
 .priority-grid {
