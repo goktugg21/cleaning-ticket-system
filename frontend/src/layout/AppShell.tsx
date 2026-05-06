@@ -169,28 +169,34 @@ export function AppShell({ children }: AppShellProps) {
 
       <div className="workspace">
         <header className="topbar">
-          <div className="topbar-left">
-            <span className="topbar-kicker">{t("topbar.kicker")}</span>
-            <span className="topbar-title">{t("topbar.title")}</span>
-          </div>
-          <div className="topbar-right">
-            <div className="topbar-identity">
-              <div className="identity-text">
-                <div className="identity-name">{userName}</div>
-                {userEmail && (
-                  <div className="identity-email">{userEmail}</div>
-                )}
-              </div>
-              <span className="identity-role">{roleLabel}</span>
+          {/* topbar-inner constrains the brand-on-left / user-on-right
+              row to the same max-width as .page-canvas. The .topbar
+              itself stays edge-to-edge so its background, border, and
+              backdrop blur bleed across the full workspace. */}
+          <div className="topbar-inner">
+            <div className="topbar-left">
+              <span className="topbar-kicker">{t("topbar.kicker")}</span>
+              <span className="topbar-title">{t("topbar.title")}</span>
             </div>
-            <div className="topbar-divider" />
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleLogout}
-            >
-              {t("sign_out")}
-            </button>
+            <div className="topbar-right">
+              <div className="topbar-identity">
+                <div className="identity-text">
+                  <div className="identity-name">{userName}</div>
+                  {userEmail && (
+                    <div className="identity-email">{userEmail}</div>
+                  )}
+                </div>
+                <span className="identity-role">{roleLabel}</span>
+              </div>
+              <div className="topbar-divider" />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleLogout}
+              >
+                {t("sign_out")}
+              </button>
+            </div>
           </div>
         </header>
 

@@ -474,15 +474,26 @@ p { line-height: 1.6; }
   top: 0;
   z-index: 40;
   height: var(--topbar-h);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 0 28px;
   background: rgba(245,247,245,0.92);
   border-bottom: 1px solid var(--border-soft);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+/* Pattern 1 topbar: the .topbar background bleeds edge-to-edge across
+   the workspace, while the inner content respects the same canvas
+   max-width so the brand and user info align with the page content
+   below. Matches GitHub / Linear / Notion / Stripe. */
+.topbar-inner {
+  max-width: 1360px;
+  margin-inline: auto;
+  width: 100%;
+  height: 100%;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  box-sizing: border-box;
 }
 .topbar-left { display: flex; flex-direction: column; }
 .topbar-kicker {
@@ -528,7 +539,14 @@ p { line-height: 1.6; }
 }
 .topbar-divider { width: 1px; height: 28px; background: var(--border); }
 
-.page-canvas { flex: 1; padding: 28px; }
+.page-canvas {
+  flex: 1;
+  padding: 28px;
+  max-width: 1360px;
+  width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
+}
 
 /* ====================================================================
    PAGE: LOGIN
