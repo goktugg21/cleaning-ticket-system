@@ -7,6 +7,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchManagerThroughput } from "../../../api/reports";
 import { useReport } from "../../../hooks/useReport";
@@ -17,6 +18,7 @@ export interface ChartProps {
 }
 
 export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
+  const { t } = useTranslation("reports");
   const { data, loading, error, retry } = useReport({
     fetcher: fetchManagerThroughput,
     filters,
@@ -33,11 +35,14 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
   }));
 
   return (
-    <section className="card" style={{ padding: "20px 22px", minHeight: 360 }}>
-      <h3 className="section-title">Approved tickets per assignee</h3>
+    <section
+      className="card"
+      style={{ padding: "20px 22px", minHeight: 360 }}
+      data-testid="chart-card-manager-throughput"
+    >
+      <h3 className="section-title">{t("manager_throughput_title")}</h3>
       <p className="muted small" style={{ marginBottom: 8 }}>
-        In the selected date range. Includes Building Managers and Company
-        Admins with at least one assignment in scope.
+        {t("manager_throughput_subtitle")}
       </p>
 
       {loading && (
@@ -54,7 +59,7 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
             onClick={retry}
             style={{ marginLeft: 8 }}
           >
-            Retry
+            {t("retry")}
           </button>
         </div>
       )}
@@ -62,6 +67,7 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
         data.managers.length === 0 ? (
           <div
             className="muted small"
+            data-testid="chart-empty"
             style={{
               display: "flex",
               alignItems: "center",
@@ -69,7 +75,7 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
               height: 240,
             }}
           >
-            No managers in scope.
+            {t("manager_throughput_empty")}
           </div>
         ) : (
           <ResponsiveContainer
@@ -90,7 +96,7 @@ export function ManagerThroughputChart({ filters, refreshKey }: ChartProps) {
                 tick={{ fontSize: 11 }}
               />
               <Tooltip
-                formatter={(value: number) => [value, "Approved"]}
+                formatter={(value: number) => [value, t("manager_throughput_tooltip_label")]}
                 labelFormatter={(_label, payload) => {
                   const row = payload?.[0]?.payload as
                     | { full_name: string; email: string }

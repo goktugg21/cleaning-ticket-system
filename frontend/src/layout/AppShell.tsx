@@ -22,11 +22,11 @@ const REPORTS_ROLES = new Set([
   "BUILDING_MANAGER",
 ]);
 
-const ROLE_LABEL: Record<string, string> = {
-  SUPER_ADMIN: "Super admin",
-  COMPANY_ADMIN: "Company admin",
-  BUILDING_MANAGER: "Manager",
-  CUSTOMER_USER: "Customer",
+const ROLE_KEY: Record<string, string> = {
+  SUPER_ADMIN: "roles.super_admin",
+  COMPANY_ADMIN: "roles.company_admin",
+  BUILDING_MANAGER: "roles.building_manager",
+  CUSTOMER_USER: "roles.customer_user",
 };
 
 function getInitials(value: string | undefined): string {
@@ -40,11 +40,6 @@ function getInitials(value: string | undefined): string {
   }
 
   return clean.slice(0, 2).toUpperCase();
-}
-
-function formatRole(role: string | undefined): string {
-  if (!role) return "User";
-  return ROLE_LABEL[role] ?? role.replaceAll("_", " ").toLowerCase();
 }
 
 function navClass({ isActive }: { isActive: boolean }) {
@@ -62,9 +57,14 @@ export function AppShell({ children }: AppShellProps) {
   useLanguageSync();
 
   const userName =
-    me?.full_name?.trim() || me?.email || "Facility user";
+    me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
   const userEmail = me?.email || "";
-  const roleLabel = formatRole(me?.role);
+  // Role label resolves through the i18n key map: enum value (SUPER_ADMIN
+  // etc.) → key (roles.super_admin) → translated label. Falls back to the
+  // generic "User" key when role is missing.
+  const roleLabel = me?.role
+    ? t(ROLE_KEY[me.role] ?? "roles.fallback")
+    : t("roles.fallback");
 
   function handleLogout() {
     logout();
@@ -78,7 +78,7 @@ export function AppShell({ children }: AppShellProps) {
           <div className="brand-icon">FM</div>
           <div>
             <div className="brand-name">FacilityPro</div>
-            <div className="brand-tag">Cleaning operations</div>
+            <div className="brand-tag">{t("topbar.brand_tag")}</div>
           </div>
         </div>
 
@@ -91,25 +91,25 @@ export function AppShell({ children }: AppShellProps) {
         </div>
 
         <nav className="sidebar-nav" aria-label="Main navigation">
-          <div className="nav-group-label">Operations</div>
+          <div className="nav-group-label">{t("nav.operations_group")}</div>
           <NavLink to="/" end className={navClass}>
             <span className="nav-icon">
               <LayoutGrid size={16} strokeWidth={2} />
             </span>
-            Dashboard
+            {t("nav.dashboard")}
           </NavLink>
           <NavLink to="/tickets/new" className={navClass}>
             <span className="nav-icon">
               <PlusCircle size={16} strokeWidth={2} />
             </span>
-            New ticket
+            {t("nav.new_ticket")}
           </NavLink>
           {me?.role && REPORTS_ROLES.has(me.role) && (
             <NavLink to="/reports" className={navClass}>
               <span className="nav-icon">
                 <BarChart3 size={16} strokeWidth={2} />
               </span>
-              Reports
+              {t("nav.reports")}
             </NavLink>
           )}
           <NavLink to="/settings" className={navClass}>
@@ -122,37 +122,37 @@ export function AppShell({ children }: AppShellProps) {
           {me?.role && STAFF_ROLES.has(me.role) && (
             <>
               <div className="nav-group-label" style={{ marginTop: 8 }}>
-                Admin
+                {t("nav.admin_group")}
               </div>
               <NavLink to="/admin/companies" className={navClass}>
                 <span className="nav-icon">
                   <Building2 size={16} strokeWidth={2} />
                 </span>
-                Companies
+                {t("nav.companies")}
               </NavLink>
               <NavLink to="/admin/buildings" className={navClass}>
                 <span className="nav-icon">
                   <MapPin size={16} strokeWidth={2} />
                 </span>
-                Buildings
+                {t("nav.buildings")}
               </NavLink>
               <NavLink to="/admin/customers" className={navClass}>
                 <span className="nav-icon">
                   <Users size={16} strokeWidth={2} />
                 </span>
-                Customers
+                {t("nav.customers")}
               </NavLink>
               <NavLink to="/admin/users" className={navClass}>
                 <span className="nav-icon">
                   <UserCog size={16} strokeWidth={2} />
                 </span>
-                Users
+                {t("nav.users")}
               </NavLink>
               <NavLink to="/admin/invitations" className={navClass}>
                 <span className="nav-icon">
                   <MailPlus size={16} strokeWidth={2} />
                 </span>
-                Invitations
+                {t("nav.invitations")}
               </NavLink>
             </>
           )}
@@ -163,15 +163,15 @@ export function AppShell({ children }: AppShellProps) {
             <div className="footer-sys-name">VERIDIAN</div>
             <div className="footer-sys-ver">Ops Console v1.0</div>
           </div>
-          <div className="status-dot">Online</div>
+          <div className="status-dot">{t("topbar.online")}</div>
         </div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
           <div className="topbar-left">
-            <span className="topbar-kicker">Ticket Management</span>
-            <span className="topbar-title">Facility service desk</span>
+            <span className="topbar-kicker">{t("topbar.kicker")}</span>
+            <span className="topbar-title">{t("topbar.title")}</span>
           </div>
           <div className="topbar-right">
             <div className="topbar-identity">
@@ -189,7 +189,7 @@ export function AppShell({ children }: AppShellProps) {
               className="btn btn-secondary btn-sm"
               onClick={handleLogout}
             >
-              Sign out
+              {t("sign_out")}
             </button>
           </div>
         </header>

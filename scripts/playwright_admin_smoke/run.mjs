@@ -479,24 +479,26 @@ async function runNonStaff(browser, account, label) {
 
 // ---- /reports coverage ------------------------------------------------
 
-const CHART_TITLES = [
-  "Status distribution",
-  "Tickets created over time",
-  "Approved tickets per assignee",
-  "Open tickets by age",
-  "SLA distribution",
-  "SLA breach rate over time",
+// i18n B3: chart cards identified by data-testid="chart-card-<slug>" so
+// assertions stay language-agnostic. The slugs match the order the charts
+// render on /reports; CHART_CARD_COUNT preserves the previous semantic.
+const CHART_SLUGS = [
+  "status-distribution",
+  "tickets-over-time",
+  "manager-throughput",
+  "age-buckets",
+  "sla-distribution",
+  "sla-breach-rate-over-time",
 ];
-const CHART_CARD_COUNT = CHART_TITLES.length;
+const CHART_CARD_COUNT = CHART_SLUGS.length;
 
-// Scope selector for the chart cards. The filter strip is also a
-// section.card but it has no h3.section-title, so :has() filters cleanly.
-const CHART_CARD_SELECTOR = "section.card:has(h3.section-title)";
+// Prefix selector picks every per-chart testid in one shot.
+const CHART_CARD_SELECTOR = "[data-testid^='chart-card-']";
 
 async function waitForReportsSettled(page) {
-  // Wait for either a chart svg OR an empty-state OR an alert-error inside
-  // each chart card. This indicates the underlying useReport finished its
-  // initial fetch one way or another.
+  // Wait until each chart card has a chart svg OR an alert-error OR a
+  // [data-testid="chart-empty"] node — all three are language-agnostic
+  // markers that the underlying useReport call resolved.
   await page.waitForFunction(
     ({ selector, expectedCount }) => {
       const cards = Array.from(document.querySelectorAll(selector));
@@ -504,9 +506,7 @@ async function waitForReportsSettled(page) {
       return cards.every((card) =>
         card.querySelector("svg") ||
         card.querySelector(".alert-error") ||
-        Array.from(card.querySelectorAll(".muted.small")).some((el) =>
-          /no (tickets|managers|open tickets) /i.test(el.textContent || ""),
-        ),
+        card.querySelector('[data-testid="chart-empty"]'),
       );
     },
     { selector: CHART_CARD_SELECTOR, expectedCount: CHART_CARD_COUNT },
@@ -516,20 +516,21 @@ async function waitForReportsSettled(page) {
 
 async function assertChartCardsPresent(page, group) {
   await page.goto(`${FRONTEND}/reports`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("h2.page-title:has-text('Operations reports')", {
+  await page.waitForSelector('[data-testid="reports-page-title"]', {
     timeout: 10000,
   });
   await waitForReportsSettled(page);
-  const titles = await page
-    .locator(`${CHART_CARD_SELECTOR} h3.section-title`)
-    .allInnerTexts();
-  const trimmed = titles.map((t) => t.trim());
-  const allPresent = CHART_TITLES.every((t) => trimmed.includes(t));
+  const slugsRendered = await page
+    .locator(CHART_CARD_SELECTOR)
+    .evaluateAll((els) =>
+      els.map((el) => (el.getAttribute("data-testid") || "").replace(/^chart-card-/, "")),
+    );
+  const allPresent = CHART_SLUGS.every((s) => slugsRendered.includes(s));
   record(
     group,
     `/reports renders ${CHART_CARD_COUNT} chart cards`,
-    trimmed.length === CHART_CARD_COUNT && allPresent ? PASS : FAIL,
-    `titles=${trimmed.join("|")}`,
+    slugsRendered.length === CHART_CARD_COUNT && allPresent ? PASS : FAIL,
+    `slugs=${slugsRendered.join("|")}`,
   );
 }
 
@@ -561,9 +562,7 @@ async function runReportsForSuperAdmin(page) {
   );
 
   // 2b. SLA distribution chart specifically renders without inline error.
-  const slaDistCard = page.locator(
-    `${CHART_CARD_SELECTOR}:has(h3.section-title:has-text("SLA distribution"))`,
-  );
+  const slaDistCard = page.locator('[data-testid="chart-card-sla-distribution"]');
   const slaDistVisible = (await slaDistCard.count()) === 1;
   const slaDistError = (await slaDistCard.locator(".alert-error").count()) > 0;
   record(
@@ -575,7 +574,7 @@ async function runReportsForSuperAdmin(page) {
 
   // 2c. SLA breach rate chart specifically renders without inline error.
   const slaBreachCard = page.locator(
-    `${CHART_CARD_SELECTOR}:has(h3.section-title:has-text("SLA breach rate over time"))`,
+    '[data-testid="chart-card-sla-breach-rate-over-time"]',
   );
   const slaBreachVisible = (await slaBreachCard.count()) === 1;
   const slaBreachError = (await slaBreachCard.locator(".alert-error").count()) > 0;
@@ -588,16 +587,13 @@ async function runReportsForSuperAdmin(page) {
 
   // 3. Default range preset is "Last 30 days" and visually active.
   const last30Pressed = await page
-    .locator('button:has-text("Last 30 days")')
-    .first()
+    .locator('[data-testid="range-preset-last_30"]')
     .getAttribute("aria-pressed");
   const last7Pressed = await page
-    .locator('button:has-text("Last 7 days")')
-    .first()
+    .locator('[data-testid="range-preset-last_7"]')
     .getAttribute("aria-pressed");
   const last90Pressed = await page
-    .locator('button:has-text("Last 90 days")')
-    .first()
+    .locator('[data-testid="range-preset-last_90"]')
     .getAttribute("aria-pressed");
   record(
     G,
@@ -609,7 +605,7 @@ async function runReportsForSuperAdmin(page) {
   );
 
   // 4. Click "Last 7 days" updates ?from= and ?to= URL params.
-  await page.locator('button:has-text("Last 7 days")').first().click();
+  await page.locator('[data-testid="range-preset-last_7"]').click();
   await page.waitForURL(/[?&]from=\d{4}-\d{2}-\d{2}.*[?&]to=\d{4}-\d{2}-\d{2}/, {
     timeout: 5000,
   });
@@ -632,9 +628,7 @@ async function runReportsForSuperAdmin(page) {
   await waitForReportsSettled(page);
 
   // 5. Selecting a specific company updates ?company= and reveals building dropdown.
-  const companySelect = page.locator(
-    'div.filter-field:has(span.filter-label:text-is("Company")) select',
-  );
+  const companySelect = page.locator('[data-testid="filter-company"]');
   // Pick the second option (first is "All companies").
   const optionValues = await companySelect.locator("option").evaluateAll((els) =>
     els.map((el) => el.getAttribute("value")),
@@ -649,7 +643,7 @@ async function runReportsForSuperAdmin(page) {
     });
     await page.waitForTimeout(300);
     const buildingSelectVisible = await page
-      .locator('div.filter-field:has(span.filter-label:text-is("Building")) select')
+      .locator('[data-testid="filter-building"]')
       .isVisible()
       .catch(() => false);
     record(
@@ -662,16 +656,12 @@ async function runReportsForSuperAdmin(page) {
   await waitForReportsSettled(page);
 
   // 6. Refresh button is present and clickable without crash.
-  const refreshBtn = page.locator(
-    "div.page-header-actions button:has-text('Refresh')",
-  );
+  const refreshBtn = page.locator('[data-testid="refresh-reports"]');
   const refreshVisible = await refreshBtn.isVisible().catch(() => false);
   await refreshBtn.click().catch(() => {});
   await page.waitForTimeout(400);
   await waitForReportsSettled(page);
-  const stillRenderedCount = await page
-    .locator(`${CHART_CARD_SELECTOR} h3.section-title`)
-    .count();
+  const stillRenderedCount = await page.locator(CHART_CARD_SELECTOR).count();
   const stillRendered = stillRenderedCount === CHART_CARD_COUNT;
   record(
     G,
@@ -719,20 +709,13 @@ async function runReportsForBuildingManager(page, G) {
   await assertChartCardsPresent(page, G);
 
   // 11. Building dropdown auto-selects + is disabled when only one assignment.
-  const buildingSelect = page.locator(
-    'div.filter-field:has(span.filter-label:text-is("Building")) select',
-  );
+  const buildingSelect = page.locator('[data-testid="filter-building"]');
   // Wait for both: a non-empty value AND disabled attribute.
   let autoSelectOk = false;
   try {
     await page.waitForFunction(
       () => {
-        const sel = document.querySelector(
-          'div.filter-field select',
-        );
-        // The first filter-field select on the BM page is the building select
-        // (no Company dropdown for non-super-admin). Confirm it has both
-        // a non-empty value and the disabled attribute.
+        const sel = document.querySelector('[data-testid="filter-building"]');
         if (!sel) return false;
         const value = sel.value;
         const disabled = sel.disabled;
@@ -781,13 +764,14 @@ async function runReportsForCustomerUser(page, G) {
   await page.waitForTimeout(500);
   const url = new URL(page.url());
   const onDashboard = url.pathname === "/" || url.pathname === "";
-  const noChartTitles =
-    (await page.locator("h3.section-title").filter({ hasText: /Status distribution/ }).count()) === 0;
+  // Language-agnostic: check chart cards by testid rather than the (now
+  // translated) chart title text.
+  const noChartCards = (await page.locator(CHART_CARD_SELECTOR).count()) === 0;
   record(
     G,
     "Direct /reports redirects to /",
-    onDashboard && noChartTitles ? PASS : FAIL,
-    `url=${url.pathname} chartTitles=${!noChartTitles}`,
+    onDashboard && noChartCards ? PASS : FAIL,
+    `url=${url.pathname} chartCards=${!noChartCards}`,
   );
 }
 

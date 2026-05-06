@@ -4,6 +4,30 @@
   "nav_settings": "Instellingen",
   "sign_out": "Uitloggen",
 
+  "nav.operations_group": "Operaties",
+  "nav.admin_group": "Beheer",
+  "nav.dashboard": "Dashboard",
+  "nav.new_ticket": "Nieuw ticket",
+  "nav.reports": "Rapporten",
+  "nav.companies": "Bedrijven",
+  "nav.buildings": "Gebouwen",
+  "nav.customers": "Klanten",
+  "nav.users": "Gebruikers",
+  "nav.invitations": "Uitnodigingen",
+
+  "topbar.kicker": "Ticketbeheer",
+  "topbar.title": "Facility servicedesk",
+  "topbar.online": "Online",
+  "topbar.brand_tag": "Schoonmaakoperaties",
+  "topbar.user_fallback": "Facility-gebruiker",
+
+  "roles.super_admin": "Superbeheerder",
+  "roles.company_admin": "Bedrijfsbeheerder",
+  "roles.building_manager": "Beheerder",
+  "roles.customer_user": "Klant",
+  "roles.fallback": "Gebruiker",
+
+
   "search": "Zoeken",
   "filter": "Filter",
   "status": "Status",
