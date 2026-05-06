@@ -118,6 +118,51 @@ class MeSerializer(serializers.ModelSerializer):
         return list(scope_customers_for(obj).values_list("id", flat=True))
 
 
+class MeUpdateSerializer(serializers.ModelSerializer):
+    """
+    Write-side serializer for PATCH /auth/me/. Kept separate from MeSerializer
+    so the read-side stays an honest read-only shape (its read_only_fields
+    cover the full payload). Only full_name and language are writable here;
+    role / is_active / email changes go through admin endpoints or are not
+    yet implemented.
+    """
+
+    class Meta:
+        model = User
+        fields = ["full_name", "language"]
+
+    def validate_full_name(self, value):
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise serializers.ValidationError("Full name cannot be empty.")
+        return cleaned
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate_new_password(self, value):
+        user = self.context["request"].user
+        try:
+            password_validation.validate_password(value, user=user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value
+
+    def save(self, **kwargs):
+        user = self.context["request"].user
+        user.set_password(self.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        return user
+
+
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 

@@ -10,6 +10,7 @@ import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { BuildingFormPage } from "./pages/admin/BuildingFormPage";
 import { BuildingsAdminPage } from "./pages/admin/BuildingsAdminPage";
@@ -80,6 +81,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <TicketDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <SettingsPage />
               </ProtectedRoute>
             }
           />
