@@ -2,17 +2,24 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { BellRing, Save, ShieldCheck, UserCircle2 } from "lucide-react";
 import axios from "axios";
+import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import type {
+  NotificationEventType,
   NotificationPreferenceEntry,
   NotificationPreferencesResponse,
 } from "../api/types";
 
-const LANGUAGE_OPTIONS = [
-  { value: "nl", label: "Nederlands (nl)" },
-  { value: "en", label: "English (en)" },
-];
+// The four user-mutable event types map to settings.json keys. The API
+// response also carries a label, but we override with the locale-specific
+// translation so the toggle list matches the rest of the UI.
+const EVENT_LABEL_KEYS: Record<NotificationEventType, string> = {
+  TICKET_CREATED: "event_ticket_created",
+  TICKET_STATUS_CHANGED: "event_ticket_status_changed",
+  TICKET_ASSIGNED: "event_ticket_assigned",
+  TICKET_UNASSIGNED: "event_ticket_unassigned",
+};
 
 type FieldErrors = Record<string, string | undefined>;
 
@@ -38,6 +45,12 @@ function errorPayload(err: unknown): unknown {
 
 export function SettingsPage() {
   const { me, reloadMe } = useAuth();
+  const { t } = useTranslation(["settings", "common"]);
+
+  const languageOptions = [
+    { value: "nl", label: `${t("common:language_dutch")} (nl)` },
+    { value: "en", label: `${t("common:language_english")} (en)` },
+  ];
 
   const [fullName, setFullName] = useState(me?.full_name ?? "");
   const [language, setLanguage] = useState(me?.language ?? "nl");
@@ -127,7 +140,7 @@ export function SettingsPage() {
 
     const trimmed = fullName.trim();
     if (!trimmed) {
-      setProfileFieldErrors({ full_name: "Full name cannot be empty." });
+      setProfileFieldErrors({ full_name: t("full_name_empty") });
       return;
     }
 
@@ -162,15 +175,15 @@ export function SettingsPage() {
     // stronger (common-password, all-numeric) round-trips to the server.
     const local: FieldErrors = {};
     if (!currentPassword) {
-      local.current_password = "Current password is required.";
+      local.current_password = t("current_password_required");
     }
     if (!newPassword) {
-      local.new_password = "New password is required.";
+      local.new_password = t("new_password_required");
     } else if (newPassword.length < 8) {
-      local.new_password = "New password must be at least 8 characters.";
+      local.new_password = t("new_password_too_short");
     }
     if (newPassword && newPassword !== confirmPassword) {
-      local.confirm_password = "Passwords do not match.";
+      local.confirm_password = t("confirm_password_mismatch");
     }
     if (Object.keys(local).length > 0) {
       setPasswordFieldErrors(local);
@@ -206,11 +219,9 @@ export function SettingsPage() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Account</div>
-          <h2 className="page-title">Settings</h2>
-          <p className="page-sub">
-            Update your profile, password, and notification preferences.
-          </p>
+          <div className="eyebrow">{t("eyebrow")}</div>
+          <h2 className="page-title">{t("title")}</h2>
+          <p className="page-sub">{t("subtitle")}</p>
         </div>
       </div>
 
@@ -229,15 +240,13 @@ export function SettingsPage() {
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
               <UserCircle2 size={16} strokeWidth={2} />
-              Profile
+              {t("profile_title")}
             </div>
-            <div className="form-section-helper">
-              Your name and preferred language.
-            </div>
+            <div className="form-section-helper">{t("profile_helper")}</div>
 
             <div className="field">
               <label className="field-label" htmlFor="settings-email">
-                Email
+                {t("email_label")}
               </label>
               <input
                 id="settings-email"
@@ -251,7 +260,7 @@ export function SettingsPage() {
 
             <div className="field">
               <label className="field-label" htmlFor="settings-full-name">
-                Full name
+                {t("full_name_label")}
               </label>
               <input
                 id="settings-full-name"
@@ -270,7 +279,7 @@ export function SettingsPage() {
 
             <div className="field">
               <label className="field-label" htmlFor="settings-language">
-                Language
+                {t("language_label")}
               </label>
               <select
                 id="settings-language"
@@ -278,7 +287,7 @@ export function SettingsPage() {
                 value={language}
                 onChange={(event) => setLanguage(event.target.value)}
               >
-                {LANGUAGE_OPTIONS.map((option) => (
+                {languageOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -293,7 +302,7 @@ export function SettingsPage() {
 
             {profileSaved && (
               <div className="alert-info" role="status">
-                Profile saved.
+                {t("profile_saved")}
               </div>
             )}
             {profileError && (
@@ -309,7 +318,7 @@ export function SettingsPage() {
               disabled={profileSaving}
             >
               <Save size={14} strokeWidth={2.5} />
-              {profileSaving ? "Saving…" : "Save profile"}
+              {profileSaving ? t("profile_saving") : t("profile_save")}
             </button>
           </div>
         </form>
@@ -321,16 +330,13 @@ export function SettingsPage() {
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
               <ShieldCheck size={16} strokeWidth={2} />
-              Password
+              {t("password_title")}
             </div>
-            <div className="form-section-helper">
-              Use a strong password. Your existing session stays signed in
-              after the change.
-            </div>
+            <div className="form-section-helper">{t("password_helper")}</div>
 
             <div className="field">
               <label className="field-label" htmlFor="settings-current-password">
-                Current password
+                {t("current_password_label")}
               </label>
               <input
                 id="settings-current-password"
@@ -349,7 +355,7 @@ export function SettingsPage() {
 
             <div className="field">
               <label className="field-label" htmlFor="settings-new-password">
-                New password
+                {t("new_password_label")}
               </label>
               <input
                 id="settings-new-password"
@@ -371,7 +377,7 @@ export function SettingsPage() {
                 className="field-label"
                 htmlFor="settings-confirm-password"
               >
-                Confirm new password
+                {t("confirm_password_label")}
               </label>
               <input
                 id="settings-confirm-password"
@@ -390,7 +396,7 @@ export function SettingsPage() {
 
             {passwordSaved && (
               <div className="alert-info" role="status">
-                Password updated.
+                {t("password_saved")}
               </div>
             )}
             {passwordError && (
@@ -406,7 +412,7 @@ export function SettingsPage() {
               disabled={passwordSaving}
             >
               <Save size={14} strokeWidth={2.5} />
-              {passwordSaving ? "Saving…" : "Update password"}
+              {passwordSaving ? t("password_saving") : t("password_save")}
             </button>
           </div>
         </form>
@@ -418,11 +424,10 @@ export function SettingsPage() {
               style={{ display: "flex", alignItems: "center", gap: 8 }}
             >
               <BellRing size={16} strokeWidth={2} />
-              Notification preferences
+              {t("notifications_title")}
             </div>
             <div className="form-section-helper">
-              Choose which events trigger an email to you. Security and
-              onboarding emails are always sent.
+              {t("notifications_helper")}
             </div>
 
             {preferencesLoading ? (
@@ -440,6 +445,12 @@ export function SettingsPage() {
                 {preferences.map((entry) => {
                   const checked = !entry.muted;
                   const inputId = `pref-${entry.event_type}`;
+                  // Frontend translation overrides the API-provided label so
+                  // the toggle list switches language with the rest of the
+                  // page. The API label remains as a fallback if the key is
+                  // absent (defensive — all four are populated).
+                  const labelKey = EVENT_LABEL_KEYS[entry.event_type];
+                  const label = labelKey ? t(labelKey) : entry.label;
                   return (
                     <label
                       key={entry.event_type}
@@ -456,7 +467,7 @@ export function SettingsPage() {
                       }}
                     >
                       <span style={{ fontSize: 13, fontWeight: 600 }}>
-                        {entry.label}
+                        {label}
                       </span>
                       <span
                         style={{
@@ -476,7 +487,7 @@ export function SettingsPage() {
                             textAlign: "right",
                           }}
                         >
-                          {checked ? "On" : "Off"}
+                          {checked ? t("notifications_on") : t("notifications_off")}
                         </span>
                         <input
                           id={inputId}
@@ -499,7 +510,7 @@ export function SettingsPage() {
 
             {preferencesSaved && (
               <div className="alert-info" role="status">
-                Notification preferences saved.
+                {t("notifications_saved")}
               </div>
             )}
             {preferencesError && (
@@ -515,7 +526,9 @@ export function SettingsPage() {
               disabled={preferencesSaving || preferencesLoading}
             >
               <Save size={14} strokeWidth={2.5} />
-              {preferencesSaving ? "Saving…" : "Save preferences"}
+              {preferencesSaving
+                ? t("notifications_saving")
+                : t("notifications_save")}
             </button>
           </div>
         </form>

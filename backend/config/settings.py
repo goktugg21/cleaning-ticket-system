@@ -65,6 +65,12 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # UserLanguageMiddleware overrides the LocaleMiddleware default with
+    # the authenticated user's stored preference (User.language). Runs
+    # after AuthenticationMiddleware so request.user is populated. For
+    # JWT-authenticated DRF requests, see the docstring caveat — JWT auth
+    # runs at the view layer, not here.
+    "accounts.middleware.UserLanguageMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

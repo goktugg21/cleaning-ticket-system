@@ -11,7 +11,9 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
+import { useLanguageSync } from "../i18n/useLanguageSync";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 const REPORTS_ROLES = new Set([
@@ -56,6 +58,8 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation("common");
+  useLanguageSync();
 
   const userName =
     me?.full_name?.trim() || me?.email || "Facility user";
@@ -112,7 +116,7 @@ export function AppShell({ children }: AppShellProps) {
             <span className="nav-icon">
               <Settings size={16} strokeWidth={2} />
             </span>
-            Settings
+            {t("nav_settings")}
           </NavLink>
 
           {me?.role && STAFF_ROLES.has(me.role) && (
