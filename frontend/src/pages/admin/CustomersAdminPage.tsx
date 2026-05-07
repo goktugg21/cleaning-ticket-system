@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listBuildings, listCompanies, listCustomers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
@@ -12,6 +13,8 @@ type ActiveFilter = "true" | "false" | "all";
 const DEBOUNCE_MS = 300;
 
 export function CustomersAdminPage() {
+  const { t } = useTranslation("common");
+
   const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -31,9 +34,9 @@ export function CustomersAdminPage() {
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
 
   const [savedBanner] = useSavedBanner({
-    saved: "Customer saved.",
-    deactivated: "Customer deactivated.",
-    reactivated: "Customer reactivated.",
+    saved: t("customers.banner_saved"),
+    deactivated: t("customers.banner_deactivated"),
+    reactivated: t("customers.banner_reactivated"),
   });
 
   // Companies for the filter dropdown.
@@ -125,12 +128,16 @@ export function CustomersAdminPage() {
   }, [load]);
 
   const companyName = useCallback(
-    (id: number) => companies.find((c) => c.id === id)?.name ?? `Company #${id}`,
-    [companies],
+    (id: number) =>
+      companies.find((c) => c.id === id)?.name ??
+      t("buildings.company_fallback", { id }),
+    [companies, t],
   );
   const buildingName = useCallback(
-    (id: number) => buildings.find((b) => b.id === id)?.name ?? `Building #${id}`,
-    [buildings],
+    (id: number) =>
+      buildings.find((b) => b.id === id)?.name ??
+      t("customers.building_fallback", { id }),
+    [buildings, t],
   );
 
   const hasActiveFilters = Boolean(
@@ -145,11 +152,13 @@ export function CustomersAdminPage() {
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">Customers</h2>
+          <h2 className="page-title">{t("nav.customers")}</h2>
           <p className="page-sub">
-            {loading ? "Loading customers…" : `${count} ${count === 1 ? "customer" : "customers"}`}
+            {loading
+              ? t("customers.loading")
+              : t("customers.count", { count })}
           </p>
         </div>
         <div className="page-header-actions">
@@ -160,11 +169,11 @@ export function CustomersAdminPage() {
             disabled={loading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("refresh")}
           </button>
           <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
             <Plus size={14} strokeWidth={2.5} />
-            Create new
+            {t("admin.create_new")}
           </Link>
         </div>
       </div>
@@ -191,17 +200,17 @@ export function CustomersAdminPage() {
           }}
         >
           <div className="filter-field search">
-            <span className="filter-label">Search</span>
+            <span className="filter-label">{t("search")}</span>
             <input
               className="filter-control"
               type="search"
-              placeholder="Name, email, phone…"
+              placeholder={t("customers.search_placeholder")}
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">Status</span>
+            <span className="filter-label">{t("status")}</span>
             <select
               className="filter-control"
               value={activeFilter}
@@ -210,13 +219,13 @@ export function CustomersAdminPage() {
                 setPage(1);
               }}
             >
-              <option value="true">Active</option>
-              <option value="false">Inactive</option>
-              <option value="all">All</option>
+              <option value="true">{t("admin.status_active")}</option>
+              <option value="false">{t("admin.status_inactive")}</option>
+              <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
           <div className="filter-field">
-            <span className="filter-label">Company</span>
+            <span className="filter-label">{t("company")}</span>
             <select
               className="filter-control"
               value={companyFilter === "" ? "" : String(companyFilter)}
@@ -228,7 +237,7 @@ export function CustomersAdminPage() {
               }}
               disabled={companyDropdownDisabled}
             >
-              <option value="">All companies</option>
+              <option value="">{t("admin.all_companies")}</option>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -237,7 +246,7 @@ export function CustomersAdminPage() {
             </select>
           </div>
           <div className="filter-field">
-            <span className="filter-label">Building</span>
+            <span className="filter-label">{t("building")}</span>
             <select
               className="filter-control"
               value={buildingFilter === "" ? "" : String(buildingFilter)}
@@ -248,7 +257,7 @@ export function CustomersAdminPage() {
               }}
               disabled={companyFilter === "" || buildings.length === 0}
             >
-              <option value="">All buildings</option>
+              <option value="">{t("admin.all_buildings")}</option>
               {buildings.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
@@ -261,6 +270,7 @@ export function CustomersAdminPage() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
+                data-testid="filters-clear"
                 onClick={() => {
                   setSearchInput("");
                   setActiveFilter("true");
@@ -269,7 +279,7 @@ export function CustomersAdminPage() {
                   setPage(1);
                 }}
               >
-                Clear
+                {t("clear")}
               </button>
             )}
           </div>
@@ -285,12 +295,12 @@ export function CustomersAdminPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Company</th>
-                <th>Building</th>
-                <th>Contact email</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
+                <th>{t("admin.col_name")}</th>
+                <th>{t("company")}</th>
+                <th>{t("building")}</th>
+                <th>{t("customers.col_contact_email")}</th>
+                <th>{t("status")}</th>
+                <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
             <tbody>
@@ -307,7 +317,9 @@ export function CustomersAdminPage() {
                       className={`cell-tag cell-tag-${customer.is_active ? "open" : "closed"}`}
                     >
                       <i />
-                      {customer.is_active ? "Active" : "Inactive"}
+                      {customer.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
                     </span>
                   </td>
                   <td>
@@ -315,7 +327,7 @@ export function CustomersAdminPage() {
                       className="btn btn-ghost btn-sm"
                       to={`/admin/customers/${customer.id}`}
                     >
-                      Edit
+                      {t("admin.edit")}
                     </Link>
                   </td>
                 </tr>
@@ -327,16 +339,18 @@ export function CustomersAdminPage() {
             <div className="empty-state">
               <div className="empty-icon">＋</div>
               <div className="empty-title">
-                {hasActiveFilters ? "No customers match your filters" : "No customers yet"}
+                {hasActiveFilters
+                  ? t("customers.empty_filtered_title")
+                  : t("customers.empty_initial_title")}
               </div>
               <p className="empty-sub">
                 {hasActiveFilters
-                  ? "Try clearing filters or switching the status tab."
-                  : "Create the first customer to get started."}
+                  ? t("admin.empty_filtered_desc")
+                  : t("customers.empty_initial_desc")}
               </p>
               {!hasActiveFilters && (
                 <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
-                  Create customer
+                  {t("customers.create")}
                 </Link>
               )}
             </div>
@@ -346,7 +360,7 @@ export function CustomersAdminPage() {
         {(previous || next) && (
           <div className="pagination">
             <span className="pagination-info">
-              Page {page} · {count} total
+              {t("admin.pagination_page", { page, total: count })}
             </span>
             <div className="pagination-controls">
               <button
@@ -355,7 +369,7 @@ export function CustomersAdminPage() {
                 disabled={loading || !previous || page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Previous
+                {t("previous")}
               </button>
               <button
                 type="button"
@@ -363,7 +377,7 @@ export function CustomersAdminPage() {
                 disabled={loading || !next}
                 onClick={() => setPage((current) => current + 1)}
               >
-                Next
+                {t("next")}
               </button>
             </div>
           </div>

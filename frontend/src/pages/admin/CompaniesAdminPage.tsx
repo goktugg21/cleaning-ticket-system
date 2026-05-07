@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listCompanies } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
@@ -12,9 +13,9 @@ type ActiveFilter = "true" | "false" | "all";
 
 const DEBOUNCE_MS = 300;
 
-function formatDate(value: string): string {
+function formatDate(value: string, locale: string): string {
   try {
-    return new Date(value).toLocaleDateString(undefined, {
+    return new Date(value).toLocaleDateString(locale, {
       year: "numeric",
       month: "short",
       day: "2-digit",
@@ -26,6 +27,7 @@ function formatDate(value: string): string {
 
 export function CompaniesAdminPage() {
   const { me } = useAuth();
+  const { t, i18n } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
@@ -41,9 +43,9 @@ export function CompaniesAdminPage() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
 
   const [savedBanner] = useSavedBanner({
-    saved: "Company saved.",
-    deactivated: "Company deactivated.",
-    reactivated: "Company reactivated.",
+    saved: t("companies.banner_saved"),
+    deactivated: t("companies.banner_deactivated"),
+    reactivated: t("companies.banner_reactivated"),
   });
 
   // Debounce the search input.
@@ -84,18 +86,20 @@ export function CompaniesAdminPage() {
 
   const hasActiveFilters = Boolean(searchActive || activeFilter !== "true");
 
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+
   return (
     <div>
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">Companies</h2>
+          <h2 className="page-title">{t("nav.companies")}</h2>
           <p className="page-sub">
             {loading
-              ? "Loading companies…"
-              : `${count} ${count === 1 ? "company" : "companies"}`}
+              ? t("companies.loading")
+              : t("companies.count", { count })}
           </p>
         </div>
         <div className="page-header-actions">
@@ -106,12 +110,12 @@ export function CompaniesAdminPage() {
             disabled={loading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("refresh")}
           </button>
           {isSuperAdmin && (
             <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
               <Plus size={14} strokeWidth={2.5} />
-              Create new
+              {t("admin.create_new")}
             </Link>
           )}
         </div>
@@ -139,17 +143,17 @@ export function CompaniesAdminPage() {
           }}
         >
           <div className="filter-field search">
-            <span className="filter-label">Search</span>
+            <span className="filter-label">{t("search")}</span>
             <input
               className="filter-control"
               type="search"
-              placeholder="Name or slug…"
+              placeholder={t("companies.search_placeholder")}
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">Status</span>
+            <span className="filter-label">{t("status")}</span>
             <select
               className="filter-control"
               value={activeFilter}
@@ -158,9 +162,9 @@ export function CompaniesAdminPage() {
                 setPage(1);
               }}
             >
-              <option value="true">Active</option>
-              <option value="false">Inactive</option>
-              <option value="all">All</option>
+              <option value="true">{t("admin.status_active")}</option>
+              <option value="false">{t("admin.status_inactive")}</option>
+              <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
           <div className="filter-actions">
@@ -168,13 +172,14 @@ export function CompaniesAdminPage() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
+                data-testid="filters-clear"
                 onClick={() => {
                   setSearchInput("");
                   setActiveFilter("true");
                   setPage(1);
                 }}
               >
-                Clear
+                {t("clear")}
               </button>
             )}
           </div>
@@ -190,12 +195,12 @@ export function CompaniesAdminPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Slug</th>
-                <th>Default language</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
+                <th>{t("admin.col_name")}</th>
+                <th>{t("companies.col_slug")}</th>
+                <th>{t("companies.col_default_language")}</th>
+                <th>{t("created")}</th>
+                <th>{t("status")}</th>
+                <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
             <tbody>
@@ -206,13 +211,15 @@ export function CompaniesAdminPage() {
                   </td>
                   <td>{company.slug}</td>
                   <td>{company.default_language}</td>
-                  <td className="td-date">{formatDate(company.created_at)}</td>
+                  <td className="td-date">{formatDate(company.created_at, dateLocale)}</td>
                   <td>
                     <span
                       className={`cell-tag cell-tag-${company.is_active ? "open" : "closed"}`}
                     >
                       <i />
-                      {company.is_active ? "Active" : "Inactive"}
+                      {company.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
                     </span>
                   </td>
                   <td>
@@ -220,7 +227,7 @@ export function CompaniesAdminPage() {
                       className="btn btn-ghost btn-sm"
                       to={`/admin/companies/${company.id}`}
                     >
-                      Edit
+                      {t("admin.edit")}
                     </Link>
                   </td>
                 </tr>
@@ -232,18 +239,20 @@ export function CompaniesAdminPage() {
             <div className="empty-state">
               <div className="empty-icon">＋</div>
               <div className="empty-title">
-                {hasActiveFilters ? "No companies match your filters" : "No companies yet"}
+                {hasActiveFilters
+                  ? t("companies.empty_filtered_title")
+                  : t("companies.empty_initial_title")}
               </div>
               <p className="empty-sub">
                 {hasActiveFilters
-                  ? "Try clearing filters or switching the status tab."
+                  ? t("admin.empty_filtered_desc")
                   : isSuperAdmin
-                    ? "Create the first company to get started."
-                    : "Ask a super admin to create one."}
+                    ? t("companies.empty_initial_desc_admin")
+                    : t("companies.empty_initial_desc_other")}
               </p>
               {isSuperAdmin && !hasActiveFilters && (
                 <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
-                  Create company
+                  {t("companies.create")}
                 </Link>
               )}
             </div>
@@ -253,7 +262,7 @@ export function CompaniesAdminPage() {
         {(previous || next) && (
           <div className="pagination">
             <span className="pagination-info">
-              Page {page} · {count} total
+              {t("admin.pagination_page", { page, total: count })}
             </span>
             <div className="pagination-controls">
               <button
@@ -262,7 +271,7 @@ export function CompaniesAdminPage() {
                 disabled={loading || !previous || page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Previous
+                {t("previous")}
               </button>
               <button
                 type="button"
@@ -270,7 +279,7 @@ export function CompaniesAdminPage() {
                 disabled={loading || !next}
                 onClick={() => setPage((current) => current + 1)}
               >
-                Next
+                {t("next")}
               </button>
             </div>
           </div>

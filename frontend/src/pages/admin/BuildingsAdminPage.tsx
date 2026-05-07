@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listBuildings, listCompanies } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
@@ -11,9 +12,9 @@ type ActiveFilter = "true" | "false" | "all";
 
 const DEBOUNCE_MS = 300;
 
-function formatDate(value: string): string {
+function formatDate(value: string, locale: string): string {
   try {
-    return new Date(value).toLocaleDateString(undefined, {
+    return new Date(value).toLocaleDateString(locale, {
       year: "numeric",
       month: "short",
       day: "2-digit",
@@ -24,6 +25,8 @@ function formatDate(value: string): string {
 }
 
 export function BuildingsAdminPage() {
+  const { t, i18n } = useTranslation("common");
+
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -41,9 +44,9 @@ export function BuildingsAdminPage() {
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
 
   const [savedBanner] = useSavedBanner({
-    saved: "Building saved.",
-    deactivated: "Building deactivated.",
-    reactivated: "Building reactivated.",
+    saved: t("buildings.banner_saved"),
+    deactivated: t("buildings.banner_deactivated"),
+    reactivated: t("buildings.banner_reactivated"),
   });
 
   // Load companies once for the filter dropdown. The list is paginated server
@@ -106,24 +109,30 @@ export function BuildingsAdminPage() {
   }, [load]);
 
   const companyName = useCallback(
-    (id: number) => companies.find((c) => c.id === id)?.name ?? `Company #${id}`,
-    [companies],
+    (id: number) =>
+      companies.find((c) => c.id === id)?.name ??
+      t("buildings.company_fallback", { id }),
+    [companies, t],
   );
 
   const hasActiveFilters = Boolean(
     searchActive || activeFilter !== "true" || (companyFilter !== "" && !companyDropdownDisabled),
   );
 
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+
   return (
     <div>
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">Buildings</h2>
+          <h2 className="page-title">{t("nav.buildings")}</h2>
           <p className="page-sub">
-            {loading ? "Loading buildings…" : `${count} ${count === 1 ? "building" : "buildings"}`}
+            {loading
+              ? t("buildings.loading")
+              : t("buildings.count", { count })}
           </p>
         </div>
         <div className="page-header-actions">
@@ -134,11 +143,11 @@ export function BuildingsAdminPage() {
             disabled={loading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("refresh")}
           </button>
           <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
             <Plus size={14} strokeWidth={2.5} />
-            Create new
+            {t("admin.create_new")}
           </Link>
         </div>
       </div>
@@ -165,17 +174,17 @@ export function BuildingsAdminPage() {
           }}
         >
           <div className="filter-field search">
-            <span className="filter-label">Search</span>
+            <span className="filter-label">{t("search")}</span>
             <input
               className="filter-control"
               type="search"
-              placeholder="Name, address, city…"
+              placeholder={t("buildings.search_placeholder")}
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">Status</span>
+            <span className="filter-label">{t("status")}</span>
             <select
               className="filter-control"
               value={activeFilter}
@@ -184,13 +193,13 @@ export function BuildingsAdminPage() {
                 setPage(1);
               }}
             >
-              <option value="true">Active</option>
-              <option value="false">Inactive</option>
-              <option value="all">All</option>
+              <option value="true">{t("admin.status_active")}</option>
+              <option value="false">{t("admin.status_inactive")}</option>
+              <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
           <div className="filter-field">
-            <span className="filter-label">Company</span>
+            <span className="filter-label">{t("company")}</span>
             <select
               className="filter-control"
               value={companyFilter === "" ? "" : String(companyFilter)}
@@ -201,7 +210,7 @@ export function BuildingsAdminPage() {
               }}
               disabled={companyDropdownDisabled}
             >
-              <option value="">All companies</option>
+              <option value="">{t("admin.all_companies")}</option>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -214,6 +223,7 @@ export function BuildingsAdminPage() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
+                data-testid="filters-clear"
                 onClick={() => {
                   setSearchInput("");
                   setActiveFilter("true");
@@ -221,7 +231,7 @@ export function BuildingsAdminPage() {
                   setPage(1);
                 }}
               >
-                Clear
+                {t("clear")}
               </button>
             )}
           </div>
@@ -237,12 +247,12 @@ export function BuildingsAdminPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Company</th>
-                <th>Address</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
+                <th>{t("admin.col_name")}</th>
+                <th>{t("company")}</th>
+                <th>{t("admin.col_address")}</th>
+                <th>{t("created")}</th>
+                <th>{t("status")}</th>
+                <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
             <tbody>
@@ -255,13 +265,15 @@ export function BuildingsAdminPage() {
                   <td>
                     {[building.city, building.postal_code].filter(Boolean).join(" ")}
                   </td>
-                  <td className="td-date">{formatDate(building.created_at)}</td>
+                  <td className="td-date">{formatDate(building.created_at, dateLocale)}</td>
                   <td>
                     <span
                       className={`cell-tag cell-tag-${building.is_active ? "open" : "closed"}`}
                     >
                       <i />
-                      {building.is_active ? "Active" : "Inactive"}
+                      {building.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
                     </span>
                   </td>
                   <td>
@@ -269,7 +281,7 @@ export function BuildingsAdminPage() {
                       className="btn btn-ghost btn-sm"
                       to={`/admin/buildings/${building.id}`}
                     >
-                      Edit
+                      {t("admin.edit")}
                     </Link>
                   </td>
                 </tr>
@@ -281,16 +293,18 @@ export function BuildingsAdminPage() {
             <div className="empty-state">
               <div className="empty-icon">＋</div>
               <div className="empty-title">
-                {hasActiveFilters ? "No buildings match your filters" : "No buildings yet"}
+                {hasActiveFilters
+                  ? t("buildings.empty_filtered_title")
+                  : t("buildings.empty_initial_title")}
               </div>
               <p className="empty-sub">
                 {hasActiveFilters
-                  ? "Try clearing filters or switching the status tab."
-                  : "Create the first building to get started."}
+                  ? t("admin.empty_filtered_desc")
+                  : t("buildings.empty_initial_desc")}
               </p>
               {!hasActiveFilters && (
                 <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
-                  Create building
+                  {t("buildings.create")}
                 </Link>
               )}
             </div>
@@ -300,7 +314,7 @@ export function BuildingsAdminPage() {
         {(previous || next) && (
           <div className="pagination">
             <span className="pagination-info">
-              Page {page} · {count} total
+              {t("admin.pagination_page", { page, total: count })}
             </span>
             <div className="pagination-controls">
               <button
@@ -309,7 +323,7 @@ export function BuildingsAdminPage() {
                 disabled={loading || !previous || page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Previous
+                {t("previous")}
               </button>
               <button
                 type="button"
@@ -317,7 +331,7 @@ export function BuildingsAdminPage() {
                 disabled={loading || !next}
                 onClick={() => setPage((current) => current + 1)}
               >
-                Next
+                {t("next")}
               </button>
             </div>
           </div>

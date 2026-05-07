@@ -92,14 +92,20 @@ async function runSuperAdmin(browser) {
   const rowsBefore = await page.locator("table.data-table tbody tr").count();
   record(G, "Users list loads", rowsBefore > 0 ? PASS : FAIL, `${rowsBefore} rows`);
 
-  await page.getByRole("button", { name: /^Building manager$/, pressed: false }).click();
+  // Role filter chips carry data-role={ROLE} so we can target them
+  // language-agnostically after i18n B4a translated the chip label.
+  await page.locator('button[data-role="BUILDING_MANAGER"]').click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(300);
-  const roleCells = await page.locator("table.data-table tbody tr td:nth-child(3)").allTextContents();
-  const allBM = roleCells.length > 0 && roleCells.every((t) => /Building manager/i.test(t));
+  // Each role td carries data-testid="user-row-role" + data-role="<ROLE>"; we
+  // assert on the canonical role enum rather than the translated cell text.
+  const roleAttrs = await page.locator('[data-testid="user-row-role"]').evaluateAll(
+    (els) => els.map((el) => el.getAttribute("data-role") ?? ""),
+  );
+  const allBM = roleAttrs.length > 0 && roleAttrs.every((r) => r === "BUILDING_MANAGER");
   record(G, "Role filter (Building manager) restricts list", allBM ? PASS : FAIL,
-    `${roleCells.length} rows; roles=${[...new Set(roleCells)].join("|")}`);
-  await page.getByRole("button", { name: /^Clear$/ }).click().catch(() => {});
+    `${roleAttrs.length} rows; roles=${[...new Set(roleAttrs)].join("|")}`);
+  await page.locator('[data-testid="filters-clear"]').click().catch(() => {});
 
   // 6-8: Open detail for ANOTHER user, then own user
   await page.goto(`${FRONTEND}/admin/users/3`, { waitUntil: "domcontentloaded" });
