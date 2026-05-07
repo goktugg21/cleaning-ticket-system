@@ -173,7 +173,7 @@ async function runSuperAdmin(browser) {
   // Pick a company so the buildings list loads (we still won't pick any building).
   await page.locator("select#invite-company").selectOption({ label: "Demo Cleaning Company" });
   await page.waitForTimeout(400);
-  await page.getByRole("button", { name: /Send invitation/ }).click();
+  await page.locator('[data-testid="invite-submit"]').click();
   await page.waitForTimeout(300);
   const buildingFieldErr = await page.locator(".alert-error").filter({ hasText: /at least one building/i }).count();
   record("UI", "Inline field error appears next to invalid invitation field", buildingFieldErr > 0 ? PASS : FAIL);
@@ -184,7 +184,7 @@ async function runSuperAdmin(browser) {
   // Pick first available building.
   const firstBuildingBtn = page.locator('section.card div.field button[aria-pressed]').first();
   await firstBuildingBtn.click();
-  await page.getByRole("button", { name: /Send invitation/ }).click();
+  await page.locator('[data-testid="invite-submit"]').click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(700);
 
