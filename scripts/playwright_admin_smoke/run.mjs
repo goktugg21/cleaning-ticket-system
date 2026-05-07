@@ -121,11 +121,14 @@ async function runSuperAdmin(browser) {
   record(G, "Own role dropdown disabled when opening self", selfRoleDisabled ? PASS : FAIL);
 
   // 9-11: Deactivate user 3, confirm appears in inactive view, reactivate
+  // Form-page Deactivate/Reactivate buttons carry data-testid after i18n B4b
+  // translated their labels. Dialog confirm button identified by btn-primary
+  // class; cancel by btn-ghost.
   await page.goto(`${FRONTEND}/admin/users/3`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("button.btn-ghost:has-text('Deactivate')", { timeout: 10000 });
-  await page.locator("button.btn-ghost:has-text('Deactivate')").first().click();
+  await page.waitForSelector('[data-testid="deactivate-button"]', { timeout: 10000 });
+  await page.locator('[data-testid="deactivate-button"]').first().click();
   await page.waitForTimeout(300);
-  await page.locator("dialog[open] button:has-text('Deactivate')").click();
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForURL(/\/admin\/users(?:\?|$)/, { timeout: 10000 });
   record(G, "Deactivate other user", PASS);
 
@@ -142,14 +145,14 @@ async function runSuperAdmin(browser) {
   // returns 404, so the Reactivate button never shows. Record observed
   // behavior, then reactivate via the API to restore state.
   await page.goto(`${FRONTEND}/admin/users/3`, { waitUntil: "domcontentloaded" });
-  const reactivateBtn = page.locator('button.btn-primary.btn-sm:has-text("Reactivate")').first();
+  const reactivateBtn = page.locator('[data-testid="reactivate-button"]').first();
   let canReactivateUI = false;
   try {
     await reactivateBtn.waitFor({ state: "visible", timeout: 4000 });
     canReactivateUI = true;
     await reactivateBtn.click();
     await page.waitForTimeout(300);
-    await page.locator("dialog[open] button:has-text('Reactivate')").click();
+    await page.locator("dialog[open] button.btn-primary").click();
     await page.waitForURL(/\/admin\/users(?:\?|$)/, { timeout: 10000 });
   } catch {
     canReactivateUI = false;
@@ -214,7 +217,7 @@ async function runSuperAdmin(browser) {
   const revokeRow = page.locator(`tr:has-text("${inviteEmail}")`).first();
   await revokeRow.locator('.link-action--danger').click();
   await page.waitForTimeout(300);
-  await page.locator("dialog[open] button:has-text('Revoke')").click();
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
 
@@ -239,7 +242,10 @@ async function runSuperAdmin(browser) {
     },
     { timeout: 10000 },
   );
-  const existingMembersCount = await page.locator("section.card:has-text('Admins') table tbody tr").count();
+  // Membership section root carries data-testid after i18n B4b; "Admins"
+  // / "Beheerders" header text is now translated.
+  const adminsSection = page.locator('[data-testid="section-admins"]');
+  const existingMembersCount = await adminsSection.locator("table tbody tr").count();
 
   let pickedCompanyAdminEmail = null;
   const opts = await page.locator("select#add-company-admin option").all();
@@ -252,107 +258,111 @@ async function runSuperAdmin(browser) {
       break;
     }
   }
-  await page.locator("section.card:has-text('Admins') button:has-text('Add')").click();
+  await adminsSection.locator('[data-testid="member-add-button"]').click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
-  const newMembersCount = await page.locator("section.card:has-text('Admins') table tbody tr").count();
+  const newMembersCount = await adminsSection.locator("table tbody tr").count();
   record(G, "Add company admin refreshes list immediately",
     newMembersCount === existingMembersCount + 1 ? PASS : FAIL,
     `${existingMembersCount} -> ${newMembersCount}; picked=${pickedCompanyAdminEmail}`);
 
-  // Remove
-  const newRow = page.locator(`section.card:has-text('Admins') tr:has-text("${pickedCompanyAdminEmail}")`).first();
-  await newRow.locator('button:has-text("Remove")').click();
+  // Remove (Remove button text is translated; target by class within the row)
+  const newRow = adminsSection.locator(`tr:has-text("${pickedCompanyAdminEmail}")`).first();
+  await newRow.locator('button.btn-ghost.btn-sm').click();
   await page.waitForTimeout(300);
-  await page.locator("dialog[open] button:has-text('Remove')").click();
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(400);
-  const afterRemoveCount = await page.locator("section.card:has-text('Admins') table tbody tr").count();
+  const afterRemoveCount = await adminsSection.locator("table tbody tr").count();
   record(G, "Remove company admin refreshes list",
     afterRemoveCount === existingMembersCount ? PASS : FAIL,
     `${newMembersCount} -> ${afterRemoveCount}`);
 
   // 21-24: /admin/buildings/:id Managers section
   await page.goto(`${FRONTEND}/admin/buildings/1`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("section.card:has-text('Managers')", { timeout: 10000 });
+  await page.waitForSelector('[data-testid="section-managers"]', { timeout: 10000 });
   await page.waitForTimeout(500);
-  const bMembersBefore = await page.locator("section.card:has-text('Managers') table tbody tr").count();
+  const managersSection = page.locator('[data-testid="section-managers"]');
+  const bMembersBefore = await managersSection.locator("table tbody tr").count();
   let pickedManagerEmail = null;
-  const bOpts = await page.locator("section.card:has-text('Managers') select option").all();
+  const bOpts = await managersSection.locator("select option").all();
   for (const o of bOpts) {
     const t = ((await o.textContent()) || "").trim();
     if (/^manager2@example\.com/.test(t) || /^assignment-other-manager@example\.com/.test(t)) {
       const value = await o.getAttribute("value");
-      await page.locator("section.card:has-text('Managers') select").selectOption(value);
+      await managersSection.locator("select").selectOption(value);
       pickedManagerEmail = t.split(" ")[0];
       break;
     }
   }
-  await page.locator("section.card:has-text('Managers') button:has-text('Add')").click();
+  await managersSection.locator('[data-testid="member-add-button"]').click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
-  const bMembersAfterAdd = await page.locator("section.card:has-text('Managers') table tbody tr").count();
+  const bMembersAfterAdd = await managersSection.locator("table tbody tr").count();
   record(G, "Add building manager refreshes list",
     bMembersAfterAdd === bMembersBefore + 1 ? PASS : FAIL,
     `${bMembersBefore} -> ${bMembersAfterAdd}; picked=${pickedManagerEmail}`);
 
-  const bAddedRow = page.locator(`section.card:has-text('Managers') tr:has-text("${pickedManagerEmail}")`).first();
-  await bAddedRow.locator('button:has-text("Remove")').click();
+  const bAddedRow = managersSection.locator(`tr:has-text("${pickedManagerEmail}")`).first();
+  await bAddedRow.locator('button.btn-ghost.btn-sm').click();
   await page.waitForTimeout(300);
-  await page.locator("dialog[open] button:has-text('Remove')").click();
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(400);
-  const bMembersAfterRm = await page.locator("section.card:has-text('Managers') table tbody tr").count();
+  const bMembersAfterRm = await managersSection.locator("table tbody tr").count();
   record(G, "Remove building manager refreshes list",
     bMembersAfterRm === bMembersBefore ? PASS : FAIL,
     `${bMembersAfterAdd} -> ${bMembersAfterRm}`);
 
   // 25-28: /admin/customers/:id Users section
   await page.goto(`${FRONTEND}/admin/customers/1`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("section.card:has-text('Users')", { timeout: 10000 });
+  await page.waitForSelector('[data-testid="section-customer-users"]', { timeout: 10000 });
   await page.waitForTimeout(500);
-  const cMembersBefore = await page.locator("section.card:has-text('Users') table tbody tr").count();
+  const customerUsersSection = page.locator('[data-testid="section-customer-users"]');
+  const cMembersBefore = await customerUsersSection.locator("table tbody tr").count();
   let pickedCustomerUserEmail = null;
-  const cOpts = await page.locator("section.card:has-text('Users') select option").all();
+  const cOpts = await customerUsersSection.locator("select option").all();
   for (const o of cOpts) {
     const t = ((await o.textContent()) || "").trim();
     if (/^customer2@example\.com/.test(t) || /^notification-customer-user@example\.com/.test(t)) {
       const value = await o.getAttribute("value");
-      await page.locator("section.card:has-text('Users') select").selectOption(value);
+      await customerUsersSection.locator("select").selectOption(value);
       pickedCustomerUserEmail = t.split(" ")[0];
       break;
     }
   }
-  await page.locator("section.card:has-text('Users') button:has-text('Add')").click();
+  await customerUsersSection.locator('[data-testid="member-add-button"]').click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
-  const cMembersAfterAdd = await page.locator("section.card:has-text('Users') table tbody tr").count();
+  const cMembersAfterAdd = await customerUsersSection.locator("table tbody tr").count();
   record(G, "Add customer user refreshes list",
     cMembersAfterAdd === cMembersBefore + 1 ? PASS : FAIL,
     `${cMembersBefore} -> ${cMembersAfterAdd}; picked=${pickedCustomerUserEmail}`);
 
-  const cAddedRow = page.locator(`section.card:has-text('Users') tr:has-text("${pickedCustomerUserEmail}")`).first();
-  await cAddedRow.locator('button:has-text("Remove")').click();
+  const cAddedRow = customerUsersSection.locator(`tr:has-text("${pickedCustomerUserEmail}")`).first();
+  await cAddedRow.locator('button.btn-ghost.btn-sm').click();
   await page.waitForTimeout(300);
-  await page.locator("dialog[open] button:has-text('Remove')").click();
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(400);
-  const cMembersAfterRm = await page.locator("section.card:has-text('Users') table tbody tr").count();
+  const cMembersAfterRm = await customerUsersSection.locator("table tbody tr").count();
   record(G, "Remove customer user refreshes list",
     cMembersAfterRm === cMembersBefore ? PASS : FAIL,
     `${cMembersAfterAdd} -> ${cMembersAfterRm}`);
 
   // ---- Dialog cancel/escape/confirm ----
+  // Cancel button targeted by class (.btn-ghost) inside the open dialog;
+  // the dialog button order is [Cancel(.btn-ghost), Confirm(.btn-primary)].
   await page.goto(`${FRONTEND}/admin/users/3`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("button.btn-ghost:has-text('Deactivate')", { timeout: 10000 });
-  await page.locator("button.btn-ghost:has-text('Deactivate')").first().click();
+  await page.waitForSelector('[data-testid="deactivate-button"]', { timeout: 10000 });
+  await page.locator('[data-testid="deactivate-button"]').first().click();
   await page.waitForTimeout(200);
-  await page.locator("dialog[open] button:has-text('Cancel')").click();
+  await page.locator("dialog[open] button.btn-ghost").click();
   await page.waitForTimeout(200);
   let dialogOpen = await page.locator("dialog[open]").count();
   record("UI", "Cancel closes deactivate dialog", dialogOpen === 0 ? PASS : FAIL);
 
-  await page.locator("button.btn-ghost:has-text('Deactivate')").first().click();
+  await page.locator('[data-testid="deactivate-button"]').first().click();
   await page.waitForTimeout(200);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
@@ -360,9 +370,9 @@ async function runSuperAdmin(browser) {
   record("UI", "Escape closes deactivate dialog", dialogOpen === 0 ? PASS : FAIL);
 
   // Confirm action: deactivate, then API-restore.
-  await page.locator("button.btn-ghost:has-text('Deactivate')").first().click();
+  await page.locator('[data-testid="deactivate-button"]').first().click();
   await page.waitForTimeout(200);
-  await page.locator("dialog[open] button:has-text('Deactivate')").click();
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForURL(/\/admin\/users(?:\?|$)/, { timeout: 10000 });
   record("UI", "Confirm action works", PASS);
   // Restore via API.

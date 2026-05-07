@@ -2,14 +2,15 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Building2, Eye, EyeOff, LockKeyhole } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import type { InvitationPreview, Role } from "../api/types";
 
-const ROLE_LABEL: Record<Role, string> = {
-  SUPER_ADMIN: "Super admin",
-  COMPANY_ADMIN: "Company admin",
-  BUILDING_MANAGER: "Building manager",
-  CUSTOMER_USER: "Customer user",
+const ROLE_KEYS: Record<Role, string> = {
+  SUPER_ADMIN: "common:roles.super_admin",
+  COMPANY_ADMIN: "common:roles.company_admin",
+  BUILDING_MANAGER: "common:roles.building_manager",
+  CUSTOMER_USER: "common:roles.customer_user",
 };
 
 type FieldErrors = {
@@ -54,24 +55,11 @@ type LoadState =
   | { kind: "not-found" }
   | { kind: "error"; message: string };
 
-function scopeSummary(preview: InvitationPreview): string {
-  const parts: string[] = [];
-  if (preview.company_names.length > 0) {
-    parts.push(`Company: ${preview.company_names.join(", ")}`);
-  }
-  if (preview.building_names.length > 0) {
-    parts.push(`Buildings: ${preview.building_names.join(", ")}`);
-  }
-  if (preview.customer_names.length > 0) {
-    parts.push(`Customers: ${preview.customer_names.join(", ")}`);
-  }
-  return parts.join(" · ");
-}
-
 export function AcceptInvitationPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
+  const { t } = useTranslation("common");
 
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [password, setPassword] = useState("");
@@ -121,17 +109,33 @@ export function AcceptInvitationPage() {
     return p.inviter_full_name?.trim() || p.inviter_email;
   }, [loadState]);
 
+  const scopeLine = useMemo(() => {
+    if (loadState.kind !== "ready") return "";
+    const preview = loadState.preview;
+    const parts: string[] = [];
+    if (preview.company_names.length > 0) {
+      parts.push(`${t("accept_invitation.scope_company")}: ${preview.company_names.join(", ")}`);
+    }
+    if (preview.building_names.length > 0) {
+      parts.push(`${t("accept_invitation.scope_buildings")}: ${preview.building_names.join(", ")}`);
+    }
+    if (preview.customer_names.length > 0) {
+      parts.push(`${t("accept_invitation.scope_customers")}: ${preview.customer_names.join(", ")}`);
+    }
+    return parts.join(" · ");
+  }, [loadState, t]);
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setGeneralError("");
     setFieldErrors({});
 
     if (password.length === 0) {
-      setFieldErrors({ new_password: "Choose a password." });
+      setFieldErrors({ new_password: t("accept_invitation.error_choose_password") });
       return;
     }
     if (password !== confirmPassword) {
-      setFieldErrors({ new_password: "The two passwords do not match." });
+      setFieldErrors({ new_password: t("accept_invitation.error_passwords_dont_match") });
       return;
     }
 
@@ -169,22 +173,24 @@ export function AcceptInvitationPage() {
 
         {loadState.kind === "loading" && (
           <div className="login-welcome">
-            <h2 className="login-welcome-title">Loading invitation</h2>
-            <p className="login-welcome-sub">One moment.</p>
+            <h2 className="login-welcome-title">{t("accept_invitation.loading_title")}</h2>
+            <p className="login-welcome-sub">{t("accept_invitation.loading_sub")}</p>
           </div>
         )}
 
         {loadState.kind === "missing-token" && (
           <>
             <div className="login-welcome">
-              <h2 className="login-welcome-title">Invitation link is incomplete</h2>
+              <h2 className="login-welcome-title">
+                {t("accept_invitation.missing_token_title")}
+              </h2>
               <p className="login-welcome-sub">
-                The link in your email did not include a token. Open the email and click the link again, or ask the person who invited you for a fresh invitation.
+                {t("accept_invitation.missing_token_desc")}
               </p>
             </div>
             <div style={{ marginTop: 24, fontSize: 13 }}>
               <Link className="login-field-link" to="/login">
-                Back to sign in
+                {t("accept_invitation.back_to_signin")}
               </Link>
             </div>
           </>
@@ -193,14 +199,14 @@ export function AcceptInvitationPage() {
         {loadState.kind === "not-found" && (
           <>
             <div className="login-welcome">
-              <h2 className="login-welcome-title">Invitation not found</h2>
+              <h2 className="login-welcome-title">{t("accept_invitation.not_found_title")}</h2>
               <p className="login-welcome-sub">
-                The invitation token does not match anything on file. It may have already been used or revoked.
+                {t("accept_invitation.not_found_desc")}
               </p>
             </div>
             <div style={{ marginTop: 24, fontSize: 13 }}>
               <Link className="login-field-link" to="/login">
-                Back to sign in
+                {t("accept_invitation.back_to_signin")}
               </Link>
             </div>
           </>
@@ -209,14 +215,18 @@ export function AcceptInvitationPage() {
         {loadState.kind === "gone" && (
           <>
             <div className="login-welcome">
-              <h2 className="login-welcome-title">Invitation no longer valid</h2>
+              <h2 className="login-welcome-title">{t("accept_invitation.gone_title")}</h2>
               <p className="login-welcome-sub">
-                This invitation is {loadState.status?.toLowerCase() || "no longer active"}. Ask the person who invited you to send a new one.
+                {t("accept_invitation.gone_desc", {
+                  status:
+                    loadState.status?.toLowerCase() ||
+                    t("accept_invitation.gone_status_fallback"),
+                })}
               </p>
             </div>
             <div style={{ marginTop: 24, fontSize: 13 }}>
               <Link className="login-field-link" to="/login">
-                Back to sign in
+                {t("accept_invitation.back_to_signin")}
               </Link>
             </div>
           </>
@@ -225,12 +235,12 @@ export function AcceptInvitationPage() {
         {loadState.kind === "error" && (
           <>
             <div className="login-welcome">
-              <h2 className="login-welcome-title">Could not load invitation</h2>
+              <h2 className="login-welcome-title">{t("accept_invitation.error_title")}</h2>
               <p className="login-welcome-sub">{loadState.message}</p>
             </div>
             <div style={{ marginTop: 24, fontSize: 13 }}>
               <Link className="login-field-link" to="/login">
-                Back to sign in
+                {t("accept_invitation.back_to_signin")}
               </Link>
             </div>
           </>
@@ -239,14 +249,16 @@ export function AcceptInvitationPage() {
         {loadState.kind === "ready" && (
           <>
             <div className="login-welcome">
-              <h2 className="login-welcome-title">Accept your invitation</h2>
+              <h2 className="login-welcome-title">{t("accept_invitation.welcome_title")}</h2>
               <p className="login-welcome-sub">
-                {inviterName} invited you to join CleanOps as{" "}
-                {ROLE_LABEL[loadState.preview.role] || loadState.preview.role}.
-                {scopeSummary(loadState.preview) && (
+                {t("accept_invitation.welcome_lead", {
+                  inviter: inviterName,
+                  role: t(ROLE_KEYS[loadState.preview.role] ?? "common:roles.fallback"),
+                })}
+                {scopeLine && (
                   <>
                     <br />
-                    {scopeSummary(loadState.preview)}
+                    {scopeLine}
                   </>
                 )}
               </p>
@@ -280,7 +292,7 @@ export function AcceptInvitationPage() {
               <div className="login-field">
                 <div className="login-field-row">
                   <label className="login-field-label" htmlFor="invite-new-password">
-                    Choose a password
+                    {t("accept_invitation.field_new_password")}
                   </label>
                 </div>
                 <div className="login-field-wrap">
@@ -302,7 +314,11 @@ export function AcceptInvitationPage() {
                   <button
                     type="button"
                     className="login-field-toggle"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword
+                        ? t("accept_invitation.aria_hide_password")
+                        : t("accept_invitation.aria_show_password")
+                    }
                     onClick={() => setShowPassword((value) => !value)}
                   >
                     {showPassword ? (
@@ -322,7 +338,7 @@ export function AcceptInvitationPage() {
               <div className="login-field">
                 <div className="login-field-row">
                   <label className="login-field-label" htmlFor="invite-confirm-password">
-                    Confirm password
+                    {t("accept_invitation.field_confirm_password")}
                   </label>
                 </div>
                 <div className="login-field-wrap">
@@ -349,13 +365,15 @@ export function AcceptInvitationPage() {
                 className="login-submit"
                 disabled={submitting || !password || !confirmPassword}
               >
-                {submitting ? "Creating account…" : "Accept and create account"}
+                {submitting
+                  ? t("accept_invitation.creating_account")
+                  : t("accept_invitation.submit")}
               </button>
             </form>
 
             <div style={{ marginTop: 24, fontSize: 13 }}>
               <Link className="login-field-link" to="/login">
-                Back to sign in
+                {t("accept_invitation.back_to_signin")}
               </Link>
             </div>
           </>
