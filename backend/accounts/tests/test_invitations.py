@@ -420,6 +420,59 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
         invitation.refresh_from_db()
         self.assertIsNone(invitation.accepted_at)
 
+    def test_accept_returns_user_exists_when_active_user_with_email_exists(self):
+        # An active user already on file blocks accept with a structured 400.
+        # Returning IntegrityError 500 here would white-screen the frontend.
+        get_user_model().objects.create_user(
+            email="duplicate-active@example.com",
+            password="ExistingPassword123!",
+            full_name="Existing User",
+            role=UserRole.CUSTOMER_USER,
+        )
+        invitation, raw = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="duplicate-active@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        response = self.client.post(
+            self.ACCEPT_URL,
+            {"token": raw, "new_password": "AStrongPassword123!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data.get("detail"), "user_exists")
+        self.assertIn("message", response.data)
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+
+    def test_accept_returns_user_exists_when_soft_deleted_user_with_email_exists(self):
+        # The unique email column on User collides regardless of is_active /
+        # deleted_at, so a soft-deleted row would still trip create_user with
+        # an IntegrityError. Pre-checking by email keeps the response clean.
+        existing = get_user_model().objects.create_user(
+            email="duplicate-soft-deleted@example.com",
+            password="ExistingPassword123!",
+            full_name="Soft Deleted",
+            role=UserRole.CUSTOMER_USER,
+        )
+        existing.soft_delete()
+        invitation, raw = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="duplicate-soft-deleted@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        response = self.client.post(
+            self.ACCEPT_URL,
+            {"token": raw, "new_password": "AStrongPassword123!"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data.get("detail"), "user_exists")
+        invitation.refresh_from_db()
+        self.assertIsNone(invitation.accepted_at)
+
     # ---- Revoke -----------------------------------------------------------
 
     def test_revoke_marks_invitation_revoked(self):

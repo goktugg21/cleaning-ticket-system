@@ -289,9 +289,15 @@ class InvitationAcceptSerializer(serializers.Serializer):
             )
 
         # Race-safe inside the locked transaction: re-check user existence.
-        if _user_active_qs().filter(email__iexact=invitation.email).exists():
+        # The query intentionally drops the active/deleted_at filter — the
+        # unique email column on User collides regardless of is_active or
+        # deleted_at, so a soft-deleted row would still trip create_user
+        # with an IntegrityError. The view performs the same check up front
+        # and returns a structured "user_exists" payload; this serializer
+        # check is the second line of defense for races inside the lock.
+        if User.objects.filter(email__iexact=invitation.email).exists():
             raise serializers.ValidationError(
-                {"email": "An active user with this email already exists."}
+                {"email": "An account with this email already exists."}
             )
 
         try:

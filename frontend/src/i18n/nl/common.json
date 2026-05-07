@@ -327,5 +327,11 @@
   "accept_invitation.error_choose_password": "Kies een wachtwoord.",
   "accept_invitation.error_passwords_dont_match": "De twee wachtwoorden komen niet overeen.",
   "accept_invitation.creating_account": "Account aanmaken…",
-  "accept_invitation.submit": "Accepteren en account aanmaken"
+  "accept_invitation.submit": "Accepteren en account aanmaken",
+  "accept_invitation.error_user_exists_title": "Account bestaat al",
+  "accept_invitation.error_user_exists_desc": "Er bestaat al een account met dit e-mailadres. Meld u aan met uw bestaande wachtwoord.",
+  "accept_invitation.error_user_exists_signin": "Naar aanmelden",
+  "accept_invitation.error_generic_title": "Er is iets misgegaan",
+  "accept_invitation.error_generic_desc": "We konden de uitnodiging niet accepteren. Probeer het opnieuw of neem contact op met support.",
+  "accept_invitation.error_generic_retry": "Probeer opnieuw"
 }
