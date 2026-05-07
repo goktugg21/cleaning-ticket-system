@@ -74,5 +74,32 @@
 
   "sla_tooltip_historical": "This ticket predates the SLA engine.",
   "sla_tooltip_paused": "Waiting on customer; SLA clock paused.",
-  "sla_tooltip_completed": "Ticket reached a terminal status."
+  "sla_tooltip_completed": "Ticket reached a terminal status.",
+
+  "invitations.total": "total invitations",
+  "invitations.pending_label": "Pending",
+  "invitations.accepted_label": "Accepted",
+  "invitations.expired_label": "Expired",
+  "invitations.revoked_label": "Revoked",
+  "invitations.all_label": "All",
+  "invitations.send_eyebrow": "Send invitation",
+  "invitations.invite_teammate": "Invite a teammate",
+  "invitations.form_description": "The invitee receives an email with a one-time link. They set their own password when accepting and join with the role and scope you pick here.",
+  "invitations.expires_note": "Invitation links expire after 7 days. Pending invitations can be revoked at any time.",
+  "invitations.activity_eyebrow": "Activity",
+  "invitations.all_invitations": "All invitations",
+  "invitations.col_recipient": "Recipient",
+  "invitations.col_role": "Role",
+  "invitations.col_status": "Status",
+  "invitations.col_sent": "Sent",
+  "invitations.col_expires": "Expires",
+  "invitations.col_actions": "Actions",
+  "invitations.status_pending": "Pending",
+  "invitations.status_accepted": "Accepted",
+  "invitations.status_expired": "Expired",
+  "invitations.status_revoked": "Revoked",
+  "invitations.resend": "Resend",
+  "invitations.revoke": "Revoke",
+  "invitations.empty_title": "No invitations to show",
+  "invitations.empty_desc": "When you invite teammates, they'll appear here grouped by status."
 }

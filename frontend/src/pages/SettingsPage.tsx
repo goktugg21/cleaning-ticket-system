@@ -437,16 +437,9 @@ export function SettingsPage() {
                 <div className="loading-bar-fill" />
               </div>
             ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                }}
-              >
+              <div>
                 {preferences.map((entry) => {
                   const checked = !entry.muted;
-                  const inputId = `pref-${entry.event_type}`;
                   // Frontend translation overrides the API-provided label so
                   // the toggle list switches language with the rest of the
                   // page. The API label remains as a fallback if the key is
@@ -456,53 +449,16 @@ export function SettingsPage() {
                   return (
                     <label
                       key={entry.event_type}
-                      htmlFor={inputId}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "10px 12px",
-                        border: "1px solid var(--border-soft)",
-                        borderRadius: "var(--r)",
-                        cursor: "pointer",
-                        gap: 12,
-                      }}
+                      className="notification-row"
                     >
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>
-                        {label}
-                      </span>
-                      <span
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            color: checked
-                              ? "var(--green)"
-                              : "var(--text-faint)",
-                            minWidth: 28,
-                            textAlign: "right",
-                          }}
-                        >
-                          {checked ? t("notifications_on") : t("notifications_off")}
-                        </span>
+                      <span className="notification-row-label">{label}</span>
+                      <span className="toggle-switch">
                         <input
-                          id={inputId}
                           type="checkbox"
                           checked={checked}
                           onChange={() => togglePreference(entry.event_type)}
-                          style={{
-                            width: 16,
-                            height: 16,
-                            cursor: "pointer",
-                            accentColor: "var(--green)",
-                          }}
                         />
+                        <span className="toggle-switch-slider" />
                       </span>
                     </label>
                   );

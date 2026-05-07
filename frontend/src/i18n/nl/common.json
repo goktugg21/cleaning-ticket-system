@@ -74,5 +74,32 @@
 
   "sla_tooltip_historical": "Dit ticket dateert van vóór de SLA-engine.",
   "sla_tooltip_paused": "Wacht op klant; SLA-klok gepauzeerd.",
-  "sla_tooltip_completed": "Ticket heeft een eindstatus bereikt."
+  "sla_tooltip_completed": "Ticket heeft een eindstatus bereikt.",
+
+  "invitations.total": "uitnodigingen totaal",
+  "invitations.pending_label": "In afwachting",
+  "invitations.accepted_label": "Geaccepteerd",
+  "invitations.expired_label": "Verlopen",
+  "invitations.revoked_label": "Ingetrokken",
+  "invitations.all_label": "Alle",
+  "invitations.send_eyebrow": "Uitnodiging versturen",
+  "invitations.invite_teammate": "Nodig een teamlid uit",
+  "invitations.form_description": "De genodigde ontvangt een e-mail met een eenmalige link. Bij het accepteren stelt hij of zij een eigen wachtwoord in en krijgt de rol en scope die u hier kiest.",
+  "invitations.expires_note": "Uitnodigingslinks verlopen na 7 dagen. Openstaande uitnodigingen kunnen op elk moment worden ingetrokken.",
+  "invitations.activity_eyebrow": "Activiteit",
+  "invitations.all_invitations": "Alle uitnodigingen",
+  "invitations.col_recipient": "Ontvanger",
+  "invitations.col_role": "Rol",
+  "invitations.col_status": "Status",
+  "invitations.col_sent": "Verzonden",
+  "invitations.col_expires": "Verloopt",
+  "invitations.col_actions": "Acties",
+  "invitations.status_pending": "In afwachting",
+  "invitations.status_accepted": "Geaccepteerd",
+  "invitations.status_expired": "Verlopen",
+  "invitations.status_revoked": "Ingetrokken",
+  "invitations.resend": "Opnieuw sturen",
+  "invitations.revoke": "Intrekken",
+  "invitations.empty_title": "Geen uitnodigingen om te tonen",
+  "invitations.empty_desc": "Wanneer u teamleden uitnodigt, verschijnen ze hier gegroepeerd per status."
 }
