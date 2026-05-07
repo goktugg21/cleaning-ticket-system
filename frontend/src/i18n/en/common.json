@@ -122,6 +122,8 @@
   "invitations.pagination_page": "Page {{page}} · {{total}} total",
   "invitations.pagination_previous": "Previous",
   "invitations.pagination_next": "Next",
+  "invitations.banner_sent": "Invitation sent to {{email}}.",
+  "invitations.banner_revoked": "Invitation to {{email}} revoked.",
 
   "account.member_since": "Member since",
   "account.last_sign_in": "Last sign-in",
