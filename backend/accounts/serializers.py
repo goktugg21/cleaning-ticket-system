@@ -103,6 +103,8 @@ class MeSerializer(serializers.ModelSerializer):
             "company_ids",
             "building_ids",
             "customer_ids",
+            "date_joined",
+            "last_login",
         ]
         read_only_fields = fields
 
