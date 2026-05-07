@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { MailPlus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listUsers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
@@ -12,11 +13,11 @@ type ActiveFilter = "true" | "false" | "all";
 
 const DEBOUNCE_MS = 300;
 
-const ROLE_LABEL: Record<Role, string> = {
-  SUPER_ADMIN: "Super admin",
-  COMPANY_ADMIN: "Company admin",
-  BUILDING_MANAGER: "Building manager",
-  CUSTOMER_USER: "Customer user",
+const ROLE_KEYS: Record<Role, string> = {
+  SUPER_ADMIN: "common:roles.super_admin",
+  COMPANY_ADMIN: "common:roles.company_admin",
+  BUILDING_MANAGER: "common:roles.building_manager",
+  CUSTOMER_USER: "common:roles.customer_user",
 };
 
 const ALL_ROLES: Role[] = [
@@ -28,6 +29,7 @@ const ALL_ROLES: Role[] = [
 
 export function UsersAdminPage() {
   const { me } = useAuth();
+  const { t } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
   const [users, setUsers] = useState<UserAdmin[]>([]);
@@ -47,9 +49,9 @@ export function UsersAdminPage() {
   const [roleFilter, setRoleFilter] = useState<Role[]>([]);
 
   const [savedBanner] = useSavedBanner({
-    saved: "User saved.",
-    deactivated: "User deactivated.",
-    reactivated: "User reactivated.",
+    saved: t("users.banner_saved"),
+    deactivated: t("users.banner_deactivated"),
+    reactivated: t("users.banner_reactivated"),
   });
 
   // COMPANY_ADMIN can only meaningfully filter by the three roles they manage.
@@ -119,11 +121,13 @@ export function UsersAdminPage() {
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">Users</h2>
+          <h2 className="page-title">{t("nav.users")}</h2>
           <p className="page-sub">
-            {loading ? "Loading users…" : `${count} ${count === 1 ? "user" : "users"}`}
+            {loading
+              ? t("users.loading")
+              : t("users.count", { count })}
           </p>
         </div>
         <div className="page-header-actions">
@@ -134,11 +138,11 @@ export function UsersAdminPage() {
             disabled={loading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("refresh")}
           </button>
           <Link className="btn btn-primary btn-sm" to="/admin/invitations">
             <MailPlus size={14} strokeWidth={2.5} />
-            Invite user
+            {t("users.invite_user")}
           </Link>
         </div>
       </div>
@@ -164,17 +168,17 @@ export function UsersAdminPage() {
           }}
         >
           <div className="filter-field search">
-            <span className="filter-label">Search</span>
+            <span className="filter-label">{t("search")}</span>
             <input
               className="filter-control"
               type="search"
-              placeholder="Email or name…"
+              placeholder={t("users.search_placeholder")}
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">Status</span>
+            <span className="filter-label">{t("status")}</span>
             <select
               className="filter-control"
               value={activeFilter}
@@ -183,13 +187,13 @@ export function UsersAdminPage() {
                 setPage(1);
               }}
             >
-              <option value="true">Active</option>
-              <option value="false">Inactive</option>
-              <option value="all">All</option>
+              <option value="true">{t("admin.status_active")}</option>
+              <option value="false">{t("admin.status_inactive")}</option>
+              <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
           <div className="filter-field" style={{ flexBasis: "100%" }}>
-            <span className="filter-label">Roles</span>
+            <span className="filter-label">{t("users.roles_label")}</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {availableRoles.map((role) => {
                 const active = roleFilter.includes(role);
@@ -200,8 +204,9 @@ export function UsersAdminPage() {
                     className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
                     onClick={() => toggleRole(role)}
                     aria-pressed={active}
+                    data-role={role}
                   >
-                    {ROLE_LABEL[role]}
+                    {t(ROLE_KEYS[role])}
                   </button>
                 );
               })}
@@ -212,6 +217,7 @@ export function UsersAdminPage() {
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
+                data-testid="filters-clear"
                 onClick={() => {
                   setSearchInput("");
                   setActiveFilter("true");
@@ -219,7 +225,7 @@ export function UsersAdminPage() {
                   setPage(1);
                 }}
               >
-                Clear
+                {t("clear")}
               </button>
             )}
           </div>
@@ -235,12 +241,12 @@ export function UsersAdminPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Email</th>
-                <th>Full name</th>
-                <th>Role</th>
-                <th>Language</th>
-                <th>Status</th>
-                <th aria-label="Actions" />
+                <th>{t("users.col_email")}</th>
+                <th>{t("users.col_full_name")}</th>
+                <th>{t("users.col_role")}</th>
+                <th>{t("users.col_language")}</th>
+                <th>{t("status")}</th>
+                <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
             <tbody>
@@ -250,19 +256,23 @@ export function UsersAdminPage() {
                     <Link to={`/admin/users/${user.id}`}>{user.email}</Link>
                   </td>
                   <td>{user.full_name || "—"}</td>
-                  <td>{ROLE_LABEL[user.role] ?? user.role}</td>
+                  <td data-testid="user-row-role" data-role={user.role}>
+                    {t(ROLE_KEYS[user.role] ?? "common:roles.fallback")}
+                  </td>
                   <td>{user.language}</td>
                   <td>
                     <span
                       className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
                     >
                       <i />
-                      {user.is_active ? "Active" : "Inactive"}
+                      {user.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
                     </span>
                   </td>
                   <td>
                     <Link className="btn btn-ghost btn-sm" to={`/admin/users/${user.id}`}>
-                      Edit
+                      {t("admin.edit")}
                     </Link>
                   </td>
                 </tr>
@@ -274,16 +284,18 @@ export function UsersAdminPage() {
             <div className="empty-state">
               <div className="empty-icon">＋</div>
               <div className="empty-title">
-                {hasActiveFilters ? "No users match your filters" : "No users yet"}
+                {hasActiveFilters
+                  ? t("users.empty_filtered_title")
+                  : t("users.empty_initial_title")}
               </div>
               <p className="empty-sub">
                 {hasActiveFilters
-                  ? "Try clearing filters or switching the status tab."
-                  : "Invite the first user to get started."}
+                  ? t("admin.empty_filtered_desc")
+                  : t("users.empty_initial_desc")}
               </p>
               {!hasActiveFilters && (
                 <Link className="btn btn-primary btn-sm" to="/admin/invitations">
-                  Invite user
+                  {t("users.invite_user")}
                 </Link>
               )}
             </div>
@@ -293,7 +305,7 @@ export function UsersAdminPage() {
         {(previous || next) && (
           <div className="pagination">
             <span className="pagination-info">
-              Page {page} · {count} total
+              {t("admin.pagination_page", { page, total: count })}
             </span>
             <div className="pagination-controls">
               <button
@@ -302,7 +314,7 @@ export function UsersAdminPage() {
                 disabled={loading || !previous || page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Previous
+                {t("previous")}
               </button>
               <button
                 type="button"
@@ -310,7 +322,7 @@ export function UsersAdminPage() {
                 disabled={loading || !next}
                 onClick={() => setPage((current) => current + 1)}
               >
-                Next
+                {t("next")}
               </button>
             </div>
           </div>
