@@ -5,6 +5,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from accounts.views_users import UserViewSet
+from config.health import liveness, readiness
 
 
 users_router = DefaultRouter()
@@ -12,6 +13,10 @@ users_router.register(r"users", UserViewSet, basename="user")
 
 
 urlpatterns = [
+    # Health endpoints come first so they never collide with auth/admin
+    # routing. No trailing slash — orchestrators expect the literal path.
+    path("health/live", liveness),
+    path("health/ready", readiness),
     path("admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
     path("api/companies/", include("companies.urls")),
