@@ -330,9 +330,9 @@ export function InvitationsAdminPage() {
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">Invitations</h2>
+          <h2 className="page-title">{t("invitations.title")}</h2>
           <div className="invitations-stats">
             <span>
               {totalCount} {t("invitations.total")}
@@ -367,7 +367,7 @@ export function InvitationsAdminPage() {
             disabled={listLoading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("refresh")}
           </button>
         </div>
       </div>
@@ -410,7 +410,7 @@ export function InvitationsAdminPage() {
               <div className="form-grid-2">
                 <div className="field">
                   <label className="field-label" htmlFor="invite-email">
-                    Email *
+                    {t("invitations.field_email")} *
                   </label>
                   <input
                     id="invite-email"
@@ -428,7 +428,7 @@ export function InvitationsAdminPage() {
                 </div>
                 <div className="field">
                   <label className="field-label" htmlFor="invite-full-name">
-                    Full name (optional)
+                    {t("invitations.field_full_name")} {t("invitations.field_optional")}
                   </label>
                   <input
                     id="invite-full-name"
@@ -443,7 +443,7 @@ export function InvitationsAdminPage() {
               <div className="form-grid-2">
                 <div className="field">
                   <label className="field-label" htmlFor="invite-role">
-                    Role *
+                    {t("invitations.field_role")} *
                   </label>
                   <select
                     id="invite-role"
@@ -467,7 +467,8 @@ export function InvitationsAdminPage() {
                 {formRole !== "SUPER_ADMIN" && (
                   <div className="field">
                     <label className="field-label" htmlFor="invite-company">
-                      Company {formRole === "COMPANY_ADMIN" && "*"}
+                      {t("invitations.field_company")}
+                      {formRole === "COMPANY_ADMIN" && " *"}
                     </label>
                     <select
                       id="invite-company"
@@ -502,9 +503,9 @@ export function InvitationsAdminPage() {
 
               {formRole === "BUILDING_MANAGER" && (
                 <div className="field">
-                  <label className="field-label">Buildings *</label>
+                  <label className="field-label">{t("invitations.field_buildings")} *</label>
                   <p className="field-helper">
-                    Pick one or more buildings the invitee will manage.
+                    {t("invitations.buildings_hint")}
                   </p>
                   <div
                     style={{
@@ -517,7 +518,7 @@ export function InvitationsAdminPage() {
                     {buildingOptions.length === 0 ? (
                       <span className="muted small">
                         {formCompany === ""
-                          ? "Select a company first."
+                          ? t("invitations.select_company_first")
                           : "No buildings in this company."}
                       </span>
                     ) : (
@@ -547,9 +548,9 @@ export function InvitationsAdminPage() {
 
               {formRole === "CUSTOMER_USER" && (
                 <div className="field">
-                  <label className="field-label">Customers *</label>
+                  <label className="field-label">{t("invitations.field_customers")} *</label>
                   <p className="field-helper">
-                    Pick one or more customers the invitee will be linked to.
+                    {t("invitations.customers_hint")}
                   </p>
                   <div
                     style={{
@@ -562,7 +563,7 @@ export function InvitationsAdminPage() {
                     {customerOptions.length === 0 ? (
                       <span className="muted small">
                         {formCompany === ""
-                          ? "Select a company first."
+                          ? t("invitations.select_company_first")
                           : "No customers in this company."}
                       </span>
                     ) : (
@@ -593,8 +594,13 @@ export function InvitationsAdminPage() {
           </div>
 
           <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? "Sending…" : "Send invitation"}
+            <button
+              type="submit"
+              className="btn btn-primary"
+              data-testid="invite-submit"
+              disabled={submitting}
+            >
+              {submitting ? t("invitations.sending") : t("invitations.send_invitation")}
             </button>
           </div>
         </form>
@@ -747,7 +753,7 @@ export function InvitationsAdminPage() {
         {(previous || next) && (
           <div className="pagination">
             <span className="pagination-info">
-              Page {page} · {count} total
+              {t("invitations.pagination_page", { page, total: count })}
             </span>
             <div className="pagination-controls">
               <button
@@ -756,7 +762,7 @@ export function InvitationsAdminPage() {
                 disabled={listLoading || !previous || page <= 1}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                Previous
+                {t("invitations.pagination_previous")}
               </button>
               <button
                 type="button"
@@ -764,7 +770,7 @@ export function InvitationsAdminPage() {
                 disabled={listLoading || !next}
                 onClick={() => setPage((current) => current + 1)}
               >
-                Next
+                {t("invitations.pagination_next")}
               </button>
             </div>
           </div>
