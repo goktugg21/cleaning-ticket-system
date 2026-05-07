@@ -101,5 +101,24 @@
   "invitations.resend": "Resend",
   "invitations.revoke": "Revoke",
   "invitations.empty_title": "No invitations to show",
-  "invitations.empty_desc": "When you invite teammates, they'll appear here grouped by status."
+  "invitations.empty_desc": "When you invite teammates, they'll appear here grouped by status.",
+
+  "account.member_since": "Member since",
+  "account.last_sign_in": "Last sign-in",
+  "account.never_signed_in": "Never",
+  "account.access": "Access",
+  "account.companies_one": "company",
+  "account.companies_other": "companies",
+  "account.buildings_one": "building",
+  "account.buildings_other": "buildings",
+  "account.customers_one": "customer",
+  "account.customers_other": "customers",
+
+  "time.just_now": "Just now",
+  "time.minutes_ago_one": "{{count}} minute ago",
+  "time.minutes_ago_other": "{{count}} minutes ago",
+  "time.hours_ago_one": "{{count}} hour ago",
+  "time.hours_ago_other": "{{count}} hours ago",
+  "time.days_ago_one": "{{count}} day ago",
+  "time.days_ago_other": "{{count}} days ago"
 }

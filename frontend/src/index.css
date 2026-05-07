@@ -1348,6 +1348,130 @@ table.data-table {
    reading width on wide monitors. */
 .page-form-narrow { max-width: 720px; }
 
+/* Settings page two-column layout: account-overview info card on the
+   left (340px), settings cards stacked on the right. Collapses to a
+   single column below 960px. align-items: start prevents the left
+   card from stretching to match the right column's height. */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.settings-main { display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 960px) {
+  .settings-layout { grid-template-columns: 1fr; }
+}
+
+/* ---- Account overview card ---- */
+.account-overview {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.account-overview-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+.account-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--green);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--f-head);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.account-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.account-name {
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.account-email {
+  font-size: 13px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+.account-role-pill {
+  margin-top: 6px;
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+  text-transform: uppercase;
+}
+.account-overview-divider {
+  height: 1px;
+  background: var(--border-soft);
+}
+.account-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.account-meta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.account-meta-label,
+.account-access-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.account-meta-value {
+  font-size: 13.5px;
+  color: var(--text);
+}
+.account-access {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.account-access-label {
+  margin-bottom: 4px;
+}
+.account-access-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.account-access-count {
+  font-family: var(--f-head);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 28px;
+}
+.account-access-name {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* ====================================================================
    Toggle switch (shared by Settings notifications + future use)
    ==================================================================== */
