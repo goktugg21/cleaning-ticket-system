@@ -273,7 +273,7 @@ export function InvitationsAdminPage() {
     setSubmitting(true);
     try {
       await createInvitation(payload);
-      setSavedBanner(`Invitation sent to ${trimmedEmail}.`);
+      setSavedBanner(t("invitations.banner_sent", { email: trimmedEmail }));
       setFormEmail("");
       setFormFullName("");
       setFormBuildings([]);
@@ -314,7 +314,7 @@ export function InvitationsAdminPage() {
     try {
       await revokeInvitation(revokeTarget.id);
       revokeDialogRef.current?.close();
-      setSavedBanner(`Invitation to ${revokeTarget.email} revoked.`);
+      setSavedBanner(t("invitations.banner_revoked", { email: revokeTarget.email }));
       setRevokeTarget(null);
       await load();
     } catch (err) {
