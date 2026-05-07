@@ -101,5 +101,24 @@
   "invitations.resend": "Opnieuw sturen",
   "invitations.revoke": "Intrekken",
   "invitations.empty_title": "Geen uitnodigingen om te tonen",
-  "invitations.empty_desc": "Wanneer u teamleden uitnodigt, verschijnen ze hier gegroepeerd per status."
+  "invitations.empty_desc": "Wanneer u teamleden uitnodigt, verschijnen ze hier gegroepeerd per status.",
+
+  "account.member_since": "Lid sinds",
+  "account.last_sign_in": "Laatste aanmelding",
+  "account.never_signed_in": "Nooit",
+  "account.access": "Toegang",
+  "account.companies_one": "bedrijf",
+  "account.companies_other": "bedrijven",
+  "account.buildings_one": "gebouw",
+  "account.buildings_other": "gebouwen",
+  "account.customers_one": "klant",
+  "account.customers_other": "klanten",
+
+  "time.just_now": "Zojuist",
+  "time.minutes_ago_one": "{{count}} minuut geleden",
+  "time.minutes_ago_other": "{{count}} minuten geleden",
+  "time.hours_ago_one": "{{count}} uur geleden",
+  "time.hours_ago_other": "{{count}} uur geleden",
+  "time.days_ago_one": "{{count}} dag geleden",
+  "time.days_ago_other": "{{count}} dagen geleden"
 }

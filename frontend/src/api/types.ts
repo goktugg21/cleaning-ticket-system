@@ -32,6 +32,8 @@ export interface Me {
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
+  date_joined: string;
+  last_login: string | null;
 }
 
 export interface Company {

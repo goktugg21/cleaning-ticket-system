@@ -43,9 +43,63 @@ function errorPayload(err: unknown): unknown {
   return undefined;
 }
 
+const ROLE_KEYS: Record<string, string> = {
+  SUPER_ADMIN: "common:roles.super_admin",
+  COMPANY_ADMIN: "common:roles.company_admin",
+  BUILDING_MANAGER: "common:roles.building_manager",
+  CUSTOMER_USER: "common:roles.customer_user",
+};
+
+function getInitials(fullName: string, email: string): string {
+  const cleaned = (fullName || "").trim();
+  if (cleaned) {
+    const parts = cleaned.split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (email.split("@")[0] || "?").slice(0, 2).toUpperCase();
+}
+
+function formatJoinDate(iso: string, lang: string): string {
+  try {
+    return new Intl.DateTimeFormat(lang === "nl" ? "nl-NL" : "en-US", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
+
+// Returns a translated "X minutes ago" / "X hours ago" / "X days ago"
+// string for recent timestamps; falls back to an absolute date once the
+// gap exceeds 7 days. Plurals via i18next count interpolation.
+function formatLastSignIn(
+  iso: string | null,
+  lang: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t: (key: string, opts?: any) => string,
+): string {
+  if (!iso) return t("common:account.never_signed_in");
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return iso;
+  const diffMs = Date.now() - then.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMs / 3600000);
+  const diffDay = Math.floor(diffMs / 86400000);
+  if (diffMin < 1) return t("common:time.just_now");
+  if (diffMin < 60) return t("common:time.minutes_ago", { count: diffMin });
+  if (diffHr < 24) return t("common:time.hours_ago", { count: diffHr });
+  if (diffDay < 7) return t("common:time.days_ago", { count: diffDay });
+  return formatJoinDate(iso, lang);
+}
+
 export function SettingsPage() {
   const { me, reloadMe } = useAuth();
-  const { t } = useTranslation(["settings", "common"]);
+  const { t, i18n } = useTranslation(["settings", "common"]);
 
   const languageOptions = [
     { value: "nl", label: `${t("common:language_dutch")} (nl)` },
@@ -225,14 +279,103 @@ export function SettingsPage() {
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-          maxWidth: 720,
-        }}
-      >
+      <div className="settings-layout">
+        <aside>
+          {me && (
+            <section className="card account-overview">
+              <div className="account-overview-header">
+                <div className="account-avatar">
+                  {getInitials(me.full_name, me.email)}
+                </div>
+                <div className="account-identity">
+                  {me.full_name?.trim() && (
+                    <div className="account-name">{me.full_name}</div>
+                  )}
+                  <div className="account-email">{me.email}</div>
+                  {me.role && (
+                    <span className="account-role-pill">
+                      {t(ROLE_KEYS[me.role] ?? "common:roles.fallback")}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="account-overview-divider" />
+
+              <div className="account-meta">
+                <div className="account-meta-row">
+                  <div className="account-meta-label">
+                    {t("common:account.member_since")}
+                  </div>
+                  <div className="account-meta-value">
+                    {me.date_joined
+                      ? formatJoinDate(me.date_joined, i18n.language)
+                      : "—"}
+                  </div>
+                </div>
+                <div className="account-meta-row">
+                  <div className="account-meta-label">
+                    {t("common:account.last_sign_in")}
+                  </div>
+                  <div className="account-meta-value">
+                    {formatLastSignIn(me.last_login, i18n.language, t)}
+                  </div>
+                </div>
+              </div>
+
+              {(me.company_ids.length > 0 ||
+                me.building_ids.length > 0 ||
+                me.customer_ids.length > 0) && (
+                <>
+                  <div className="account-overview-divider" />
+                  <div className="account-access">
+                    <div className="account-access-label">
+                      {t("common:account.access")}
+                    </div>
+                    {me.company_ids.length > 0 && (
+                      <div className="account-access-row">
+                        <span className="account-access-count">
+                          {me.company_ids.length}
+                        </span>
+                        <span className="account-access-name">
+                          {t("common:account.companies", {
+                            count: me.company_ids.length,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {me.building_ids.length > 0 && (
+                      <div className="account-access-row">
+                        <span className="account-access-count">
+                          {me.building_ids.length}
+                        </span>
+                        <span className="account-access-name">
+                          {t("common:account.buildings", {
+                            count: me.building_ids.length,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                    {me.customer_ids.length > 0 && (
+                      <div className="account-access-row">
+                        <span className="account-access-count">
+                          {me.customer_ids.length}
+                        </span>
+                        <span className="account-access-name">
+                          {t("common:account.customers", {
+                            count: me.customer_ids.length,
+                          })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+        </aside>
+
+        <div className="settings-main">
         <form className="card" onSubmit={handleProfileSubmit} noValidate>
           <div className="form-section">
             <div
@@ -491,6 +634,7 @@ export function SettingsPage() {
             </button>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );
