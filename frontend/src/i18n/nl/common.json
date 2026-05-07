@@ -229,6 +229,8 @@
   "admin_form.col_assigned": "Toegewezen",
 
   "user_form.back": "Terug naar gebruikers",
+  "user_form.card_label_title": "Profiel",
+  "user_form.card_label_desc": "E-mail, naam, taal en rol van deze gebruiker.",
   "user_form.this_is_you": "Dit ben jij",
   "user_form.role_disabled_self": "(u kunt uw eigen rol niet wijzigen)",
   "user_form.role_disabled_actor": "(alleen superbeheerders kunnen deze rol beheren)",
@@ -241,6 +243,8 @@
   "user_form.dialog_reactivate_body": "Heractiveren herstelt hun account. Zij krijgen weer toegang met hun bestaande wachtwoord (of kunnen een reset aanvragen).",
 
   "company_form.back": "Terug naar bedrijven",
+  "company_form.card_label_title": "Bedrijf",
+  "company_form.card_label_desc": "Naam, slug en standaardtaal.",
   "company_form.forbidden_title": "Verboden",
   "company_form.forbidden_desc": "Alleen superbeheerders kunnen nieuwe bedrijven aanmaken. Vraag er een om dit voor u te doen, of bewerk hieronder een bestaand bedrijf.",
   "company_form.edit_title": "{{name}} bewerken",
@@ -259,6 +263,8 @@
   "company_form.dialog_remove_body": "Hun andere lidmaatschappen blijven onaangetast. Ze kunnen later opnieuw worden toegevoegd.",
 
   "building_form.back": "Terug naar gebouwen",
+  "building_form.card_label_title": "Gebouw",
+  "building_form.card_label_desc": "Bedrijf, naam en adres van deze locatie.",
   "building_form.edit_title": "{{name}} bewerken",
   "building_form.fallback": "gebouw",
   "building_form.error_pick_company": "Kies een bedrijf.",
@@ -277,6 +283,8 @@
   "building_form.dialog_remove_body": "Hun andere lidmaatschappen blijven onaangetast. Ze kunnen later opnieuw worden toegevoegd.",
 
   "customer_form.back": "Terug naar klanten",
+  "customer_form.card_label_title": "Klant",
+  "customer_form.card_label_desc": "Bedrijf, gebouw en contactgegevens.",
   "customer_form.edit_title": "{{name}} bewerken",
   "customer_form.fallback": "klant",
   "customer_form.error_pick_company": "Kies een bedrijf.",

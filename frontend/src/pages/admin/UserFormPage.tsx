@@ -267,7 +267,10 @@ export function UserFormPage() {
         </div>
       ) : (
         <>
-          <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
+          <form className="card" onSubmit={form.handleSubmit}>
+            <div className="form-section">
+              <div className="form-section-title">{t("user_form.card_label_title")}</div>
+              <div className="form-section-helper">{t("user_form.card_label_desc")}</div>
             <div className="field">
               <label className="field-label" htmlFor="user-email">
                 {t("users.col_email")}
@@ -355,6 +358,7 @@ export function UserFormPage() {
               </div>
             </div>
 
+            </div>
             <div className="form-actions">
               {user.is_active && !isSelf && (
                 <button
@@ -372,7 +376,7 @@ export function UserFormPage() {
             </div>
           </form>
 
-          <section className="card page-form-narrow" style={{ marginTop: 16, padding: "20px 22px" }}>
+          <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
             <h3 className="section-title">{t("user_form.memberships_title")}</h3>
             <p className="muted small" style={{ marginBottom: 12 }}>
               {t("user_form.memberships_desc")}
