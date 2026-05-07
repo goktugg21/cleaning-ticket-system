@@ -1319,7 +1319,7 @@ table.data-table {
   .form-2col, .form-3col { grid-template-columns: 1fr; }
 }
 .form-actions {
-  padding: 18px 22px;
+  padding: 14px 28px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1327,6 +1327,71 @@ table.data-table {
   border-top: 1px solid var(--border-soft);
   background: var(--surface-2);
   border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+
+/* Two-column body layout for Settings cards: 240px label/description on
+   the left, form fields on the right. Aligns with .form-actions's 28px
+   horizontal padding so the bottom action row's left/right edges line
+   up with the body's left/right edges. Collapses to single-column on
+   narrow viewports. */
+.card-split {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 32px;
+  padding: 24px 28px;
+}
+.card-split-label-title {
+  font-family: var(--f-head);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-split-label-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.55;
+}
+.card-split-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .card-split {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+}
+
+/* Inline label row: field label on the left, optional badge (e.g.,
+   Verified) on the right. Sits as the first child of .field — relies
+   on .field's own 6px column gap for spacing to the input below; no
+   margin-bottom of its own. */
+.field-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Generic small status badge (pill). Modifier --verified gives the
+   green-on-green-soft look used next to the read-only email field. */
+.badge {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+.badge--verified {
+  background: var(--green-soft);
+  color: var(--green);
 }
 /* Anchor a counterweight to the left edge of a form-actions row. The
    submit button still sits on the right via the parent's flex-end; the

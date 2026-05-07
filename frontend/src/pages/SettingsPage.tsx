@@ -234,77 +234,84 @@ export function SettingsPage() {
         }}
       >
         <form className="card" onSubmit={handleProfileSubmit} noValidate>
-          <div className="form-section">
-            <div
-              className="form-section-title"
-              style={{ display: "flex", alignItems: "center", gap: 8 }}
-            >
-              <UserCircle2 size={16} strokeWidth={2} />
-              {t("profile_title")}
-            </div>
-            <div className="form-section-helper">{t("profile_helper")}</div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="settings-email">
-                {t("email_label")}
-              </label>
-              <input
-                id="settings-email"
-                className="field-input"
-                type="email"
-                value={me?.email ?? ""}
-                disabled
-                readOnly
-              />
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="settings-full-name">
-                {t("full_name_label")}
-              </label>
-              <input
-                id="settings-full-name"
-                className="field-input"
-                type="text"
-                maxLength={255}
-                value={fullName}
-                onChange={(event) => setFullName(event.target.value)}
-              />
-              {profileFieldErrors.full_name && (
-                <div style={fieldErrorStyle} role="alert">
-                  {profileFieldErrors.full_name}
-                </div>
-              )}
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="settings-language">
-                {t("language_label")}
-              </label>
-              <select
-                id="settings-language"
-                className="field-select"
-                value={language}
-                onChange={(event) => setLanguage(event.target.value)}
-              >
-                {languageOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              {profileFieldErrors.language && (
-                <div style={fieldErrorStyle} role="alert">
-                  {profileFieldErrors.language}
-                </div>
-              )}
-            </div>
-
-            {profileError && (
-              <div className="alert-error" role="alert">
-                {profileError}
+          <div className="card-split">
+            <div className="card-split-label">
+              <div className="card-split-label-title">
+                <UserCircle2 size={16} strokeWidth={2} />
+                {t("profile_title")}
               </div>
-            )}
+              <div className="card-split-label-desc">
+                {t("profile_helper")}
+              </div>
+            </div>
+            <div className="card-split-fields">
+              <div className="field">
+                <div className="field-label-row">
+                  <label className="field-label" htmlFor="settings-email">
+                    {t("email_label")}
+                  </label>
+                  <span className="badge badge--verified">
+                    {t("email_verified")}
+                  </span>
+                </div>
+                <input
+                  id="settings-email"
+                  className="field-input"
+                  type="email"
+                  value={me?.email ?? ""}
+                  disabled
+                  readOnly
+                />
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="settings-full-name">
+                  {t("full_name_label")}
+                </label>
+                <input
+                  id="settings-full-name"
+                  className="field-input"
+                  type="text"
+                  maxLength={255}
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                />
+                {profileFieldErrors.full_name && (
+                  <div style={fieldErrorStyle} role="alert">
+                    {profileFieldErrors.full_name}
+                  </div>
+                )}
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="settings-language">
+                  {t("language_label")}
+                </label>
+                <select
+                  id="settings-language"
+                  className="field-select"
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value)}
+                >
+                  {languageOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {profileFieldErrors.language && (
+                  <div style={fieldErrorStyle} role="alert">
+                    {profileFieldErrors.language}
+                  </div>
+                )}
+              </div>
+
+              {profileError && (
+                <div className="alert-error" role="alert">
+                  {profileError}
+                </div>
+              )}
+            </div>
           </div>
           <div className="form-actions">
             {profileSaved && (
@@ -325,81 +332,88 @@ export function SettingsPage() {
         </form>
 
         <form className="card" onSubmit={handlePasswordSubmit} noValidate>
-          <div className="form-section">
-            <div
-              className="form-section-title"
-              style={{ display: "flex", alignItems: "center", gap: 8 }}
-            >
-              <ShieldCheck size={16} strokeWidth={2} />
-              {t("password_title")}
-            </div>
-            <div className="form-section-helper">{t("password_helper")}</div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="settings-current-password">
-                {t("current_password_label")}
-              </label>
-              <input
-                id="settings-current-password"
-                className="field-input"
-                type="password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-              />
-              {passwordFieldErrors.current_password && (
-                <div style={fieldErrorStyle} role="alert">
-                  {passwordFieldErrors.current_password}
-                </div>
-              )}
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="settings-new-password">
-                {t("new_password_label")}
-              </label>
-              <input
-                id="settings-new-password"
-                className="field-input"
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-              />
-              {passwordFieldErrors.new_password && (
-                <div style={fieldErrorStyle} role="alert">
-                  {passwordFieldErrors.new_password}
-                </div>
-              )}
-            </div>
-
-            <div className="field">
-              <label
-                className="field-label"
-                htmlFor="settings-confirm-password"
-              >
-                {t("confirm_password_label")}
-              </label>
-              <input
-                id="settings-confirm-password"
-                className="field-input"
-                type="password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-              />
-              {passwordFieldErrors.confirm_password && (
-                <div style={fieldErrorStyle} role="alert">
-                  {passwordFieldErrors.confirm_password}
-                </div>
-              )}
-            </div>
-
-            {passwordError && (
-              <div className="alert-error" role="alert">
-                {passwordError}
+          <div className="card-split">
+            <div className="card-split-label">
+              <div className="card-split-label-title">
+                <ShieldCheck size={16} strokeWidth={2} />
+                {t("password_title")}
               </div>
-            )}
+              <div className="card-split-label-desc">
+                {t("password_helper")}
+              </div>
+            </div>
+            <div className="card-split-fields">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="settings-current-password"
+                >
+                  {t("current_password_label")}
+                </label>
+                <input
+                  id="settings-current-password"
+                  className="field-input"
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(event) =>
+                    setCurrentPassword(event.target.value)
+                  }
+                />
+                {passwordFieldErrors.current_password && (
+                  <div style={fieldErrorStyle} role="alert">
+                    {passwordFieldErrors.current_password}
+                  </div>
+                )}
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="settings-new-password">
+                  {t("new_password_label")}
+                </label>
+                <input
+                  id="settings-new-password"
+                  className="field-input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                />
+                {passwordFieldErrors.new_password && (
+                  <div style={fieldErrorStyle} role="alert">
+                    {passwordFieldErrors.new_password}
+                  </div>
+                )}
+              </div>
+
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="settings-confirm-password"
+                >
+                  {t("confirm_password_label")}
+                </label>
+                <input
+                  id="settings-confirm-password"
+                  className="field-input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+                {passwordFieldErrors.confirm_password && (
+                  <div style={fieldErrorStyle} role="alert">
+                    {passwordFieldErrors.confirm_password}
+                  </div>
+                )}
+              </div>
+
+              {passwordError && (
+                <div className="alert-error" role="alert">
+                  {passwordError}
+                </div>
+              )}
+            </div>
           </div>
           <div className="form-actions">
             {passwordSaved && (
@@ -420,19 +434,18 @@ export function SettingsPage() {
         </form>
 
         <form className="card" onSubmit={handlePreferencesSubmit} noValidate>
-          <div className="form-section">
-            <div
-              className="form-section-title"
-              style={{ display: "flex", alignItems: "center", gap: 8 }}
-            >
-              <BellRing size={16} strokeWidth={2} />
-              {t("notifications_title")}
+          <div className="card-split">
+            <div className="card-split-label">
+              <div className="card-split-label-title">
+                <BellRing size={16} strokeWidth={2} />
+                {t("notifications_title")}
+              </div>
+              <div className="card-split-label-desc">
+                {t("notifications_helper")}
+              </div>
             </div>
-            <div className="form-section-helper">
-              {t("notifications_helper")}
-            </div>
-
-            {preferencesLoading ? (
+            <div className="card-split-fields">
+              {preferencesLoading ? (
               <div className="loading-bar">
                 <div className="loading-bar-fill" />
               </div>
@@ -515,6 +528,7 @@ export function SettingsPage() {
                 {preferencesError}
               </div>
             )}
+            </div>
           </div>
           <div className="form-actions">
             {preferencesSaved && (

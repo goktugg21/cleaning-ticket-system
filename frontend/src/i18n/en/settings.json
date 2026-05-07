@@ -6,6 +6,7 @@
   "profile_title": "Profile",
   "profile_helper": "Your name and preferred language.",
   "email_label": "Email",
+  "email_verified": "Verified",
   "full_name_label": "Full name",
   "full_name_empty": "Full name cannot be empty.",
   "language_label": "Language",
