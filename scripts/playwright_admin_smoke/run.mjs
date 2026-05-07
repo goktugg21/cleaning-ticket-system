@@ -197,24 +197,29 @@ async function runSuperAdmin(browser) {
   const successAfterReload = await page.locator(".alert-info[role='status']").count();
   record("UI", "Success banner does not reappear after reload", successAfterReload === 0 ? PASS : FAIL);
 
-  // Confirm invitation appears as PENDING
+  // Confirm invitation appears as PENDING (post-redesign: status-pill
+  // replaces cell-tag; PENDING is the default tab, no extra click needed).
   const pendingHit = await page.locator(`tr:has-text("${inviteEmail}")`).first()
-    .locator(".cell-tag-open").count();
+    .locator(".status-pill--pending").count();
   record(G, "Invitation appears as PENDING", pendingHit > 0 ? PASS : FAIL);
 
-  // Revoke
+  // Revoke (post-redesign: the Revoke action is a translated link-action,
+  // so target by class instead of text).
   const revokeRow = page.locator(`tr:has-text("${inviteEmail}")`).first();
-  await revokeRow.locator('button:has-text("Revoke")').click();
+  await revokeRow.locator('.link-action--danger').click();
   await page.waitForTimeout(300);
   await page.locator("dialog[open] button:has-text('Revoke')").click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
 
-  await page.locator("select.filter-control").first().selectOption("REVOKED");
+  // After revoke the row leaves the PENDING tab — REVOKED entries surface
+  // only under the "All" tab in the redesigned page. Click that tab and
+  // verify the row now wears the revoked status pill.
+  await page.locator('[data-testid="status-tab-all"]').click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(400);
   const revokedHit = await page.locator(`tr:has-text("${inviteEmail}")`).first()
-    .locator(".cell-tag-rejected").count();
+    .locator(".status-pill--revoked").count();
   record(G, "Invitation becomes REVOKED", revokedHit > 0 ? PASS : FAIL);
 
   // 17-20: /admin/companies/:id Admins section

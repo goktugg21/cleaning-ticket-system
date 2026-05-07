@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   createInvitation,
@@ -24,7 +25,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
-type StatusFilter = "all" | "PENDING" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+type StatusTab = "PENDING" | "ACCEPTED" | "EXPIRED" | "ALL";
 
 const ROLE_LABEL: Record<Role, string> = {
   SUPER_ADMIN: "Super admin",
@@ -33,42 +34,54 @@ const ROLE_LABEL: Record<Role, string> = {
   CUSTOMER_USER: "Customer user",
 };
 
-const STATUS_LABEL: Record<InvitationAdmin["status"], string> = {
-  PENDING: "Pending",
-  ACCEPTED: "Accepted",
-  REVOKED: "Revoked",
-  EXPIRED: "Expired",
-};
-
-function statusCellClass(status: InvitationAdmin["status"]): string {
-  switch (status) {
-    case "PENDING":
-      return "cell-tag cell-tag-open";
-    case "ACCEPTED":
-      return "cell-tag cell-tag-approved";
-    case "REVOKED":
-      return "cell-tag cell-tag-rejected";
-    case "EXPIRED":
-      return "cell-tag cell-tag-closed";
-  }
+function statusPillClass(status: InvitationAdmin["status"]): string {
+  return `status-pill status-pill--${status.toLowerCase()}`;
 }
 
-function formatDate(value: string): string {
-  try {
-    return new Date(value).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return value;
+function getInitials(fullName: string, email: string): string {
+  const cleaned = (fullName || "").trim();
+  if (cleaned) {
+    const parts = cleaned.split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    return parts[0].slice(0, 2).toUpperCase();
   }
+  return (email.split("@")[0] || "?").slice(0, 2).toUpperCase();
+}
+
+// Relative time using Intl.RelativeTimeFormat with numeric:"auto" so we
+// get "yesterday" / "tomorrow" / "in 3 days" naturally in both nl and en.
+// Falls back to absolute date when the gap exceeds 30 days. Empty input
+// returns an em dash.
+function formatRelative(iso: string | null | undefined, lang: string): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const diffMs = date.getTime() - Date.now();
+  const absHr = Math.abs(diffMs) / 3600000;
+  const absDay = Math.abs(diffMs) / 86400000;
+  const locale = lang === "nl" ? "nl-NL" : "en-US";
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (absHr < 1) {
+    return rtf.format(Math.round(diffMs / 60000), "minute");
+  }
+  if (absHr < 24) {
+    return rtf.format(Math.round(diffMs / 3600000), "hour");
+  }
+  if (absDay < 30) {
+    return rtf.format(Math.round(diffMs / 86400000), "day");
+  }
+  return date.toLocaleDateString(locale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 export function InvitationsAdminPage() {
   const { me } = useAuth();
+  const { t, i18n } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
   // Available role choices for the create form. SUPER_ADMIN can pick any role
@@ -92,7 +105,7 @@ export function InvitationsAdminPage() {
   const [page, setPage] = useState(1);
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("PENDING");
+  const [statusTab, setStatusTab] = useState<StatusTab>("PENDING");
 
   const [savedBanner, setSavedBanner] = useSavedBanner({});
 
@@ -116,12 +129,20 @@ export function InvitationsAdminPage() {
     load();
   }, [load]);
 
-  // Status filter is client-side because /api/auth/invitations/ does not
-  // currently have a status filterset. Documented in api/admin.ts.
-  const visibleInvitations = useMemo(() => {
-    if (statusFilter === "all") return invitations;
-    return invitations.filter((i) => i.status === statusFilter);
-  }, [invitations, statusFilter]);
+  // Status filter is client-side: the API does not currently expose a
+  // status query param. The four tabs are PENDING/ACCEPTED/EXPIRED/ALL —
+  // REVOKED entries surface only under ALL.
+  const filteredInvitations = useMemo(() => {
+    if (statusTab === "ALL") return invitations;
+    return invitations.filter((i) => i.status === statusTab);
+  }, [invitations, statusTab]);
+
+  // Counts for the page-header stats summary. Always reflect the full
+  // set returned by the API, regardless of which tab is active.
+  const totalCount = invitations.length;
+  const pendingCount = invitations.filter((i) => i.status === "PENDING").length;
+  const acceptedCount = invitations.filter((i) => i.status === "ACCEPTED").length;
+  const expiredCount = invitations.filter((i) => i.status === "EXPIRED").length;
 
   // ---- Create form state -----------------------------------------------
 
@@ -312,11 +333,31 @@ export function InvitationsAdminPage() {
             Admin
           </div>
           <h2 className="page-title">Invitations</h2>
-          <p className="page-sub">
-            {listLoading
-              ? "Loading invitations…"
-              : `${count} ${count === 1 ? "invitation" : "invitations"}`}
-          </p>
+          <div className="invitations-stats">
+            <span>
+              {totalCount} {t("invitations.total")}
+            </span>
+            <span className="dot" />
+            <span>
+              {pendingCount} {t("invitations.pending_label")}
+            </span>
+            {acceptedCount > 0 && (
+              <>
+                <span className="dot" />
+                <span className="accepted-text">
+                  {acceptedCount} {t("invitations.accepted_label")}
+                </span>
+              </>
+            )}
+            {expiredCount > 0 && (
+              <>
+                <span className="dot" />
+                <span className="expired-text">
+                  {expiredCount} {t("invitations.expired_label")}
+                </span>
+              </>
+            )}
+          </div>
         </div>
         <div className="page-header-actions">
           <button
@@ -337,187 +378,219 @@ export function InvitationsAdminPage() {
         </div>
       )}
 
-      <section className="card page-form-narrow" style={{ padding: "20px 22px" }}>
-        <h3 className="section-title">Send a new invitation</h3>
-        <p className="muted small" style={{ marginBottom: 12 }}>
-          The invitee receives an email with a one-time link. They set their own password when
-          accepting.
-        </p>
-
+      {/* Form card: two-column body (description on the left, fields on
+          the right). The form-actions row at the bottom keeps its
+          shared border-top + subtle bg styling. */}
+      <section className="card">
         {formGeneralError && (
-          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+          <div
+            className="alert-error"
+            role="alert"
+            style={{ margin: "16px 32px 0" }}
+          >
             {formGeneralError}
           </div>
         )}
-
         <form onSubmit={handleCreate}>
-          <div className="form-2col">
-            <div className="field">
-              <label className="field-label" htmlFor="invite-email">
-                Email *
-              </label>
-              <input
-                id="invite-email"
-                className="field-input"
-                type="email"
-                value={formEmail}
-                onChange={(event) => setFormEmail(event.target.value)}
-                required
-              />
-              {formFieldErrors.email && (
-                <div className="alert-error login-error" role="alert">
-                  {formFieldErrors.email}
-                </div>
-              )}
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="invite-full-name">
-                Full name (optional)
-              </label>
-              <input
-                id="invite-full-name"
-                className="field-input"
-                type="text"
-                value={formFullName}
-                onChange={(event) => setFormFullName(event.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="field">
-            <label className="field-label" htmlFor="invite-role">
-              Role *
-            </label>
-            <select
-              id="invite-role"
-              className="field-select"
-              value={formRole}
-              onChange={(event) => setFormRole(event.target.value as Role)}
-            >
-              {availableRoles.map((role) => (
-                <option key={role} value={role}>
-                  {ROLE_LABEL[role]}
-                </option>
-              ))}
-            </select>
-            {formFieldErrors.role && (
-              <div className="alert-error login-error" role="alert">
-                {formFieldErrors.role}
+          <div className="invitation-form-split">
+            <div className="invitation-form-info">
+              <div className="eyebrow">{t("invitations.send_eyebrow")}</div>
+              <div className="invitation-form-title">
+                {t("invitations.invite_teammate")}
               </div>
-            )}
-          </div>
-
-          {/* Company picker is shown for COMPANY_ADMIN role and as a parent
-              filter for BUILDING_MANAGER / CUSTOMER_USER role. SUPER_ADMIN
-              role has no scope inputs. */}
-          {formRole !== "SUPER_ADMIN" && (
-            <div className="field">
-              <label className="field-label" htmlFor="invite-company">
-                Company {formRole === "COMPANY_ADMIN" && "*"}
-              </label>
-              <select
-                id="invite-company"
-                className="field-select"
-                value={formCompany === "" ? "" : String(formCompany)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setFormCompany(v === "" ? "" : Number(v));
-                }}
-                disabled={companyLocked}
-                required={formRole === "COMPANY_ADMIN"}
-              >
-                <option value="">
-                  {formRole === "COMPANY_ADMIN" ? "Select company…" : "All companies"}
-                </option>
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              {formFieldErrors.company_ids && (
-                <div className="alert-error login-error" role="alert">
-                  {formFieldErrors.company_ids}
-                </div>
-              )}
+              <div className="invitation-form-desc">
+                {t("invitations.form_description")}
+              </div>
+              <div className="invitation-form-note">
+                {t("invitations.expires_note")}
+              </div>
             </div>
-          )}
 
-          {formRole === "BUILDING_MANAGER" && (
-            <div className="field">
-              <label className="field-label">Buildings *</label>
-              <p className="field-helper">
-                Pick one or more buildings the invitee will manage.
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-                {buildingOptions.length === 0 ? (
-                  <span className="muted small">
-                    {formCompany === ""
-                      ? "Select a company first."
-                      : "No buildings in this company."}
-                  </span>
-                ) : (
-                  buildingOptions.map((b) => {
-                    const active = formBuildings.includes(b.id);
-                    return (
-                      <button
-                        key={b.id}
-                        type="button"
-                        className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
-                        onClick={() => toggleBuilding(b.id)}
-                        aria-pressed={active}
-                      >
-                        {b.name}
-                      </button>
-                    );
-                  })
+            <div className="invitation-form-fields">
+              <div className="form-grid-2">
+                <div className="field">
+                  <label className="field-label" htmlFor="invite-email">
+                    Email *
+                  </label>
+                  <input
+                    id="invite-email"
+                    className="field-input"
+                    type="email"
+                    value={formEmail}
+                    onChange={(event) => setFormEmail(event.target.value)}
+                    required
+                  />
+                  {formFieldErrors.email && (
+                    <div className="alert-error login-error" role="alert">
+                      {formFieldErrors.email}
+                    </div>
+                  )}
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="invite-full-name">
+                    Full name (optional)
+                  </label>
+                  <input
+                    id="invite-full-name"
+                    className="field-input"
+                    type="text"
+                    value={formFullName}
+                    onChange={(event) => setFormFullName(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <div className="field">
+                  <label className="field-label" htmlFor="invite-role">
+                    Role *
+                  </label>
+                  <select
+                    id="invite-role"
+                    className="field-select"
+                    value={formRole}
+                    onChange={(event) => setFormRole(event.target.value as Role)}
+                  >
+                    {availableRoles.map((role) => (
+                      <option key={role} value={role}>
+                        {ROLE_LABEL[role]}
+                      </option>
+                    ))}
+                  </select>
+                  {formFieldErrors.role && (
+                    <div className="alert-error login-error" role="alert">
+                      {formFieldErrors.role}
+                    </div>
+                  )}
+                </div>
+
+                {formRole !== "SUPER_ADMIN" && (
+                  <div className="field">
+                    <label className="field-label" htmlFor="invite-company">
+                      Company {formRole === "COMPANY_ADMIN" && "*"}
+                    </label>
+                    <select
+                      id="invite-company"
+                      className="field-select"
+                      value={formCompany === "" ? "" : String(formCompany)}
+                      onChange={(event) => {
+                        const v = event.target.value;
+                        setFormCompany(v === "" ? "" : Number(v));
+                      }}
+                      disabled={companyLocked}
+                      required={formRole === "COMPANY_ADMIN"}
+                    >
+                      <option value="">
+                        {formRole === "COMPANY_ADMIN"
+                          ? "Select company…"
+                          : "All companies"}
+                      </option>
+                      {companies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    {formFieldErrors.company_ids && (
+                      <div className="alert-error login-error" role="alert">
+                        {formFieldErrors.company_ids}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-              {formFieldErrors.building_ids && (
-                <div className="alert-error login-error" role="alert">
-                  {formFieldErrors.building_ids}
-                </div>
-              )}
-            </div>
-          )}
 
-          {formRole === "CUSTOMER_USER" && (
-            <div className="field">
-              <label className="field-label">Customers *</label>
-              <p className="field-helper">
-                Pick one or more customers the invitee will be linked to.
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-                {customerOptions.length === 0 ? (
-                  <span className="muted small">
-                    {formCompany === ""
-                      ? "Select a company first."
-                      : "No customers in this company."}
-                  </span>
-                ) : (
-                  customerOptions.map((c) => {
-                    const active = formCustomers.includes(c.id);
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
-                        onClick={() => toggleCustomer(c.id)}
-                        aria-pressed={active}
-                      >
-                        {c.name}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-              {formFieldErrors.customer_ids && (
-                <div className="alert-error login-error" role="alert">
-                  {formFieldErrors.customer_ids}
+              {formRole === "BUILDING_MANAGER" && (
+                <div className="field">
+                  <label className="field-label">Buildings *</label>
+                  <p className="field-helper">
+                    Pick one or more buildings the invitee will manage.
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      marginTop: 4,
+                    }}
+                  >
+                    {buildingOptions.length === 0 ? (
+                      <span className="muted small">
+                        {formCompany === ""
+                          ? "Select a company first."
+                          : "No buildings in this company."}
+                      </span>
+                    ) : (
+                      buildingOptions.map((b) => {
+                        const active = formBuildings.includes(b.id);
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+                            onClick={() => toggleBuilding(b.id)}
+                            aria-pressed={active}
+                          >
+                            {b.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  {formFieldErrors.building_ids && (
+                    <div className="alert-error login-error" role="alert">
+                      {formFieldErrors.building_ids}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {formRole === "CUSTOMER_USER" && (
+                <div className="field">
+                  <label className="field-label">Customers *</label>
+                  <p className="field-helper">
+                    Pick one or more customers the invitee will be linked to.
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      marginTop: 4,
+                    }}
+                  >
+                    {customerOptions.length === 0 ? (
+                      <span className="muted small">
+                        {formCompany === ""
+                          ? "Select a company first."
+                          : "No customers in this company."}
+                      </span>
+                    ) : (
+                      customerOptions.map((c) => {
+                        const active = formCustomers.includes(c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+                            onClick={() => toggleCustomer(c.id)}
+                            aria-pressed={active}
+                          >
+                            {c.name}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  {formFieldErrors.customer_ids && (
+                    <div className="alert-error login-error" role="alert">
+                      {formFieldErrors.customer_ids}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
+          </div>
 
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={submitting}>
@@ -527,21 +600,51 @@ export function InvitationsAdminPage() {
         </form>
       </section>
 
-      <div className="card" style={{ overflow: "hidden", marginTop: 16 }}>
-        <div className="filter-bar">
-          <div className="filter-field">
-            <span className="filter-label">Status</span>
-            <select
-              className="filter-control"
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+      {/* Activity card: status tabs + table. Tabs replace the old
+          single-select status filter. The fetch logic is unchanged
+          (one /api/auth/invitations/ call); the tab choice filters
+          client-side via filteredInvitations. */}
+      <section className="card" style={{ overflow: "hidden", marginTop: 16 }}>
+        <div className="activity-card-header">
+          <div>
+            <div className="eyebrow">{t("invitations.activity_eyebrow")}</div>
+            <div className="activity-card-title">
+              {t("invitations.all_invitations")}
+            </div>
+          </div>
+          <div className="status-tabs">
+            <button
+              type="button"
+              data-testid="status-tab-pending"
+              className={statusTab === "PENDING" ? "active" : ""}
+              onClick={() => setStatusTab("PENDING")}
             >
-              <option value="PENDING">Pending</option>
-              <option value="ACCEPTED">Accepted</option>
-              <option value="REVOKED">Revoked</option>
-              <option value="EXPIRED">Expired</option>
-              <option value="all">All</option>
-            </select>
+              {t("invitations.pending_label")}
+            </button>
+            <button
+              type="button"
+              data-testid="status-tab-accepted"
+              className={statusTab === "ACCEPTED" ? "active" : ""}
+              onClick={() => setStatusTab("ACCEPTED")}
+            >
+              {t("invitations.accepted_label")}
+            </button>
+            <button
+              type="button"
+              data-testid="status-tab-expired"
+              className={statusTab === "EXPIRED" ? "active" : ""}
+              onClick={() => setStatusTab("EXPIRED")}
+            >
+              {t("invitations.expired_label")}
+            </button>
+            <button
+              type="button"
+              data-testid="status-tab-all"
+              className={statusTab === "ALL" ? "active" : ""}
+              onClick={() => setStatusTab("ALL")}
+            >
+              {t("invitations.all_label")}
+            </button>
           </div>
         </div>
 
@@ -558,44 +661,69 @@ export function InvitationsAdminPage() {
         )}
 
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="invitations-table" data-testid="invitations-table">
+            <colgroup>
+              <col style={{ width: "32%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "12%" }} />
+              <col style={{ width: "13%" }} />
+            </colgroup>
             <thead>
               <tr>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Sent</th>
-                <th>Expires</th>
-                <th>Sent by</th>
-                <th aria-label="Actions" />
+                <th>{t("invitations.col_recipient")}</th>
+                <th>{t("invitations.col_role")}</th>
+                <th>{t("invitations.col_status")}</th>
+                <th>{t("invitations.col_sent")}</th>
+                <th>{t("invitations.col_expires")}</th>
+                <th className="text-right">{t("invitations.col_actions")}</th>
               </tr>
             </thead>
             <tbody>
-              {visibleInvitations.map((invitation) => {
+              {filteredInvitations.map((invitation) => {
                 const canRevoke =
                   invitation.status === "PENDING" &&
                   (isSuperAdmin || invitation.created_by_email === me?.email);
+                const displayName =
+                  invitation.full_name?.trim() ||
+                  invitation.email.split("@")[0];
                 return (
                   <tr key={invitation.id}>
-                    <td className="td-subject">{invitation.email}</td>
+                    <td>
+                      <div className="recipient-cell">
+                        <div className="recipient-avatar">
+                          {getInitials(invitation.full_name, invitation.email)}
+                        </div>
+                        <div className="recipient-text">
+                          <div className="recipient-name">{displayName}</div>
+                          <div className="recipient-email">
+                            {invitation.email}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
                     <td>{ROLE_LABEL[invitation.role] ?? invitation.role}</td>
                     <td>
-                      <span className={statusCellClass(invitation.status)}>
-                        <i />
-                        {STATUS_LABEL[invitation.status]}
+                      <span className={statusPillClass(invitation.status)}>
+                        <span className="status-pill-dot" />
+                        {t(`invitations.status_${invitation.status.toLowerCase()}`)}
                       </span>
                     </td>
-                    <td className="td-date">{formatDate(invitation.created_at)}</td>
-                    <td className="td-date">{formatDate(invitation.expires_at)}</td>
-                    <td>{invitation.created_by_email}</td>
-                    <td>
+                    <td className="muted-cell">
+                      {formatRelative(invitation.created_at, i18n.language)}
+                    </td>
+                    <td className="muted-cell">
+                      {formatRelative(invitation.expires_at, i18n.language)}
+                    </td>
+                    <td className="text-right">
                       {canRevoke && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-sm"
+                          className="link-action link-action--danger"
                           onClick={() => openRevokeDialog(invitation)}
                         >
-                          Revoke
+                          {t("invitations.revoke")}
                         </button>
                       )}
                     </td>
@@ -605,15 +733,13 @@ export function InvitationsAdminPage() {
             </tbody>
           </table>
 
-          {!listLoading && visibleInvitations.length === 0 && (
+          {!listLoading && filteredInvitations.length === 0 && (
             <div className="empty-state">
               <div className="empty-icon">＋</div>
               <div className="empty-title">
-                {statusFilter === "all"
-                  ? "No invitations yet"
-                  : `No ${STATUS_LABEL[statusFilter as InvitationAdmin["status"]].toLowerCase()} invitations`}
+                {t("invitations.empty_title")}
               </div>
-              <p className="empty-sub">Use the form above to send the first one.</p>
+              <p className="empty-sub">{t("invitations.empty_desc")}</p>
             </div>
           )}
         </div>
@@ -643,7 +769,7 @@ export function InvitationsAdminPage() {
             </div>
           </div>
         )}
-      </div>
+      </section>
 
       <ConfirmDialog
         ref={revokeDialogRef}
