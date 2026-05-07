@@ -240,15 +240,15 @@ export function InvitationsAdminPage() {
 
     const trimmedEmail = formEmail.trim();
     const errs: AdminFieldErrors = {};
-    if (!trimmedEmail) errs.email = "Email is required.";
+    if (!trimmedEmail) errs.email = t("invitations.error_email_required");
     if (formRole === "COMPANY_ADMIN" && formCompany === "") {
-      errs.company_ids = "Pick a company.";
+      errs.company_ids = t("invitations.error_pick_company");
     }
     if (formRole === "BUILDING_MANAGER" && formBuildings.length === 0) {
-      errs.building_ids = "Pick at least one building.";
+      errs.building_ids = t("invitations.error_pick_building");
     }
     if (formRole === "CUSTOMER_USER" && formCustomers.length === 0) {
-      errs.customer_ids = "Pick at least one customer.";
+      errs.customer_ids = t("invitations.error_pick_customer");
     }
     if (Object.keys(errs).length > 0) {
       setFormFieldErrors(errs);
@@ -273,7 +273,7 @@ export function InvitationsAdminPage() {
     setSubmitting(true);
     try {
       await createInvitation(payload);
-      setSavedBanner(`Invitation sent to ${trimmedEmail}.`);
+      setSavedBanner(t("invitations.banner_sent", { email: trimmedEmail }));
       setFormEmail("");
       setFormFullName("");
       setFormBuildings([]);
@@ -314,7 +314,7 @@ export function InvitationsAdminPage() {
     try {
       await revokeInvitation(revokeTarget.id);
       revokeDialogRef.current?.close();
-      setSavedBanner(`Invitation to ${revokeTarget.email} revoked.`);
+      setSavedBanner(t("invitations.banner_revoked", { email: revokeTarget.email }));
       setRevokeTarget(null);
       await load();
     } catch (err) {
@@ -519,7 +519,7 @@ export function InvitationsAdminPage() {
                       <span className="muted small">
                         {formCompany === ""
                           ? t("invitations.select_company_first")
-                          : "No buildings in this company."}
+                          : t("invitations.no_buildings_in_company")}
                       </span>
                     ) : (
                       buildingOptions.map((b) => {
@@ -564,7 +564,7 @@ export function InvitationsAdminPage() {
                       <span className="muted small">
                         {formCompany === ""
                           ? t("invitations.select_company_first")
-                          : "No customers in this company."}
+                          : t("invitations.no_customers_in_company")}
                       </span>
                     ) : (
                       customerOptions.map((c) => {
@@ -779,9 +779,11 @@ export function InvitationsAdminPage() {
 
       <ConfirmDialog
         ref={revokeDialogRef}
-        title={`Revoke invitation to ${revokeTarget?.email ?? "user"}?`}
-        body="The invitation link will stop working immediately. You can send a new one if needed."
-        confirmLabel="Revoke"
+        title={t("invitations.revoke_dialog_title", {
+          email: revokeTarget?.email ?? "",
+        })}
+        body={t("invitations.revoke_dialog_body")}
+        confirmLabel={t("invitations.revoke_dialog_confirm")}
         onConfirm={handleConfirmRevoke}
         onCancel={() => setRevokeTarget(null)}
         busy={revokeBusy}

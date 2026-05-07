@@ -175,7 +175,9 @@ async function runSuperAdmin(browser) {
   await page.waitForTimeout(400);
   await page.locator('[data-testid="invite-submit"]').click();
   await page.waitForTimeout(300);
-  const buildingFieldErr = await page.locator(".alert-error").filter({ hasText: /at least one building/i }).count();
+  // .alert-error.login-error is the inline form-field error variant;
+  // counting it is language-agnostic (the validation copy is translated).
+  const buildingFieldErr = await page.locator(".alert-error.login-error").count();
   record("UI", "Inline field error appears next to invalid invitation field", buildingFieldErr > 0 ? PASS : FAIL);
 
   // Recover: send a valid invitation to confirm success banner.
@@ -208,7 +210,9 @@ async function runSuperAdmin(browser) {
   const revokeRow = page.locator(`tr:has-text("${inviteEmail}")`).first();
   await revokeRow.locator('.link-action--danger').click();
   await page.waitForTimeout(300);
-  await page.locator("dialog[open] button:has-text('Revoke')").click();
+  // Confirm button uses .btn-primary; the cancel button uses .btn-ghost.
+  // Targeting by class is language-agnostic.
+  await page.locator("dialog[open] button.btn-primary").click();
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(500);
 
