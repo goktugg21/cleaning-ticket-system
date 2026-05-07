@@ -11,7 +11,7 @@ from notifications.services import send_invitation_email
 
 from .filters_invitations import InvitationFilter
 from .invitations import Invitation, InvitationStatus, hash_invitation_token
-from .models import UserRole
+from .models import User, UserRole
 from .permissions import IsAuthenticatedAndActive
 from .scoping import company_ids_for
 from .serializers_invitations import (
@@ -105,6 +105,37 @@ class InvitationAcceptView(views.APIView):
     authentication_classes = []
 
     def post(self, request):
+        # Pre-check: a User row already on file for this invitation's email
+        # — active, deactivated, or soft-deleted — will collide with the
+        # unique email column when the serializer's create_user runs. Catch
+        # it here and return a structured user_exists payload so the
+        # frontend can offer a sign-in hint instead of treating it as a
+        # generic validation error.
+        raw_token = request.data.get("token") or ""
+        if raw_token:
+            invitation = (
+                Invitation.objects.filter(
+                    token_hash=hash_invitation_token(raw_token)
+                )
+                .only("email", "accepted_at", "revoked_at", "expires_at")
+                .first()
+            )
+            if (
+                invitation is not None
+                and invitation.status == InvitationStatus.PENDING
+                and User.objects.filter(email__iexact=invitation.email).exists()
+            ):
+                return Response(
+                    {
+                        "detail": "user_exists",
+                        "message": (
+                            "An account with this email already exists. "
+                            "Please sign in."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         # The serializer's validate() uses select_for_update so the row is
         # locked for the duration of this transaction.
         with transaction.atomic():

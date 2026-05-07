@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Building2, Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { api, getApiError } from "../api/client";
+import { api, clearAuthTokens, getApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import type { InvitationPreview, Role } from "../api/types";
 
 const ROLE_KEYS: Record<Role, string> = {
@@ -55,11 +56,34 @@ type LoadState =
   | { kind: "not-found" }
   | { kind: "error"; message: string };
 
+type SubmitOutcome =
+  | { kind: "idle" }
+  | { kind: "user-exists" }
+  | { kind: "generic-error" };
+
+function isUserExistsError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const data = (err as { response?: { data?: { detail?: unknown } } }).response
+    ?.data;
+  return (
+    !!data &&
+    typeof data === "object" &&
+    (data as { detail?: unknown }).detail === "user_exists"
+  );
+}
+
+function isStructuredJsonErrorBody(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const data = (err as { response?: { data?: unknown } }).response?.data;
+  return !!data && typeof data === "object" && !Array.isArray(data);
+}
+
 export function AcceptInvitationPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
   const { t } = useTranslation("common");
+  const { logout } = useAuth();
 
   const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
   const [password, setPassword] = useState("");
@@ -68,6 +92,9 @@ export function AcceptInvitationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [generalError, setGeneralError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitOutcome, setSubmitOutcome] = useState<SubmitOutcome>({
+    kind: "idle",
+  });
 
   useEffect(() => {
     if (!token) {
@@ -129,6 +156,7 @@ export function AcceptInvitationPage() {
     event.preventDefault();
     setGeneralError("");
     setFieldErrors({});
+    setSubmitOutcome({ kind: "idle" });
 
     if (password.length === 0) {
       setFieldErrors({ new_password: t("accept_invitation.error_choose_password") });
@@ -145,13 +173,33 @@ export function AcceptInvitationPage() {
         token,
         new_password: password,
       });
+      // Clear any stale auth state from a different account that might have
+      // been left over in this browser (e.g., the operator who issued the
+      // invitation testing the link in the same session). Without this,
+      // /login → useAuth().me would still resolve to the old user and the
+      // <Navigate to="/"> short-circuit on LoginPage strands the post-accept
+      // navigation, presenting a blank page.
+      try {
+        logout();
+      } catch {
+        clearAuthTokens();
+      }
       navigate("/login?invited=ok", { replace: true });
     } catch (err) {
-      const fields = extractFieldErrors(err);
-      if (Object.keys(fields).length > 0) {
-        setFieldErrors(fields);
+      if (isUserExistsError(err)) {
+        setSubmitOutcome({ kind: "user-exists" });
+      } else if (isStructuredJsonErrorBody(err)) {
+        const fields = extractFieldErrors(err);
+        if (Object.keys(fields).length > 0) {
+          setFieldErrors(fields);
+        } else {
+          setGeneralError(getApiError(err));
+        }
       } else {
-        setGeneralError(getApiError(err));
+        // Non-JSON response body (HTML traceback, network failure, CORS).
+        // Never render the body verbatim — it might be a Django debug page
+        // or other surprising payload. Surface a translated generic error.
+        setSubmitOutcome({ kind: "generic-error" });
       }
     } finally {
       setSubmitting(false);
@@ -246,7 +294,51 @@ export function AcceptInvitationPage() {
           </>
         )}
 
-        {loadState.kind === "ready" && (
+        {loadState.kind === "ready" && submitOutcome.kind === "user-exists" && (
+          <>
+            <div className="login-welcome">
+              <h2 className="login-welcome-title">
+                {t("accept_invitation.error_user_exists_title")}
+              </h2>
+              <p className="login-welcome-sub">
+                {t("accept_invitation.error_user_exists_desc")}
+              </p>
+            </div>
+            <div style={{ marginTop: 24 }}>
+              <Link className="login-submit" to="/login" style={{ textDecoration: "none", textAlign: "center", display: "block" }}>
+                {t("accept_invitation.error_user_exists_signin")}
+              </Link>
+            </div>
+          </>
+        )}
+
+        {loadState.kind === "ready" && submitOutcome.kind === "generic-error" && (
+          <>
+            <div className="login-welcome">
+              <h2 className="login-welcome-title">
+                {t("accept_invitation.error_generic_title")}
+              </h2>
+              <p className="login-welcome-sub">
+                {t("accept_invitation.error_generic_desc")}
+              </p>
+            </div>
+            <div style={{ marginTop: 24, fontSize: 13 }}>
+              <button
+                type="button"
+                className="login-field-link"
+                onClick={() => setSubmitOutcome({ kind: "idle" })}
+              >
+                {t("accept_invitation.error_generic_retry")}
+              </button>
+              <span style={{ margin: "0 8px", color: "var(--text-faint)" }}>·</span>
+              <Link className="login-field-link" to="/login">
+                {t("accept_invitation.back_to_signin")}
+              </Link>
+            </div>
+          </>
+        )}
+
+        {loadState.kind === "ready" && submitOutcome.kind === "idle" && (
           <>
             <div className="login-welcome">
               <h2 className="login-welcome-title">{t("accept_invitation.welcome_title")}</h2>
