@@ -113,6 +113,72 @@ else:
         }
     }
 
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+# Single env knob — DJANGO_LOG_LEVEL — drives the root and per-project-app
+# loggers so prod can promote to WARNING without touching code. Third-party
+# loggers (urllib3/boto3/botocore) and django.request / django.db.backends
+# stay pinned at WARNING so a verbose root level does not flood logs with
+# request-level noise or per-query SQL.
+LOGGING_LEVEL = os.environ.get("DJANGO_LOG_LEVEL", "INFO").upper()
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name}: {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOGGING_LEVEL,
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": LOGGING_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.db.backends": {
+            # DEBUG to see every SQL query — only useful for local debugging.
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        # Project loggers — explicit so prod tuning is per-app.
+        "accounts": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "buildings": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "companies": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "customers": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "notifications": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "reports": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "sla": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "tickets": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "celery": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "urllib3": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "boto3": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "botocore": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+    },
+}
+
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
