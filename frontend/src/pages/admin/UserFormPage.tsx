@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   deactivateUser,
@@ -24,16 +25,11 @@ interface UserUpdatePayload {
   role: Role;
 }
 
-const LANGUAGE_OPTIONS = [
-  { value: "nl", label: "Dutch (nl)" },
-  { value: "en", label: "English (en)" },
-];
-
-const ROLE_LABEL: Record<Role, string> = {
-  SUPER_ADMIN: "Super admin",
-  COMPANY_ADMIN: "Company admin",
-  BUILDING_MANAGER: "Building manager",
-  CUSTOMER_USER: "Customer user",
+const ROLE_KEYS: Record<Role, string> = {
+  SUPER_ADMIN: "common:roles.super_admin",
+  COMPANY_ADMIN: "common:roles.company_admin",
+  BUILDING_MANAGER: "common:roles.building_manager",
+  CUSTOMER_USER: "common:roles.customer_user",
 };
 
 const ALL_ROLES: Role[] = [
@@ -46,11 +42,22 @@ const ALL_ROLES: Role[] = [
 export function UserFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
+  const { t } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "User saved." });
+  const languageOptions = useMemo(
+    () => [
+      { value: "nl", label: `${t("language_dutch")} (nl)` },
+      { value: "en", label: `${t("language_english")} (en)` },
+    ],
+    [t],
+  );
+
+  const [savedBanner, setSavedBanner] = useSavedBanner({
+    saved: t("users.banner_saved"),
+  });
 
   const [fullName, setFullName] = useState("");
   const [language, setLanguage] = useState("nl");
@@ -75,7 +82,7 @@ export function UserFormPage() {
       setRole(entity.role);
     },
     successPath: (entity) => `/admin/users/${entity.id}?saved=ok`,
-    onEditSuccess: () => setSavedBanner("User saved."),
+    onEditSuccess: () => setSavedBanner(t("users.banner_saved")),
   });
   const user = form.entity;
   const numericId = form.numericId ?? Number.NaN;
@@ -193,27 +200,27 @@ export function UserFormPage() {
     <div>
       <Link to="/admin/users" className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        Back to users
+        {t("user_form.back")}
       </Link>
 
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">{user?.email ?? "User"}</h2>
+          <h2 className="page-title">{user?.email ?? t("roles.fallback")}</h2>
           <p className="page-sub" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span className="cell-tag cell-tag-open">
               <i />
-              {ROLE_LABEL[role] ?? role}
+              {t(ROLE_KEYS[role] ?? "common:roles.fallback")}
             </span>
             {user && !user.is_active && (
               <span className="cell-tag cell-tag-closed">
                 <i />
-                Inactive
+                {t("admin.status_inactive")}
               </span>
             )}
-            {isSelf && <span className="muted small">This is you</span>}
+            {isSelf && <span className="muted small">{t("user_form.this_is_you")}</span>}
           </p>
         </div>
         {user && !user.is_active && isSuperAdmin && (
@@ -221,9 +228,10 @@ export function UserFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
+              data-testid="reactivate-button"
               onClick={() => reactivateDialogRef.current?.open()}
             >
-              Reactivate
+              {t("admin_form.reactivate")}
             </button>
           </div>
         )}
@@ -250,7 +258,7 @@ export function UserFormPage() {
           <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
             <div className="field">
               <label className="field-label" htmlFor="user-email">
-                Email
+                {t("users.col_email")}
               </label>
               <input
                 id="user-email"
@@ -263,7 +271,7 @@ export function UserFormPage() {
 
             <div className="field">
               <label className="field-label" htmlFor="user-full-name">
-                Full name
+                {t("users.col_full_name")}
               </label>
               <input
                 id="user-full-name"
@@ -282,7 +290,7 @@ export function UserFormPage() {
             <div className="form-2col">
               <div className="field">
                 <label className="field-label" htmlFor="user-language">
-                  Language
+                  {t("users.col_language")}
                 </label>
                 <select
                   id="user-language"
@@ -290,7 +298,7 @@ export function UserFormPage() {
                   value={language}
                   onChange={(event) => setLanguage(event.target.value)}
                 >
-                  {LANGUAGE_OPTIONS.map((option) => (
+                  {languageOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
@@ -299,12 +307,12 @@ export function UserFormPage() {
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="user-role">
-                  Role
+                  {t("users.col_role")}
                   {roleDisabled && (
                     <span className="muted small" style={{ marginLeft: 8 }}>
                       {isSelf
-                        ? "(you cannot change your own role)"
-                        : "(only super admins can manage this role)"}
+                        ? t("user_form.role_disabled_self")
+                        : t("user_form.role_disabled_actor")}
                     </span>
                   )}
                 </label>
@@ -317,11 +325,13 @@ export function UserFormPage() {
                 >
                   {/* Always include the current role so a disabled select still shows it. */}
                   {!availableRoleOptions.includes(role) && (
-                    <option value={role}>{ROLE_LABEL[role] ?? role}</option>
+                    <option value={role}>
+                      {t(ROLE_KEYS[role] ?? "common:roles.fallback")}
+                    </option>
                   )}
                   {availableRoleOptions.map((option) => (
                     <option key={option} value={option}>
-                      {ROLE_LABEL[option]}
+                      {t(ROLE_KEYS[option])}
                     </option>
                   ))}
                 </select>
@@ -338,51 +348,52 @@ export function UserFormPage() {
                 <button
                   type="button"
                   className="btn btn-ghost"
+                  data-testid="deactivate-button"
                   onClick={() => deactivateDialogRef.current?.open()}
                 >
-                  Deactivate
+                  {t("admin_form.deactivate")}
                 </button>
               )}
               <button type="submit" className="btn btn-primary" disabled={form.submitting}>
-                {form.submitting ? "Saving…" : "Save changes"}
+                {form.submitting ? t("admin_form.saving") : t("admin_form.save_changes")}
               </button>
             </div>
           </form>
 
           <section className="card page-form-narrow" style={{ marginTop: 16, padding: "20px 22px" }}>
-            <h3 className="section-title">Memberships</h3>
+            <h3 className="section-title">{t("user_form.memberships_title")}</h3>
             <p className="muted small" style={{ marginBottom: 12 }}>
-              Read-only summary. Memberships are managed from the entity detail pages.
+              {t("user_form.memberships_desc")}
             </p>
             <div className="detail-kv-list">
               <div className="detail-kv-row">
-                <span className="detail-kv-label">Companies</span>
+                <span className="detail-kv-label">{t("nav.companies")}</span>
                 <span className="detail-kv-val">
                   {user.company_ids.length === 0
                     ? "—"
                     : companyNames.length > 0
                       ? companyNames.join(", ")
-                      : `${user.company_ids.length} (loading names…)`}
+                      : t("user_form.loading_names", { count: user.company_ids.length })}
                 </span>
               </div>
               <div className="detail-kv-row">
-                <span className="detail-kv-label">Buildings</span>
+                <span className="detail-kv-label">{t("nav.buildings")}</span>
                 <span className="detail-kv-val">
                   {user.building_ids.length === 0
                     ? "—"
                     : buildingNames.length > 0
                       ? buildingNames.join(", ")
-                      : `${user.building_ids.length} (loading names…)`}
+                      : t("user_form.loading_names", { count: user.building_ids.length })}
                 </span>
               </div>
               <div className="detail-kv-row">
-                <span className="detail-kv-label">Customers</span>
+                <span className="detail-kv-label">{t("nav.customers")}</span>
                 <span className="detail-kv-val">
                   {user.customer_ids.length === 0
                     ? "—"
                     : customerNames.length > 0
                       ? customerNames.join(", ")
-                      : `${user.customer_ids.length} (loading names…)`}
+                      : t("user_form.loading_names", { count: user.customer_ids.length })}
                 </span>
               </div>
             </div>
@@ -392,18 +403,22 @@ export function UserFormPage() {
 
       <ConfirmDialog
         ref={deactivateDialogRef}
-        title={`Deactivate ${user?.email ?? "user"}?`}
-        body="They will lose access immediately. Their data and history are kept; a super admin can reactivate them later."
-        confirmLabel="Deactivate"
+        title={t("user_form.dialog_deactivate_title", {
+          email: user?.email ?? "",
+        })}
+        body={t("user_form.dialog_deactivate_body")}
+        confirmLabel={t("admin_form.deactivate")}
         onConfirm={handleConfirmDeactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={reactivateDialogRef}
-        title={`Reactivate ${user?.email ?? "user"}?`}
-        body="Reactivating restores their account. They will regain access using their existing password (or can request a reset)."
-        confirmLabel="Reactivate"
+        title={t("user_form.dialog_reactivate_title", {
+          email: user?.email ?? "",
+        })}
+        body={t("user_form.dialog_reactivate_body")}
+        confirmLabel={t("admin_form.reactivate")}
         onConfirm={handleConfirmReactivate}
         busy={actionBusy}
       />

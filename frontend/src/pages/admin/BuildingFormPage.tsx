@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addBuildingManager,
@@ -32,11 +33,14 @@ export function BuildingFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
+  const { t, i18n } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "Building saved." });
+  const [savedBanner, setSavedBanner] = useSavedBanner({
+    saved: t("buildings.banner_saved"),
+  });
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
@@ -54,7 +58,7 @@ export function BuildingFormPage() {
     createFn: createBuilding,
     updateFn: updateBuilding,
     validate: () => {
-      if (isCreate && company === "") return { company: "Pick a company." };
+      if (isCreate && company === "") return { company: t("building_form.error_pick_company") };
       return null;
     },
     buildPayload: () => {
@@ -77,7 +81,7 @@ export function BuildingFormPage() {
       setPostalCode(entity.postal_code);
     },
     successPath: (entity) => `/admin/buildings/${entity.id}?saved=ok`,
-    onEditSuccess: () => setSavedBanner("Building saved."),
+    onEditSuccess: () => setSavedBanner(t("buildings.banner_saved")),
   });
   const building = form.entity;
   const numericId = form.numericId;
@@ -212,26 +216,31 @@ export function BuildingFormPage() {
     }
   }
 
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  const buildingName = building?.name ?? t("building_form.fallback");
+
   return (
     <div>
       <Link to="/admin/buildings" className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        Back to buildings
+        {t("building_form.back")}
       </Link>
 
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
           <h2 className="page-title">
-            {isCreate ? "Create building" : `Edit ${building?.name ?? "building"}`}
+            {isCreate
+              ? t("buildings.create")
+              : t("building_form.edit_title", { name: buildingName })}
           </h2>
           {!isCreate && building && !building.is_active && (
             <p className="page-sub">
               <span className="cell-tag cell-tag-closed">
                 <i />
-                Inactive
+                {t("admin.status_inactive")}
               </span>
             </p>
           )}
@@ -241,9 +250,10 @@ export function BuildingFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
+              data-testid="reactivate-button"
               onClick={() => reactivateDialogRef.current?.open()}
             >
-              Reactivate
+              {t("admin_form.reactivate")}
             </button>
           </div>
         )}
@@ -269,7 +279,7 @@ export function BuildingFormPage() {
         <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
           <div className="field">
             <label className="field-label" htmlFor="building-company">
-              Company *
+              {t("company")} *
             </label>
             <select
               id="building-company"
@@ -283,7 +293,7 @@ export function BuildingFormPage() {
               required
             >
               <option value="" disabled>
-                Select company…
+                {t("invitations.select_company_placeholder")}
               </option>
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -291,7 +301,9 @@ export function BuildingFormPage() {
                 </option>
               ))}
               {!isCreate && building && !companies.some((c) => c.id === building.company) && (
-                <option value={building.company}>Company #{building.company}</option>
+                <option value={building.company}>
+                  {t("buildings.company_fallback", { id: building.company })}
+                </option>
               )}
             </select>
             {form.fieldErrors.company && (
@@ -303,7 +315,7 @@ export function BuildingFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="building-name">
-              Name *
+              {t("admin.col_name")} *
             </label>
             <input
               id="building-name"
@@ -322,7 +334,7 @@ export function BuildingFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="building-address">
-              Address
+              {t("admin.col_address")}
             </label>
             <input
               id="building-address"
@@ -336,7 +348,7 @@ export function BuildingFormPage() {
           <div className="form-2col">
             <div className="field">
               <label className="field-label" htmlFor="building-city">
-                City
+                {t("building_form.field_city")}
               </label>
               <input
                 id="building-city"
@@ -348,7 +360,7 @@ export function BuildingFormPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="building-postal">
-                Postal code
+                {t("building_form.field_postal_code")}
               </label>
               <input
                 id="building-postal"
@@ -362,7 +374,7 @@ export function BuildingFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="building-country">
-              Country
+              {t("building_form.field_country")}
             </label>
             <input
               id="building-country"
@@ -378,24 +390,32 @@ export function BuildingFormPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
+                data-testid="deactivate-button"
                 onClick={() => deactivateDialogRef.current?.open()}
               >
-                Deactivate
+                {t("admin_form.deactivate")}
               </button>
             )}
             <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
-              {form.submitting ? "Saving…" : isCreate ? "Create building" : "Save changes"}
+              {form.submitting
+                ? t("admin_form.saving")
+                : isCreate
+                  ? t("buildings.create")
+                  : t("admin_form.save_changes")}
             </button>
           </div>
         </form>
       )}
 
       {!isCreate && building && (
-        <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
-          <h3 className="section-title">Managers</h3>
+        <section
+          className="card"
+          data-testid="section-managers"
+          style={{ marginTop: 16, padding: "20px 22px" }}
+        >
+          <h3 className="section-title">{t("building_form.section_managers_title")}</h3>
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Users with the BUILDING_MANAGER role assigned to this building. Add an existing user
-            below; new users come in via invitations.
+            {t("building_form.section_managers_desc")}
           </p>
 
           {memberError && (
@@ -408,10 +428,10 @@ export function BuildingFormPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Email</th>
-                  <th>Full name</th>
-                  <th>Assigned</th>
-                  <th aria-label="Actions" />
+                  <th>{t("users.col_email")}</th>
+                  <th>{t("users.col_full_name")}</th>
+                  <th>{t("admin_form.col_assigned")}</th>
+                  <th aria-label={t("admin.col_actions")} />
                 </tr>
               </thead>
               <tbody>
@@ -420,7 +440,7 @@ export function BuildingFormPage() {
                     <td className="td-subject">{membership.user_email}</td>
                     <td>{membership.user_full_name || "—"}</td>
                     <td className="td-date">
-                      {new Date(membership.assigned_at).toLocaleDateString()}
+                      {new Date(membership.assigned_at).toLocaleDateString(dateLocale)}
                     </td>
                     <td>
                       <button
@@ -428,7 +448,7 @@ export function BuildingFormPage() {
                         className="btn btn-ghost btn-sm"
                         onClick={() => openRemoveDialog(membership)}
                       >
-                        Remove
+                        {t("admin_form.remove")}
                       </button>
                     </td>
                   </tr>
@@ -437,7 +457,7 @@ export function BuildingFormPage() {
             </table>
             {members.length === 0 && (
               <p className="muted small" style={{ padding: "12px 0" }}>
-                No managers assigned yet.
+                {t("building_form.no_managers_yet")}
               </p>
             )}
           </div>
@@ -448,7 +468,7 @@ export function BuildingFormPage() {
           >
             <div className="field" style={{ flex: 1, marginBottom: 0 }}>
               <label className="field-label" htmlFor="add-building-manager">
-                Add manager
+                {t("building_form.add_manager")}
               </label>
               <select
                 id="add-building-manager"
@@ -462,8 +482,8 @@ export function BuildingFormPage() {
               >
                 <option value="">
                   {availableUsers.length === 0
-                    ? "No eligible users"
-                    : "Select a user…"}
+                    ? t("admin_form.no_eligible_users")
+                    : t("admin_form.select_user")}
                 </option>
                 {availableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
@@ -476,9 +496,10 @@ export function BuildingFormPage() {
             <button
               type="submit"
               className="btn btn-primary"
+              data-testid="member-add-button"
               disabled={memberBusy || selectedUserId === ""}
             >
-              {memberBusy ? "Adding…" : "Add"}
+              {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
             </button>
           </form>
         </section>
@@ -486,27 +507,30 @@ export function BuildingFormPage() {
 
       <ConfirmDialog
         ref={deactivateDialogRef}
-        title={`Deactivate ${building?.name ?? "building"}?`}
-        body="It will be hidden from non-super-admin users. Tickets attached to it remain visible to staff."
-        confirmLabel="Deactivate"
+        title={t("building_form.dialog_deactivate_title", { name: buildingName })}
+        body={t("building_form.dialog_deactivate_body")}
+        confirmLabel={t("admin_form.deactivate")}
         onConfirm={handleConfirmDeactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={reactivateDialogRef}
-        title={`Reactivate ${building?.name ?? "building"}?`}
-        body="Reactivating restores it for all roles. Existing memberships and tickets are unchanged."
-        confirmLabel="Reactivate"
+        title={t("building_form.dialog_reactivate_title", { name: buildingName })}
+        body={t("building_form.dialog_reactivate_body")}
+        confirmLabel={t("admin_form.reactivate")}
         onConfirm={handleConfirmReactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={removeDialogRef}
-        title={`Remove ${removeTarget?.user_email ?? "manager"} from ${building?.name ?? "building"}?`}
-        body="Their other memberships are unaffected. They can be re-added later."
-        confirmLabel="Remove"
+        title={t("building_form.dialog_remove_title", {
+          email: removeTarget?.user_email ?? "",
+          name: buildingName,
+        })}
+        body={t("building_form.dialog_remove_body")}
+        confirmLabel={t("admin_form.remove")}
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}
         busy={memberBusy}

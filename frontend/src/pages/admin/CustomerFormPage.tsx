@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addCustomerUser,
@@ -30,20 +31,26 @@ import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
-const LANGUAGE_OPTIONS = [
-  { value: "nl", label: "Dutch (nl)" },
-  { value: "en", label: "English (en)" },
-];
-
 export function CustomerFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
+  const { t, i18n } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "Customer saved." });
+  const languageOptions = useMemo(
+    () => [
+      { value: "nl", label: `${t("language_dutch")} (nl)` },
+      { value: "en", label: `${t("language_english")} (en)` },
+    ],
+    [t],
+  );
+
+  const [savedBanner, setSavedBanner] = useSavedBanner({
+    saved: t("customers.banner_saved"),
+  });
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
@@ -64,8 +71,8 @@ export function CustomerFormPage() {
     validate: () => {
       if (!isCreate) return null;
       const errs: AdminFieldErrors = {};
-      if (company === "") errs.company = "Pick a company.";
-      if (building === "") errs.building = "Pick a building.";
+      if (company === "") errs.company = t("customer_form.error_pick_company");
+      if (building === "") errs.building = t("customer_form.error_pick_building");
       return Object.keys(errs).length > 0 ? errs : null;
     },
     buildPayload: () => {
@@ -90,7 +97,7 @@ export function CustomerFormPage() {
       setLanguage(entity.language);
     },
     successPath: (entity) => `/admin/customers/${entity.id}?saved=ok`,
-    onEditSuccess: () => setSavedBanner("Customer saved."),
+    onEditSuccess: () => setSavedBanner(t("customers.banner_saved")),
   });
   const customer = form.entity;
   const numericId = form.numericId;
@@ -258,26 +265,31 @@ export function CustomerFormPage() {
     }
   }
 
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  const customerName = customer?.name ?? t("customer_form.fallback");
+
   return (
     <div>
       <Link to="/admin/customers" className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        Back to customers
+        {t("customer_form.back")}
       </Link>
 
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
           <h2 className="page-title">
-            {isCreate ? "Create customer" : `Edit ${customer?.name ?? "customer"}`}
+            {isCreate
+              ? t("customers.create")
+              : t("customer_form.edit_title", { name: customerName })}
           </h2>
           {!isCreate && customer && !customer.is_active && (
             <p className="page-sub">
               <span className="cell-tag cell-tag-closed">
                 <i />
-                Inactive
+                {t("admin.status_inactive")}
               </span>
             </p>
           )}
@@ -287,9 +299,10 @@ export function CustomerFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
+              data-testid="reactivate-button"
               onClick={() => reactivateDialogRef.current?.open()}
             >
-              Reactivate
+              {t("admin_form.reactivate")}
             </button>
           </div>
         )}
@@ -316,7 +329,7 @@ export function CustomerFormPage() {
           <div className="form-2col">
             <div className="field">
               <label className="field-label" htmlFor="customer-company">
-                Company *
+                {t("company")} *
               </label>
               <select
                 id="customer-company"
@@ -330,7 +343,7 @@ export function CustomerFormPage() {
                 required
               >
                 <option value="" disabled>
-                  Select company…
+                  {t("invitations.select_company_placeholder")}
                 </option>
                 {companies.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -340,7 +353,9 @@ export function CustomerFormPage() {
                 {!isCreate &&
                   customer &&
                   !companies.some((c) => c.id === customer.company) && (
-                    <option value={customer.company}>Company #{customer.company}</option>
+                    <option value={customer.company}>
+                      {t("buildings.company_fallback", { id: customer.company })}
+                    </option>
                   )}
               </select>
               {form.fieldErrors.company && (
@@ -351,7 +366,7 @@ export function CustomerFormPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="customer-building">
-                Building *
+                {t("building")} *
               </label>
               <select
                 id="customer-building"
@@ -365,7 +380,9 @@ export function CustomerFormPage() {
                 required
               >
                 <option value="" disabled>
-                  {company === "" ? "Select a company first" : "Select building…"}
+                  {company === ""
+                    ? t("customer_form.select_company_first")
+                    : t("customer_form.select_building_placeholder")}
                 </option>
                 {buildings.map((b) => (
                   <option key={b.id} value={b.id}>
@@ -375,7 +392,9 @@ export function CustomerFormPage() {
                 {!isCreate &&
                   customer &&
                   !buildings.some((b) => b.id === customer.building) && (
-                    <option value={customer.building}>Building #{customer.building}</option>
+                    <option value={customer.building}>
+                      {t("customers.building_fallback", { id: customer.building })}
+                    </option>
                   )}
               </select>
               {form.fieldErrors.building && (
@@ -388,7 +407,7 @@ export function CustomerFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="customer-name">
-              Name *
+              {t("admin.col_name")} *
             </label>
             <input
               id="customer-name"
@@ -408,7 +427,7 @@ export function CustomerFormPage() {
           <div className="form-2col">
             <div className="field">
               <label className="field-label" htmlFor="customer-email">
-                Contact email
+                {t("customers.col_contact_email")}
               </label>
               <input
                 id="customer-email"
@@ -425,7 +444,7 @@ export function CustomerFormPage() {
             </div>
             <div className="field">
               <label className="field-label" htmlFor="customer-phone">
-                Phone
+                {t("customer_form.field_phone")}
               </label>
               <input
                 id="customer-phone"
@@ -439,7 +458,7 @@ export function CustomerFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="customer-language">
-              Language
+              {t("users.col_language")}
             </label>
             <select
               id="customer-language"
@@ -447,7 +466,7 @@ export function CustomerFormPage() {
               value={language}
               onChange={(event) => setLanguage(event.target.value)}
             >
-              {LANGUAGE_OPTIONS.map((option) => (
+              {languageOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -460,24 +479,32 @@ export function CustomerFormPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
+                data-testid="deactivate-button"
                 onClick={() => deactivateDialogRef.current?.open()}
               >
-                Deactivate
+                {t("admin_form.deactivate")}
               </button>
             )}
             <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
-              {form.submitting ? "Saving…" : isCreate ? "Create customer" : "Save changes"}
+              {form.submitting
+                ? t("admin_form.saving")
+                : isCreate
+                  ? t("customers.create")
+                  : t("admin_form.save_changes")}
             </button>
           </div>
         </form>
       )}
 
       {!isCreate && customer && (
-        <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
-          <h3 className="section-title">Users</h3>
+        <section
+          className="card"
+          data-testid="section-customer-users"
+          style={{ marginTop: 16, padding: "20px 22px" }}
+        >
+          <h3 className="section-title">{t("customer_form.section_users_title")}</h3>
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Customer-side users (CUSTOMER_USER role) linked to this customer. Add an existing user
-            below; new users come in via invitations.
+            {t("customer_form.section_users_desc")}
           </p>
 
           {memberError && (
@@ -490,10 +517,10 @@ export function CustomerFormPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Email</th>
-                  <th>Full name</th>
-                  <th>Linked</th>
-                  <th aria-label="Actions" />
+                  <th>{t("users.col_email")}</th>
+                  <th>{t("users.col_full_name")}</th>
+                  <th>{t("customer_form.col_linked")}</th>
+                  <th aria-label={t("admin.col_actions")} />
                 </tr>
               </thead>
               <tbody>
@@ -502,7 +529,7 @@ export function CustomerFormPage() {
                     <td className="td-subject">{membership.user_email}</td>
                     <td>{membership.user_full_name || "—"}</td>
                     <td className="td-date">
-                      {new Date(membership.created_at).toLocaleDateString()}
+                      {new Date(membership.created_at).toLocaleDateString(dateLocale)}
                     </td>
                     <td>
                       <button
@@ -510,7 +537,7 @@ export function CustomerFormPage() {
                         className="btn btn-ghost btn-sm"
                         onClick={() => openRemoveDialog(membership)}
                       >
-                        Remove
+                        {t("admin_form.remove")}
                       </button>
                     </td>
                   </tr>
@@ -519,7 +546,7 @@ export function CustomerFormPage() {
             </table>
             {members.length === 0 && (
               <p className="muted small" style={{ padding: "12px 0" }}>
-                No users linked yet.
+                {t("customer_form.no_users_yet")}
               </p>
             )}
           </div>
@@ -530,7 +557,7 @@ export function CustomerFormPage() {
           >
             <div className="field" style={{ flex: 1, marginBottom: 0 }}>
               <label className="field-label" htmlFor="add-customer-user">
-                Add user
+                {t("customer_form.add_user")}
               </label>
               <select
                 id="add-customer-user"
@@ -544,8 +571,8 @@ export function CustomerFormPage() {
               >
                 <option value="">
                   {availableUsers.length === 0
-                    ? "No eligible users"
-                    : "Select a user…"}
+                    ? t("admin_form.no_eligible_users")
+                    : t("admin_form.select_user")}
                 </option>
                 {availableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
@@ -558,9 +585,10 @@ export function CustomerFormPage() {
             <button
               type="submit"
               className="btn btn-primary"
+              data-testid="member-add-button"
               disabled={memberBusy || selectedUserId === ""}
             >
-              {memberBusy ? "Adding…" : "Add"}
+              {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
             </button>
           </form>
         </section>
@@ -568,27 +596,30 @@ export function CustomerFormPage() {
 
       <ConfirmDialog
         ref={deactivateDialogRef}
-        title={`Deactivate ${customer?.name ?? "customer"}?`}
-        body="It will be hidden from non-super-admin users. Tickets attached to it remain visible to staff."
-        confirmLabel="Deactivate"
+        title={t("customer_form.dialog_deactivate_title", { name: customerName })}
+        body={t("customer_form.dialog_deactivate_body")}
+        confirmLabel={t("admin_form.deactivate")}
         onConfirm={handleConfirmDeactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={reactivateDialogRef}
-        title={`Reactivate ${customer?.name ?? "customer"}?`}
-        body="Reactivating restores it for all roles. Existing memberships and tickets are unchanged."
-        confirmLabel="Reactivate"
+        title={t("customer_form.dialog_reactivate_title", { name: customerName })}
+        body={t("customer_form.dialog_reactivate_body")}
+        confirmLabel={t("admin_form.reactivate")}
         onConfirm={handleConfirmReactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={removeDialogRef}
-        title={`Remove ${removeTarget?.user_email ?? "user"} from ${customer?.name ?? "customer"}?`}
-        body="Their other memberships are unaffected. They can be re-added later."
-        confirmLabel="Remove"
+        title={t("customer_form.dialog_remove_title", {
+          email: removeTarget?.user_email ?? "",
+          name: customerName,
+        })}
+        body={t("customer_form.dialog_remove_body")}
+        confirmLabel={t("admin_form.remove")}
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}
         busy={memberBusy}

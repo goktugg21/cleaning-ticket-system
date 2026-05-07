@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { forwardRef, useImperativeHandle, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface ConfirmDialogHandle {
   open: () => void;
@@ -24,7 +25,7 @@ export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>
       title,
       body,
       confirmLabel,
-      cancelLabel = "Cancel",
+      cancelLabel,
       onConfirm,
       onCancel,
       busy = false,
@@ -33,6 +34,8 @@ export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>
     },
     ref,
   ) {
+    const { t } = useTranslation("common");
+    const resolvedCancelLabel = cancelLabel ?? t("cancel");
     const dialogRef = useRef<HTMLDialogElement>(null);
 
     useImperativeHandle(
@@ -76,7 +79,7 @@ export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>
             onClick={handleCancel}
             disabled={busy}
           >
-            {cancelLabel}
+            {resolvedCancelLabel}
           </button>
           <button
             type="button"

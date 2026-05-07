@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addCompanyAdmin,
@@ -26,20 +27,26 @@ import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
-const LANGUAGE_OPTIONS = [
-  { value: "nl", label: "Dutch (nl)" },
-  { value: "en", label: "English (en)" },
-];
-
 export function CompanyFormPage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
+  const { t, i18n } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  const [savedBanner, setSavedBanner] = useSavedBanner({ saved: "Company saved." });
+  const languageOptions = useMemo(
+    () => [
+      { value: "nl", label: `${t("language_dutch")} (nl)` },
+      { value: "en", label: `${t("language_english")} (en)` },
+    ],
+    [t],
+  );
+
+  const [savedBanner, setSavedBanner] = useSavedBanner({
+    saved: t("companies.banner_saved"),
+  });
 
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -68,7 +75,7 @@ export function CompanyFormPage() {
       setDefaultLanguage(entity.default_language);
     },
     successPath: (entity) => `/admin/companies/${entity.id}?saved=ok`,
-    onEditSuccess: () => setSavedBanner("Company saved."),
+    onEditSuccess: () => setSavedBanner(t("companies.banner_saved")),
   });
   const company = form.entity;
   const numericId = form.numericId;
@@ -159,17 +166,16 @@ export function CompanyFormPage() {
       <div>
         <Link to="/admin/companies" className="link-back">
           <ChevronLeft size={14} strokeWidth={2.5} />
-          Back to companies
+          {t("company_form.back")}
         </Link>
         <div className="page-header">
           <div>
             <div className="eyebrow" style={{ marginBottom: 8 }}>
-              Admin
+              {t("nav.admin_group")}
             </div>
-            <h2 className="page-title">Forbidden</h2>
+            <h2 className="page-title">{t("company_form.forbidden_title")}</h2>
             <p className="page-sub">
-              Only super admins can create new companies. Ask one to create it for you, or edit an
-              existing company below.
+              {t("company_form.forbidden_desc")}
             </p>
           </div>
         </div>
@@ -209,26 +215,31 @@ export function CompanyFormPage() {
     }
   }
 
+  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  const companyName = company?.name ?? t("company_form.fallback");
+
   return (
     <div>
       <Link to="/admin/companies" className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        Back to companies
+        {t("company_form.back")}
       </Link>
 
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
           <h2 className="page-title">
-            {isCreate ? "Create company" : `Edit ${company?.name ?? "company"}`}
+            {isCreate
+              ? t("companies.create")
+              : t("company_form.edit_title", { name: companyName })}
           </h2>
           {!isCreate && company && !company.is_active && (
             <p className="page-sub">
               <span className="cell-tag cell-tag-closed">
                 <i />
-                Inactive
+                {t("admin.status_inactive")}
               </span>
             </p>
           )}
@@ -238,9 +249,10 @@ export function CompanyFormPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
+              data-testid="reactivate-button"
               onClick={() => reactivateDialogRef.current?.open()}
             >
-              Reactivate
+              {t("admin_form.reactivate")}
             </button>
           </div>
         )}
@@ -266,7 +278,7 @@ export function CompanyFormPage() {
         <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
           <div className="field">
             <label className="field-label" htmlFor="company-name">
-              Name *
+              {t("admin.col_name")} *
             </label>
             <input
               id="company-name"
@@ -285,10 +297,10 @@ export function CompanyFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="company-slug">
-              Slug
+              {t("companies.col_slug")}
               {slugReadOnly && (
                 <span className="muted small" style={{ marginLeft: 8 }}>
-                  (only super admins can change slugs)
+                  {t("company_form.slug_readonly_hint")}
                 </span>
               )}
             </label>
@@ -299,7 +311,7 @@ export function CompanyFormPage() {
               value={slug}
               onChange={(event) => setSlug(event.target.value)}
               readOnly={slugReadOnly}
-              placeholder={isCreate ? "Leave blank to auto-generate from the name" : ""}
+              placeholder={isCreate ? t("company_form.slug_placeholder") : ""}
             />
             {form.fieldErrors.slug && (
               <div className="alert-error login-error" role="alert">
@@ -310,7 +322,7 @@ export function CompanyFormPage() {
 
           <div className="field">
             <label className="field-label" htmlFor="company-language">
-              Default language
+              {t("companies.col_default_language")}
             </label>
             <select
               id="company-language"
@@ -318,7 +330,7 @@ export function CompanyFormPage() {
               value={defaultLanguage}
               onChange={(event) => setDefaultLanguage(event.target.value)}
             >
-              {LANGUAGE_OPTIONS.map((option) => (
+              {languageOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -336,24 +348,32 @@ export function CompanyFormPage() {
               <button
                 type="button"
                 className="btn btn-ghost"
+                data-testid="deactivate-button"
                 onClick={() => deactivateDialogRef.current?.open()}
               >
-                Deactivate
+                {t("admin_form.deactivate")}
               </button>
             )}
             <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
-              {form.submitting ? "Saving…" : isCreate ? "Create company" : "Save changes"}
+              {form.submitting
+                ? t("admin_form.saving")
+                : isCreate
+                  ? t("companies.create")
+                  : t("admin_form.save_changes")}
             </button>
           </div>
         </form>
       )}
 
       {!isCreate && company && (
-        <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
-          <h3 className="section-title">Admins</h3>
+        <section
+          className="card"
+          data-testid="section-admins"
+          style={{ marginTop: 16, padding: "20px 22px" }}
+        >
+          <h3 className="section-title">{t("company_form.section_admins_title")}</h3>
           <p className="muted small" style={{ marginBottom: 12 }}>
-            Users with the COMPANY_ADMIN role linked to this company. Add an existing user
-            below; new users come in via invitations.
+            {t("company_form.section_admins_desc")}
           </p>
 
           {memberError && (
@@ -366,10 +386,10 @@ export function CompanyFormPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Email</th>
-                  <th>Full name</th>
-                  <th>Added</th>
-                  <th aria-label="Actions" />
+                  <th>{t("users.col_email")}</th>
+                  <th>{t("users.col_full_name")}</th>
+                  <th>{t("admin_form.col_added")}</th>
+                  <th aria-label={t("admin.col_actions")} />
                 </tr>
               </thead>
               <tbody>
@@ -378,7 +398,7 @@ export function CompanyFormPage() {
                     <td className="td-subject">{membership.user_email}</td>
                     <td>{membership.user_full_name || "—"}</td>
                     <td className="td-date">
-                      {new Date(membership.created_at).toLocaleDateString()}
+                      {new Date(membership.created_at).toLocaleDateString(dateLocale)}
                     </td>
                     <td>
                       <button
@@ -386,7 +406,7 @@ export function CompanyFormPage() {
                         className="btn btn-ghost btn-sm"
                         onClick={() => openRemoveDialog(membership)}
                       >
-                        Remove
+                        {t("admin_form.remove")}
                       </button>
                     </td>
                   </tr>
@@ -395,7 +415,7 @@ export function CompanyFormPage() {
             </table>
             {members.length === 0 && (
               <p className="muted small" style={{ padding: "12px 0" }}>
-                No admins linked yet.
+                {t("company_form.no_admins_yet")}
               </p>
             )}
           </div>
@@ -406,7 +426,7 @@ export function CompanyFormPage() {
           >
             <div className="field" style={{ flex: 1, marginBottom: 0 }}>
               <label className="field-label" htmlFor="add-company-admin">
-                Add admin
+                {t("company_form.add_admin")}
               </label>
               <select
                 id="add-company-admin"
@@ -420,8 +440,8 @@ export function CompanyFormPage() {
               >
                 <option value="">
                   {availableUsers.length === 0
-                    ? "No eligible users"
-                    : "Select a user…"}
+                    ? t("admin_form.no_eligible_users")
+                    : t("admin_form.select_user")}
                 </option>
                 {availableUsers.map((user) => (
                   <option key={user.id} value={user.id}>
@@ -434,9 +454,10 @@ export function CompanyFormPage() {
             <button
               type="submit"
               className="btn btn-primary"
+              data-testid="member-add-button"
               disabled={memberBusy || selectedUserId === ""}
             >
-              {memberBusy ? "Adding…" : "Add"}
+              {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
             </button>
           </form>
         </section>
@@ -444,27 +465,30 @@ export function CompanyFormPage() {
 
       <ConfirmDialog
         ref={deactivateDialogRef}
-        title={`Deactivate ${company?.name ?? "company"}?`}
-        body="It will be hidden from non-super-admin users. Tickets attached to it remain visible to staff."
-        confirmLabel="Deactivate"
+        title={t("company_form.dialog_deactivate_title", { name: companyName })}
+        body={t("company_form.dialog_deactivate_body")}
+        confirmLabel={t("admin_form.deactivate")}
         onConfirm={handleConfirmDeactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={reactivateDialogRef}
-        title={`Reactivate ${company?.name ?? "company"}?`}
-        body="Reactivating restores it for all roles. Existing memberships and tickets are unchanged."
-        confirmLabel="Reactivate"
+        title={t("company_form.dialog_reactivate_title", { name: companyName })}
+        body={t("company_form.dialog_reactivate_body")}
+        confirmLabel={t("admin_form.reactivate")}
         onConfirm={handleConfirmReactivate}
         busy={actionBusy}
       />
 
       <ConfirmDialog
         ref={removeDialogRef}
-        title={`Remove ${removeTarget?.user_email ?? "user"} from ${company?.name ?? "company"}?`}
-        body="Their other memberships are unaffected. They can be re-added later."
-        confirmLabel="Remove"
+        title={t("company_form.dialog_remove_title", {
+          email: removeTarget?.user_email ?? "",
+          name: companyName,
+        })}
+        body={t("company_form.dialog_remove_body")}
+        confirmLabel={t("admin_form.remove")}
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}
         busy={memberBusy}
