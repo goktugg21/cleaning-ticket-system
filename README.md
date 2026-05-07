@@ -41,3 +41,17 @@ Copy environment files:
 ```bash
 cp .env.example .env
 cp frontend/.env.example frontend/.env
+```
+
+Start the stack:
+
+```bash
+docker compose up -d
+```
+
+### Email in development
+
+Outgoing email is captured by the `mailhog` service rather than delivered.
+Inspect captured messages at http://localhost:8025. The default `.env.example`
+already points SMTP at `mailhog:1025`; for production replace with real SMTP
+credentials (see `.env.production.example`).
