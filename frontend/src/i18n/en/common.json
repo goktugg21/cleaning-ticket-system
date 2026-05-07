@@ -229,6 +229,8 @@
   "admin_form.col_assigned": "Assigned",
 
   "user_form.back": "Back to users",
+  "user_form.card_label_title": "Profile",
+  "user_form.card_label_desc": "Email, name, language and role for this user.",
   "user_form.this_is_you": "This is you",
   "user_form.role_disabled_self": "(you cannot change your own role)",
   "user_form.role_disabled_actor": "(only super admins can manage this role)",
@@ -241,6 +243,8 @@
   "user_form.dialog_reactivate_body": "Reactivating restores their account. They will regain access using their existing password (or can request a reset).",
 
   "company_form.back": "Back to companies",
+  "company_form.card_label_title": "Company",
+  "company_form.card_label_desc": "Name, slug and default language.",
   "company_form.forbidden_title": "Forbidden",
   "company_form.forbidden_desc": "Only super admins can create new companies. Ask one to create it for you, or edit an existing company below.",
   "company_form.edit_title": "Edit {{name}}",
@@ -259,6 +263,8 @@
   "company_form.dialog_remove_body": "Their other memberships are unaffected. They can be re-added later.",
 
   "building_form.back": "Back to buildings",
+  "building_form.card_label_title": "Building",
+  "building_form.card_label_desc": "Company, name and address of this location.",
   "building_form.edit_title": "Edit {{name}}",
   "building_form.fallback": "building",
   "building_form.error_pick_company": "Pick a company.",
@@ -277,6 +283,8 @@
   "building_form.dialog_remove_body": "Their other memberships are unaffected. They can be re-added later.",
 
   "customer_form.back": "Back to customers",
+  "customer_form.card_label_title": "Customer",
+  "customer_form.card_label_desc": "Company, building and contact details.",
   "customer_form.edit_title": "Edit {{name}}",
   "customer_form.fallback": "customer",
   "customer_form.error_pick_company": "Pick a company.",

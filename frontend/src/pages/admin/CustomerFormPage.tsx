@@ -325,7 +325,10 @@ export function CustomerFormPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit}>
+          <div className="form-section">
+            <div className="form-section-title">{t("customer_form.card_label_title")}</div>
+            <div className="form-section-helper">{t("customer_form.card_label_desc")}</div>
           <div className="form-2col">
             <div className="field">
               <label className="field-label" htmlFor="customer-company">
@@ -474,7 +477,8 @@ export function CustomerFormPage() {
             </select>
           </div>
 
-          <div className="form-actions" style={{ marginTop: 12 }}>
+          </div>
+          <div className="form-actions">
             {!isCreate && customer && customer.is_active && (
               <button
                 type="button"

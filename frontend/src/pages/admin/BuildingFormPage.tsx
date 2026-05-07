@@ -276,7 +276,10 @@ export function BuildingFormPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit}>
+          <div className="form-section">
+            <div className="form-section-title">{t("building_form.card_label_title")}</div>
+            <div className="form-section-helper">{t("building_form.card_label_desc")}</div>
           <div className="field">
             <label className="field-label" htmlFor="building-company">
               {t("company")} *
@@ -385,7 +388,8 @@ export function BuildingFormPage() {
             />
           </div>
 
-          <div className="form-actions" style={{ marginTop: 12 }}>
+          </div>
+          <div className="form-actions">
             {!isCreate && building && building.is_active && (
               <button
                 type="button"

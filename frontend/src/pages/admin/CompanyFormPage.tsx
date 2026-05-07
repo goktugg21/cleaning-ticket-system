@@ -275,7 +275,10 @@ export function CompanyFormPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
-        <form className="card page-form-narrow" onSubmit={form.handleSubmit} style={{ padding: "20px 22px" }}>
+        <form className="card" onSubmit={form.handleSubmit}>
+          <div className="form-section">
+            <div className="form-section-title">{t("company_form.card_label_title")}</div>
+            <div className="form-section-helper">{t("company_form.card_label_desc")}</div>
           <div className="field">
             <label className="field-label" htmlFor="company-name">
               {t("admin.col_name")} *
@@ -343,7 +346,8 @@ export function CompanyFormPage() {
             )}
           </div>
 
-          <div className="form-actions" style={{ marginTop: 12 }}>
+          </div>
+          <div className="form-actions">
             {!isCreate && company && company.is_active && (
               <button
                 type="button"
