@@ -115,6 +115,8 @@
   "invitations.select_company_first": "Selecteer eerst een bedrijf.",
   "invitations.send_invitation": "Uitnodiging versturen",
   "invitations.sending": "Versturen…",
+  "invitations.all_companies": "Alle bedrijven",
+  "invitations.select_company_placeholder": "Selecteer bedrijf…",
   "invitations.pagination_page": "Pagina {{page}} · {{total}} totaal",
   "invitations.pagination_previous": "Vorige",
   "invitations.pagination_next": "Volgende",
