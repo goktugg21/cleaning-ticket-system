@@ -73,9 +73,9 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
 
         self.assertTrue(logs)
         for log in logs:
-            self.assertIn("Approved on behalf of customer", log.subject)
+            self.assertIn("Goedgekeurd namens de klant", log.subject)
             self.assertIn(self.super_admin.email, log.subject)
-            self.assertIn("on behalf of the customer", log.body)
+            self.assertIn("namens de klant", log.body)
 
     def test_company_admin_override_uses_override_subject(self):
         logs = send_ticket_status_changed_email(
@@ -88,9 +88,9 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
 
         self.assertTrue(logs)
         for log in logs:
-            self.assertIn("Rejected on behalf of customer", log.subject)
+            self.assertIn("Afgewezen namens de klant", log.subject)
             self.assertIn(self.company_admin.email, log.subject)
-            self.assertIn("on behalf of the customer", log.body)
+            self.assertIn("namens de klant", log.body)
 
     def test_normal_status_change_does_not_use_override_copy(self):
         logs = send_ticket_status_changed_email(
@@ -102,8 +102,8 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
 
         self.assertTrue(logs)
         for log in logs:
-            self.assertIn("Status changed", log.subject)
-            self.assertNotIn("on behalf of customer", log.subject)
+            self.assertIn("Status gewijzigd", log.subject)
+            self.assertNotIn("namens de klant", log.subject)
 
     def test_previous_assignee_is_notified_on_reassignment(self):
         # Simulate the assign-then-reassign flow: ticket ends up assigned to
@@ -119,7 +119,7 @@ class NotificationEmailTests(TenantFixtureMixin, TestCase):
 
         self.assertEqual([log.recipient_email for log in logs], [self.manager.email])
         self.assertEqual(logs[0].event_type, NotificationEventType.TICKET_UNASSIGNED)
-        self.assertIn("Removed from your assigned tickets", logs[0].subject)
+        self.assertIn("Toewijzing ingetrokken", logs[0].subject)
 
     def test_previous_assignee_is_notified_on_unassign(self):
         # Ticket is now unassigned (assigned_to = None) but the previous
