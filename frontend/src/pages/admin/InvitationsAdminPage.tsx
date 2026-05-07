@@ -27,11 +27,11 @@ import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type StatusTab = "PENDING" | "ACCEPTED" | "EXPIRED" | "ALL";
 
-const ROLE_LABEL: Record<Role, string> = {
-  SUPER_ADMIN: "Super admin",
-  COMPANY_ADMIN: "Company admin",
-  BUILDING_MANAGER: "Building manager",
-  CUSTOMER_USER: "Customer user",
+const ROLE_KEYS: Record<Role, string> = {
+  SUPER_ADMIN: "common:roles.super_admin",
+  COMPANY_ADMIN: "common:roles.company_admin",
+  BUILDING_MANAGER: "common:roles.building_manager",
+  CUSTOMER_USER: "common:roles.customer_user",
 };
 
 function statusPillClass(status: InvitationAdmin["status"]): string {
@@ -453,7 +453,7 @@ export function InvitationsAdminPage() {
                   >
                     {availableRoles.map((role) => (
                       <option key={role} value={role}>
-                        {ROLE_LABEL[role]}
+                        {t(ROLE_KEYS[role])}
                       </option>
                     ))}
                   </select>
@@ -483,8 +483,8 @@ export function InvitationsAdminPage() {
                     >
                       <option value="">
                         {formRole === "COMPANY_ADMIN"
-                          ? "Select company…"
-                          : "All companies"}
+                          ? t("invitations.select_company_placeholder")
+                          : t("invitations.all_companies")}
                       </option>
                       {companies.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -709,7 +709,7 @@ export function InvitationsAdminPage() {
                         </div>
                       </div>
                     </td>
-                    <td>{ROLE_LABEL[invitation.role] ?? invitation.role}</td>
+                    <td>{t(ROLE_KEYS[invitation.role] ?? "common:roles.fallback")}</td>
                     <td>
                       <span className={statusPillClass(invitation.status)}>
                         <span className="status-pill-dot" />

@@ -115,6 +115,8 @@
   "invitations.select_company_first": "Select a company first.",
   "invitations.send_invitation": "Send invitation",
   "invitations.sending": "Sending…",
+  "invitations.all_companies": "All companies",
+  "invitations.select_company_placeholder": "Select company…",
   "invitations.pagination_page": "Page {{page}} · {{total}} total",
   "invitations.pagination_previous": "Previous",
   "invitations.pagination_next": "Next",
