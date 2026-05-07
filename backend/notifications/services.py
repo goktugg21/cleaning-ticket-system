@@ -3,7 +3,7 @@ from django.core.mail import send_mail
 from django.db.models import Q
 
 from accounts.models import User, UserRole
-from tickets.models import TicketStatus
+from tickets.models import TicketPriority, TicketStatus, TicketType
 
 from .models import (
     NotificationEventType,
@@ -92,32 +92,92 @@ def _ticket_customer_users(ticket):
     return _dedupe_users(users)
 
 
+# Dutch status labels for email rendering. The model's TextChoices labels
+# remain English (canonical machine label) and stay in sync with frontend
+# i18n keys; this lookup table only governs how statuses appear in email
+# bodies and subjects, which Sprint B5 standardised on Dutch.
+_STATUS_LABEL_NL = {
+    TicketStatus.OPEN: "Open",
+    TicketStatus.IN_PROGRESS: "In behandeling",
+    TicketStatus.WAITING_CUSTOMER_APPROVAL: "Wacht op goedkeuring",
+    TicketStatus.REJECTED: "Afgewezen",
+    TicketStatus.APPROVED: "Goedgekeurd",
+    TicketStatus.CLOSED: "Gesloten",
+    TicketStatus.REOPENED_BY_ADMIN: "Heropend",
+}
+
+
+_ROLE_LABEL_NL = {
+    UserRole.SUPER_ADMIN: "Superbeheerder",
+    UserRole.COMPANY_ADMIN: "Bedrijfsbeheerder",
+    UserRole.BUILDING_MANAGER: "Beheerder",
+    UserRole.CUSTOMER_USER: "Klant",
+}
+
+
+_TYPE_LABEL_NL = {
+    TicketType.REPORT: "Melding",
+    TicketType.COMPLAINT: "Klacht",
+    TicketType.REQUEST: "Verzoek",
+    TicketType.SUGGESTION: "Suggestie",
+    TicketType.QUOTE_REQUEST: "Offerteaanvraag",
+}
+
+
+_PRIORITY_LABEL_NL = {
+    TicketPriority.NORMAL: "Normaal",
+    TicketPriority.HIGH: "Hoog",
+    TicketPriority.URGENT: "Urgent",
+}
+
+
 def _status_label(value):
     try:
-        return TicketStatus(value).label
-    except ValueError:
+        return _STATUS_LABEL_NL[TicketStatus(value)]
+    except (ValueError, KeyError):
+        return str(value)
+
+
+def _role_label(value):
+    try:
+        return _ROLE_LABEL_NL[UserRole(value)]
+    except (ValueError, KeyError):
+        return str(value)
+
+
+def _type_label(value):
+    try:
+        return _TYPE_LABEL_NL[TicketType(value)]
+    except (ValueError, KeyError):
+        return str(value)
+
+
+def _priority_label(value):
+    try:
+        return _PRIORITY_LABEL_NL[TicketPriority(value)]
+    except (ValueError, KeyError):
         return str(value)
 
 
 def _ticket_summary(ticket):
     lines = [
         f"Ticket: {ticket.ticket_no}",
-        f"Title: {ticket.title}",
+        f"Onderwerp: {ticket.title}",
         f"Status: {_status_label(ticket.status)}",
-        f"Priority: {ticket.priority}",
-        f"Type: {ticket.type}",
-        f"Company: {ticket.company.name}",
-        f"Building: {ticket.building.name}",
-        f"Customer: {ticket.customer.name}",
+        f"Prioriteit: {_priority_label(ticket.priority)}",
+        f"Type: {_type_label(ticket.type)}",
+        f"Bedrijf: {ticket.company.name}",
+        f"Gebouw: {ticket.building.name}",
+        f"Klant: {ticket.customer.name}",
     ]
 
     if ticket.room_label:
-        lines.append(f"Room: {ticket.room_label}")
+        lines.append(f"Ruimte: {ticket.room_label}")
 
     if ticket.assigned_to_id:
-        lines.append(f"Assigned to: {ticket.assigned_to.email}")
+        lines.append(f"Toegewezen aan: {ticket.assigned_to.email}")
 
-    lines.extend(["", "Description:", ticket.description])
+    lines.extend(["", "Omschrijving:", ticket.description])
 
     return "\n".join(lines)
 
@@ -227,12 +287,17 @@ def _send_to_users(ticket, users, event_type, subject, body, actor=None):
 
 
 def send_ticket_created_email(ticket, actor=None):
-    subject = f"[{ticket.ticket_no}] New ticket: {ticket.title}"
+    subject = f"[{ticket.ticket_no}] Nieuwe ticket aangemaakt: {ticket.title}"
     body = "\n".join(
         [
-            "A new ticket was created.",
+            "Er is een nieuwe ticket aangemaakt.",
             "",
             _ticket_summary(ticket),
+            "",
+            "Met vriendelijke groet,",
+            "het CleanOps-team",
+            "",
+            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
         ]
     )
 
@@ -253,44 +318,57 @@ def send_ticket_status_changed_email(
     actor=None,
     is_admin_override=False,
 ):
-    actor_label = getattr(actor, "email", "") or "an administrator"
+    actor_label = getattr(actor, "email", "") or "een beheerder"
     override = (
         is_admin_override
         and str(new_status) in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
     )
 
     if override:
-        decision_word = "Approved" if str(new_status) == str(TicketStatus.APPROVED) else "Rejected"
+        decision_word = (
+            "Goedgekeurd"
+            if str(new_status) == str(TicketStatus.APPROVED)
+            else "Afgewezen"
+        )
         subject = (
-            f"[{ticket.ticket_no}] {decision_word} on behalf of customer by {actor_label}"
+            f"[{ticket.ticket_no}] {decision_word} namens de klant door {actor_label}"
         )
         body = "\n".join(
             [
-                f"This ticket was {decision_word.lower()} on behalf of the customer "
-                f"by {actor_label}.",
+                f"Deze ticket is {decision_word.lower()} namens de klant door {actor_label}.",
                 "",
-                f"Old status: {_status_label(old_status)}",
-                f"New status: {_status_label(new_status)}",
+                f"Oude status: {_status_label(old_status)}",
+                f"Nieuwe status: {_status_label(new_status)}",
                 "",
-                "If you are the customer for this ticket and disagree with this decision, "
-                "reply to the ticket or contact your facility manager.",
+                "Bent u de klant voor deze ticket en bent u het niet eens met deze beslissing? "
+                "Reageer dan op de ticket of neem contact op met uw facilitair beheerder.",
                 "",
                 _ticket_summary(ticket),
+                "",
+                "Met vriendelijke groet,",
+                "het CleanOps-team",
+                "",
+                "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
             ]
         )
     else:
         subject = (
-            f"[{ticket.ticket_no}] Status changed: "
+            f"[{ticket.ticket_no}] Status gewijzigd: "
             f"{_status_label(old_status)} → {_status_label(new_status)}"
         )
         body = "\n".join(
             [
-                "A ticket status was changed.",
+                "De status van een ticket is gewijzigd.",
                 "",
-                f"Old status: {_status_label(old_status)}",
-                f"New status: {_status_label(new_status)}",
+                f"Oude status: {_status_label(old_status)}",
+                f"Nieuwe status: {_status_label(new_status)}",
                 "",
                 _ticket_summary(ticket),
+                "",
+                "Met vriendelijke groet,",
+                "het CleanOps-team",
+                "",
+                "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
             ]
         )
 
@@ -315,12 +393,17 @@ def send_ticket_assigned_email(ticket, old_assigned_to=None, actor=None):
     if not ticket.assigned_to_id:
         return []
 
-    subject = f"[{ticket.ticket_no}] Ticket assigned to you: {ticket.title}"
+    subject = f"[{ticket.ticket_no}] Ticket aan u toegewezen: {ticket.title}"
     body = "\n".join(
         [
-            "A ticket was assigned to you.",
+            "Er is een ticket aan u toegewezen.",
             "",
             _ticket_summary(ticket),
+            "",
+            "Met vriendelijke groet,",
+            "het CleanOps-team",
+            "",
+            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
         ]
     )
 
@@ -338,12 +421,17 @@ def send_ticket_unassigned_email(ticket, recipient_user, actor=None):
     if recipient_user is None:
         return []
 
-    subject = f"[{ticket.ticket_no}] Removed from your assigned tickets: {ticket.title}"
+    subject = f"[{ticket.ticket_no}] Toewijzing ingetrokken: {ticket.title}"
     body = "\n".join(
         [
-            "You are no longer assigned to this ticket.",
+            "U bent niet langer toegewezen aan deze ticket.",
             "",
             _ticket_summary(ticket),
+            "",
+            "Met vriendelijke groet,",
+            "het CleanOps-team",
+            "",
+            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
         ]
     )
 
@@ -360,19 +448,24 @@ def send_ticket_unassigned_email(ticket, recipient_user, actor=None):
 
 
 def send_password_reset_email(user, uid, token, reset_url=None):
-    subject = "Reset your Cleaning Ticket System password"
+    subject = "Wachtwoord opnieuw instellen voor CleanOps"
     body_lines = [
-        "A password reset was requested for your account.",
+        "Er is een verzoek ingediend om het wachtwoord van uw account opnieuw in te stellen.",
         "",
         f"UID: {uid}",
         f"Token: {token}",
     ]
     if reset_url:
-        body_lines.extend(["", f"Reset link: {reset_url}"])
+        body_lines.extend(["", f"Herstelkoppeling: {reset_url}"])
     body_lines.extend(
         [
             "",
-            "If you did not request this reset, you can ignore this email.",
+            "Heeft u dit verzoek niet zelf gedaan? Dan kunt u deze e-mail negeren.",
+            "",
+            "Met vriendelijke groet,",
+            "het CleanOps-team",
+            "",
+            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
         ]
     )
 
@@ -395,36 +488,41 @@ def send_invitation_email(invitation, raw_token, accept_url):
     """
     inviter = invitation.created_by
     inviter_label = inviter.full_name or inviter.email
-    role_label = dict(UserRole.choices).get(invitation.role, invitation.role)
+    role_label = _role_label(invitation.role)
 
     scope_lines = []
     company_names = list(invitation.companies.values_list("name", flat=True))
     if company_names:
-        scope_lines.append("Companies: " + ", ".join(company_names))
+        scope_lines.append("Bedrijven: " + ", ".join(company_names))
     building_names = list(invitation.buildings.values_list("name", flat=True))
     if building_names:
-        scope_lines.append("Buildings: " + ", ".join(building_names))
+        scope_lines.append("Gebouwen: " + ", ".join(building_names))
     customer_names = list(invitation.customers.values_list("name", flat=True))
     if customer_names:
-        scope_lines.append("Customers: " + ", ".join(customer_names))
+        scope_lines.append("Klanten: " + ", ".join(customer_names))
 
-    subject = f"You have been invited as {role_label}"
+    subject = f"Uitnodiging voor CleanOps als {role_label}"
     body_lines = [
-        "Hello,",
+        "Hallo,",
         "",
-        f"{inviter_label} has invited you to join as {role_label}.",
+        f"{inviter_label} heeft u uitgenodigd om deel te nemen aan CleanOps als {role_label}.",
     ]
     if scope_lines:
         body_lines.append("")
         body_lines.extend(scope_lines)
     body_lines.extend([
         "",
-        f"Accept this invitation by following the link below. The link expires on "
+        f"Accepteer deze uitnodiging via onderstaande link. De link verloopt op "
         f"{invitation.expires_at:%Y-%m-%d %H:%M %Z}.",
         "",
-        accept_url or "(operator: set INVITATION_ACCEPT_FRONTEND_URL)",
+        accept_url or "(beheerder: stel INVITATION_ACCEPT_FRONTEND_URL in)",
         "",
-        "If you did not expect this invitation, you can ignore this email.",
+        "Heeft u deze uitnodiging niet verwacht? Dan kunt u deze e-mail negeren.",
+        "",
+        "Met vriendelijke groet,",
+        "het CleanOps-team",
+        "",
+        "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks reageren op dit bericht.",
     ])
 
     return send_logged_email(
