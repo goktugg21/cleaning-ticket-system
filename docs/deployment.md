@@ -87,6 +87,32 @@ In NPM's UI, none of these usually need explicit configuration —
 NPM forwards them by default. Verify with a `curl -i` from the
 public URL after the proxy is up.
 
+### Frontend-nginx forwards the same headers to backend
+
+There are TWO proxy hops in production: NPM → frontend nginx →
+backend gunicorn. Django only sees what frontend nginx forwards,
+so the headers above must survive the second hop too.
+[`frontend/nginx.conf`](../frontend/nginx.conf) sets every backend
+proxy block (`/api/`, `/admin/`, `/static/`) to forward:
+
+```
+proxy_set_header Host             $host;
+proxy_set_header X-Real-IP        $remote_addr;
+proxy_set_header X-Forwarded-For  $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $forwarded_proto;
+proxy_set_header X-Forwarded-Host $http_host;
+```
+
+`$forwarded_proto` is the result of an `nginx` `map` at the top
+of the same file: it prefers `$http_x_forwarded_proto` (set by
+NPM) and falls back to `$scheme` only when the header is absent.
+Without that map, `$scheme` would be `http` here (NPM forwards to
+this nginx over HTTP), and Django's `request.is_secure()` would
+return False even for HTTPS browser traffic. `$proxy_add_x_forwarded_for`
+appends nginx's `$remote_addr` (which is NPM) to whatever XFF
+arrived, so the audit-log middleware's "first hop" reading still
+returns the original client.
+
 ---
 
 ## 3. Django env settings (production)
