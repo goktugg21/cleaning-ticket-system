@@ -1,0 +1,148 @@
+name: test
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same ref on PRs (a force-push or new
+# commit supersedes any earlier in-flight run). master pushes don't
+# share a ref with each other so they are unaffected.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  backend-test:
+    name: Backend (Django, Postgres, Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cleaning_ticket_db
+          POSTGRES_USER: cleaning_ticket_user
+          POSTGRES_PASSWORD: ci-dummy-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cleaning_ticket_user -d cleaning_ticket_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Settings.py reads each value via os.environ.get; matching the
+      # docker-compose env names directly avoids a settings rewrite.
+      # DEBUG=True keeps the security validator out of the way (it only
+      # raises when DEBUG=False, and it would reject the dummy values
+      # below). Tests still run with the same code paths as production
+      # because manage.py test does not branch on DEBUG.
+      DJANGO_SECRET_KEY: ci-dummy-secret-do-not-use-in-prod
+      DJANGO_DEBUG: "True"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      DJANGO_LOG_LEVEL: WARNING
+      POSTGRES_DB: cleaning_ticket_db
+      POSTGRES_USER: cleaning_ticket_user
+      POSTGRES_PASSWORD: ci-dummy-postgres-password
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      CELERY_TASK_ALWAYS_EAGER: "True"
+      DJANGO_TEST: "1"
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+      DEFAULT_FROM_EMAIL: ci@example.com
+      # Sentry is opt-in; an empty DSN keeps the SDK as a no-op.
+      SENTRY_DSN: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Django system check
+        working-directory: backend
+        run: python manage.py check
+
+      - name: Verify migrations are checked in
+        working-directory: backend
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run test suite
+        working-directory: backend
+        run: python manage.py test --noinput --verbosity=1
+
+  frontend-build:
+    name: Frontend (lint, tsc, vite build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          # Match the version the local dev environment uses (Node 24
+          # via nvm). The frontend Dockerfile pins node:22-alpine for
+          # the production image; CI uses 24 so we shake out any LTS
+          # mismatches before they reach the image.
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (informational)
+        # `npm run lint` runs the project's existing flat-config ESLint.
+        # The codebase has 33 pre-existing errors (mostly hooks rules
+        # and unused-var warnings) that pre-date the CI sprint; failing
+        # the job on those would block every PR until a dedicated
+        # cleanup batch lands. The step still runs on every PR so its
+        # output appears in the run summary — it just doesn't gate the
+        # merge. Once the existing errors are cleared in a follow-up,
+        # remove `continue-on-error` to make lint required.
+        continue-on-error: true
+        run: npm run lint
+
+      - name: TypeScript + Vite build
+        # `npm run build` is the canonical script and runs `tsc -b &&
+        # vite build`. The chunk-size warning above 500 KB is expected
+        # (recharts is route-split into ReportsPage); it does NOT cause
+        # a non-zero exit.
+        run: npm run build
