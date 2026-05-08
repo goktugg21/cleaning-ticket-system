@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from django.db.models import Count
 from django.db.models.functions import TruncDate
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -13,6 +14,20 @@ from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 from tickets.models import TicketStatus
 
+from .dimensions import (
+    DimensionFilters,
+    compute_tickets_by_building,
+    compute_tickets_by_customer,
+    compute_tickets_by_type,
+)
+from .exports import (
+    build_tickets_by_building_csv,
+    build_tickets_by_building_pdf,
+    build_tickets_by_customer_csv,
+    build_tickets_by_customer_pdf,
+    build_tickets_by_type_csv,
+    build_tickets_by_type_pdf,
+)
 from .permissions import IsReportsConsumer
 from .scoping import (
     date_range_to_aware_bounds,
@@ -436,4 +451,145 @@ class AgeBucketsView(_ReportView):
                 "buckets": buckets,
                 "total_open": sum(b["count"] for b in buckets),
             }
+        )
+
+
+# ===========================================================================
+# Sprint 5: tickets-by-{type, customer, building}
+#
+# JSON endpoints + paired CSV / PDF export endpoints. The paired exports
+# build off the SAME `compute_*` payload as the JSON view, so the three
+# response formats cannot drift apart.
+# ===========================================================================
+
+
+def _csv_response(filename: str, body: bytes) -> HttpResponse:
+    response = HttpResponse(body, content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _pdf_response(filename: str, body: bytes) -> HttpResponse:
+    response = HttpResponse(body, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+class _DimensionView(_ReportView):
+    """Common base — collects the parsed-and-validated DimensionFilters."""
+
+    accept_customer = False
+    accept_type = False
+
+    def _filters(self, request) -> DimensionFilters:
+        return DimensionFilters(
+            request.user,
+            request.query_params,
+            accept_customer=self.accept_customer,
+            accept_type=self.accept_type,
+        )
+
+
+# ---- tickets-by-type --------------------------------------------------------
+
+
+class TicketsByTypeView(_DimensionView):
+    accept_customer = True
+    accept_type = False
+
+    def get(self, request):
+        return Response(compute_tickets_by_type(self._filters(request)))
+
+
+class TicketsByTypeCSVView(_DimensionView):
+    accept_customer = True
+    accept_type = False
+
+    def get(self, request):
+        payload = compute_tickets_by_type(self._filters(request))
+        return _csv_response(
+            f"tickets-by-type_{payload['from']}_{payload['to']}.csv",
+            build_tickets_by_type_csv(payload),
+        )
+
+
+class TicketsByTypePDFView(_DimensionView):
+    accept_customer = True
+    accept_type = False
+
+    def get(self, request):
+        payload = compute_tickets_by_type(self._filters(request))
+        return _pdf_response(
+            f"tickets-by-type_{payload['from']}_{payload['to']}.pdf",
+            build_tickets_by_type_pdf(payload),
+        )
+
+
+# ---- tickets-by-customer ----------------------------------------------------
+
+
+class TicketsByCustomerView(_DimensionView):
+    accept_customer = False
+    accept_type = True
+
+    def get(self, request):
+        return Response(compute_tickets_by_customer(self._filters(request)))
+
+
+class TicketsByCustomerCSVView(_DimensionView):
+    accept_customer = False
+    accept_type = True
+
+    def get(self, request):
+        payload = compute_tickets_by_customer(self._filters(request))
+        return _csv_response(
+            f"tickets-by-customer_{payload['from']}_{payload['to']}.csv",
+            build_tickets_by_customer_csv(payload),
+        )
+
+
+class TicketsByCustomerPDFView(_DimensionView):
+    accept_customer = False
+    accept_type = True
+
+    def get(self, request):
+        payload = compute_tickets_by_customer(self._filters(request))
+        return _pdf_response(
+            f"tickets-by-customer_{payload['from']}_{payload['to']}.pdf",
+            build_tickets_by_customer_pdf(payload),
+        )
+
+
+# ---- tickets-by-building ----------------------------------------------------
+
+
+class TicketsByBuildingView(_DimensionView):
+    accept_customer = True
+    accept_type = True
+
+    def get(self, request):
+        return Response(compute_tickets_by_building(self._filters(request)))
+
+
+class TicketsByBuildingCSVView(_DimensionView):
+    accept_customer = True
+    accept_type = True
+
+    def get(self, request):
+        payload = compute_tickets_by_building(self._filters(request))
+        return _csv_response(
+            f"tickets-by-building_{payload['from']}_{payload['to']}.csv",
+            build_tickets_by_building_csv(payload),
+        )
+
+
+class TicketsByBuildingPDFView(_DimensionView):
+    accept_customer = True
+    accept_type = True
+
+    def get(self, request):
+        payload = compute_tickets_by_building(self._filters(request))
+        return _pdf_response(
+            f"tickets-by-building_{payload['from']}_{payload['to']}.pdf",
+            build_tickets_by_building_pdf(payload),
         )

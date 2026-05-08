@@ -51,5 +51,28 @@
   "sla_breach_subtitle": "share of tickets created in each bucket that ever breached",
   "sla_breach_total": "Tickets in range: {{count}}",
   "sla_breach_empty": "No tickets in this range.",
-  "sla_breach_tooltip_label": "Breach rate"
+  "sla_breach_tooltip_label": "Breach rate",
+
+  "tickets_by_type_title": "Tickets by type",
+  "tickets_by_type_subtitle": "Number of tickets created in the selected range, grouped by type.",
+  "tickets_by_type_total": "Total: {{count}}",
+  "tickets_by_type_empty": "No tickets in this range.",
+  "tickets_by_type_tooltip_label": "Tickets",
+
+  "tickets_by_customer_title": "Tickets by customer",
+  "tickets_by_customer_subtitle": "Tickets per customer location. Customers with the same name at different buildings are kept distinct.",
+  "tickets_by_customer_total": "Total: {{count}}",
+  "tickets_by_customer_empty": "No tickets in this range.",
+  "tickets_by_customer_tooltip_label": "Tickets",
+
+  "tickets_by_building_title": "Tickets by building",
+  "tickets_by_building_subtitle": "Tickets per building in the selected date range.",
+  "tickets_by_building_total": "Total: {{count}}",
+  "tickets_by_building_empty": "No tickets in this range.",
+  "tickets_by_building_tooltip_label": "Tickets",
+
+  "export_csv": "Export CSV",
+  "export_pdf": "Export PDF",
+  "export_busy": "Working…",
+  "export_error": "Export failed. Please try again."
 }

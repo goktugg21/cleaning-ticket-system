@@ -113,3 +113,66 @@ export interface SLABreachRateOverTimeResponse {
   scope: ReportScope;
   buckets: SLABreachRateBucket[];
 }
+
+// Sprint 5 — tickets-by-{type, customer, building}
+// All three responses share a `scope`-extended summary that carries
+// the optional customer / type / status filters alongside the standard
+// company / building scope.
+
+export interface DimensionScope extends ReportScope {
+  customer_id: number | null;
+  customer_name: string | null;
+  type: string | null;
+  status: string | null;
+}
+
+export interface TicketsByTypeBucket {
+  ticket_type: string;
+  ticket_type_label: string;
+  count: number;
+}
+
+export interface TicketsByTypeResponse {
+  from: string;
+  to: string;
+  scope: DimensionScope;
+  buckets: TicketsByTypeBucket[];
+  total: number;
+  generated_at: string;
+}
+
+export interface TicketsByCustomerBucket {
+  customer_id: number;
+  customer_name: string;
+  building_id: number;
+  building_name: string;
+  company_id: number;
+  company_name: string;
+  count: number;
+}
+
+export interface TicketsByCustomerResponse {
+  from: string;
+  to: string;
+  scope: DimensionScope;
+  buckets: TicketsByCustomerBucket[];
+  total: number;
+  generated_at: string;
+}
+
+export interface TicketsByBuildingBucket {
+  building_id: number;
+  building_name: string;
+  company_id: number;
+  company_name: string;
+  count: number;
+}
+
+export interface TicketsByBuildingResponse {
+  from: string;
+  to: string;
+  scope: DimensionScope;
+  buckets: TicketsByBuildingBucket[];
+  total: number;
+  generated_at: string;
+}

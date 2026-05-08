@@ -6,6 +6,15 @@ from .views import (
     SLABreachRateOverTimeView,
     SLADistributionView,
     StatusDistributionView,
+    TicketsByBuildingCSVView,
+    TicketsByBuildingPDFView,
+    TicketsByBuildingView,
+    TicketsByCustomerCSVView,
+    TicketsByCustomerPDFView,
+    TicketsByCustomerView,
+    TicketsByTypeCSVView,
+    TicketsByTypePDFView,
+    TicketsByTypeView,
     TicketsOverTimeView,
 )
 
@@ -40,5 +49,51 @@ urlpatterns = [
         "sla-breach-rate-over-time/",
         SLABreachRateOverTimeView.as_view(),
         name="reports-sla-breach-rate-over-time",
+    ),
+    # ---- Sprint 5 dimensions + exports --------------------------------
+    path(
+        "tickets-by-type/",
+        TicketsByTypeView.as_view(),
+        name="reports-tickets-by-type",
+    ),
+    path(
+        "tickets-by-type/export.csv",
+        TicketsByTypeCSVView.as_view(),
+        name="reports-tickets-by-type-csv",
+    ),
+    path(
+        "tickets-by-type/export.pdf",
+        TicketsByTypePDFView.as_view(),
+        name="reports-tickets-by-type-pdf",
+    ),
+    path(
+        "tickets-by-customer/",
+        TicketsByCustomerView.as_view(),
+        name="reports-tickets-by-customer",
+    ),
+    path(
+        "tickets-by-customer/export.csv",
+        TicketsByCustomerCSVView.as_view(),
+        name="reports-tickets-by-customer-csv",
+    ),
+    path(
+        "tickets-by-customer/export.pdf",
+        TicketsByCustomerPDFView.as_view(),
+        name="reports-tickets-by-customer-pdf",
+    ),
+    path(
+        "tickets-by-building/",
+        TicketsByBuildingView.as_view(),
+        name="reports-tickets-by-building",
+    ),
+    path(
+        "tickets-by-building/export.csv",
+        TicketsByBuildingCSVView.as_view(),
+        name="reports-tickets-by-building-csv",
+    ),
+    path(
+        "tickets-by-building/export.pdf",
+        TicketsByBuildingPDFView.as_view(),
+        name="reports-tickets-by-building-pdf",
     ),
 ]

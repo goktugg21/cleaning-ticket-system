@@ -51,5 +51,28 @@
   "sla_breach_subtitle": "Aandeel van in elke periode aangemaakte tickets dat ooit is overschreden",
   "sla_breach_total": "Tickets in periode: {{count}}",
   "sla_breach_empty": "Geen tickets in deze periode.",
-  "sla_breach_tooltip_label": "Overschrijdingspercentage"
+  "sla_breach_tooltip_label": "Overschrijdingspercentage",
+
+  "tickets_by_type_title": "Tickets per categorie",
+  "tickets_by_type_subtitle": "Aantal tickets aangemaakt in de periode, gegroepeerd op type.",
+  "tickets_by_type_total": "Totaal: {{count}}",
+  "tickets_by_type_empty": "Geen tickets in deze periode.",
+  "tickets_by_type_tooltip_label": "Tickets",
+
+  "tickets_by_customer_title": "Tickets per klant",
+  "tickets_by_customer_subtitle": "Aantal tickets per klantlocatie. Klanten met dezelfde naam in verschillende gebouwen worden apart getoond.",
+  "tickets_by_customer_total": "Totaal: {{count}}",
+  "tickets_by_customer_empty": "Geen tickets in deze periode.",
+  "tickets_by_customer_tooltip_label": "Tickets",
+
+  "tickets_by_building_title": "Tickets per gebouw",
+  "tickets_by_building_subtitle": "Aantal tickets per gebouw in de geselecteerde periode.",
+  "tickets_by_building_total": "Totaal: {{count}}",
+  "tickets_by_building_empty": "Geen tickets in deze periode.",
+  "tickets_by_building_tooltip_label": "Tickets",
+
+  "export_csv": "Exporteer CSV",
+  "export_pdf": "Exporteer PDF",
+  "export_busy": "Bezig…",
+  "export_error": "Export is mislukt. Probeer het opnieuw."
 }
