@@ -111,64 +111,52 @@ export function UserFormPage() {
   // Lazy-load membership names. Only fetch the lists the user actually has
   // memberships in. Each list call is bounded by page_size=200 so most
   // installs fit in one request.
-  //
-  // The membership id arrays are guarded with `?? []` because the PATCH
-  // response shape (UserUpdateSerializer) returns only {full_name, language,
-  // role, is_active} — the *_ids fields are not in the serializer. When
-  // useEntityForm.handleSubmit replaces the entity with that partial
-  // response after Save, the next render would otherwise crash on
-  // .length access. The guard keeps the previously-loaded names visible
-  // until a full reload (or page refresh) re-fetches the detail shape.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    const companyIds = user.company_ids ?? [];
-    const buildingIds = user.building_ids ?? [];
-    const customerIds = user.customer_ids ?? [];
-    if (companyIds.length > 0) {
+    if (user.company_ids.length > 0) {
       listCompanies({ page_size: 200 })
         .then((response) => {
           if (cancelled) return;
           const names = response.results
-            .filter((c) => companyIds.includes(c.id))
+            .filter((c) => user.company_ids.includes(c.id))
             .map((c) => c.name);
           setCompanyNames(names);
         })
         .catch(() => {
           if (!cancelled) setCompanyNames([]);
         });
-    } else if (user.company_ids !== undefined) {
-      // Only reset when the field is actually present and empty.
+    } else {
       setCompanyNames([]);
     }
-    if (buildingIds.length > 0) {
+    if (user.building_ids.length > 0) {
       listBuildings({ page_size: 200 })
         .then((response) => {
           if (cancelled) return;
           const names = response.results
-            .filter((b) => buildingIds.includes(b.id))
+            .filter((b) => user.building_ids.includes(b.id))
             .map((b) => b.name);
           setBuildingNames(names);
         })
         .catch(() => {
           if (!cancelled) setBuildingNames([]);
         });
-    } else if (user.building_ids !== undefined) {
+    } else {
       setBuildingNames([]);
     }
-    if (customerIds.length > 0) {
+    if (user.customer_ids.length > 0) {
       listCustomers({ page_size: 200 })
         .then((response) => {
           if (cancelled) return;
           const names = response.results
-            .filter((c) => customerIds.includes(c.id))
+            .filter((c) => user.customer_ids.includes(c.id))
             .map((c) => c.name);
           setCustomerNames(names);
         })
         .catch(() => {
           if (!cancelled) setCustomerNames([]);
         });
-    } else if (user.customer_ids !== undefined) {
+    } else {
       setCustomerNames([]);
     }
     return () => {
@@ -382,13 +370,9 @@ export function UserFormPage() {
               {t("user_form.memberships_desc")}
             </p>
             {(() => {
-              // Same guard as the membership-fetch useEffect above: the PATCH
-              // response strips company_ids/building_ids/customer_ids, so we
-              // fall back to empty arrays for length/iteration checks rather
-              // than crashing on undefined.
-              const companyIds = user.company_ids ?? [];
-              const buildingIds = user.building_ids ?? [];
-              const customerIds = user.customer_ids ?? [];
+              const companyIds = user.company_ids;
+              const buildingIds = user.building_ids;
+              const customerIds = user.customer_ids;
               return (
                 <div className="detail-kv-list">
                   <div className="detail-kv-row">
