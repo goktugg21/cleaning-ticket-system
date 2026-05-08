@@ -229,9 +229,11 @@ password.
       browser if your OS supports it (the app does not currently
       enforce its own 2FA).
 - [ ] That super-admin can log in via the public domain.
-- [ ] That super-admin can browse `/api/audit-logs/` (Sprint 2.2)
-      and see the User / Company / Building / Customer mutations
-      they have performed during this checklist.
+- [ ] That super-admin can browse `/api/audit-logs/` (Sprint 2.2 +
+      Sprint 7) and see the User / Company / Building / Customer
+      mutations AND the CompanyUserMembership /
+      BuildingManagerAssignment / CustomerUserMembership grants and
+      revocations they have performed during this checklist.
 - [ ] At least one named operator has shell access to the docker
       host AND knows where the `.env.production` lives.
 
