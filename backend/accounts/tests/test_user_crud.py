@@ -192,6 +192,42 @@ class UserCRUDTests(TenantFixtureMixin, APITestCase):
         self.assertTrue(self.customer_user.is_active)
         self.assertIsNone(self.customer_user.deleted_at)
 
+    # ---- PATCH/GET response shape parity ---------------------------------
+
+    def test_patch_response_shape_matches_get(self):
+        # Regression for Sprint 2.1: UserUpdateSerializer used to return
+        # only the four writable fields, leaving the frontend with no
+        # id/email/*_ids in the PATCH response. The frontend masked this
+        # with `?? []` defensive guards. UserUpdateSerializer.to_representation
+        # now delegates to UserDetailSerializer so PATCH and GET emit the
+        # same keys, and the array membership fields are always present.
+        self.authenticate(self.super_admin)
+        get_response = self.client.get(self.detail_url(self.customer_user.id))
+        self.assertEqual(get_response.status_code, status.HTTP_200_OK)
+        get_keys = set(get_response.data.keys())
+
+        patch_response = self.client.patch(
+            self.detail_url(self.customer_user.id),
+            {"full_name": "Customer Renamed"},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, status.HTTP_200_OK)
+        patch_keys = set(patch_response.data.keys())
+
+        self.assertEqual(
+            get_keys,
+            patch_keys,
+            f"PATCH response missing keys vs GET: {get_keys - patch_keys}; "
+            f"extra keys: {patch_keys - get_keys}",
+        )
+        for arr_field in ("company_ids", "building_ids", "customer_ids"):
+            self.assertIn(arr_field, patch_response.data)
+            self.assertIsInstance(
+                patch_response.data[arr_field],
+                list,
+                f"{arr_field} must be a list in the PATCH response",
+            )
+
     def test_company_admin_cannot_reactivate_user(self):
         self.customer_user.soft_delete(deleted_by=self.super_admin)
         self.authenticate(self.company_admin)

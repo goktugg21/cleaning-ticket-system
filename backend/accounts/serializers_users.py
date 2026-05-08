@@ -64,6 +64,16 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         model = User
         fields = ["full_name", "language", "role", "is_active"]
 
+    def to_representation(self, instance):
+        # PATCH/PUT must return the canonical detail shape so the
+        # response equals what GET /api/users/<id>/ returns. The four
+        # writable fields above stay the input contract; the response
+        # is delegated to UserDetailSerializer so it carries id, email,
+        # deleted_at, and the *_ids membership arrays. Without this the
+        # frontend gets back a partial body and has to compensate with
+        # `?? []` guards on every consumer.
+        return UserDetailSerializer(instance, context=self.context).data
+
     def validate_role(self, value):
         actor = self.context["request"].user
         target = self.instance
