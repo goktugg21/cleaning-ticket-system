@@ -165,17 +165,23 @@ The five things to verify:
 - [ ] Manager moves it to WAITING_CUSTOMER_APPROVAL.
 - [ ] Customer approves; admin closes.
 
-All five state transitions land an audit-log row. Verify after
-the run:
+Ticket lifecycle transitions are NOT in the audit-log scope —
+they are recorded in `tickets.TicketStatusHistory`, which the
+TicketDetailPage already surfaces. The audit-log feed instead
+shows the User / Company / Building / Customer mutations and (as
+of Sprint 7) the CompanyUserMembership / BuildingManagerAssignment
+/ CustomerUserMembership grants and revocations. If this checklist
+included onboarding a customer user or flipping a role, those
+events are now visible:
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://$DOMAIN/api/audit-logs/?page_size=10" | python3 -m json.tool | head -40
 ```
 
-(Audit logs cover User / Company / Building / Customer mutations,
-NOT ticket lifecycle. The smoke for ticket workflow is the manual
-walkthrough above.)
+The smoke for the ticket workflow itself is the manual walkthrough
+above; for compliance / change history, the audit-log feed is the
+right place to look.
 
 ---
 
