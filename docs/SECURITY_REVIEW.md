@@ -51,3 +51,42 @@ JWT storage strategy has been reviewed.
 For private/internal testing, the current `localStorage` approach is acceptable with the existing mitigations.
 
 For public production launch, cookie-based refresh token storage should be implemented before exposing the system to untrusted users.
+
+## Audit-log coverage
+
+Scope-changing actions are recorded in the `audit_auditlog` table
+(see Sprint 2.2 + Sprint 7). Super admins can browse them at
+`GET /api/audit-logs/` with the documented filters. Each row
+captures the actor (resolved from the JWT-authenticated request,
+not the middleware-time `request.user`), the action
+(`CREATE` / `UPDATE` / `DELETE`), the target row, the per-field
+`changes` payload, and request metadata (`request_ip` from the
+first hop of `X-Forwarded-For`, optional `request_id` from
+`X-Request-Id`). Sensitive fields (password, token, secret, hash,
+otp, mfa) are stripped before persistence.
+
+Coverage as of Sprint 7:
+
+| Mutation | Audited target | Notes |
+|---|---|---|
+| Company / Building / Customer / User CREATE / UPDATE / DELETE | the row itself | Sprint 2.2 |
+| User role change | `accounts.User` UPDATE | `changes.role.before/after` |
+| User soft-delete (deactivate) | `accounts.User` UPDATE | `changes.is_active` flip + `deleted_at` stamp |
+| **CompanyUserMembership create / delete** | `companies.CompanyUserMembership` | Sprint 7. Rich payload includes `user_id`, `user_email`, `company_id`, `company_name` so an operator does not need to cross-look-up pks. |
+| **BuildingManagerAssignment create / delete** | `buildings.BuildingManagerAssignment` | Sprint 7. Payload mirrors the company case with `building_*`. |
+| **CustomerUserMembership create / delete** | `customers.CustomerUserMembership` | Sprint 7. Payload mirrors with `customer_*`. |
+
+Failed authorisation (403) and not-found (404) do NOT produce an
+audit row, because the underlying mutation never ran. Tests in
+`backend/audit/tests/test_audit_membership.py` pin this:
+`test_forbidden_create_does_not_write_audit_log`.
+
+Out of scope for the audit log today (deliberate, see
+`docs/pilot-readiness-roadmap.md`):
+
+- Ticket lifecycle transitions (already captured in
+  `tickets.TicketStatusHistory`).
+- Reads. Audit-log entries are mutation-only.
+- Authentication events (login / logout / token refresh).
+- Background / Celery system writes — those land with `actor=NULL`
+  by design.
