@@ -42,7 +42,14 @@ npm run dev
 Frontend: <http://localhost:5173>
 Backend:  <http://localhost:8000> (you usually do not open this directly)
 MailHog:  <http://localhost:8025>  ← outgoing-email inbox
-PG / Redis: not exposed publicly; reachable only via the docker network.
+
+Local Postgres (`localhost:5432`) and Redis (`localhost:6379`) are
+**exposed on the host** in `docker-compose.yml` for developer
+convenience (so a local IDE / `psql` / `redis-cli` can connect
+without `docker compose exec`). The **production** compose file
+(`docker-compose.prod.yml`) does NOT expose those ports; production
+must keep db / redis container-internal. Sprint 4 will re-verify the
+production compose posture before pilot.
 
 > **Tip — clean inbox before demo:** MailHog "Delete all messages"
 > button. Otherwise old test runs will distract Ramazan.

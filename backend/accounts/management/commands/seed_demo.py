@@ -33,6 +33,7 @@ from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
 from customers.models import Customer, CustomerUserMembership
 from tickets.models import Ticket, TicketPriority, TicketStatus, TicketType
+from tickets.state_machine import apply_transition
 
 
 DEMO_PASSWORD = "Demo12345!"
@@ -72,6 +73,22 @@ CUSTOMER_NAME = "Acme Demo Customer"
 # this prefix, so non-demo tickets cannot be removed by mistake.
 DEMO_TICKET_PREFIX = "[DEMO]"
 
+# Demo tickets are always CREATED in the OPEN state. To pre-stage one in
+# a later state for the dashboard / reports, the seed walks the live
+# state machine forward via `apply_transition`, which records every hop
+# in TicketStatusHistory and stamps the right timestamp fields
+# (sent_for_approval_at, approved_at, resolved_at) — i.e. it produces
+# the same shape as a real user clicking through the workflow. The
+# super-admin user is the actor for the seed transitions because
+# SUPER_ADMIN can perform any transition (state_machine line 95-97), so
+# the seed does not need to encode the role/scope matrix itself.
+TARGET_STATUS_CHAIN = [
+    TicketStatus.OPEN,
+    TicketStatus.IN_PROGRESS,
+    TicketStatus.WAITING_CUSTOMER_APPROVAL,
+    TicketStatus.APPROVED,
+]
+
 DEMO_TICKETS = [
     {
         "title": f"{DEMO_TICKET_PREFIX} Lekkage in vergaderzaal A",
@@ -81,7 +98,7 @@ DEMO_TICKETS = [
         ),
         "type": TicketType.REPORT,
         "priority": TicketPriority.HIGH,
-        "status": TicketStatus.OPEN,
+        "target_status": TicketStatus.OPEN,
         "room_label": "Vergaderzaal A",
         "assigned_to_email": None,
     },
@@ -93,7 +110,7 @@ DEMO_TICKETS = [
         ),
         "type": TicketType.REQUEST,
         "priority": TicketPriority.NORMAL,
-        "status": TicketStatus.IN_PROGRESS,
+        "target_status": TicketStatus.IN_PROGRESS,
         "room_label": "Toiletten 2e verdieping",
         "assigned_to_email": "demo-manager@example.com",
     },
@@ -105,7 +122,7 @@ DEMO_TICKETS = [
         ),
         "type": TicketType.REQUEST,
         "priority": TicketPriority.NORMAL,
-        "status": TicketStatus.WAITING_CUSTOMER_APPROVAL,
+        "target_status": TicketStatus.WAITING_CUSTOMER_APPROVAL,
         "room_label": "Kantine",
         "assigned_to_email": "demo-manager@example.com",
     },
@@ -117,7 +134,7 @@ DEMO_TICKETS = [
         ),
         "type": TicketType.QUOTE_REQUEST,
         "priority": TicketPriority.NORMAL,
-        "status": TicketStatus.APPROVED,
+        "target_status": TicketStatus.APPROVED,
         "room_label": "",
         "assigned_to_email": "demo-manager@example.com",
     },
@@ -250,10 +267,17 @@ class Command(BaseCommand):
 
     def _upsert_tickets(self, users, company, building, customer):
         creator = users["demo-customer@example.com"]
+        actor = users["demo-super@example.com"]
         for spec in DEMO_TICKETS:
             assigned_email = spec["assigned_to_email"]
             assigned_to = users.get(assigned_email) if assigned_email else None
-            Ticket.objects.update_or_create(
+            # Create the row in the OPEN state on first run; on later
+            # runs leave the existing row's `status` alone so we don't
+            # silently bounce a transitioned ticket back to OPEN. Other
+            # display fields (description, priority, room_label,
+            # assignee) are kept in sync each run so a typo can be
+            # corrected by re-seeding.
+            ticket, created = Ticket.objects.get_or_create(
                 company=company,
                 building=building,
                 customer=customer,
@@ -262,12 +286,56 @@ class Command(BaseCommand):
                     "description": spec["description"],
                     "type": spec["type"],
                     "priority": spec["priority"],
-                    "status": spec["status"],
+                    "status": TicketStatus.OPEN,
                     "room_label": spec["room_label"],
                     "created_by": creator,
                     "assigned_to": assigned_to,
                 },
             )
+            if not created:
+                ticket.description = spec["description"]
+                ticket.type = spec["type"]
+                ticket.priority = spec["priority"]
+                ticket.room_label = spec["room_label"]
+                ticket.assigned_to = assigned_to
+                ticket.save(
+                    update_fields=[
+                        "description",
+                        "type",
+                        "priority",
+                        "room_label",
+                        "assigned_to",
+                        "updated_at",
+                    ]
+                )
+
+            # Walk forward through the state machine until the ticket
+            # reaches its target. Each hop goes through apply_transition
+            # so TicketStatusHistory + sent_for_approval_at / approved_at
+            # / resolved_at / first_response_at are populated correctly.
+            # If the ticket already sits at (or past) the target — e.g.
+            # the operator manually advanced it during the demo and
+            # then re-ran the seed — the loop is a no-op.
+            self._walk_to_target(ticket, actor, spec["target_status"])
+
+    def _walk_to_target(self, ticket, actor, target_status):
+        try:
+            current_idx = TARGET_STATUS_CHAIN.index(TicketStatus(ticket.status))
+        except ValueError:
+            # The ticket sits in a state outside the seed chain (e.g.
+            # operator transitioned to REJECTED or CLOSED during the
+            # demo). Don't try to walk it back; leave the ticket alone.
+            return
+        try:
+            target_idx = TARGET_STATUS_CHAIN.index(target_status)
+        except ValueError:
+            return
+        if current_idx >= target_idx:
+            return
+
+        for next_status in TARGET_STATUS_CHAIN[current_idx + 1 : target_idx + 1]:
+            apply_transition(ticket, actor, next_status, note="seed_demo")
+            ticket.refresh_from_db()
 
     # ---- output ----------------------------------------------------------
     def _print_summary(self, users, company, building, customer):
