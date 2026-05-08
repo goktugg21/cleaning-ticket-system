@@ -327,17 +327,37 @@ EMAIL_BACKEND = os.environ.get(
 )
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
+SENTRY_ENVIRONMENT = os.environ.get("SENTRY_ENVIRONMENT", "development")
+SENTRY_TRACES_SAMPLE_RATE = float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.0"))
+SENTRY_RELEASE = os.environ.get("SENTRY_RELEASE", "") or None
 
 if SENTRY_DSN:
+    # Logging integration is wired alongside Django + Celery so any
+    # logger.error / logger.exception call (including Celery task failures
+    # via the LOGGING dict above) becomes a Sentry event automatically.
+    # send_default_pii=False is deliberate — NL/GDPR data hygiene.
+    # Empty DSN short-circuits this block, so the SDK has zero overhead
+    # in dev / test / any deployment that has not opted in.
+    import logging as _stdlib_logging
     import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
     from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
 
     sentry_sdk.init(
         dsn=SENTRY_DSN,
-        integrations=[DjangoIntegration()],
-        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
-        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.0")),
+        environment=SENTRY_ENVIRONMENT,
+        integrations=[
+            DjangoIntegration(),
+            CeleryIntegration(),
+            LoggingIntegration(
+                level=_stdlib_logging.INFO,
+                event_level=_stdlib_logging.ERROR,
+            ),
+        ],
+        traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         send_default_pii=False,
+        release=SENTRY_RELEASE,
     )
 
 
