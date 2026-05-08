@@ -5,6 +5,9 @@ import type {
   SLABreachRateOverTimeResponse,
   SLADistributionResponse,
   StatusDistributionResponse,
+  TicketsByBuildingResponse,
+  TicketsByCustomerResponse,
+  TicketsByTypeResponse,
   TicketsOverTimeResponse,
 } from "./reports.types";
 
@@ -82,4 +85,77 @@ export async function fetchSLABreachRateOverTime(
     { params: paramsFor(filters) },
   );
   return data;
+}
+
+// ---- Sprint 5 dimensions -------------------------------------------------
+
+export async function fetchTicketsByType(
+  filters: ReportFilters,
+): Promise<TicketsByTypeResponse> {
+  const { data } = await api.get<TicketsByTypeResponse>(
+    "/reports/tickets-by-type/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
+export async function fetchTicketsByCustomer(
+  filters: ReportFilters,
+): Promise<TicketsByCustomerResponse> {
+  const { data } = await api.get<TicketsByCustomerResponse>(
+    "/reports/tickets-by-customer/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
+export async function fetchTicketsByBuilding(
+  filters: ReportFilters,
+): Promise<TicketsByBuildingResponse> {
+  const { data } = await api.get<TicketsByBuildingResponse>(
+    "/reports/tickets-by-building/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
+// Export download helpers. Each returns the URL the browser should
+// hit; the chart card's button just sets `window.location.href` so
+// the existing axios auth header is bypassed and the browser receives
+// the file via a normal navigation. (Axios + blob downloads work too
+// but require manual JWT-attaching which would duplicate api/client.ts.)
+//
+// Important: because these go through window.location, the JWT must
+// be in a header that the browser will send — which it isn't for
+// Authorization: Bearer. So we use api.get with responseType=blob and
+// trigger a programmatic download instead. See helper below.
+export type DimensionExportFormat = "csv" | "pdf";
+
+const EXPORT_PATHS = {
+  type: "/reports/tickets-by-type",
+  customer: "/reports/tickets-by-customer",
+  building: "/reports/tickets-by-building",
+} as const;
+
+export async function downloadDimensionExport(
+  dimension: keyof typeof EXPORT_PATHS,
+  format: DimensionExportFormat,
+  filters: ReportFilters,
+): Promise<void> {
+  const url = `${EXPORT_PATHS[dimension]}/export.${format}`;
+  const response = await api.get(url, {
+    params: paramsFor(filters),
+    responseType: "blob",
+  });
+  const contentDisposition = response.headers["content-disposition"] ?? "";
+  const match = /filename="?([^"]+)"?/i.exec(contentDisposition);
+  const filename = match ? match[1] : `${dimension}-export.${format}`;
+  const blobUrl = window.URL.createObjectURL(response.data as Blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(blobUrl);
 }

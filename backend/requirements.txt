@@ -11,3 +11,4 @@ redis>=5.2,<7.0
 gunicorn>=23.0,<24.0
 whitenoise>=6.8,<7.0
 sentry-sdk[django,celery]>=2.59,<3.0
+fpdf2>=2.8,<3.0

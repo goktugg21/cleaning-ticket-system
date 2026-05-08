@@ -510,6 +510,10 @@ const CHART_SLUGS = [
   "age-buckets",
   "sla-distribution",
   "sla-breach-rate-over-time",
+  // Sprint 5 dimensions + per-card export buttons.
+  "tickets-by-type",
+  "tickets-by-customer",
+  "tickets-by-building",
 ];
 const CHART_CARD_COUNT = CHART_SLUGS.length;
 
