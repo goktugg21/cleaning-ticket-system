@@ -55,12 +55,16 @@ services:
         condition: service_healthy
     healthcheck:
       # Liveness only — readiness is a load-balancer concern.
-      # NOTE: with DEBUG=False, Django enforces ALLOWED_HOSTS. The probe
-      # below targets localhost and so requires the operator to include
-      # an internal hostname in DJANGO_ALLOWED_HOSTS, OR replace this
-      # check with one that exits in-process via `manage.py shell`. See
-      # the docstring in backend/config/health.py for options.
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/live',timeout=3).getcode()==200 else 1)\""]
+      # We use a TCP socket probe (not an HTTP GET against
+      # /health/live) because the production-settings validator in
+      # backend/config/security.py forbids `localhost` / `127.0.0.1`
+      # from appearing in DJANGO_ALLOWED_HOSTS when DEBUG=False, so
+      # an HTTP probe with `Host: localhost:8000` would 400 on the
+      # ALLOWED_HOSTS gate. The TCP probe just confirms gunicorn is
+      # accepting connections; the upstream NPM/load-balancer is
+      # responsible for the readiness signal that exercises Django.
+      # See docs/deployment.md for the full rationale.
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.create_connection(('localhost',8000),2); s.close()\""]
       interval: 30s
       timeout: 5s
       retries: 3
