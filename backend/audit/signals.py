@@ -35,9 +35,9 @@ import threading
 
 from django.db.models.signals import post_delete, post_save, pre_save
 
-from buildings.models import Building
-from companies.models import Company
-from customers.models import Customer
+from buildings.models import Building, BuildingManagerAssignment
+from companies.models import Company, CompanyUserMembership
+from customers.models import Customer, CustomerUserMembership
 
 from . import context
 from .diff import (
@@ -145,12 +145,137 @@ def _on_post_delete(sender, instance, **kwargs):
         logger.exception("audit: post_delete failed for %s", _label(instance))
 
 
+# ===========================================================================
+# Sprint 7 — membership / assignment scope changes.
+#
+# CompanyUserMembership / BuildingManagerAssignment / CustomerUserMembership
+# rows are scope-changing: creating one grants a user access to a tenant
+# entity; deleting one revokes it. The default diff engine would only emit
+# bare FK pks ({"user": 42, "company": 7}); for compliance purposes the
+# audit row needs the user's email and the entity's name in plain text so
+# the operator does not have to cross-reference pks.
+#
+# These handlers therefore build a hand-crafted changes payload for the
+# three M:N junction models and emit through the same _create_log helper as
+# the rest of the file. There is no UPDATE path on memberships (no editable
+# fields), so we only listen to post_save (created=True) and post_delete.
+# ===========================================================================
+
+
+# Map membership/assignment model -> ("entity attr name", "verb-form label").
+_MEMBERSHIP_ENTITY_ATTR = {
+    CompanyUserMembership: "company",
+    BuildingManagerAssignment: "building",
+    CustomerUserMembership: "customer",
+}
+
+
+def _membership_changes(membership, *, action: str) -> dict:
+    """
+    Build a meaningful changes dict for a membership / assignment row.
+
+    Always includes user_id + user_email and the matching entity id + name,
+    so audit rows are human-readable without a cross-lookup. CREATE puts
+    the values in `after`; DELETE puts them in `before`.
+    """
+    entity_attr = _MEMBERSHIP_ENTITY_ATTR.get(type(membership))
+    if entity_attr is None:
+        return {}
+    user = membership.user
+    entity = getattr(membership, entity_attr, None)
+    user_id = user.id if user is not None else None
+    user_email = getattr(user, "email", None) if user is not None else None
+    entity_id = entity.id if entity is not None else None
+    entity_name = getattr(entity, "name", None) if entity is not None else None
+
+    if action == AuditAction.CREATE:
+        sentinel_before, sentinel_after = None, "after"
+    else:  # DELETE
+        sentinel_before, sentinel_after = "before", None
+
+    def _pair(value):
+        # CREATE: {"before": None, "after": value}
+        # DELETE: {"before": value, "after": None}
+        if sentinel_after == "after":
+            return {"before": None, "after": value}
+        return {"before": value, "after": None}
+
+    return {
+        "user_id": _pair(user_id),
+        "user_email": _pair(user_email),
+        f"{entity_attr}_id": _pair(entity_id),
+        f"{entity_attr}_name": _pair(entity_name),
+    }
+
+
+def _on_membership_post_save(sender, instance, created, **kwargs):
+    if not created:
+        # Membership rows have no editable fields; an UPDATE would be a
+        # surprise but we still want to know about it. Emit an UPDATE log
+        # with the same shape as a CREATE so the row stays inspectable.
+        try:
+            _create_log(
+                instance,
+                AuditAction.UPDATE,
+                _membership_changes(instance, action=AuditAction.CREATE),
+            )
+        except Exception:  # pragma: no cover — defensive
+            logger.exception(
+                "audit: membership post_save (update) failed for %s",
+                _label(instance),
+            )
+        return
+    try:
+        _create_log(
+            instance,
+            AuditAction.CREATE,
+            _membership_changes(instance, action=AuditAction.CREATE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: membership post_save (create) failed for %s",
+            _label(instance),
+        )
+
+
+def _on_membership_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _membership_changes(instance, action=AuditAction.DELETE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: membership post_delete failed for %s", _label(instance)
+        )
+
+
 def _connect():
     User = _user_model()
     for model in (User, Company, Building, Customer):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
         post_delete.connect(_on_post_delete, sender=model, weak=False, dispatch_uid=f"audit:del:{model.__name__}")
+    for model in (
+        CompanyUserMembership,
+        BuildingManagerAssignment,
+        CustomerUserMembership,
+    ):
+        # Memberships use a different handler set — see comment above.
+        # No pre_save (no editable fields, no UPDATE shape).
+        post_save.connect(
+            _on_membership_post_save,
+            sender=model,
+            weak=False,
+            dispatch_uid=f"audit:membership:post:{model.__name__}",
+        )
+        post_delete.connect(
+            _on_membership_post_delete,
+            sender=model,
+            weak=False,
+            dispatch_uid=f"audit:membership:del:{model.__name__}",
+        )
 
 
 _connect()
