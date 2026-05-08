@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -17,8 +18,10 @@ interface ErrorBoundaryState {
  *
  * In development we surface the stack trace inline so engineers can debug
  * fast. In production the stack is hidden — only a generic translated
- * message and a reload button. (Sentry integration in Sprint 1.3 will
- * ship the stack to the server so we still have it for triage.)
+ * message and a reload button. The error is also forwarded to Sentry
+ * (Sprint 1.3) when VITE_SENTRY_DSN is set, with the React component
+ * stack attached as context. Sentry.captureException is a no-op when
+ * Sentry.init was not called (empty DSN), so this stays merge-safe.
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
@@ -33,6 +36,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     // eslint-disable-next-line no-console
     console.error("ErrorBoundary caught:", error, errorInfo);
+    Sentry.captureException(error, {
+      contexts: {
+        react: { componentStack: errorInfo.componentStack ?? "" },
+      },
+    });
     this.setState({ errorInfo });
   }
 
