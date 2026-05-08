@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "reports",
     "notifications",
     "sla",
+    "audit",
 ]
 
 MIDDLEWARE = [
@@ -71,6 +72,14 @@ MIDDLEWARE = [
     # JWT-authenticated DRF requests, see the docstring caveat — JWT auth
     # runs at the view layer, not here.
     "accounts.middleware.UserLanguageMiddleware",
+    # AuditContextMiddleware stores the active HTTP request in a thread-
+    # local so audit signal handlers can resolve actor / IP / request id
+    # at write time. Sits AFTER AuthenticationMiddleware so the request
+    # object it captures already has request.user set for session auth;
+    # for DRF JWT (which authenticates at the view layer), the actor is
+    # resolved lazily from request.user when the post_save signal fires
+    # and is therefore the authenticated JWT user, not AnonymousUser.
+    "audit.middleware.AuditContextMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
