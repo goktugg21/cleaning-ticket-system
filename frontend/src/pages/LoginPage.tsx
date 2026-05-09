@@ -7,8 +7,16 @@ import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import heroImage from "../assets/login_page_photo.png";
 
-const SHOW_DEMO_USERS =
-  import.meta.env.DEV || import.meta.env.VITE_SHOW_DEMO_USERS === "true";
+// Sprint 16: demo helper visibility is gated on VITE_DEMO_MODE. The
+// previous gate (DEV || VITE_SHOW_DEMO_USERS) accidentally surfaced
+// demo cards in any frontend built with `npm run dev`. The new flag
+// is opt-in and never set in the production .env.example, so a
+// production build cannot leak demo credentials by accident even if
+// `npm run build` was run from a developer machine that has VITE_*
+// env vars exported in the shell.
+const SHOW_DEMO_USERS = import.meta.env.VITE_DEMO_MODE === "true";
+
+const DEMO_PASSWORD = "Demo12345!";
 
 interface DemoUser {
   id: string;
@@ -20,33 +28,109 @@ interface DemoUser {
   // role and pillLabel resolve through i18n keys at render time so the demo
   // cards switch language with the rest of the page. The DEMO_USERS fixture
   // only stores the key; the t() call decides the displayed string.
-  roleKey: "demo_role_manager" | "demo_role_customer";
-  pillKey: "demo_pill_manager" | "demo_pill_customer";
+  roleKey:
+    | "demo_role_super_admin"
+    | "demo_role_company_admin"
+    | "demo_role_manager"
+    | "demo_role_customer";
+  pillKey:
+    | "demo_pill_super_admin"
+    | "demo_pill_company_admin"
+    | "demo_pill_manager"
+    | "demo_pill_customer";
   pillVariant: "primary" | "muted";
+  // Optional one-line scope hint shown under the role name (e.g.
+  // "B1 / B2 / B3" for a multi-building manager). Helps the operator
+  // pick the right demo account without consulting the seed.
+  scopeHint?: string;
 }
 
+// Mirrors backend/accounts/management/commands/seed_demo_data.py.
+// One card per role + the three customer-user variants so a demo
+// can show the per-building access matrix in one click.
 const DEMO_USERS: DemoUser[] = [
   {
-    id: "manager",
-    email: "john@example.com",
-    password: "John12345",
-    initials: "JD",
+    id: "super",
+    email: "super@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "SA",
     avatarVariant: "dark",
-    name: "John Doe",
-    roleKey: "demo_role_manager",
-    pillKey: "demo_pill_manager",
+    name: "Super Admin",
+    roleKey: "demo_role_super_admin",
+    pillKey: "demo_pill_super_admin",
     pillVariant: "primary",
   },
   {
-    id: "customer",
-    email: "anna@example.com",
-    password: "Anna12345",
-    initials: "AS",
+    id: "company-admin",
+    email: "admin@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "CA",
+    avatarVariant: "dark",
+    name: "Company Admin",
+    roleKey: "demo_role_company_admin",
+    pillKey: "demo_pill_company_admin",
+    pillVariant: "primary",
+    scopeHint: "Osius Demo",
+  },
+  {
+    id: "manager-all",
+    email: "gokhan@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "GK",
+    avatarVariant: "dark",
+    name: "Gokhan Koçak",
+    roleKey: "demo_role_manager",
+    pillKey: "demo_pill_manager",
+    pillVariant: "primary",
+    scopeHint: "B1 / B2 / B3",
+  },
+  {
+    id: "manager-b1",
+    email: "murat@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "MU",
+    avatarVariant: "dark",
+    name: "Murat Uğurlu",
+    roleKey: "demo_role_manager",
+    pillKey: "demo_pill_manager",
+    pillVariant: "primary",
+    scopeHint: "B1 only",
+  },
+  {
+    id: "customer-all",
+    email: "tom@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "TV",
     avatarVariant: "mint",
-    name: "Anna Smith",
+    name: "Tom Verbeek",
     roleKey: "demo_role_customer",
     pillKey: "demo_pill_customer",
     pillVariant: "muted",
+    scopeHint: "B1 / B2 / B3",
+  },
+  {
+    id: "customer-b1-b2",
+    email: "iris@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "IR",
+    avatarVariant: "mint",
+    name: "Iris",
+    roleKey: "demo_role_customer",
+    pillKey: "demo_pill_customer",
+    pillVariant: "muted",
+    scopeHint: "B1 / B2",
+  },
+  {
+    id: "customer-b3",
+    email: "amanda@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "AM",
+    avatarVariant: "mint",
+    name: "Amanda",
+    roleKey: "demo_role_customer",
+    pillKey: "demo_pill_customer",
+    pillVariant: "muted",
+    scopeHint: "B3 only",
   },
 ];
 
@@ -158,13 +242,17 @@ export function LoginPage() {
           </div>
 
           {SHOW_DEMO_USERS && (
-            <div className="qa-section">
+            <div className="qa-section" data-testid="demo-cards">
               <div className="qa-label">{t("demo_label")}</div>
+              <div className="qa-hint">
+                {t("demo_credentials_hint", { password: DEMO_PASSWORD })}
+              </div>
               <div className="qa-grid">
                 {DEMO_USERS.map((user) => (
                   <button
                     type="button"
                     key={user.id}
+                    data-testid={`demo-card-${user.id}`}
                     className={`qa-card ${selectedDemo === user.id ? "selected" : ""}`}
                     onClick={() => applyDemoUser(user)}
                   >
@@ -175,6 +263,9 @@ export function LoginPage() {
                       <div className="qa-id">
                         <div className="qa-name">{user.name}</div>
                         <div className="qa-title">{t(user.roleKey)}</div>
+                        {user.scopeHint && (
+                          <div className="qa-scope">{user.scopeHint}</div>
+                        )}
                       </div>
                     </div>
                     <span
