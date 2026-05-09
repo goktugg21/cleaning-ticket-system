@@ -37,7 +37,12 @@ from django.db.models.signals import post_delete, post_save, pre_save
 
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 
 from . import context
 from .diff import (
@@ -251,6 +256,114 @@ def _on_membership_post_delete(sender, instance, **kwargs):
         )
 
 
+# ===========================================================================
+# Sprint 14 — CustomerBuildingMembership and CustomerUserBuildingAccess.
+#
+# These rows are scope-changing (they grant or revoke a customer's link to
+# a building, or a customer-user's per-building access), so they need
+# audit coverage. Their shape differs from the Sprint-7 membership models:
+#
+#   CustomerBuildingMembership:  (customer, building)             — no user
+#   CustomerUserBuildingAccess:  (membership, building)            — user via membership.user
+#
+# We emit through the same _create_log helper but with hand-crafted
+# changes payloads so an operator scrolling the audit feed sees the
+# customer name + building name without a cross-lookup.
+# ===========================================================================
+
+
+def _customer_building_link_changes(link, *, action: str) -> dict:
+    customer = link.customer
+    building = link.building
+    payload = {
+        "customer_id": (customer.id if customer else None),
+        "customer_name": (getattr(customer, "name", None) if customer else None),
+        "building_id": (building.id if building else None),
+        "building_name": (getattr(building, "name", None) if building else None),
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _customer_user_access_changes(access, *, action: str) -> dict:
+    membership = access.membership
+    user = getattr(membership, "user", None)
+    customer = getattr(membership, "customer", None)
+    building = access.building
+    payload = {
+        "user_id": (user.id if user else None),
+        "user_email": (getattr(user, "email", None) if user else None),
+        "customer_id": (customer.id if customer else None),
+        "customer_name": (getattr(customer, "name", None) if customer else None),
+        "building_id": (building.id if building else None),
+        "building_name": (getattr(building, "name", None) if building else None),
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _on_customer_building_link_post_save(sender, instance, created, **kwargs):
+    if not created:
+        return  # No editable fields; ignore non-create saves.
+    try:
+        _create_log(
+            instance,
+            AuditAction.CREATE,
+            _customer_building_link_changes(instance, action=AuditAction.CREATE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerBuildingMembership post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_customer_building_link_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _customer_building_link_changes(instance, action=AuditAction.DELETE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerBuildingMembership post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_customer_user_access_post_save(sender, instance, created, **kwargs):
+    if not created:
+        return
+    try:
+        _create_log(
+            instance,
+            AuditAction.CREATE,
+            _customer_user_access_changes(instance, action=AuditAction.CREATE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerUserBuildingAccess post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_customer_user_access_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _customer_user_access_changes(instance, action=AuditAction.DELETE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerUserBuildingAccess post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _connect():
     User = _user_model()
     for model in (User, Company, Building, Customer):
@@ -276,6 +389,35 @@ def _connect():
             weak=False,
             dispatch_uid=f"audit:membership:del:{model.__name__}",
         )
+
+    # Sprint 14 — customer↔building link and per-user-per-building
+    # access. Different shape from the Sprint-7 trio above, so they
+    # use dedicated handlers. CREATE and DELETE are recorded with
+    # rich payloads.
+    post_save.connect(
+        _on_customer_building_link_post_save,
+        sender=CustomerBuildingMembership,
+        weak=False,
+        dispatch_uid="audit:customer_building:post:CustomerBuildingMembership",
+    )
+    post_delete.connect(
+        _on_customer_building_link_post_delete,
+        sender=CustomerBuildingMembership,
+        weak=False,
+        dispatch_uid="audit:customer_building:del:CustomerBuildingMembership",
+    )
+    post_save.connect(
+        _on_customer_user_access_post_save,
+        sender=CustomerUserBuildingAccess,
+        weak=False,
+        dispatch_uid="audit:customer_access:post:CustomerUserBuildingAccess",
+    )
+    post_delete.connect(
+        _on_customer_user_access_post_delete,
+        sender=CustomerUserBuildingAccess,
+        weak=False,
+        dispatch_uid="audit:customer_access:del:CustomerUserBuildingAccess",
+    )
 
 
 _connect()

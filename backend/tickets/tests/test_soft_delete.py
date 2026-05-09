@@ -109,10 +109,20 @@ class TicketSoftDeletePermissionTests(_TicketDeleteBase):
         # ticket creator but DID NOT open the ticket. Sprint 12's
         # conservative permission rule blocks them with 403 — even
         # though the ticket is technically in their scope.
+        from customers.models import CustomerUserBuildingAccess
+
         sibling = self.make_user(
             "customer-a-sibling@example.com", UserRole.CUSTOMER_USER
         )
-        CustomerUserMembership.objects.create(user=sibling, customer=self.customer)
+        sibling_membership = CustomerUserMembership.objects.create(
+            user=sibling, customer=self.customer
+        )
+        # Sprint 14: sibling needs explicit per-building access on top
+        # of the customer membership; without it the queryset gate
+        # returns 404 before the role gate can fire 403.
+        CustomerUserBuildingAccess.objects.create(
+            membership=sibling_membership, building=self.building
+        )
 
         self.authenticate(sibling)
         response = self.client.delete(f"/api/tickets/{self.ticket.id}/")

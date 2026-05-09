@@ -226,7 +226,10 @@ export interface BuildingAdmin {
 export interface CustomerAdmin {
   id: number;
   company: number;
-  building: number;
+  // Sprint 14: legacy single-building anchor, now nullable. New
+  // consolidated customers can be created with no anchor and linked
+  // to multiple buildings via the M:N CustomerBuildingMembership.
+  building: number | null;
   name: string;
   contact_email: string;
   phone: string;
@@ -234,6 +237,27 @@ export interface CustomerAdmin {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// Sprint 14 — Customer ↔ Building (M:N) link.
+export interface CustomerBuildingMembership {
+  id: number;
+  customer: number;
+  building_id: number;
+  building_name: string;
+  building_address: string;
+  created_at: string;
+}
+
+// Sprint 14 — per-customer-user, per-building access grant.
+export interface CustomerUserBuildingAccess {
+  id: number;
+  membership_id: number;
+  user_id: number;
+  user_email: string;
+  building_id: number;
+  building_name: string;
+  created_at: string;
 }
 
 export interface UserAdmin {

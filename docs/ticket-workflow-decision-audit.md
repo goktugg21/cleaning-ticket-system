@@ -529,3 +529,21 @@ this doc converting from "options" to "shipped"). Total ~3-4 days.
   describes the *future-decision* surface.
 - Not a security or compliance review. The current workflow is
   not insecure; it is semantically loose.
+
+---
+
+## Sprint 14 footnote
+
+Sprint 14 refactored the customer / building / customer-user
+scope model (M:N customer↔building, per-user-per-building access).
+That refactor is documented separately in
+[docs/customer-building-user-scope.md](customer-building-user-scope.md).
+
+**Sprint 14 does NOT change ticket `workflow_type` or the
+approval / customer-approval process.** The ambiguity described
+in §B above remains exactly as it was at the close of Sprint 13;
+the recommendation in §D (ship Option 1 for pilot, revisit
+post-pilot, prefer Option 3 if forced to pick) is unchanged. A
+later sprint that picks one of the options can implement it on
+top of the new scope model without further migration of customer
+or building data.

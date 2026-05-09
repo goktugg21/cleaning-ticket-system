@@ -134,9 +134,14 @@ export function CustomersAdminPage() {
     [companies, t],
   );
   const buildingName = useCallback(
-    (id: number) =>
-      buildings.find((b) => b.id === id)?.name ??
-      t("customers.building_fallback", { id }),
+    (id: number | null) => {
+      // Sprint 14: legacy building can be null on consolidated customers.
+      if (id === null) return "—";
+      return (
+        buildings.find((b) => b.id === id)?.name ??
+        t("customers.building_fallback", { id })
+      );
+    },
     [buildings, t],
   );
 

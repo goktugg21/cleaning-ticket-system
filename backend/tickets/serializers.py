@@ -7,7 +7,11 @@ from rest_framework import serializers
 from accounts.models import User, UserRole
 from accounts.permissions import is_staff_role
 from buildings.models import Building, BuildingManagerAssignment
-from customers.models import Customer
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+)
 from sla import business_hours
 
 from .models import (
@@ -231,9 +235,17 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         building: Building = attrs["building"]
         customer: Customer = attrs["customer"]
 
-        if customer.building_id != building.id:
+        # Sprint 14: customer/building pair must be linked via the M:N
+        # CustomerBuildingMembership. We deliberately accept the legacy
+        # `customer.building == building` shape for already-existing
+        # customers (the migration backfill creates a matching
+        # CustomerBuildingMembership row, so the new check below also
+        # passes for legacy data — no special case needed).
+        if not CustomerBuildingMembership.objects.filter(
+            customer_id=customer.id, building_id=building.id
+        ).exists():
             raise serializers.ValidationError(
-                {"customer": "Customer does not belong to the selected building."}
+                {"customer": "Customer is not linked to the selected building."}
             )
 
         if not building.is_active:
@@ -273,11 +285,22 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         if user.role == UserRole.CUSTOMER_USER:
             from customers.models import CustomerUserMembership
 
-            if not CustomerUserMembership.objects.filter(
+            membership = CustomerUserMembership.objects.filter(
                 user=user, customer_id=customer.id
-            ).exists():
+            ).first()
+            if membership is None:
                 raise serializers.ValidationError(
                     {"customer": "You are not linked to this customer."}
+                )
+            # Sprint 14: customer-users must additionally have building
+            # access for the (customer, building) pair. A user with
+            # access to B3 only cannot create a ticket for B1, even if
+            # the customer is linked to both.
+            if not CustomerUserBuildingAccess.objects.filter(
+                membership=membership, building_id=building.id
+            ).exists():
+                raise serializers.ValidationError(
+                    {"building": "You do not have access to this building under this customer."}
                 )
             return attrs
 

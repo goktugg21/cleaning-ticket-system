@@ -5,6 +5,8 @@ import type {
   CompanyAdmin,
   CompanyAdminMembership,
   CustomerAdmin,
+  CustomerBuildingMembership,
+  CustomerUserBuildingAccess,
   CustomerUserMembership,
   InvitationAdmin,
   PaginatedResponse,
@@ -368,4 +370,67 @@ export async function removeCustomerUser(
   userId: number,
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/users/${userId}/`);
+}
+
+// ---- Sprint 14: customer ↔ buildings (M:N) ----
+
+export async function listCustomerBuildings(
+  customerId: number,
+): Promise<PaginatedResponse<CustomerBuildingMembership>> {
+  const response = await api.get<PaginatedResponse<CustomerBuildingMembership>>(
+    `/customers/${customerId}/buildings/`,
+  );
+  return response.data;
+}
+
+export async function addCustomerBuilding(
+  customerId: number,
+  buildingId: number,
+): Promise<CustomerBuildingMembership> {
+  const response = await api.post<CustomerBuildingMembership>(
+    `/customers/${customerId}/buildings/`,
+    { building_id: buildingId },
+  );
+  return response.data;
+}
+
+export async function removeCustomerBuilding(
+  customerId: number,
+  buildingId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/buildings/${buildingId}/`);
+}
+
+// ---- Sprint 14: per-customer-user building access ----
+
+export async function listCustomerUserAccess(
+  customerId: number,
+  userId: number,
+): Promise<PaginatedResponse<CustomerUserBuildingAccess>> {
+  const response = await api.get<PaginatedResponse<CustomerUserBuildingAccess>>(
+    `/customers/${customerId}/users/${userId}/access/`,
+  );
+  return response.data;
+}
+
+export async function addCustomerUserAccess(
+  customerId: number,
+  userId: number,
+  buildingId: number,
+): Promise<CustomerUserBuildingAccess> {
+  const response = await api.post<CustomerUserBuildingAccess>(
+    `/customers/${customerId}/users/${userId}/access/`,
+    { building_id: buildingId },
+  );
+  return response.data;
+}
+
+export async function removeCustomerUserAccess(
+  customerId: number,
+  userId: number,
+  buildingId: number,
+): Promise<void> {
+  await api.delete(
+    `/customers/${customerId}/users/${userId}/access/${buildingId}/`,
+  );
 }

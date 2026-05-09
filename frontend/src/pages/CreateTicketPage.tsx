@@ -147,12 +147,64 @@ export function CreateTicketPage() {
     };
   }, []);
 
+  // Sprint 14: when a customer is selected, fetch the buildings that
+  // customer is linked to (M:N CustomerBuildingMembership) so the
+  // building dropdown can be narrowed to only valid pairs. The legacy
+  // `customer.building` is still respected as a fallback for any
+  // customer the operator has not yet re-linked.
+  const [customerLinkedBuildingIds, setCustomerLinkedBuildingIds] = useState<
+    Set<number> | null
+  >(null);
+
+  useEffect(() => {
+    if (!form.customer) {
+      setCustomerLinkedBuildingIds(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .get<PaginatedResponse<{ building_id: number }>>(
+        `/customers/${form.customer}/buildings/`,
+      )
+      .then((response) => {
+        if (cancelled) return;
+        setCustomerLinkedBuildingIds(
+          new Set(response.data.results.map((r) => r.building_id)),
+        );
+      })
+      .catch(() => {
+        // Endpoint requires admin permissions; for non-admin users
+        // this fetch will 403. Fall back to the legacy
+        // customer.building hint so the dropdown is still useful.
+        if (!cancelled) setCustomerLinkedBuildingIds(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.customer]);
+
   const filteredCustomers = useMemo(() => {
     if (!form.building) return customers;
+    const buildingId = Number(form.building);
     return customers.filter(
-      (customer) => customer.building === Number(form.building),
+      (customer) => customer.building === buildingId,
     );
   }, [customers, form.building]);
+
+  const filteredBuildings = useMemo(() => {
+    if (!form.customer) return buildings;
+    if (customerLinkedBuildingIds === null) {
+      // Either we have not loaded yet or the user is non-admin and
+      // we cannot read the link list. Fall back to the legacy
+      // customer.building anchor to keep the dropdown helpful.
+      const c = customers.find((x) => String(x.id) === form.customer);
+      if (c?.building) {
+        return buildings.filter((b) => b.id === c.building);
+      }
+      return buildings;
+    }
+    return buildings.filter((b) => customerLinkedBuildingIds.has(b.id));
+  }, [buildings, customers, form.customer, customerLinkedBuildingIds]);
 
   useEffect(() => {
     if (!form.customer) return;
@@ -168,6 +220,21 @@ export function CreateTicketPage() {
       }));
     }
   }, [filteredCustomers, form.customer]);
+
+  useEffect(() => {
+    if (!form.building) return;
+    const stillValid = filteredBuildings.some(
+      (b) => String(b.id) === form.building,
+    );
+    if (!stillValid) {
+      setForm((current) => ({
+        ...current,
+        building: filteredBuildings[0]
+          ? String(filteredBuildings[0].id)
+          : "",
+      }));
+    }
+  }, [filteredBuildings, form.building]);
 
   const selectedBuilding = useMemo(
     () => buildings.find((b) => String(b.id) === form.building),
@@ -305,13 +372,13 @@ export function CreateTicketPage() {
                   className="field-select"
                   value={form.building}
                   onChange={(event) => update("building", event.target.value)}
-                  disabled={buildings.length === 0}
+                  disabled={filteredBuildings.length === 0}
                   required
                 >
                   <option value="" disabled>
                     {t("field_location_placeholder")}
                   </option>
-                  {buildings.map((building) => (
+                  {filteredBuildings.map((building) => (
                     <option key={building.id} value={building.id}>
                       {building.name}
                     </option>
