@@ -32,24 +32,16 @@ import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
 
-const SUPER_ADMIN_UI_NEXT_STATUS: Record<TicketStatus, TicketStatus[]> = {
-  OPEN: ["IN_PROGRESS"],
-  IN_PROGRESS: ["WAITING_CUSTOMER_APPROVAL"],
-  WAITING_CUSTOMER_APPROVAL: ["APPROVED", "REJECTED"],
-  APPROVED: ["CLOSED"],
-  CLOSED: ["REOPENED_BY_ADMIN"],
-  REJECTED: ["IN_PROGRESS"],
-  REOPENED_BY_ADMIN: ["IN_PROGRESS"],
-};
-
-function getVisibleWorkflowStatuses(
-  ticket: TicketDetail,
-  role?: string,
-): TicketStatus[] {
-  if (role === "SUPER_ADMIN") {
-    return SUPER_ADMIN_UI_NEXT_STATUS[ticket.status] ?? [];
-  }
-
+// Sprint 15: backend is the source of truth for which transitions are
+// available. Previously the frontend carried a SUPER_ADMIN_UI_NEXT_STATUS
+// table that hard-coded a SUPER_ADMIN's next-step buttons; that table
+// could drift from `state_machine.ALLOWED_TRANSITIONS` and bypass the
+// pair-aware customer-user / building-manager scope checks. The viewset
+// now returns a per-role `allowed_next_statuses` for every role
+// (SUPER_ADMIN included via the special-case branch in
+// `state_machine.allowed_next_statuses`), so the page renders that list
+// directly.
+function getVisibleWorkflowStatuses(ticket: TicketDetail): TicketStatus[] {
   return ticket.allowed_next_statuses;
 }
 
@@ -258,8 +250,8 @@ export function TicketDetailPage() {
   }, [id, isStaff]);
 
   const visibleNextStatuses = useMemo(
-    () => (ticket ? getVisibleWorkflowStatuses(ticket, me?.role) : []),
-    [ticket, me?.role],
+    () => (ticket ? getVisibleWorkflowStatuses(ticket) : []),
+    [ticket],
   );
 
   async function submitAssignment(event: FormEvent) {
