@@ -92,65 +92,65 @@ credentials.
 
 ## Known finding to address before pilot launch
 
-### Health endpoint path mismatch — operator action required
+### Health endpoint path mismatch — fixed in Sprint 11
 
-Current state:
+> **Status: ✅ fixed.** Sprint 11 picked option 1 (smallest blast
+> radius): add a `location /health/` block to
+> [frontend/nginx.conf](../frontend/nginx.conf) so the public smoke
+> reaches the backend, and align all docs and `prod_health.sh` on
+> the bare `/health/...` path that Django actually serves.
 
-- Django registers the health endpoints at **`/health/live`** and
+#### What was wrong (Sprint 10 finding)
+
+- Django registered the health endpoints at **`/health/live`** and
   **`/health/ready`** (no `/api/` prefix —
   [backend/config/urls.py:18-19](../backend/config/urls.py#L18-L19)).
-- The frontend nginx config at
-  [frontend/nginx.conf](../frontend/nginx.conf) only proxies `/api/`,
-  `/admin/`, and `/static/` to the backend. Plain `/health/...` is
-  not forwarded; it falls through to `try_files $uri $uri/
-  /index.html` and serves the SPA shell with HTTP 200 (a false
-  positive!).
-- The runbooks
-  ([production-smoke-test.md §2-3](production-smoke-test.md),
-  [pilot-launch-checklist.md §C2](pilot-launch-checklist.md)) and
-  [scripts/ops/prod_health.sh](../scripts/ops/prod_health.sh) all
-  curl `https://<domain>/api/health/live`, which is proxied to
-  `backend:8000/api/health/live` — and Django returns **404** because
-  Django expects bare `/health/live`.
+- The frontend nginx config only proxied `/api/`, `/admin/`, and
+  `/static/` to the backend. Plain `/health/...` fell through to
+  `try_files $uri $uri/ /index.html` and served the **SPA shell with
+  HTTP 200** — a silent false positive.
+- The runbooks and `scripts/ops/prod_health.sh` all curled
+  `https://<domain>/api/health/live`. With nothing intercepting it,
+  that path proxied to `backend:8000/api/health/live` — Django
+  returned **404** because the route lives outside `/api/`.
 
-Net: with the current code shipped to a real host, **neither
-`/health/live` nor `/api/health/live` works through the public NPM
-domain**. The internal docker healthcheck still works (it uses a TCP
-socket probe that does not depend on Django routing), so the stack
-itself runs healthy — but the operator-facing smoke at §2-3 of the
-production smoke would either erroneously pass (SPA HTML 200 on the
-unprefixed path) or fail (404 on the prefixed path).
+Net: with the Sprint-10 code shipped to a real host, **neither
+`/health/live` nor `/api/health/live` worked through the public NPM
+domain**. The internal docker healthcheck was unaffected (it uses a
+TCP socket probe, not Django routing), so the stack ran healthy —
+but the operator-facing smoke at §2-3 of the production smoke would
+either erroneously pass (SPA HTML 200 on the unprefixed path) or
+fail (404 on the prefixed path).
 
-**Why this was not caught earlier:** Sprint 9's `dev_scope_audit.py`
-hits `localhost:8000/health/live` directly against the backend
-container, which works (no nginx in the path). The full chain
-(frontend nginx → backend) was never exercised against `/health/*`.
+#### Why it was not caught earlier
 
-**Operator action — pick one before pilot launch:**
+Sprint 9's `dev_scope_audit.py` hit `localhost:8000/health/live`
+directly against the backend container, which worked (no nginx in
+the path). The full chain (frontend nginx → backend) was never
+exercised against `/health/*`.
 
-1. **Add an nginx route (recommended):** in `frontend/nginx.conf`,
-   add a `location /health/` block that proxies to
-   `http://backend:8000`. Keeps the runbooks and Django code as-is
-   and changes only the frontend nginx routing. Smallest blast
-   radius.
-2. **Move Django URLs under /api/:** change
-   `backend/config/urls.py` so the paths become `api/health/live` and
-   `api/health/ready` — then update the docker-compose.prod.yml
-   internal healthcheck (currently a TCP socket probe, so no change
-   needed there) and `dev_scope_audit.py`. Larger blast radius
-   (touches code + tests + scripts).
+#### Sprint 11 fix
 
-Sprint 10 deliberately does not pick a side — choosing requires a
-sign-off from the operator on whether a public-facing
-`/health/<...>` is acceptable in the URL space (option 1) or whether
-all backend traffic must live under `/api/` (option 2). Once the
-operator decides, the change is small. Sprint 10 surfaces the
-mismatch so the operator does not ship to pilot with a broken smoke.
+1. [frontend/nginx.conf](../frontend/nginx.conf) — added a `location
+   /health/` block proxying to `http://backend:8000/health/`,
+   placed BEFORE the SPA `try_files` fallback so it cannot be
+   shadowed.
+2. [scripts/ops/prod_health.sh](../scripts/ops/prod_health.sh) — now
+   probes `/health/live` and `/health/ready` (matches Django + the
+   new nginx route). Header comment updated.
+3. [docs/production-smoke-test.md](production-smoke-test.md) §2-3
+   and [docs/pilot-launch-checklist.md](pilot-launch-checklist.md)
+   §10 — paths corrected; the smoke-test doc now says "if you see
+   HTML in the response body, the nginx config is missing the
+   `/health/` block".
+4. [scripts/ops/frontend_nginx_validate.sh](../scripts/ops/frontend_nginx_validate.sh)
+   — new validator that runs `nginx -t` against the frontend image
+   and asserts the `location /health/` block is present, so a
+   future regression cannot quietly remove the route again.
 
-This is **not** a security issue (TLS, scope, audit are all
-unaffected). It is a launch-readiness issue: the runbooks would
-mislead the operator into thinking the stack was healthy when the
-public smoke was actually returning the SPA shell or a 404.
+The fix changes only nginx routing — Django URLs, the docker-compose
+prod healthcheck, dev_scope_audit, and the test suite are all
+untouched.
 
 ---
 
