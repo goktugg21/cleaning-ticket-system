@@ -120,9 +120,19 @@ export function CreateTicketPage() {
         setCustomers(customerResponse.data.results);
 
         const firstBuilding = buildingResponse.data.results[0];
+        // Sprint 14 hotfix: a customer is valid for a building if EITHER
+        // legacy customer.building matches OR the building id appears in
+        // customer.linked_building_ids (M:N source of truth for
+        // consolidated customers like B Amsterdam).
+        const customerMatchesBuilding = (
+          customer: Customer,
+          buildingId: number,
+        ) =>
+          customer.building === buildingId ||
+          (customer.linked_building_ids?.includes(buildingId) ?? false);
         const firstCustomer = firstBuilding
-          ? customerResponse.data.results.find(
-              (customer) => customer.building === firstBuilding.id,
+          ? customerResponse.data.results.find((customer) =>
+              customerMatchesBuilding(customer, firstBuilding.id),
             )
           : undefined;
 
@@ -147,64 +157,51 @@ export function CreateTicketPage() {
     };
   }, []);
 
-  // Sprint 14: when a customer is selected, fetch the buildings that
-  // customer is linked to (M:N CustomerBuildingMembership) so the
-  // building dropdown can be narrowed to only valid pairs. The legacy
-  // `customer.building` is still respected as a fallback for any
-  // customer the operator has not yet re-linked.
-  const [customerLinkedBuildingIds, setCustomerLinkedBuildingIds] = useState<
-    Set<number> | null
-  >(null);
-
-  useEffect(() => {
-    if (!form.customer) {
-      setCustomerLinkedBuildingIds(null);
-      return;
-    }
-    let cancelled = false;
-    api
-      .get<PaginatedResponse<{ building_id: number }>>(
-        `/customers/${form.customer}/buildings/`,
-      )
-      .then((response) => {
-        if (cancelled) return;
-        setCustomerLinkedBuildingIds(
-          new Set(response.data.results.map((r) => r.building_id)),
-        );
-      })
-      .catch(() => {
-        // Endpoint requires admin permissions; for non-admin users
-        // this fetch will 403. Fall back to the legacy
-        // customer.building hint so the dropdown is still useful.
-        if (!cancelled) setCustomerLinkedBuildingIds(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [form.customer]);
+  // Sprint 14 hotfix — match a customer to a selected building via
+  // EITHER the legacy customer.building anchor OR the M:N
+  // linked_building_ids list returned by the customer serializer.
+  // This makes consolidated customers (Customer.building=NULL but
+  // linked to multiple buildings via CustomerBuildingMembership)
+  // appear in the dropdown when the operator picks a linked building.
+  // Backend ticket-create still validates per-(customer, building)
+  // user access on submit; this helper is convenience only.
+  const customerMatchesBuilding = (
+    customer: Customer,
+    buildingId: number,
+  ): boolean =>
+    customer.building === buildingId ||
+    (customer.linked_building_ids?.includes(buildingId) ?? false);
 
   const filteredCustomers = useMemo(() => {
     if (!form.building) return customers;
     const buildingId = Number(form.building);
-    return customers.filter(
-      (customer) => customer.building === buildingId,
+    return customers.filter((customer) =>
+      customerMatchesBuilding(customer, buildingId),
     );
   }, [customers, form.building]);
 
   const filteredBuildings = useMemo(() => {
     if (!form.customer) return buildings;
-    if (customerLinkedBuildingIds === null) {
-      // Either we have not loaded yet or the user is non-admin and
-      // we cannot read the link list. Fall back to the legacy
-      // customer.building anchor to keep the dropdown helpful.
-      const c = customers.find((x) => String(x.id) === form.customer);
-      if (c?.building) {
-        return buildings.filter((b) => b.id === c.building);
-      }
-      return buildings;
+    const c = customers.find((x) => String(x.id) === form.customer);
+    if (!c) return buildings;
+    return buildings.filter((b) => customerMatchesBuilding(c, b.id));
+  }, [buildings, customers, form.customer]);
+
+  // If a building is selected, the customer is unset, and exactly
+  // one valid customer matches → auto-select it. Saves a click in the
+  // common case where one building → one customer (e.g. Amanda's
+  // B3 → B Amsterdam). Multiple matches keep the user picking
+  // explicitly.
+  useEffect(() => {
+    if (!form.building) return;
+    if (form.customer) return;
+    if (filteredCustomers.length === 1) {
+      setForm((current) => ({
+        ...current,
+        customer: String(filteredCustomers[0].id),
+      }));
     }
-    return buildings.filter((b) => customerLinkedBuildingIds.has(b.id));
-  }, [buildings, customers, form.customer, customerLinkedBuildingIds]);
+  }, [form.building, form.customer, filteredCustomers]);
 
   useEffect(() => {
     if (!form.customer) return;

@@ -58,7 +58,17 @@ export interface Building {
 export interface Customer {
   id: number;
   company: number;
-  building: number;
+  // Sprint 14: legacy single-building anchor, now nullable. New
+  // consolidated customers (B Amsterdam-style) have building=null and
+  // are linked to many buildings via the M:N table.
+  building: number | null;
+  // Sprint 14 hotfix: every linked building, sourced from
+  // CustomerBuildingMembership. The list is the FULL set linked to
+  // this customer (not filtered to the caller's allowed buildings),
+  // so the frontend can match a selected building to a customer
+  // without an extra fetch. Backend ticket-create still validates
+  // the caller's per-building access on submit.
+  linked_building_ids?: number[];
   name: string;
   contact_email: string;
   phone: string;

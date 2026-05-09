@@ -418,3 +418,94 @@ class RemoveAccessRevokesVisibilityTests(_BAmsterdamScenarioMixin, APITestCase):
 
         after = self.client.get("/api/tickets/")
         self.assertEqual(self.response_ids(after), set())
+
+
+# ===========================================================================
+# Sprint 14 hotfix — /api/customers/ must expose linked_building_ids so the
+# CreateTicketPage frontend filter can match a consolidated customer to a
+# selected building. Without this field a customer-user picks B3 in the
+# Location dropdown and the Customer dropdown shows "No customers in this
+# location" because Customer.building is NULL.
+# ===========================================================================
+
+
+class LinkedBuildingIdsSerializerTests(_BAmsterdamScenarioMixin, APITestCase):
+    def _get_customer(self, response, customer_id):
+        """Find one customer payload in the paginated list response."""
+        for row in response.data["results"]:
+            if row["id"] == customer_id:
+                return row
+        self.fail(
+            f"Customer #{customer_id} not in list response: {response.data}"
+        )
+
+    def test_super_admin_sees_all_three_linked_buildings(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get("/api/customers/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        row = self._get_customer(response, self.b_amsterdam.id)
+        self.assertEqual(
+            sorted(row["linked_building_ids"]),
+            sorted([self.b1.id, self.b2.id, self.b3.id]),
+        )
+
+    def test_amanda_sees_b_amsterdam_with_full_linked_building_list(self):
+        """
+        Hotfix contract: /api/customers/ returns the FULL linked-building
+        list for a customer the caller is a member of, NOT filtered to
+        the caller's per-building access. The frontend uses the list
+        only to match a selected building to the customer; the backend
+        ticket-create endpoint enforces per-(customer, building) user
+        access on submit.
+        """
+        self.authenticate(self.amanda)
+        response = self.client.get("/api/customers/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        row = self._get_customer(response, self.b_amsterdam.id)
+        # Amanda's CustomerUserBuildingAccess only covers B3, but the
+        # serializer reports the full linked set — that is intentional
+        # so the dropdown match works when Amanda picks B3.
+        self.assertEqual(
+            sorted(row["linked_building_ids"]),
+            sorted([self.b1.id, self.b2.id, self.b3.id]),
+        )
+
+    def test_legacy_single_building_customer_falls_back_to_legacy_anchor(self):
+        """
+        A customer with no CustomerBuildingMembership rows but a non-null
+        Customer.building still surfaces the legacy id, so an unmigrated
+        row stays usable in the frontend filter.
+        """
+        # The fixture's self.customer was given a CustomerBuildingMembership
+        # by TenantFixtureMixin (mirrors the migration backfill). To
+        # exercise the legacy fallback, wipe the M:N row and confirm the
+        # serializer falls back to customer.building.
+        from customers.models import CustomerBuildingMembership
+
+        CustomerBuildingMembership.objects.filter(
+            customer=self.customer
+        ).delete()
+
+        self.authenticate(self.super_admin)
+        response = self.client.get("/api/customers/")
+        row = self._get_customer(response, self.customer.id)
+        self.assertEqual(
+            row["linked_building_ids"],
+            [self.customer.building_id],
+        )
+
+    def test_consolidated_customer_with_no_links_returns_empty_list(self):
+        """A truly empty consolidated customer returns []."""
+        from customers.models import CustomerBuildingMembership
+
+        # Wipe both the M:N rows AND the legacy anchor so no link
+        # exists at all.
+        CustomerBuildingMembership.objects.filter(
+            customer=self.b_amsterdam
+        ).delete()
+        # b_amsterdam already has building=NULL.
+
+        self.authenticate(self.super_admin)
+        response = self.client.get("/api/customers/")
+        row = self._get_customer(response, self.b_amsterdam.id)
+        self.assertEqual(row["linked_building_ids"], [])
