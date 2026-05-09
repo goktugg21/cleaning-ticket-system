@@ -1,15 +1,18 @@
 import type { ReactNode } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Building2,
   LayoutGrid,
   MailPlus,
   MapPin,
+  Menu,
   PlusCircle,
   Settings,
   UserCog,
   Users,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
@@ -53,8 +56,19 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const { me, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation("common");
   useLanguageSync();
+
+  // Sprint 12 — mobile sidebar toggle. The sidebar is `position: fixed`
+  // and hidden by default below the mobile breakpoint via CSS; the
+  // `.sidebar-mobile-open` class on the outer .app element flips it
+  // into an overlay. Auto-close on route navigation so a tap on a
+  // nav-item dismisses the menu.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
@@ -72,7 +86,15 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="app">
+    <div className={`app${sidebarOpen ? " sidebar-mobile-open" : ""}`}>
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label={t("sidebar_close")}
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="brand-icon">FM</div>
@@ -169,6 +191,19 @@ export function AppShell({ children }: AppShellProps) {
 
       <div className="workspace">
         <header className="topbar">
+          <button
+            type="button"
+            className="sidebar-toggle"
+            aria-label={sidebarOpen ? t("sidebar_close") : t("sidebar_open")}
+            aria-expanded={sidebarOpen}
+            onClick={() => setSidebarOpen((value) => !value)}
+          >
+            {sidebarOpen ? (
+              <X size={18} strokeWidth={2.2} />
+            ) : (
+              <Menu size={18} strokeWidth={2.2} />
+            )}
+          </button>
           <div className="topbar-left">
             <span className="topbar-kicker">{t("topbar.kicker")}</span>
             <span className="topbar-title">{t("topbar.title")}</span>

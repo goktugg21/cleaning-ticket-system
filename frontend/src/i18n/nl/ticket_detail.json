@@ -78,5 +78,13 @@
   "history_empty": "Nog geen statuswijzigingen.",
 
   "card_critical_title": "Kritieke prioriteit",
-  "card_critical_body": "Dit ticket is als urgent gemarkeerd. Geef voorrang aan de uitvoering en informeer de klant zodra een uitvoerder ter plaatse is."
+  "card_critical_body": "Dit ticket is als urgent gemarkeerd. Geef voorrang aan de uitvoering en informeer de klant zodra een uitvoerder ter plaatse is.",
+
+  "delete_ticket_button": "Per ongeluk geopend ticket verwijderen",
+  "delete_ticket_dialog_title": "Ticket {{ticket_no}} verwijderen",
+  "delete_ticket_dialog_body": "Verwijder dit ticket alleen als het per ongeluk is geopend. Deze actie verbergt het ticket uit normale weergaven en rapporten. Berichten, bijlagen en geschiedenis blijven bewaard voor audit. Typ ter bevestiging het ticketnummer hieronder.",
+  "delete_ticket_confirm_label": "Typ het ticketnummer om te bevestigen",
+  "delete_ticket_confirm_button": "Ticket verwijderen",
+  "delete_ticket_confirm_busy": "Verwijderen…",
+  "delete_ticket_failed": "Kon het ticket niet verwijderen. {{detail}}"
 }

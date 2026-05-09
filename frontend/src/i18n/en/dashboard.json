@@ -46,5 +46,9 @@
   "byb_open": "{{count}} open",
   "byb_in_progress": "{{count}} in progress",
   "byb_awaiting_customer": "{{count}} awaiting customer",
-  "byb_urgent": "{{count}} urgent"
+  "byb_urgent": "{{count}} urgent",
+
+  "last_updated_just_now": "Just updated",
+  "last_updated_seconds_ago": "Updated {{seconds}}s ago",
+  "last_updated_minutes_ago": "Updated {{minutes}}m ago"
 }

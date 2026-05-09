@@ -17,6 +17,10 @@ export interface ConfirmDialogProps {
   busy?: boolean;
   busyLabel?: string;
   destructive?: boolean;
+  // Sprint 12: optional gate so callers can require, e.g., a typed
+  // confirmation phrase before the confirm button activates. Defaults
+  // to false — pre-existing callers keep their current behaviour.
+  confirmDisabled?: boolean;
 }
 
 export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>(
@@ -31,6 +35,7 @@ export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>
       busy = false,
       busyLabel,
       destructive = false,
+      confirmDisabled = false,
     },
     ref,
   ) {
@@ -87,7 +92,7 @@ export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>
             onClick={() => {
               void onConfirm();
             }}
-            disabled={busy}
+            disabled={busy || confirmDisabled}
           >
             {busy ? renderedBusyLabel : confirmLabel}
           </button>

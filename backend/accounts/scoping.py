@@ -106,23 +106,30 @@ def scope_customers_for(user):
 
 
 def scope_tickets_for(user):
+    # Sprint 12: every code path below filters deleted_at__isnull=True.
+    # A soft-deleted ticket disappears from list, detail, search,
+    # messages, attachments, stats, and reports for every role
+    # (including SUPER_ADMIN — there is no archived-view UI yet, and
+    # showing a deleted ticket in normal views would surprise the
+    # operator). Hard SQL access in the Django admin or a future
+    # archived-view endpoint can still see the row.
     if _is_anonymous(user):
         return Ticket.objects.none()
 
     if user.role == UserRole.SUPER_ADMIN:
-        return Ticket.objects.all()
+        return Ticket.objects.filter(deleted_at__isnull=True)
 
     if user.role == UserRole.COMPANY_ADMIN:
         company_ids = CompanyUserMembership.objects.filter(user=user).values_list("company_id", flat=True)
-        return Ticket.objects.filter(company_id__in=company_ids)
+        return Ticket.objects.filter(deleted_at__isnull=True, company_id__in=company_ids)
 
     if user.role == UserRole.BUILDING_MANAGER:
         building_ids = BuildingManagerAssignment.objects.filter(user=user).values_list("building_id", flat=True)
-        return Ticket.objects.filter(building_id__in=building_ids)
+        return Ticket.objects.filter(deleted_at__isnull=True, building_id__in=building_ids)
 
     if user.role == UserRole.CUSTOMER_USER:
         customer_ids = CustomerUserMembership.objects.filter(user=user).values_list("customer_id", flat=True)
-        return Ticket.objects.filter(customer_id__in=customer_ids)
+        return Ticket.objects.filter(deleted_at__isnull=True, customer_id__in=customer_ids)
 
     return Ticket.objects.none()
 

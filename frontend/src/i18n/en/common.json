@@ -20,6 +20,8 @@
   "topbar.online": "Online",
   "topbar.brand_tag": "Cleaning operations",
   "topbar.user_fallback": "Facility user",
+  "sidebar_open": "Open menu",
+  "sidebar_close": "Close menu",
 
   "roles.super_admin": "Super admin",
   "roles.company_admin": "Company admin",
