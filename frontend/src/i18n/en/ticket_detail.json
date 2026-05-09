@@ -78,5 +78,13 @@
   "history_empty": "No status changes yet.",
 
   "card_critical_title": "Critical priority",
-  "card_critical_body": "This ticket is flagged urgent. Prioritise dispatch and update the customer once an operator is on site."
+  "card_critical_body": "This ticket is flagged urgent. Prioritise dispatch and update the customer once an operator is on site.",
+
+  "delete_ticket_button": "Delete accidental ticket",
+  "delete_ticket_dialog_title": "Delete ticket {{ticket_no}}",
+  "delete_ticket_dialog_body": "Only delete this ticket if it was opened accidentally. This action will hide the ticket from normal views and reports. Messages, attachments, and history are preserved for audit. To continue, type the ticket number below.",
+  "delete_ticket_confirm_label": "Type ticket number to confirm",
+  "delete_ticket_confirm_button": "Delete ticket",
+  "delete_ticket_confirm_busy": "Deleting…",
+  "delete_ticket_failed": "Could not delete the ticket. {{detail}}"
 }

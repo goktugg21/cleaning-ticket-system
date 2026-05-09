@@ -129,29 +129,34 @@ def tickets_for_scope(actor, scope: ResolvedScope):
     Returns a Ticket queryset filtered to the resolved scope, falling back to
     the actor's full allowed scope if neither company nor building is
     specified.
+
+    Sprint 12: every branch filters deleted_at__isnull=True so soft-deleted
+    tickets do not appear in any report, export, or chart.
     """
+    base = Ticket.objects.filter(deleted_at__isnull=True)
+
     if scope.building is not None:
-        return Ticket.objects.filter(building_id=scope.building.id)
+        return base.filter(building_id=scope.building.id)
 
     if scope.company is not None:
-        return Ticket.objects.filter(company_id=scope.company.id)
+        return base.filter(company_id=scope.company.id)
 
     if actor.role == UserRole.SUPER_ADMIN:
-        return Ticket.objects.all()
+        return base
     if actor.role == UserRole.COMPANY_ADMIN:
         company_ids = list(
             CompanyUserMembership.objects.filter(user=actor).values_list(
                 "company_id", flat=True
             )
         )
-        return Ticket.objects.filter(company_id__in=company_ids)
+        return base.filter(company_id__in=company_ids)
     if actor.role == UserRole.BUILDING_MANAGER:
         building_ids = list(
             BuildingManagerAssignment.objects.filter(user=actor).values_list(
                 "building_id", flat=True
             )
         )
-        return Ticket.objects.filter(building_id__in=building_ids)
+        return base.filter(building_id__in=building_ids)
     return Ticket.objects.none()
 
 

@@ -1,6 +1,6 @@
 import type { ChangeEvent, FormEvent } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ChevronLeft,
   Clock,
@@ -8,6 +8,7 @@ import {
   MapPin,
   MessageSquare,
   Paperclip,
+  Trash2,
   TriangleAlert,
   UploadCloud,
   UserPlus,
@@ -25,6 +26,8 @@ import type {
   TicketStatus,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
@@ -118,6 +121,7 @@ function getFileExtension(filename: string): string {
 
 export function TicketDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { me } = useAuth();
   const { t } = useTranslation(["ticket_detail", "common"]);
   const slaLabel = useSLALabel();
@@ -173,10 +177,29 @@ export function TicketDetailPage() {
 
   const [error, setError] = useState("");
 
+  // Sprint 12 — soft-delete state. confirmText is what the operator
+  // types into the dialog input; the confirm button only activates
+  // when it matches the ticket number, preventing single-click
+  // accidents. busy gates the network round-trip.
+  const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingTicket, setDeletingTicket] = useState(false);
+
   const isStaff =
     me?.role === "SUPER_ADMIN" ||
     me?.role === "COMPANY_ADMIN" ||
     me?.role === "BUILDING_MANAGER";
+
+  // Sprint 12 — mirrors the backend `_user_can_soft_delete_ticket`
+  // rule so the button only renders when the API will actually accept
+  // the call. Backend stays the source of truth for security; this
+  // is purely a UX gate.
+  const canDeleteTicket =
+    !!ticket &&
+    !!me &&
+    (me.role === "SUPER_ADMIN" ||
+      me.role === "COMPANY_ADMIN" ||
+      ticket.created_by === me.id);
 
   const loadTicket = useCallback(async () => {
     if (!id) return;
@@ -256,6 +279,32 @@ export function TicketDetailPage() {
       setError(getApiError(err));
     } finally {
       setAssigningTicket(false);
+    }
+  }
+
+  function openDeleteDialog() {
+    setDeleteConfirmText("");
+    setError("");
+    deleteDialogRef.current?.open();
+  }
+
+  async function confirmDeleteTicket() {
+    if (!id || !ticket) return;
+    setDeletingTicket(true);
+    try {
+      await api.delete(`/tickets/${id}/`);
+      deleteDialogRef.current?.close();
+      // Sprint 12: navigate back to dashboard so the soft-deleted
+      // ticket disappears from view immediately. The ticket list will
+      // refetch on mount and the row will not appear.
+      navigate("/", { replace: true });
+    } catch (err) {
+      setError(
+        t("delete_ticket_failed", { detail: getApiError(err) }),
+      );
+      deleteDialogRef.current?.close();
+    } finally {
+      setDeletingTicket(false);
     }
   }
 
@@ -426,10 +475,23 @@ export function TicketDetailPage() {
   return (
     <div>
       <div className="detail-header">
-        <Link to="/" className="link-back">
-          <ChevronLeft size={14} strokeWidth={2.5} />
-          {t("back_to_tickets")}
-        </Link>
+        <div className="detail-header-top">
+          <Link to="/" className="link-back">
+            <ChevronLeft size={14} strokeWidth={2.5} />
+            {t("back_to_tickets")}
+          </Link>
+          {canDeleteTicket && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm detail-delete-btn"
+              onClick={openDeleteDialog}
+              disabled={deletingTicket}
+            >
+              <Trash2 size={14} strokeWidth={2.2} />
+              {t("delete_ticket_button")}
+            </button>
+          )}
+        </div>
         <div className="detail-header-meta">
           <span className="detail-header-no">{ticket.ticket_no}</span>
           <span className={`badge badge-${ticket.priority.toLowerCase()}`}>
@@ -1172,6 +1234,55 @@ export function TicketDetailPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        ref={deleteDialogRef}
+        title={t("delete_ticket_dialog_title", {
+          ticket_no: ticket.ticket_no,
+        })}
+        body={
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p style={{ margin: 0, lineHeight: 1.5 }}>
+              {t("delete_ticket_dialog_body")}
+            </p>
+            <label
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                fontSize: 12,
+                color: "var(--text-muted)",
+              }}
+            >
+              <span>{t("delete_ticket_confirm_label")}</span>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder={ticket.ticket_no ?? ""}
+                autoFocus
+                style={{
+                  height: 34,
+                  padding: "0 10px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                }}
+              />
+            </label>
+          </div>
+        }
+        confirmLabel={t("delete_ticket_confirm_button")}
+        busyLabel={t("delete_ticket_confirm_busy")}
+        onConfirm={confirmDeleteTicket}
+        onCancel={() => setDeleteConfirmText("")}
+        busy={deletingTicket}
+        confirmDisabled={
+          deleteConfirmText.trim() !== (ticket.ticket_no ?? "").trim()
+        }
+        destructive
+      />
     </div>
   );
 }

@@ -95,6 +95,21 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # Soft-delete (Sprint 12). The TicketViewSet's DESTROY action sets
+    # both fields and the row stays in the database; scope_tickets_for
+    # / tickets_for_scope filter rows where deleted_at IS NOT NULL out
+    # of every list, detail, and report query. The internal
+    # ticket-status history, messages, and attachments are preserved
+    # so an operator can audit the row even after a soft delete.
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="deleted_tickets",
+    )
+
     first_response_at = models.DateTimeField(null=True, blank=True)
     sent_for_approval_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)

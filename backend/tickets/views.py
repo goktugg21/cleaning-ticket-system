@@ -1,6 +1,9 @@
+import logging
+
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -9,6 +12,8 @@ from rest_framework.response import Response
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
 from accounts.scoping import scope_tickets_for
+from audit.models import AuditAction, AuditLog
+from audit import context as audit_context
 from notifications.services import (
     send_ticket_assigned_email,
     send_ticket_created_email,
@@ -32,10 +37,40 @@ from .serializers import (
 )
 
 
+_audit_logger = logging.getLogger(__name__)
+
+
+def _user_can_soft_delete_ticket(user, ticket) -> bool:
+    """
+    Sprint 12 — conservative permission rule for ticket soft-delete.
+
+    The caller is already known to be in scope (the queryset gate enforces
+    that before this check fires). This function decides who, *within scope*,
+    is permitted to soft-delete:
+
+      - SUPER_ADMIN: always allowed.
+      - COMPANY_ADMIN: allowed for any in-scope ticket (their company's).
+      - BUILDING_MANAGER and CUSTOMER_USER: only the user who created the
+        ticket. A manager is not allowed to delete a customer's ticket they
+        did not raise themselves; one customer-user is not allowed to delete
+        another customer-user's ticket even if both share a customer.
+
+    The narrower "creator-only" rule for non-admin roles matches the brief's
+    intent: this feature exists to clean up tickets opened by accident, so
+    only the person who opened it (or an admin in scope) can roll it back.
+    """
+    if user.role == UserRole.SUPER_ADMIN:
+        return True
+    if user.role == UserRole.COMPANY_ADMIN:
+        return True
+    return ticket.created_by_id == user.id
+
+
 class TicketViewSet(
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     permission_classes = [IsAuthenticatedAndActive, CanViewTicket]
@@ -96,6 +131,66 @@ class TicketViewSet(
     def perform_create(self, serializer):
         ticket = serializer.save()
         send_ticket_created_email(ticket, actor=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Sprint 12 — soft-delete an accidentally-opened ticket.
+
+        - The instance is fetched through the scoped queryset (so a 404 is
+          returned before we even reach this method when the ticket lives
+          outside the caller's scope).
+        - `_user_can_soft_delete_ticket` further narrows by role/creator.
+        - We set `deleted_at` + `deleted_by` and save those two fields
+          only, leaving the rest of the row (status, assigned_to, sla_*)
+          intact so the audit trail and the lifecycle history survive.
+        - Related TicketMessage / TicketAttachment / TicketStatusHistory
+          rows are NOT touched.
+        - Exactly one AuditLog row is written with action=DELETE and a
+          rich changes payload (ticket_no, title, deleted_by_email)
+          so an operator can later see who removed which ticket without
+          a cross-lookup. The audit write is best-effort: a failure is
+          logged but does not roll back the soft-delete.
+        """
+        ticket = self.get_object()
+        if not _user_can_soft_delete_ticket(request.user, ticket):
+            self.permission_denied(
+                request,
+                message="You are not allowed to delete this ticket.",
+            )
+        if ticket.deleted_at is not None:
+            # Idempotent: already soft-deleted means the queryset gate
+            # would have returned 404, but defend in depth.
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        ticket.deleted_at = timezone.now()
+        ticket.deleted_by = request.user
+        ticket.save(update_fields=["deleted_at", "deleted_by", "updated_at"])
+
+        try:
+            AuditLog.objects.create(
+                actor=audit_context.get_current_actor(),
+                action=AuditAction.DELETE,
+                target_model="tickets.Ticket",
+                target_id=ticket.id,
+                changes={
+                    "ticket_id": {"before": ticket.id, "after": None},
+                    "ticket_no": {"before": ticket.ticket_no, "after": None},
+                    "title": {"before": ticket.title, "after": None},
+                    "deleted_by_email": {
+                        "before": None,
+                        "after": getattr(request.user, "email", None),
+                    },
+                },
+                request_ip=audit_context.get_current_request_ip(),
+                request_id=audit_context.get_current_request_id(),
+            )
+        except Exception:  # pragma: no cover — audit must not block delete
+            _audit_logger.exception(
+                "audit: failed to record soft-delete of tickets.Ticket#%s",
+                ticket.id,
+            )
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="status")
     def change_status(self, request, pk=None):

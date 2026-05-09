@@ -46,5 +46,9 @@
   "byb_open": "{{count}} open",
   "byb_in_progress": "{{count}} in behandeling",
   "byb_awaiting_customer": "{{count}} wacht op klant",
-  "byb_urgent": "{{count}} urgent"
+  "byb_urgent": "{{count}} urgent",
+
+  "last_updated_just_now": "Zojuist bijgewerkt",
+  "last_updated_seconds_ago": "{{seconds}} sec geleden bijgewerkt",
+  "last_updated_minutes_ago": "{{minutes}} min geleden bijgewerkt"
 }

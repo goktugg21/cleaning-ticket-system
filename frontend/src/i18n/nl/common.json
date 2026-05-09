@@ -20,6 +20,8 @@
   "topbar.online": "Online",
   "topbar.brand_tag": "Schoonmaakoperaties",
   "topbar.user_fallback": "Facility-gebruiker",
+  "sidebar_open": "Menu openen",
+  "sidebar_close": "Menu sluiten",
 
   "roles.super_admin": "Superbeheerder",
   "roles.company_admin": "Bedrijfsbeheerder",

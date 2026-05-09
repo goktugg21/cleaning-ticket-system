@@ -27,6 +27,14 @@ type Priority = "NORMAL" | "HIGH" | "URGENT";
 
 const PAGE_SIZE = 25;
 
+// Sprint 12: dashboard data refreshes silently every minute. Picked
+// 60s as a balance between "fresh enough that the operator does not
+// have to click refresh after a state change" and "not so chatty that
+// the API logs fill with noise from idle dashboards". Filters / pagination /
+// search state are NOT touched by the refresh — only the network reads
+// repeat with the current params.
+const AUTO_REFRESH_INTERVAL_MS = 60_000;
+
 const STATUS_OPTIONS: TicketStatus[] = [
   "OPEN",
   "IN_PROGRESS",
@@ -94,6 +102,13 @@ export function DashboardPage() {
   const [byBuilding, setByBuilding] = useState<TicketStatsByBuildingRow[] | null>(
     null,
   );
+  // Sprint 12: lastUpdated is set after every successful loader run
+  // (manual refresh, filter change, or background interval). Rendered
+  // as a small indicator in the page header. The "now" tick state
+  // forces the relative-time string to recompute every 30s without
+  // re-fetching anything.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [now, setNow] = useState<Date>(() => new Date());
 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
@@ -163,6 +178,7 @@ export function DashboardPage() {
       setCount(response.data.count);
       setNext(response.data.next);
       setPrevious(response.data.previous);
+      setLastUpdated(new Date());
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -198,6 +214,44 @@ export function DashboardPage() {
     loadStats();
     loadStatsByBuilding();
   }, [loadStats, loadStatsByBuilding]);
+
+  // Sprint 12: silent auto-refresh every 60s. Always exactly ONE
+  // interval per mount of this page; cleanup on unmount; cleanup on
+  // dependency change (so a new query-params combination installs a
+  // fresh timer aligned to the new fetch). The interval fires the
+  // same three loaders the manual Refresh button uses, so filters /
+  // pagination / SLA state are preserved automatically.
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      loadTickets();
+      loadStats();
+      loadStatsByBuilding();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(handle);
+    };
+  }, [loadTickets, loadStats, loadStatsByBuilding]);
+
+  // Tick "now" every 30s so the "Updated Xs ago" string recomputes
+  // without re-fetching. Cheap; no network. Same lifecycle as the
+  // refresher above.
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      setNow(new Date());
+    }, 30_000);
+    return () => {
+      window.clearInterval(handle);
+    };
+  }, []);
+
+  const lastUpdatedLabel = useMemo(() => {
+    if (!lastUpdated) return "";
+    const diff = Math.max(0, Math.floor((now.getTime() - lastUpdated.getTime()) / 1000));
+    if (diff < 10) return t("last_updated_just_now");
+    if (diff < 60) return t("last_updated_seconds_ago", { seconds: diff });
+    const minutes = Math.floor(diff / 60);
+    return t("last_updated_minutes_ago", { minutes });
+  }, [lastUpdated, now, t]);
 
   function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
@@ -274,6 +328,15 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="page-header-actions">
+          {lastUpdatedLabel && (
+            <span
+              className="last-updated"
+              aria-live="polite"
+              title={lastUpdated ? lastUpdated.toLocaleString() : undefined}
+            >
+              {lastUpdatedLabel}
+            </span>
+          )}
           <button
             type="button"
             className="btn btn-secondary btn-sm"

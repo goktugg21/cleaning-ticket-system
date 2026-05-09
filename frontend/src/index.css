@@ -2512,3 +2512,142 @@ table.data-table {
   text-transform: uppercase;
 }
 .sla-detail-meta-value { color: var(--text-2); }
+
+/* ====================================================================
+   SPRINT 12 — additions
+   --------------------------------------------------------------------
+   1. New element styles (last-updated indicator, ticket-detail header
+      top row, mobile sidebar toggle + backdrop, delete button).
+   2. Mobile / responsive polish — keeps the desktop look untouched and
+      adds targeted overrides at <= 960px (tablet) and <= 600px (phone).
+   ==================================================================== */
+
+/* "Updated 30s ago" pill in the dashboard header. Subtle, non-blocking. */
+.last-updated {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 10px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+/* Ticket detail: header now has a top row with back-link on the left
+   and the delete button on the right. The button uses the existing
+   ghost styling but tints its icon red so it reads as destructive
+   without inventing a new btn-danger variant. */
+.detail-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.detail-delete-btn {
+  color: var(--red);
+}
+.detail-delete-btn:hover {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.detail-delete-btn svg {
+  margin-right: 4px;
+}
+
+/* Sidebar mobile toggle — hidden on desktop, shown via the @media
+   block below. Keep the rule outside the media query so the styling
+   survives if the media query ever moves. */
+.sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  color: var(--text-2);
+}
+.sidebar-toggle:hover { background: var(--surface-2); }
+
+/* Click-outside backdrop for the mobile sidebar. */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  border: 0;
+  cursor: pointer;
+  z-index: 49;
+}
+
+/* Tablet — 960px and below: stack page-header actions, drop the
+   identity text in the topbar to keep room for the role badge and
+   logout button. */
+@media (max-width: 960px) {
+  .page-canvas { padding: 20px; }
+  .topbar { padding: 0 18px; }
+  .topbar-identity .identity-text { display: none; }
+  .page-header-actions { flex-wrap: wrap; }
+  .last-updated { order: -1; flex-basis: 100%; justify-content: flex-start; }
+}
+
+/* Phone — 760px and below: hide the fixed sidebar by default; show
+   the hamburger toggle; reset workspace margin so content uses the
+   full viewport. When .sidebar-mobile-open is set on .app the
+   sidebar slides in as an overlay with the backdrop. */
+@media (max-width: 760px) {
+  .sidebar { transform: translateX(-100%); transition: transform 0.18s ease; width: min(280px, 86vw); }
+  .app.sidebar-mobile-open .sidebar { transform: translateX(0); }
+  .app.sidebar-mobile-open .sidebar-backdrop { display: block; }
+  .workspace { margin-left: 0; }
+  .sidebar-toggle { display: inline-flex; }
+
+  .topbar { padding: 0 12px; gap: 10px; height: 56px; }
+  .topbar-left .topbar-kicker { display: none; }
+  .topbar-title { font-size: 15px; }
+  .topbar-divider { display: none; }
+  .topbar-right { gap: 8px; }
+  .identity-role { font-size: 9px; padding: 0 7px; height: 20px; }
+
+  .page-canvas { padding: 14px; }
+  .page-header { gap: 12px; margin-bottom: 16px; }
+  .page-title { font-size: 22px; }
+
+  /* Detail header: meta + buttons may need to wrap. */
+  .detail-header-meta { flex-wrap: wrap; gap: 6px; }
+  .detail-header-title { font-size: 22px; line-height: 1.2; }
+
+  /* Make all buttons easier to tap. The default btn-sm height (30px)
+     is below the recommended 44px tap target; bump it on mobile only,
+     so desktop visual density is preserved. */
+  .btn-sm { height: 36px; min-width: 36px; padding: 0 14px; }
+  .filter-control { height: 38px; }
+  .filter-bar { padding: 12px 14px; }
+
+  /* SLA badge inside the dense table tends to overflow on narrow
+     widths. Allow it to wrap. */
+  .sla-badge { white-space: normal; }
+}
+
+/* Tiny phones — 480px and below: collapse KPIs to a single column and
+   tighten paddings further. */
+@media (max-width: 480px) {
+  .kpi-row { grid-template-columns: 1fr; gap: 10px; }
+  .page-canvas { padding: 10px; }
+  .filter-bar { grid-template-columns: 1fr; }
+  .filter-field.search { grid-column: auto; }
+  .filter-actions { grid-column: auto; }
+  .page-header-actions { width: 100%; }
+  .page-header-actions .btn { flex: 1 0 auto; justify-content: center; }
+}
