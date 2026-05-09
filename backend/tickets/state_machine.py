@@ -4,7 +4,7 @@ from django.utils import timezone
 from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from customers.models import CustomerUserMembership
+from customers.models import CustomerUserBuildingAccess
 
 from .models import Ticket, TicketStatus, TicketStatusHistory
 
@@ -87,7 +87,18 @@ def _user_passes_scope(user, ticket, scope):
     if scope == SCOPE_BUILDING_ASSIGNED:
         return BuildingManagerAssignment.objects.filter(user=user, building_id=ticket.building_id).exists()
     if scope == SCOPE_CUSTOMER_LINKED:
-        return CustomerUserMembership.objects.filter(user=user, customer_id=ticket.customer_id).exists()
+        # Sprint 15: customer-user transitions (approve / reject) require
+        # the EXACT (customer, building) pair access, not just any
+        # CustomerUserMembership for the customer. A user with membership
+        # to Customer X but only CustomerUserBuildingAccess for B3 must
+        # not be able to approve a B1 ticket of the same customer. This
+        # mirrors accounts/scoping.py::scope_tickets_for so visibility
+        # and action authority stay aligned.
+        return CustomerUserBuildingAccess.objects.filter(
+            membership__user=user,
+            membership__customer_id=ticket.customer_id,
+            building_id=ticket.building_id,
+        ).exists()
     return False
 
 

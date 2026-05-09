@@ -122,3 +122,163 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
 
         self.assertIsNotNone(ticket.resolved_at)
         self.assertGreater(ticket.resolved_at, first_resolved)
+
+
+# ===========================================================================
+# Sprint 15 — customer-user transitions require EXACT (customer, building)
+# pair access, not just a CustomerUserMembership for the customer.
+#
+# Sprint 14 introduced CustomerUserBuildingAccess but
+# state_machine._user_passes_scope still only checked CustomerUserMembership
+# for SCOPE_CUSTOMER_LINKED. Sprint 15 closes that gap so a customer-user
+# whose access list does not include the ticket's building cannot
+# approve or reject the ticket — even if they share the customer with
+# the rightful approver.
+# ===========================================================================
+
+from buildings.models import Building
+from customers.models import (
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
+from accounts.models import UserRole
+from tickets.models import Ticket, TicketType
+from tickets.permissions import user_has_scope_for_ticket
+from tickets.state_machine import allowed_next_statuses, can_transition
+
+
+class CustomerUserPairAccessTransitionTests(TenantFixtureMixin, APITestCase):
+    """
+    Build a multi-building B Amsterdam-style scenario on top of the
+    standard fixture so the per-building pair check is observable.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        # Two extra buildings under self.company. self.building (from
+        # the fixture) plus self.b_extra is enough to prove the pair
+        # check; self.b_third gives us a building Amanda has no access
+        # to at all, distinct from the fixture's self.building.
+        self.b_extra = Building.objects.create(
+            company=self.company, name="Building A2", address="Other Street"
+        )
+        self.b_third = Building.objects.create(
+            company=self.company, name="Building A3", address="Third Street"
+        )
+
+        # Promote self.customer to the consolidated shape: link it to
+        # all three buildings via CustomerBuildingMembership. The
+        # fixture already created the (customer, self.building) row,
+        # so we add the two new ones.
+        CustomerBuildingMembership.objects.get_or_create(
+            customer=self.customer, building=self.b_extra
+        )
+        CustomerBuildingMembership.objects.get_or_create(
+            customer=self.customer, building=self.b_third
+        )
+
+        # Amanda: customer-user of self.customer with access ONLY to
+        # self.b_third.
+        self.amanda = self.make_user(
+            "amanda-sprint15@example.com", UserRole.CUSTOMER_USER
+        )
+        amanda_membership = CustomerUserMembership.objects.create(
+            user=self.amanda, customer=self.customer
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=amanda_membership, building=self.b_third
+        )
+
+        # Two tickets: one at self.b_third (in-scope for Amanda), one
+        # at self.b_extra (out-of-scope for Amanda but same customer).
+        # Both start in WAITING_CUSTOMER_APPROVAL so the
+        # APPROVED/REJECTED transitions are testable directly.
+        self.ticket_in_scope = Ticket.objects.create(
+            company=self.company,
+            building=self.b_third,
+            customer=self.customer,
+            created_by=self.amanda,
+            title="Amanda-scope ticket",
+            description="d",
+            type=TicketType.REPORT,
+            status=TicketStatus.WAITING_CUSTOMER_APPROVAL,
+        )
+        self.ticket_out_of_scope = Ticket.objects.create(
+            company=self.company,
+            building=self.b_extra,
+            customer=self.customer,
+            created_by=self.customer_user,  # someone else
+            title="Other-building ticket",
+            description="d",
+            type=TicketType.REPORT,
+            status=TicketStatus.WAITING_CUSTOMER_APPROVAL,
+        )
+
+    # --- can_transition ----------------------------------------------------
+
+    def test_can_approve_ticket_in_scope_building(self):
+        self.assertTrue(
+            can_transition(self.amanda, self.ticket_in_scope, TicketStatus.APPROVED)
+        )
+
+    def test_can_reject_ticket_in_scope_building(self):
+        self.assertTrue(
+            can_transition(self.amanda, self.ticket_in_scope, TicketStatus.REJECTED)
+        )
+
+    def test_cannot_approve_ticket_out_of_scope_building(self):
+        self.assertFalse(
+            can_transition(
+                self.amanda, self.ticket_out_of_scope, TicketStatus.APPROVED
+            )
+        )
+
+    def test_cannot_reject_ticket_out_of_scope_building(self):
+        self.assertFalse(
+            can_transition(
+                self.amanda, self.ticket_out_of_scope, TicketStatus.REJECTED
+            )
+        )
+
+    # --- allowed_next_statuses --------------------------------------------
+
+    def test_allowed_next_statuses_in_scope_includes_approved_and_rejected(self):
+        next_statuses = set(allowed_next_statuses(self.amanda, self.ticket_in_scope))
+        self.assertIn(TicketStatus.APPROVED, next_statuses)
+        self.assertIn(TicketStatus.REJECTED, next_statuses)
+
+    def test_allowed_next_statuses_out_of_scope_excludes_approval_actions(self):
+        next_statuses = set(allowed_next_statuses(self.amanda, self.ticket_out_of_scope))
+        self.assertNotIn(TicketStatus.APPROVED, next_statuses)
+        self.assertNotIn(TicketStatus.REJECTED, next_statuses)
+        # In fact a customer-user has no transitions at all on a ticket
+        # that is out of their building access — the empty set is the
+        # expected shape.
+        self.assertEqual(next_statuses, set())
+
+    # --- apply_transition end-to-end --------------------------------------
+
+    def test_apply_transition_rejects_out_of_scope_approval(self):
+        with self.assertRaises(TransitionError) as ctx:
+            apply_transition(
+                self.ticket_out_of_scope, self.amanda, TicketStatus.APPROVED
+            )
+        self.assertEqual(ctx.exception.code, "forbidden_transition")
+
+    def test_apply_transition_allows_in_scope_approval(self):
+        ticket = apply_transition(
+            self.ticket_in_scope, self.amanda, TicketStatus.APPROVED
+        )
+        self.assertEqual(ticket.status, TicketStatus.APPROVED)
+
+    # --- user_has_scope_for_ticket (Sprint 15 hardening) ------------------
+
+    def test_user_has_scope_for_ticket_true_for_in_scope_pair(self):
+        self.assertTrue(user_has_scope_for_ticket(self.amanda, self.ticket_in_scope))
+
+    def test_user_has_scope_for_ticket_false_for_out_of_scope_pair(self):
+        self.assertFalse(
+            user_has_scope_for_ticket(self.amanda, self.ticket_out_of_scope)
+        )

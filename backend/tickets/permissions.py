@@ -5,7 +5,7 @@ from accounts.permissions import IsAuthenticatedAndActive
 from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from customers.models import CustomerUserMembership
+from customers.models import CustomerUserBuildingAccess
 
 
 class CanViewTicket(IsAuthenticatedAndActive):
@@ -39,5 +39,15 @@ def user_has_scope_for_ticket(user, ticket):
     if user.role == UserRole.BUILDING_MANAGER:
         return BuildingManagerAssignment.objects.filter(user=user, building_id=ticket.building_id).exists()
     if user.role == UserRole.CUSTOMER_USER:
-        return CustomerUserMembership.objects.filter(user=user, customer_id=ticket.customer_id).exists()
+        # Sprint 15: customer-users need the exact (customer, building)
+        # pair access, matching scope_tickets_for. This function is
+        # consulted by the messages and attachments serializers, so
+        # without the pair check a customer-user with membership to
+        # Customer X but no building access for B1 could post a
+        # message on a B1 ticket of the same customer.
+        return CustomerUserBuildingAccess.objects.filter(
+            membership__user=user,
+            membership__customer_id=ticket.customer_id,
+            building_id=ticket.building_id,
+        ).exists()
     return False
