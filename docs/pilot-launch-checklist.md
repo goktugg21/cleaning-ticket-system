@@ -246,8 +246,8 @@ Run the full sequence from
 stack is up. The condensed list:
 
 - [ ] Public HTTPS frontend loads.
-- [ ] `/api/health/live` returns 200.
-- [ ] `/api/health/ready` returns 200 with `{database: ok, redis: ok}`.
+- [ ] `/health/live` returns 200 (and the body is JSON, not HTML).
+- [ ] `/health/ready` returns 200 with `{database: ok, redis: ok}`.
 - [ ] Login works for the named super-admin.
 - [ ] Admin user list loads.
 - [ ] Customer creates a ticket end-to-end (the live flow from

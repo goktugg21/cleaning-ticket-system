@@ -7,6 +7,15 @@
 #   DOMAIN=cleaning.example.com ./scripts/ops/prod_health.sh
 #   ./scripts/ops/prod_health.sh cleaning.example.com
 #
+# Probes:
+#   GET https://<domain>/health/live   -> liveness   (200 expected)
+#   GET https://<domain>/health/ready  -> readiness  (200 expected)
+#
+# Both paths require frontend/nginx.conf's `location /health/`
+# block (added in Sprint 11). Earlier drafts of this script used
+# /api/health/* — those would 404 because Django registers the
+# routes outside the /api/ namespace.
+#
 # Exits non-zero if either /health/live or /health/ready returns
 # anything other than HTTP 200.
 
@@ -45,6 +54,11 @@ probe() {
   return 1
 }
 
-probe "liveness " /api/health/live
-probe "readiness" /api/health/ready
+# Paths match Django's URL conf: /health/live and /health/ready,
+# proxied to backend by frontend/nginx.conf's `location /health/`
+# block (added in Sprint 11). Earlier runbook drafts referenced
+# /api/health/* — those would 404 because Django registers the
+# routes outside the /api/ namespace.
+probe "liveness " /health/live
+probe "readiness" /health/ready
 echo "All checks passed."

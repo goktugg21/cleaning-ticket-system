@@ -60,11 +60,11 @@ the dev-tools console.
 
 ---
 
-## 2. `/api/health/live`
+## 2. `/health/live`
 
 ```bash
-curl -sI https://$DOMAIN/api/health/live | head -1
-curl -s https://$DOMAIN/api/health/live
+curl -sI https://$DOMAIN/health/live | head -1
+curl -s https://$DOMAIN/health/live
 ```
 
 Expected:
@@ -78,13 +78,21 @@ This is the cheap liveness signal — it confirms NPM + frontend
 nginx + backend gunicorn are all up. It does NOT validate
 Postgres or Redis (that's `/health/ready` below).
 
+> **Note (Sprint 11):** earlier drafts of this runbook used
+> `/api/health/live`. Django registers the route as `/health/live`
+> (no `/api/` prefix); Sprint 11 added a `location /health/` block to
+> [frontend/nginx.conf](../frontend/nginx.conf) so the public smoke
+> reaches the backend instead of falling through to the SPA shell.
+> If you see HTML in the response body, the nginx config is missing
+> that block — check your build.
+
 ---
 
-## 3. `/api/health/ready`
+## 3. `/health/ready`
 
 ```bash
-curl -sI https://$DOMAIN/api/health/ready | head -1
-curl -s https://$DOMAIN/api/health/ready
+curl -sI https://$DOMAIN/health/ready | head -1
+curl -s https://$DOMAIN/health/ready
 ```
 
 Expected (healthy):
@@ -385,8 +393,8 @@ which is the correct posture (verified in the rendered config:
 | # | Check | OK |
 |---|---|---|
 | 1 | Public HTTPS frontend loads | [ ] |
-| 2 | `/api/health/live` 200 | [ ] |
-| 3 | `/api/health/ready` 200 + database+redis ok | [ ] |
+| 2 | `/health/live` 200 | [ ] |
+| 3 | `/health/ready` 200 + database+redis ok | [ ] |
 | 4 | Login works (browser + token) | [ ] |
 | 5 | Admin user list returns rows | [ ] |
 | 6 | Ticket workflow end-to-end | [ ] |

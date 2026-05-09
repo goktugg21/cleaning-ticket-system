@@ -17,6 +17,7 @@ default env vars and human-readable output, so a tired operator at
 | `prod_env_check_test.sh` | Sprint 10 — self-test for `scripts/prod_env_check.sh` using dummy good/bad env files. No real secrets. | [docs/pre-host-production-hardening.md](../../docs/pre-host-production-hardening.md) |
 | `prod_compose_validate.sh` | Sprint 10 — host-agnostic validation of `docker-compose.prod.yml` rendering and host-port posture. Uses a dummy env. | [docs/pre-host-production-hardening.md](../../docs/pre-host-production-hardening.md) |
 | `pilot_readiness_report.sh` | Sprint 10 — single-command OK/WARN/FAIL summary across env / compose / demo-accounts / backups / domain. Skips host-only checks gracefully. | [docs/pre-host-production-hardening.md](../../docs/pre-host-production-hardening.md) |
+| `frontend_nginx_validate.sh` | Sprint 11 — runs `nginx -t` against the frontend config inside `nginx:1.27-alpine` and asserts the `/health/` proxy block is present. Locks the Sprint-11 fix against future regressions. | [docs/pre-host-production-hardening.md](../../docs/pre-host-production-hardening.md) |
 
 ## Rules
 
