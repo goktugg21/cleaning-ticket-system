@@ -35,9 +35,13 @@ class CustomerViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         company: Company = serializer.validated_data["company"]
-        building = serializer.validated_data["building"]
+        # Sprint 14: legacy `building` is optional now. Existing data
+        # still carries it; new consolidated customers can be created
+        # with no anchor building and linked to many buildings via the
+        # M:N CustomerBuildingMembership endpoint.
+        building = serializer.validated_data.get("building")
         actor = self.request.user
-        if building.company_id != company.id:
+        if building is not None and building.company_id != company.id:
             raise ValidationError(
                 {"building": "Building does not belong to the selected company."}
             )

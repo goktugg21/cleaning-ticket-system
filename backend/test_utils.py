@@ -3,7 +3,12 @@ from django.contrib.auth import get_user_model
 from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 from tickets.models import Ticket, TicketStatus
 
 
@@ -67,8 +72,36 @@ class TenantFixtureMixin:
         CompanyUserMembership.objects.create(user=self.other_company_admin, company=self.other_company)
         BuildingManagerAssignment.objects.create(user=self.manager, building=self.building)
         BuildingManagerAssignment.objects.create(user=self.other_manager, building=self.other_building)
-        CustomerUserMembership.objects.create(user=self.customer_user, customer=self.customer)
-        CustomerUserMembership.objects.create(user=self.other_customer_user, customer=self.other_customer)
+
+        # Sprint 14 — every legacy customer↔building anchor also gets a
+        # CustomerBuildingMembership row so the new ticket-create
+        # validator finds the M:N link. The migration backfill does
+        # this for pre-existing pilot data; tests that build their own
+        # fixtures need the same shape.
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=self.building
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=self.other_customer, building=self.other_building
+        )
+
+        # Sprint 14 — CustomerUserMembership alone is no longer enough
+        # for visibility; the user also needs CustomerUserBuildingAccess
+        # for each building. Mirror the Sprint-14 migration backfill so
+        # legacy single-building customer-users have visibility of the
+        # customer's anchor building.
+        membership_a = CustomerUserMembership.objects.create(
+            user=self.customer_user, customer=self.customer
+        )
+        membership_b = CustomerUserMembership.objects.create(
+            user=self.other_customer_user, customer=self.other_customer
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership_a, building=self.building
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership_b, building=self.other_building
+        )
 
         self.ticket = Ticket.objects.create(
             company=self.company,

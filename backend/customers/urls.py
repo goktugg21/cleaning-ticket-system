@@ -2,7 +2,14 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import CustomerViewSet
-from .views_memberships import CustomerUserDeleteView, CustomerUserListCreateView
+from .views_memberships import (
+    CustomerBuildingDeleteView,
+    CustomerBuildingListCreateView,
+    CustomerUserAccessDeleteView,
+    CustomerUserAccessListCreateView,
+    CustomerUserDeleteView,
+    CustomerUserListCreateView,
+)
 
 
 router = DefaultRouter()
@@ -19,5 +26,27 @@ urlpatterns = [
         "<int:customer_id>/users/<int:user_id>/",
         CustomerUserDeleteView.as_view(),
         name="customer-user-delete",
+    ),
+    # Sprint 14 — customer ↔ buildings (M:N).
+    path(
+        "<int:customer_id>/buildings/",
+        CustomerBuildingListCreateView.as_view(),
+        name="customer-buildings",
+    ),
+    path(
+        "<int:customer_id>/buildings/<int:building_id>/",
+        CustomerBuildingDeleteView.as_view(),
+        name="customer-building-delete",
+    ),
+    # Sprint 14 — per-customer-user building access.
+    path(
+        "<int:customer_id>/users/<int:user_id>/access/",
+        CustomerUserAccessListCreateView.as_view(),
+        name="customer-user-access",
+    ),
+    path(
+        "<int:customer_id>/users/<int:user_id>/access/<int:building_id>/",
+        CustomerUserAccessDeleteView.as_view(),
+        name="customer-user-access-delete",
     ),
 ] + router.urls

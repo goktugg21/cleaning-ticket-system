@@ -5,16 +5,22 @@ import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
+  addCustomerBuilding,
   addCustomerUser,
+  addCustomerUserAccess,
   createCustomer,
   deactivateCustomer,
   getCustomer,
   listBuildings,
   listCompanies,
+  listCustomerBuildings,
+  listCustomerUserAccess,
   listCustomerUsers,
   listUsers,
   reactivateCustomer,
+  removeCustomerBuilding,
   removeCustomerUser,
+  removeCustomerUserAccess,
   updateCustomer,
 } from "../../api/admin";
 import type { AdminFieldErrors, CustomerWritePayload } from "../../api/admin";
@@ -22,6 +28,8 @@ import type {
   BuildingAdmin,
   CompanyAdmin,
   CustomerAdmin,
+  CustomerBuildingMembership,
+  CustomerUserBuildingAccess,
   CustomerUserMembership,
   UserAdmin,
 } from "../../api/types";
@@ -90,7 +98,8 @@ export function CustomerFormPage() {
     },
     applyEntity: (entity) => {
       setCompany(entity.company);
-      setBuilding(entity.building);
+      // Sprint 14: legacy building can be null on consolidated customers.
+      setBuilding(entity.building ?? "");
       setName(entity.name);
       setContactEmail(entity.contact_email);
       setPhone(entity.phone);
@@ -114,6 +123,36 @@ export function CustomerFormPage() {
   const [memberBusy, setMemberBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<CustomerUserMembership | null>(null);
   const removeDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  // Sprint 14 — linked-buildings section state.
+  const [linkedBuildings, setLinkedBuildings] = useState<
+    CustomerBuildingMembership[]
+  >([]);
+  const [allCompanyBuildings, setAllCompanyBuildings] = useState<BuildingAdmin[]>(
+    [],
+  );
+  const [selectedBuildingToLink, setSelectedBuildingToLink] = useState<
+    number | ""
+  >("");
+  const [buildingLinkError, setBuildingLinkError] = useState("");
+  const [buildingLinkBusy, setBuildingLinkBusy] = useState(false);
+  const [unlinkBuildingTarget, setUnlinkBuildingTarget] =
+    useState<CustomerBuildingMembership | null>(null);
+  const unlinkBuildingDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  // Sprint 14 — per-customer-user building access state.
+  // Indexed by user_id since the membership row is keyed on user under
+  // a fixed customer (the unique constraint).
+  const [accessByUserId, setAccessByUserId] = useState<
+    Record<number, CustomerUserBuildingAccess[]>
+  >({});
+  const [accessBusyUserId, setAccessBusyUserId] = useState<number | null>(null);
+  const [accessError, setAccessError] = useState("");
+  const [revokeAccessTarget, setRevokeAccessTarget] = useState<{
+    membership: CustomerUserMembership;
+    access: CustomerUserBuildingAccess;
+  } | null>(null);
+  const revokeAccessDialogRef = useRef<ConfirmDialogHandle>(null);
 
   const reloadMembers = useMemo(
     () => async () => {
@@ -175,6 +214,179 @@ export function CustomerFormPage() {
       removeDialogRef.current?.close();
     } finally {
       setMemberBusy(false);
+    }
+  }
+
+  // Sprint 14 — linked-buildings reload + add/remove handlers.
+
+  const reloadLinkedBuildings = useMemo(
+    () => async () => {
+      if (numericId === null || customer === null) return;
+      try {
+        const [linksResponse, companyBuildingsResponse] = await Promise.all([
+          listCustomerBuildings(numericId),
+          // Pull the company's buildings so we can offer "available to
+          // link" as the difference. is_active=true keeps inactive
+          // buildings out of the dropdown; the operator can still see
+          // them in the linked list if they were linked previously.
+          listBuildings({
+            is_active: "true",
+            page_size: 200,
+            company: customer.company,
+          }),
+        ]);
+        setLinkedBuildings(linksResponse.results);
+        setAllCompanyBuildings(companyBuildingsResponse.results);
+      } catch (err) {
+        setBuildingLinkError(getApiError(err));
+      }
+    },
+    [numericId, customer],
+  );
+
+  useEffect(() => {
+    if (isCreate || numericId === null || customer === null) return;
+    reloadLinkedBuildings();
+  }, [isCreate, numericId, customer, reloadLinkedBuildings]);
+
+  async function handleAddBuildingLink(event: FormEvent) {
+    event.preventDefault();
+    if (numericId === null || selectedBuildingToLink === "") return;
+    setBuildingLinkError("");
+    setBuildingLinkBusy(true);
+    try {
+      await addCustomerBuilding(numericId, Number(selectedBuildingToLink));
+      setSelectedBuildingToLink("");
+      await reloadLinkedBuildings();
+    } catch (err) {
+      setBuildingLinkError(getApiError(err));
+    } finally {
+      setBuildingLinkBusy(false);
+    }
+  }
+
+  function openUnlinkBuildingDialog(link: CustomerBuildingMembership) {
+    setUnlinkBuildingTarget(link);
+    unlinkBuildingDialogRef.current?.open();
+  }
+
+  async function handleConfirmUnlinkBuilding() {
+    if (numericId === null || !unlinkBuildingTarget) return;
+    setBuildingLinkBusy(true);
+    setBuildingLinkError("");
+    try {
+      await removeCustomerBuilding(
+        numericId,
+        unlinkBuildingTarget.building_id,
+      );
+      unlinkBuildingDialogRef.current?.close();
+      setUnlinkBuildingTarget(null);
+      await reloadLinkedBuildings();
+      // Cascade: removing a customer↔building also revokes access
+      // rows for that pair on the backend; refetch every user's
+      // access list so the UI reflects it.
+      await reloadAllUserAccess();
+    } catch (err) {
+      setBuildingLinkError(getApiError(err));
+      unlinkBuildingDialogRef.current?.close();
+    } finally {
+      setBuildingLinkBusy(false);
+    }
+  }
+
+  // Sprint 14 — per-user building access loaders + handlers.
+
+  const reloadAllUserAccess = useMemo(
+    () => async () => {
+      if (numericId === null) return;
+      // Fetch each member's access list. For a small pilot population
+      // this is fine; if the membership list grows beyond ~20 users
+      // we can paginate or batch it. Sequential to keep the UI
+      // deterministic; failures on one user do not poison the others.
+      const next: Record<number, CustomerUserBuildingAccess[]> = {};
+      for (const membership of members) {
+        try {
+          const response = await listCustomerUserAccess(
+            numericId,
+            membership.user_id,
+          );
+          next[membership.user_id] = response.results;
+        } catch {
+          next[membership.user_id] = [];
+        }
+      }
+      setAccessByUserId(next);
+    },
+    [numericId, members],
+  );
+
+  useEffect(() => {
+    if (isCreate || numericId === null) return;
+    if (members.length === 0) {
+      setAccessByUserId({});
+      return;
+    }
+    reloadAllUserAccess();
+  }, [isCreate, numericId, members, reloadAllUserAccess]);
+
+  async function handleAddAccess(
+    membership: CustomerUserMembership,
+    buildingId: number,
+  ) {
+    if (numericId === null) return;
+    setAccessError("");
+    setAccessBusyUserId(membership.user_id);
+    try {
+      await addCustomerUserAccess(numericId, membership.user_id, buildingId);
+      const response = await listCustomerUserAccess(
+        numericId,
+        membership.user_id,
+      );
+      setAccessByUserId((prev) => ({
+        ...prev,
+        [membership.user_id]: response.results,
+      }));
+    } catch (err) {
+      setAccessError(getApiError(err));
+    } finally {
+      setAccessBusyUserId(null);
+    }
+  }
+
+  function openRevokeAccessDialog(
+    membership: CustomerUserMembership,
+    access: CustomerUserBuildingAccess,
+  ) {
+    setRevokeAccessTarget({ membership, access });
+    revokeAccessDialogRef.current?.open();
+  }
+
+  async function handleConfirmRevokeAccess() {
+    if (numericId === null || !revokeAccessTarget) return;
+    const { membership, access } = revokeAccessTarget;
+    setAccessError("");
+    setAccessBusyUserId(membership.user_id);
+    try {
+      await removeCustomerUserAccess(
+        numericId,
+        membership.user_id,
+        access.building_id,
+      );
+      const response = await listCustomerUserAccess(
+        numericId,
+        membership.user_id,
+      );
+      setAccessByUserId((prev) => ({
+        ...prev,
+        [membership.user_id]: response.results,
+      }));
+      revokeAccessDialogRef.current?.close();
+      setRevokeAccessTarget(null);
+    } catch (err) {
+      setAccessError(getApiError(err));
+      revokeAccessDialogRef.current?.close();
+    } finally {
+      setAccessBusyUserId(null);
     }
   }
 
@@ -267,6 +479,17 @@ export function CustomerFormPage() {
 
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
   const customerName = customer?.name ?? t("customer_form.fallback");
+
+  // Sprint 14 — buildings available to link: every active building
+  // in the customer's company that is NOT already linked.
+  const linkedBuildingIds = useMemo(
+    () => new Set(linkedBuildings.map((l) => l.building_id)),
+    [linkedBuildings],
+  );
+  const availableBuildingsToLink = useMemo(
+    () => allCompanyBuildings.filter((b) => !linkedBuildingIds.has(b.id)),
+    [allCompanyBuildings, linkedBuildingIds],
+  );
 
   return (
     <div>
@@ -394,9 +617,12 @@ export function CustomerFormPage() {
                 ))}
                 {!isCreate &&
                   customer &&
+                  customer.building !== null &&
                   !buildings.some((b) => b.id === customer.building) && (
                     <option value={customer.building}>
-                      {t("customers.building_fallback", { id: customer.building })}
+                      {t("customers.building_fallback", {
+                        id: customer.building,
+                      })}
                     </option>
                   )}
               </select>
@@ -503,6 +729,112 @@ export function CustomerFormPage() {
       {!isCreate && customer && (
         <section
           className="card"
+          data-testid="section-customer-buildings"
+          style={{ marginTop: 16, padding: "20px 22px" }}
+        >
+          <h3 className="section-title">
+            {t("customer_form.section_buildings_title")}
+          </h3>
+          <p className="muted small" style={{ marginBottom: 12 }}>
+            {t("customer_form.section_buildings_desc")}
+          </p>
+
+          {buildingLinkError && (
+            <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+              {buildingLinkError}
+            </div>
+          )}
+
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("admin.col_name")}</th>
+                  <th>{t("admin.col_address")}</th>
+                  <th>{t("customer_form.col_linked")}</th>
+                  <th aria-label={t("admin.col_actions")} />
+                </tr>
+              </thead>
+              <tbody>
+                {linkedBuildings.map((link) => (
+                  <tr key={link.id}>
+                    <td className="td-subject">{link.building_name}</td>
+                    <td>{link.building_address || "—"}</td>
+                    <td className="td-date">
+                      {new Date(link.created_at).toLocaleDateString(dateLocale)}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => openUnlinkBuildingDialog(link)}
+                        disabled={buildingLinkBusy}
+                      >
+                        {t("admin_form.remove")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {linkedBuildings.length === 0 && (
+              <p className="muted small" style={{ padding: "12px 0" }}>
+                {t("customer_form.no_buildings_linked")}
+              </p>
+            )}
+          </div>
+
+          <form
+            onSubmit={handleAddBuildingLink}
+            style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "flex-end" }}
+          >
+            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+              <label className="field-label" htmlFor="add-customer-building">
+                {t("customer_form.add_building")}
+              </label>
+              <select
+                id="add-customer-building"
+                className="field-select"
+                value={
+                  selectedBuildingToLink === ""
+                    ? ""
+                    : String(selectedBuildingToLink)
+                }
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setSelectedBuildingToLink(v === "" ? "" : Number(v));
+                }}
+                disabled={
+                  buildingLinkBusy || availableBuildingsToLink.length === 0
+                }
+              >
+                <option value="">
+                  {availableBuildingsToLink.length === 0
+                    ? t("customer_form.no_eligible_buildings")
+                    : t("customer_form.select_building_to_add")}
+                </option>
+                {availableBuildingsToLink.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              data-testid="building-link-add-button"
+              disabled={buildingLinkBusy || selectedBuildingToLink === ""}
+            >
+              {buildingLinkBusy ? t("admin_form.adding") : t("admin_form.add")}
+            </button>
+          </form>
+        </section>
+      )}
+
+      {!isCreate && customer && (
+        <section
+          className="card"
           data-testid="section-customer-users"
           style={{ marginTop: 16, padding: "20px 22px" }}
         >
@@ -511,9 +843,9 @@ export function CustomerFormPage() {
             {t("customer_form.section_users_desc")}
           </p>
 
-          {memberError && (
+          {(memberError || accessError) && (
             <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-              {memberError}
+              {memberError || accessError}
             </div>
           )}
 
@@ -523,29 +855,123 @@ export function CustomerFormPage() {
                 <tr>
                   <th>{t("users.col_email")}</th>
                   <th>{t("users.col_full_name")}</th>
-                  <th>{t("customer_form.col_linked")}</th>
+                  <th>{t("customer_form.col_user_access")}</th>
                   <th aria-label={t("admin.col_actions")} />
                 </tr>
               </thead>
               <tbody>
-                {members.map((membership) => (
-                  <tr key={membership.id}>
-                    <td className="td-subject">{membership.user_email}</td>
-                    <td>{membership.user_full_name || "—"}</td>
-                    <td className="td-date">
-                      {new Date(membership.created_at).toLocaleDateString(dateLocale)}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => openRemoveDialog(membership)}
-                      >
-                        {t("admin_form.remove")}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {members.map((membership) => {
+                  const userAccess =
+                    accessByUserId[membership.user_id] ?? [];
+                  const userAccessBuildingIds = new Set(
+                    userAccess.map((a) => a.building_id),
+                  );
+                  const grantableBuildings = linkedBuildings.filter(
+                    (l) => !userAccessBuildingIds.has(l.building_id),
+                  );
+                  const isThisUserBusy =
+                    accessBusyUserId === membership.user_id;
+                  return (
+                    <tr key={membership.id}>
+                      <td className="td-subject">{membership.user_email}</td>
+                      <td>{membership.user_full_name || "—"}</td>
+                      <td>
+                        {userAccess.length === 0 ? (
+                          <p
+                            className="muted small"
+                            style={{ marginBottom: 6 }}
+                          >
+                            {t("customer_form.access_no_buildings")}
+                          </p>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                              marginBottom: 6,
+                            }}
+                          >
+                            {userAccess.map((access) => (
+                              <span
+                                key={access.id}
+                                className="badge badge-pill"
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 6,
+                                  padding: "2px 8px",
+                                  background: "var(--surface-2)",
+                                  border: "1px solid var(--border)",
+                                  borderRadius: 999,
+                                  fontSize: 12,
+                                }}
+                              >
+                                {access.building_name}
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-xs"
+                                  style={{
+                                    height: 18,
+                                    padding: "0 6px",
+                                    fontSize: 11,
+                                  }}
+                                  onClick={() =>
+                                    openRevokeAccessDialog(membership, access)
+                                  }
+                                  disabled={isThisUserBusy}
+                                  aria-label={t(
+                                    "customer_form.access_remove_button",
+                                  )}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <select
+                            className="field-select"
+                            style={{ flex: 1 }}
+                            value=""
+                            onChange={(event) => {
+                              const v = event.target.value;
+                              if (v === "") return;
+                              handleAddAccess(membership, Number(v));
+                              event.target.value = "";
+                            }}
+                            disabled={
+                              isThisUserBusy || grantableBuildings.length === 0
+                            }
+                          >
+                            <option value="">
+                              {grantableBuildings.length === 0
+                                ? t("customer_form.access_no_more")
+                                : t(
+                                    "customer_form.access_select_placeholder",
+                                  )}
+                            </option>
+                            {grantableBuildings.map((l) => (
+                              <option key={l.id} value={l.building_id}>
+                                {l.building_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => openRemoveDialog(membership)}
+                        >
+                          {t("admin_form.remove")}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {members.length === 0 && (
@@ -627,6 +1053,34 @@ export function CustomerFormPage() {
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}
         busy={memberBusy}
+      />
+
+      <ConfirmDialog
+        ref={unlinkBuildingDialogRef}
+        title={t("customer_form.dialog_unlink_building_title", {
+          building: unlinkBuildingTarget?.building_name ?? "",
+          name: customerName,
+        })}
+        body={t("customer_form.dialog_unlink_building_body")}
+        confirmLabel={t("admin_form.remove")}
+        onConfirm={handleConfirmUnlinkBuilding}
+        onCancel={() => setUnlinkBuildingTarget(null)}
+        busy={buildingLinkBusy}
+        destructive
+      />
+
+      <ConfirmDialog
+        ref={revokeAccessDialogRef}
+        title={t("customer_form.dialog_revoke_access_title", {
+          email: revokeAccessTarget?.membership.user_email ?? "",
+          building: revokeAccessTarget?.access.building_name ?? "",
+        })}
+        body={t("customer_form.dialog_revoke_access_body")}
+        confirmLabel={t("customer_form.access_remove_button")}
+        onConfirm={handleConfirmRevokeAccess}
+        onCancel={() => setRevokeAccessTarget(null)}
+        busy={accessBusyUserId !== null}
+        destructive
       />
     </div>
   );
