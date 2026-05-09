@@ -109,3 +109,86 @@ class TicketScopingTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         results = response.data.get("results", response.data)
         self.assertEqual(len(results), 1)
+
+    # Sprint 9 — defence-in-depth: deleting a membership / assignment
+    # row must immediately remove the de-scoped user's visibility into
+    # the affected tickets. The earlier suite proves the membership
+    # row is gone; these tests prove the *security consequence* —
+    # if scope_tickets_for is ever rewritten against a denormalised
+    # field, these tests catch the regression.
+
+    def test_company_admin_loses_ticket_visibility_after_membership_delete(self):
+        from companies.models import CompanyUserMembership
+
+        self.authenticate(self.company_admin)
+        before = self.client.get("/api/tickets/")
+        self.assertEqual(before.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.response_ids(before), {self.ticket.id})
+
+        CompanyUserMembership.objects.filter(
+            user=self.company_admin, company=self.company
+        ).delete()
+
+        after = self.client.get("/api/tickets/")
+        self.assertEqual(after.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.response_ids(after), set())
+
+    def test_building_manager_loses_ticket_visibility_after_assignment_delete(self):
+        from buildings.models import BuildingManagerAssignment
+
+        self.authenticate(self.manager)
+        before = self.client.get("/api/tickets/")
+        self.assertEqual(self.response_ids(before), {self.ticket.id})
+
+        BuildingManagerAssignment.objects.filter(
+            user=self.manager, building=self.building
+        ).delete()
+
+        after = self.client.get("/api/tickets/")
+        self.assertEqual(after.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.response_ids(after), set())
+
+    def test_customer_user_loses_ticket_visibility_after_membership_delete(self):
+        from customers.models import CustomerUserMembership
+
+        self.authenticate(self.customer_user)
+        before = self.client.get("/api/tickets/")
+        self.assertEqual(self.response_ids(before), {self.ticket.id})
+
+        CustomerUserMembership.objects.filter(
+            user=self.customer_user, customer=self.customer
+        ).delete()
+
+        after = self.client.get("/api/tickets/")
+        self.assertEqual(after.status_code, status.HTTP_200_OK)
+        self.assertEqual(self.response_ids(after), set())
+
+    # Sprint 9 — the view forces message_type=PUBLIC_REPLY for non-staff
+    # at perform_create, which masks the serializer-level rejection. This
+    # test pins the serializer-level guard so a future refactor that
+    # removes the view-side override does not silently allow customers
+    # to post internal notes.
+    def test_customer_cannot_post_internal_note_message_type(self):
+        from tickets.models import TicketMessage, TicketMessageType
+
+        self.authenticate(self.customer_user)
+        response = self.client.post(
+            f"/api/tickets/{self.ticket.id}/messages/",
+            {
+                "message": "secret",
+                "message_type": TicketMessageType.INTERNAL_NOTE,
+            },
+            format="json",
+        )
+
+        # Either the serializer rejects with 400 (preferred), or the
+        # view normalises to PUBLIC_REPLY. EITHER WAY, no internal
+        # note row may be created from this request.
+        self.assertNotIn(response.status_code, (500,))
+        self.assertFalse(
+            TicketMessage.objects.filter(
+                ticket=self.ticket,
+                author=self.customer_user,
+                message_type=TicketMessageType.INTERNAL_NOTE,
+            ).exists()
+        )

@@ -301,3 +301,45 @@ class TicketsByBuildingScopeAndFilterTests(_DimensionsBase):
         # Both company-A REQUESTs across the two buildings.
         ids = {b["building_id"] for b in response.data["buckets"]}
         self.assertEqual(ids, {self.building.id, self.second_building.id})
+
+
+# ===========================================================================
+# Sprint 9 — explicit cross-tenant 403 assertions for the dimension
+# endpoints. The legacy reports (status-distribution, tickets-over-time,
+# age-buckets, manager-throughput) already have equivalent tests; this
+# class brings the dimension endpoints to parity. The contract is:
+# `?company=<company-outside-actor-scope>` and
+# `?building=<building-outside-actor-scope>` must return 403, NOT 200
+# with an empty body — silent filtering would let a regression slip
+# through unnoticed.
+# ===========================================================================
+
+
+class DimensionCrossTenantForbiddenTests(_DimensionsBase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_authenticate(user=self.company_admin)
+
+    def test_tickets_by_type_company_outside_scope_403(self):
+        response = self.client.get(URL_TYPE, {"company": self.other_company.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tickets_by_type_building_outside_scope_403(self):
+        response = self.client.get(URL_TYPE, {"building": self.other_building.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tickets_by_customer_company_outside_scope_403(self):
+        response = self.client.get(URL_CUSTOMER, {"company": self.other_company.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tickets_by_customer_building_outside_scope_403(self):
+        response = self.client.get(URL_CUSTOMER, {"building": self.other_building.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tickets_by_building_company_outside_scope_403(self):
+        response = self.client.get(URL_BUILDING, {"company": self.other_company.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tickets_by_building_building_outside_scope_403(self):
+        response = self.client.get(URL_BUILDING, {"building": self.other_building.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
