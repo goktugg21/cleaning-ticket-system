@@ -703,6 +703,27 @@ p { line-height: 1.6; }
   text-overflow: ellipsis;
 }
 .qa-title { font-size: 11px; color: var(--text-muted); line-height: 1.1; }
+/* Sprint 16: small per-card scope hint (e.g. "B1 / B2 / B3") so the
+   operator can pick the right demo customer-user without re-reading
+   the seed. Light grey, smaller than the role title. */
+.qa-scope {
+  font-size: 10px;
+  color: var(--text-faint);
+  line-height: 1.1;
+  margin-top: 2px;
+  font-family: var(--f-head);
+  letter-spacing: 0.02em;
+}
+/* Sprint 16: short hint above the demo grid telling the operator
+   the shared password and what clicking does. Plain block-level
+   text, no card chrome. */
+.qa-hint {
+  margin-top: -6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
 .qa-role-pill {
   display: inline-flex;
   align-items: center;

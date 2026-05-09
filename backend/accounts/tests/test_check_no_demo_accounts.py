@@ -109,3 +109,41 @@ class CheckNoDemoAccountsTests(TestCase):
         out = StringIO()
         call_command("check_no_demo_accounts", stdout=out, stderr=StringIO())
         self.assertIn("[OK] no demo accounts found", out.getvalue())
+
+    def test_sprint16_seed_demo_data_account_fails(self):
+        # Sprint 16's seed_demo_data writes accounts under the
+        # @cleanops.demo TLD. The guard rejects them via the
+        # explicit list AND via the domain-suffix safety net.
+        User.objects.create_user(
+            email="amanda@cleanops.demo",
+            password="Demo12345!",
+            role=UserRole.CUSTOMER_USER,
+        )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("amanda@cleanops.demo", err.getvalue())
+
+    def test_unlisted_cleanops_demo_email_still_fails(self):
+        # Defence in depth: even if a future demo seed adds a new
+        # persona under @cleanops.demo that isn't yet in the
+        # explicit DEMO_EMAILS list, the suffix guard catches it.
+        User.objects.create_user(
+            email="future-tester@cleanops.demo",
+            password="Demo12345!",
+            role=UserRole.CUSTOMER_USER,
+        )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("future-tester@cleanops.demo", err.getvalue())

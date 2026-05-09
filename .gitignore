@@ -3,6 +3,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Sprint 16 — Playwright run artifacts
+frontend/test-results/
+frontend/playwright-report/
 .venv/
 venv/
 .env.*
