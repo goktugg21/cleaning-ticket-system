@@ -31,7 +31,14 @@ class CustomerViewSet(viewsets.ModelViewSet):
         return [IsSuperAdminOrCompanyAdminForCompany()]
 
     def get_queryset(self):
-        return scope_customers_for(self.request.user).select_related("company", "building")
+        # Sprint 14 hotfix: prefetch building_memberships so the
+        # serializer's linked_building_ids field does not run N
+        # extra queries when a list endpoint returns 50+ customers.
+        return (
+            scope_customers_for(self.request.user)
+            .select_related("company", "building")
+            .prefetch_related("building_memberships")
+        )
 
     def perform_create(self, serializer):
         company: Company = serializer.validated_data["company"]
