@@ -65,6 +65,18 @@ DEMO_EMAILS = (
     "tom@cleanops.demo",
     "iris@cleanops.demo",
     "amanda@cleanops.demo",
+    # Sprint 19 — demo_up.sh / prod_upload_download_test.sh seeds
+    # these "@example.com" accounts with well-known demo passwords
+    # (Admin12345!, Test12345!). They were never intended to land
+    # on a real pilot host, but the guard previously missed them
+    # because the local-demo seed script lives in scripts/, not in
+    # a seed_demo* management command. Catching them here keeps
+    # the readiness gate honest even if an operator runs the wrong
+    # script against the pilot DB by accident.
+    "admin@example.com",
+    "companyadmin@example.com",
+    "manager@example.com",
+    "customer@example.com",
 )
 
 # Suffix-level guard for any future demo account added under the
