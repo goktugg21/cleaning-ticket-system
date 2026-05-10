@@ -676,89 +676,114 @@ export function InvitationsAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
-          <table className="invitations-table" data-testid="invitations-table">
-            <colgroup>
-              <col style={{ width: "32%" }} />
-              <col style={{ width: "18%" }} />
-              <col style={{ width: "13%" }} />
-              <col style={{ width: "12%" }} />
-              <col style={{ width: "12%" }} />
-              <col style={{ width: "13%" }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>{t("invitations.col_recipient")}</th>
-                <th>{t("invitations.col_role")}</th>
-                <th>{t("invitations.col_status")}</th>
-                <th>{t("invitations.col_sent")}</th>
-                <th>{t("invitations.col_expires")}</th>
-                <th className="text-right">{t("invitations.col_actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInvitations.map((invitation) => {
-                const canRevoke =
-                  invitation.status === "PENDING" &&
-                  (isSuperAdmin || invitation.created_by_email === me?.email);
-                const displayName =
-                  invitation.full_name?.trim() ||
-                  invitation.email.split("@")[0];
-                return (
-                  <tr key={invitation.id}>
-                    <td>
-                      <div className="recipient-cell">
-                        <div className="recipient-avatar">
-                          {getInitials(invitation.full_name, invitation.email)}
-                        </div>
-                        <div className="recipient-text">
-                          <div className="recipient-name">{displayName}</div>
-                          <div className="recipient-email">
-                            {invitation.email}
+        {/* Sprint 20 follow-up #5: when there are no rows, do NOT render
+            the table (its 6-column thead would otherwise show as an
+            empty header row above the empty state, and the .table-wrap
+            would still have a ~12–21 px horizontal overflow on phones).
+            Render the empty-state on its own. */}
+        {!listLoading && filteredInvitations.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">＋</div>
+            <div className="empty-title">
+              {t("invitations.empty_title")}
+            </div>
+            <p className="empty-sub">{t("invitations.empty_desc")}</p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table
+              className="invitations-table"
+              data-testid="invitations-table"
+            >
+              <colgroup>
+                <col style={{ width: "32%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "13%" }} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>{t("invitations.col_recipient")}</th>
+                  <th>{t("invitations.col_role")}</th>
+                  <th>{t("invitations.col_status")}</th>
+                  <th>{t("invitations.col_sent")}</th>
+                  <th>{t("invitations.col_expires")}</th>
+                  <th className="text-right">{t("invitations.col_actions")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredInvitations.map((invitation) => {
+                  const canRevoke =
+                    invitation.status === "PENDING" &&
+                    (isSuperAdmin || invitation.created_by_email === me?.email);
+                  const displayName =
+                    invitation.full_name?.trim() ||
+                    invitation.email.split("@")[0];
+                  // Sprint 20 follow-up #5: each <td> carries a
+                  // `data-label` so the @media (max-width: 480px) rule
+                  // can transform the table into stacked cards, showing
+                  // "Role: Manager", "Sent: 2 hours ago" etc. The
+                  // recipient column already has its own avatar+name
+                  // block so its label is suppressed in CSS.
+                  return (
+                    <tr key={invitation.id}>
+                      <td data-label={t("invitations.col_recipient")}>
+                        <div className="recipient-cell">
+                          <div className="recipient-avatar">
+                            {getInitials(invitation.full_name, invitation.email)}
+                          </div>
+                          <div className="recipient-text">
+                            <div className="recipient-name">{displayName}</div>
+                            <div className="recipient-email">
+                              {invitation.email}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </td>
-                    <td>{t(ROLE_KEYS[invitation.role] ?? "common:roles.fallback")}</td>
-                    <td>
-                      <span className={statusPillClass(invitation.status)}>
-                        <span className="status-pill-dot" />
-                        {t(`invitations.status_${invitation.status.toLowerCase()}`)}
-                      </span>
-                    </td>
-                    <td className="muted-cell">
-                      {formatRelative(invitation.created_at, i18n.language)}
-                    </td>
-                    <td className="muted-cell">
-                      {formatRelative(invitation.expires_at, i18n.language)}
-                    </td>
-                    <td className="text-right">
-                      {canRevoke && (
-                        <button
-                          type="button"
-                          className="link-action link-action--danger"
-                          onClick={() => openRevokeDialog(invitation)}
-                        >
-                          {t("invitations.revoke")}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {!listLoading && filteredInvitations.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">＋</div>
-              <div className="empty-title">
-                {t("invitations.empty_title")}
-              </div>
-              <p className="empty-sub">{t("invitations.empty_desc")}</p>
-            </div>
-          )}
-        </div>
+                      </td>
+                      <td data-label={t("invitations.col_role")}>
+                        {t(ROLE_KEYS[invitation.role] ?? "common:roles.fallback")}
+                      </td>
+                      <td data-label={t("invitations.col_status")}>
+                        <span className={statusPillClass(invitation.status)}>
+                          <span className="status-pill-dot" />
+                          {t(`invitations.status_${invitation.status.toLowerCase()}`)}
+                        </span>
+                      </td>
+                      <td
+                        className="muted-cell"
+                        data-label={t("invitations.col_sent")}
+                      >
+                        {formatRelative(invitation.created_at, i18n.language)}
+                      </td>
+                      <td
+                        className="muted-cell"
+                        data-label={t("invitations.col_expires")}
+                      >
+                        {formatRelative(invitation.expires_at, i18n.language)}
+                      </td>
+                      <td
+                        className="text-right"
+                        data-label={t("invitations.col_actions")}
+                      >
+                        {canRevoke && (
+                          <button
+                            type="button"
+                            className="link-action link-action--danger"
+                            onClick={() => openRevokeDialog(invitation)}
+                          >
+                            {t("invitations.revoke")}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {(previous || next) && (
           <div className="pagination">

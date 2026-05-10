@@ -2887,19 +2887,19 @@ table.data-table {
   outline-offset: -2px;
 }
 
-/* 13. Sprint 20 follow-up #3 + #4 — /admin/invitations mobile
-   compactness. The invitations page stacks two cards (form +
-   Activity) and the default desktop spacing leaves the Activity
-   card noticeably below the fold on a 430px-tall viewport. The
-   #3 polish trimmed the cards' inner padding and the table cells.
-   This block (#4) goes further: on ≤480px it also collapses the
-   duplicate info column (the eyebrow + title + description + note
-   on the LEFT of the form on desktop, which stacks above the form
-   fields on mobile and duplicates what the page header already
-   says) and shrinks the empty-state padding — together these
-   reclaim ~290px of vertical real estate so the default empty
-   state fits a 430x932 viewport without an annoying tail-end
-   scroll. Desktop and tablet (>480px) remain untouched. */
+/* 13. Sprint 20 follow-up #3 + #4 + #5 — /admin/invitations mobile
+   layout. Two cards stacked vertically: form (top) + Activity card
+   (bottom).
+
+   - #3 trimmed the cards' inner padding + table cell padding.
+   - #4 hid the duplicate info column so the empty default state
+     fits a 430x932 viewport.
+   - #5 (this revision) makes the Activity content itself
+     mobile-friendly: empty state renders alone (no orphan thead),
+     and on ≤480px the existing 6-column table re-flows into a
+     stacked "label: value" card per row. The status-tabs row also
+     wraps cleanly. No horizontal scroll inside the Activity card.
+   Desktop and tablet (>480px) remain untouched. */
 .invitations-activity-card {
   margin-top: 16px;
 }
@@ -2937,18 +2937,20 @@ table.data-table {
     padding: 10px 14px;
     gap: 8px;
   }
-  /* Invitations table cells: shave 5–6px off the vertical padding on
-     phones. The min row tap target is the underlying td (~38px tall
-     after the trim, still well above the 36px guideline). */
-  .invitations-table th,
-  .invitations-table td {
-    padding: 9px 10px;
+
+  /* Status tabs (Pending / Accepted / Expired / All). The desktop
+     inline-flex without wrap can overflow on a 360px viewport when
+     translations are long; allow wrapping. Buttons stay tappable
+     (≥30px tall) — only their row layout changes. */
+  .activity-card-header .status-tabs {
+    flex-wrap: wrap;
+    max-width: 100%;
   }
-  /* Empty-state inside the Activity card is the single biggest block
-     on the empty/default page (~232px on desktop padding). On a phone
-     we do NOT need 54px of vertical padding above and below the
-     centred icon and label. Shrink padding and icon. The .empty-icon
-     rule is shared, so we scope to the invitations card only. */
+
+  /* Empty-state inside the Activity card. Sprint 20 #5: empty state
+     now renders WITHOUT the table thead above it, so this rule
+     governs the entire empty area. Shrink padding and icon to keep
+     the Activity card vertically compact. */
   .invitations-activity-card .empty-state {
     padding: 18px 14px;
     gap: 6px;
@@ -2957,5 +2959,109 @@ table.data-table {
     width: 32px;
     height: 32px;
     margin-bottom: 0;
+  }
+
+  /* ----- Responsive table → stacked cards on phones -----
+     Sprint 20 follow-up #5: the desktop 6-column table is too dense
+     for a 360–430px viewport (~12–21 px horizontal overflow on the
+     surrounding `.table-wrap`, plus tiny per-cell padding makes
+     long emails wrap into 5+ lines). On ≤480px we re-flow each row
+     into a vertical "label: value" stack — one card per invitation.
+     The DOM stays the same; only `display` and a `::before` content
+     using `data-label` change. */
+
+  /* The wrap drops its horizontal scrollbar and acts as a plain
+     container — the table is no longer wider than its parent because
+     each "row" is now a block. */
+  .invitations-activity-card .table-wrap {
+    overflow-x: visible;
+    padding: 10px 14px 4px;
+  }
+
+  /* Strip the table's table semantics; behave as blocks. */
+  .invitations-table,
+  .invitations-table thead,
+  .invitations-table tbody,
+  .invitations-table tr,
+  .invitations-table th,
+  .invitations-table td {
+    display: block;
+    width: auto;
+  }
+
+  /* Hide the column-header row entirely. Each <td> renders its label
+     via the ::before pseudo-element. */
+  .invitations-table thead {
+    display: none;
+  }
+  /* The <colgroup> is irrelevant when columns are blocks. */
+  .invitations-table colgroup,
+  .invitations-table col {
+    display: none;
+  }
+
+  /* Each row becomes a bordered card with vertical spacing. */
+  .invitations-table tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--surface);
+  }
+  .invitations-table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Each cell is a label/value row. The label sits on the left,
+     content flush right. */
+  .invitations-table td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: none;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  .invitations-table td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-family: var(--f-head);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: left;
+  }
+
+  /* Recipient column has its own avatar + name + email block, no
+     label needed. Make it sit full-width inside the card, above the
+     label/value rows below it. */
+  .invitations-table td:first-child {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 4px;
+  }
+  .invitations-table td:first-child::before {
+    display: none;
+  }
+  .recipient-email {
+    overflow-wrap: anywhere;
+  }
+
+  /* Actions row right-alignment override: keep the Revoke button on
+     the right of its label/value row. */
+  .invitations-table td.text-right {
+    text-align: right;
+  }
+  .invitations-table td.text-right .link-action {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--red-soft);
   }
 }

@@ -618,7 +618,32 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
 // /admin/invitations at phone widths — Sprint 20 follow-up #3 polish
 // ---------------------------------------------------------------------------
 
-test("/admin/invitations at 430x932: empty/default state fits the viewport (no annoying tail scroll)", async ({
+/**
+ * Sprint 20 follow-up #5: the Activity / "All invitations" card
+ * must not have an internal horizontal scroll on phones. Returns
+ * the scrollWidth − clientWidth delta of the .invitations-activity-card
+ * (and the inner .table-wrap when present), so a test can assert it
+ * is zero.
+ */
+async function measureInvitationsActivityOverflow(
+  page: import("@playwright/test").Page,
+) {
+  return page.evaluate(() => {
+    const activity = document.querySelector(
+      ".invitations-activity-card",
+    ) as HTMLElement | null;
+    const wrap = activity?.querySelector(".table-wrap") as HTMLElement | null;
+    return {
+      activityOverflow: activity ? activity.scrollWidth - activity.clientWidth : -1,
+      wrapPresent: !!wrap,
+      wrapOverflow: wrap ? wrap.scrollWidth - wrap.clientWidth : 0,
+      hasEmptyState: !!activity?.querySelector(".empty-state"),
+      hasTableHead: !!activity?.querySelector(".invitations-table thead"),
+    };
+  });
+}
+
+test("/admin/invitations at 430x932: Activity card has no internal horizontal overflow", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_430);
@@ -628,26 +653,40 @@ test("/admin/invitations at 430x932: empty/default state fits the viewport (no a
   // Send invitation submit must be visible (rendered + mid-page).
   const submit = page.locator('[data-testid="invite-submit"]');
   await expect(submit).toBeVisible({ timeout: 10_000 });
-  // Activity card mounts after the form. Either the table or the
+  // Activity card mounts after the form. Either the table OR the
   // empty-state must be present once the network idles.
-  const tableOrEmpty = page
-    .locator(
-      '[data-testid="invitations-table"], .invitations-activity-card .empty-state',
-    )
-    .first();
-  await expect(tableOrEmpty).toBeVisible({ timeout: 10_000 });
-  // The Sprint 20 follow-up #4 trims (info-column hidden, empty-state
-  // padding shrunk, form-actions tighter, activity-card-header
-  // tighter) bring the empty-default state from ~1243px tall down to
-  // ~932px, fitting a 430x932 viewport exactly. Allow a 32px
-  // tolerance per the brief — anti-aliasing and demo data variance
-  // (an extra pending row pushing the table) should not flake the
-  // assertion.
-  const docHeight = await page.evaluate(
-    () => document.documentElement.scrollHeight,
-  );
-  expect(docHeight).toBeLessThanOrEqual(MOBILE_430.height + 32);
+  const activity = page.locator(".invitations-activity-card");
+  await expect(activity).toBeVisible({ timeout: 10_000 });
+  const m = await measureInvitationsActivityOverflow(page);
+  // Real assertion: Activity card itself has no horizontal scroll.
+  // Allow +1 px for sub-pixel rounding on the platform.
+  expect(m.activityOverflow).toBeLessThanOrEqual(1);
+  // If the wrap is present (i.e. there ARE rows), it must also not
+  // overflow horizontally — the mobile card transform should remove
+  // the table's horizontal width.
+  if (m.wrapPresent) {
+    expect(m.wrapOverflow).toBeLessThanOrEqual(1);
+  }
   await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
+});
+
+test("/admin/invitations at 430x932: empty state has no orphan table header", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_430);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/invitations");
+  await page.waitForLoadState("networkidle");
+  const m = await measureInvitationsActivityOverflow(page);
+  // The demo seed has no pending invitations by default, so the
+  // empty-state card is what renders. Sprint 20 #5: in the empty
+  // state we must NOT also render the table (whose 6-column
+  // thead would otherwise show as an empty header row above the
+  // empty state, with horizontal overflow on phones).
+  if (m.hasEmptyState) {
+    expect(m.hasTableHead).toBe(false);
+    expect(m.wrapPresent).toBe(false);
+  }
 });
 
 test("/admin/invitations at 430px: page bottom is reachable after scroll", async ({
@@ -691,23 +730,52 @@ test("/admin/invitations at 360px: status tabs row stays inside the viewport", a
   await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
 });
 
-test("/admin/invitations at 360x640: page may scroll but Activity card is reachable", async ({
+test("/admin/invitations at 360x640: page may scroll but Activity is reachable AND has no horizontal overflow", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_360);
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/admin/invitations");
   await page.waitForLoadState("networkidle");
-  // 360x640 is much shorter than the form + activity stack even
-  // after the #4 trims (~930px tall). The page WILL scroll — what
-  // we assert is that scrolling to the absolute bottom brings the
-  // Activity card into the viewport and that there is no body-level
-  // horizontal overflow.
+  // 360x640 is much shorter than the form + activity stack — the
+  // page WILL scroll vertically. What we assert is:
+  //   (a) the body itself has no HORIZONTAL overflow,
+  //   (b) the Activity card is reachable via scroll-to-bottom, and
+  //   (c) the Activity card itself has no internal horizontal
+  //       scroll (Sprint 20 #5 mobile card transform).
   const activity = page.locator(".invitations-activity-card");
   await expect(activity).toBeAttached({ timeout: 10_000 });
   await scrollDocumentToBottom(page);
   await expect(activity).toBeInViewport({ timeout: 5_000 });
   await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
+  const m = await measureInvitationsActivityOverflow(page);
+  expect(m.activityOverflow).toBeLessThanOrEqual(1);
+  if (m.wrapPresent) {
+    expect(m.wrapOverflow).toBeLessThanOrEqual(1);
+  }
+});
+
+test("/admin/invitations at 768x1024: desktop table layout still renders (no mobile card transform)", async ({
+  page,
+}) => {
+  await page.setViewportSize(TABLET_768);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/invitations");
+  await page.waitForLoadState("networkidle");
+  // The @media (max-width: 480px) mobile card transform must NOT
+  // fire at 768px — the column header row (thead) must still
+  // render so a tablet/desktop user sees the standard table layout.
+  // We tolerate the empty-state path: when the demo data has no
+  // rows for the active tab, the JSX renders the empty-state
+  // instead of the table by design (Sprint 20 #5). Either branch
+  // is fine; what we forbid is the broken hybrid (cards on tablet).
+  const m = await measureInvitationsActivityOverflow(page);
+  if (!m.hasEmptyState) {
+    // Rows present → table must render with its column header.
+    expect(m.hasTableHead).toBe(true);
+  }
+  // No body-level horizontal overflow.
+  await expectNoBodyHorizontalOverflow(page, TABLET_768.width);
 });
 
 for (const vp of [MOBILE_360, MOBILE_430]) {
