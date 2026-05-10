@@ -1,34 +1,30 @@
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
 
 /**
  * Sprint 17 — route access matrix.
+ * Sprint 18 — Django admin moved to /django-admin/, so the SPA's
+ * /admin/* routes are now reachable via direct URL too. The matrix
+ * below tests both the direct-URL path (nginx SPA fallback) and the
+ * sidebar-nav presence for each role.
  *
- * The SPA's `/admin/*` routes share a URL prefix with Django's
- * `admin/` (see backend/config/urls.py). The prod nginx config
- * forwards every `/admin/*` request to the backend so Django's admin
- * console works (frontend/nginx.conf::location /admin/), which means
- * a fresh page load at `/admin/companies` does NOT reach the SPA at
- * all — it reaches Django and is redirected to `/admin/login/`. The
- * SPA's `/admin/*` routes are therefore reachable only via in-SPA
- * navigation (React Router push). This is documented as a NEEDS
- * FOLLOW-UP in `docs/audit/sprint-17-full-business-logic-audit.md`.
+ * Mirrors the SPA route guards:
  *
- * Until that quirk is resolved (the planned fix is to move Django's
- * admin to `/django-admin/`), we exercise the access matrix by
- * asserting on the AppShell sidebar:
+ *   /                  every authenticated user.
+ *   /tickets/new       every authenticated user (backend rejects
+ *                      out-of-scope creations on submit).
+ *   /reports           SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER.
+ *   /admin/*           SUPER_ADMIN, COMPANY_ADMIN (AdminRoute).
+ *   /admin/audit-logs  SUPER_ADMIN only (SuperAdminRoute).
  *
- *   - /admin/* nav links render only when the user role is in
- *     `STAFF_ROLES` (SUPER_ADMIN, COMPANY_ADMIN). This mirrors the
- *     `AdminRoute` guard.
- *   - /reports nav link renders only when the user role is in
- *     `REPORTS_ROLES` (SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER).
+ * The denied paths land on `/?admin_required=ok` for /admin/* and on
+ * `/` for /reports. We do not assert the exact destination — only
+ * that the URL no longer contains the disallowed path.
  *
- * For the SPA-only routes (/, /tickets/new, /reports) we also do a
- * direct-URL navigation check, because those paths are served by
- * nginx's SPA fallback (`try_files $uri $uri/ /index.html`).
+ * A separate test confirms /django-admin/login/ still serves Django's
+ * admin login page after the move.
  */
 
 type RoleKey = "super" | "companyAdmin" | "managerAll" | "customerAll";
@@ -43,61 +39,47 @@ interface RoleExpectations {
   navDeny: string[];
 }
 
+const SPA_ADMIN_ROUTES = [
+  "/admin/companies",
+  "/admin/buildings",
+  "/admin/customers",
+  "/admin/users",
+  "/admin/invitations",
+];
+
 const EXPECTATIONS: Record<RoleKey, RoleExpectations> = {
   super: {
-    spaAllow: ["/", "/tickets/new", "/reports"],
+    // Sprint 18: every /admin/* route is now SPA-direct-URL reachable.
+    // Audit log is super-admin-only (SuperAdminRoute).
+    spaAllow: ["/", "/tickets/new", "/reports", ...SPA_ADMIN_ROUTES, "/admin/audit-logs"],
     spaDeny: [],
     navAllow: [
       "/",
       "/tickets/new",
       "/reports",
-      "/admin/companies",
-      "/admin/buildings",
-      "/admin/customers",
-      "/admin/users",
-      "/admin/invitations",
+      ...SPA_ADMIN_ROUTES,
+      "/admin/audit-logs",
     ],
     navDeny: [],
   },
   companyAdmin: {
-    spaAllow: ["/", "/tickets/new", "/reports"],
-    spaDeny: [],
-    navAllow: [
-      "/",
-      "/tickets/new",
-      "/reports",
-      "/admin/companies",
-      "/admin/buildings",
-      "/admin/customers",
-      "/admin/users",
-      "/admin/invitations",
-    ],
-    navDeny: [],
+    spaAllow: ["/", "/tickets/new", "/reports", ...SPA_ADMIN_ROUTES],
+    // Audit log is super-admin-only — direct URL must redirect away.
+    spaDeny: ["/admin/audit-logs"],
+    navAllow: ["/", "/tickets/new", "/reports", ...SPA_ADMIN_ROUTES],
+    navDeny: ["/admin/audit-logs"],
   },
   managerAll: {
     spaAllow: ["/", "/tickets/new", "/reports"],
-    spaDeny: [],
+    spaDeny: [...SPA_ADMIN_ROUTES, "/admin/audit-logs"],
     navAllow: ["/", "/tickets/new", "/reports"],
-    navDeny: [
-      "/admin/companies",
-      "/admin/buildings",
-      "/admin/customers",
-      "/admin/users",
-      "/admin/invitations",
-    ],
+    navDeny: [...SPA_ADMIN_ROUTES, "/admin/audit-logs"],
   },
   customerAll: {
     spaAllow: ["/", "/tickets/new"],
-    spaDeny: ["/reports"],
+    spaDeny: ["/reports", ...SPA_ADMIN_ROUTES, "/admin/audit-logs"],
     navAllow: ["/", "/tickets/new"],
-    navDeny: [
-      "/reports",
-      "/admin/companies",
-      "/admin/buildings",
-      "/admin/customers",
-      "/admin/users",
-      "/admin/invitations",
-    ],
+    navDeny: ["/reports", ...SPA_ADMIN_ROUTES, "/admin/audit-logs"],
   },
 };
 
@@ -151,3 +133,28 @@ for (const roleKey of ROLE_KEYS) {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 18 — Django admin still reachable at /django-admin/login/.
+//
+// nginx now proxies /django-admin/ to the backend; the SPA owns
+// /admin/*. The check uses raw HTTP (no browser session) so the test
+// doesn't need a Django superuser to be authenticated.
+// ---------------------------------------------------------------------------
+
+test("/django-admin/login/ still serves Django's admin login page", async ({
+  baseURL,
+}) => {
+  const ctx = await request.newContext({
+    baseURL,
+    ignoreHTTPSErrors: true,
+  });
+  const response = await ctx.get("/django-admin/login/");
+  expect(response.status()).toBe(200);
+  const body = await response.text();
+  // Django ships an unmistakable signature on its admin login template;
+  // checking for "Django administration" is more robust than asserting
+  // the form field IDs which can shift with version bumps.
+  expect(body).toMatch(/Django administration|django/i);
+  await ctx.dispose();
+});

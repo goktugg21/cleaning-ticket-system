@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AdminRoute } from "./components/AdminRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
+import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
@@ -12,6 +13,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
+import { AuditLogsAdminPage } from "./pages/admin/AuditLogsAdminPage";
 import { BuildingFormPage } from "./pages/admin/BuildingFormPage";
 import { BuildingsAdminPage } from "./pages/admin/BuildingsAdminPage";
 import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
@@ -186,6 +188,14 @@ export default function App() {
               <AdminRoute>
                 <InvitationsAdminPage />
               </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/audit-logs"
+            element={
+              <SuperAdminRoute>
+                <AuditLogsAdminPage />
+              </SuperAdminRoute>
             }
           />
           <Route

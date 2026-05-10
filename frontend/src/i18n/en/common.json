@@ -14,6 +14,7 @@
   "nav.customers": "Customers",
   "nav.users": "Users",
   "nav.invitations": "Invitations",
+  "nav.audit_logs": "Audit log",
 
   "topbar.kicker": "Ticket Management",
   "topbar.title": "Facility service desk",

@@ -17,7 +17,11 @@ urlpatterns = [
     # routing. No trailing slash — orchestrators expect the literal path.
     path("health/live", liveness),
     path("health/ready", readiness),
-    path("admin/", admin.site.urls),
+    # Sprint 18: Django admin moved from /admin/ to /django-admin/ so the
+    # React SPA owns the /admin/* prefix end-to-end (e.g. /admin/companies,
+    # /admin/users, /admin/audit-logs are now served by the SPA fallback in
+    # nginx). The frontend nginx.conf was updated alongside this change.
+    path("django-admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
     path("api/companies/", include("companies.urls")),
     path("api/buildings/", include("buildings.urls")),

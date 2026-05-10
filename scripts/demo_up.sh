@@ -87,7 +87,7 @@ echo
 echo "===== 2. WAIT FOR DEMO ENDPOINTS ====="
 wait_for_http "Frontend /" "$BASE_URL/" "200" "/tmp/cleaning-ticket-demo-frontend.html"
 wait_for_http "API /api/auth/me/ without token" "$API/auth/me/" "401" "/tmp/cleaning-ticket-demo-me.json"
-wait_for_http "Admin login" "$BASE_URL/admin/login/" "200" "/tmp/cleaning-ticket-demo-admin.html"
+wait_for_http "Admin login" "$BASE_URL/django-admin/login/" "200" "/tmp/cleaning-ticket-demo-admin.html"
 
 echo
 echo "===== 3. SEED DEMO USERS AND SCOPE ====="
