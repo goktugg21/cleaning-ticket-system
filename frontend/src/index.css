@@ -2886,3 +2886,47 @@ table.data-table {
   outline: 2px solid var(--green);
   outline-offset: -2px;
 }
+
+/* 13. Sprint 20 follow-up #3 — /admin/invitations mobile compactness.
+   The invitations page stacks two cards (form + Activity) and the
+   default desktop spacing leaves the Activity card just slightly
+   below the fold on a 430px-tall viewport. Tighten only on phones,
+   leave desktop alone. The Activity card's marginTop moved off the
+   inline style and onto .invitations-activity-card so this rule can
+   override it. */
+.invitations-activity-card {
+  margin-top: 16px;
+}
+@media (max-width: 480px) {
+  .invitations-activity-card {
+    margin-top: 10px;
+  }
+  /* Form card: dial back the body padding so the form sits closer to
+     the card edge. Side gutters drop from 32px to 14px (matching the
+     page-canvas gutter on phones) and the row gap from 24 to 18. */
+  .invitation-form-split {
+    padding: 18px 14px;
+    gap: 18px;
+  }
+  /* The "Invitations expire after 7 days" note is informational; on
+     phones it can shrink one line and pull up against the form. */
+  .invitation-form-note {
+    margin-top: 8px;
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+  /* Activity card header (eyebrow + title + status tabs): trim the
+     padding and tighten the gap so the tabs row sits directly below
+     the title without a tall band of empty space. */
+  .activity-card-header {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+  /* Invitations table cells: shave 5–6px off the vertical padding on
+     phones. The min row tap target is the underlying td (~38px tall
+     after the trim, still well above the 36px guideline). */
+  .invitations-table th,
+  .invitations-table td {
+    padding: 9px 10px;
+  }
+}

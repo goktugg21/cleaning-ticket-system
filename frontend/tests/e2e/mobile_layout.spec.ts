@@ -614,6 +614,75 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// /admin/invitations at phone widths — Sprint 20 follow-up #3 polish
+// ---------------------------------------------------------------------------
+
+test("/admin/invitations at 430px: form + Activity card render cleanly", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_430);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/invitations");
+  await page.waitForLoadState("networkidle");
+  // The Send invitation submit button must be visible (rendered, in
+  // viewport at the form's location). It is mid-page on mobile —
+  // do NOT scroll first; we are checking it mounts and is reachable
+  // without an extra interaction.
+  const submit = page.locator('[data-testid="invite-submit"]');
+  await expect(submit).toBeVisible({ timeout: 10_000 });
+  // Activity card mounts after the form. Either the table or an
+  // empty-state must be present once the network idles.
+  const tableOrEmpty = page
+    .locator(
+      '[data-testid="invitations-table"], .invitations-activity-card .empty-state',
+    )
+    .first();
+  await expect(tableOrEmpty).toBeVisible({ timeout: 10_000 });
+  await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
+});
+
+test("/admin/invitations at 430px: page bottom is reachable after scroll", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_430);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/invitations");
+  await page.waitForLoadState("networkidle");
+  // The Activity card is the last block on the page. After the
+  // mobile margin-top tightening (16 → 10 px on ≤480), it should
+  // still clear the safe-area-aware page-canvas padding when the
+  // user scrolls to the absolute bottom.
+  const activity = page.locator(".invitations-activity-card").last();
+  await expect(activity).toBeAttached({ timeout: 10_000 });
+  await scrollDocumentToBottom(page);
+  // We assert the activity card is in viewport (any ratio is fine —
+  // a long invitations table can stretch the card taller than the
+  // viewport, in which case toBeInViewport passes if any part of it
+  // is on screen, which is the user-relevant assertion).
+  await expect(activity).toBeInViewport({ timeout: 5_000 });
+  await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
+});
+
+test("/admin/invitations at 360px: status tabs row stays inside the viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_360);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/invitations");
+  await page.waitForLoadState("networkidle");
+  const tabs = page.locator(".status-tabs");
+  await expect(tabs).toBeVisible({ timeout: 10_000 });
+  const box = await tabs.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    // The tabs row may wrap below the title on a 360px viewport but
+    // must NOT overflow the viewport horizontally.
+    expect(box.x + box.width).toBeLessThanOrEqual(MOBILE_360.width + 1);
+  }
+  await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
+});
+
 for (const vp of [MOBILE_360, MOBILE_430]) {
   test(`/tickets/new at ${vp.width}px: bottom of the page is reachable`, async ({
     page,

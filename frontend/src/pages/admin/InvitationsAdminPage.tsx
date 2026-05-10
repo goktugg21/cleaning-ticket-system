@@ -609,8 +609,14 @@ export function InvitationsAdminPage() {
       {/* Activity card: status tabs + table. Tabs replace the old
           single-select status filter. The fetch logic is unchanged
           (one /api/auth/invitations/ call); the tab choice filters
-          client-side via filteredInvitations. */}
-      <section className="card" style={{ overflow: "hidden", marginTop: 16 }}>
+          client-side via filteredInvitations.
+          Sprint 20 follow-up #3: marginTop moved to a CSS class so a
+          mobile-only override (≤480px) can tighten the gap without
+          adding a per-component breakpoint here. */}
+      <section
+        className="card invitations-activity-card"
+        style={{ overflow: "hidden" }}
+      >
         <div className="activity-card-header">
           <div>
             <div className="eyebrow">{t("invitations.activity_eyebrow")}</div>
