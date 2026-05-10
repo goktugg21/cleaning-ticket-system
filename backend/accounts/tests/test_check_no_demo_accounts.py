@@ -148,6 +148,37 @@ class CheckNoDemoAccountsTests(TestCase):
         self.assertEqual(cm.exception.code, 1)
         self.assertIn("future-tester@cleanops.demo", err.getvalue())
 
+    def test_sprint21_company_b_demo_accounts_fail(self):
+        # Sprint 21 added a second demo company (Bright Facilities) to
+        # seed_demo_data. The three new accounts must each trip the
+        # pilot guard. They also share the @cleanops.demo TLD so the
+        # suffix safety net catches them even if the explicit list
+        # were ever pruned.
+        for email, role in [
+            ("admin-b@cleanops.demo", UserRole.COMPANY_ADMIN),
+            ("manager-b@cleanops.demo", UserRole.BUILDING_MANAGER),
+            ("customer-b@cleanops.demo", UserRole.CUSTOMER_USER),
+        ]:
+            User.objects.create_user(
+                email=email,
+                password="Demo12345!",
+                role=role,
+            )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        for email in (
+            "admin-b@cleanops.demo",
+            "manager-b@cleanops.demo",
+            "customer-b@cleanops.demo",
+        ):
+            self.assertIn(email, err.getvalue())
+
     def test_sprint19_demo_up_script_accounts_fail(self):
         # Sprint 19's pilot-readiness gate extended DEMO_EMAILS to
         # also reject the four accounts that scripts/demo_up.sh and

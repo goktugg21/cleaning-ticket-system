@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Sprint 21: this script now delegates seeding to the canonical
+# `seed_demo_data` management command, which provisions two demo
+# companies (Osius Demo + Bright Facilities). Previously this file
+# inlined a one-off Python shell that created `admin@example.com` and
+# friends — those accounts caused naming/password drift versus the
+# rest of the demo stack. The pilot-readiness guard
+# (`check_no_demo_accounts`) still rejects both the old and the new
+# demo emails, so an older clone of this script can't silently leak
+# admin credentials into a pilot host.
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -61,24 +71,6 @@ print(data["access"])
 '
 }
 
-json_get_id() {
-  python3 -c '
-import sys, json
-raw = sys.stdin.read()
-try:
-    data = json.loads(raw)
-except Exception:
-    print("INVALID_JSON_RESPONSE:", raw, file=sys.stderr)
-    raise SystemExit(1)
-
-if "id" not in data:
-    print("EXPECTED_ID_MISSING_RESPONSE:", json.dumps(data, indent=2), file=sys.stderr)
-    raise SystemExit(1)
-
-print(data["id"])
-'
-}
-
 echo "===== 1. START LOCAL HTTP DEMO STACK ====="
 compose up -d --build
 ok "Demo stack started"
@@ -90,159 +82,28 @@ wait_for_http "API /api/auth/me/ without token" "$API/auth/me/" "401" "/tmp/clea
 wait_for_http "Admin login" "$BASE_URL/django-admin/login/" "200" "/tmp/cleaning-ticket-demo-admin.html"
 
 echo
-echo "===== 3. SEED DEMO USERS AND SCOPE ====="
-SEED_OUTPUT="$(compose exec -T backend python manage.py shell <<'PYSEED'
-from accounts.models import User, UserRole
-from buildings.models import Building, BuildingManagerAssignment
-from companies.models import Company, CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
-
-
-def upsert_user(email, password, role, full_name, is_staff=False, is_superuser=False):
-    user, created = User.objects.get_or_create(
-        email=email,
-        defaults={
-            "username": email,
-            "role": role,
-            "full_name": full_name,
-            "is_staff": is_staff,
-            "is_superuser": is_superuser,
-            "is_active": True,
-        },
-    )
-
-    changed = False
-
-    updates = {
-        "role": role,
-        "full_name": full_name,
-        "is_staff": is_staff,
-        "is_superuser": is_superuser,
-        "is_active": True,
-    }
-
-    for field, value in updates.items():
-        if getattr(user, field) != value:
-            setattr(user, field, value)
-            changed = True
-
-    if user.deleted_at is not None:
-        user.deleted_at = None
-        changed = True
-
-    if changed:
-        user.save()
-
-    if created or not user.check_password(password):
-        user.set_password(password)
-        user.save(update_fields=["password"])
-
-    return user
-
-
-admin = upsert_user(
-    "admin@example.com",
-    "Admin12345!",
-    UserRole.SUPER_ADMIN,
-    "Demo Super Admin",
-    is_staff=True,
-    is_superuser=True,
-)
-
-company_admin = upsert_user(
-    "companyadmin@example.com",
-    "Test12345!",
-    UserRole.COMPANY_ADMIN,
-    "Demo Company Admin",
-    is_staff=True,
-)
-
-manager = upsert_user(
-    "manager@example.com",
-    "Test12345!",
-    UserRole.BUILDING_MANAGER,
-    "Demo Building Manager",
-    is_staff=True,
-)
-
-customer_user = upsert_user(
-    "customer@example.com",
-    "Test12345!",
-    UserRole.CUSTOMER_USER,
-    "Demo Customer User",
-)
-
-company, _ = Company.objects.get_or_create(
-    slug="demo-cleaning-company",
-    defaults={
-        "name": "Demo Cleaning Company",
-        "default_language": "nl",
-        "is_active": True,
-    },
-)
-
-building, _ = Building.objects.get_or_create(
-    company=company,
-    name="Demo Building",
-    defaults={
-        "address": "Demo Street 1",
-        "city": "Amsterdam",
-        "country": "NL",
-        "is_active": True,
-    },
-)
-
-customer, _ = Customer.objects.get_or_create(
-    company=company,
-    building=building,
-    name="Demo Customer",
-    defaults={
-        "contact_email": "customer@example.com",
-        "language": "nl",
-        "is_active": True,
-    },
-)
-
-CompanyUserMembership.objects.get_or_create(company=company, user=company_admin)
-CompanyUserMembership.objects.get_or_create(company=company, user=manager)
-BuildingManagerAssignment.objects.get_or_create(building=building, user=manager)
-CustomerUserMembership.objects.get_or_create(customer=customer, user=customer_user)
-
-print(f"COMPANY_ID={company.id}")
-print(f"BUILDING_ID={building.id}")
-print(f"CUSTOMER_ID={customer.id}")
-PYSEED
-)"
-
-echo "$SEED_OUTPUT"
-
-BUILDING_ID="$(printf '%s\n' "$SEED_OUTPUT" | grep '^BUILDING_ID=' | tail -1 | cut -d= -f2 | tr -d '\r')"
-CUSTOMER_ID="$(printf '%s\n' "$SEED_OUTPUT" | grep '^CUSTOMER_ID=' | tail -1 | cut -d= -f2 | tr -d '\r')"
-
-[[ -n "$BUILDING_ID" ]] || fail "BUILDING_ID not found"
-[[ -n "$CUSTOMER_ID" ]] || fail "CUSTOMER_ID not found"
-
-ok "Demo scope ready: building=$BUILDING_ID customer=$CUSTOMER_ID"
+echo "===== 3. SEED CANONICAL TWO-COMPANY DEMO ====="
+# --i-know-this-is-not-prod is required because docker-compose.prod.yml
+# runs the backend with DJANGO_DEBUG=False. The flag does not bypass
+# the pilot-launch guard (check_no_demo_accounts) — it only allows the
+# seed itself to run on a non-DEBUG settings tree. A real pilot host
+# never runs this script.
+compose exec -T backend python manage.py seed_demo_data --i-know-this-is-not-prod
+ok "seed_demo_data complete"
 
 echo
-echo "===== 4. CREATE DEMO TICKET ====="
-CUSTOMER_TOKEN="$(login customer@example.com 'Test12345!')"
+echo "===== 4. VERIFY DEMO LOGIN ====="
+SUPER_TOKEN="$(login super@cleanops.demo 'Demo12345!')"
+[[ -n "$SUPER_TOKEN" ]] || fail "super@cleanops.demo login failed"
+ok "super@cleanops.demo can log in"
 
-CREATE_RESP="$(curl -sS -X POST "$API/tickets/" \
-  -H "Authorization: Bearer $CUSTOMER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"title\":\"Demo cleaning request\",
-    \"description\":\"This is a demo ticket created by scripts/demo_up.sh.\",
-    \"room_label\":\"Demo Room 101\",
-    \"type\":\"REPORT\",
-    \"priority\":\"NORMAL\",
-    \"building\":$BUILDING_ID,
-    \"customer\":$CUSTOMER_ID
-  }")"
+ADMIN_A_TOKEN="$(login admin@cleanops.demo 'Demo12345!')"
+[[ -n "$ADMIN_A_TOKEN" ]] || fail "admin@cleanops.demo (Company A) login failed"
+ok "admin@cleanops.demo (Company A) can log in"
 
-TICKET_ID="$(printf '%s' "$CREATE_RESP" | json_get_id)"
-ok "Demo ticket created id=$TICKET_ID"
+ADMIN_B_TOKEN="$(login admin-b@cleanops.demo 'Demo12345!')"
+[[ -n "$ADMIN_B_TOKEN" ]] || fail "admin-b@cleanops.demo (Company B) login failed"
+ok "admin-b@cleanops.demo (Company B) can log in"
 
 echo
 echo "======================================"
@@ -251,14 +112,24 @@ echo "======================================"
 echo "URL:"
 echo "  $BASE_URL"
 echo
-echo "Demo users:"
-echo "  Super admin:    admin@example.com        / Admin12345!"
-echo "  Company admin:  companyadmin@example.com / Test12345!"
-echo "  Manager:        manager@example.com      / Test12345!"
-echo "  Customer:       customer@example.com     / Test12345!"
+echo "Demo password (all accounts): Demo12345!"
 echo
-echo "Demo ticket id:"
-echo "  $TICKET_ID"
+echo "Super admin (both companies):"
+echo "  super@cleanops.demo"
+echo
+echo "Company A — Osius Demo (Amsterdam B1/B2/B3):"
+echo "  admin@cleanops.demo            COMPANY_ADMIN"
+echo "  gokhan@cleanops.demo           BUILDING_MANAGER  B1/B2/B3"
+echo "  murat@cleanops.demo            BUILDING_MANAGER  B1"
+echo "  isa@cleanops.demo              BUILDING_MANAGER  B2"
+echo "  tom@cleanops.demo              CUSTOMER_USER     B1/B2/B3"
+echo "  iris@cleanops.demo             CUSTOMER_USER     B1/B2"
+echo "  amanda@cleanops.demo           CUSTOMER_USER     B3"
+echo
+echo "Company B — Bright Facilities (Rotterdam R1/R2):"
+echo "  admin-b@cleanops.demo          COMPANY_ADMIN"
+echo "  manager-b@cleanops.demo        BUILDING_MANAGER  R1/R2"
+echo "  customer-b@cleanops.demo       CUSTOMER_USER     R1/R2"
 echo
 echo "Stop demo stack:"
 echo "  ./scripts/demo_down.sh"

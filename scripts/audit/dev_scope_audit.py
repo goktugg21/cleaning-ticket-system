@@ -11,8 +11,8 @@ auth middleware chain in the loop.
 
 Pre-requisites:
     - Dev stack up (see scripts/demo_up.sh).
-    - `python manage.py seed_demo` has run, so the four demo accounts
-      and the Demo Cleaning BV tenant exist.
+    - `python manage.py seed_demo_data` has run, so the canonical
+      two-company demo (Osius Demo + Bright Facilities) exists.
 
 Run:
     python3 scripts/audit/dev_scope_audit.py
@@ -38,12 +38,15 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "Demo12345!")
 
 
-# (label, email)
+# (label, email) — Sprint 21 retargets at the canonical seed_demo_data
+# personas (Osius Demo / Company A). Cross-company isolation is
+# verified by the Playwright cross_company_isolation.spec.ts suite,
+# not by this audit.
 ROLES = [
-    ("super",    "demo-super@example.com"),
-    ("company",  "demo-company-admin@example.com"),
-    ("manager",  "demo-manager@example.com"),
-    ("customer", "demo-customer@example.com"),
+    ("super",    "super@cleanops.demo"),
+    ("company",  "admin@cleanops.demo"),
+    ("manager",  "gokhan@cleanops.demo"),
+    ("customer", "tom@cleanops.demo"),
 ]
 
 # (path, expected_status_per_role) — expected status codes by role label.
@@ -108,7 +111,7 @@ def main() -> int:
         except urllib.error.HTTPError as exc:
             print(
                 f"  login {label:<8} {email}: HTTP {exc.code} — "
-                f"did you run `python manage.py seed_demo`?"
+                f"did you run `python manage.py seed_demo_data`?"
             )
             return 1
         except urllib.error.URLError as exc:

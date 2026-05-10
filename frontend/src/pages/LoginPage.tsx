@@ -46,20 +46,12 @@ interface DemoUser {
 }
 
 // Mirrors backend/accounts/management/commands/seed_demo_data.py.
-// One card per role + the three customer-user variants so a demo
-// can show the per-building access matrix in one click.
-const DEMO_USERS: DemoUser[] = [
-  {
-    id: "super",
-    email: "super@cleanops.demo",
-    password: DEMO_PASSWORD,
-    initials: "SA",
-    avatarVariant: "dark",
-    name: "Super Admin",
-    roleKey: "demo_role_super_admin",
-    pillKey: "demo_pill_super_admin",
-    pillVariant: "primary",
-  },
+// Sprint 21: two demo companies (Osius Demo + Bright Facilities) so
+// the operator can demonstrate cross-company isolation in one click.
+const COMPANY_A_LABEL = "Osius Demo (Amsterdam)";
+const COMPANY_B_LABEL = "Bright Facilities (Rotterdam)";
+
+const DEMO_USERS_COMPANY_A: DemoUser[] = [
   {
     id: "company-admin",
     email: "admin@cleanops.demo",
@@ -70,7 +62,6 @@ const DEMO_USERS: DemoUser[] = [
     roleKey: "demo_role_company_admin",
     pillKey: "demo_pill_company_admin",
     pillVariant: "primary",
-    scopeHint: "Osius Demo",
   },
   {
     id: "manager-all",
@@ -133,6 +124,56 @@ const DEMO_USERS: DemoUser[] = [
     scopeHint: "B3 only",
   },
 ];
+
+const DEMO_USERS_COMPANY_B: DemoUser[] = [
+  {
+    id: "company-admin-b",
+    email: "admin-b@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "SD",
+    avatarVariant: "dark",
+    name: "Sophie van Dijk",
+    roleKey: "demo_role_company_admin",
+    pillKey: "demo_pill_company_admin",
+    pillVariant: "primary",
+  },
+  {
+    id: "manager-b",
+    email: "manager-b@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "BJ",
+    avatarVariant: "dark",
+    name: "Bram de Jong",
+    roleKey: "demo_role_manager",
+    pillKey: "demo_pill_manager",
+    pillVariant: "primary",
+    scopeHint: "R1 / R2",
+  },
+  {
+    id: "customer-b-co",
+    email: "customer-b@cleanops.demo",
+    password: DEMO_PASSWORD,
+    initials: "LV",
+    avatarVariant: "mint",
+    name: "Lotte Visser",
+    roleKey: "demo_role_customer",
+    pillKey: "demo_pill_customer",
+    pillVariant: "muted",
+    scopeHint: "R1 / R2",
+  },
+];
+
+const SUPER_ADMIN_DEMO_USER: DemoUser = {
+  id: "super",
+  email: "super@cleanops.demo",
+  password: DEMO_PASSWORD,
+  initials: "SA",
+  avatarVariant: "dark",
+  name: "Super Admin",
+  roleKey: "demo_role_super_admin",
+  pillKey: "demo_pill_super_admin",
+  pillVariant: "primary",
+};
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -248,11 +289,78 @@ export function LoginPage() {
                 {t("demo_credentials_hint", { password: DEMO_PASSWORD })}
               </div>
               <div className="qa-grid">
-                {DEMO_USERS.map((user) => (
+                {/* Super admin spans both companies — shown first. */}
+                <button
+                  type="button"
+                  key={SUPER_ADMIN_DEMO_USER.id}
+                  data-testid={`demo-card-${SUPER_ADMIN_DEMO_USER.id}`}
+                  data-demo-company="both"
+                  className={`qa-card ${selectedDemo === SUPER_ADMIN_DEMO_USER.id ? "selected" : ""}`}
+                  onClick={() => applyDemoUser(SUPER_ADMIN_DEMO_USER)}
+                >
+                  <div className="qa-card-head">
+                    <div className={`qa-avatar ${SUPER_ADMIN_DEMO_USER.avatarVariant}`}>
+                      {SUPER_ADMIN_DEMO_USER.initials}
+                    </div>
+                    <div className="qa-id">
+                      <div className="qa-name">{SUPER_ADMIN_DEMO_USER.name}</div>
+                      <div className="qa-title">{t(SUPER_ADMIN_DEMO_USER.roleKey)}</div>
+                    </div>
+                  </div>
+                  <span className="qa-role-pill">{t(SUPER_ADMIN_DEMO_USER.pillKey)}</span>
+                </button>
+              </div>
+
+              <div
+                className="qa-company-label"
+                data-testid="demo-company-a-label"
+              >
+                {COMPANY_A_LABEL}
+              </div>
+              <div className="qa-grid" data-testid="demo-company-a-grid">
+                {DEMO_USERS_COMPANY_A.map((user) => (
                   <button
                     type="button"
                     key={user.id}
                     data-testid={`demo-card-${user.id}`}
+                    data-demo-company="A"
+                    className={`qa-card ${selectedDemo === user.id ? "selected" : ""}`}
+                    onClick={() => applyDemoUser(user)}
+                  >
+                    <div className="qa-card-head">
+                      <div className={`qa-avatar ${user.avatarVariant}`}>
+                        {user.initials}
+                      </div>
+                      <div className="qa-id">
+                        <div className="qa-name">{user.name}</div>
+                        <div className="qa-title">{t(user.roleKey)}</div>
+                        {user.scopeHint && (
+                          <div className="qa-scope">{user.scopeHint}</div>
+                        )}
+                      </div>
+                    </div>
+                    <span
+                      className={`qa-role-pill ${user.pillVariant === "muted" ? "muted" : ""}`}
+                    >
+                      {t(user.pillKey)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <div
+                className="qa-company-label"
+                data-testid="demo-company-b-label"
+              >
+                {COMPANY_B_LABEL}
+              </div>
+              <div className="qa-grid" data-testid="demo-company-b-grid">
+                {DEMO_USERS_COMPANY_B.map((user) => (
+                  <button
+                    type="button"
+                    key={user.id}
+                    data-testid={`demo-card-${user.id}`}
+                    data-demo-company="B"
                     className={`qa-card ${selectedDemo === user.id ? "selected" : ""}`}
                     onClick={() => applyDemoUser(user)}
                   >

@@ -1,17 +1,13 @@
 """
-Sprint 10 — pre-pilot guard: refuse to leave demo accounts in place
-on a host headed for production.
+Sprint 10 / 16 / 19 / 21 — pre-pilot guard: refuse to leave demo
+accounts in place on a host headed for production.
 
-The seed_demo / seed_demo_data commands (used for local walkthroughs
-and the demo fixtures) create well-known accounts:
+The seed_demo_data command (used for local walkthroughs and the demo
+fixtures) creates well-known accounts in two demo companies. The
+scripts/demo_up.sh helper additionally seeds a small set of
+@example.com accounts as part of the local-HTTP smoke flow.
 
-  Sprint 10 (seed_demo)
-    demo-super@example.com
-    demo-company-admin@example.com
-    demo-manager@example.com
-    demo-customer@example.com
-
-  Sprint 16 (seed_demo_data)
+  Company A — Osius Demo  (seed_demo_data, Sprint 16):
     super@cleanops.demo
     admin@cleanops.demo
     gokhan@cleanops.demo
@@ -21,10 +17,29 @@ and the demo fixtures) create well-known accounts:
     iris@cleanops.demo
     amanda@cleanops.demo
 
-All accounts share the password `Demo12345!`. Leaving any of them on
-a public-facing host is a trivial admin compromise.
+  Company B — Bright Facilities  (seed_demo_data, Sprint 21):
+    admin-b@cleanops.demo
+    manager-b@cleanops.demo
+    customer-b@cleanops.demo
 
-Sprint 16 broadens the check to also reject ANY user whose email
+  Sprint 10 — legacy seed_demo (removed in Sprint 21 but kept in this
+  list as defense-in-depth in case a pilot DB was seeded with the old
+  command earlier):
+    demo-super@example.com
+    demo-company-admin@example.com
+    demo-manager@example.com
+    demo-customer@example.com
+
+  Sprint 19 — demo_up.sh local smoke seed:
+    admin@example.com
+    companyadmin@example.com
+    manager@example.com
+    customer@example.com
+
+All `@cleanops.demo` accounts share the password `Demo12345!`. Leaving
+any of them on a public-facing host is a trivial admin compromise.
+
+Sprint 16 broadened the check to also reject ANY user whose email
 ends with `@cleanops.demo`, so a future seed that adds new personas
 under that suffix is caught even before this list is updated.
 
@@ -46,17 +61,14 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 
 
-# Explicit list — kept in sync with seed_demo.py and seed_demo_data.py
-# rather than imported, so a future refactor of either seed cannot
-# accidentally erase the entries this guard refuses to allow on a
-# pilot host.
+# Explicit list — kept in sync with seed_demo_data.py rather than
+# imported, so a future refactor of the seed cannot accidentally erase
+# the entries this guard refuses to allow on a pilot host. The
+# `@cleanops.demo` suffix rule below is a defense-in-depth catch-all,
+# but the explicit list ensures the message we print names the actual
+# account so the operator can purge it deterministically.
 DEMO_EMAILS = (
-    # seed_demo (Sprint 10)
-    "demo-super@example.com",
-    "demo-company-admin@example.com",
-    "demo-manager@example.com",
-    "demo-customer@example.com",
-    # seed_demo_data (Sprint 16)
+    # Company A — Osius Demo (Sprint 16, retained Sprint 21)
     "super@cleanops.demo",
     "admin@cleanops.demo",
     "gokhan@cleanops.demo",
@@ -65,14 +77,21 @@ DEMO_EMAILS = (
     "tom@cleanops.demo",
     "iris@cleanops.demo",
     "amanda@cleanops.demo",
-    # Sprint 19 — demo_up.sh / prod_upload_download_test.sh seeds
-    # these "@example.com" accounts with well-known demo passwords
-    # (Admin12345!, Test12345!). They were never intended to land
-    # on a real pilot host, but the guard previously missed them
-    # because the local-demo seed script lives in scripts/, not in
-    # a seed_demo* management command. Catching them here keeps
-    # the readiness gate honest even if an operator runs the wrong
-    # script against the pilot DB by accident.
+    # Company B — Bright Facilities (Sprint 21)
+    "admin-b@cleanops.demo",
+    "manager-b@cleanops.demo",
+    "customer-b@cleanops.demo",
+    # Legacy seed_demo (Sprint 10 — command removed in Sprint 21, but
+    # any DB still carrying these emails from an earlier run should
+    # still trip the guard).
+    "demo-super@example.com",
+    "demo-company-admin@example.com",
+    "demo-manager@example.com",
+    "demo-customer@example.com",
+    # Sprint 19 — demo_up.sh / prod_upload_download_test.sh seed.
+    # demo_up.sh has been migrated to call seed_demo_data in Sprint 21,
+    # but the entries stay here in case an operator runs an older
+    # snapshot of the script against a fresh pilot DB.
     "admin@example.com",
     "companyadmin@example.com",
     "manager@example.com",
@@ -109,9 +128,5 @@ class Command(BaseCommand):
             self.stderr.write(
                 "Delete them before pilot launch — see docs/pilot-launch-checklist.md."
             )
-            # SystemExit instead of self.exit() because BaseCommand
-            # in Django 5 doesn't expose a public non-zero-exit hook;
-            # the management runner converts SystemExit to the
-            # process exit code.
             raise SystemExit(1)
         self.stdout.write("[OK] no demo accounts found.")

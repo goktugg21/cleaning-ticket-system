@@ -14,3 +14,9 @@ staticfiles
 .pytest_cache
 .coverage
 htmlcov
+# Local developer virtualenvs — never copied into the image. The
+# .venv symlink to lib64 on WSL Python 3.12 is a broken link that
+# breaks `docker build` ("invalid file request .venv/bin/python3").
+.venv
+venv
+.virtualenvs

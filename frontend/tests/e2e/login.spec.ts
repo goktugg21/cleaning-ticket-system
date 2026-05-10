@@ -29,9 +29,19 @@ test("demo cards render when VITE_DEMO_MODE=true", async ({ page }) => {
     return;
   }
   await expect(cards).toBeVisible();
-  // One card per role flavour the seed produces (super, company-admin,
-  // two managers, three customer users) → 7 cards.
-  await expect(page.locator('[data-testid^="demo-card-"]')).toHaveCount(7);
+  // Sprint 21: 1 super-admin + 6 Company A cards (admin, two manager
+  // flavours, three customer-user flavours) + 3 Company B cards
+  // (admin-b, manager-b, customer-b) → 10 cards total.
+  await expect(page.locator('[data-testid^="demo-card-"]')).toHaveCount(10);
+  // Both company groupings are labelled and addressable.
+  await expect(page.locator('[data-testid="demo-company-a-label"]')).toBeVisible();
+  await expect(page.locator('[data-testid="demo-company-b-label"]')).toBeVisible();
+  await expect(
+    page.locator('[data-demo-company="A"]'),
+  ).toHaveCount(6);
+  await expect(
+    page.locator('[data-demo-company="B"]'),
+  ).toHaveCount(3);
 });
 
 test("demo card click fills the login form", async ({ page }) => {

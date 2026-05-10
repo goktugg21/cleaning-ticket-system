@@ -660,11 +660,24 @@ p { line-height: 1.6; }
   text-transform: uppercase;
   margin-bottom: 10px;
 }
+/* Sprint 21: per-company sub-label above each grid of demo cards,
+   used to group Company A and Company B visually. Sits just below
+   the .qa-hint line. Slightly smaller and lighter than .qa-label. */
+.qa-company-label {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 12px 0 6px;
+}
 .qa-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.qa-grid + .qa-company-label { margin-top: 14px; }
 .qa-card {
   display: flex;
   flex-direction: column;
