@@ -380,8 +380,12 @@ export function InvitationsAdminPage() {
 
       {/* Form card: two-column body (description on the left, fields on
           the right). The form-actions row at the bottom keeps its
-          shared border-top + subtle bg styling. */}
-      <section className="card">
+          shared border-top + subtle bg styling.
+          Sprint 20 follow-up #4: add a page-specific class so the
+          mobile-only override can trim form-actions padding and
+          collapse the duplicate info column without affecting any
+          other card on the page. */}
+      <section className="card invitations-form-card">
         {formGeneralError && (
           <div
             className="alert-error"

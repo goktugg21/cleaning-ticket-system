@@ -618,20 +618,17 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
 // /admin/invitations at phone widths — Sprint 20 follow-up #3 polish
 // ---------------------------------------------------------------------------
 
-test("/admin/invitations at 430px: form + Activity card render cleanly", async ({
+test("/admin/invitations at 430x932: empty/default state fits the viewport (no annoying tail scroll)", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE_430);
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/admin/invitations");
   await page.waitForLoadState("networkidle");
-  // The Send invitation submit button must be visible (rendered, in
-  // viewport at the form's location). It is mid-page on mobile —
-  // do NOT scroll first; we are checking it mounts and is reachable
-  // without an extra interaction.
+  // Send invitation submit must be visible (rendered + mid-page).
   const submit = page.locator('[data-testid="invite-submit"]');
   await expect(submit).toBeVisible({ timeout: 10_000 });
-  // Activity card mounts after the form. Either the table or an
+  // Activity card mounts after the form. Either the table or the
   // empty-state must be present once the network idles.
   const tableOrEmpty = page
     .locator(
@@ -639,6 +636,17 @@ test("/admin/invitations at 430px: form + Activity card render cleanly", async (
     )
     .first();
   await expect(tableOrEmpty).toBeVisible({ timeout: 10_000 });
+  // The Sprint 20 follow-up #4 trims (info-column hidden, empty-state
+  // padding shrunk, form-actions tighter, activity-card-header
+  // tighter) bring the empty-default state from ~1243px tall down to
+  // ~932px, fitting a 430x932 viewport exactly. Allow a 32px
+  // tolerance per the brief — anti-aliasing and demo data variance
+  // (an extra pending row pushing the table) should not flake the
+  // assertion.
+  const docHeight = await page.evaluate(
+    () => document.documentElement.scrollHeight,
+  );
+  expect(docHeight).toBeLessThanOrEqual(MOBILE_430.height + 32);
   await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
 });
 
@@ -680,6 +688,25 @@ test("/admin/invitations at 360px: status tabs row stays inside the viewport", a
     // must NOT overflow the viewport horizontally.
     expect(box.x + box.width).toBeLessThanOrEqual(MOBILE_360.width + 1);
   }
+  await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
+});
+
+test("/admin/invitations at 360x640: page may scroll but Activity card is reachable", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_360);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/invitations");
+  await page.waitForLoadState("networkidle");
+  // 360x640 is much shorter than the form + activity stack even
+  // after the #4 trims (~930px tall). The page WILL scroll — what
+  // we assert is that scrolling to the absolute bottom brings the
+  // Activity card into the viewport and that there is no body-level
+  // horizontal overflow.
+  const activity = page.locator(".invitations-activity-card");
+  await expect(activity).toBeAttached({ timeout: 10_000 });
+  await scrollDocumentToBottom(page);
+  await expect(activity).toBeInViewport({ timeout: 5_000 });
   await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
 });
 
