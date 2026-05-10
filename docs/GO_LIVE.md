@@ -113,6 +113,20 @@ Follow logs:
 
 Before accepting real users:
 
+- Run the demo-account guard. It MUST exit 0:
+
+      docker compose -f docker-compose.prod.yml exec -T backend \
+        python manage.py check_no_demo_accounts
+
+  A non-zero exit means a `seed_demo*` / `demo_up.sh` /
+  `prod_upload_download_test.sh` account is on the host with a
+  well-known password — delete those rows before opening the door.
+
+- Confirm the frontend image was built WITHOUT `VITE_DEMO_MODE=true`.
+  Quick check: `curl https://<host>/login` followed by
+  `curl https://<host>/assets/<index>.js | grep -c demo-cards`
+  should print `0` on a real production build.
+
 - Login as admin, manager, and customer.
 - Create a ticket.
 - Upload and download an attachment.

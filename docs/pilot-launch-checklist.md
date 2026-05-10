@@ -195,30 +195,34 @@ attachment.
 
 ## 8. Demo account cleanup
 
-The local-demo accounts (`demo-super@`, `demo-company-admin@`,
-`demo-manager@`, `demo-customer@`) all use the predictable password
-`Demo12345!`. They MUST NOT exist on the pilot host with that
-password.
+Multiple seed scripts produce well-known accounts with predictable
+passwords (`Demo12345!`, `Admin12345!`, `Test12345!`):
 
-- [ ] **Did NOT** run `python manage.py seed_demo` against the
-      production database. (The command is intended for local
-      dev only — it idempotently re-applies `Demo12345!` to those
-      four accounts, which would be a public credential leak in
-      production.)
-- [ ] If the pilot DB inherited dev fixtures by mistake: delete
-      the four demo users with
-      `User.objects.filter(email__startswith="demo-").delete()`,
-      OR set them inactive and rotate their passwords to opaque
-      random strings.
-- [ ] Run a check from inside the backend container:
-      ```
-      docker compose -f docker-compose.prod.yml exec -T backend \
-        python manage.py shell -c \
-        "from accounts.models import User; \
-         print('demo accounts present:', \
-           User.objects.filter(email__startswith='demo-').count())"
-      ```
-      Expected output: `demo accounts present: 0`.
+- `manage.py seed_demo` (Sprint 10): `demo-super@`,
+  `demo-company-admin@`, `demo-manager@`, `demo-customer@` at
+  `@example.com` with `Demo12345!`.
+- `manage.py seed_demo_data` (Sprint 16): eight personas under
+  `@cleanops.demo` with `Demo12345!`.
+- `scripts/demo_up.sh` and
+  `scripts/prod_upload_download_test.sh`: `admin@example.com`,
+  `companyadmin@example.com`, `manager@example.com`,
+  `customer@example.com` with `Admin12345!` / `Test12345!`.
+
+**None of these accounts may exist on the pilot host.** Use the
+guard command — it is the single source of truth and it covers all
+three families (Sprint 19 extended it to the `demo_up.sh` family):
+
+```
+docker compose -f docker-compose.prod.yml exec -T backend \
+  python manage.py check_no_demo_accounts
+```
+
+- [ ] **Did NOT** run any of the seed scripts above against the
+      production database.
+- [ ] `check_no_demo_accounts` exits 0 on the pilot DB. Non-zero
+      exit lists the offending emails — delete those rows or
+      rotate their passwords to opaque random strings before
+      proceeding.
 
 ---
 
@@ -311,7 +315,9 @@ If the pilot deploy is wrong:
 
 ### No-go (any one is a hard stop)
 - Tests / smoke failing on the deployed commit.
-- Demo accounts (`Demo12345!`) reachable on the pilot domain.
+- `manage.py check_no_demo_accounts` exits non-zero on the pilot DB.
+- Frontend image was built with `VITE_DEMO_MODE=true` (login page
+  shows demo helper cards).
 - `/api/audit-logs/` reachable by anyone other than super-admin.
 - Postgres / Redis port reachable from the public IP.
 - No backup configured, or no successful restore drill.

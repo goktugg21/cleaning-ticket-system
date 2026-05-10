@@ -36,7 +36,10 @@ For a real server using port 80:
 The frontend container serves the React build with Nginx and proxies:
 
 - /api/ to Django
-- /admin/ to Django
+- /django-admin/ to Django (Sprint 18 moved Django admin off the
+  /admin/ prefix so the React SPA owns /admin/companies,
+  /admin/buildings, /admin/customers, /admin/users,
+  /admin/invitations, and /admin/audit-logs end-to-end)
 - /static/ to Django static files
 
 ## 3. Run checks

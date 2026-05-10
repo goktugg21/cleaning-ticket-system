@@ -27,7 +27,8 @@ This checklist tracks the minimum work required before running the cleaning tick
 
 - [x] Use Gunicorn for Django in production.
 - [x] Serve React build with Nginx.
-- [x] Proxy `/api/` and `/admin/` to Django.
+- [x] Proxy `/api/` and `/django-admin/` to Django (Sprint 18 — `/admin/*`
+      is owned by the React SPA).
 - [x] Use a persistent Docker volume for PostgreSQL.
 - [x] Use a persistent Docker volume for uploaded media.
 - [x] Add Docker container log rotation.
@@ -120,3 +121,14 @@ User onboarding goes through one-time invitation links. The backend stores only 
 - [x] Build production images.
 - [x] Run smoke test against production containers.
 - [x] Test upload/download on production containers (`./scripts/prod_upload_download_test.sh`).
+- [ ] Run the demo-account guard — MUST exit 0 on the pilot DB:
+
+      docker compose -f docker-compose.prod.yml exec -T backend \
+        python manage.py check_no_demo_accounts
+
+      Refusal means a `seed_demo*` or `demo_up.sh` account leaked
+      into the pilot database; delete those rows before launch.
+
+- [ ] Confirm the production frontend image was built WITHOUT
+      `VITE_DEMO_MODE=true` so the login page does not bake in the
+      demo-helper cards.

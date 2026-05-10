@@ -147,3 +147,37 @@ class CheckNoDemoAccountsTests(TestCase):
             )
         self.assertEqual(cm.exception.code, 1)
         self.assertIn("future-tester@cleanops.demo", err.getvalue())
+
+    def test_sprint19_demo_up_script_accounts_fail(self):
+        # Sprint 19's pilot-readiness gate extended DEMO_EMAILS to
+        # also reject the four accounts that scripts/demo_up.sh and
+        # scripts/prod_upload_download_test.sh seed with the
+        # well-known passwords Admin12345! / Test12345!. Before this
+        # entry, an operator who ran demo_up.sh against the pilot DB
+        # by accident would still pass the launch gate.
+        for email, role in [
+            ("admin@example.com", UserRole.SUPER_ADMIN),
+            ("companyadmin@example.com", UserRole.COMPANY_ADMIN),
+            ("manager@example.com", UserRole.BUILDING_MANAGER),
+            ("customer@example.com", UserRole.CUSTOMER_USER),
+        ]:
+            User.objects.create_user(
+                email=email,
+                password="Test12345!",
+                role=role,
+            )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        for email in (
+            "admin@example.com",
+            "companyadmin@example.com",
+            "manager@example.com",
+            "customer@example.com",
+        ):
+            self.assertIn(email, err.getvalue())
