@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -25,6 +25,7 @@ function formatDate(value: string, locale: string): string {
 }
 
 export function BuildingsAdminPage() {
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation("common");
 
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
@@ -256,36 +257,53 @@ export function BuildingsAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {buildings.map((building) => (
-                <tr key={building.id}>
-                  <td className="td-subject">
-                    <Link to={`/admin/buildings/${building.id}`}>{building.name}</Link>
-                  </td>
-                  <td>{companyName(building.company)}</td>
-                  <td>
-                    {[building.city, building.postal_code].filter(Boolean).join(" ")}
-                  </td>
-                  <td className="td-date">{formatDate(building.created_at, dateLocale)}</td>
-                  <td>
-                    <span
-                      className={`cell-tag cell-tag-${building.is_active ? "open" : "closed"}`}
-                    >
-                      <i />
-                      {building.is_active
-                        ? t("admin.status_active")
-                        : t("admin.status_inactive")}
-                    </span>
-                  </td>
-                  <td>
-                    <Link
-                      className="btn btn-ghost btn-sm"
-                      to={`/admin/buildings/${building.id}`}
-                    >
-                      {t("admin.edit")}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {buildings.map((building) => {
+                const editPath = `/admin/buildings/${building.id}`;
+                const openEdit = () => navigate(editPath);
+                return (
+                  <tr
+                    key={building.id}
+                    className="admin-row-clickable"
+                    role="link"
+                    tabIndex={0}
+                    aria-label={t("admin.edit") + ": " + building.name}
+                    onClick={openEdit}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openEdit();
+                      }
+                    }}
+                  >
+                    <td className="td-subject">
+                      <Link to={editPath}>{building.name}</Link>
+                    </td>
+                    <td>{companyName(building.company)}</td>
+                    <td>
+                      {[building.city, building.postal_code].filter(Boolean).join(" ")}
+                    </td>
+                    <td className="td-date">{formatDate(building.created_at, dateLocale)}</td>
+                    <td>
+                      <span
+                        className={`cell-tag cell-tag-${building.is_active ? "open" : "closed"}`}
+                      >
+                        <i />
+                        {building.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive")}
+                      </span>
+                    </td>
+                    <td>
+                      <Link
+                        className="btn btn-ghost btn-sm"
+                        to={editPath}
+                      >
+                        {t("admin.edit")}
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -27,6 +27,7 @@ function formatDate(value: string, locale: string): string {
 
 export function CompaniesAdminPage() {
   const { me } = useAuth();
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
@@ -204,34 +205,51 @@ export function CompaniesAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {companies.map((company) => (
-                <tr key={company.id}>
-                  <td className="td-subject">
-                    <Link to={`/admin/companies/${company.id}`}>{company.name}</Link>
-                  </td>
-                  <td>{company.slug}</td>
-                  <td>{company.default_language}</td>
-                  <td className="td-date">{formatDate(company.created_at, dateLocale)}</td>
-                  <td>
-                    <span
-                      className={`cell-tag cell-tag-${company.is_active ? "open" : "closed"}`}
-                    >
-                      <i />
-                      {company.is_active
-                        ? t("admin.status_active")
-                        : t("admin.status_inactive")}
-                    </span>
-                  </td>
-                  <td>
-                    <Link
-                      className="btn btn-ghost btn-sm"
-                      to={`/admin/companies/${company.id}`}
-                    >
-                      {t("admin.edit")}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {companies.map((company) => {
+                const editPath = `/admin/companies/${company.id}`;
+                const openEdit = () => navigate(editPath);
+                return (
+                  <tr
+                    key={company.id}
+                    className="admin-row-clickable"
+                    role="link"
+                    tabIndex={0}
+                    aria-label={t("admin.edit") + ": " + company.name}
+                    onClick={openEdit}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openEdit();
+                      }
+                    }}
+                  >
+                    <td className="td-subject">
+                      <Link to={editPath}>{company.name}</Link>
+                    </td>
+                    <td>{company.slug}</td>
+                    <td>{company.default_language}</td>
+                    <td className="td-date">{formatDate(company.created_at, dateLocale)}</td>
+                    <td>
+                      <span
+                        className={`cell-tag cell-tag-${company.is_active ? "open" : "closed"}`}
+                      >
+                        <i />
+                        {company.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive")}
+                      </span>
+                    </td>
+                    <td>
+                      <Link
+                        className="btn btn-ghost btn-sm"
+                        to={editPath}
+                      >
+                        {t("admin.edit")}
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 

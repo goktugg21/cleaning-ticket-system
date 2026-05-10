@@ -245,9 +245,18 @@ export function ReportsPage() {
       </section>
 
       <div
+        // Sprint 20 follow-up: the previous template `minmax(420px, 1fr)`
+        // forced every card to be at least 420px wide, which on a
+        // ≤420px viewport overflowed the workspace and got clipped by
+        // its `overflow-x: clip` rule, hiding the right edge of every
+        // chart. `min(420px, 100%)` tells the auto-fit algorithm to
+        // back off to the available width on a phone, producing a
+        // single full-width column. Desktop layout is unchanged.
+        className="reports-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(min(420px, 100%), 1fr))",
           gap: 16,
         }}
       >

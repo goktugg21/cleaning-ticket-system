@@ -247,8 +247,16 @@ test.describe("admin → /admin/invitations", () => {
   test("SUPER_ADMIN reaches the invitations page", async ({ page }) => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/admin/invitations");
+    // Sprint 20 follow-up #5: when there are no invitations the page
+    // renders an empty-state directly inside the Activity card and
+    // skips the `invitations-table` element. Accept either branch as
+    // "page rendered".
     await expect(
-      page.locator('[data-testid="invitations-table"]'),
+      page
+        .locator(
+          '[data-testid="invitations-table"], .invitations-activity-card .empty-state',
+        )
+        .first(),
     ).toBeVisible({ timeout: 10_000 });
   });
 
@@ -256,7 +264,11 @@ test.describe("admin → /admin/invitations", () => {
     await loginAs(page, DEMO_USERS.companyAdmin);
     await page.goto("/admin/invitations");
     await expect(
-      page.locator('[data-testid="invitations-table"]'),
+      page
+        .locator(
+          '[data-testid="invitations-table"], .invitations-activity-card .empty-state',
+        )
+        .first(),
     ).toBeVisible({ timeout: 10_000 });
   });
 

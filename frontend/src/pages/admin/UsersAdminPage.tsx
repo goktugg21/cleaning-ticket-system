@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { MailPlus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -29,6 +29,7 @@ const ALL_ROLES: Role[] = [
 
 export function UsersAdminPage() {
   const { me } = useAuth();
+  const navigate = useNavigate();
   const { t } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
@@ -250,33 +251,50 @@ export function UsersAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleUsers.map((user) => (
-                <tr key={user.id}>
-                  <td className="td-subject">
-                    <Link to={`/admin/users/${user.id}`}>{user.email}</Link>
-                  </td>
-                  <td>{user.full_name || "—"}</td>
-                  <td data-testid="user-row-role" data-role={user.role}>
-                    {t(ROLE_KEYS[user.role] ?? "common:roles.fallback")}
-                  </td>
-                  <td>{user.language}</td>
-                  <td>
-                    <span
-                      className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
-                    >
-                      <i />
-                      {user.is_active
-                        ? t("admin.status_active")
-                        : t("admin.status_inactive")}
-                    </span>
-                  </td>
-                  <td>
-                    <Link className="btn btn-ghost btn-sm" to={`/admin/users/${user.id}`}>
-                      {t("admin.edit")}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {visibleUsers.map((user) => {
+                const editPath = `/admin/users/${user.id}`;
+                const openEdit = () => navigate(editPath);
+                return (
+                  <tr
+                    key={user.id}
+                    className="admin-row-clickable"
+                    role="link"
+                    tabIndex={0}
+                    aria-label={t("admin.edit") + ": " + user.email}
+                    onClick={openEdit}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openEdit();
+                      }
+                    }}
+                  >
+                    <td className="td-subject">
+                      <Link to={editPath}>{user.email}</Link>
+                    </td>
+                    <td>{user.full_name || "—"}</td>
+                    <td data-testid="user-row-role" data-role={user.role}>
+                      {t(ROLE_KEYS[user.role] ?? "common:roles.fallback")}
+                    </td>
+                    <td>{user.language}</td>
+                    <td>
+                      <span
+                        className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
+                      >
+                        <i />
+                        {user.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive")}
+                      </span>
+                    </td>
+                    <td>
+                      <Link className="btn btn-ghost btn-sm" to={editPath}>
+                        {t("admin.edit")}
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 

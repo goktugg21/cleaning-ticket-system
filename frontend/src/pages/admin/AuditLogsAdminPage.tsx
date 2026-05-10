@@ -310,12 +310,16 @@ export function AuditLogsAdminPage() {
                         Changes
                       </summary>
                       <pre
+                        // Sprint 20: max-width handled via the
+                        // [data-testid="audit-logs-page"] selector
+                        // in index.css so it can clamp to the
+                        // viewport on phones; keep inline styles for
+                        // the per-cell box only.
                         style={{
                           background: "var(--bg-soft, #f7f7f7)",
                           padding: "8px 10px",
                           borderRadius: 4,
                           fontSize: 12,
-                          maxWidth: 520,
                           maxHeight: 280,
                           overflow: "auto",
                           whiteSpace: "pre-wrap",

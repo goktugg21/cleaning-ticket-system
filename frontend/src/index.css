@@ -466,7 +466,12 @@ p { line-height: 1.6; }
   margin-left: var(--sidebar-w);
   display: flex;
   flex-direction: column;
+  /* `100vh` on mobile browsers includes the dynamic chrome (URL bar,
+     bottom toolbar) so the page bottom can sit BEHIND the toolbar.
+     Use the dynamic viewport height where supported; the older `vh`
+     stays as a fallback. */
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .topbar {
@@ -2671,4 +2676,392 @@ table.data-table {
   .filter-actions { grid-column: auto; }
   .page-header-actions { width: 100%; }
   .page-header-actions .btn { flex: 1 0 auto; justify-content: center; }
+}
+
+/* ====================================================================
+   SPRINT 20 — MOBILE UI POLISH
+   --------------------------------------------------------------------
+   Surgical CSS fixes that round out the existing mobile rules above.
+   No backend, no permission, no workflow change. Targets 360 / 390 /
+   430 / 768px viewports highlighted in the Sprint 20 brief.
+   ==================================================================== */
+
+/* 1. Tables — keep momentum scrolling on iOS so the dense ticket /
+   admin / audit tables (`min-width: 860px`) feel native when the user
+   swipes them sideways. The native scrollbar appears on touch so the
+   horizontal scroll stays discoverable; we deliberately do NOT add a
+   fade overlay because past attempts (sticky pseudo-elements, fixed
+   gradients) all introduced layout glitches at the row boundary. */
+.table-wrap {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 2. Pagination — stack on tiny phones so the row doesn't crush the
+   page-counter into the buttons. */
+@media (max-width: 480px) {
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .pagination-info { text-align: center; }
+  .pagination-controls {
+    justify-content: space-between;
+  }
+  .pagination-controls .btn {
+    flex: 1 0 auto;
+    justify-content: center;
+  }
+}
+
+/* 3. Audit log — the per-row <details>/<pre> JSON block shows the
+   `changes` payload. On phones the inline-style `max-width: 520px`
+   from the page can still overflow the visible cell when the table
+   has scrolled. Cap the pre to its containing cell so it never widens
+   the row beyond what we already paged via .table-wrap. */
+[data-testid="audit-logs-page"] .data-table tbody td pre {
+  max-width: min(520px, calc(100vw - 80px));
+}
+@media (max-width: 760px) {
+  [data-testid="audit-logs-page"] .data-table tbody td pre {
+    max-width: calc(100vw - 60px);
+    font-size: 11px;
+  }
+}
+
+/* 4. Login demo cards — 2 columns reads cramped under 480px (each
+   card narrows to ~140px, the role pill wraps under the avatar). One
+   column is fine for a phone since this is a one-tap helper. */
+@media (max-width: 480px) {
+  .qa-grid { grid-template-columns: 1fr; }
+}
+
+/* 5. Ticket detail header — the "Back to tickets" + soft-delete row
+   wraps gracefully when both render. The meta line (ticket no +
+   priority + status badges) already wraps via the existing rule at
+   760px; nothing more needed here. */
+@media (max-width: 480px) {
+  .detail-header-top {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .detail-delete-btn {
+    margin-left: auto;
+  }
+}
+
+/* 6. Notes / message composer — the textarea defaults to a fairly
+   large height; on a 360px-tall split (after virtual keyboard) it
+   can push the post button off-screen. Allow it to shrink. */
+@media (max-width: 480px) {
+  .notes-textarea { min-height: 96px; }
+  .notes-actions { flex-wrap: wrap; gap: 10px; }
+  .notes-actions .btn { width: 100%; justify-content: center; }
+  .composer-toggle { width: 100%; }
+}
+
+/* 7. 360px and below — the smallest mainstream phone width (iPhone
+   SE 1st-gen / older Android). Tighten gutters one more notch and
+   give the topbar gap room for the role badge + sign-out. */
+@media (max-width: 360px) {
+  .page-canvas { padding: 8px; }
+  .topbar { gap: 6px; padding: 0 10px; }
+  .page-title { font-size: 20px; }
+  .topbar-title { font-size: 14px; }
+  .identity-role { display: none; }
+  /* The page header's right-side action stack already takes 100% at
+     480px; keep the gap tight so two actions fit on one row. */
+  .page-header-actions { gap: 6px; }
+}
+
+/* 8. Workspace-level horizontal overflow guard. The SPA is laid out
+   with a fixed sidebar + flex workspace; we never INTEND a
+   horizontal body scroll. Clip overflow at the .workspace level
+   (NOT body — that would re-promote body to a scroll container and
+   silently disable position:sticky on the topbar). Per-component
+   horizontal scroll (table-wrap, attachment grid) is unaffected
+   because they declare their own overflow:auto. */
+.workspace {
+  overflow-x: clip;
+  min-width: 0;
+}
+
+/* 9. Grid columns containing potentially-overflowing tables need
+   `min-width: 0` so the implicit `minmax(auto, 1fr)` column does
+   NOT grow to its content. Without this the dashboard / detail /
+   create grids let the table inside push the column to ~900px on
+   a phone, the parent .workspace's overflow-x:clip then HIDES the
+   right half of the table because the table-wrap's own scrollbar
+   never engages (its clientWidth already equals its scrollWidth).
+   This rule restores the scroll-inside-the-wrap behaviour the
+   table-wrap was designed for. */
+.dash-main, .dash-side,
+.detail-main, .detail-side,
+.create-main, .create-side {
+  min-width: 0;
+}
+
+/* ====================================================================
+   SPRINT 20 FOLLOW-UP — REPORTS, ROW-CLICK, SAFE-AREA
+   ==================================================================== */
+
+/* 10. Safe-area-aware page-canvas bottom padding. Phones with a home
+   indicator (iOS, Android gesture nav) reserve a small inset at the
+   bottom; without this the last row of a long page renders directly
+   under the gesture pill. `env()` returns 0 on platforms that do not
+   need an inset, so the rule is a no-op on desktop.
+
+   Sprint 20 follow-up #2 — manual review on iPhone 14 Pro Max (430px)
+   showed the last "Load by building" row partially cut at the
+   absolute scroll bottom. The previous mobile values (10 / 8 px on
+   ≤480 / ≤360) plus a zero-`env()` reading on most desktop emulators
+   left only ~10px of headroom, which a row-level border-bottom
+   shadow + the platform's reserved area can crowd out. Bump the
+   phone-class values to 36 / 40 px so the last card always clears
+   the viewport, while keeping the side paddings (10 / 8 px) tight
+   from the existing shorthand `.page-canvas { padding: 10px }` rules
+   above. Desktop padding stays at 28 px. */
+.page-canvas {
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 960px) {
+  .page-canvas {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 760px) {
+  .page-canvas {
+    padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 480px) {
+  .page-canvas {
+    padding-bottom: calc(36px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 360px) {
+  .page-canvas {
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* 11. Reports page: the inline `gridTemplateColumns: "repeat(auto-fit,
+   minmax(420px, 1fr))"` capped each chart card at a 420px MINIMUM,
+   which on a 360-390px phone overflowed the workspace and clipped
+   the right edge. The page now uses `min(420px, 100%)` to back off
+   gracefully — but the .reports-grid class also lets us reduce the
+   card padding on phones so the chart SVG has more room to render
+   the y-axis labels and pie/donut charts. */
+@media (max-width: 480px) {
+  .reports-grid > .card {
+    /* Trim the per-chart-card padding so the recharts ResponsiveContainer
+       gets a wider drawing surface inside a 360px viewport. The card
+       still has enough breathing room for the title + subtitle. */
+    padding: 16px 14px !important;
+  }
+  /* Tooltip in recharts can render off-screen if the cursor is near
+     the right edge; clamp its inline width so it stays inside. */
+  .reports-grid .recharts-tooltip-wrapper {
+    max-width: calc(100vw - 32px);
+  }
+  /* Recharts horizontal-bar y-axis labels can be long. The two
+     charts that render a horizontal bar layout (manager-throughput,
+     tickets-by-customer) declare a fixed yAxis width of 140 / 180
+     pixels — too wide for a 360 px card. Recharts re-flows when the
+     container shrinks, but the legend / tick text gets cropped via
+     ellipsis. We cannot resize a Recharts axis from CSS; what we
+     CAN do is shrink the surrounding card to give the chart more
+     room overall. */
+}
+
+/* 12. Row-click-to-edit on admin CRUD tables. The .data-table tbody
+   already shows a pointer cursor on hover; this class adds keyboard
+   focus visibility. Mirror the existing .ticket-row-clickable rule
+   so admin and tickets row-click share one outline style. */
+.admin-row-clickable {
+  cursor: pointer;
+}
+.admin-row-clickable:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+
+/* 13. Sprint 20 follow-up #3 + #4 + #5 — /admin/invitations mobile
+   layout. Two cards stacked vertically: form (top) + Activity card
+   (bottom).
+
+   - #3 trimmed the cards' inner padding + table cell padding.
+   - #4 hid the duplicate info column so the empty default state
+     fits a 430x932 viewport.
+   - #5 (this revision) makes the Activity content itself
+     mobile-friendly: empty state renders alone (no orphan thead),
+     and on ≤480px the existing 6-column table re-flows into a
+     stacked "label: value" card per row. The status-tabs row also
+     wraps cleanly. No horizontal scroll inside the Activity card.
+   Desktop and tablet (>480px) remain untouched. */
+.invitations-activity-card {
+  margin-top: 16px;
+}
+@media (max-width: 480px) {
+  .invitations-activity-card {
+    margin-top: 10px;
+  }
+  /* Form card: dial back the body padding so the form sits closer to
+     the card edge. Side gutters drop from 32px to 12px (matching the
+     page-canvas gutter on phones) and the inter-row gap to 12. */
+  .invitation-form-split {
+    padding: 14px 12px;
+    gap: 12px;
+  }
+  /* The info column (eyebrow + title + description + expiry note) is
+     a desktop-side prose block. On mobile it stacks ABOVE the form
+     fields and duplicates the page-header text. Hide it on phones —
+     the form's own labels carry all the context the user needs. */
+  .invitation-form-info {
+    display: none;
+  }
+  /* Tighter spacing between field rows. */
+  .invitation-form-fields {
+    gap: 8px;
+  }
+  /* Trim the submit-row padding/height. Submit button itself stays
+     full size — only the bg band shrinks. */
+  .invitations-form-card .form-actions {
+    padding: 12px 14px;
+  }
+  /* Activity card header (eyebrow + title + status tabs): trim the
+     padding and tighten the gap so the tabs row sits directly below
+     the title without a tall band of empty space. */
+  .activity-card-header {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+
+  /* Status tabs (Pending / Accepted / Expired / All). The desktop
+     inline-flex without wrap can overflow on a 360px viewport when
+     translations are long; allow wrapping. Buttons stay tappable
+     (≥30px tall) — only their row layout changes. */
+  .activity-card-header .status-tabs {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  /* Empty-state inside the Activity card. Sprint 20 #5: empty state
+     now renders WITHOUT the table thead above it, so this rule
+     governs the entire empty area. Shrink padding and icon to keep
+     the Activity card vertically compact. */
+  .invitations-activity-card .empty-state {
+    padding: 18px 14px;
+    gap: 6px;
+  }
+  .invitations-activity-card .empty-state .empty-icon {
+    width: 32px;
+    height: 32px;
+    margin-bottom: 0;
+  }
+
+  /* ----- Responsive table → stacked cards on phones -----
+     Sprint 20 follow-up #5: the desktop 6-column table is too dense
+     for a 360–430px viewport (~12–21 px horizontal overflow on the
+     surrounding `.table-wrap`, plus tiny per-cell padding makes
+     long emails wrap into 5+ lines). On ≤480px we re-flow each row
+     into a vertical "label: value" stack — one card per invitation.
+     The DOM stays the same; only `display` and a `::before` content
+     using `data-label` change. */
+
+  /* The wrap drops its horizontal scrollbar and acts as a plain
+     container — the table is no longer wider than its parent because
+     each "row" is now a block. */
+  .invitations-activity-card .table-wrap {
+    overflow-x: visible;
+    padding: 10px 14px 4px;
+  }
+
+  /* Strip the table's table semantics; behave as blocks. */
+  .invitations-table,
+  .invitations-table thead,
+  .invitations-table tbody,
+  .invitations-table tr,
+  .invitations-table th,
+  .invitations-table td {
+    display: block;
+    width: auto;
+  }
+
+  /* Hide the column-header row entirely. Each <td> renders its label
+     via the ::before pseudo-element. */
+  .invitations-table thead {
+    display: none;
+  }
+  /* The <colgroup> is irrelevant when columns are blocks. */
+  .invitations-table colgroup,
+  .invitations-table col {
+    display: none;
+  }
+
+  /* Each row becomes a bordered card with vertical spacing. */
+  .invitations-table tr {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: var(--surface);
+  }
+  .invitations-table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Each cell is a label/value row. The label sits on the left,
+     content flush right. */
+  .invitations-table td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: none;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  .invitations-table td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-family: var(--f-head);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: left;
+  }
+
+  /* Recipient column has its own avatar + name + email block, no
+     label needed. Make it sit full-width inside the card, above the
+     label/value rows below it. */
+  .invitations-table td:first-child {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-soft);
+    margin-bottom: 4px;
+  }
+  .invitations-table td:first-child::before {
+    display: none;
+  }
+  .recipient-email {
+    overflow-wrap: anywhere;
+  }
+
+  /* Actions row right-alignment override: keep the Revoke button on
+     the right of its label/value row. */
+  .invitations-table td.text-right {
+    text-align: right;
+  }
+  .invitations-table td.text-right .link-action {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--red-soft);
+  }
 }
