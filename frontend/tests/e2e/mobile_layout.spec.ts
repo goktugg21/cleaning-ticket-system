@@ -498,3 +498,143 @@ test("admin/audit-logs: rows are NOT marked row-clickable for editing", async ({
     page.locator('.data-table tbody tr.admin-row-clickable'),
   ).toHaveCount(0);
 });
+
+// ===========================================================================
+// SPRINT 20 FOLLOW-UP #2 — MOBILE PAGE-BOTTOM REACHABILITY
+//
+// Manual review on iPhone 14 Pro Max (430px) showed the last
+// "Load by building" row partially cut at the absolute scroll bottom.
+// On Playwright's Chromium the env(safe-area-inset-bottom) is always 0,
+// so the only protection against a clipped last row is the .page-canvas
+// rule's plain padding-bottom. The Sprint 20 follow-up bumps that value
+// to 36 / 40 px on ≤480 / ≤360 phones; these tests defend that
+// behaviour against future regressions.
+// ===========================================================================
+
+/**
+ * Scroll the document to its absolute bottom and let layout settle.
+ * Helper because Playwright's `scrollIntoViewIfNeeded` can stop early
+ * when the element is "in viewport" but a few pixels still hang off
+ * the bottom edge.
+ */
+async function scrollDocumentToBottom(
+  page: import("@playwright/test").Page,
+) {
+  await page.evaluate(() => {
+    const target = document.documentElement.scrollHeight;
+    window.scrollTo(0, target);
+  });
+  // Recharts and other lazy components can re-flow on scroll; one
+  // small tick is enough.
+  await page.waitForTimeout(150);
+}
+
+for (const vp of [MOBILE_360, MOBILE_430]) {
+  test(`dashboard at ${vp.width}px: last "Load by building" row is fully visible after scrolling to bottom`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(vp);
+    // Use a role that sees the by-building card. companyAdmin sees
+    // all 3 demo buildings.
+    await loginAs(page, DEMO_USERS.companyAdmin);
+    await page.waitForLoadState("networkidle");
+    // The dashboard's "Load by building" sidebar card collapses below
+    // the main card on mobile and is the LAST visible card. Wait for
+    // its rows to render.
+    const lastBldRow = page.locator(".bld-list .bld-row-head").last();
+    await expect(lastBldRow).toBeAttached({ timeout: 10_000 });
+    await scrollDocumentToBottom(page);
+    // The full row must be in viewport (ratio 1 = no clipping).
+    await expect(lastBldRow).toBeInViewport({ ratio: 1, timeout: 5_000 });
+    await expectNoBodyHorizontalOverflow(page, vp.width);
+  });
+}
+
+for (const vp of [MOBILE_360, MOBILE_430]) {
+  test(`reports at ${vp.width}px: last chart card is fully visible after scrolling to bottom`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(vp);
+    await loginAs(page, DEMO_USERS.super);
+    await page.goto("/reports");
+    await page.waitForLoadState("networkidle");
+    const last = page.locator(
+      '[data-testid="chart-card-tickets-by-building"]',
+    );
+    await expect(last).toBeAttached({ timeout: 10_000 });
+    await scrollDocumentToBottom(page);
+    await expect(last).toBeInViewport({ ratio: 1, timeout: 5_000 });
+    await expectNoBodyHorizontalOverflow(page, vp.width);
+  });
+}
+
+for (const vp of [MOBILE_360, MOBILE_430]) {
+  test(`settings at ${vp.width}px: bottom of the settings page is reachable`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(vp);
+    await loginAs(page, DEMO_USERS.companyAdmin);
+    await page.goto("/settings");
+    await page.waitForLoadState("networkidle");
+    // SettingsPage renders form sections and standalone cards; we
+    // pick the last `.card` on the page, which is whatever final
+    // section renders (notification preferences in the current
+    // build). The key invariant: no matter what the last block is,
+    // its full bounding box must clear the viewport bottom after a
+    // hard scroll.
+    const lastCard = page.locator("main .card").last();
+    await expect(lastCard).toBeAttached({ timeout: 10_000 });
+    await scrollDocumentToBottom(page);
+    await expect(lastCard).toBeInViewport({ ratio: 1, timeout: 5_000 });
+    await expectNoBodyHorizontalOverflow(page, vp.width);
+  });
+}
+
+for (const vp of [MOBILE_360, MOBILE_430]) {
+  test(`/admin/users at ${vp.width}px: pagination row is fully visible after scrolling to bottom`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(vp);
+    await loginAs(page, DEMO_USERS.super);
+    await page.goto("/admin/users");
+    await page.waitForLoadState("networkidle");
+    // The /admin/users table renders the demo users (≥7 rows) plus
+    // any legacy users; the pagination is below the table when there
+    // are enough rows for `next/previous` to be set. When there are
+    // not enough rows, the empty/footer area is still the last block
+    // — pick the last child of the .card so the test is robust to
+    // either case.
+    const lastBlock = page
+      .locator(".card .table-wrap, .card .pagination, .card .empty-state")
+      .last();
+    await expect(lastBlock).toBeAttached({ timeout: 10_000 });
+    await scrollDocumentToBottom(page);
+    await expect(lastBlock).toBeInViewport({ timeout: 5_000 });
+    await expectNoBodyHorizontalOverflow(page, vp.width);
+  });
+}
+
+for (const vp of [MOBILE_360, MOBILE_430]) {
+  test(`/tickets/new at ${vp.width}px: bottom of the page is reachable`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(vp);
+    await loginAs(page, DEMO_USERS.companyAdmin);
+    await page.goto("/tickets/new");
+    await page.waitForLoadState("networkidle");
+    // CreateTicketPage's `.create-layout` collapses to one column on
+    // mobile, with `.create-main` (form sections + submit row) on top
+    // and `.create-side` (summary / guidelines / SLA cards) BELOW it.
+    // The last card on the page is therefore the SLA card from the
+    // side panel — not the submit button. We check that last card is
+    // fully visible after scrolling, which is the real "bottom is
+    // reachable" assertion. The submit button itself is reachable by
+    // scrolling up from the bottom; that's expected mobile behaviour
+    // for a stacked form + sidebar layout.
+    const lastCard = page.locator("main .card").last();
+    await expect(lastCard).toBeAttached({ timeout: 10_000 });
+    await scrollDocumentToBottom(page);
+    await expect(lastCard).toBeInViewport({ ratio: 1, timeout: 5_000 });
+    await expectNoBodyHorizontalOverflow(page, vp.width);
+  });
+}

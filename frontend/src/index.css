@@ -2810,28 +2810,39 @@ table.data-table {
    indicator (iOS, Android gesture nav) reserve a small inset at the
    bottom; without this the last row of a long page renders directly
    under the gesture pill. `env()` returns 0 on platforms that do not
-   need an inset, so the rule is a no-op on desktop. */
+   need an inset, so the rule is a no-op on desktop.
+
+   Sprint 20 follow-up #2 — manual review on iPhone 14 Pro Max (430px)
+   showed the last "Load by building" row partially cut at the
+   absolute scroll bottom. The previous mobile values (10 / 8 px on
+   ≤480 / ≤360) plus a zero-`env()` reading on most desktop emulators
+   left only ~10px of headroom, which a row-level border-bottom
+   shadow + the platform's reserved area can crowd out. Bump the
+   phone-class values to 36 / 40 px so the last card always clears
+   the viewport, while keeping the side paddings (10 / 8 px) tight
+   from the existing shorthand `.page-canvas { padding: 10px }` rules
+   above. Desktop padding stays at 28 px. */
 .page-canvas {
   padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
 }
 @media (max-width: 960px) {
   .page-canvas {
-    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   }
 }
 @media (max-width: 760px) {
   .page-canvas {
-    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
   }
 }
 @media (max-width: 480px) {
   .page-canvas {
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(36px + env(safe-area-inset-bottom, 0px));
   }
 }
 @media (max-width: 360px) {
   .page-canvas {
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
   }
 }
 
