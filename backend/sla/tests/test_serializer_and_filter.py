@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -32,9 +33,17 @@ class SlaSerializerFieldTests(TenantFixtureMixin, TestCase):
         self.assertGreater(result, 0)
 
     def test_remaining_seconds_negative_when_overdue(self):
-        # Force sla_due_at into the past.
-        _force(self.ticket, sla_due_at=timezone.now() - timedelta(days=2))
-        result = _sla_remaining_business_seconds(self.ticket)
+        # Freeze "now" to a fixed weekday business time so the overdue interval
+        # always contains real business seconds. Using a relative
+        # timezone.now() - timedelta(days=2) caused weekend flakiness: a Sun→Fri
+        # span has zero business seconds, so assertLess(0, 0) failed in CI.
+        fixed_now = timezone.make_aware(
+            datetime(2026, 1, 7, 12, 0, 0),  # Wednesday, 12:00 project-local
+            timezone.get_default_timezone(),
+        )
+        _force(self.ticket, sla_due_at=fixed_now - timedelta(hours=1))
+        with patch("tickets.serializers.timezone.now", return_value=fixed_now):
+            result = _sla_remaining_business_seconds(self.ticket)
         self.assertIsNotNone(result)
         self.assertLess(result, 0)
 
