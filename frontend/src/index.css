@@ -466,7 +466,12 @@ p { line-height: 1.6; }
   margin-left: var(--sidebar-w);
   display: flex;
   flex-direction: column;
+  /* `100vh` on mobile browsers includes the dynamic chrome (URL bar,
+     bottom toolbar) so the page bottom can sit BEHIND the toolbar.
+     Use the dynamic viewport height where supported; the older `vh`
+     stays as a fallback. */
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .topbar {
@@ -2795,4 +2800,78 @@ table.data-table {
 .detail-main, .detail-side,
 .create-main, .create-side {
   min-width: 0;
+}
+
+/* ====================================================================
+   SPRINT 20 FOLLOW-UP — REPORTS, ROW-CLICK, SAFE-AREA
+   ==================================================================== */
+
+/* 10. Safe-area-aware page-canvas bottom padding. Phones with a home
+   indicator (iOS, Android gesture nav) reserve a small inset at the
+   bottom; without this the last row of a long page renders directly
+   under the gesture pill. `env()` returns 0 on platforms that do not
+   need an inset, so the rule is a no-op on desktop. */
+.page-canvas {
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 960px) {
+  .page-canvas {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 760px) {
+  .page-canvas {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 480px) {
+  .page-canvas {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (max-width: 360px) {
+  .page-canvas {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* 11. Reports page: the inline `gridTemplateColumns: "repeat(auto-fit,
+   minmax(420px, 1fr))"` capped each chart card at a 420px MINIMUM,
+   which on a 360-390px phone overflowed the workspace and clipped
+   the right edge. The page now uses `min(420px, 100%)` to back off
+   gracefully — but the .reports-grid class also lets us reduce the
+   card padding on phones so the chart SVG has more room to render
+   the y-axis labels and pie/donut charts. */
+@media (max-width: 480px) {
+  .reports-grid > .card {
+    /* Trim the per-chart-card padding so the recharts ResponsiveContainer
+       gets a wider drawing surface inside a 360px viewport. The card
+       still has enough breathing room for the title + subtitle. */
+    padding: 16px 14px !important;
+  }
+  /* Tooltip in recharts can render off-screen if the cursor is near
+     the right edge; clamp its inline width so it stays inside. */
+  .reports-grid .recharts-tooltip-wrapper {
+    max-width: calc(100vw - 32px);
+  }
+  /* Recharts horizontal-bar y-axis labels can be long. The two
+     charts that render a horizontal bar layout (manager-throughput,
+     tickets-by-customer) declare a fixed yAxis width of 140 / 180
+     pixels — too wide for a 360 px card. Recharts re-flows when the
+     container shrinks, but the legend / tick text gets cropped via
+     ellipsis. We cannot resize a Recharts axis from CSS; what we
+     CAN do is shrink the surrounding card to give the chart more
+     room overall. */
+}
+
+/* 12. Row-click-to-edit on admin CRUD tables. The .data-table tbody
+   already shows a pointer cursor on hover; this class adds keyboard
+   focus visibility. Mirror the existing .ticket-row-clickable rule
+   so admin and tickets row-click share one outline style. */
+.admin-row-clickable {
+  cursor: pointer;
+}
+.admin-row-clickable:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
 }

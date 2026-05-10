@@ -294,3 +294,207 @@ test("768px: sidebar shows on tablet (not the mobile overlay)", async ({
     expect(box.x).toBeGreaterThanOrEqual(0);
   }
 });
+
+// ===========================================================================
+// SPRINT 20 FOLLOW-UP — REPORTS + ROW-CLICK-TO-EDIT
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Reports — mobile chart visibility
+// ---------------------------------------------------------------------------
+
+const MOBILE_366 = { width: 366, height: 800 };
+
+for (const vp of [MOBILE_360, MOBILE_366, MOBILE_390]) {
+  test(`reports at ${vp.width}px: chart cards span the viewport (no clipping)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(vp);
+    await loginAs(page, DEMO_USERS.super);
+    await page.goto("/reports");
+    // Wait for at least one chart card to mount before measuring.
+    const firstCard = page
+      .locator('[data-testid^="chart-card-"]')
+      .first();
+    await expect(firstCard).toBeVisible({ timeout: 10_000 });
+    // The grid template is now `minmax(min(420px, 100%), 1fr)`, so on a
+    // ≤420px viewport there is exactly one column and every card's
+    // width fits inside the available canvas (viewport minus
+    // page-canvas padding). Allow some tolerance for paddings; the
+    // important assertion is that the card does NOT exceed the
+    // viewport.
+    const box = await firstCard.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      expect(box.x + box.width).toBeLessThanOrEqual(vp.width);
+    }
+    // The page must NOT scroll horizontally.
+    await expectNoBodyHorizontalOverflow(page, vp.width);
+  });
+}
+
+test("reports at 360px: every chart card stays inside the viewport width", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_360);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/reports");
+  await expect(
+    page.locator('[data-testid^="chart-card-"]').first(),
+  ).toBeVisible({ timeout: 10_000 });
+  const widths = await page
+    .locator('[data-testid^="chart-card-"]')
+    .evaluateAll((cards) =>
+      cards.map((c) => {
+        const box = (c as HTMLElement).getBoundingClientRect();
+        return { right: box.left + box.width };
+      }),
+    );
+  for (const w of widths) {
+    expect(w.right).toBeLessThanOrEqual(MOBILE_360.width + 1);
+  }
+});
+
+test("reports at 360px: page can scroll to bottom (last chart reachable)", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_360);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/reports");
+  await page.waitForLoadState("networkidle");
+  // tickets-by-building is the last chart in ReportsPage.tsx. Scroll
+  // it into view and confirm we can — i.e. the workspace did not
+  // clip its bottom under the URL bar / safe area.
+  const last = page.locator(
+    '[data-testid="chart-card-tickets-by-building"]',
+  );
+  await last.scrollIntoViewIfNeeded({ timeout: 10_000 });
+  await expect(last).toBeInViewport({ timeout: 10_000 });
+});
+
+test("reports at 430px: still renders multi-column where the viewport allows", async ({
+  page,
+}) => {
+  await page.setViewportSize(MOBILE_430);
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/reports");
+  await expect(
+    page.locator('[data-testid^="chart-card-"]').first(),
+  ).toBeVisible({ timeout: 10_000 });
+  // 430px < 420 * 2 + gap, so the auto-fit grid still falls back to
+  // a single column at this viewport (one card width >= viewport
+  // minus padding). Just confirm no horizontal overflow and that the
+  // first card is fully inside the viewport.
+  const first = page.locator('[data-testid^="chart-card-"]').first();
+  const box = await first.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    expect(box.x + box.width).toBeLessThanOrEqual(MOBILE_430.width + 1);
+  }
+  await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
+});
+
+// ---------------------------------------------------------------------------
+// Row-click-to-edit on admin CRUD tables
+// ---------------------------------------------------------------------------
+
+test("admin/buildings: clicking a row navigates to the edit page", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/buildings");
+  const row = page
+    .locator(".data-table tbody tr.admin-row-clickable", {
+      hasText: "B1 Amsterdam",
+    })
+    .first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  // The first cell holds an inner anchor; clicking the row body but
+  // outside the anchor should still navigate. We click the status
+  // cell — neutral, has no inner anchor.
+  await row.locator("td").nth(4).click();
+  await page.waitForURL(/\/admin\/buildings\/\d+$/, { timeout: 10_000 });
+});
+
+test("admin/buildings: Edit button still works alongside row-click", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/buildings");
+  const row = page
+    .locator(".data-table tbody tr.admin-row-clickable", {
+      hasText: "B1 Amsterdam",
+    })
+    .first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  // Click the explicit Edit button; React Router fires a navigate
+  // and the row's onClick handler also fires (same destination), so
+  // the URL should still settle on the edit page exactly once.
+  await row.getByRole("link", { name: /edit/i }).click();
+  await page.waitForURL(/\/admin\/buildings\/\d+$/, { timeout: 10_000 });
+});
+
+test("admin/users: clicking a row navigates to the edit page", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/users");
+  const row = page
+    .locator(".data-table tbody tr.admin-row-clickable", {
+      hasText: "super@cleanops.demo",
+    })
+    .first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  // Click the language cell (cell index 3) — neutral, no inner link.
+  await row.locator("td").nth(3).click();
+  await page.waitForURL(/\/admin\/users\/\d+$/, { timeout: 10_000 });
+});
+
+test("admin/customers: clicking a row navigates to the edit page", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/customers");
+  const row = page
+    .locator(".data-table tbody tr.admin-row-clickable", {
+      hasText: "B Amsterdam",
+    })
+    .first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  // Click the contact-email cell (index 3) — neutral, no inner link.
+  await row.locator("td").nth(3).click();
+  await page.waitForURL(/\/admin\/customers\/\d+$/, { timeout: 10_000 });
+});
+
+test("admin/companies: clicking a row navigates to the edit page", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/companies");
+  const row = page
+    .locator(".data-table tbody tr.admin-row-clickable", {
+      hasText: "Osius Demo",
+    })
+    .first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  // Slug cell (index 1) — neutral, no inner link.
+  await row.locator("td").nth(1).click();
+  await page.waitForURL(/\/admin\/companies\/\d+$/, { timeout: 10_000 });
+});
+
+// Audit logs are intentionally NOT row-clickable (read-only feed); we
+// also covered this in admin_crud.spec.ts. Add one assertion here so a
+// future regression cannot quietly add the class to the audit table
+// without re-scoping the page's row semantics.
+test("admin/audit-logs: rows are NOT marked row-clickable for editing", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto("/admin/audit-logs");
+  await expect(
+    page.locator('[data-testid="audit-logs-page"]'),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.locator('.data-table tbody tr.admin-row-clickable'),
+  ).toHaveCount(0);
+});

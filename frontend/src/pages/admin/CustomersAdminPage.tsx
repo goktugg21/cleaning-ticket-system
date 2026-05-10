@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -13,6 +13,7 @@ type ActiveFilter = "true" | "false" | "all";
 const DEBOUNCE_MS = 300;
 
 export function CustomersAdminPage() {
+  const navigate = useNavigate();
   const { t } = useTranslation("common");
 
   const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
@@ -309,34 +310,51 @@ export function CustomersAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {customers.map((customer) => (
-                <tr key={customer.id}>
-                  <td className="td-subject">
-                    <Link to={`/admin/customers/${customer.id}`}>{customer.name}</Link>
-                  </td>
-                  <td>{companyName(customer.company)}</td>
-                  <td>{buildingName(customer.building)}</td>
-                  <td>{customer.contact_email || "—"}</td>
-                  <td>
-                    <span
-                      className={`cell-tag cell-tag-${customer.is_active ? "open" : "closed"}`}
-                    >
-                      <i />
-                      {customer.is_active
-                        ? t("admin.status_active")
-                        : t("admin.status_inactive")}
-                    </span>
-                  </td>
-                  <td>
-                    <Link
-                      className="btn btn-ghost btn-sm"
-                      to={`/admin/customers/${customer.id}`}
-                    >
-                      {t("admin.edit")}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
+              {customers.map((customer) => {
+                const editPath = `/admin/customers/${customer.id}`;
+                const openEdit = () => navigate(editPath);
+                return (
+                  <tr
+                    key={customer.id}
+                    className="admin-row-clickable"
+                    role="link"
+                    tabIndex={0}
+                    aria-label={t("admin.edit") + ": " + customer.name}
+                    onClick={openEdit}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        openEdit();
+                      }
+                    }}
+                  >
+                    <td className="td-subject">
+                      <Link to={editPath}>{customer.name}</Link>
+                    </td>
+                    <td>{companyName(customer.company)}</td>
+                    <td>{buildingName(customer.building)}</td>
+                    <td>{customer.contact_email || "—"}</td>
+                    <td>
+                      <span
+                        className={`cell-tag cell-tag-${customer.is_active ? "open" : "closed"}`}
+                      >
+                        <i />
+                        {customer.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive")}
+                      </span>
+                    </td>
+                    <td>
+                      <Link
+                        className="btn btn-ghost btn-sm"
+                        to={editPath}
+                      >
+                        {t("admin.edit")}
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
 
