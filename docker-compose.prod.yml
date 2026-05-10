@@ -110,6 +110,11 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        # Sprint 17 — opt-in demo helper UI on the login page. Set to
+        # "true" only on dev/QA hosts so the seeded demo cards render
+        # for Playwright + walkthroughs. Defaults to "false" so a
+        # production rebuild never bakes the demo cards in.
+        VITE_DEMO_MODE: ${VITE_DEMO_MODE:-false}
     container_name: cleaning_ticket_prod_frontend
     restart: unless-stopped
     ports:

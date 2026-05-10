@@ -102,3 +102,101 @@ test("Building dropdown on /tickets/new respects manager scope", async ({
   expect(optionLabels.some((t) => t.includes("B2 Amsterdam"))).toBe(false);
   expect(optionLabels.some((t) => t.includes("B3 Amsterdam"))).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// Sprint 17 — extend the scope coverage to every persona.
+//
+// Each demo ticket lives at exactly one building (the seed creates
+// one ticket per B1/B2/B3 plus a closed kitchen-tap at B1, four
+// total). Every persona below should see exactly the buildings their
+// role + access grants describe.
+// ---------------------------------------------------------------------------
+
+const DEMO_BUILDINGS = ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"];
+
+async function listFacilityCells(
+  page: import("@playwright/test").Page,
+): Promise<string[]> {
+  await page.waitForLoadState("networkidle");
+  const rows = page.locator(".data-table tbody tr");
+  const rowCount = await rows.count();
+  const cells: string[] = [];
+  for (let i = 0; i < rowCount; i++) {
+    const cell = rows.nth(i).locator(".td-facility");
+    if ((await cell.count()) > 0) {
+      cells.push((await cell.textContent())?.trim() ?? "");
+    }
+  }
+  return cells;
+}
+
+test("Super admin sees all 3 demo buildings in the ticket list", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.super);
+  const cells = await listFacilityCells(page);
+  for (const b of DEMO_BUILDINGS) {
+    expect(cells.some((c) => c.includes(b))).toBe(true);
+  }
+});
+
+test("Company admin sees all 3 demo buildings in the ticket list", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.companyAdmin);
+  const cells = await listFacilityCells(page);
+  for (const b of DEMO_BUILDINGS) {
+    expect(cells.some((c) => c.includes(b))).toBe(true);
+  }
+});
+
+test("Gokhan (manager B1+B2+B3) sees all 3 buildings", async ({ page }) => {
+  await loginAs(page, DEMO_USERS.managerAll);
+  const cells = await listFacilityCells(page);
+  for (const b of DEMO_BUILDINGS) {
+    expect(cells.some((c) => c.includes(b))).toBe(true);
+  }
+});
+
+test("Isa (manager B2 only) sees only B2 tickets", async ({ page }) => {
+  await loginAs(page, DEMO_USERS.managerB2);
+  const cells = await listFacilityCells(page);
+  expect(cells.length).toBeGreaterThan(0);
+  for (const c of cells) {
+    expect(c).toContain("B2 Amsterdam");
+    expect(c).not.toContain("B1 Amsterdam");
+    expect(c).not.toContain("B3 Amsterdam");
+  }
+});
+
+test("Tom (customer B1+B2+B3) sees all 3 buildings' demo tickets", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.customerAll);
+  const cells = await listFacilityCells(page);
+  for (const b of DEMO_BUILDINGS) {
+    expect(cells.some((c) => c.includes(b))).toBe(true);
+  }
+});
+
+test("Iris (customer B1+B2 only) sees no B3 tickets", async ({ page }) => {
+  await loginAs(page, DEMO_USERS.customerB1B2);
+  const cells = await listFacilityCells(page);
+  expect(cells.length).toBeGreaterThan(0);
+  for (const c of cells) {
+    expect(c).not.toContain("B3 Amsterdam");
+  }
+});
+
+test("Customer ticket-create dropdown for Amanda lists only B3", async ({
+  page,
+}) => {
+  await loginAs(page, DEMO_USERS.customerB3);
+  await page.goto("/tickets/new");
+  const select = page.locator("#f-building");
+  await expect(select).toBeVisible({ timeout: 10_000 });
+  const optionLabels = await select.locator("option").allTextContents();
+  expect(optionLabels.some((t) => t.includes("B3 Amsterdam"))).toBe(true);
+  expect(optionLabels.some((t) => t.includes("B1 Amsterdam"))).toBe(false);
+  expect(optionLabels.some((t) => t.includes("B2 Amsterdam"))).toBe(false);
+});
