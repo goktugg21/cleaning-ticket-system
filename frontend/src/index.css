@@ -2672,3 +2672,127 @@ table.data-table {
   .page-header-actions { width: 100%; }
   .page-header-actions .btn { flex: 1 0 auto; justify-content: center; }
 }
+
+/* ====================================================================
+   SPRINT 20 — MOBILE UI POLISH
+   --------------------------------------------------------------------
+   Surgical CSS fixes that round out the existing mobile rules above.
+   No backend, no permission, no workflow change. Targets 360 / 390 /
+   430 / 768px viewports highlighted in the Sprint 20 brief.
+   ==================================================================== */
+
+/* 1. Tables — keep momentum scrolling on iOS so the dense ticket /
+   admin / audit tables (`min-width: 860px`) feel native when the user
+   swipes them sideways. The native scrollbar appears on touch so the
+   horizontal scroll stays discoverable; we deliberately do NOT add a
+   fade overlay because past attempts (sticky pseudo-elements, fixed
+   gradients) all introduced layout glitches at the row boundary. */
+.table-wrap {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 2. Pagination — stack on tiny phones so the row doesn't crush the
+   page-counter into the buttons. */
+@media (max-width: 480px) {
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .pagination-info { text-align: center; }
+  .pagination-controls {
+    justify-content: space-between;
+  }
+  .pagination-controls .btn {
+    flex: 1 0 auto;
+    justify-content: center;
+  }
+}
+
+/* 3. Audit log — the per-row <details>/<pre> JSON block shows the
+   `changes` payload. On phones the inline-style `max-width: 520px`
+   from the page can still overflow the visible cell when the table
+   has scrolled. Cap the pre to its containing cell so it never widens
+   the row beyond what we already paged via .table-wrap. */
+[data-testid="audit-logs-page"] .data-table tbody td pre {
+  max-width: min(520px, calc(100vw - 80px));
+}
+@media (max-width: 760px) {
+  [data-testid="audit-logs-page"] .data-table tbody td pre {
+    max-width: calc(100vw - 60px);
+    font-size: 11px;
+  }
+}
+
+/* 4. Login demo cards — 2 columns reads cramped under 480px (each
+   card narrows to ~140px, the role pill wraps under the avatar). One
+   column is fine for a phone since this is a one-tap helper. */
+@media (max-width: 480px) {
+  .qa-grid { grid-template-columns: 1fr; }
+}
+
+/* 5. Ticket detail header — the "Back to tickets" + soft-delete row
+   wraps gracefully when both render. The meta line (ticket no +
+   priority + status badges) already wraps via the existing rule at
+   760px; nothing more needed here. */
+@media (max-width: 480px) {
+  .detail-header-top {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .detail-delete-btn {
+    margin-left: auto;
+  }
+}
+
+/* 6. Notes / message composer — the textarea defaults to a fairly
+   large height; on a 360px-tall split (after virtual keyboard) it
+   can push the post button off-screen. Allow it to shrink. */
+@media (max-width: 480px) {
+  .notes-textarea { min-height: 96px; }
+  .notes-actions { flex-wrap: wrap; gap: 10px; }
+  .notes-actions .btn { width: 100%; justify-content: center; }
+  .composer-toggle { width: 100%; }
+}
+
+/* 7. 360px and below — the smallest mainstream phone width (iPhone
+   SE 1st-gen / older Android). Tighten gutters one more notch and
+   give the topbar gap room for the role badge + sign-out. */
+@media (max-width: 360px) {
+  .page-canvas { padding: 8px; }
+  .topbar { gap: 6px; padding: 0 10px; }
+  .page-title { font-size: 20px; }
+  .topbar-title { font-size: 14px; }
+  .identity-role { display: none; }
+  /* The page header's right-side action stack already takes 100% at
+     480px; keep the gap tight so two actions fit on one row. */
+  .page-header-actions { gap: 6px; }
+}
+
+/* 8. Workspace-level horizontal overflow guard. The SPA is laid out
+   with a fixed sidebar + flex workspace; we never INTEND a
+   horizontal body scroll. Clip overflow at the .workspace level
+   (NOT body — that would re-promote body to a scroll container and
+   silently disable position:sticky on the topbar). Per-component
+   horizontal scroll (table-wrap, attachment grid) is unaffected
+   because they declare their own overflow:auto. */
+.workspace {
+  overflow-x: clip;
+  min-width: 0;
+}
+
+/* 9. Grid columns containing potentially-overflowing tables need
+   `min-width: 0` so the implicit `minmax(auto, 1fr)` column does
+   NOT grow to its content. Without this the dashboard / detail /
+   create grids let the table inside push the column to ~900px on
+   a phone, the parent .workspace's overflow-x:clip then HIDES the
+   right half of the table because the table-wrap's own scrollbar
+   never engages (its clientWidth already equals its scrollWidth).
+   This rule restores the scroll-inside-the-wrap behaviour the
+   table-wrap was designed for. */
+.dash-main, .dash-side,
+.detail-main, .detail-side,
+.create-main, .create-side {
+  min-width: 0;
+}
