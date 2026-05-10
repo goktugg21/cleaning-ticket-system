@@ -67,6 +67,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
@@ -83,6 +84,54 @@ from tickets.state_machine import apply_transition
 
 DEMO_PASSWORD = "Demo12345!"
 DEMO_TICKET_PREFIX = "[DEMO]"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 21 cleanup — Legacy demo personas seeded by commands that have
+# since been deleted (`seed_demo`, `seed_b_amsterdam_demo`) or by the
+# inline shell heredoc in the pre-Sprint-21 `scripts/demo_up.sh`. The
+# rows themselves persist in any local/demo database that ran those
+# scripts before Sprint 21 landed, so the canonical seed prunes them
+# on every run. The list is exact-match only: a typo in a real
+# operator's email will never collide because every entry is a
+# documented historical seed value.
+#
+# The `check_no_demo_accounts` pilot guard still references the same
+# emails — the prune here only fires on DEBUG/local stacks (the seed
+# itself refuses on DJANGO_DEBUG=False without --i-know-this-is-not-prod),
+# so a pilot host cannot reach this code path.
+# ---------------------------------------------------------------------------
+LEGACY_DEMO_EMAILS = (
+    # Sprint 10 — seed_demo.py (removed in Sprint 21).
+    "demo-super@example.com",
+    "demo-company-admin@example.com",
+    "demo-manager@example.com",
+    "demo-customer@example.com",
+    # Pre-Sprint-21 scripts/demo_up.sh inline shell heredoc.
+    "admin@example.com",
+    "companyadmin@example.com",
+    "manager@example.com",
+    "customer@example.com",
+    # Sprint 14 — seed_b_amsterdam_demo.py (removed in Sprint 21).
+    "tom@b-amsterdam.com",
+    "iris@b-amsterdam.com",
+    "amanda@b-amsterdam.com",
+    "gokhan.kocak@osius.demo",
+    "murat.ugurlu@osius.demo",
+    "isa.ugurlu@osius.demo",
+)
+
+# Legacy single-company seed slugs. We deactivate (soft) rather than
+# delete because their ID may already be referenced by historical
+# tickets or audit rows; flipping `is_active=False` hides the row from
+# every non-super-admin scope query, which is what an operator running
+# the cleanup actually wants. The canonical Sprint 21 slugs (osius-demo,
+# bright-facilities) are intentionally NOT in this list — they are
+# upserted back to is_active=True by the seed itself.
+LEGACY_COMPANY_SLUGS = (
+    "demo-cleaning-bv",         # Sprint 10 seed_demo company
+    "demo-cleaning-company",    # pre-Sprint-21 demo_up.sh inline seed
+)
 
 
 # Super admin spans both companies. No CompanyUserMembership row — the
@@ -299,12 +348,19 @@ class Command(BaseCommand):
         User = get_user_model()
         super_admin = self._upsert_user(User, SUPER_ADMIN_USER)
 
+        # Prune legacy demo rows BEFORE upserting the canonical seed.
+        # The canonical accounts share zero email prefixes with the
+        # legacy ones, so this ordering cannot accidentally soft-delete
+        # a canonical persona. We must, however, run it after creating
+        # super_admin so deleted_by can point at a real actor.
+        prune_summary = self._prune_legacy_demo_rows(User, super_admin)
+
         for company_spec in COMPANIES:
             self._seed_company(
                 User, super_admin, company_spec, reset_tickets=options["reset_tickets"]
             )
 
-        self._print_summary()
+        self._print_summary(prune_summary=prune_summary)
 
     # -----------------------------------------------------------------
     # Per-company seed
@@ -439,6 +495,129 @@ class Command(BaseCommand):
             self._walk_to_status(ticket, tspec["target_status"], super_admin)
 
     # -----------------------------------------------------------------
+    # Legacy demo cleanup
+    # -----------------------------------------------------------------
+    def _prune_legacy_demo_rows(self, User, super_admin):
+        """
+        Soft-deactivate legacy demo personas and their tenancy rows.
+
+        Sprint 21 deleted the legacy `seed_demo` and
+        `seed_b_amsterdam_demo` management commands, but any local /
+        demo database that ran those commands before the deletion
+        still carries their users, their company/building/customer
+        memberships, and any tickets they created. Without this prune
+        step the `/admin/users` page shows them as live demo personas
+        alongside the canonical Sprint 21 set, which defeats the
+        purpose of the Sprint 21 cleanup.
+
+        The match is exact-by-email (no domain wildcards) so a real
+        operator email can never trip the prune. The canonical
+        Sprint 21 accounts (`super@`, `admin@`, `gokhan@`, `murat@`,
+        `isa@`, `tom@`, `iris@`, `amanda@`, `admin-b@`, `manager-b@`,
+        `customer-b@cleanops.demo`) share zero email prefixes with
+        any LEGACY_DEMO_EMAILS entry, so this method cannot
+        accidentally deactivate a canonical persona.
+
+        Returns a small summary dict so the operator-facing output of
+        seed_demo_data shows how many rows were touched.
+        """
+        targets = list(User.objects.filter(email__in=LEGACY_DEMO_EMAILS))
+        if not targets:
+            self._prune_legacy_companies()
+            return {
+                "users": 0,
+                "tickets": 0,
+                "company_memberships": 0,
+                "manager_assignments": 0,
+                "customer_memberships": 0,
+                "customer_user_building_access": 0,
+                "companies_deactivated": 0,
+            }
+
+        target_ids = [u.id for u in targets]
+
+        # Step 1: drop every membership/assignment that ties the
+        # legacy users into a tenant. Customer-user-building-access
+        # rows hang off CustomerUserMembership, so we delete those
+        # first via the membership FK.
+        access_count = CustomerUserBuildingAccess.objects.filter(
+            membership__user_id__in=target_ids
+        ).count()
+        CustomerUserBuildingAccess.objects.filter(
+            membership__user_id__in=target_ids
+        ).delete()
+
+        cu_count = CustomerUserMembership.objects.filter(
+            user_id__in=target_ids
+        ).count()
+        CustomerUserMembership.objects.filter(
+            user_id__in=target_ids
+        ).delete()
+
+        mgr_count = BuildingManagerAssignment.objects.filter(
+            user_id__in=target_ids
+        ).count()
+        BuildingManagerAssignment.objects.filter(
+            user_id__in=target_ids
+        ).delete()
+
+        comp_count = CompanyUserMembership.objects.filter(
+            user_id__in=target_ids
+        ).count()
+        CompanyUserMembership.objects.filter(
+            user_id__in=target_ids
+        ).delete()
+
+        # Step 2: delete any legacy tickets the legacy users created.
+        # Real demo activity uses the canonical [DEMO]-prefixed
+        # titles seeded against the canonical customers, never these
+        # legacy users — so a delete here can only remove legacy
+        # rows. We do an unconditional delete on `created_by` because
+        # the legacy tickets carry no marker prefix and may live in
+        # the legacy "Demo Cleaning BV" company.
+        ticket_count = Ticket.objects.filter(
+            created_by_id__in=target_ids
+        ).count()
+        Ticket.objects.filter(created_by_id__in=target_ids).delete()
+
+        # Step 3: soft-delete the users themselves. We use the model's
+        # own soft_delete() so deleted_at + deleted_by + is_active are
+        # all set consistently with the rest of the codebase.
+        now = timezone.now()
+        for user in targets:
+            user.is_active = False
+            if user.deleted_at is None:
+                user.deleted_at = now
+            if user.deleted_by_id is None:
+                user.deleted_by = super_admin
+            user.save(update_fields=["is_active", "deleted_at", "deleted_by"])
+
+        # Step 4: deactivate legacy single-company seed slugs (the
+        # canonical osius-demo / bright-facilities slugs are NOT in
+        # LEGACY_COMPANY_SLUGS, so this cannot deactivate them).
+        companies_deactivated = self._prune_legacy_companies()
+
+        return {
+            "users": len(targets),
+            "tickets": ticket_count,
+            "company_memberships": comp_count,
+            "manager_assignments": mgr_count,
+            "customer_memberships": cu_count,
+            "customer_user_building_access": access_count,
+            "companies_deactivated": companies_deactivated,
+        }
+
+    def _prune_legacy_companies(self):
+        """Flip is_active=False on legacy single-company seed slugs."""
+        count = 0
+        for slug in LEGACY_COMPANY_SLUGS:
+            updated = Company.objects.filter(
+                slug=slug, is_active=True
+            ).update(is_active=False)
+            count += updated
+        return count
+
+    # -----------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------
     def _upsert_user(self, User, spec):
@@ -502,9 +681,26 @@ class Command(BaseCommand):
     # -----------------------------------------------------------------
     # Output
     # -----------------------------------------------------------------
-    def _print_summary(self):
+    def _print_summary(self, *, prune_summary=None):
         out = self.stdout.write
         out(self.style.SUCCESS("seed_demo_data: done."))
+        if prune_summary and prune_summary["users"] > 0:
+            out("")
+            out(
+                f"Pruned legacy demo rows: "
+                f"{prune_summary['users']} users (soft-deleted), "
+                f"{prune_summary['tickets']} tickets, "
+                f"{prune_summary['company_memberships']} company memberships, "
+                f"{prune_summary['manager_assignments']} manager assignments, "
+                f"{prune_summary['customer_memberships']} customer memberships, "
+                f"{prune_summary['customer_user_building_access']} "
+                "customer-user-building-access rows."
+            )
+            if prune_summary["companies_deactivated"] > 0:
+                out(
+                    f"Deactivated {prune_summary['companies_deactivated']} "
+                    "legacy single-company seed slug(s)."
+                )
         out("")
         out(f"All demo accounts use password: {DEMO_PASSWORD}")
         out("")

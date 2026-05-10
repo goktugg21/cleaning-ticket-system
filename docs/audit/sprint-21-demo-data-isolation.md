@@ -106,6 +106,62 @@ exports `COMPANY_A_BUILDINGS`, `COMPANY_B_BUILDINGS`, `COMPANY_A_NAME`,
 `DemoUser`. The Sprint 16/17 single-company scope tests keep working
 because every existing fixture is still present and unchanged in shape.
 
+### g. Legacy demo row prune (Sprint 21 follow-up)
+
+Deleting the legacy `seed_demo` and `seed_b_amsterdam_demo` command
+files did not remove rows already created in local / demo databases
+that ran those scripts before Sprint 21 landed. After the first
+Sprint 21 deploy of the demo stack, `/admin/users` still showed the
+old personas (`amanda@b-amsterdam.com`, `gokhan.kocak@osius.demo`,
+etc.) alongside the canonical set.
+
+[backend/accounts/management/commands/seed_demo_data.py](../../backend/accounts/management/commands/seed_demo_data.py)
+now declares two explicit constants and a `_prune_legacy_demo_rows`
+helper that runs after the super admin is created and before the
+canonical companies are seeded:
+
+```python
+LEGACY_DEMO_EMAILS = (
+    # seed_demo (Sprint 10, removed in Sprint 21):
+    "demo-super@example.com", "demo-company-admin@example.com",
+    "demo-manager@example.com", "demo-customer@example.com",
+    # pre-Sprint-21 scripts/demo_up.sh inline shell:
+    "admin@example.com", "companyadmin@example.com",
+    "manager@example.com", "customer@example.com",
+    # seed_b_amsterdam_demo (Sprint 14, removed in Sprint 21):
+    "tom@b-amsterdam.com", "iris@b-amsterdam.com",
+    "amanda@b-amsterdam.com",
+    "gokhan.kocak@osius.demo", "murat.ugurlu@osius.demo",
+    "isa.ugurlu@osius.demo",
+)
+LEGACY_COMPANY_SLUGS = ("demo-cleaning-bv", "demo-cleaning-company")
+```
+
+For each legacy user the prune:
+
+1. Deletes `CustomerUserBuildingAccess` rows hanging off the user's
+   `CustomerUserMembership`.
+2. Deletes `CustomerUserMembership`, `BuildingManagerAssignment`,
+   and `CompanyUserMembership` rows where `user_id = legacy.id`.
+3. Deletes any `Ticket` whose `created_by_id` matches a legacy user
+   (legacy demo tickets only — canonical demo tickets are created by
+   `@cleanops.demo` accounts).
+4. Calls the model's soft-delete equivalent (sets `is_active=False`,
+   `deleted_at=now()`, `deleted_by=super_admin`), so the row stays
+   in the DB for audit but never re-appears in the active list.
+
+For each legacy company slug, `is_active` flips to `False`. The
+canonical Sprint 21 slugs (`osius-demo`, `bright-facilities`) are
+NOT in `LEGACY_COMPANY_SLUGS`, and the canonical user emails share
+zero prefixes with any `LEGACY_DEMO_EMAILS` entry, so the prune is
+mathematically incapable of touching the canonical set.
+
+The match is exact-by-email — there is no domain wildcard, so a
+real operator's email can never collide. The Sprint 19 pilot-launch
+guard (`check_no_demo_accounts`) still references the same emails
+as a defense-in-depth, so a pilot host where this prune never ran
+is still blocked from going live.
+
 ## 3. Final demo account matrix
 
 All accounts share the password `Demo12345!`.
@@ -213,9 +269,8 @@ Playwright: see Sprint 21 commit run log for the
   account on a production host, so the demo password cannot leak into
   pilot.
 - The legacy `seed_demo` and `seed_b_amsterdam_demo` command files
-  have been deleted, but their emails remain in the
-  `check_no_demo_accounts` block list. A pilot DB that still carries
-  rows from those older seeds will still fail the guard — but the
-  operator should run the guard explicitly as the last manual step
-  of `docs/pilot-launch-checklist.md`, since CI does not exercise
-  pilot DBs.
+  have been deleted **and** any rows they left in a local / demo DB
+  are pruned by the canonical seed on every run (section 2.g). The
+  `check_no_demo_accounts` guard still lists those emails as a
+  defense-in-depth in case a pilot DB skipped the seed step, so the
+  pilot-launch readiness path is unchanged.

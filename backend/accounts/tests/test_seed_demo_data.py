@@ -443,6 +443,263 @@ class SeedDemoDataIdempotencyTests(TestCase):
         )
 
 
+CANONICAL_USER_EMAILS = (
+    "super@cleanops.demo",
+    "admin@cleanops.demo",
+    "gokhan@cleanops.demo",
+    "murat@cleanops.demo",
+    "isa@cleanops.demo",
+    "tom@cleanops.demo",
+    "iris@cleanops.demo",
+    "amanda@cleanops.demo",
+    "admin-b@cleanops.demo",
+    "manager-b@cleanops.demo",
+    "customer-b@cleanops.demo",
+)
+
+LEGACY_USER_EMAILS = (
+    "demo-super@example.com",
+    "demo-company-admin@example.com",
+    "demo-manager@example.com",
+    "demo-customer@example.com",
+    "admin@example.com",
+    "companyadmin@example.com",
+    "manager@example.com",
+    "customer@example.com",
+    "tom@b-amsterdam.com",
+    "iris@b-amsterdam.com",
+    "amanda@b-amsterdam.com",
+    "gokhan.kocak@osius.demo",
+    "murat.ugurlu@osius.demo",
+    "isa.ugurlu@osius.demo",
+)
+
+
+class SeedDemoDataLegacyPruneTests(TestCase):
+    """
+    Sprint 21 follow-up: legacy demo personas left in the local DB by
+    the deleted `seed_demo` and `seed_b_amsterdam_demo` commands must
+    be pruned by the canonical seed so /admin/users does not show
+    stale rows alongside the Sprint 21 set.
+    """
+
+    def _create_legacy_user(self, email, role=UserRole.CUSTOMER_USER):
+        return User.objects.create_user(
+            email=email,
+            password="Demo12345!",
+            role=role,
+        )
+
+    def test_legacy_users_are_soft_deleted_after_seed(self):
+        # Pre-create every legacy email the prune list targets. We
+        # vary the role across the set so a regression that mis-typed
+        # the role filter would be caught too.
+        roles_cycle = [
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+            UserRole.CUSTOMER_USER,
+        ]
+        for i, email in enumerate(LEGACY_USER_EMAILS):
+            self._create_legacy_user(email, role=roles_cycle[i % len(roles_cycle)])
+
+        # Pre-create the legacy single-company seed companies so the
+        # prune step has something to deactivate.
+        Company.objects.create(
+            slug="demo-cleaning-bv",
+            name="Demo Cleaning BV",
+            default_language="nl",
+            is_active=True,
+        )
+        Company.objects.create(
+            slug="demo-cleaning-company",
+            name="Demo Cleaning Company",
+            default_language="nl",
+            is_active=True,
+        )
+
+        _seed()
+
+        for email in LEGACY_USER_EMAILS:
+            user = User.objects.get(email=email)
+            self.assertFalse(
+                user.is_active,
+                f"{email} should be inactive after prune",
+            )
+            self.assertIsNotNone(
+                user.deleted_at,
+                f"{email} should have deleted_at set after prune",
+            )
+            # deleted_by should point at the super admin (the seed
+            # creates super_admin before running the prune so it can
+            # be the soft-delete actor).
+            self.assertIsNotNone(
+                user.deleted_by_id,
+                f"{email} should have deleted_by set after prune",
+            )
+            self.assertEqual(
+                User.objects.get(id=user.deleted_by_id).email,
+                "super@cleanops.demo",
+            )
+
+    def test_canonical_users_remain_active_after_prune(self):
+        # First run: seed only — establishes canonical users.
+        _seed()
+        # Inject the legacy ones now and re-seed; canonical users must
+        # not flip to inactive.
+        for email in LEGACY_USER_EMAILS:
+            self._create_legacy_user(email)
+        _seed()
+        for email in CANONICAL_USER_EMAILS:
+            user = User.objects.get(email=email)
+            self.assertTrue(
+                user.is_active,
+                f"canonical user {email} must remain active after prune",
+            )
+            self.assertIsNone(
+                user.deleted_at,
+                f"canonical user {email} must have deleted_at=None after prune",
+            )
+
+    def test_company_b_canonical_users_are_not_pruned(self):
+        # The Company B trio shares no email prefix with any legacy
+        # entry but a regression that walked the wrong list could
+        # still hit them. Seed twice with legacy users injected
+        # between, then assert the Company B users are intact.
+        _seed()
+        for email in LEGACY_USER_EMAILS:
+            self._create_legacy_user(email)
+        _seed()
+        for email in (
+            "admin-b@cleanops.demo",
+            "manager-b@cleanops.demo",
+            "customer-b@cleanops.demo",
+        ):
+            user = User.objects.get(email=email)
+            self.assertTrue(user.is_active, f"{email} must remain active")
+            self.assertIsNone(user.deleted_at, f"{email} must not be soft-deleted")
+
+    def test_legacy_user_memberships_are_removed(self):
+        # A legacy user that was a manager of B1 Amsterdam in the old
+        # seed should no longer have any BuildingManagerAssignment
+        # row after the prune; same for company / customer rows.
+        _seed()  # establishes the canonical company A buildings.
+        b1 = Building.objects.get(name="B1 Amsterdam")
+        legacy_user = self._create_legacy_user(
+            "gokhan.kocak@osius.demo", role=UserRole.BUILDING_MANAGER
+        )
+        BuildingManagerAssignment.objects.create(
+            user=legacy_user, building=b1
+        )
+        company_a = Company.objects.get(slug=COMPANY_A_SLUG)
+        # CompanyUserMembership is also created in the old code path
+        # for managers; we replicate it here so the prune has both
+        # row types to remove.
+        CompanyUserMembership.objects.create(
+            user=legacy_user, company=company_a
+        )
+
+        _seed()
+
+        self.assertFalse(
+            BuildingManagerAssignment.objects.filter(user=legacy_user).exists(),
+            "legacy manager's BuildingManagerAssignment must be removed",
+        )
+        self.assertFalse(
+            CompanyUserMembership.objects.filter(user=legacy_user).exists(),
+            "legacy manager's CompanyUserMembership must be removed",
+        )
+
+    def test_legacy_customer_user_access_rows_are_removed(self):
+        # The Sprint 14 seed wired tom@b-amsterdam.com to all 3 B
+        # buildings via CustomerUserMembership + CustomerUserBuildingAccess.
+        # The prune must drop both.
+        _seed()
+        customer_a = Customer.objects.get(
+            company__slug=COMPANY_A_SLUG, name=COMPANY_A_CUSTOMER
+        )
+        legacy_tom = self._create_legacy_user(
+            "tom@b-amsterdam.com", role=UserRole.CUSTOMER_USER
+        )
+        membership = CustomerUserMembership.objects.create(
+            customer=customer_a, user=legacy_tom
+        )
+        for bname in COMPANY_A_BUILDINGS:
+            CustomerUserBuildingAccess.objects.create(
+                membership=membership,
+                building=Building.objects.get(name=bname),
+            )
+
+        _seed()
+
+        self.assertFalse(
+            CustomerUserMembership.objects.filter(user=legacy_tom).exists(),
+            "legacy customer user's membership must be removed",
+        )
+        self.assertFalse(
+            CustomerUserBuildingAccess.objects.filter(
+                membership__user=legacy_tom
+            ).exists(),
+            "legacy customer user's per-building access rows must be removed",
+        )
+
+    def test_legacy_demo_cleaning_bv_company_is_deactivated(self):
+        Company.objects.create(
+            slug="demo-cleaning-bv",
+            name="Demo Cleaning BV",
+            default_language="nl",
+            is_active=True,
+        )
+        _seed()
+        legacy = Company.objects.get(slug="demo-cleaning-bv")
+        self.assertFalse(legacy.is_active)
+
+        # Canonical companies remain active.
+        self.assertTrue(Company.objects.get(slug=COMPANY_A_SLUG).is_active)
+        self.assertTrue(Company.objects.get(slug=COMPANY_B_SLUG).is_active)
+
+    def test_admin_users_api_hides_legacy_after_seed(self):
+        # End-to-end check: GET /api/users/ as super@cleanops.demo
+        # must not return any of the legacy emails after the prune.
+        from rest_framework.test import APIClient
+
+        for email in LEGACY_USER_EMAILS:
+            self._create_legacy_user(email)
+        _seed()
+
+        super_admin = User.objects.get(email="super@cleanops.demo")
+        client = APIClient()
+        client.force_authenticate(user=super_admin)
+        response = client.get("/api/users/")
+        self.assertEqual(response.status_code, 200)
+        # The default list filters by is_active=True, so soft-deleted
+        # legacy users must not appear.
+        returned_emails = {row["email"] for row in response.data["results"]}
+        for email in LEGACY_USER_EMAILS:
+            self.assertNotIn(
+                email,
+                returned_emails,
+                f"/api/users/ leaked legacy email {email} after prune",
+            )
+        # Canonical users still appear.
+        for email in CANONICAL_USER_EMAILS:
+            self.assertIn(
+                email,
+                returned_emails,
+                f"/api/users/ missing canonical email {email}",
+            )
+
+    def test_no_legacy_users_present_is_a_no_op(self):
+        # Running the prune on a clean DB must not raise and must
+        # leave the canonical seed intact.
+        _seed()
+        for email in CANONICAL_USER_EMAILS:
+            self.assertTrue(
+                User.objects.filter(email=email, is_active=True).exists(),
+                f"{email} must be present and active after clean re-seed",
+            )
+
+
 class SeedDemoDataSafetyTests(TestCase):
     """The seed refuses to run on DJANGO_DEBUG=False without the override."""
 
