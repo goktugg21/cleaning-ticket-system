@@ -29,6 +29,23 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     await page.goto("/login");
 
+    // Sprint 18-3: when a previous loginAs in the same test left a
+    // valid session in localStorage, /login bounces to / via the
+    // AuthContext's `if (me) return <Navigate to="/" replace />`
+    // shortcut and the form never mounts. Clear the session and
+    // reload so the form is guaranteed to render.
+    const hasStaleSession = await page.evaluate(() => {
+      const had =
+        !!localStorage.getItem("accessToken") ||
+        !!localStorage.getItem("refreshToken");
+      localStorage.removeItem("accessToken");
+      localStorage.removeItem("refreshToken");
+      return had;
+    });
+    if (hasStaleSession) {
+      await page.goto("/login");
+    }
+
     // Arm the response listener BEFORE the click so we never miss
     // the request even on a fast network.
     const tokenResponsePromise = page.waitForResponse(
