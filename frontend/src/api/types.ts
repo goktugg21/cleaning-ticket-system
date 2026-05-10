@@ -315,6 +315,27 @@ export interface NotificationPreferencesResponse {
   preferences: NotificationPreferenceEntry[];
 }
 
+// Sprint 18 — audit log feed. Mirrors backend/audit/serializers.py
+// and audit/models.py::AuditAction. `changes` is an opaque per-field
+// diff; the schema is `{ field: { before, after } }` plus
+// hand-crafted shapes for the membership/assignment models — see
+// `audit/signals.py`. The page renders it as JSON so future schema
+// drift does not silently hide fields.
+export type AuditAction = "CREATE" | "UPDATE" | "DELETE";
+
+export interface AuditLog {
+  id: number;
+  actor: number | null;
+  actor_email: string | null;
+  action: AuditAction;
+  target_model: string;
+  target_id: number;
+  changes: Record<string, unknown>;
+  created_at: string;
+  request_ip: string | null;
+  request_id: string | null;
+}
+
 export interface CompanyAdminMembership {
   id: number;
   company: number;

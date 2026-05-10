@@ -1,5 +1,6 @@
 import { api } from "./client";
 import type {
+  AuditLog,
   BuildingAdmin,
   BuildingManagerMembership,
   CompanyAdmin,
@@ -399,6 +400,34 @@ export async function removeCustomerBuilding(
   buildingId: number,
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/buildings/${buildingId}/`);
+}
+
+// ---- Sprint 18: Audit logs (super-admin only) -------------------------
+
+export interface AuditLogListParams {
+  target_model?: string;
+  target_id?: number;
+  actor?: number;
+  date_from?: string; // ISO 8601 datetime; backend is timezone-aware
+  date_to?: string;
+  page?: number;
+}
+
+export async function listAuditLogs(
+  params: AuditLogListParams = {},
+): Promise<PaginatedResponse<AuditLog>> {
+  // The audit feed reuses the standard /api/ prefix; the resource
+  // name is `audit-logs` (DRF DefaultRouter) and there is no detail
+  // endpoint — the viewset deliberately omits RetrieveModelMixin so
+  // a 404 is returned for /api/audit-logs/<id>/. See backend
+  // audit/views.py for the rationale.
+  const response = await api.get<PaginatedResponse<AuditLog>>(
+    "/audit-logs/",
+    {
+      params: cleanParams(params as AdminListParams),
+    },
+  );
+  return response.data;
 }
 
 // ---- Sprint 14: per-customer-user building access ----

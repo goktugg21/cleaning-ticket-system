@@ -48,7 +48,7 @@ echo
 echo "===== 2. WAIT FOR PROD ENDPOINTS ====="
 wait_for_http "Frontend /" "$BASE_URL/" "200" "/tmp/cleaning-ticket-prod-up-frontend.html"
 wait_for_http "API /api/auth/me/ without token" "$BASE_URL/api/auth/me/" "401" "/tmp/cleaning-ticket-prod-up-api-me.json"
-wait_for_http "Admin login" "$BASE_URL/admin/login/" "200" "/tmp/cleaning-ticket-prod-up-admin.html"
+wait_for_http "Admin login" "$BASE_URL/django-admin/login/" "200" "/tmp/cleaning-ticket-prod-up-admin.html"
 
 echo
 echo "===== 3. SEED PROD DB IDEMPOTENTLY ====="

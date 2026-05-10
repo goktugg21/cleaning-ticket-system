@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Building2,
+  ClipboardList,
   LayoutGrid,
   MailPlus,
   MapPin,
@@ -176,6 +177,20 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.invitations")}
               </NavLink>
+              {/*
+                Sprint 18 — audit log link is super-admin-only on the
+                backend (`audit/views.py::IsSuperAdmin`). We mirror
+                that gate here so company admins do not see a link
+                that would 403 on every visit.
+              */}
+              {me?.role === "SUPER_ADMIN" && (
+                <NavLink to="/admin/audit-logs" className={navClass}>
+                  <span className="nav-icon">
+                    <ClipboardList size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.audit_logs")}
+                </NavLink>
+              )}
             </>
           )}
         </nav>

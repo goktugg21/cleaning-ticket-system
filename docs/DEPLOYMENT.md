@@ -52,7 +52,7 @@ Expected results:
 
 - Frontend / returns 200
 - /api/auth/me/ returns 401 without token
-- /admin/login/ returns 200
+- /django-admin/login/ returns 200 (Sprint 18 moved Django admin off the SPA-owned /admin/* prefix)
 - Security headers are present
 
 ## 4. Backups
