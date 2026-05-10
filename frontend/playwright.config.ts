@@ -26,7 +26,12 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: process.env.CI ? "github" : "list",
-  timeout: 30_000,
+  // Sprint 17: bumped from 30_000 to 120_000 so a single test can
+  // absorb up to two auth_token-throttle backoffs (~35s each) inside
+  // `loginAs` and still finish without blowing the per-test budget.
+  // Most tests still complete in <3s; the new ceiling is a safety
+  // valve for the worst case.
+  timeout: 120_000,
   expect: {
     timeout: 5_000,
   },
