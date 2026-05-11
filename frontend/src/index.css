@@ -3078,3 +3078,120 @@ table.data-table {
     background: var(--red-soft);
   }
 }
+
+/* ---------------------------------------------------------------- */
+/* Sprint 22 final polish — mobile-only ticket card list on the     */
+/* Dashboard. The desktop ticket table (`.ticket-list-wrap`) has    */
+/* `min-width: 860px` and is unreadable on phones; below 600px we   */
+/* hide it and render the parallel `.ticket-card-list` instead.     */
+/* Tablet 768px and desktop are unchanged: the card list is hidden  */
+/* and the table renders as before. Both trees are in the DOM so    */
+/* existing desktop Playwright assertions targeting                 */
+/* `.data-table tbody tr` still resolve when the viewport is wide.  */
+/* ---------------------------------------------------------------- */
+.ticket-card-list {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  /* Hide the desktop ticket table on phones — the parallel mobile
+     card list below carries the same data in a tap-friendly shape. */
+  .ticket-list-wrap {
+    display: none;
+  }
+
+  .ticket-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    list-style: none;
+    margin: 0;
+  }
+
+  .ticket-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    transition: border-color 0.14s, box-shadow 0.14s;
+  }
+  .ticket-card:hover {
+    border-color: var(--green);
+    box-shadow: 0 6px 14px -8px rgba(11, 107, 66, 0.18);
+  }
+
+  .ticket-card-link {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    color: inherit;
+    text-decoration: none;
+    min-height: 44px;
+  }
+  .ticket-card-link:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: -2px;
+    border-radius: 10px;
+  }
+
+  .ticket-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .ticket-card-id {
+    font-family: var(--f-mono, monospace);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+  }
+
+  .ticket-card-title {
+    font-family: var(--f-head);
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+
+  .ticket-card-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .ticket-card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 4px 0 0;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border-soft);
+  }
+  .ticket-card-meta-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12.5px;
+  }
+  .ticket-card-meta-row dt {
+    color: var(--text-muted);
+    font-family: var(--f-head);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    flex: 0 0 auto;
+  }
+  .ticket-card-meta-row dd {
+    margin: 0;
+    color: var(--text);
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+}
