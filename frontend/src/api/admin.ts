@@ -12,6 +12,8 @@ import type {
   InvitationAdmin,
   PaginatedResponse,
   Role,
+  StaffAssignmentRequest,
+  StaffAssignmentRequestStatus,
   UserAdmin,
   UserAdminDetail,
 } from "./types";
@@ -162,6 +164,14 @@ export interface CustomerWritePayload {
   contact_email?: string;
   phone?: string;
   language?: string;
+  // Sprint 23B — assigned-staff contact-visibility flags. The
+  // backend serializer accepts these on PATCH; the CustomerViewSet
+  // permission gate is IsSuperAdminOrCompanyAdmin, so only
+  // service-provider-side admins can flip them. Defaults stay
+  // True (show everything) until explicitly turned off.
+  show_assigned_staff_name?: boolean;
+  show_assigned_staff_email?: boolean;
+  show_assigned_staff_phone?: boolean;
 }
 
 export async function listCustomers(
@@ -462,4 +472,63 @@ export async function removeCustomerUserAccess(
   await api.delete(
     `/customers/${customerId}/users/${userId}/access/${buildingId}/`,
   );
+}
+
+// ---- Sprint 23B — Staff assignment requests --------------------------
+
+// `/api/staff-assignment-requests/` — the minimal Sprint 23A API:
+//   GET    /                 — list (queryset filtered by role)
+//   POST   /                 — create (STAFF only; backend gates)
+//   POST   /:id/approve/    — manager/admin approves a pending request
+//   POST   /:id/reject/     — manager/admin rejects a pending request
+// The viewset returns an empty queryset for CUSTOMER_USER so the
+// resource is invisible to the customer side.
+
+export interface StaffAssignmentRequestListParams {
+  page?: number;
+  status?: StaffAssignmentRequestStatus;
+  ticket?: number;
+  staff?: number;
+}
+
+export async function listStaffAssignmentRequests(
+  params: StaffAssignmentRequestListParams = {},
+): Promise<PaginatedResponse<StaffAssignmentRequest>> {
+  const response = await api.get<PaginatedResponse<StaffAssignmentRequest>>(
+    "/staff-assignment-requests/",
+    { params: cleanParams(params) },
+  );
+  return response.data;
+}
+
+export async function createStaffAssignmentRequest(
+  ticketId: number,
+): Promise<StaffAssignmentRequest> {
+  const response = await api.post<StaffAssignmentRequest>(
+    "/staff-assignment-requests/",
+    { ticket: ticketId },
+  );
+  return response.data;
+}
+
+export async function approveStaffAssignmentRequest(
+  id: number,
+  reviewerNote: string = "",
+): Promise<StaffAssignmentRequest> {
+  const response = await api.post<StaffAssignmentRequest>(
+    `/staff-assignment-requests/${id}/approve/`,
+    { reviewer_note: reviewerNote },
+  );
+  return response.data;
+}
+
+export async function rejectStaffAssignmentRequest(
+  id: number,
+  reviewerNote: string = "",
+): Promise<StaffAssignmentRequest> {
+  const response = await api.post<StaffAssignmentRequest>(
+    `/staff-assignment-requests/${id}/reject/`,
+    { reviewer_note: reviewerNote },
+  );
+  return response.data;
 }

@@ -60,6 +60,16 @@ class CustomerSerializer(serializers.ModelSerializer):
             "phone",
             "language",
             "is_active",
+            # Sprint 23B — assigned-staff contact-visibility policy.
+            # The CustomerViewSet permission gate is already
+            # IsSuperAdminOrCompanyAdmin for write operations, so
+            # only OSIUS-side admins can flip these flags. Customer
+            # users hitting GET /api/customers/ never list this
+            # customer at all (queryset gate) so leaking the bool
+            # values back to a customer-side caller is impossible.
+            "show_assigned_staff_name",
+            "show_assigned_staff_email",
+            "show_assigned_staff_phone",
             "created_at",
             "updated_at",
         ]

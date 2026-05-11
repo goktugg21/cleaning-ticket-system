@@ -248,6 +248,20 @@ COMPANIES = [
                 "language": "nl",
             },
         ],
+        # Sprint 23B: one STAFF persona per company with a
+        # StaffProfile and visibility on every building of the
+        # company. Lets the demo show the "Request assignment"
+        # flow end-to-end without an admin manually wiring it up
+        # at boot time.
+        "staff": [
+            {
+                "email": "ahmet-staff-osius@b-amsterdam.demo",
+                "full_name": "Ahmet Yıldız",
+                "phone": "+31 6 1234 5678",
+                "buildings": ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"],
+                "language": "nl",
+            },
+        ],
         "tickets": [
             {
                 "title": f"{DEMO_TICKET_PREFIX} Open lobby light",
@@ -318,6 +332,19 @@ COMPANIES = [
             {
                 "email": "lotte-customer-bright@bright-facilities.demo",
                 "full_name": "Lotte Visser",
+                "buildings": ["R1 Rotterdam", "R2 Rotterdam"],
+                "language": "nl",
+            },
+        ],
+        # Sprint 23B: one STAFF persona for Bright too, so the
+        # demo proves cross-company isolation also applies to
+        # STAFF (a STAFF user under Bright cannot reach an Osius
+        # ticket even with the same role name).
+        "staff": [
+            {
+                "email": "noah-staff-bright@bright-facilities.demo",
+                "full_name": "Noah Bakker",
+                "phone": "+31 6 9876 5432",
                 "buildings": ["R1 Rotterdam", "R2 Rotterdam"],
                 "language": "nl",
             },
@@ -501,6 +528,46 @@ class Command(BaseCommand):
                     membership=membership, building=buildings[bname]
                 )
             customer_user_lookup[cu_spec["email"]] = cu
+
+        # Sprint 23B — STAFF persona per company. Idempotent: re-runs
+        # do not duplicate the StaffProfile or visibility rows. Each
+        # staff user gets a phone (so the contact-visibility policy
+        # demo actually has something to hide / reveal), a
+        # StaffProfile, and BuildingStaffVisibility rows for every
+        # building of the company so they can request assignment
+        # on any in-company ticket.
+        from accounts.models import StaffProfile
+        from buildings.models import BuildingStaffVisibility
+
+        for staff_spec in spec.get("staff", []):
+            staff_user = self._upsert_user(
+                User,
+                {
+                    "email": staff_spec["email"],
+                    "full_name": staff_spec["full_name"],
+                    "role": UserRole.STAFF,
+                    "language": staff_spec.get("language", "nl"),
+                },
+            )
+            profile, _ = StaffProfile.objects.get_or_create(
+                user=staff_user,
+                defaults={
+                    "phone": staff_spec.get("phone", ""),
+                    "can_request_assignment": True,
+                    "is_active": True,
+                },
+            )
+            # Keep phone in sync on re-runs so an operator changing
+            # the seed value doesn't have to manually update the DB.
+            if staff_spec.get("phone") and profile.phone != staff_spec["phone"]:
+                profile.phone = staff_spec["phone"]
+                profile.save(update_fields=["phone"])
+            for bname in staff_spec["buildings"]:
+                BuildingStaffVisibility.objects.get_or_create(
+                    user=staff_user,
+                    building=buildings[bname],
+                    defaults={"can_request_assignment": True},
+                )
 
         # Tickets
         if reset_tickets:

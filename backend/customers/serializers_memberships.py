@@ -50,7 +50,16 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
 
 
 class CustomerUserBuildingAccessSerializer(serializers.ModelSerializer):
-    """Sprint 14 — list/inspect a customer-user's per-building access."""
+    """
+    Sprint 14 — list/inspect a customer-user's per-building access.
+
+    Sprint 23B exposes the Sprint 23A fields (access_role,
+    permission_overrides, is_active) as READ-ONLY so the admin UI
+    can render an at-a-glance access matrix. Editing those values
+    via the admin UI is deferred to Sprint 23C — that surface
+    needs careful per-permission-key toggles and is out of scope
+    for the 23B "make foundation visible" pass.
+    """
 
     membership_id = serializers.IntegerField(source="membership.id", read_only=True)
     user_id = serializers.IntegerField(source="membership.user.id", read_only=True)
@@ -69,6 +78,12 @@ class CustomerUserBuildingAccessSerializer(serializers.ModelSerializer):
             "user_email",
             "building_id",
             "building_name",
+            # Sprint 23B: read-only exposure of the Sprint 23A
+            # fields. The admin UI renders these as badges /
+            # summary; mutation lives in Sprint 23C.
+            "access_role",
+            "is_active",
+            "permission_overrides",
             "created_at",
         ]
         read_only_fields = fields

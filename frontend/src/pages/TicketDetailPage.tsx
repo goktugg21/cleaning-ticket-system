@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+import { createStaffAssignmentRequest } from "../api/admin";
 import type {
   AssignableManager,
   PaginatedResponse,
@@ -162,6 +163,20 @@ export function TicketDetailPage() {
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
+
+  // Sprint 23B — Request-assignment state for STAFF users on a
+  // ticket they have building visibility for but aren't yet
+  // assigned to. `pending` flips true when the local user has
+  // either successfully POSTed a request OR the server reported
+  // a duplicate (the queue already has an open request from this
+  // user). Both states should hide the button so we don't let
+  // the user POST again.
+  const [requestAssignmentBusy, setRequestAssignmentBusy] =
+    useState(false);
+  const [requestAssignmentSubmitted, setRequestAssignmentSubmitted] =
+    useState(false);
+  const [requestAssignmentError, setRequestAssignmentError] =
+    useState("");
 
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
@@ -915,6 +930,200 @@ export function TicketDetailPage() {
                   </button>
                 </form>
               ) : null}
+            </div>
+          </div>
+
+          {/* Sprint 23B — Assigned-staff list. Backend gates the
+              contact-visibility per Customer.show_assigned_staff_*
+              flags BEFORE returning to a CUSTOMER_USER; we just
+              render what the API gives us. An empty array means
+              no staff assigned yet. */}
+          <div
+            className="card"
+            data-testid="assigned-staff-card"
+          >
+            <div className="section-head">
+              <div
+                className="section-head-title"
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "var(--text-faint)",
+                }}
+              >
+                {t("ticket_detail:assigned_staff_title")}
+              </div>
+            </div>
+            <div className="assign-body">
+              {ticket.assigned_staff.length === 0 ? (
+                <p
+                  className="muted small"
+                  style={{ padding: "4px 0 12px" }}
+                  data-testid="assigned-staff-empty"
+                >
+                  {t("ticket_detail:assigned_staff_empty")}
+                </p>
+              ) : (
+                <ul
+                  className="assigned-staff-list"
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                  data-testid="assigned-staff-list"
+                >
+                  {ticket.assigned_staff.map((entry, index) => {
+                    if ("anonymous" in entry && entry.anonymous) {
+                      return (
+                        <li
+                          key={`anon-${index}`}
+                          className="assignee-row"
+                          data-testid="assigned-staff-anon"
+                        >
+                          <div className="assignee-avatar">·</div>
+                          <div className="assignee-info">
+                            <span className="assignee-name">
+                              {t(entry.label_key)}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    }
+                    const named = entry as {
+                      id: number;
+                      full_name?: string;
+                      email?: string;
+                      phone?: string;
+                    };
+                    const displayName =
+                      named.full_name ||
+                      (named.email ? named.email.split("@")[0] : "—");
+                    return (
+                      <li
+                        key={named.id}
+                        className="assignee-row"
+                        data-testid="assigned-staff-item"
+                      >
+                        <div className="assignee-avatar">
+                          {getInitials(displayName)}
+                        </div>
+                        <div className="assignee-info">
+                          <span className="assignee-name">{displayName}</span>
+                          <span
+                            className="assignee-role"
+                            style={{ fontSize: 11 }}
+                          >
+                            {t("ticket_detail:assigned_staff_role")}
+                            {named.email ? ` · ${named.email}` : ""}
+                            {named.phone ? ` · ${named.phone}` : ""}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {/* Sprint 23B — STAFF-only "Request assignment"
+                  button. Visible only when:
+                    * the viewer's role is STAFF (CUSTOMER_USER and
+                      OSIUS-side managers never see it),
+                    * the staff user is NOT already assigned to this
+                      ticket, and
+                    * the local UI hasn't already POSTed a request
+                      this session.
+                  The backend separately enforces "active staff
+                  profile + visibility for the ticket's building"
+                  and 400s a duplicate. The UI flips to a friendly
+                  message on duplicate so we don't let the user
+                  repeatedly POST. */}
+              {me?.role === "STAFF" && (() => {
+                const alreadyAssigned = ticket.assigned_staff.some(
+                  (entry) =>
+                    !("anonymous" in entry && entry.anonymous) &&
+                    (entry as { id: number }).id === me.id,
+                );
+                if (alreadyAssigned) return null;
+                async function handleRequest() {
+                  if (!ticket) return;
+                  setRequestAssignmentBusy(true);
+                  setRequestAssignmentError("");
+                  try {
+                    await createStaffAssignmentRequest(ticket.id);
+                    setRequestAssignmentSubmitted(true);
+                  } catch (err) {
+                    const message = getApiError(err);
+                    // Backend returns "A pending request already exists."
+                    // on duplicates; we re-message it for clarity.
+                    if (/pending request/i.test(message)) {
+                      setRequestAssignmentSubmitted(true);
+                      setRequestAssignmentError(
+                        t("ticket_detail:request_assignment_already_pending"),
+                      );
+                    } else {
+                      setRequestAssignmentError(message);
+                    }
+                  } finally {
+                    setRequestAssignmentBusy(false);
+                  }
+                }
+                return (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                    data-testid="request-assignment-wrap"
+                  >
+                    {requestAssignmentSubmitted ? (
+                      <p
+                        className="muted small"
+                        data-testid="request-assignment-submitted"
+                      >
+                        {requestAssignmentError ||
+                          t("ticket_detail:request_assignment_success")}
+                      </p>
+                    ) : (
+                      <>
+                        <p
+                          className="muted small"
+                          style={{ margin: 0 }}
+                        >
+                          {t("ticket_detail:request_assignment_hint")}
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={requestAssignmentBusy}
+                          onClick={handleRequest}
+                          data-testid="request-assignment-button"
+                        >
+                          {requestAssignmentBusy
+                            ? t("ticket_detail:requesting_assignment")
+                            : t("ticket_detail:request_assignment")}
+                        </button>
+                        {requestAssignmentError && !requestAssignmentSubmitted && (
+                          <div
+                            className="alert-error"
+                            role="alert"
+                            style={{ marginTop: 6 }}
+                          >
+                            {requestAssignmentError}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

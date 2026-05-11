@@ -17,13 +17,20 @@ const ROLE_KEYS: Record<Role, string> = {
   SUPER_ADMIN: "common:roles.super_admin",
   COMPANY_ADMIN: "common:roles.company_admin",
   BUILDING_MANAGER: "common:roles.building_manager",
+  STAFF: "common:roles.staff",
   CUSTOMER_USER: "common:roles.customer_user",
 };
 
+// Sprint 23B — STAFF is a valid filter option so reviewers can find
+// existing STAFF users. The list page only reads; the create path
+// (UserFormPage / invitations) deliberately omits STAFF — see the
+// comment in UserFormPage. CUSTOMER_USER stays the default for
+// scope-isolated listings.
 const ALL_ROLES: Role[] = [
   "SUPER_ADMIN",
   "COMPANY_ADMIN",
   "BUILDING_MANAGER",
+  "STAFF",
   "CUSTOMER_USER",
 ];
 

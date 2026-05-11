@@ -403,5 +403,54 @@
   "api_error.network": "We kunnen de server niet bereiken. Controleer uw verbinding en probeer het opnieuw.",
   "api_error.unexpected": "Er is iets onverwachts gebeurd. Probeer het opnieuw.",
 
-  "tickets.assigned_team_anonymous": "Toegewezen aan het OSIUS-team"
+  "tickets.assigned_team_anonymous": "Toegewezen aan het OSIUS-team",
+
+  "nav.staff_requests": "Medewerker-aanvragen",
+
+  "roles.staff": "Medewerker",
+
+  "access_role.customer_user": "Klantgebruiker",
+  "access_role.customer_location_manager": "Locatiebeheerder",
+  "access_role.customer_company_admin": "Klant-bedrijfsbeheerder",
+
+  "ticket_detail.assigned_staff_title": "Toegewezen OSIUS-medewerkers",
+  "ticket_detail.assigned_staff_empty": "Nog geen medewerker toegewezen.",
+  "ticket_detail.assigned_staff_role": "OSIUS-medewerker",
+  "ticket_detail.request_assignment": "Toewijzing aanvragen",
+  "ticket_detail.requesting_assignment": "Aanvraag versturen…",
+  "ticket_detail.request_assignment_hint": "Vraag een OSIUS-beheerder om je aan dit ticket toe te wijzen.",
+  "ticket_detail.request_assignment_success": "Aanvraag verzonden. Een beheerder bekijkt deze binnenkort.",
+  "ticket_detail.request_assignment_already_pending": "Je hebt al een openstaande aanvraag voor dit ticket.",
+
+  "staff_requests.title": "Medewerker-toewijzingsaanvragen",
+  "staff_requests.subtitle_loading": "Aanvragen laden…",
+  "staff_requests.count_one": "{{count}} aanvraag",
+  "staff_requests.count_other": "{{count}} aanvragen",
+  "staff_requests.intro": "Medewerkers vragen toewijzing aan voor tickets waarvoor ze in aanmerking komen. Gebouwbeheerders en OSIUS-admins bekijken de wachtrij hier.",
+  "staff_requests.col_when": "Aangevraagd",
+  "staff_requests.col_staff": "Medewerker",
+  "staff_requests.col_ticket": "Ticket",
+  "staff_requests.col_status": "Status",
+  "staff_requests.col_actions": "Acties",
+  "staff_requests.status_pending": "In afwachting",
+  "staff_requests.status_approved": "Goedgekeurd",
+  "staff_requests.status_rejected": "Afgewezen",
+  "staff_requests.status_cancelled": "Geannuleerd",
+  "staff_requests.filter_pending": "In afwachting",
+  "staff_requests.filter_all": "Alle",
+  "staff_requests.approve": "Goedkeuren",
+  "staff_requests.reject": "Afwijzen",
+  "staff_requests.empty_title": "Niets om te beoordelen",
+  "staff_requests.empty_desc": "Medewerker-aanvragen verschijnen hier wanneer een veldmedewerker vraagt om toegewezen te worden aan een ticket waarvoor zij gebouwzichtbaarheid hebben.",
+  "staff_requests.empty_filtered_title": "Geen aanvragen passen bij je filters",
+  "staff_requests.empty_filtered_desc": "Schakel over naar 'Alle' om aanvragen te zien die al zijn goedgekeurd, afgewezen of geannuleerd.",
+  "staff_requests.reviewing": "Bezig met beoordelen…",
+  "staff_requests.reviewer_note_label": "Optionele notitie voor de aanvrager",
+  "staff_requests.reviewer_note_placeholder": "bijv. toegewezen aan dinsdagploeg",
+
+  "customer_form.contact_visibility_title": "Zichtbaarheid van toegewezen medewerker voor deze klant",
+  "customer_form.contact_visibility_helper": "Kies wat de gebruikers van de klant zien van de OSIUS-veldmedewerker die aan hun tickets is toegewezen. Als alles uit staat, wordt een generiek label 'Toegewezen aan het OSIUS-team' getoond.",
+  "customer_form.show_assigned_staff_name": "Naam medewerker tonen",
+  "customer_form.show_assigned_staff_email": "E-mail medewerker tonen",
+  "customer_form.show_assigned_staff_phone": "Telefoonnummer medewerker tonen"
 }
