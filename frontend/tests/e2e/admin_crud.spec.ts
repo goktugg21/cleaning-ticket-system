@@ -29,33 +29,50 @@ import { loginAs } from "./fixtures/login";
 
 // ---------------------------------------------------------------------------
 // API helper: log in via /api/auth/token/ and return a request context with
-// the Authorization header pre-set. Skips the SPA + throttle backoff path,
-// so backend-only checks stay fast.
+// the Authorization header pre-set. Skips the SPA + (until Sprint 23C) the
+// throttle backoff path. Sprint 23C added the same 429-backoff that
+// `loginAs` uses, because the full Playwright run easily crosses the
+// 20/min auth_token throttle once a few apiAs-based specs land. Without
+// the retry the suite is racy: a single test passes in isolation, but a
+// dense back-to-back run fails non-deterministically. Backoff is the
+// rolling-window margin (~35s) and we allow up to 2 retries.
 // ---------------------------------------------------------------------------
 async function apiAs(
   baseURL: string,
   email: string,
   password: string = DEMO_PASSWORD,
 ): Promise<APIRequestContext> {
-  const loginCtx = await request.newContext({
-    baseURL,
-    ignoreHTTPSErrors: true,
-  });
-  const tokenResponse = await loginCtx.post("/api/auth/token/", {
-    data: { email, password },
-  });
-  expect(
-    tokenResponse.status(),
-    `token request for ${email} should succeed`,
-  ).toBe(200);
-  const body = (await tokenResponse.json()) as { access: string };
-  await loginCtx.dispose();
-
-  return await request.newContext({
-    baseURL,
-    ignoreHTTPSErrors: true,
-    extraHTTPHeaders: { Authorization: `Bearer ${body.access}` },
-  });
+  const MAX_ATTEMPTS = 3;
+  const THROTTLE_BACKOFF_MS = 35_000;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const loginCtx = await request.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+    });
+    const tokenResponse = await loginCtx.post("/api/auth/token/", {
+      data: { email, password },
+    });
+    const status = tokenResponse.status();
+    if (status === 200) {
+      const body = (await tokenResponse.json()) as { access: string };
+      await loginCtx.dispose();
+      return await request.newContext({
+        baseURL,
+        ignoreHTTPSErrors: true,
+        extraHTTPHeaders: { Authorization: `Bearer ${body.access}` },
+      });
+    }
+    await loginCtx.dispose();
+    if (status === 429 && attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, THROTTLE_BACKOFF_MS));
+      continue;
+    }
+    expect(
+      status,
+      `token request for ${email} should succeed (attempt ${attempt})`,
+    ).toBe(200);
+  }
+  throw new Error(`apiAs(${email}) exhausted attempts`);
 }
 
 // ===========================================================================

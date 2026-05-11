@@ -324,6 +324,7 @@
   "customer_form.access_select_placeholder": "Selecteer een gebouw…",
   "customer_form.access_no_more": "Alle gekoppelde gebouwen al verleend",
   "customer_form.access_remove_button": "Intrekken",
+  "customer_form.access_role_edit_label": "Gebouwtoegangsrol wijzigen",
   "customer_form.dialog_revoke_access_title": "Toegang van {{email}} tot {{building}} intrekken?",
   "customer_form.dialog_revoke_access_body": "Ze zien geen tickets meer voor dit gebouw onder deze klant. Andere gebouwentoegang blijft onveranderd.",
 

@@ -169,14 +169,26 @@ test("Isa (manager B2 only) sees only B2 tickets", async ({ page }) => {
   }
 });
 
-test("Tom (customer B1+B2+B3) sees all 3 buildings' demo tickets", async ({
+test("Tom (plain CUSTOMER_USER, view_own) sees only tickets he created", async ({
   page,
 }) => {
+  // Sprint 23A tightened plain CUSTOMER_USER scope from "every ticket
+  // at any (customer, building) pair I have access to" to "tickets I
+  // myself created at those pairs" (`view_own`). Tom has CUSTOMER_USER
+  // access_role on B1+B2+B3, but the demo seed has Iris creating the
+  // B2 ticket and Amanda creating the B3 ticket, so Tom's dashboard
+  // shows only the B1 tickets he himself raised. Upgrading Tom's
+  // per-building access_role to CUSTOMER_LOCATION_MANAGER (Sprint 23C)
+  // is what unlocks the broader visibility — covered by
+  // sprint23c_access_role_editor.spec.ts.
   await loginAs(page, DEMO_USERS.customerAll);
   const cells = await listFacilityCells(page);
-  for (const b of DEMO_BUILDINGS) {
-    expect(cells.some((c) => c.includes(b))).toBe(true);
+  expect(cells.length).toBeGreaterThan(0);
+  for (const c of cells) {
+    expect(c).toContain("B1 Amsterdam");
   }
+  expect(cells.some((c) => c.includes("B2 Amsterdam"))).toBe(false);
+  expect(cells.some((c) => c.includes("B3 Amsterdam"))).toBe(false);
 });
 
 test("Iris (customer B1+B2 only) sees no B3 tickets", async ({ page }) => {

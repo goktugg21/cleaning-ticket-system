@@ -324,6 +324,7 @@
   "customer_form.access_select_placeholder": "Select a building…",
   "customer_form.access_no_more": "All linked buildings already granted",
   "customer_form.access_remove_button": "Revoke",
+  "customer_form.access_role_edit_label": "Change building access role",
   "customer_form.dialog_revoke_access_title": "Revoke {{email}}'s access to {{building}}?",
   "customer_form.dialog_revoke_access_body": "They will no longer see tickets at this building under this customer. Other building access is unaffected.",
 

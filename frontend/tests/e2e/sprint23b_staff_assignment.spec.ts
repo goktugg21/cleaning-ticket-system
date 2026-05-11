@@ -30,24 +30,40 @@ async function apiAs(
   email: string,
   password: string = DEMO_PASSWORD,
 ): Promise<APIRequestContext> {
-  const loginCtx = await request.newContext({
-    baseURL,
-    ignoreHTTPSErrors: true,
-  });
-  const tokenResponse = await loginCtx.post("/api/auth/token/", {
-    data: { email, password },
-  });
-  expect(
-    tokenResponse.status(),
-    `token request for ${email} should succeed`,
-  ).toBe(200);
-  const body = (await tokenResponse.json()) as { access: string };
-  await loginCtx.dispose();
-  return await request.newContext({
-    baseURL,
-    ignoreHTTPSErrors: true,
-    extraHTTPHeaders: { Authorization: `Bearer ${body.access}` },
-  });
+  // Sprint 23C — 429 backoff (see admin_crud.spec.ts for the long
+  // explanation). The full Playwright run easily crosses the 20/min
+  // auth_token throttle now that several specs use apiAs.
+  const MAX_ATTEMPTS = 3;
+  const THROTTLE_BACKOFF_MS = 35_000;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const loginCtx = await request.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+    });
+    const tokenResponse = await loginCtx.post("/api/auth/token/", {
+      data: { email, password },
+    });
+    const status = tokenResponse.status();
+    if (status === 200) {
+      const body = (await tokenResponse.json()) as { access: string };
+      await loginCtx.dispose();
+      return await request.newContext({
+        baseURL,
+        ignoreHTTPSErrors: true,
+        extraHTTPHeaders: { Authorization: `Bearer ${body.access}` },
+      });
+    }
+    await loginCtx.dispose();
+    if (status === 429 && attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, THROTTLE_BACKOFF_MS));
+      continue;
+    }
+    expect(
+      status,
+      `token request for ${email} should succeed (attempt ${attempt})`,
+    ).toBe(200);
+  }
+  throw new Error(`apiAs(${email}) exhausted attempts`);
 }
 
 /**
