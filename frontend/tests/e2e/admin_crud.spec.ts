@@ -193,7 +193,7 @@ test.describe("admin → /admin/users", () => {
       timeout: 10_000,
     });
     await expect(page.locator(".data-table tbody")).toContainText(
-      "super@cleanops.demo",
+      "superadmin@cleanops.demo",
     );
   });
 
@@ -209,15 +209,15 @@ test.describe("admin → /admin/users", () => {
     // In-scope users (company membership ∪ building manager ∪ customer-user
     // memberships of the company) must appear.
     for (const inScope of [
-      "admin@cleanops.demo",
-      "gokhan@cleanops.demo",
-      "tom@cleanops.demo",
+      "ramazan-admin-osius@b-amsterdam.demo",
+      "gokhan-manager-osius@b-amsterdam.demo",
+      "tom-customer-b-amsterdam@b-amsterdam.demo",
     ]) {
       await expect(tableBody).toContainText(inScope);
     }
     // SUPER_ADMIN has no CompanyUserMembership → must be hidden from a
     // company admin even on the unfiltered first page.
-    await expect(tableBody).not.toContainText("super@cleanops.demo");
+    await expect(tableBody).not.toContainText("superadmin@cleanops.demo");
   });
 
   test("Invite link to /admin/invitations is shown for both staff roles", async ({

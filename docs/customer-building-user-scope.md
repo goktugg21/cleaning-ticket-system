@@ -204,8 +204,13 @@ remains useful for the pre-Sprint-14 single-building rows.
 
 ## How to seed the B Amsterdam demo locally
 
+Sprint 21 retired the standalone `seed_b_amsterdam_demo` command —
+the canonical `seed_demo_data` now covers the same B Amsterdam
+scope (Tom / Iris / Amanda under Osius Demo) plus a second isolated
+demo company (Bright Facilities). Use the canonical seed:
+
 ```bash
-docker compose exec -T backend python manage.py seed_b_amsterdam_demo --with-ticket
+docker compose exec -T backend python manage.py seed_demo_data
 ```
 
 The command is idempotent and safe to re-run. It refuses to run
@@ -213,10 +218,13 @@ under `DJANGO_DEBUG=False` unless explicitly overridden with
 `--i-know-this-is-not-prod`, so a stray invocation on a
 production host fails closed.
 
-The customer-user accounts (Tom / Iris / Amanda) are created with
-*unusable* passwords — no default credentials live in code.
-Operator finishes onboarding via the password-reset flow. The
-Osius manager accounts use a clearly-marked dev-only password
+Sprint 21 also unified credentials: every seeded account (including
+the customer users Tom / Iris / Amanda) uses the documented
+`Demo12345!` password. The Sprint 14 design choice to issue
+unusable passwords for customer users has been dropped — the
+single shared password matches the rest of the dev-only seed and
+keeps the Playwright demo cards working without an out-of-band
+password reset. The Osius manager accounts use a clearly-marked dev-only password
 (`Sprint14Demo!`) printed at the end of the run; do not reuse it
 on a production host.
 

@@ -195,22 +195,29 @@ attachment.
 
 ## 8. Demo account cleanup
 
-Multiple seed scripts produce well-known accounts with predictable
-passwords (`Demo12345!`, `Admin12345!`, `Test12345!`):
+Seed scripts produce well-known accounts with predictable passwords
+(`Demo12345!`, plus legacy `Admin12345!` / `Test12345!`):
 
-- `manage.py seed_demo` (Sprint 10): `demo-super@`,
-  `demo-company-admin@`, `demo-manager@`, `demo-customer@` at
-  `@example.com` with `Demo12345!`.
-- `manage.py seed_demo_data` (Sprint 16): eight personas under
-  `@cleanops.demo` with `Demo12345!`.
-- `scripts/demo_up.sh` and
-  `scripts/prod_upload_download_test.sh`: `admin@example.com`,
-  `companyadmin@example.com`, `manager@example.com`,
-  `customer@example.com` with `Admin12345!` / `Test12345!`.
+- `manage.py seed_demo_data` (Sprint 16, extended in Sprint 21 to
+  cover two companies): eleven personas under `@cleanops.demo` with
+  `Demo12345!`. Company A (Osius Demo): `super@`, `admin@`,
+  `gokhan@`, `murat@`, `isa@`, `tom@`, `iris@`, `amanda@`. Company B
+  (Bright Facilities): `admin-b@`, `manager-b@`, `customer-b@`.
+- Legacy / removed in Sprint 21 but still rejected by the guard in
+  case a pilot DB carries them:
+  - `manage.py seed_demo` (Sprint 10): `demo-super@`,
+    `demo-company-admin@`, `demo-manager@`, `demo-customer@` at
+    `@example.com`. Command file deleted in Sprint 21.
+  - `scripts/prod_upload_download_test.sh` /
+    earlier `scripts/demo_up.sh`: `admin@example.com`,
+    `companyadmin@example.com`, `manager@example.com`,
+    `customer@example.com`. `demo_up.sh` itself was migrated in
+    Sprint 21 to invoke `seed_demo_data`.
 
 **None of these accounts may exist on the pilot host.** Use the
 guard command — it is the single source of truth and it covers all
-three families (Sprint 19 extended it to the `demo_up.sh` family):
+families (Sprint 19 extended it to the `demo_up.sh` family;
+Sprint 21 added the Company B trio):
 
 ```
 docker compose -f docker-compose.prod.yml exec -T backend \
