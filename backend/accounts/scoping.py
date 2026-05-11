@@ -230,39 +230,68 @@ def scope_tickets_for(user):
         )
 
     if user.role == UserRole.CUSTOMER_USER:
-        # Sprint 23A: union three customer-side branches.
+        # Sprint 23A (corrected before PR #50): resolve customer-side
+        # visibility in Python so the `permission_overrides` JSON is
+        # honoured. Each active access row resolves to one of three
+        # outcomes:
         #
-        # (a) CUSTOMER_USER access — (customer, building) pair must
-        #     match an active access row. (Sprint 14 default.)
-        # (b) CUSTOMER_LOCATION_MANAGER access — same pair check
-        #     but no per-creator filter at the scope layer (the
-        #     "I only see my own" rule lives in the permission
-        #     resolver, not the scope helper).
-        # (c) CUSTOMER_COMPANY_ADMIN access — any active access row
-        #     of that role against the same customer grants
-        #     visibility on every ticket of that customer.
-        pair_access_exists = CustomerUserBuildingAccess.objects.filter(
-            membership__user=user,
-            membership__customer_id=OuterRef("customer_id"),
-            building_id=OuterRef("building_id"),
-            is_active=True,
-        )
-        company_admin_exists = CustomerUserBuildingAccess.objects.filter(
-            membership__user=user,
-            membership__customer_id=OuterRef("customer_id"),
-            is_active=True,
-            access_role=(
-                CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
-            ),
-        )
-        return (
-            Ticket.objects.filter(deleted_at__isnull=True)
-            .annotate(
-                _pair=Exists(pair_access_exists),
-                _company_admin=Exists(company_admin_exists),
+        #   - view_company → grants visibility on EVERY ticket of the
+        #     customer, regardless of building. (CUSTOMER_COMPANY_ADMIN
+        #     default, or any override granting `customer.ticket.view_company`.)
+        #   - view_location → grants visibility on every ticket at the
+        #     (customer, building) pair. (CUSTOMER_LOCATION_MANAGER
+        #     default, or any override granting view_location.)
+        #   - view_own → grants visibility on tickets at (customer,
+        #     building) only when the user is `created_by`. (Plain
+        #     CUSTOMER_USER default. Sprint 22 / earlier 23A leaked
+        #     other-user tickets at the same pair.)
+        #
+        # An inactive access row resolves every key to False (handled
+        # by customers.permissions.access_has_permission) so it
+        # never contributes to scope.
+        from customers.permissions import access_has_permission
+
+        view_company_customers = set()  # {customer_id}
+        view_location_pairs = set()  # {(customer_id, building_id)}
+        view_own_pairs = set()  # {(customer_id, building_id)}
+        for access in (
+            CustomerUserBuildingAccess.objects.filter(
+                membership__user=user, is_active=True
             )
-            .filter(models.Q(_pair=True) | models.Q(_company_admin=True))
-        )
+            .select_related("membership")
+            .only(
+                "id",
+                "access_role",
+                "permission_overrides",
+                "is_active",
+                "building_id",
+                "membership__customer_id",
+            )
+        ):
+            cid = access.membership.customer_id
+            bid = access.building_id
+            if access_has_permission(access, "customer.ticket.view_company"):
+                view_company_customers.add(cid)
+            elif access_has_permission(access, "customer.ticket.view_location"):
+                view_location_pairs.add((cid, bid))
+            elif access_has_permission(access, "customer.ticket.view_own"):
+                view_own_pairs.add((cid, bid))
+
+        if not (view_company_customers or view_location_pairs or view_own_pairs):
+            return Ticket.objects.none()
+
+        q = models.Q()
+        if view_company_customers:
+            q |= models.Q(customer_id__in=view_company_customers)
+        for cid, bid in view_location_pairs:
+            q |= models.Q(customer_id=cid, building_id=bid)
+        if view_own_pairs:
+            own_filter = models.Q()
+            for cid, bid in view_own_pairs:
+                own_filter |= models.Q(customer_id=cid, building_id=bid)
+            q |= own_filter & models.Q(created_by=user)
+
+        return Ticket.objects.filter(deleted_at__isnull=True).filter(q)
 
     return Ticket.objects.none()
 

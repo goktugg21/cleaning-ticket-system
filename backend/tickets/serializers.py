@@ -344,6 +344,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
         if user.role == UserRole.CUSTOMER_USER:
             from customers.models import CustomerUserMembership
+            from customers.permissions import access_has_permission
 
             membership = CustomerUserMembership.objects.filter(
                 user=user, customer_id=customer.id
@@ -352,17 +353,53 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"customer": "You are not linked to this customer."}
                 )
+
             # Sprint 14: customer-users must additionally have building
             # access for the (customer, building) pair. A user with
             # access to B3 only cannot create a ticket for B1, even if
             # the customer is linked to both.
-            if not CustomerUserBuildingAccess.objects.filter(
+            #
+            # Sprint 23A (corrected before PR #50): the access row
+            # must be ACTIVE, and the resolved permission for the
+            # `customer.ticket.create` key must be True. An inactive
+            # row resolves every key to False (handled inside
+            # access_has_permission), so a single `if not allowed`
+            # test below is enough.
+            #
+            # CUSTOMER_COMPANY_ADMIN spans buildings: an admin holding
+            # an active access row at ANY building of the customer
+            # whose role/override grants `customer.ticket.create`
+            # may create at any other building of the same customer.
+            pair_access = CustomerUserBuildingAccess.objects.filter(
                 membership=membership, building_id=building.id
-            ).exists():
-                raise serializers.ValidationError(
-                    {"building": "You do not have access to this building under this customer."}
-                )
-            return attrs
+            ).first()
+            if pair_access is not None and access_has_permission(
+                pair_access, "customer.ticket.create"
+            ):
+                return attrs
+
+            company_admin_access = CustomerUserBuildingAccess.objects.filter(
+                membership=membership,
+                is_active=True,
+                access_role=(
+                    CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+                ),
+            ).first()
+            if company_admin_access is not None and access_has_permission(
+                company_admin_access, "customer.ticket.create"
+            ):
+                return attrs
+
+            # No active pair-access row, OR override revokes create,
+            # OR access role doesn't grant create — block.
+            raise serializers.ValidationError(
+                {
+                    "building": (
+                        "You do not have permission to create a ticket at "
+                        "this location."
+                    )
+                }
+            )
 
         raise serializers.ValidationError("You do not have permission to create tickets.")
 

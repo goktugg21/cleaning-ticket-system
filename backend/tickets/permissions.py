@@ -55,32 +55,42 @@ def user_has_scope_for_ticket(user, ticket):
             user=user, building_id=ticket.building_id
         ).exists()
     if user.role == UserRole.CUSTOMER_USER:
-        # Sprint 15: customer-users need the exact (customer, building)
-        # pair access, matching scope_tickets_for. This function is
-        # consulted by the messages and attachments serializers, so
-        # without the pair check a customer-user with membership to
-        # Customer X but no building access for B1 could post a
-        # message on a B1 ticket of the same customer.
+        # Sprint 23A (corrected before PR #50): mirror the resolver
+        # logic in `accounts.scoping.scope_tickets_for`. The two
+        # helpers MUST agree — anything visible on the list endpoint
+        # is actionable here (messages, attachments, status); anything
+        # hidden from the list is also blocked here.
         #
-        # Sprint 23A: ignore inactive access rows, matching
-        # scope_tickets_for's union of CUSTOMER_USER + LOCATION_MGR
-        # + COMPANY_ADMIN access paths.
-        if CustomerUserBuildingAccess.objects.filter(
-            membership__user=user,
-            membership__customer_id=ticket.customer_id,
-            building_id=ticket.building_id,
-            is_active=True,
-        ).exists():
-            return True
-        # CUSTOMER_COMPANY_ADMIN access at ANY building of the
-        # customer also grants pair-level access (the company admin
-        # spans buildings).
-        return CustomerUserBuildingAccess.objects.filter(
-            membership__user=user,
-            membership__customer_id=ticket.customer_id,
-            is_active=True,
-            access_role=(
-                CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
-            ),
-        ).exists()
+        # Resolution order on each active access row:
+        #   - view_company  → grants pair scope for ANY building of
+        #                     the customer.
+        #   - view_location → grants pair scope at the access row's
+        #                     building.
+        #   - view_own      → grants pair scope at the access row's
+        #                     building, but ONLY if the user created
+        #                     the ticket.
+        from customers.permissions import access_has_permission
+
+        accesses = list(
+            CustomerUserBuildingAccess.objects.filter(
+                membership__user=user,
+                membership__customer_id=ticket.customer_id,
+                is_active=True,
+            ).select_related("membership")
+        )
+        if not accesses:
+            return False
+        for access in accesses:
+            if access_has_permission(access, "customer.ticket.view_company"):
+                return True
+        for access in accesses:
+            if access.building_id != ticket.building_id:
+                continue
+            if access_has_permission(access, "customer.ticket.view_location"):
+                return True
+            if access_has_permission(
+                access, "customer.ticket.view_own"
+            ) and ticket.created_by_id == user.id:
+                return True
+        return False
     return False

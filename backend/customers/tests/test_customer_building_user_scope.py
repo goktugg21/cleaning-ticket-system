@@ -109,19 +109,40 @@ class _BAmsterdamScenarioMixin(TenantFixtureMixin):
             customer=self.b_amsterdam, user=self.amanda
         )
 
+        # Sprint 23A — the original Sprint 14 tests below assert
+        # pair-wide visibility ("Tom sees all 3 buildings' tickets",
+        # "Amanda sees only the B3 ticket" — regardless of creator).
+        # The Sprint 23A spec tightened the default CUSTOMER_USER
+        # access_role to "own-only", so to preserve the *intent* of
+        # these tests (building-scope visibility, not creator-scope
+        # visibility) we grant the LOCATION_MANAGER access role
+        # explicitly on every access row. The behavior under test is
+        # still "what tickets does a building-scoped customer user
+        # see at this pair" — exactly what the new
+        # CUSTOMER_LOCATION_MANAGER access role models.
+        loc_mgr = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+
         # Tom: all three buildings.
         for b in (self.b1, self.b2, self.b3):
             CustomerUserBuildingAccess.objects.create(
-                membership=self.tom_membership, building=b
+                membership=self.tom_membership,
+                building=b,
+                access_role=loc_mgr,
             )
         # Iris: B1 + B2.
         for b in (self.b1, self.b2):
             CustomerUserBuildingAccess.objects.create(
-                membership=self.iris_membership, building=b
+                membership=self.iris_membership,
+                building=b,
+                access_role=loc_mgr,
             )
         # Amanda: B3 only.
         CustomerUserBuildingAccess.objects.create(
-            membership=self.amanda_membership, building=self.b3
+            membership=self.amanda_membership,
+            building=self.b3,
+            access_role=loc_mgr,
         )
 
         self.gokhan = self.make_user("gokhan@osius.demo", UserRole.BUILDING_MANAGER)

@@ -782,6 +782,114 @@ class Sprint23AFoundationTests(TestCase):
         ).count()
         self.assertEqual(after_count, before_count)
 
+    # ---- 23-25. Customer-scope safety net before PR #50 merge. ----
+
+    def test_23_default_customer_user_sees_only_own_created_tickets(self):
+        """
+        Spec: a default CUSTOMER_USER (no role upgrade, no override)
+        sees only tickets THEY CREATED, even when another customer
+        user under the same customer / same building creates a
+        separate ticket. Sprint 14 + 23A scope_tickets_for previously
+        returned the WHOLE (customer, building) pair, leaking other
+        users' tickets to a plain CUSTOMER_USER.
+
+        Fixture: cust_user_a is CUSTOMER_USER access_role on B1 of
+        Customer A. cust_user_a_loc_mgr (also under Customer A,
+        but with LOCATION_MANAGER access on B2) creates a SECOND
+        ticket at (Customer A, B1). cust_user_a must NOT see it.
+        """
+        their_ticket = Ticket.objects.create(
+            company=self.company,
+            building=self.b1,
+            customer=self.customer_a,
+            created_by=self.cust_user_a_loc_mgr,
+            title="Other user's ticket at the same pair",
+            description="x",
+        )
+        scoped = scope_tickets_for(self.cust_user_a)
+        # CUSTOMER_USER access_role: only own.
+        self.assertIn(self.t_a_b1, scoped)  # cust_user_a created this
+        self.assertNotIn(
+            their_ticket,
+            scoped,
+            "Default CUSTOMER_USER must not see another user's ticket "
+            "at the same (customer, building) pair.",
+        )
+        # The helper that gates messages / attachments must agree:
+        # otherwise customer A's user-1 could comment on user-2's
+        # ticket even though it doesn't show up in their list.
+        from tickets.permissions import user_has_scope_for_ticket
+
+        self.assertFalse(
+            user_has_scope_for_ticket(self.cust_user_a, their_ticket),
+            "user_has_scope_for_ticket must agree with scope_tickets_for: "
+            "no scope for tickets you didn't create at CUSTOMER_USER role.",
+        )
+
+    def test_24_inactive_or_revoked_access_cannot_create_ticket(self):
+        """
+        Customer-side ticket create requires:
+          (a) an ACTIVE access row for the (customer, building) pair
+              (or a cross-building CUSTOMER_COMPANY_ADMIN row), AND
+          (b) access_has_permission(access, 'customer.ticket.create')
+              resolves to True.
+
+        Sprint 14 only enforced (a) and ignored is_active. Sprint
+        23A added the is_active + permission_overrides shape but
+        the create serializer wasn't updated.
+        """
+        client = APIClient()
+        payload = {
+            "title": "Should not be created",
+            "description": "x",
+            "type": "REPORT",
+            "priority": "NORMAL",
+            "building": self.b1.id,
+            "customer": self.customer_a.id,
+        }
+
+        # Case 1: access row is_active=False → 4xx.
+        self.access_a_user_b1.is_active = False
+        self.access_a_user_b1.save(update_fields=["is_active"])
+        client.force_authenticate(user=self.cust_user_a)
+        r1 = client.post("/api/tickets/", payload, format="json")
+        self.assertIn(r1.status_code, (400, 403), r1.data)
+        self.access_a_user_b1.is_active = True
+        self.access_a_user_b1.save(update_fields=["is_active"])
+
+        # Case 2: permission_overrides revokes customer.ticket.create
+        # → 4xx.
+        self.access_a_user_b1.permission_overrides = {
+            "customer.ticket.create": False
+        }
+        self.access_a_user_b1.save(update_fields=["permission_overrides"])
+        r2 = client.post("/api/tickets/", payload, format="json")
+        self.assertIn(r2.status_code, (400, 403), r2.data)
+        self.access_a_user_b1.permission_overrides = {}
+        self.access_a_user_b1.save(update_fields=["permission_overrides"])
+
+    def test_25_default_active_customer_user_can_create_ticket(self):
+        """
+        Sanity check the happy path didn't regress: a CUSTOMER_USER
+        with an active access row and no override still creates
+        tickets at the (customer, building) they hold pair access for.
+        """
+        client = APIClient()
+        client.force_authenticate(user=self.cust_user_a)
+        r = client.post(
+            "/api/tickets/",
+            {
+                "title": "Happy path",
+                "description": "x",
+                "type": "REPORT",
+                "priority": "NORMAL",
+                "building": self.b1.id,
+                "customer": self.customer_a.id,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+
 
 # ---------------------------------------------------------------- helpers
 
