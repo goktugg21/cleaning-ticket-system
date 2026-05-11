@@ -7,10 +7,21 @@ from .views import (
     TicketMessageListCreateView,
     TicketViewSet,
 )
+from .views_staff_requests import StaffAssignmentRequestViewSet
 
 
 router = DefaultRouter()
 router.register(r"", TicketViewSet, basename="ticket")
+
+# Sprint 23A — staff-initiated assignment requests live under
+# `/api/staff-assignment-requests/`. Mounted on its own router so
+# the path is independent of the tickets router prefix.
+staff_request_router = DefaultRouter()
+staff_request_router.register(
+    r"staff-assignment-requests",
+    StaffAssignmentRequestViewSet,
+    basename="staff-assignment-request",
+)
 
 urlpatterns = [
     path(

@@ -151,6 +151,12 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     sla_is_paused = serializers.SerializerMethodField()
     sla_remaining_business_seconds = serializers.SerializerMethodField()
     sla_display_state = serializers.SerializerMethodField()
+    # Sprint 23A — list of staff currently assigned to the ticket
+    # via TicketStaffAssignment. For a CUSTOMER_USER caller, the
+    # output is gated through Customer.show_assigned_staff_*
+    # flags so the customer never sees fields the policy hides.
+    # See _assigned_staff_payload() below.
+    assigned_staff = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -172,6 +178,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "created_by_email",
             "assigned_to",
             "assigned_to_email",
+            "assigned_staff",
             "created_at",
             "updated_at",
             "first_response_at",
@@ -209,6 +216,59 @@ class TicketDetailSerializer(serializers.ModelSerializer):
 
     def get_sla_display_state(self, obj):
         return _sla_display_state(obj)
+
+    def get_assigned_staff(self, obj):
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        return _assigned_staff_payload(obj, viewer)
+
+
+def _assigned_staff_payload(ticket, viewer):
+    """
+    Sprint 23A — render the list of staff assigned to a ticket
+    through the customer's contact-visibility policy.
+
+    For OSIUS-side viewers (SUPER_ADMIN / COMPANY_ADMIN /
+    BUILDING_MANAGER / STAFF) the full record is always returned —
+    those roles need name/email/phone to coordinate work.
+
+    For CUSTOMER_USER viewers the Customer.show_assigned_staff_*
+    flags act as filters. If all three flags are False the payload
+    collapses to a single anonymous label key the frontend renders
+    as "Assigned to the OSIUS team" (locale: en) /
+    "Toegewezen aan het OSIUS-team" (locale: nl).
+    """
+    assignments = list(
+        ticket.staff_assignments.select_related("user", "user__staff_profile")
+        .order_by("assigned_at")
+    )
+    if not assignments:
+        return []
+
+    is_customer = getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+    customer = ticket.customer
+    if is_customer:
+        show_name = bool(customer.show_assigned_staff_name)
+        show_email = bool(customer.show_assigned_staff_email)
+        show_phone = bool(customer.show_assigned_staff_phone)
+        if not (show_name or show_email or show_phone):
+            return [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}]
+    else:
+        show_name = show_email = show_phone = True
+
+    out = []
+    for a in assignments:
+        user = a.user
+        entry = {"id": user.id}
+        if show_name:
+            entry["full_name"] = user.full_name or user.email.split("@")[0]
+        if show_email:
+            entry["email"] = user.email
+        if show_phone:
+            profile = getattr(user, "staff_profile", None)
+            entry["phone"] = profile.phone if profile else ""
+        out.append(entry)
+    return out
 
 
 class TicketCreateSerializer(serializers.ModelSerializer):

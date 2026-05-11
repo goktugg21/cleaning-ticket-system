@@ -6,6 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from accounts.views_users import UserViewSet
 from config.health import liveness, readiness
+from tickets.urls import staff_request_router
 
 
 users_router = DefaultRouter()
@@ -30,6 +31,10 @@ urlpatterns = [
     path("api/reports/", include("reports.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),
+    # Sprint 23A — staff-initiated "I want to do this work" review
+    # queue. The viewset returns no results for CUSTOMER_USER so
+    # the resource is invisible on the customer side.
+    path("api/", include(staff_request_router.urls)),
 ]
 
 if settings.DEBUG:

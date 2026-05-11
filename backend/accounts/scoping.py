@@ -1,3 +1,4 @@
+from django.db import models
 from django.db.models import Exists, OuterRef
 
 from buildings.models import Building, BuildingManagerAssignment
@@ -50,13 +51,28 @@ def building_ids_for(user):
     if user.role == UserRole.BUILDING_MANAGER:
         return BuildingManagerAssignment.objects.filter(user=user).values_list("building_id", flat=True)
 
+    if user.role == UserRole.STAFF:
+        # Sprint 23A: a STAFF user sees a building if they hold a
+        # BuildingStaffVisibility row for it. Per-ticket visibility
+        # via TicketStaffAssignment is enforced inside
+        # scope_tickets_for, but the BUILDING list intentionally
+        # stays narrower (the ticket might be in a building the
+        # staff has no read-access for outside that assignment).
+        from buildings.models import BuildingStaffVisibility
+
+        return BuildingStaffVisibility.objects.filter(user=user).values_list(
+            "building_id", flat=True
+        )
+
     if user.role == UserRole.CUSTOMER_USER:
         # Sprint 14: a customer-user only sees buildings explicitly granted
         # via CustomerUserBuildingAccess, never the customer's legacy
         # `building` FK. A customer-user with a CustomerUserMembership but
         # zero access rows sees zero buildings.
+        #
+        # Sprint 23A: only active access rows count.
         return CustomerUserBuildingAccess.objects.filter(
-            membership__user=user
+            membership__user=user, is_active=True
         ).values_list("building_id", flat=True)
 
     return Building.objects.none().values_list("id", flat=True)
@@ -154,6 +170,29 @@ def scope_tickets_for(user):
     enforced by an Exists subquery so a multi-customer user with
     different building access per customer cannot accidentally see a
     ticket whose pair isn't theirs.
+
+    Sprint 23A — two changes on top of the Sprint 14 behaviour:
+
+      1. The CUSTOMER_USER branch now also unions in:
+         - tickets where the user holds an active
+           CustomerUserBuildingAccess row of access_role
+           CUSTOMER_LOCATION_MANAGER for `(customer, building)`;
+         - every ticket of the customer when the user holds at
+           least one active CUSTOMER_COMPANY_ADMIN access row
+           against that customer (cross-building visibility).
+         All access rows with is_active=False are ignored.
+
+      2. A new STAFF branch: returns the union of
+         - tickets where the user appears in
+           TicketStaffAssignment; and
+         - tickets in any building where the user holds a
+           BuildingStaffVisibility row.
+
+    Customer isolation is preserved: every customer-side path
+    still filters by `customer_id` membership before union-ing
+    location-manager or company-admin rows, so a user under
+    customer A can never see customer B's tickets even at
+    CUSTOMER_COMPANY_ADMIN level.
     """
     if _is_anonymous(user):
         return Ticket.objects.none()
@@ -169,16 +208,60 @@ def scope_tickets_for(user):
         building_ids = BuildingManagerAssignment.objects.filter(user=user).values_list("building_id", flat=True)
         return Ticket.objects.filter(deleted_at__isnull=True, building_id__in=building_ids)
 
+    if user.role == UserRole.STAFF:
+        # Sprint 23A: STAFF sees tickets they are listed on PLUS
+        # tickets in buildings where they hold visibility.
+        from tickets.models import TicketStaffAssignment
+        from buildings.models import BuildingStaffVisibility
+
+        assignment_exists = TicketStaffAssignment.objects.filter(
+            ticket_id=OuterRef("pk"), user=user
+        )
+        visibility_building_ids = BuildingStaffVisibility.objects.filter(
+            user=user
+        ).values_list("building_id", flat=True)
+        return (
+            Ticket.objects.filter(deleted_at__isnull=True)
+            .annotate(_assigned=Exists(assignment_exists))
+            .filter(
+                models.Q(_assigned=True)
+                | models.Q(building_id__in=list(visibility_building_ids))
+            )
+        )
+
     if user.role == UserRole.CUSTOMER_USER:
-        access_pair_exists = CustomerUserBuildingAccess.objects.filter(
+        # Sprint 23A: union three customer-side branches.
+        #
+        # (a) CUSTOMER_USER access — (customer, building) pair must
+        #     match an active access row. (Sprint 14 default.)
+        # (b) CUSTOMER_LOCATION_MANAGER access — same pair check
+        #     but no per-creator filter at the scope layer (the
+        #     "I only see my own" rule lives in the permission
+        #     resolver, not the scope helper).
+        # (c) CUSTOMER_COMPANY_ADMIN access — any active access row
+        #     of that role against the same customer grants
+        #     visibility on every ticket of that customer.
+        pair_access_exists = CustomerUserBuildingAccess.objects.filter(
             membership__user=user,
             membership__customer_id=OuterRef("customer_id"),
             building_id=OuterRef("building_id"),
+            is_active=True,
+        )
+        company_admin_exists = CustomerUserBuildingAccess.objects.filter(
+            membership__user=user,
+            membership__customer_id=OuterRef("customer_id"),
+            is_active=True,
+            access_role=(
+                CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+            ),
         )
         return (
             Ticket.objects.filter(deleted_at__isnull=True)
-            .annotate(_has_access=Exists(access_pair_exists))
-            .filter(_has_access=True)
+            .annotate(
+                _pair=Exists(pair_access_exists),
+                _company_admin=Exists(company_admin_exists),
+            )
+            .filter(models.Q(_pair=True) | models.Q(_company_admin=True))
         )
 
     return Ticket.objects.none()

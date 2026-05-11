@@ -260,3 +260,108 @@ class TicketStatusHistory(models.Model):
 
     def __str__(self):
         return f"{self.ticket}: {self.old_status} → {self.new_status}"
+
+
+class TicketStaffAssignment(models.Model):
+    """
+    Sprint 23A — additive M:N between Ticket and STAFF user.
+
+    The existing single `Ticket.assigned_to` FK stays as the legacy
+    "primary assignee" the existing UI and tests read. This new
+    through-style table lets a ticket carry multiple assigned
+    staff at the same time (per the OSIUS workflow: "a job may have
+    multiple staff; any one completing it moves it to manager
+    review"). The workflow change is staged for Sprint 23B — in
+    23A the rows are informational only and the existing state
+    machine is unchanged.
+
+    Validation (enforced at serializer level, not via a DB check):
+      - user.role MUST be UserRole.STAFF.
+      - The user MUST hold BuildingStaffVisibility for ticket.building
+        (or the assignment was created by a manager who can override).
+    """
+
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="staff_assignments",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ticket_staff_assignments",
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="staff_assignments_made",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("ticket", "user")]
+        indexes = [models.Index(fields=["ticket", "user"])]
+
+    def __str__(self):
+        return f"{self.user.email} → {self.ticket}"
+
+
+class AssignmentRequestStatus(models.TextChoices):
+    """Sprint 23A — lifecycle of a staff-initiated assignment request."""
+
+    PENDING = "PENDING", "Pending"
+    APPROVED = "APPROVED", "Approved"
+    REJECTED = "REJECTED", "Rejected"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class StaffAssignmentRequest(models.Model):
+    """
+    Sprint 23A — a STAFF user's "I want to do this work / assign me
+    to this" request, awaiting BUILDING_MANAGER (or higher) review.
+
+    Internal to the service-provider side. Never serialized for
+    CUSTOMER_USER. A BUILDING_MANAGER may approve or reject
+    requests for buildings they hold a BuildingManagerAssignment
+    in; COMPANY_ADMIN and SUPER_ADMIN can act on any request.
+    """
+
+    staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="assignment_requests",
+    )
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="assignment_requests",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=AssignmentRequestStatus.choices,
+        default=AssignmentRequestStatus.PENDING,
+    )
+
+    requested_at = models.DateTimeField(auto_now_add=True)
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_assignment_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewer_note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-requested_at"]
+        indexes = [
+            models.Index(fields=["status", "ticket"]),
+            models.Index(fields=["staff", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.staff.email} → {self.ticket} ({self.status})"

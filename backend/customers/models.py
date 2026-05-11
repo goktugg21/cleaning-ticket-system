@@ -52,6 +52,19 @@ class Customer(models.Model):
 
     is_active = models.BooleanField(default=True)
 
+    # Sprint 23A — assigned-staff contact-visibility policy. Default
+    # is "show everything" so existing pilot behaviour is unchanged
+    # and customer users see the assigned staff's name/email/phone.
+    # OSIUS Admin can flip any of these to False per-customer to
+    # anonymise the team behind a "Assigned to the OSIUS team" label
+    # at the ticket-detail serializer layer. The architecture doc
+    # records that this can be extracted into its own
+    # CustomerContactVisibilityPolicy table later without changing
+    # the ticket-serializer contract.
+    show_assigned_staff_name = models.BooleanField(default=True)
+    show_assigned_staff_email = models.BooleanField(default=True)
+    show_assigned_staff_phone = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -145,6 +158,24 @@ class CustomerUserBuildingAccess(models.Model):
     pilot customer-user: their visibility is unchanged.
     """
 
+    # Sprint 23A — per-building access role for a customer-side
+    # user. Defaults to CUSTOMER_USER so every pre-Sprint-23A row
+    # backfills with the same effective permissions Sprint 14
+    # already documented. LOCATION_MANAGER and COMPANY_ADMIN add
+    # broader visibility / approval rights at the customer's
+    # location level. The customer-side global User.role stays
+    # CUSTOMER_USER; this field is the per-building role.
+    class AccessRole(models.TextChoices):
+        CUSTOMER_USER = "CUSTOMER_USER", "Customer user"
+        CUSTOMER_LOCATION_MANAGER = (
+            "CUSTOMER_LOCATION_MANAGER",
+            "Customer location manager",
+        )
+        CUSTOMER_COMPANY_ADMIN = (
+            "CUSTOMER_COMPANY_ADMIN",
+            "Customer company admin",
+        )
+
     membership = models.ForeignKey(
         CustomerUserMembership,
         on_delete=models.CASCADE,
@@ -155,6 +186,21 @@ class CustomerUserBuildingAccess(models.Model):
         on_delete=models.PROTECT,
         related_name="customer_user_access",
     )
+    # Sprint 23A: per-building role on the customer side.
+    access_role = models.CharField(
+        max_length=32,
+        choices=AccessRole.choices,
+        default=AccessRole.CUSTOMER_USER,
+    )
+    # Sprint 23A: free-form { permission_key: bool } overrides on
+    # top of the role default. True grants, False revokes, missing
+    # falls back to the role default. The full key list lives in
+    # docs/architecture/sprint-23a-domain-permissions-foundation.md
+    # and the resolver lives in customers/permissions.py.
+    permission_overrides = models.JSONField(default=dict, blank=True)
+    # Sprint 23A: lets an admin temporarily disable an access grant
+    # without deleting the row (preserves audit trail).
+    is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 

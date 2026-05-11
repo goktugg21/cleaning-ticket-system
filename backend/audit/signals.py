@@ -35,7 +35,11 @@ import threading
 
 from django.db.models.signals import post_delete, post_save, pre_save
 
-from buildings.models import Building, BuildingManagerAssignment
+from buildings.models import (
+    Building,
+    BuildingManagerAssignment,
+    BuildingStaffVisibility,
+)
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Customer,
@@ -43,6 +47,7 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from tickets.models import StaffAssignmentRequest, TicketStaffAssignment
 
 from . import context
 from .diff import (
@@ -366,7 +371,23 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
 
 def _connect():
     User = _user_model()
-    for model in (User, Company, Building, Customer):
+    # Lazy import: StaffProfile lives in accounts and would create a
+    # circular import at module-load time if pulled at the top of
+    # this file (accounts.signals → audit.signals → accounts.models
+    # via _user_model).
+    from accounts.models import StaffProfile
+
+    # Full CRUD trio — models with editable fields and meaningful
+    # UPDATE diffs. Sprint 23A adds StaffProfile and
+    # StaffAssignmentRequest here.
+    for model in (
+        User,
+        Company,
+        Building,
+        Customer,
+        StaffProfile,
+        StaffAssignmentRequest,
+    ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
         post_delete.connect(_on_post_delete, sender=model, weak=False, dispatch_uid=f"audit:del:{model.__name__}")
@@ -374,6 +395,13 @@ def _connect():
         CompanyUserMembership,
         BuildingManagerAssignment,
         CustomerUserMembership,
+        # Sprint 23A — staff visibility + multi-staff ticket
+        # assignment use the same lightweight CREATE/DELETE shape
+        # as the other membership tables. StaffProfile uses the
+        # full CRUD trio (see below) because it has editable
+        # fields.
+        BuildingStaffVisibility,
+        TicketStaffAssignment,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).
