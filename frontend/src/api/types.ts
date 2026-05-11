@@ -2,6 +2,9 @@ export type Role =
   | "SUPER_ADMIN"
   | "COMPANY_ADMIN"
   | "BUILDING_MANAGER"
+  // Sprint 23A — service-provider-side field staff. Added here so
+  // the frontend Role union stays in sync with backend UserRole.
+  | "STAFF"
   | "CUSTOMER_USER";
 
 export type TicketStatus =
@@ -116,6 +119,22 @@ export interface TicketStatusHistory {
   created_at: string;
 }
 
+// Sprint 23B — list of staff currently assigned to a ticket via
+// TicketStaffAssignment. The backend serializer gates this list
+// through Customer.show_assigned_staff_* flags before returning
+// it to a CUSTOMER_USER; if every flag is off the payload
+// collapses to a single anonymous-label entry the UI translates
+// via the `label_key` i18n key.
+export type AssignedStaffEntry =
+  | {
+      id: number;
+      full_name?: string;
+      email?: string;
+      phone?: string;
+      anonymous?: false;
+    }
+  | { anonymous: true; label_key: string };
+
 export interface TicketDetail extends TicketList {
   description: string;
   room_label: string;
@@ -136,6 +155,33 @@ export interface TicketDetail extends TicketList {
   sla_paused_at: string | null;
   sla_paused_seconds: number;
   sla_first_breached_at: string | null;
+  // Sprint 23B — staff currently assigned via TicketStaffAssignment.
+  // Empty array means no one is assigned (existing Sprint 22
+  // single-assignee `assigned_to` is the legacy "primary
+  // assignee" and remains the field the assign-dropdown writes).
+  assigned_staff: AssignedStaffEntry[];
+}
+
+// Sprint 23B — Staff-initiated "I want to do this work" request.
+export type StaffAssignmentRequestStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export interface StaffAssignmentRequest {
+  id: number;
+  staff: number;
+  staff_email: string;
+  ticket: number;
+  ticket_no: string | null;
+  ticket_title: string;
+  status: StaffAssignmentRequestStatus;
+  requested_at: string;
+  reviewed_by: number | null;
+  reviewer_email: string | null;
+  reviewed_at: string | null;
+  reviewer_note: string;
 }
 
 export interface TicketMessage {
@@ -245,6 +291,12 @@ export interface CustomerAdmin {
   phone: string;
   language: string;
   is_active: boolean;
+  // Sprint 23B — assigned-staff contact-visibility policy. Defaults
+  // True. The CustomerFormPage exposes these as three checkboxes
+  // for OSIUS Admin / Company Admin only.
+  show_assigned_staff_name: boolean;
+  show_assigned_staff_email: boolean;
+  show_assigned_staff_phone: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -260,6 +312,12 @@ export interface CustomerBuildingMembership {
 }
 
 // Sprint 14 — per-customer-user, per-building access grant.
+// Sprint 23A — per-building access role on the customer side.
+export type CustomerAccessRole =
+  | "CUSTOMER_USER"
+  | "CUSTOMER_LOCATION_MANAGER"
+  | "CUSTOMER_COMPANY_ADMIN";
+
 export interface CustomerUserBuildingAccess {
   id: number;
   membership_id: number;
@@ -267,6 +325,11 @@ export interface CustomerUserBuildingAccess {
   user_email: string;
   building_id: number;
   building_name: string;
+  // Sprint 23B — Sprint 23A fields surfaced read-only for the
+  // admin UI. Editing them is deferred to Sprint 23C.
+  access_role: CustomerAccessRole;
+  is_active: boolean;
+  permission_overrides: Record<string, boolean>;
   created_at: string;
 }
 

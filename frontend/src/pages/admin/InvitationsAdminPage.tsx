@@ -31,6 +31,7 @@ const ROLE_KEYS: Record<Role, string> = {
   SUPER_ADMIN: "common:roles.super_admin",
   COMPANY_ADMIN: "common:roles.company_admin",
   BUILDING_MANAGER: "common:roles.building_manager",
+  STAFF: "common:roles.staff",
   CUSTOMER_USER: "common:roles.customer_user",
 };
 

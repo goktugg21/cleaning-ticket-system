@@ -95,6 +95,9 @@ DEMO_EMAILS = (
     "sophie-admin-bright@bright-facilities.demo",
     "bram-manager-bright@bright-facilities.demo",
     "lotte-customer-bright@bright-facilities.demo",
+    # ---- Sprint 23B STAFF personas ----
+    "ahmet-staff-osius@b-amsterdam.demo",
+    "noah-staff-bright@bright-facilities.demo",
 
     # ---- Sprint 21 v1 (superseded by v2 but still rejected) ----
     "super@cleanops.demo",

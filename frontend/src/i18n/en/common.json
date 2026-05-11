@@ -403,5 +403,54 @@
   "api_error.network": "We can't reach the server. Check your connection and try again.",
   "api_error.unexpected": "Something unexpected happened. Please try again.",
 
-  "tickets.assigned_team_anonymous": "Assigned to the OSIUS team"
+  "tickets.assigned_team_anonymous": "Assigned to the OSIUS team",
+
+  "nav.staff_requests": "Staff requests",
+
+  "roles.staff": "Staff",
+
+  "access_role.customer_user": "Customer user",
+  "access_role.customer_location_manager": "Location manager",
+  "access_role.customer_company_admin": "Company admin",
+
+  "ticket_detail.assigned_staff_title": "Assigned OSIUS staff",
+  "ticket_detail.assigned_staff_empty": "No staff assigned yet.",
+  "ticket_detail.assigned_staff_role": "OSIUS field staff",
+  "ticket_detail.request_assignment": "Request assignment",
+  "ticket_detail.requesting_assignment": "Sending request…",
+  "ticket_detail.request_assignment_hint": "Ask an OSIUS manager to assign you to this ticket.",
+  "ticket_detail.request_assignment_success": "Request sent. A manager will review it shortly.",
+  "ticket_detail.request_assignment_already_pending": "You already have a pending request for this ticket.",
+
+  "staff_requests.title": "Staff assignment requests",
+  "staff_requests.subtitle_loading": "Loading requests…",
+  "staff_requests.count_one": "{{count}} request",
+  "staff_requests.count_other": "{{count}} requests",
+  "staff_requests.intro": "Staff request assignment to a ticket they are eligible to work on. Building managers and OSIUS admins review the queue here.",
+  "staff_requests.col_when": "Requested",
+  "staff_requests.col_staff": "Staff",
+  "staff_requests.col_ticket": "Ticket",
+  "staff_requests.col_status": "Status",
+  "staff_requests.col_actions": "Actions",
+  "staff_requests.status_pending": "Pending",
+  "staff_requests.status_approved": "Approved",
+  "staff_requests.status_rejected": "Rejected",
+  "staff_requests.status_cancelled": "Cancelled",
+  "staff_requests.filter_pending": "Pending",
+  "staff_requests.filter_all": "All",
+  "staff_requests.approve": "Approve",
+  "staff_requests.reject": "Reject",
+  "staff_requests.empty_title": "Nothing waiting for review",
+  "staff_requests.empty_desc": "Staff requests appear here when a field-staff member asks to be assigned to a ticket they have building visibility for.",
+  "staff_requests.empty_filtered_title": "No requests match your filters",
+  "staff_requests.empty_filtered_desc": "Switch to 'All' to see requests that have already been approved, rejected, or cancelled.",
+  "staff_requests.reviewing": "Reviewing…",
+  "staff_requests.reviewer_note_label": "Optional note for the requester",
+  "staff_requests.reviewer_note_placeholder": "e.g. assigned to the Tuesday crew",
+
+  "customer_form.contact_visibility_title": "Assigned-staff visibility for this customer",
+  "customer_form.contact_visibility_helper": "Choose what the customer’s users see about the OSIUS field staff assigned to their tickets. Switching everything off shows a generic “Assigned to the OSIUS team” label instead.",
+  "customer_form.show_assigned_staff_name": "Show staff name",
+  "customer_form.show_assigned_staff_email": "Show staff email",
+  "customer_form.show_assigned_staff_phone": "Show staff phone"
 }

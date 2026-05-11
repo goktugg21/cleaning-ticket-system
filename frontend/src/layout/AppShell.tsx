@@ -20,6 +20,16 @@ import { useAuth } from "../auth/AuthContext";
 import { useLanguageSync } from "../i18n/useLanguageSync";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+// Sprint 23B — the staff-assignment-request review queue is for
+// service-provider-side reviewers. Building managers also see it
+// (their own buildings only — backend queryset gate). STAFF and
+// CUSTOMER_USER never see the link; STAFF requests via the ticket
+// detail "Request assignment" button instead.
+const STAFF_REQUEST_REVIEW_ROLES = new Set([
+  "SUPER_ADMIN",
+  "COMPANY_ADMIN",
+  "BUILDING_MANAGER",
+]);
 const REPORTS_ROLES = new Set([
   "SUPER_ADMIN",
   "COMPANY_ADMIN",
@@ -192,6 +202,22 @@ export function AppShell({ children }: AppShellProps) {
                 </NavLink>
               )}
             </>
+          )}
+
+          {/* Sprint 23B — staff assignment requests review queue.
+              Visible to SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER.
+              The backend viewset returns no rows for CUSTOMER_USER
+              (the link is hidden anyway since this nav block lives
+              outside STAFF_ROLES). Building managers see the link
+              even though they don't see the rest of the admin
+              group — they need this one queue. */}
+          {me?.role && STAFF_REQUEST_REVIEW_ROLES.has(me.role) && (
+            <NavLink to="/admin/staff-assignment-requests" className={navClass}>
+              <span className="nav-icon">
+                <ClipboardList size={16} strokeWidth={2} />
+              </span>
+              {t("nav.staff_requests")}
+            </NavLink>
           )}
         </nav>
 

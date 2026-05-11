@@ -70,6 +70,15 @@ export function CustomerFormPage() {
   const [contactEmail, setContactEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [language, setLanguage] = useState("nl");
+  // Sprint 23B — assigned-staff contact visibility policy. Defaults
+  // mirror the backend model defaults (all True). The backend gate
+  // is IsSuperAdminOrCompanyAdmin on CustomerViewSet; the buildings
+  // serializer surfaces these as writable, so OSIUS Admin and the
+  // owning Company Admin can edit them here. CUSTOMER_USER never
+  // reaches this page.
+  const [showAssignedStaffName, setShowAssignedStaffName] = useState(true);
+  const [showAssignedStaffEmail, setShowAssignedStaffEmail] = useState(true);
+  const [showAssignedStaffPhone, setShowAssignedStaffPhone] = useState(true);
 
   const form = useEntityForm<CustomerAdmin, CustomerWritePayload>({
     id,
@@ -89,6 +98,9 @@ export function CustomerFormPage() {
         contact_email: contactEmail.trim(),
         phone: phone.trim(),
         language,
+        show_assigned_staff_name: showAssignedStaffName,
+        show_assigned_staff_email: showAssignedStaffEmail,
+        show_assigned_staff_phone: showAssignedStaffPhone,
       };
       if (isCreate) {
         if (company !== "") payload.company = Number(company);
@@ -104,6 +116,14 @@ export function CustomerFormPage() {
       setContactEmail(entity.contact_email);
       setPhone(entity.phone);
       setLanguage(entity.language);
+      // Sprint 23B — hydrate contact-visibility flags. Backend
+      // ensures these are always present on read responses (model
+      // defaults are True), so the `?? true` is belt-and-suspenders
+      // for any pre-Sprint-23A customer record that somehow lacks
+      // them in a serialized snapshot.
+      setShowAssignedStaffName(entity.show_assigned_staff_name ?? true);
+      setShowAssignedStaffEmail(entity.show_assigned_staff_email ?? true);
+      setShowAssignedStaffPhone(entity.show_assigned_staff_phone ?? true);
     },
     successPath: (entity) => `/admin/customers/${entity.id}?saved=ok`,
     onEditSuccess: () => setSavedBanner(t("customers.banner_saved")),
@@ -704,6 +724,79 @@ export function CustomerFormPage() {
           </div>
 
           </div>
+          {/* Sprint 23B — Assigned-staff contact-visibility policy.
+              Default True; toggling off scrubs the corresponding
+              field from the ticket-detail payload that CUSTOMER_USER
+              receives. Other roles always see full staff contact
+              info regardless of these toggles. */}
+          <div className="form-section" data-testid="contact-visibility-section">
+            <div className="form-section-title">
+              {t("customer_form.contact_visibility_title")}
+            </div>
+            <div className="form-section-helper">
+              {t("customer_form.contact_visibility_helper")}
+            </div>
+            <div className="field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={showAssignedStaffName}
+                  onChange={(event) =>
+                    setShowAssignedStaffName(event.target.checked)
+                  }
+                  data-testid="show-assigned-staff-name"
+                />
+                <span>{t("customer_form.show_assigned_staff_name")}</span>
+              </label>
+            </div>
+            <div className="field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={showAssignedStaffEmail}
+                  onChange={(event) =>
+                    setShowAssignedStaffEmail(event.target.checked)
+                  }
+                  data-testid="show-assigned-staff-email"
+                />
+                <span>{t("customer_form.show_assigned_staff_email")}</span>
+              </label>
+            </div>
+            <div className="field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={showAssignedStaffPhone}
+                  onChange={(event) =>
+                    setShowAssignedStaffPhone(event.target.checked)
+                  }
+                  data-testid="show-assigned-staff-phone"
+                />
+                <span>{t("customer_form.show_assigned_staff_phone")}</span>
+              </label>
+            </div>
+          </div>
           <div className="form-actions">
             {!isCreate && customer && customer.is_active && (
               <button
@@ -892,42 +985,69 @@ export function CustomerFormPage() {
                               marginBottom: 6,
                             }}
                           >
-                            {userAccess.map((access) => (
-                              <span
-                                key={access.id}
-                                className="badge badge-pill"
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 6,
-                                  padding: "2px 8px",
-                                  background: "var(--surface-2)",
-                                  border: "1px solid var(--border)",
-                                  borderRadius: 999,
-                                  fontSize: 12,
-                                }}
-                              >
-                                {access.building_name}
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-xs"
+                            {userAccess.map((access) => {
+                              // Sprint 23B — surface access_role
+                              // and is_active read-only inline.
+                              // Editing is deferred to Sprint 23C
+                              // (overrides UI is non-trivial); for
+                              // now reviewers see the persisted
+                              // state and can revoke + re-grant
+                              // to change role via the future UI.
+                              const roleKey =
+                                access.access_role === "CUSTOMER_COMPANY_ADMIN"
+                                  ? "access_role.customer_company_admin"
+                                  : access.access_role ===
+                                      "CUSTOMER_LOCATION_MANAGER"
+                                    ? "access_role.customer_location_manager"
+                                    : "access_role.customer_user";
+                              return (
+                                <span
+                                  key={access.id}
+                                  className="badge badge-pill"
+                                  data-testid="customer-access-badge"
                                   style={{
-                                    height: 18,
-                                    padding: "0 6px",
-                                    fontSize: 11,
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                    padding: "2px 8px",
+                                    background: access.is_active === false
+                                      ? "var(--surface-3, var(--surface-2))"
+                                      : "var(--surface-2)",
+                                    border: "1px solid var(--border)",
+                                    borderRadius: 999,
+                                    fontSize: 12,
+                                    opacity: access.is_active === false ? 0.6 : 1,
                                   }}
-                                  onClick={() =>
-                                    openRevokeAccessDialog(membership, access)
-                                  }
-                                  disabled={isThisUserBusy}
-                                  aria-label={t(
-                                    "customer_form.access_remove_button",
-                                  )}
                                 >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
+                                  <span>{access.building_name}</span>
+                                  <span
+                                    className="muted"
+                                    style={{ fontSize: 11 }}
+                                    data-testid="customer-access-role"
+                                  >
+                                    · {t(roleKey)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-xs"
+                                    style={{
+                                      height: 18,
+                                      padding: "0 6px",
+                                      fontSize: 11,
+                                    }}
+                                    onClick={() =>
+                                      openRevokeAccessDialog(membership, access)
+                                    }
+                                    disabled={isThisUserBusy}
+                                    aria-label={t(
+                                      "customer_form.access_remove_button",
+                                    )}
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              );
+                            })}
                           </div>
                         )}
                         <div style={{ display: "flex", gap: 6 }}>

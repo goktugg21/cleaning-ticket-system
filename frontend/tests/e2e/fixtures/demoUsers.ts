@@ -27,6 +27,7 @@ export interface DemoUser {
     | "SUPER_ADMIN"
     | "COMPANY_ADMIN"
     | "BUILDING_MANAGER"
+    | "STAFF"
     | "CUSTOMER_USER";
   // Buildings the user has access to (manager assignment OR per-customer
   // building access for customer users). Used by the scope tests to
@@ -106,6 +107,17 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     fullName: "Amanda",
     company: "A",
   },
+  // Sprint 23B — Osius field staff (STAFF role). Has
+  // BuildingStaffVisibility on every Osius building so the
+  // "Request assignment" demo flow can fire on any Osius ticket.
+  staffOsius: {
+    email: "ahmet-staff-osius@b-amsterdam.demo",
+    password: DEMO_PASSWORD,
+    role: "STAFF",
+    buildings: COMPANY_A_BUILDINGS,
+    fullName: "Ahmet Yıldız",
+    company: "A",
+  },
 
   // ----- Company B — Bright Facilities -----
   companyAdminB: {
@@ -130,6 +142,18 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     role: "CUSTOMER_USER",
     buildings: COMPANY_B_BUILDINGS,
     fullName: "Lotte Visser",
+    company: "B",
+  },
+  // Sprint 23B — Bright field staff (STAFF role). Proves cross-
+  // company isolation also applies to STAFF: this user cannot
+  // reach Osius tickets even with BuildingStaffVisibility on
+  // every R-building.
+  staffBright: {
+    email: "noah-staff-bright@bright-facilities.demo",
+    password: DEMO_PASSWORD,
+    role: "STAFF",
+    buildings: COMPANY_B_BUILDINGS,
+    fullName: "Noah Bakker",
     company: "B",
   },
 };

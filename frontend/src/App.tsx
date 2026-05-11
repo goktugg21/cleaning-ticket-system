@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AdminRoute } from "./components/AdminRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
+import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
@@ -21,6 +22,7 @@ import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
+import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserFormPage } from "./pages/admin/UserFormPage";
 import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 
@@ -196,6 +198,18 @@ export default function App() {
               <SuperAdminRoute>
                 <AuditLogsAdminPage />
               </SuperAdminRoute>
+            }
+          />
+          {/* Sprint 23B — staff assignment request review queue.
+              StaffRequestReviewRoute admits SUPER_ADMIN, COMPANY_ADMIN,
+              AND BUILDING_MANAGER (the latter is invisible to the rest
+              of the admin nav, but needs this single queue). */}
+          <Route
+            path="/admin/staff-assignment-requests"
+            element={
+              <StaffRequestReviewRoute>
+                <StaffAssignmentRequestsAdminPage />
+              </StaffRequestReviewRoute>
             }
           />
           <Route
