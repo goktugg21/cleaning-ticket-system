@@ -401,5 +401,7 @@
   "api_error.too_many_requests": "Too many requests in a short time. Please wait a moment and try again.",
   "api_error.server_unavailable": "The server is having trouble right now. Please try again in a few seconds.",
   "api_error.network": "We can't reach the server. Check your connection and try again.",
-  "api_error.unexpected": "Something unexpected happened. Please try again."
+  "api_error.unexpected": "Something unexpected happened. Please try again.",
+
+  "tickets.assigned_team_anonymous": "Assigned to the OSIUS team"
 }

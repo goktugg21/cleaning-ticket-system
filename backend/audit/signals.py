@@ -35,7 +35,11 @@ import threading
 
 from django.db.models.signals import post_delete, post_save, pre_save
 
-from buildings.models import Building, BuildingManagerAssignment
+from buildings.models import (
+    Building,
+    BuildingManagerAssignment,
+    BuildingStaffVisibility,
+)
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Customer,
@@ -43,6 +47,7 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from tickets.models import StaffAssignmentRequest, TicketStaffAssignment
 
 from . import context
 from .diff import (
@@ -334,15 +339,67 @@ def _on_customer_building_link_post_delete(sender, instance, **kwargs):
         )
 
 
-def _on_customer_user_access_post_save(sender, instance, created, **kwargs):
-    if not created:
-        return
+# Sprint 23A: per-instance UPDATE diffing for the editable fields on
+# CustomerUserBuildingAccess. The identity fields (membership/building)
+# are not mutable through the admin UI — they belong to the CREATE/
+# DELETE shape captured by `_customer_user_access_changes`. The
+# trio of mutable fields below is captured separately so an UPDATE
+# log records only what actually changed.
+_CUBA_TRACKED_FIELDS = ("access_role", "permission_overrides", "is_active")
+
+
+def _cuba_snapshot_for_pre_save(instance):
+    """Snapshot only the Sprint 23A editable fields."""
+    if instance.pk is None:
+        return None
+    from customers.models import CustomerUserBuildingAccess
+
     try:
-        _create_log(
-            instance,
-            AuditAction.CREATE,
-            _customer_user_access_changes(instance, action=AuditAction.CREATE),
+        previous = CustomerUserBuildingAccess.objects.get(pk=instance.pk)
+    except CustomerUserBuildingAccess.DoesNotExist:
+        return None
+    return {field: getattr(previous, field) for field in _CUBA_TRACKED_FIELDS}
+
+
+def _on_customer_user_access_pre_save(sender, instance, **kwargs):
+    """Snapshot the pre-update state so post_save can diff it."""
+    try:
+        snapshot = _cuba_snapshot_for_pre_save(instance)
+        _state_map()[("customers.CustomerUserBuildingAccess", instance.pk)] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerUserBuildingAccess pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
         )
+
+
+def _on_customer_user_access_post_save(sender, instance, created, **kwargs):
+    try:
+        if created:
+            _create_log(
+                instance,
+                AuditAction.CREATE,
+                _customer_user_access_changes(instance, action=AuditAction.CREATE),
+            )
+            return
+        # Sprint 23A: log UPDATE when any of the editable trio
+        # (access_role / permission_overrides / is_active) changed.
+        snapshot = _state_map().pop(
+            ("customers.CustomerUserBuildingAccess", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _CUBA_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = getattr(instance, field)
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            # Nothing tracked changed (e.g. only a downstream save
+            # rewrote created_at-only context). Suppress noise.
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
     except Exception:  # pragma: no cover — defensive
         logger.exception(
             "audit: CustomerUserBuildingAccess post_save failed for #%s",
@@ -366,7 +423,23 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
 
 def _connect():
     User = _user_model()
-    for model in (User, Company, Building, Customer):
+    # Lazy import: StaffProfile lives in accounts and would create a
+    # circular import at module-load time if pulled at the top of
+    # this file (accounts.signals → audit.signals → accounts.models
+    # via _user_model).
+    from accounts.models import StaffProfile
+
+    # Full CRUD trio — models with editable fields and meaningful
+    # UPDATE diffs. Sprint 23A adds StaffProfile and
+    # StaffAssignmentRequest here.
+    for model in (
+        User,
+        Company,
+        Building,
+        Customer,
+        StaffProfile,
+        StaffAssignmentRequest,
+    ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
         post_delete.connect(_on_post_delete, sender=model, weak=False, dispatch_uid=f"audit:del:{model.__name__}")
@@ -374,6 +447,13 @@ def _connect():
         CompanyUserMembership,
         BuildingManagerAssignment,
         CustomerUserMembership,
+        # Sprint 23A — staff visibility + multi-staff ticket
+        # assignment use the same lightweight CREATE/DELETE shape
+        # as the other membership tables. StaffProfile uses the
+        # full CRUD trio (see below) because it has editable
+        # fields.
+        BuildingStaffVisibility,
+        TicketStaffAssignment,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).
@@ -405,6 +485,16 @@ def _connect():
         sender=CustomerBuildingMembership,
         weak=False,
         dispatch_uid="audit:customer_building:del:CustomerBuildingMembership",
+    )
+    # Sprint 23A: pre_save snapshot is required so post_save can
+    # emit a meaningful UPDATE log for access_role / permission_
+    # overrides / is_active mutations. CREATE / DELETE shapes are
+    # unchanged and still go through the dedicated handlers above.
+    pre_save.connect(
+        _on_customer_user_access_pre_save,
+        sender=CustomerUserBuildingAccess,
+        weak=False,
+        dispatch_uid="audit:customer_access:pre:CustomerUserBuildingAccess",
     )
     post_save.connect(
         _on_customer_user_access_post_save,

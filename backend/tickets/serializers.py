@@ -151,6 +151,12 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     sla_is_paused = serializers.SerializerMethodField()
     sla_remaining_business_seconds = serializers.SerializerMethodField()
     sla_display_state = serializers.SerializerMethodField()
+    # Sprint 23A — list of staff currently assigned to the ticket
+    # via TicketStaffAssignment. For a CUSTOMER_USER caller, the
+    # output is gated through Customer.show_assigned_staff_*
+    # flags so the customer never sees fields the policy hides.
+    # See _assigned_staff_payload() below.
+    assigned_staff = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -172,6 +178,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "created_by_email",
             "assigned_to",
             "assigned_to_email",
+            "assigned_staff",
             "created_at",
             "updated_at",
             "first_response_at",
@@ -209,6 +216,59 @@ class TicketDetailSerializer(serializers.ModelSerializer):
 
     def get_sla_display_state(self, obj):
         return _sla_display_state(obj)
+
+    def get_assigned_staff(self, obj):
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        return _assigned_staff_payload(obj, viewer)
+
+
+def _assigned_staff_payload(ticket, viewer):
+    """
+    Sprint 23A — render the list of staff assigned to a ticket
+    through the customer's contact-visibility policy.
+
+    For OSIUS-side viewers (SUPER_ADMIN / COMPANY_ADMIN /
+    BUILDING_MANAGER / STAFF) the full record is always returned —
+    those roles need name/email/phone to coordinate work.
+
+    For CUSTOMER_USER viewers the Customer.show_assigned_staff_*
+    flags act as filters. If all three flags are False the payload
+    collapses to a single anonymous label key the frontend renders
+    as "Assigned to the OSIUS team" (locale: en) /
+    "Toegewezen aan het OSIUS-team" (locale: nl).
+    """
+    assignments = list(
+        ticket.staff_assignments.select_related("user", "user__staff_profile")
+        .order_by("assigned_at")
+    )
+    if not assignments:
+        return []
+
+    is_customer = getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+    customer = ticket.customer
+    if is_customer:
+        show_name = bool(customer.show_assigned_staff_name)
+        show_email = bool(customer.show_assigned_staff_email)
+        show_phone = bool(customer.show_assigned_staff_phone)
+        if not (show_name or show_email or show_phone):
+            return [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}]
+    else:
+        show_name = show_email = show_phone = True
+
+    out = []
+    for a in assignments:
+        user = a.user
+        entry = {"id": user.id}
+        if show_name:
+            entry["full_name"] = user.full_name or user.email.split("@")[0]
+        if show_email:
+            entry["email"] = user.email
+        if show_phone:
+            profile = getattr(user, "staff_profile", None)
+            entry["phone"] = profile.phone if profile else ""
+        out.append(entry)
+    return out
 
 
 class TicketCreateSerializer(serializers.ModelSerializer):
@@ -284,6 +344,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
         if user.role == UserRole.CUSTOMER_USER:
             from customers.models import CustomerUserMembership
+            from customers.permissions import access_has_permission
 
             membership = CustomerUserMembership.objects.filter(
                 user=user, customer_id=customer.id
@@ -292,17 +353,53 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"customer": "You are not linked to this customer."}
                 )
+
             # Sprint 14: customer-users must additionally have building
             # access for the (customer, building) pair. A user with
             # access to B3 only cannot create a ticket for B1, even if
             # the customer is linked to both.
-            if not CustomerUserBuildingAccess.objects.filter(
+            #
+            # Sprint 23A (corrected before PR #50): the access row
+            # must be ACTIVE, and the resolved permission for the
+            # `customer.ticket.create` key must be True. An inactive
+            # row resolves every key to False (handled inside
+            # access_has_permission), so a single `if not allowed`
+            # test below is enough.
+            #
+            # CUSTOMER_COMPANY_ADMIN spans buildings: an admin holding
+            # an active access row at ANY building of the customer
+            # whose role/override grants `customer.ticket.create`
+            # may create at any other building of the same customer.
+            pair_access = CustomerUserBuildingAccess.objects.filter(
                 membership=membership, building_id=building.id
-            ).exists():
-                raise serializers.ValidationError(
-                    {"building": "You do not have access to this building under this customer."}
-                )
-            return attrs
+            ).first()
+            if pair_access is not None and access_has_permission(
+                pair_access, "customer.ticket.create"
+            ):
+                return attrs
+
+            company_admin_access = CustomerUserBuildingAccess.objects.filter(
+                membership=membership,
+                is_active=True,
+                access_role=(
+                    CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+                ),
+            ).first()
+            if company_admin_access is not None and access_has_permission(
+                company_admin_access, "customer.ticket.create"
+            ):
+                return attrs
+
+            # No active pair-access row, OR override revokes create,
+            # OR access role doesn't grant create — block.
+            raise serializers.ValidationError(
+                {
+                    "building": (
+                        "You do not have permission to create a ticket at "
+                        "this location."
+                    )
+                }
+            )
 
         raise serializers.ValidationError("You do not have permission to create tickets.")
 

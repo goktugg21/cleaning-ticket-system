@@ -120,8 +120,20 @@ class TicketSoftDeletePermissionTests(_TicketDeleteBase):
         # Sprint 14: sibling needs explicit per-building access on top
         # of the customer membership; without it the queryset gate
         # returns 404 before the role gate can fire 403.
+        #
+        # Sprint 23A: a default-role CUSTOMER_USER now only sees
+        # tickets they CREATED. To keep this test's intent
+        # ("visible but not deletable for a non-creator") meaningful,
+        # we grant the sibling the LOCATION_MANAGER access role
+        # which restores pair-wide visibility. The 403 below then
+        # fires from the soft-delete creator-only rule, not from
+        # the scope helper.
         CustomerUserBuildingAccess.objects.create(
-            membership=sibling_membership, building=self.building
+            membership=sibling_membership,
+            building=self.building,
+            access_role=(
+                CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+            ),
         )
 
         self.authenticate(sibling)

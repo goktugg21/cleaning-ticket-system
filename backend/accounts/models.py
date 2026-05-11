@@ -8,6 +8,11 @@ class UserRole(models.TextChoices):
     SUPER_ADMIN = "SUPER_ADMIN", "Super Admin"
     COMPANY_ADMIN = "COMPANY_ADMIN", "Company Admin"
     BUILDING_MANAGER = "BUILDING_MANAGER", "Building Manager"
+    # Sprint 23A: service-provider-side field staff. Sees tickets
+    # they are assigned to via TicketStaffAssignment; also sees
+    # tickets in any building where they hold a
+    # BuildingStaffVisibility row.
+    STAFF = "STAFF", "Staff"
     CUSTOMER_USER = "CUSTOMER_USER", "Customer User"
 
 
@@ -94,6 +99,38 @@ class User(AbstractUser):
         self.deleted_at = timezone.now()
         self.deleted_by = deleted_by
         self.save(update_fields=["is_active", "deleted_at", "deleted_by"])
+
+
+class StaffProfile(models.Model):
+    """
+    Sprint 23A — extended profile for service-provider field staff.
+
+    One-to-one with User where User.role == UserRole.STAFF. Holds
+    contact details that customers may or may not see (gated by
+    Customer.show_assigned_staff_* flags) and an internal note the
+    OSIUS admin can use for scheduling notes etc.
+
+    `is_active=False` disables the staff member without removing
+    audit history. `can_request_assignment` is a per-staff flag
+    that gates the "I want to do this work" flow; it can also be
+    revoked per-building via BuildingStaffVisibility.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="staff_profile",
+    )
+    phone = models.CharField(max_length=64, blank=True)
+    internal_note = models.TextField(blank=True)
+    can_request_assignment = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"StaffProfile<{self.user.email}>"
 
 
 class LoginLog(models.Model):
