@@ -238,7 +238,7 @@ export function UsersAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
+        <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -297,28 +297,85 @@ export function UsersAdminPage() {
               })}
             </tbody>
           </table>
-
-          {!loading && visibleUsers.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">＋</div>
-              <div className="empty-title">
-                {hasActiveFilters
-                  ? t("users.empty_filtered_title")
-                  : t("users.empty_initial_title")}
-              </div>
-              <p className="empty-sub">
-                {hasActiveFilters
-                  ? t("admin.empty_filtered_desc")
-                  : t("users.empty_initial_desc")}
-              </p>
-              {!hasActiveFilters && (
-                <Link className="btn btn-primary btn-sm" to="/admin/invitations">
-                  {t("users.invite_user")}
-                </Link>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Sprint 22 final polish: phone-width parallel card list. */}
+        <ul
+          className="admin-card-list"
+          data-testid="admin-card-list"
+          aria-label={t("nav.users")}
+        >
+          {visibleUsers.map((user) => {
+            const editPath = `/admin/users/${user.id}`;
+            return (
+              <li key={user.id} className="admin-card">
+                <Link
+                  to={editPath}
+                  className="admin-card-link"
+                  aria-label={`${t("admin.edit")}: ${user.email}`}
+                  data-testid="admin-user-card"
+                  data-role={user.role}
+                >
+                  <div className="admin-card-head">
+                    <span className="admin-card-title">{user.email}</span>
+                    <span
+                      className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
+                    >
+                      <i />
+                      {user.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
+                    </span>
+                  </div>
+                  <dl className="admin-card-meta">
+                    {user.full_name && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("users.col_full_name")}</dt>
+                        <dd>{user.full_name}</dd>
+                      </div>
+                    )}
+                    <div className="admin-card-meta-row">
+                      <dt>{t("users.col_role")}</dt>
+                      <dd>
+                        {t(ROLE_KEYS[user.role] ?? "common:roles.fallback")}
+                      </dd>
+                    </div>
+                    <div className="admin-card-meta-row">
+                      <dt>{t("users.col_language")}</dt>
+                      <dd>{user.language}</dd>
+                    </div>
+                  </dl>
+                  <div className="admin-card-actions">
+                    <span className="btn btn-ghost btn-sm">
+                      {t("admin.edit")}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!loading && visibleUsers.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-icon">＋</div>
+            <div className="empty-title">
+              {hasActiveFilters
+                ? t("users.empty_filtered_title")
+                : t("users.empty_initial_title")}
+            </div>
+            <p className="empty-sub">
+              {hasActiveFilters
+                ? t("admin.empty_filtered_desc")
+                : t("users.empty_initial_desc")}
+            </p>
+            {!hasActiveFilters && (
+              <Link className="btn btn-primary btn-sm" to="/admin/invitations">
+                {t("users.invite_user")}
+              </Link>
+            )}
+          </div>
+        )}
 
         {(previous || next) && (
           <div className="pagination">

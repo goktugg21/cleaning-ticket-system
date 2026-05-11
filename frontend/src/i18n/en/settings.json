@@ -18,6 +18,7 @@
   "current_password_label": "Current password",
   "current_password_required": "Current password is required.",
   "new_password_label": "New password",
+  "password_requirements_hint": "Use at least 8 characters. Avoid very common or all-numeric passwords.",
   "new_password_required": "New password is required.",
   "new_password_too_short": "New password must be at least 8 characters.",
   "confirm_password_label": "Confirm new password",

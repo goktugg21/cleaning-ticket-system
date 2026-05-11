@@ -3195,3 +3195,142 @@ table.data-table {
     overflow-wrap: anywhere;
   }
 }
+
+/* ---------------------------------------------------------------- */
+/* Sprint 22 final mobile + copy polish — per-page mobile card list */
+/* for the 5 admin list pages (Companies / Buildings / Customers /  */
+/* Users / Audit logs). Same pattern as the Dashboard ticket cards: */
+/* desktop table stays in DOM and visible at ≥601 px; below 600 px  */
+/* the `.admin-list-wrap` hides and the parallel `.admin-card-list` */
+/* renders. No generic CSS table transform — each admin page emits  */
+/* an explicit mobile tree alongside its <table>. */
+/* ---------------------------------------------------------------- */
+.admin-card-list {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .admin-list-wrap {
+    display: none;
+  }
+
+  .admin-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    list-style: none;
+    margin: 0;
+  }
+
+  .admin-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    transition: border-color 0.14s, box-shadow 0.14s;
+  }
+  .admin-card:hover {
+    border-color: var(--green);
+    box-shadow: 0 6px 14px -8px rgba(11, 107, 66, 0.18);
+  }
+
+  .admin-card-link {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    color: inherit;
+    text-decoration: none;
+    min-height: 44px;
+  }
+  .admin-card-link:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: -2px;
+    border-radius: 10px;
+  }
+
+  .admin-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .admin-card-title {
+    font-family: var(--f-head);
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .admin-card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 4px 0 0;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border-soft);
+  }
+  .admin-card-meta-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12.5px;
+  }
+  .admin-card-meta-row dt {
+    color: var(--text-muted);
+    font-family: var(--f-head);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    flex: 0 0 auto;
+  }
+  .admin-card-meta-row dd {
+    margin: 0;
+    color: var(--text);
+    text-align: right;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .admin-card-actions {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .admin-card-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Audit-log Changes details disclosure inside the card: behave as
+     a normal block so the long JSON payload reads naturally. */
+  .admin-card details {
+    margin: 0;
+  }
+  .admin-card details > summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-family: var(--f-head);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .admin-card details > pre {
+    background: var(--bg-soft, #f7f7f7);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    max-height: 280px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-top: 6px;
+  }
+}

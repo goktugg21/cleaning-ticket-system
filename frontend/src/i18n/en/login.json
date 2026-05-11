@@ -33,6 +33,7 @@
   "reset_subtitle": "Choose a new password for your CleanOps account.",
   "reset_link_incomplete": "This password-reset link is incomplete. Request a new one from the sign-in page.",
   "reset_field_new_password": "New password",
+  "reset_password_requirements_hint": "Use at least 8 characters. Avoid very common or all-numeric passwords.",
   "reset_field_confirm_password": "Confirm new password",
   "reset_error_choose_password": "Choose a new password to continue.",
   "reset_error_passwords_dont_match": "The two passwords do not match.",

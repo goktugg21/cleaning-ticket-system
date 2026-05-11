@@ -399,6 +399,7 @@ export function AcceptInvitationPage() {
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
                     autoComplete="new-password"
+                    aria-describedby="invite-new-password-hint"
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
@@ -419,6 +420,17 @@ export function AcceptInvitationPage() {
                       <Eye size={16} strokeWidth={2} />
                     )}
                   </button>
+                </div>
+                <div
+                  id="invite-new-password-hint"
+                  style={{
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: "var(--text-muted)",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {t("accept_invitation.password_requirements_hint")}
                 </div>
                 {fieldErrors.new_password && (
                   <div className="alert-error login-error" role="alert">

@@ -277,7 +277,7 @@ export function AuditLogsAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
+        <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -353,32 +353,82 @@ export function AuditLogsAdminPage() {
               ))}
             </tbody>
           </table>
-
-          {!loading && logs.length === 0 && (
-            <div className="empty-state" data-testid="audit-empty">
-              <div className="empty-icon">·</div>
-              <div className="empty-title">
-                {hasActiveFilters
-                  ? t("audit_logs.empty_filtered_title")
-                  : t("audit_logs.empty_initial_title")}
-              </div>
-              <p className="empty-sub">
-                {hasActiveFilters
-                  ? t("audit_logs.empty_filtered_desc")
-                  : t("audit_logs.empty_initial_desc")}
-              </p>
-              {hasActiveFilters && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={clearFilters}
-                >
-                  {t("audit_logs.empty_clear")}
-                </button>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Sprint 22 final polish: phone-width parallel card list. */}
+        <ul
+          className="admin-card-list"
+          data-testid="admin-card-list"
+          aria-label={t("audit_logs.title")}
+        >
+          {logs.map((log) => (
+            <li key={log.id} className="admin-card" data-testid="audit-card">
+              <div className="admin-card-link" style={{ cursor: "default" }}>
+                <div className="admin-card-head">
+                  <span className="admin-card-title">
+                    {formatTimestamp(log.created_at)}
+                  </span>
+                  <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
+                    <i />
+                    {t(ACTION_LABEL_KEY[log.action])}
+                  </span>
+                </div>
+                <dl className="admin-card-meta">
+                  <div className="admin-card-meta-row">
+                    <dt>{t("audit_logs.col_actor")}</dt>
+                    <dd>
+                      {log.actor_email ?? t("audit_logs.system_actor")}
+                    </dd>
+                  </div>
+                  <div className="admin-card-meta-row">
+                    <dt>{t("audit_logs.col_target")}</dt>
+                    <dd style={{ fontFamily: "var(--f-mono, monospace)" }}>
+                      {log.target_model}#{log.target_id}
+                    </dd>
+                  </div>
+                  {(log.request_ip || log.request_id) && (
+                    <div className="admin-card-meta-row">
+                      <dt>{t("audit_logs.col_request")}</dt>
+                      <dd>
+                        {log.request_ip || "—"}
+                        {log.request_id ? ` · ${log.request_id}` : ""}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <details>
+                  <summary>{t("audit_logs.changes_summary")}</summary>
+                  <pre>{JSON.stringify(log.changes, null, 2)}</pre>
+                </details>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {!loading && logs.length === 0 && (
+          <div className="empty-state" data-testid="audit-empty">
+            <div className="empty-icon">·</div>
+            <div className="empty-title">
+              {hasActiveFilters
+                ? t("audit_logs.empty_filtered_title")
+                : t("audit_logs.empty_initial_title")}
+            </div>
+            <p className="empty-sub">
+              {hasActiveFilters
+                ? t("audit_logs.empty_filtered_desc")
+                : t("audit_logs.empty_initial_desc")}
+            </p>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={clearFilters}
+              >
+                {t("audit_logs.empty_clear")}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="pagination">
           <span className="pagination-info">

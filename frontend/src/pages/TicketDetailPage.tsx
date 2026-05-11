@@ -110,6 +110,24 @@ function getFileExtension(filename: string): string {
   return (parts.pop() || "FILE").slice(0, 4).toUpperCase();
 }
 
+// Sprint 22 final polish: status-history notes set by the seed
+// (`seed_demo_data → IN_PROGRESS`) and any other transition note
+// that contains a raw enum value or an internal marker string are
+// not meant to be shown to demo users. We strip them at render
+// time so the timeline reads cleanly. Operator-typed notes are
+// preserved verbatim.
+function sanitizeStatusNote(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  // Drop notes that start with `seed_demo_data` (or contain the
+  // legacy seed prefix anywhere). This matches the exact string
+  // the canonical seed writes via apply_transition(..., note=…).
+  if (/^seed_demo_data\b/i.test(trimmed)) return "";
+  if (/seed_demo_data\s*→/i.test(trimmed)) return "";
+  return trimmed;
+}
+
 
 export function TicketDetailPage() {
   const { id } = useParams();
@@ -584,7 +602,10 @@ export function TicketDetailPage() {
                             </span>
                           </>
                         )}
-                        {entry.note ? `. ${entry.note}` : "."}
+                        {(() => {
+                          const cleaned = sanitizeStatusNote(entry.note);
+                          return cleaned ? `. ${cleaned}` : ".";
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -1186,9 +1207,12 @@ export function TicketDetailPage() {
                       <div className="history-meta">
                         {item.changed_by_email} · {formatDate(item.created_at)}
                       </div>
-                      {item.note && (
-                        <div className="history-note">{item.note}</div>
-                      )}
+                      {(() => {
+                        const cleaned = sanitizeStatusNote(item.note);
+                        return cleaned ? (
+                          <div className="history-note">{cleaned}</div>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 ))

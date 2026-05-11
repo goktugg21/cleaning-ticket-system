@@ -344,6 +344,7 @@
   "accept_invitation.scope_buildings": "Buildings",
   "accept_invitation.scope_customers": "Customers",
   "accept_invitation.field_new_password": "Choose a password",
+  "accept_invitation.password_requirements_hint": "Use at least 8 characters. Avoid very common or all-numeric passwords.",
   "accept_invitation.field_confirm_password": "Confirm password",
   "accept_invitation.aria_show_password": "Show password",
   "accept_invitation.aria_hide_password": "Hide password",

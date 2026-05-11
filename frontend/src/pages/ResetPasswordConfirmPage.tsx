@@ -155,6 +155,7 @@ export function ResetPasswordConfirmPage() {
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
                 autoComplete="new-password"
+                aria-describedby="reset-new-password-hint"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -171,6 +172,17 @@ export function ResetPasswordConfirmPage() {
                   <Eye size={16} strokeWidth={2} />
                 )}
               </button>
+            </div>
+            <div
+              id="reset-new-password-hint"
+              style={{
+                marginTop: 6,
+                fontSize: 12,
+                color: "var(--text-muted)",
+                lineHeight: 1.4,
+              }}
+            >
+              {t("reset_password_requirements_hint")}
             </div>
             {fieldErrors.new_password && (
               <div className="alert-error login-error" role="alert">

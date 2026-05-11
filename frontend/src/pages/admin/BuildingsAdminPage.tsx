@@ -244,7 +244,7 @@ export function BuildingsAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
+        <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -306,28 +306,84 @@ export function BuildingsAdminPage() {
               })}
             </tbody>
           </table>
-
-          {!loading && buildings.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">＋</div>
-              <div className="empty-title">
-                {hasActiveFilters
-                  ? t("buildings.empty_filtered_title")
-                  : t("buildings.empty_initial_title")}
-              </div>
-              <p className="empty-sub">
-                {hasActiveFilters
-                  ? t("admin.empty_filtered_desc")
-                  : t("buildings.empty_initial_desc")}
-              </p>
-              {!hasActiveFilters && (
-                <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
-                  {t("buildings.create")}
-                </Link>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Sprint 22 final polish: phone-width parallel card list. */}
+        <ul
+          className="admin-card-list"
+          data-testid="admin-card-list"
+          aria-label={t("nav.buildings")}
+        >
+          {buildings.map((building) => {
+            const editPath = `/admin/buildings/${building.id}`;
+            const address = [building.city, building.postal_code]
+              .filter(Boolean)
+              .join(" ");
+            return (
+              <li key={building.id} className="admin-card">
+                <Link
+                  to={editPath}
+                  className="admin-card-link"
+                  aria-label={`${t("admin.edit")}: ${building.name}`}
+                >
+                  <div className="admin-card-head">
+                    <span className="admin-card-title">{building.name}</span>
+                    <span
+                      className={`cell-tag cell-tag-${building.is_active ? "open" : "closed"}`}
+                    >
+                      <i />
+                      {building.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
+                    </span>
+                  </div>
+                  <dl className="admin-card-meta">
+                    <div className="admin-card-meta-row">
+                      <dt>{t("company")}</dt>
+                      <dd>{companyName(building.company)}</dd>
+                    </div>
+                    {address && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("admin.col_address")}</dt>
+                        <dd>{address}</dd>
+                      </div>
+                    )}
+                    <div className="admin-card-meta-row">
+                      <dt>{t("created")}</dt>
+                      <dd>{formatDate(building.created_at, dateLocale)}</dd>
+                    </div>
+                  </dl>
+                  <div className="admin-card-actions">
+                    <span className="btn btn-ghost btn-sm">
+                      {t("admin.edit")}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!loading && buildings.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-icon">＋</div>
+            <div className="empty-title">
+              {hasActiveFilters
+                ? t("buildings.empty_filtered_title")
+                : t("buildings.empty_initial_title")}
+            </div>
+            <p className="empty-sub">
+              {hasActiveFilters
+                ? t("admin.empty_filtered_desc")
+                : t("buildings.empty_initial_desc")}
+            </p>
+            {!hasActiveFilters && (
+              <Link className="btn btn-primary btn-sm" to="/admin/buildings/new">
+                {t("buildings.create")}
+              </Link>
+            )}
+          </div>
+        )}
 
         {(previous || next) && (
           <div className="pagination">

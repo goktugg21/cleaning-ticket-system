@@ -344,6 +344,7 @@
   "accept_invitation.scope_buildings": "Gebouwen",
   "accept_invitation.scope_customers": "Klanten",
   "accept_invitation.field_new_password": "Kies een wachtwoord",
+  "accept_invitation.password_requirements_hint": "Gebruik minimaal 8 tekens. Vermijd veelgebruikte of volledig numerieke wachtwoorden.",
   "accept_invitation.field_confirm_password": "Bevestig wachtwoord",
   "accept_invitation.aria_show_password": "Toon wachtwoord",
   "accept_invitation.aria_hide_password": "Verberg wachtwoord",

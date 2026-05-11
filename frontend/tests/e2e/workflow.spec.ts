@@ -98,6 +98,28 @@ test("Building manager sees no Approve/Reject on a WAITING_CUSTOMER_APPROVAL tic
   }
 });
 
+test("ticket detail timeline does NOT leak seed_demo_data internal note", async ({
+  page,
+}) => {
+  // Sprint 22 final mobile + copy polish: the canonical seed writes
+  // `note=f"seed_demo_data → {stop}"` on every transition row it
+  // walks through. `sanitizeStatusNote()` on TicketDetailPage filters
+  // those out at render time so demo users never see the marker. Pick
+  // the [DEMO] Closed kitchen tap ticket — it walks through 4
+  // transitions, so every history row's note is populated.
+  await loginAs(page, DEMO_USERS.companyAdmin);
+  await page.waitForLoadState("networkidle");
+  const row = page
+    .locator(".data-table tbody tr", { hasText: "kitchen tap" })
+    .first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.locator("a.td-id").click();
+  const timeline = page.locator(".timeline").first();
+  await expect(timeline).toBeVisible({ timeout: 10_000 });
+  const text = (await timeline.textContent()) ?? "";
+  expect(text).not.toContain("seed_demo_data");
+});
+
 test("Super admin sees REOPENED_BY_ADMIN button on a CLOSED ticket", async ({
   page,
 }) => {

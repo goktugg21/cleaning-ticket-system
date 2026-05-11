@@ -240,8 +240,12 @@ test("390px: admin users page is readable for SUPER_ADMIN", async ({
   await page.setViewportSize(MOBILE_390);
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/admin/users");
+  // Sprint 22 final mobile + copy polish: below 600px the desktop
+  // `.data-table` is `display: none` and the parallel
+  // `[data-testid="admin-card-list"]` of `.admin-card` items is
+  // visible instead. Assert against the card list directly.
   await expect(
-    page.locator(".data-table tbody tr").first(),
+    page.locator('[data-testid="admin-card-list"] .admin-card').first(),
   ).toBeVisible({ timeout: 10_000 });
   await expectNoBodyHorizontalOverflow(page, MOBILE_390.width);
 });
@@ -255,10 +259,12 @@ test("390px: /admin/audit-logs renders for SUPER_ADMIN without page overflow", a
   await expect(
     page.locator('[data-testid="audit-logs-page"]'),
   ).toBeVisible({ timeout: 10_000 });
-  // Either at least one audit row or the empty-state card mounts.
-  const rows = page.locator('[data-testid="audit-row"]');
+  // Either at least one audit card (mobile) or the empty-state card
+  // mounts. `[data-testid="audit-row"]` (the desktop <tr>) is hidden
+  // at 390px under the new card list; check the card instead.
+  const cards = page.locator('[data-testid="audit-card"]');
   const empty = page.locator('[data-testid="audit-empty"]');
-  await expect(rows.first().or(empty)).toBeVisible({ timeout: 10_000 });
+  await expect(cards.first().or(empty)).toBeVisible({ timeout: 10_000 });
   await expectNoBodyHorizontalOverflow(page, MOBILE_390.width);
 });
 
@@ -635,8 +641,16 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
     // not enough rows, the empty/footer area is still the last block
     // — pick the last child of the .card so the test is robust to
     // either case.
+    //
+    // Sprint 22 final mobile + copy polish: at phone widths the
+    // desktop `.table-wrap` is `display: none`; the visible
+    // last-content block is the mobile `.admin-card-list` or the
+    // pagination row below it. Include it in the selector so the
+    // last-block lookup keeps working at 360/430.
     const lastBlock = page
-      .locator(".card .table-wrap, .card .pagination, .card .empty-state")
+      .locator(
+        ".card .table-wrap, .card .admin-card-list, .card .pagination, .card .empty-state",
+      )
       .last();
     await expect(lastBlock).toBeAttached({ timeout: 10_000 });
     await scrollDocumentToBottom(page);

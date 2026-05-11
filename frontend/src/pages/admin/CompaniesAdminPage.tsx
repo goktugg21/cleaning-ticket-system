@@ -192,7 +192,7 @@ export function CompaniesAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
+        <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -252,30 +252,84 @@ export function CompaniesAdminPage() {
               })}
             </tbody>
           </table>
-
-          {!loading && companies.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">＋</div>
-              <div className="empty-title">
-                {hasActiveFilters
-                  ? t("companies.empty_filtered_title")
-                  : t("companies.empty_initial_title")}
-              </div>
-              <p className="empty-sub">
-                {hasActiveFilters
-                  ? t("admin.empty_filtered_desc")
-                  : isSuperAdmin
-                    ? t("companies.empty_initial_desc_admin")
-                    : t("companies.empty_initial_desc_other")}
-              </p>
-              {isSuperAdmin && !hasActiveFilters && (
-                <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
-                  {t("companies.create")}
-                </Link>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Sprint 22 final polish: phone-width parallel card list.
+            Hidden via CSS @media (min-width: 601px). The desktop
+            table above stays in the DOM at all widths so Playwright
+            tablet/desktop assertions still resolve. */}
+        <ul
+          className="admin-card-list"
+          data-testid="admin-card-list"
+          aria-label={t("nav.companies")}
+        >
+          {companies.map((company) => {
+            const editPath = `/admin/companies/${company.id}`;
+            return (
+              <li key={company.id} className="admin-card">
+                <Link
+                  to={editPath}
+                  className="admin-card-link"
+                  aria-label={`${t("admin.edit")}: ${company.name}`}
+                >
+                  <div className="admin-card-head">
+                    <span className="admin-card-title">{company.name}</span>
+                    <span
+                      className={`cell-tag cell-tag-${company.is_active ? "open" : "closed"}`}
+                    >
+                      <i />
+                      {company.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
+                    </span>
+                  </div>
+                  <dl className="admin-card-meta">
+                    <div className="admin-card-meta-row">
+                      <dt>{t("companies.col_slug")}</dt>
+                      <dd>{company.slug}</dd>
+                    </div>
+                    <div className="admin-card-meta-row">
+                      <dt>{t("companies.col_default_language")}</dt>
+                      <dd>{company.default_language}</dd>
+                    </div>
+                    <div className="admin-card-meta-row">
+                      <dt>{t("created")}</dt>
+                      <dd>{formatDate(company.created_at, dateLocale)}</dd>
+                    </div>
+                  </dl>
+                  <div className="admin-card-actions">
+                    <span className="btn btn-ghost btn-sm">
+                      {t("admin.edit")}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!loading && companies.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-icon">＋</div>
+            <div className="empty-title">
+              {hasActiveFilters
+                ? t("companies.empty_filtered_title")
+                : t("companies.empty_initial_title")}
+            </div>
+            <p className="empty-sub">
+              {hasActiveFilters
+                ? t("admin.empty_filtered_desc")
+                : isSuperAdmin
+                  ? t("companies.empty_initial_desc_admin")
+                  : t("companies.empty_initial_desc_other")}
+            </p>
+            {isSuperAdmin && !hasActiveFilters && (
+              <Link className="btn btn-primary btn-sm" to="/admin/companies/new">
+                {t("companies.create")}
+              </Link>
+            )}
+          </div>
+        )}
 
         {(previous || next) && (
           <div className="pagination">

@@ -33,6 +33,7 @@
   "reset_subtitle": "Kies een nieuw wachtwoord voor uw CleanOps-account.",
   "reset_link_incomplete": "Deze wachtwoord-reset-link is onvolledig. Vraag een nieuwe aan vanaf de inlogpagina.",
   "reset_field_new_password": "Nieuw wachtwoord",
+  "reset_password_requirements_hint": "Gebruik minimaal 8 tekens. Vermijd veelgebruikte of volledig numerieke wachtwoorden.",
   "reset_field_confirm_password": "Bevestig nieuw wachtwoord",
   "reset_error_choose_password": "Kies een nieuw wachtwoord om verder te gaan.",
   "reset_error_passwords_dont_match": "De twee wachtwoorden komen niet overeen.",
