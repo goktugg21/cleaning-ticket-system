@@ -151,13 +151,17 @@ class CheckNoDemoAccountsTests(TestCase):
     def test_sprint21_company_b_demo_accounts_fail(self):
         # Sprint 21 added a second demo company (Bright Facilities) to
         # seed_demo_data. The three new accounts must each trip the
-        # pilot guard. They also share the @cleanops.demo TLD so the
-        # suffix safety net catches them even if the explicit list
-        # were ever pruned.
+        # pilot guard. The Sprint 21 v1 names (admin-b/manager-b/
+        # customer-b@cleanops.demo) and the Sprint 21 v2 names
+        # (sophie-admin-bright/bram-manager-bright/lotte-customer-bright
+        # @bright-facilities.demo) are both still rejected.
         for email, role in [
             ("admin-b@cleanops.demo", UserRole.COMPANY_ADMIN),
             ("manager-b@cleanops.demo", UserRole.BUILDING_MANAGER),
             ("customer-b@cleanops.demo", UserRole.CUSTOMER_USER),
+            ("sophie-admin-bright@bright-facilities.demo", UserRole.COMPANY_ADMIN),
+            ("bram-manager-bright@bright-facilities.demo", UserRole.BUILDING_MANAGER),
+            ("lotte-customer-bright@bright-facilities.demo", UserRole.CUSTOMER_USER),
         ]:
             User.objects.create_user(
                 email=email,
@@ -176,8 +180,81 @@ class CheckNoDemoAccountsTests(TestCase):
             "admin-b@cleanops.demo",
             "manager-b@cleanops.demo",
             "customer-b@cleanops.demo",
+            "sophie-admin-bright@bright-facilities.demo",
+            "bram-manager-bright@bright-facilities.demo",
+            "lotte-customer-bright@bright-facilities.demo",
         ):
             self.assertIn(email, err.getvalue())
+
+    def test_sprint21_v2_canonical_accounts_fail(self):
+        # Sprint 21 v2 renamed every persona. Each canonical email
+        # (super admin + 7 Osius + 3 Bright) must individually trip
+        # the pilot guard via the explicit list AND via the new
+        # domain-suffix rules for @b-amsterdam.demo and
+        # @bright-facilities.demo. We assert one persona from each
+        # suffix family to keep the test fast.
+        for email, role in [
+            ("superadmin@cleanops.demo", UserRole.SUPER_ADMIN),
+            ("ramazan-admin-osius@b-amsterdam.demo", UserRole.COMPANY_ADMIN),
+            ("amanda-customer-b-amsterdam@b-amsterdam.demo", UserRole.CUSTOMER_USER),
+            ("sophie-admin-bright@bright-facilities.demo", UserRole.COMPANY_ADMIN),
+            ("lotte-customer-bright@bright-facilities.demo", UserRole.CUSTOMER_USER),
+        ]:
+            User.objects.create_user(
+                email=email,
+                password="Demo12345!",
+                role=role,
+            )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        for email in (
+            "superadmin@cleanops.demo",
+            "ramazan-admin-osius@b-amsterdam.demo",
+            "amanda-customer-b-amsterdam@b-amsterdam.demo",
+            "sophie-admin-bright@bright-facilities.demo",
+            "lotte-customer-bright@bright-facilities.demo",
+        ):
+            self.assertIn(email, err.getvalue())
+
+    def test_unlisted_b_amsterdam_demo_email_still_fails(self):
+        # Defence in depth for the new @b-amsterdam.demo TLD.
+        User.objects.create_user(
+            email="future-tester@b-amsterdam.demo",
+            password="Demo12345!",
+            role=UserRole.CUSTOMER_USER,
+        )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("future-tester@b-amsterdam.demo", err.getvalue())
+
+    def test_unlisted_bright_facilities_demo_email_still_fails(self):
+        # Defence in depth for the new @bright-facilities.demo TLD.
+        User.objects.create_user(
+            email="future-tester@bright-facilities.demo",
+            password="Demo12345!",
+            role=UserRole.CUSTOMER_USER,
+        )
+        err = StringIO()
+        with self.assertRaises(SystemExit) as cm:
+            call_command(
+                "check_no_demo_accounts",
+                stdout=StringIO(),
+                stderr=err,
+            )
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("future-tester@bright-facilities.demo", err.getvalue())
 
     def test_sprint19_demo_up_script_accounts_fail(self):
         # Sprint 19's pilot-readiness gate extended DEMO_EMAILS to

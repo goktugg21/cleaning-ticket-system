@@ -43,10 +43,10 @@ DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "Demo12345!")
 # verified by the Playwright cross_company_isolation.spec.ts suite,
 # not by this audit.
 ROLES = [
-    ("super",    "super@cleanops.demo"),
-    ("company",  "admin@cleanops.demo"),
-    ("manager",  "gokhan@cleanops.demo"),
-    ("customer", "tom@cleanops.demo"),
+    ("super",    "superadmin@cleanops.demo"),
+    ("company",  "ramazan-admin-osius@b-amsterdam.demo"),
+    ("manager",  "gokhan-manager-osius@b-amsterdam.demo"),
+    ("customer", "tom-customer-b-amsterdam@b-amsterdam.demo"),
 ]
 
 # (path, expected_status_per_role) — expected status codes by role label.

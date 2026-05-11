@@ -44,12 +44,18 @@ or fourth company is one entry away. Two demo companies are seeded:
 - **Company A — Osius Demo** (Amsterdam, B1 / B2 / B3) — unchanged
   shape; Sprint 16's eight Osius personas + four lifecycle tickets.
 - **Company B — Bright Facilities** (Rotterdam, R1 / R2) — new.
-  Three personas (`admin-b`, `manager-b`, `customer-b@cleanops.demo`)
-  + a `City Office Rotterdam` consolidated customer + two demo
-  tickets (one OPEN, one IN_PROGRESS).
+  Three personas (Sophie / Bram / Lotte) + a `City Office
+  Rotterdam` consolidated customer + two demo tickets (one OPEN,
+  one IN_PROGRESS).
 
-The super admin (`super@cleanops.demo`) is unchanged and spans both
-companies.
+The super admin (`superadmin@cleanops.demo`) spans both companies.
+
+> **Sprint 21 v2 rename.** The v1 of this sprint used short generic
+> emails (`super@`, `admin@`, `gokhan@`, …, `admin-b@`, `manager-b@`,
+> `customer-b@cleanops.demo`). Section 2.h documents the v2 rename to
+> `<name>-<role>-<tenant>@<tenant>.demo` so /admin/users shows each
+> demo persona's role and tenant at a glance. The v1 emails are all
+> in `LEGACY_DEMO_EMAILS` and pruned on the next reseed.
 
 ### b. Legacy seed commands removed
 
@@ -77,14 +83,21 @@ the script against the pilot DB still trips the guard).
 gained the three Company B emails:
 
 ```
+(v1 names — now superseded but still rejected)
 admin-b@cleanops.demo
 manager-b@cleanops.demo
 customer-b@cleanops.demo
+
+(v2 names — current)
+sophie-admin-bright@bright-facilities.demo
+bram-manager-bright@bright-facilities.demo
+lotte-customer-bright@bright-facilities.demo
 ```
 
-The existing `@cleanops.demo` suffix catch-all would have rejected
-them anyway; the explicit list ensures the operator-facing error
-message names them.
+The three reserved non-routable demo TLDs (`@cleanops.demo`,
+`@b-amsterdam.demo`, `@bright-facilities.demo`) all trigger the
+suffix catch-all; the explicit list ensures the operator-facing
+error message names them.
 
 ### e. Frontend demo cards split by company
 
@@ -162,35 +175,90 @@ guard (`check_no_demo_accounts`) still references the same emails
 as a defense-in-depth, so a pilot host where this prune never ran
 is still blocked from going live.
 
-## 3. Final demo account matrix
+### h. Sprint 21 v2 rename — `<name>-<role>-<tenant>@<tenant>.demo`
 
-All accounts share the password `Demo12345!`.
+The v1 of this sprint shipped short generic emails (`super@`,
+`admin@`, `gokhan@`, ..., `admin-b@`, `manager-b@`,
+`customer-b@cleanops.demo`). After the first demo it became clear
+they did not communicate role or tenant: an operator looking at
+/admin/users had to remember that `admin-b@` meant "Company B
+admin" and that `customer-b@` was the Bright Facilities customer
+user. The Sprint 21 v2 rename moves every persona to a self-
+describing shape:
+
+  Super admin (single canonical):
+    `superadmin@cleanops.demo`
+
+  Osius Demo (Company A, customer B Amsterdam):
+    `<firstname>-admin-osius@b-amsterdam.demo`
+    `<firstname>-manager-osius@b-amsterdam.demo`
+    `<firstname>-customer-b-amsterdam@b-amsterdam.demo`
+
+  Bright Facilities (Company B, Rotterdam):
+    `<firstname>-admin-bright@bright-facilities.demo`
+    `<firstname>-manager-bright@bright-facilities.demo`
+    `<firstname>-customer-bright@bright-facilities.demo`
+
+Every v1 canonical email (super@, admin@, gokhan@, …,
+admin-b@cleanops.demo, manager-b@cleanops.demo,
+customer-b@cleanops.demo) is appended to `LEGACY_DEMO_EMAILS`, and
+the stray operator `superadmin@osius.demo` we observed on the
+local demo DB is pruned alongside them. Two additional non-routable
+demo TLDs are reserved by `check_no_demo_accounts`:
+
+```python
+DEMO_DOMAIN_SUFFIXES = (
+    "@cleanops.demo",
+    "@b-amsterdam.demo",
+    "@bright-facilities.demo",
+)
+```
+
+Domain hyphenation matters: `b-amsterdam.demo` (with a hyphen)
+matches the customer name "B Amsterdam"; underscores are not
+valid DNS labels.
+
+Sprint 21 v2 also enforces a "single canonical super admin"
+invariant via the new
+`SeedDemoDataShapeTests.test_exactly_one_active_super_admin_after_seed`:
+after a seed run, the only active SUPER_ADMIN under any reserved
+demo TLD is `superadmin@cleanops.demo`. The test is the safety net
+for the v1 → v2 transition; if a future seed accidentally created
+two super admins, this test would catch it.
+
+## 3. Final demo account matrix (Sprint 21 v2)
+
+All accounts share the password `Demo12345!`. Every persona email
+follows `<name>-<role>-<tenant>@<tenant>.demo` so /admin/users shows
+the role and tenant at a glance. There is exactly one canonical
+demo super admin (`superadmin@cleanops.demo`); the v1 stray
+`superadmin@osius.demo` is in the prune list.
 
 ### Super admin (spans both companies)
 
-| Email | Role |
-|---|---|
-| `super@cleanops.demo` | SUPER_ADMIN |
-
-### Company A — Osius Demo
-
-| Email | Role | Buildings |
+| Email | Full name | Role |
 |---|---|---|
-| `admin@cleanops.demo` | COMPANY_ADMIN | (entire company) |
-| `gokhan@cleanops.demo` | BUILDING_MANAGER | B1, B2, B3 |
-| `murat@cleanops.demo` | BUILDING_MANAGER | B1 |
-| `isa@cleanops.demo` | BUILDING_MANAGER | B2 |
-| `tom@cleanops.demo` | CUSTOMER_USER | B1, B2, B3 |
-| `iris@cleanops.demo` | CUSTOMER_USER | B1, B2 |
-| `amanda@cleanops.demo` | CUSTOMER_USER | B3 |
+| `superadmin@cleanops.demo` | Super Admin | SUPER_ADMIN |
 
-### Company B — Bright Facilities
+### Company A — Osius Demo / B Amsterdam
 
-| Email | Role | Buildings |
-|---|---|---|
-| `admin-b@cleanops.demo` | COMPANY_ADMIN | (entire company) |
-| `manager-b@cleanops.demo` | BUILDING_MANAGER | R1, R2 |
-| `customer-b@cleanops.demo` | CUSTOMER_USER | R1, R2 |
+| Email | Full name | Role | Buildings |
+|---|---|---|---|
+| `ramazan-admin-osius@b-amsterdam.demo` | Ramazan Koçak | COMPANY_ADMIN | (entire company) |
+| `gokhan-manager-osius@b-amsterdam.demo` | Gokhan Koçak | BUILDING_MANAGER | B1, B2, B3 |
+| `murat-manager-osius@b-amsterdam.demo` | Murat Uğurlu | BUILDING_MANAGER | B1 |
+| `isa-manager-osius@b-amsterdam.demo` | İsa Uğurlu | BUILDING_MANAGER | B2 |
+| `tom-customer-b-amsterdam@b-amsterdam.demo` | Tom Verbeek | CUSTOMER_USER | B1, B2, B3 |
+| `iris-customer-b-amsterdam@b-amsterdam.demo` | Iris | CUSTOMER_USER | B1, B2 |
+| `amanda-customer-b-amsterdam@b-amsterdam.demo` | Amanda | CUSTOMER_USER | B3 |
+
+### Company B — Bright Facilities (Rotterdam)
+
+| Email | Full name | Role | Buildings |
+|---|---|---|---|
+| `sophie-admin-bright@bright-facilities.demo` | Sophie van Dijk | COMPANY_ADMIN | (entire company) |
+| `bram-manager-bright@bright-facilities.demo` | Bram de Jong | BUILDING_MANAGER | R1, R2 |
+| `lotte-customer-bright@bright-facilities.demo` | Lotte Visser | CUSTOMER_USER | R1, R2 |
 
 ## 4. Final company / building / customer matrix
 

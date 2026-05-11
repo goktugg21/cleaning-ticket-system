@@ -1,11 +1,20 @@
 """
-Sprint 21 — canonical demo seed (two-company edition).
+Sprint 21 v2 — canonical demo seed (two-company edition).
 
 Idempotent. Aligns with the demo cards rendered on the login page when
 VITE_DEMO_MODE=true and with the Playwright test fixtures under
 frontend/tests/e2e. Creates / updates two fully isolated demo companies
 so every role and every cross-company scope rule can be exercised
 end-to-end against a single seed.
+
+The Sprint 21 v2 (post-mortem of the first Sprint 21 demo) renames
+every persona to a `<name>-<role>-<tenant>@<tenant>.demo` shape so an
+operator viewing /admin/users can identify each demo account at a
+glance. Exactly one canonical super admin lives at
+superadmin@cleanops.demo; the v1 emails (super@cleanops.demo,
+admin@cleanops.demo, gokhan@cleanops.demo, …) are added to the legacy
+prune list so a stack that previously ran v1 lands on a clean
+matrix after the first v2 seed run.
 
 Idempotent invariants after a successful run:
 
@@ -23,21 +32,21 @@ Idempotent invariants after a successful run:
 
   Demo users (every account uses the password Demo12345!):
 
-    super@cleanops.demo          SUPER_ADMIN (spans both companies)
+    superadmin@cleanops.demo                          SUPER_ADMIN (both companies)
 
-    Company A — Osius Demo:
-      admin@cleanops.demo        COMPANY_ADMIN
-      gokhan@cleanops.demo       BUILDING_MANAGER  → B1, B2, B3
-      murat@cleanops.demo        BUILDING_MANAGER  → B1
-      isa@cleanops.demo          BUILDING_MANAGER  → B2
-      tom@cleanops.demo          CUSTOMER_USER     → B1, B2, B3
-      iris@cleanops.demo         CUSTOMER_USER     → B1, B2
-      amanda@cleanops.demo       CUSTOMER_USER     → B3
+    Company A — Osius Demo / B Amsterdam:
+      ramazan-admin-osius@b-amsterdam.demo            COMPANY_ADMIN
+      gokhan-manager-osius@b-amsterdam.demo           BUILDING_MANAGER  → B1, B2, B3
+      murat-manager-osius@b-amsterdam.demo            BUILDING_MANAGER  → B1
+      isa-manager-osius@b-amsterdam.demo              BUILDING_MANAGER  → B2
+      tom-customer-b-amsterdam@b-amsterdam.demo       CUSTOMER_USER     → B1, B2, B3
+      iris-customer-b-amsterdam@b-amsterdam.demo      CUSTOMER_USER     → B1, B2
+      amanda-customer-b-amsterdam@b-amsterdam.demo    CUSTOMER_USER     → B3
 
     Company B — Bright Facilities:
-      admin-b@cleanops.demo      COMPANY_ADMIN
-      manager-b@cleanops.demo    BUILDING_MANAGER  → R1, R2
-      customer-b@cleanops.demo   CUSTOMER_USER     → R1, R2
+      sophie-admin-bright@bright-facilities.demo      COMPANY_ADMIN
+      bram-manager-bright@bright-facilities.demo      BUILDING_MANAGER  → R1, R2
+      lotte-customer-bright@bright-facilities.demo    CUSTOMER_USER     → R1, R2
 
 Usage
 -----
@@ -119,6 +128,30 @@ LEGACY_DEMO_EMAILS = (
     "gokhan.kocak@osius.demo",
     "murat.ugurlu@osius.demo",
     "isa.ugurlu@osius.demo",
+    # Sprint 21 v1 canonical demo emails — superseded by the v2
+    # `<name>-<role>-<tenant>@<tenant>.demo` shape declared in
+    # SUPER_ADMIN_USER and COMPANIES below. Adding them here means a
+    # local / demo DB that previously ran the v1 seed transitions
+    # cleanly to v2 on the first reseed (every v1 row gets soft-
+    # deleted; the v2 rows are upserted in the same transaction).
+    "super@cleanops.demo",
+    "admin@cleanops.demo",
+    "gokhan@cleanops.demo",
+    "murat@cleanops.demo",
+    "isa@cleanops.demo",
+    "tom@cleanops.demo",
+    "iris@cleanops.demo",
+    "amanda@cleanops.demo",
+    "admin-b@cleanops.demo",
+    "manager-b@cleanops.demo",
+    "customer-b@cleanops.demo",
+    # Stray real-looking operator super-admin we discovered on the
+    # current local demo DB. It is not part of any seed, but it
+    # presents as a working SUPER_ADMIN on /admin/users alongside
+    # the canonical set, which is confusing during a demo. Pruning
+    # it leaves exactly one canonical super admin
+    # (superadmin@cleanops.demo).
+    "superadmin@osius.demo",
 )
 
 # Legacy single-company seed slugs. We deactivate (soft) rather than
@@ -135,9 +168,11 @@ LEGACY_COMPANY_SLUGS = (
 
 
 # Super admin spans both companies. No CompanyUserMembership row — the
-# SUPER_ADMIN role bypasses tenant scoping.
+# SUPER_ADMIN role bypasses tenant scoping. Sprint 21 v2 renamed the
+# previous `super@cleanops.demo` to `superadmin@cleanops.demo` so the
+# email name explicitly signals SUPER_ADMIN scope at a glance.
 SUPER_ADMIN_USER = {
-    "email": "super@cleanops.demo",
+    "email": "superadmin@cleanops.demo",
     "full_name": "Super Admin",
     "role": UserRole.SUPER_ADMIN,
     "is_staff": True,
@@ -151,6 +186,11 @@ SUPER_ADMIN_USER = {
 # special-cases either one. The frontend demo cards and the Playwright
 # isolation tests both rely on this same structure (Company A == "Osius
 # Demo", Company B == "Bright Facilities"), so reorder with care.
+#
+# Sprint 21 v2: every persona email is `<name>-<role>-<tenant>@<tenant>.demo`
+# so /admin/users shows the role and tenant at a glance. The previous
+# v1 emails (super@, admin@, gokhan@, …) are in LEGACY_DEMO_EMAILS so
+# a stack that ran v1 transitions cleanly to v2 on first reseed.
 COMPANIES = [
     {
         "name": "Osius Demo",
@@ -164,25 +204,25 @@ COMPANIES = [
             "buildings": ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"],
         },
         "company_admin": {
-            "email": "admin@cleanops.demo",
-            "full_name": "Company Admin",
+            "email": "ramazan-admin-osius@b-amsterdam.demo",
+            "full_name": "Ramazan Koçak",
             "language": "en",
         },
         "building_managers": [
             {
-                "email": "gokhan@cleanops.demo",
+                "email": "gokhan-manager-osius@b-amsterdam.demo",
                 "full_name": "Gokhan Koçak",
                 "buildings": ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"],
                 "language": "en",
             },
             {
-                "email": "murat@cleanops.demo",
+                "email": "murat-manager-osius@b-amsterdam.demo",
                 "full_name": "Murat Uğurlu",
                 "buildings": ["B1 Amsterdam"],
                 "language": "en",
             },
             {
-                "email": "isa@cleanops.demo",
+                "email": "isa-manager-osius@b-amsterdam.demo",
                 "full_name": "İsa Uğurlu",
                 "buildings": ["B2 Amsterdam"],
                 "language": "en",
@@ -190,19 +230,19 @@ COMPANIES = [
         ],
         "customer_users": [
             {
-                "email": "tom@cleanops.demo",
+                "email": "tom-customer-b-amsterdam@b-amsterdam.demo",
                 "full_name": "Tom Verbeek",
                 "buildings": ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"],
                 "language": "nl",
             },
             {
-                "email": "iris@cleanops.demo",
+                "email": "iris-customer-b-amsterdam@b-amsterdam.demo",
                 "full_name": "Iris",
                 "buildings": ["B1 Amsterdam", "B2 Amsterdam"],
                 "language": "nl",
             },
             {
-                "email": "amanda@cleanops.demo",
+                "email": "amanda-customer-b-amsterdam@b-amsterdam.demo",
                 "full_name": "Amanda",
                 "buildings": ["B3 Amsterdam"],
                 "language": "nl",
@@ -213,7 +253,7 @@ COMPANIES = [
                 "title": f"{DEMO_TICKET_PREFIX} Open lobby light",
                 "description": "Lobby light flickers, please replace.",
                 "building": "B1 Amsterdam",
-                "creator_email": "tom@cleanops.demo",
+                "creator_email": "tom-customer-b-amsterdam@b-amsterdam.demo",
                 "type": TicketType.REPORT,
                 "priority": TicketPriority.NORMAL,
                 "target_status": TicketStatus.OPEN,
@@ -222,7 +262,7 @@ COMPANIES = [
                 "title": f"{DEMO_TICKET_PREFIX} In progress hallway scuff",
                 "description": "Hallway needs touch-up paint after move-in.",
                 "building": "B2 Amsterdam",
-                "creator_email": "iris@cleanops.demo",
+                "creator_email": "iris-customer-b-amsterdam@b-amsterdam.demo",
                 "type": TicketType.REQUEST,
                 "priority": TicketPriority.NORMAL,
                 "target_status": TicketStatus.IN_PROGRESS,
@@ -234,7 +274,7 @@ COMPANIES = [
                     "zeepdispenser en torkrol al weken op zijn."
                 ),
                 "building": "B3 Amsterdam",
-                "creator_email": "amanda@cleanops.demo",
+                "creator_email": "amanda-customer-b-amsterdam@b-amsterdam.demo",
                 "type": TicketType.REPORT,
                 "priority": TicketPriority.HIGH,
                 "target_status": TicketStatus.WAITING_CUSTOMER_APPROVAL,
@@ -243,7 +283,7 @@ COMPANIES = [
                 "title": f"{DEMO_TICKET_PREFIX} Closed kitchen tap",
                 "description": "Kitchen tap leak resolved last sprint.",
                 "building": "B1 Amsterdam",
-                "creator_email": "tom@cleanops.demo",
+                "creator_email": "tom-customer-b-amsterdam@b-amsterdam.demo",
                 "type": TicketType.REPORT,
                 "priority": TicketPriority.NORMAL,
                 "target_status": TicketStatus.CLOSED,
@@ -262,13 +302,13 @@ COMPANIES = [
             "buildings": ["R1 Rotterdam", "R2 Rotterdam"],
         },
         "company_admin": {
-            "email": "admin-b@cleanops.demo",
+            "email": "sophie-admin-bright@bright-facilities.demo",
             "full_name": "Sophie van Dijk",
             "language": "en",
         },
         "building_managers": [
             {
-                "email": "manager-b@cleanops.demo",
+                "email": "bram-manager-bright@bright-facilities.demo",
                 "full_name": "Bram de Jong",
                 "buildings": ["R1 Rotterdam", "R2 Rotterdam"],
                 "language": "en",
@@ -276,7 +316,7 @@ COMPANIES = [
         ],
         "customer_users": [
             {
-                "email": "customer-b@cleanops.demo",
+                "email": "lotte-customer-bright@bright-facilities.demo",
                 "full_name": "Lotte Visser",
                 "buildings": ["R1 Rotterdam", "R2 Rotterdam"],
                 "language": "nl",
@@ -287,7 +327,7 @@ COMPANIES = [
                 "title": f"{DEMO_TICKET_PREFIX} Reception lights flickering",
                 "description": "Reception strip lights need replacement.",
                 "building": "R1 Rotterdam",
-                "creator_email": "customer-b@cleanops.demo",
+                "creator_email": "lotte-customer-bright@bright-facilities.demo",
                 "type": TicketType.REPORT,
                 "priority": TicketPriority.NORMAL,
                 "target_status": TicketStatus.OPEN,
@@ -296,7 +336,7 @@ COMPANIES = [
                 "title": f"{DEMO_TICKET_PREFIX} Lobby floor polish scheduled",
                 "description": "Quarterly lobby floor polish — crew on site.",
                 "building": "R2 Rotterdam",
-                "creator_email": "customer-b@cleanops.demo",
+                "creator_email": "lotte-customer-bright@bright-facilities.demo",
                 "type": TicketType.REQUEST,
                 "priority": TicketPriority.NORMAL,
                 "target_status": TicketStatus.IN_PROGRESS,
@@ -511,12 +551,14 @@ class Command(BaseCommand):
         purpose of the Sprint 21 cleanup.
 
         The match is exact-by-email (no domain wildcards) so a real
-        operator email can never trip the prune. The canonical
-        Sprint 21 accounts (`super@`, `admin@`, `gokhan@`, `murat@`,
-        `isa@`, `tom@`, `iris@`, `amanda@`, `admin-b@`, `manager-b@`,
-        `customer-b@cleanops.demo`) share zero email prefixes with
-        any LEGACY_DEMO_EMAILS entry, so this method cannot
-        accidentally deactivate a canonical persona.
+        operator email can never trip the prune. The Sprint 21 v2
+        canonical addresses live under two non-routable demo TLDs
+        (`@cleanops.demo` for the super admin, `@b-amsterdam.demo`
+        for Osius Demo personas, `@bright-facilities.demo` for
+        Bright Facilities personas), and every v2 email starts with
+        the persona's first name — none of which collide with any
+        LEGACY_DEMO_EMAILS entry. This method therefore cannot
+        accidentally soft-delete a canonical v2 account.
 
         Returns a small summary dict so the operator-facing output of
         seed_demo_data shows how many rows were touched.

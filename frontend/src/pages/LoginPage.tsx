@@ -46,26 +46,27 @@ interface DemoUser {
 }
 
 // Mirrors backend/accounts/management/commands/seed_demo_data.py.
-// Sprint 21: two demo companies (Osius Demo + Bright Facilities) so
-// the operator can demonstrate cross-company isolation in one click.
-const COMPANY_A_LABEL = "Osius Demo (Amsterdam)";
-const COMPANY_B_LABEL = "Bright Facilities (Rotterdam)";
+// Sprint 21 v2: every persona email follows the
+// `<name>-<role>-<tenant>@<tenant>.demo` pattern so an operator
+// looking at /admin/users can identify each demo account at a glance.
+const COMPANY_A_LABEL = "Osius Demo — B Amsterdam";
+const COMPANY_B_LABEL = "Bright Facilities — Rotterdam";
 
 const DEMO_USERS_COMPANY_A: DemoUser[] = [
   {
     id: "company-admin",
-    email: "admin@cleanops.demo",
+    email: "ramazan-admin-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
-    initials: "CA",
+    initials: "RK",
     avatarVariant: "dark",
-    name: "Company Admin",
+    name: "Ramazan Koçak",
     roleKey: "demo_role_company_admin",
     pillKey: "demo_pill_company_admin",
     pillVariant: "primary",
   },
   {
     id: "manager-all",
-    email: "gokhan@cleanops.demo",
+    email: "gokhan-manager-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     initials: "GK",
     avatarVariant: "dark",
@@ -77,7 +78,7 @@ const DEMO_USERS_COMPANY_A: DemoUser[] = [
   },
   {
     id: "manager-b1",
-    email: "murat@cleanops.demo",
+    email: "murat-manager-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     initials: "MU",
     avatarVariant: "dark",
@@ -89,7 +90,7 @@ const DEMO_USERS_COMPANY_A: DemoUser[] = [
   },
   {
     id: "customer-all",
-    email: "tom@cleanops.demo",
+    email: "tom-customer-b-amsterdam@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     initials: "TV",
     avatarVariant: "mint",
@@ -101,7 +102,7 @@ const DEMO_USERS_COMPANY_A: DemoUser[] = [
   },
   {
     id: "customer-b1-b2",
-    email: "iris@cleanops.demo",
+    email: "iris-customer-b-amsterdam@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     initials: "IR",
     avatarVariant: "mint",
@@ -113,7 +114,7 @@ const DEMO_USERS_COMPANY_A: DemoUser[] = [
   },
   {
     id: "customer-b3",
-    email: "amanda@cleanops.demo",
+    email: "amanda-customer-b-amsterdam@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     initials: "AM",
     avatarVariant: "mint",
@@ -128,7 +129,7 @@ const DEMO_USERS_COMPANY_A: DemoUser[] = [
 const DEMO_USERS_COMPANY_B: DemoUser[] = [
   {
     id: "company-admin-b",
-    email: "admin-b@cleanops.demo",
+    email: "sophie-admin-bright@bright-facilities.demo",
     password: DEMO_PASSWORD,
     initials: "SD",
     avatarVariant: "dark",
@@ -139,7 +140,7 @@ const DEMO_USERS_COMPANY_B: DemoUser[] = [
   },
   {
     id: "manager-b",
-    email: "manager-b@cleanops.demo",
+    email: "bram-manager-bright@bright-facilities.demo",
     password: DEMO_PASSWORD,
     initials: "BJ",
     avatarVariant: "dark",
@@ -151,7 +152,7 @@ const DEMO_USERS_COMPANY_B: DemoUser[] = [
   },
   {
     id: "customer-b-co",
-    email: "customer-b@cleanops.demo",
+    email: "lotte-customer-bright@bright-facilities.demo",
     password: DEMO_PASSWORD,
     initials: "LV",
     avatarVariant: "mint",
@@ -165,7 +166,7 @@ const DEMO_USERS_COMPANY_B: DemoUser[] = [
 
 const SUPER_ADMIN_DEMO_USER: DemoUser = {
   id: "super",
-  email: "super@cleanops.demo",
+  email: "superadmin@cleanops.demo",
   password: DEMO_PASSWORD,
   initials: "SA",
   avatarVariant: "dark",

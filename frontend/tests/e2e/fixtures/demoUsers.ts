@@ -1,5 +1,5 @@
 /**
- * Sprint 21 — two-company demo user fixtures.
+ * Sprint 21 v2 — two-company demo user fixtures.
  *
  * Mirrors backend/accounts/management/commands/seed_demo_data.py. If
  * the seed changes, update this file too (or refactor both to read
@@ -7,7 +7,10 @@
  *
  * Two demo companies:
  *   Company A — "Osius Demo"        (Amsterdam, B1/B2/B3)
+ *                personas live under @b-amsterdam.demo
  *   Company B — "Bright Facilities" (Rotterdam, R1/R2)
+ *                personas live under @bright-facilities.demo
+ *   Super admin lives under @cleanops.demo
  */
 export const DEMO_PASSWORD = "Demo12345!";
 
@@ -38,7 +41,7 @@ export interface DemoUser {
 export const DEMO_USERS: Record<string, DemoUser> = {
   // ----- Super admin (spans both companies) -----
   super: {
-    email: "super@cleanops.demo",
+    email: "superadmin@cleanops.demo",
     password: DEMO_PASSWORD,
     role: "SUPER_ADMIN",
     buildings: [...COMPANY_A_BUILDINGS, ...COMPANY_B_BUILDINGS],
@@ -48,15 +51,15 @@ export const DEMO_USERS: Record<string, DemoUser> = {
 
   // ----- Company A — Osius Demo -----
   companyAdmin: {
-    email: "admin@cleanops.demo",
+    email: "ramazan-admin-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "COMPANY_ADMIN",
     buildings: COMPANY_A_BUILDINGS,
-    fullName: "Company Admin",
+    fullName: "Ramazan Koçak",
     company: "A",
   },
   managerAll: {
-    email: "gokhan@cleanops.demo",
+    email: "gokhan-manager-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "BUILDING_MANAGER",
     buildings: COMPANY_A_BUILDINGS,
@@ -64,7 +67,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "A",
   },
   managerB1: {
-    email: "murat@cleanops.demo",
+    email: "murat-manager-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "BUILDING_MANAGER",
     buildings: ["B1 Amsterdam"],
@@ -72,7 +75,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "A",
   },
   managerB2: {
-    email: "isa@cleanops.demo",
+    email: "isa-manager-osius@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "BUILDING_MANAGER",
     buildings: ["B2 Amsterdam"],
@@ -80,7 +83,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "A",
   },
   customerAll: {
-    email: "tom@cleanops.demo",
+    email: "tom-customer-b-amsterdam@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "CUSTOMER_USER",
     buildings: COMPANY_A_BUILDINGS,
@@ -88,7 +91,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "A",
   },
   customerB1B2: {
-    email: "iris@cleanops.demo",
+    email: "iris-customer-b-amsterdam@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "CUSTOMER_USER",
     buildings: ["B1 Amsterdam", "B2 Amsterdam"],
@@ -96,7 +99,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "A",
   },
   customerB3: {
-    email: "amanda@cleanops.demo",
+    email: "amanda-customer-b-amsterdam@b-amsterdam.demo",
     password: DEMO_PASSWORD,
     role: "CUSTOMER_USER",
     buildings: ["B3 Amsterdam"],
@@ -106,7 +109,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
 
   // ----- Company B — Bright Facilities -----
   companyAdminB: {
-    email: "admin-b@cleanops.demo",
+    email: "sophie-admin-bright@bright-facilities.demo",
     password: DEMO_PASSWORD,
     role: "COMPANY_ADMIN",
     buildings: COMPANY_B_BUILDINGS,
@@ -114,7 +117,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "B",
   },
   managerB: {
-    email: "manager-b@cleanops.demo",
+    email: "bram-manager-bright@bright-facilities.demo",
     password: DEMO_PASSWORD,
     role: "BUILDING_MANAGER",
     buildings: COMPANY_B_BUILDINGS,
@@ -122,7 +125,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     company: "B",
   },
   customerBCo: {
-    email: "customer-b@cleanops.demo",
+    email: "lotte-customer-bright@bright-facilities.demo",
     password: DEMO_PASSWORD,
     role: "CUSTOMER_USER",
     buildings: COMPANY_B_BUILDINGS,

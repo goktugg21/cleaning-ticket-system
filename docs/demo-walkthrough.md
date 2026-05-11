@@ -59,27 +59,27 @@ helpers in [`backend/accounts/scoping.py`](../backend/accounts/scoping.py).
 
 | Email | Password | Role | What to show |
 |---|---|---|---|
-| `super@cleanops.demo` | `Demo12345!` | SUPER_ADMIN | Full visibility: every ticket / company / building / customer; super-admin-only audit feed at `/api/audit-logs/` if the audience asks |
+| `superadmin@cleanops.demo` | `Demo12345!` | SUPER_ADMIN | Full visibility: every ticket / company / building / customer; super-admin-only audit feed at `/api/audit-logs/` if the audience asks |
 
-### Company A — Osius Demo (Amsterdam, B1 / B2 / B3)
+### Company A — Osius Demo (Amsterdam, B1 / B2 / B3 / customer B Amsterdam)
 
-| Email | Role | Building scope |
-|---|---|---|
-| `admin@cleanops.demo` | COMPANY_ADMIN | Osius Demo |
-| `gokhan@cleanops.demo` | BUILDING_MANAGER | B1, B2, B3 |
-| `murat@cleanops.demo` | BUILDING_MANAGER | B1 |
-| `isa@cleanops.demo` | BUILDING_MANAGER | B2 |
-| `tom@cleanops.demo` | CUSTOMER_USER | B1, B2, B3 |
-| `iris@cleanops.demo` | CUSTOMER_USER | B1, B2 |
-| `amanda@cleanops.demo` | CUSTOMER_USER | B3 |
+| Email | Full name | Role | Building scope |
+|---|---|---|---|
+| `ramazan-admin-osius@b-amsterdam.demo` | Ramazan Koçak | COMPANY_ADMIN | Osius Demo |
+| `gokhan-manager-osius@b-amsterdam.demo` | Gokhan Koçak | BUILDING_MANAGER | B1, B2, B3 |
+| `murat-manager-osius@b-amsterdam.demo` | Murat Uğurlu | BUILDING_MANAGER | B1 |
+| `isa-manager-osius@b-amsterdam.demo` | İsa Uğurlu | BUILDING_MANAGER | B2 |
+| `tom-customer-b-amsterdam@b-amsterdam.demo` | Tom Verbeek | CUSTOMER_USER | B1, B2, B3 |
+| `iris-customer-b-amsterdam@b-amsterdam.demo` | Iris | CUSTOMER_USER | B1, B2 |
+| `amanda-customer-b-amsterdam@b-amsterdam.demo` | Amanda | CUSTOMER_USER | B3 |
 
 ### Company B — Bright Facilities (Rotterdam, R1 / R2)
 
-| Email | Role | Building scope |
-|---|---|---|
-| `admin-b@cleanops.demo` | COMPANY_ADMIN | Bright Facilities |
-| `manager-b@cleanops.demo` | BUILDING_MANAGER | R1, R2 |
-| `customer-b@cleanops.demo` | CUSTOMER_USER | R1, R2 |
+| Email | Full name | Role | Building scope |
+|---|---|---|---|
+| `sophie-admin-bright@bright-facilities.demo` | Sophie van Dijk | COMPANY_ADMIN | Bright Facilities |
+| `bram-manager-bright@bright-facilities.demo` | Bram de Jong | BUILDING_MANAGER | R1, R2 |
+| `lotte-customer-bright@bright-facilities.demo` | Lotte Visser | CUSTOMER_USER | R1, R2 |
 
 ### Pre-seeded tickets
 
@@ -108,13 +108,13 @@ collide:
 
 | Step | Browser A — staff | Browser B — customer | Expected |
 |---|---|---|---|
-| 1. Login as customer | – | open <http://localhost:5173/login>, login as `tom@cleanops.demo` / `Demo12345!` | dashboard renders, "Nieuw ticket" / "New ticket" button visible |
+| 1. Login as customer | – | open <http://localhost:5173/login>, login as `tom-customer-b-amsterdam@b-amsterdam.demo` / `Demo12345!` | dashboard renders, "Nieuw ticket" / "New ticket" button visible |
 | 2. Customer creates ticket | – | click "New ticket", fill: title / description / customer / building / type / priority → optionally attach a JPG → submit | ticket created in `OPEN`, photo attached |
-| 3. Login as building manager | open <http://localhost:5173/login>, login as `gokhan@cleanops.demo` / `Demo12345!` | – | dashboard tile shows the new open ticket |
+| 3. Login as building manager | open <http://localhost:5173/login>, login as `gokhan-manager-osius@b-amsterdam.demo` / `Demo12345!` | – | dashboard tile shows the new open ticket |
 | 4. Take it In Progress | click "Take work" | – | status flips to `IN_PROGRESS` |
 | 5. Send for approval | click "Send to customer approval" | – | status `WAITING_CUSTOMER_APPROVAL`; email lands in MailHog |
 | 6. Customer approves | – | refresh ticket → click "Goedkeuren" | status `APPROVED` |
-| 7. Admin closes | logout → login as `admin@cleanops.demo` → open the ticket → click "Close" | – | status `CLOSED` |
+| 7. Admin closes | logout → login as `ramazan-admin-osius@b-amsterdam.demo` → open the ticket → click "Close" | – | status `CLOSED` |
 | 8. Show reports | open `/reports` | – | report cards render |
 
 ### 4.2 Alternative path (reject + retake)
@@ -132,11 +132,11 @@ not leak data between each other.
 
 | Step | Browser A | Browser B | Expected |
 |---|---|---|---|
-| 1. Login as super | super@cleanops.demo | – | dashboard shows tickets from BOTH Osius Demo and Bright Facilities |
-| 2. Login as Company A admin | admin@cleanops.demo | – | tickets, buildings, customers, users list only Osius Demo |
-| 3. Login as Company B admin | – | admin-b@cleanops.demo | tickets, buildings, customers, users list only Bright Facilities |
+| 1. Login as super | superadmin@cleanops.demo | – | dashboard shows tickets from BOTH Osius Demo and Bright Facilities |
+| 2. Login as Company A admin | ramazan-admin-osius@b-amsterdam.demo | – | tickets, buildings, customers, users list only Osius Demo |
+| 3. Login as Company B admin | – | sophie-admin-bright@bright-facilities.demo | tickets, buildings, customers, users list only Bright Facilities |
 | 4. Cross-company ticket URL | (still on Company A) try opening `/tickets/<id>` from one of Company B's tickets — get the id from the super admin session | – | 404 / forbidden — Company A cannot read Company B's ticket |
-| 5. Reports | open `/reports` as `admin@cleanops.demo` | open `/reports` as `admin-b@cleanops.demo` | the two report dashboards show disjoint datasets |
+| 5. Reports | open `/reports` as `ramazan-admin-osius@b-amsterdam.demo` | open `/reports` as `sophie-admin-bright@bright-facilities.demo` | the two report dashboards show disjoint datasets |
 
 The Playwright suite `cross_company_isolation.spec.ts` exercises
 this same matrix end-to-end on every build.

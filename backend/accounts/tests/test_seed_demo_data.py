@@ -34,6 +34,7 @@ from __future__ import annotations
 from io import StringIO
 
 from django.core.management import CommandError, call_command
+from django.db.models import Q
 from django.test import TestCase, override_settings
 
 from accounts.models import User, UserRole
@@ -143,8 +144,8 @@ class SeedDemoDataShapeTests(TestCase):
     def test_company_admins_are_scoped_to_their_company_only(self):
         # Company A admin has exactly one CompanyUserMembership row, to
         # Company A. Company B admin has one row, to Company B.
-        admin_a = User.objects.get(email="admin@cleanops.demo")
-        admin_b = User.objects.get(email="admin-b@cleanops.demo")
+        admin_a = User.objects.get(email="ramazan-admin-osius@b-amsterdam.demo")
+        admin_b = User.objects.get(email="sophie-admin-bright@bright-facilities.demo")
 
         self.assertEqual(admin_a.role, UserRole.COMPANY_ADMIN)
         self.assertEqual(admin_b.role, UserRole.COMPANY_ADMIN)
@@ -162,24 +163,32 @@ class SeedDemoDataShapeTests(TestCase):
 
     def test_demo_passwords_all_work(self):
         # All seeded accounts must authenticate with Demo12345!.
-        for email in (
-            "super@cleanops.demo",
-            "admin@cleanops.demo",
-            "gokhan@cleanops.demo",
-            "murat@cleanops.demo",
-            "isa@cleanops.demo",
-            "tom@cleanops.demo",
-            "iris@cleanops.demo",
-            "amanda@cleanops.demo",
-            "admin-b@cleanops.demo",
-            "manager-b@cleanops.demo",
-            "customer-b@cleanops.demo",
-        ):
+        for email in CANONICAL_USER_EMAILS:
             user = User.objects.get(email=email)
             self.assertTrue(
                 user.check_password(DEMO_PASSWORD),
                 msg=f"{email} should authenticate with Demo12345!",
             )
+
+    def test_exactly_one_active_super_admin_after_seed(self):
+        # Sprint 21 v2 invariant: exactly one canonical super admin at
+        # superadmin@cleanops.demo. Any stray super-admin under a demo
+        # TLD (e.g. the historical superadmin@osius.demo) must be
+        # pruned. The check counts active rows with role=SUPER_ADMIN
+        # whose email lives under a demo TLD.
+        active_demo_supers = User.objects.filter(
+            role=UserRole.SUPER_ADMIN, is_active=True
+        ).filter(
+            Q(email__iendswith="@cleanops.demo")
+            | Q(email__iendswith="@b-amsterdam.demo")
+            | Q(email__iendswith="@bright-facilities.demo")
+        )
+        emails = list(active_demo_supers.values_list("email", flat=True))
+        self.assertEqual(
+            emails,
+            ["superadmin@cleanops.demo"],
+            f"expected exactly one canonical super admin, got: {emails}",
+        )
 
     def test_demo_tickets_are_per_company(self):
         company_a = Company.objects.get(slug=COMPANY_A_SLUG)
@@ -214,14 +223,28 @@ class SeedDemoDataIsolationTests(TestCase):
         cls.company_a = Company.objects.get(slug=COMPANY_A_SLUG)
         cls.company_b = Company.objects.get(slug=COMPANY_B_SLUG)
 
-        cls.super_admin = User.objects.get(email="super@cleanops.demo")
-        cls.admin_a = User.objects.get(email="admin@cleanops.demo")
-        cls.admin_b = User.objects.get(email="admin-b@cleanops.demo")
-        cls.manager_a_full = User.objects.get(email="gokhan@cleanops.demo")
-        cls.manager_b = User.objects.get(email="manager-b@cleanops.demo")
-        cls.customer_a_full = User.objects.get(email="tom@cleanops.demo")
-        cls.customer_b = User.objects.get(email="customer-b@cleanops.demo")
-        cls.customer_a_b3_only = User.objects.get(email="amanda@cleanops.demo")
+        cls.super_admin = User.objects.get(email="superadmin@cleanops.demo")
+        cls.admin_a = User.objects.get(
+            email="ramazan-admin-osius@b-amsterdam.demo"
+        )
+        cls.admin_b = User.objects.get(
+            email="sophie-admin-bright@bright-facilities.demo"
+        )
+        cls.manager_a_full = User.objects.get(
+            email="gokhan-manager-osius@b-amsterdam.demo"
+        )
+        cls.manager_b = User.objects.get(
+            email="bram-manager-bright@bright-facilities.demo"
+        )
+        cls.customer_a_full = User.objects.get(
+            email="tom-customer-b-amsterdam@b-amsterdam.demo"
+        )
+        cls.customer_b = User.objects.get(
+            email="lotte-customer-bright@bright-facilities.demo"
+        )
+        cls.customer_a_b3_only = User.objects.get(
+            email="amanda-customer-b-amsterdam@b-amsterdam.demo"
+        )
 
     def test_super_admin_sees_both_companies(self):
         ids = set(company_ids_for(self.super_admin))
@@ -331,9 +354,9 @@ class SeedDemoDataIsolationTests(TestCase):
 
         # Company B users must not appear in A's visibility.
         company_b_user_emails = {
-            "admin-b@cleanops.demo",
-            "manager-b@cleanops.demo",
-            "customer-b@cleanops.demo",
+            "sophie-admin-bright@bright-facilities.demo",
+            "bram-manager-bright@bright-facilities.demo",
+            "lotte-customer-bright@bright-facilities.demo",
         }
         self.assertTrue(
             company_b_user_emails.isdisjoint(a_visible),
@@ -343,11 +366,11 @@ class SeedDemoDataIsolationTests(TestCase):
 
         # Company A users must not appear in B's visibility.
         company_a_user_emails = {
-            "admin@cleanops.demo",
-            "gokhan@cleanops.demo",
-            "tom@cleanops.demo",
-            "iris@cleanops.demo",
-            "amanda@cleanops.demo",
+            "ramazan-admin-osius@b-amsterdam.demo",
+            "gokhan-manager-osius@b-amsterdam.demo",
+            "tom-customer-b-amsterdam@b-amsterdam.demo",
+            "iris-customer-b-amsterdam@b-amsterdam.demo",
+            "amanda-customer-b-amsterdam@b-amsterdam.demo",
         }
         self.assertTrue(
             company_a_user_emails.isdisjoint(b_visible),
@@ -356,11 +379,12 @@ class SeedDemoDataIsolationTests(TestCase):
         )
 
         # And both admins do see their own users — sanity check.
-        self.assertIn("gokhan@cleanops.demo", a_visible)
-        self.assertIn("manager-b@cleanops.demo", b_visible)
+        self.assertIn("gokhan-manager-osius@b-amsterdam.demo", a_visible)
+        self.assertIn("bram-manager-bright@bright-facilities.demo", b_visible)
 
     def test_manager_b_sees_only_company_b_buildings(self):
-        # manager-b@cleanops.demo is assigned to R1+R2 Rotterdam only.
+        # bram-manager-bright@bright-facilities.demo is assigned to
+        # R1+R2 Rotterdam only.
         expected = set(
             Building.objects.filter(
                 company=self.company_b, name__in=COMPANY_B_BUILDINGS
@@ -378,8 +402,8 @@ class SeedDemoDataIsolationTests(TestCase):
         )
 
     def test_customer_b_sees_only_company_b_buildings(self):
-        # customer-b@cleanops.demo has CustomerUserBuildingAccess to
-        # R1+R2 Rotterdam only.
+        # lotte-customer-bright@bright-facilities.demo has
+        # CustomerUserBuildingAccess to R1+R2 Rotterdam only.
         accessible = set(
             CustomerUserBuildingAccess.objects.filter(
                 membership__user=self.customer_b
@@ -444,6 +468,41 @@ class SeedDemoDataIdempotencyTests(TestCase):
 
 
 CANONICAL_USER_EMAILS = (
+    # ---- Sprint 21 v2 canonical demo accounts ----
+    "superadmin@cleanops.demo",
+    # Company A — Osius Demo / B Amsterdam
+    "ramazan-admin-osius@b-amsterdam.demo",
+    "gokhan-manager-osius@b-amsterdam.demo",
+    "murat-manager-osius@b-amsterdam.demo",
+    "isa-manager-osius@b-amsterdam.demo",
+    "tom-customer-b-amsterdam@b-amsterdam.demo",
+    "iris-customer-b-amsterdam@b-amsterdam.demo",
+    "amanda-customer-b-amsterdam@b-amsterdam.demo",
+    # Company B — Bright Facilities
+    "sophie-admin-bright@bright-facilities.demo",
+    "bram-manager-bright@bright-facilities.demo",
+    "lotte-customer-bright@bright-facilities.demo",
+)
+
+LEGACY_USER_EMAILS = (
+    # ---- Sprint 10 seed_demo (removed) ----
+    "demo-super@example.com",
+    "demo-company-admin@example.com",
+    "demo-manager@example.com",
+    "demo-customer@example.com",
+    # ---- Pre-Sprint-21 scripts/demo_up.sh inline shell ----
+    "admin@example.com",
+    "companyadmin@example.com",
+    "manager@example.com",
+    "customer@example.com",
+    # ---- Sprint 14 seed_b_amsterdam_demo (removed) ----
+    "tom@b-amsterdam.com",
+    "iris@b-amsterdam.com",
+    "amanda@b-amsterdam.com",
+    "gokhan.kocak@osius.demo",
+    "murat.ugurlu@osius.demo",
+    "isa.ugurlu@osius.demo",
+    # ---- Sprint 21 v1 canonical (superseded in v2) ----
     "super@cleanops.demo",
     "admin@cleanops.demo",
     "gokhan@cleanops.demo",
@@ -455,23 +514,8 @@ CANONICAL_USER_EMAILS = (
     "admin-b@cleanops.demo",
     "manager-b@cleanops.demo",
     "customer-b@cleanops.demo",
-)
-
-LEGACY_USER_EMAILS = (
-    "demo-super@example.com",
-    "demo-company-admin@example.com",
-    "demo-manager@example.com",
-    "demo-customer@example.com",
-    "admin@example.com",
-    "companyadmin@example.com",
-    "manager@example.com",
-    "customer@example.com",
-    "tom@b-amsterdam.com",
-    "iris@b-amsterdam.com",
-    "amanda@b-amsterdam.com",
-    "gokhan.kocak@osius.demo",
-    "murat.ugurlu@osius.demo",
-    "isa.ugurlu@osius.demo",
+    # ---- Sprint 21 v2 stray operator super-admin ----
+    "superadmin@osius.demo",
 )
 
 
@@ -539,7 +583,7 @@ class SeedDemoDataLegacyPruneTests(TestCase):
             )
             self.assertEqual(
                 User.objects.get(id=user.deleted_by_id).email,
-                "super@cleanops.demo",
+                "superadmin@cleanops.demo",
             )
 
     def test_canonical_users_remain_active_after_prune(self):
@@ -571,9 +615,9 @@ class SeedDemoDataLegacyPruneTests(TestCase):
             self._create_legacy_user(email)
         _seed()
         for email in (
-            "admin-b@cleanops.demo",
-            "manager-b@cleanops.demo",
-            "customer-b@cleanops.demo",
+            "sophie-admin-bright@bright-facilities.demo",
+            "bram-manager-bright@bright-facilities.demo",
+            "lotte-customer-bright@bright-facilities.demo",
         ):
             user = User.objects.get(email=email)
             self.assertTrue(user.is_active, f"{email} must remain active")
@@ -659,7 +703,7 @@ class SeedDemoDataLegacyPruneTests(TestCase):
         self.assertTrue(Company.objects.get(slug=COMPANY_B_SLUG).is_active)
 
     def test_admin_users_api_hides_legacy_after_seed(self):
-        # End-to-end check: GET /api/users/ as super@cleanops.demo
+        # End-to-end check: GET /api/users/ as superadmin@cleanops.demo
         # must not return any of the legacy emails after the prune.
         from rest_framework.test import APIClient
 
@@ -667,7 +711,7 @@ class SeedDemoDataLegacyPruneTests(TestCase):
             self._create_legacy_user(email)
         _seed()
 
-        super_admin = User.objects.get(email="super@cleanops.demo")
+        super_admin = User.objects.get(email="superadmin@cleanops.demo")
         client = APIClient()
         client.force_authenticate(user=super_admin)
         response = client.get("/api/users/")

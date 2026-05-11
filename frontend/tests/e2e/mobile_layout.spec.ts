@@ -441,7 +441,7 @@ test("admin/users: clicking a row navigates to the edit page", async ({
   await page.goto("/admin/users");
   const row = page
     .locator(".data-table tbody tr.admin-row-clickable", {
-      hasText: "super@cleanops.demo",
+      hasText: "superadmin@cleanops.demo",
     })
     .first();
   await expect(row).toBeVisible({ timeout: 10_000 });

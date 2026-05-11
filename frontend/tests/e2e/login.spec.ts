@@ -52,6 +52,8 @@ test("demo card click fills the login form", async ({ page }) => {
     return;
   }
   await card.click();
-  await expect(page.locator("#login-email")).toHaveValue("amanda@cleanops.demo");
+  await expect(page.locator("#login-email")).toHaveValue(
+    "amanda-customer-b-amsterdam@b-amsterdam.demo",
+  );
   await expect(page.locator("#login-password")).toHaveValue("Demo12345!");
 });
