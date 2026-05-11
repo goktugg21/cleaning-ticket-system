@@ -321,6 +321,12 @@ export function CreateTicketPage() {
           </div>
           <h2 className="page-title">{t("title")}</h2>
           <p className="page-sub">{t("subtitle")}</p>
+          <p
+            className="page-sub"
+            style={{ marginTop: 4, opacity: 0.78, fontSize: 13 }}
+          >
+            {t("required_fields_hint")}
+          </p>
         </div>
       </div>
 

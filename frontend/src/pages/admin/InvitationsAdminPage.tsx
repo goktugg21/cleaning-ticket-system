@@ -814,9 +814,15 @@ export function InvitationsAdminPage() {
 
       <ConfirmDialog
         ref={revokeDialogRef}
-        title={`Revoke invitation to ${revokeTarget?.email ?? "user"}?`}
-        body="The invitation link will stop working immediately. You can send a new one if needed."
-        confirmLabel="Revoke"
+        title={
+          revokeTarget?.email
+            ? t("invitations.dialog_revoke_title", {
+                email: revokeTarget.email,
+              })
+            : t("invitations.dialog_revoke_title_no_email")
+        }
+        body={t("invitations.dialog_revoke_body")}
+        confirmLabel={t("invitations.dialog_revoke_confirm")}
         onConfirm={handleConfirmRevoke}
         onCancel={() => setRevokeTarget(null)}
         busy={revokeBusy}

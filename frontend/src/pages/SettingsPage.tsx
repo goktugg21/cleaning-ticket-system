@@ -506,9 +506,22 @@ export function SettingsPage() {
                 className="field-input"
                 type="password"
                 autoComplete="new-password"
+                aria-describedby="settings-new-password-hint"
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
               />
+              <div
+                id="settings-new-password-hint"
+                className="field-hint"
+                style={{
+                  marginTop: 4,
+                  fontSize: 12,
+                  color: "var(--text-muted)",
+                  lineHeight: 1.4,
+                }}
+              >
+                {t("password_requirements_hint")}
+              </div>
               {passwordFieldErrors.new_password && (
                 <div style={fieldErrorStyle} role="alert">
                   {passwordFieldErrors.new_password}

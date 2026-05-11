@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Building2, Eye, EyeOff, LockKeyhole } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 
 type FieldErrors = {
@@ -41,6 +42,7 @@ function extractFieldErrors(error: unknown): FieldErrors {
 }
 
 export function ResetPasswordConfirmPage() {
+  const { t } = useTranslation("login");
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const uid = params.get("uid") ?? "";
@@ -54,8 +56,8 @@ export function ResetPasswordConfirmPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const missingTokenInfo = useMemo(
-    () => (!uid || !token ? "This password reset link is incomplete. Request a new one from the sign-in page." : ""),
-    [uid, token],
+    () => (!uid || !token ? t("reset_link_incomplete") : ""),
+    [uid, token, t],
   );
 
   async function handleSubmit(event: FormEvent) {
@@ -64,11 +66,11 @@ export function ResetPasswordConfirmPage() {
     setFieldErrors({});
 
     if (password.length === 0) {
-      setFieldErrors({ new_password: "Enter a new password." });
+      setFieldErrors({ new_password: t("reset_error_choose_password") });
       return;
     }
     if (password !== confirmPassword) {
-      setFieldErrors({ new_password: "The two passwords do not match." });
+      setFieldErrors({ new_password: t("reset_error_passwords_dont_match") });
       return;
     }
 
@@ -106,10 +108,8 @@ export function ResetPasswordConfirmPage() {
         </div>
 
         <div className="login-welcome">
-          <h2 className="login-welcome-title">Reset your password</h2>
-          <p className="login-welcome-sub">
-            Choose a new password for your CleanOps account.
-          </p>
+          <h2 className="login-welcome-title">{t("reset_title")}</h2>
+          <p className="login-welcome-sub">{t("reset_subtitle")}</p>
         </div>
 
         {missingTokenInfo && (
@@ -140,7 +140,7 @@ export function ResetPasswordConfirmPage() {
           <div className="login-field">
             <div className="login-field-row">
               <label className="login-field-label" htmlFor="reset-new-password">
-                New password
+                {t("reset_field_new_password")}
               </label>
             </div>
             <div className="login-field-wrap">
@@ -155,6 +155,7 @@ export function ResetPasswordConfirmPage() {
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
                 autoComplete="new-password"
+                aria-describedby="reset-new-password-hint"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 required
@@ -162,7 +163,7 @@ export function ResetPasswordConfirmPage() {
               <button
                 type="button"
                 className="login-field-toggle"
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-label={showPassword ? t("hide_password") : t("show_password")}
                 onClick={() => setShowPassword((value) => !value)}
               >
                 {showPassword ? (
@@ -171,6 +172,17 @@ export function ResetPasswordConfirmPage() {
                   <Eye size={16} strokeWidth={2} />
                 )}
               </button>
+            </div>
+            <div
+              id="reset-new-password-hint"
+              style={{
+                marginTop: 6,
+                fontSize: 12,
+                color: "var(--text-muted)",
+                lineHeight: 1.4,
+              }}
+            >
+              {t("reset_password_requirements_hint")}
             </div>
             {fieldErrors.new_password && (
               <div className="alert-error login-error" role="alert">
@@ -182,7 +194,7 @@ export function ResetPasswordConfirmPage() {
           <div className="login-field">
             <div className="login-field-row">
               <label className="login-field-label" htmlFor="reset-confirm-password">
-                Confirm new password
+                {t("reset_field_confirm_password")}
               </label>
             </div>
             <div className="login-field-wrap">
@@ -209,13 +221,13 @@ export function ResetPasswordConfirmPage() {
             className="login-submit"
             disabled={submitting || !uid || !token || !password || !confirmPassword}
           >
-            {submitting ? "Saving…" : "Set new password"}
+            {submitting ? t("reset_saving") : t("reset_submit")}
           </button>
         </form>
 
         <div style={{ marginTop: 24, fontSize: 13 }}>
           <Link className="login-field-link" to="/login">
-            Back to sign in
+            {t("reset_back_to_signin")}
           </Link>
         </div>
       </div>

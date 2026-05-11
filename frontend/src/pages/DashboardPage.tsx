@@ -513,7 +513,7 @@ export function DashboardPage() {
               </div>
             )}
 
-            <div className="table-wrap">
+            <div className="table-wrap ticket-list-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -577,36 +577,97 @@ export function DashboardPage() {
                   ))}
                 </tbody>
               </table>
-
-              {!loading && tickets.length === 0 && (
-                <div className="empty-state">
-                  <div className="empty-icon">＋</div>
-                  <div className="empty-title">
-                    {hasActiveFilters
-                      ? t("empty_no_match_title")
-                      : t("empty_no_tickets_title")}
-                  </div>
-                  <p className="empty-sub">
-                    {hasActiveFilters
-                      ? t("empty_no_match_sub")
-                      : t("empty_no_tickets_sub")}
-                  </p>
-                  {hasActiveFilters ? (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={clearFilters}
-                    >
-                      {t("clear_filters")}
-                    </button>
-                  ) : (
-                    <Link className="btn btn-primary btn-sm" to="/tickets/new">
-                      {t("create_ticket_cta")}
-                    </Link>
-                  )}
-                </div>
-              )}
             </div>
+
+            {/*
+              Sprint 22 final polish: phone widths get a mobile-only
+              ticket card list instead of the cramped horizontally-
+              scrolling table. CSS gates this list to
+              `@media (max-width: 600px)`; on tablet/desktop it is
+              `display: none` and the table above is the visible UI.
+              Both lists are rendered in the DOM so existing desktop
+              Playwright assertions that target `.data-table` still
+              work. The mobile card carries the same ticket info but
+              stacks it for readability and offers a 100%-width tap
+              target.
+            */}
+            <ul
+              className="ticket-card-list"
+              data-testid="ticket-card-list"
+              aria-label={t("section_recent_title")}
+            >
+              {tickets.map((ticket) => (
+                <li key={ticket.id} className="ticket-card">
+                  <Link
+                    to={`/tickets/${ticket.id}`}
+                    className="ticket-card-link"
+                    aria-label={`${ticket.ticket_no} — ${ticket.title}`}
+                  >
+                    <div className="ticket-card-head">
+                      <span className="ticket-card-id">{ticket.ticket_no}</span>
+                      <span className={priorityCellClass(ticket.priority)}>
+                        <i />
+                        {tPriority(ticket.priority)}
+                      </span>
+                    </div>
+                    <div className="ticket-card-title">{ticket.title}</div>
+                    <div className="ticket-card-pills">
+                      <span className={statusCellClass(ticket.status)}>
+                        <i />
+                        {tStatus(ticket.status)}
+                      </span>
+                      <SLABadge
+                        state={ticket.sla_display_state}
+                        remainingSeconds={ticket.sla_remaining_business_seconds}
+                      />
+                    </div>
+                    <dl className="ticket-card-meta">
+                      <div className="ticket-card-meta-row">
+                        <dt>{t("common:facility")}</dt>
+                        <dd className="td-facility">{ticket.building_name}</dd>
+                      </div>
+                      <div className="ticket-card-meta-row">
+                        <dt>{t("common:customer")}</dt>
+                        <dd className="td-customer">{ticket.customer_name}</dd>
+                      </div>
+                      <div className="ticket-card-meta-row">
+                        <dt>{t("common:created")}</dt>
+                        <dd>{formatDate(ticket.created_at)}</dd>
+                      </div>
+                    </dl>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+
+            {!loading && tickets.length === 0 && (
+              <div className="empty-state">
+                <div className="empty-icon">＋</div>
+                <div className="empty-title">
+                  {hasActiveFilters
+                    ? t("empty_no_match_title")
+                    : t("empty_no_tickets_title")}
+                </div>
+                <p className="empty-sub">
+                  {hasActiveFilters
+                    ? t("empty_no_match_sub")
+                    : t("empty_no_tickets_sub")}
+                </p>
+                {hasActiveFilters ? (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={clearFilters}
+                  >
+                    {t("clear_filters")}
+                  </button>
+                ) : (
+                  <Link className="btn btn-primary btn-sm" to="/tickets/new">
+                    {t("create_ticket_cta")}
+                  </Link>
+                )}
+              </div>
+            )}
 
             <div className="pagination">
               <span className="pagination-info">

@@ -297,7 +297,7 @@ export function CustomersAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
+        <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -357,28 +357,81 @@ export function CustomersAdminPage() {
               })}
             </tbody>
           </table>
-
-          {!loading && customers.length === 0 && (
-            <div className="empty-state">
-              <div className="empty-icon">＋</div>
-              <div className="empty-title">
-                {hasActiveFilters
-                  ? t("customers.empty_filtered_title")
-                  : t("customers.empty_initial_title")}
-              </div>
-              <p className="empty-sub">
-                {hasActiveFilters
-                  ? t("admin.empty_filtered_desc")
-                  : t("customers.empty_initial_desc")}
-              </p>
-              {!hasActiveFilters && (
-                <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
-                  {t("customers.create")}
-                </Link>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Sprint 22 final polish: phone-width parallel card list. */}
+        <ul
+          className="admin-card-list"
+          data-testid="admin-card-list"
+          aria-label={t("nav.customers")}
+        >
+          {customers.map((customer) => {
+            const editPath = `/admin/customers/${customer.id}`;
+            return (
+              <li key={customer.id} className="admin-card">
+                <Link
+                  to={editPath}
+                  className="admin-card-link"
+                  aria-label={`${t("admin.edit")}: ${customer.name}`}
+                >
+                  <div className="admin-card-head">
+                    <span className="admin-card-title">{customer.name}</span>
+                    <span
+                      className={`cell-tag cell-tag-${customer.is_active ? "open" : "closed"}`}
+                    >
+                      <i />
+                      {customer.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive")}
+                    </span>
+                  </div>
+                  <dl className="admin-card-meta">
+                    <div className="admin-card-meta-row">
+                      <dt>{t("company")}</dt>
+                      <dd>{companyName(customer.company)}</dd>
+                    </div>
+                    <div className="admin-card-meta-row">
+                      <dt>{t("building")}</dt>
+                      <dd>{buildingName(customer.building)}</dd>
+                    </div>
+                    {customer.contact_email && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("customers.col_contact_email")}</dt>
+                        <dd>{customer.contact_email}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  <div className="admin-card-actions">
+                    <span className="btn btn-ghost btn-sm">
+                      {t("admin.edit")}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!loading && customers.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-icon">＋</div>
+            <div className="empty-title">
+              {hasActiveFilters
+                ? t("customers.empty_filtered_title")
+                : t("customers.empty_initial_title")}
+            </div>
+            <p className="empty-sub">
+              {hasActiveFilters
+                ? t("admin.empty_filtered_desc")
+                : t("customers.empty_initial_desc")}
+            </p>
+            {!hasActiveFilters && (
+              <Link className="btn btn-primary btn-sm" to="/admin/customers/new">
+                {t("customers.create")}
+              </Link>
+            )}
+          </div>
+        )}
 
         {(previous || next) && (
           <div className="pagination">

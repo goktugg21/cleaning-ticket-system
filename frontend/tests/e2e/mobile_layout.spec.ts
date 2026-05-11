@@ -133,36 +133,62 @@ test.describe("app shell at phone widths", () => {
     }, { timeout: 5_000 }).toBeLessThanOrEqual(0);
   });
 
-  test("390px: dashboard ticket table is reachable and scrolls inside its wrap, not the page", async ({
+  test("390px: dashboard renders the mobile ticket card list, no body overflow", async ({
     page,
   }) => {
     await page.setViewportSize(MOBILE_390);
     await loginAs(page, DEMO_USERS.companyAdmin);
-    // Wait for the ticket table to render at least one row.
-    await expect(
-      page.locator(".data-table tbody tr").first(),
-    ).toBeVisible({ timeout: 10_000 });
-    // The .table-wrap exposes the horizontal scroll; its scrollWidth
-    // should exceed its clientWidth on this viewport because the
-    // table sets `min-width: 860px`.
-    const overflowFlags = await page
-      .locator(".data-table")
-      .first()
-      .evaluate((el) => {
-        const wrap = el.closest(".table-wrap");
-        const wrapEl = wrap as HTMLElement | null;
-        return {
-          hasWrap: !!wrap,
-          wrapScrollWidth: wrapEl ? wrapEl.scrollWidth : 0,
-          wrapClientWidth: wrapEl ? wrapEl.clientWidth : 0,
-        };
-      });
-    expect(overflowFlags.hasWrap).toBe(true);
-    expect(overflowFlags.wrapScrollWidth).toBeGreaterThan(
-      overflowFlags.wrapClientWidth,
-    );
-    // The page itself, however, must NOT overflow horizontally.
+    // Sprint 22 final polish: below 600px we hide the desktop
+    // `.ticket-list-wrap` table and render a card list instead.
+    // The card list must be present, contain at least one card,
+    // and not push the page itself into horizontal scroll.
+    const cardList = page.locator('[data-testid="ticket-card-list"]');
+    await expect(cardList).toBeVisible({ timeout: 10_000 });
+    const firstCard = cardList.locator(".ticket-card").first();
+    await expect(firstCard).toBeVisible({ timeout: 10_000 });
+    // The desktop table-wrap exists in the DOM but is
+    // `display: none` on phones, so its rendered box is empty.
+    const wrapBox = await page.locator(".ticket-list-wrap").boundingBox();
+    expect(wrapBox).toBeNull();
+    // Body must not overflow horizontally on a phone.
     await expectNoBodyHorizontalOverflow(page, MOBILE_390.width);
+  });
+
+  test("430px: each ticket card has a tap-target height >= 44px", async ({
+    page,
+  }) => {
+    await page.setViewportSize(MOBILE_430);
+    await loginAs(page, DEMO_USERS.companyAdmin);
+    const cards = page.locator(
+      '[data-testid="ticket-card-list"] .ticket-card-link',
+    );
+    await expect(cards.first()).toBeVisible({ timeout: 10_000 });
+    const heights = await cards.evaluateAll((els) =>
+      els.map((el) => (el as HTMLElement).getBoundingClientRect().height),
+    );
+    expect(heights.length).toBeGreaterThan(0);
+    for (const h of heights) {
+      expect(h).toBeGreaterThanOrEqual(44);
+    }
+    await expectNoBodyHorizontalOverflow(page, MOBILE_430.width);
+  });
+
+  test("360px: dashboard ticket card list does not horizontally overflow", async ({
+    page,
+  }) => {
+    await page.setViewportSize(MOBILE_360);
+    await loginAs(page, DEMO_USERS.companyAdmin);
+    const cardList = page.locator('[data-testid="ticket-card-list"]');
+    await expect(cardList).toBeVisible({ timeout: 10_000 });
+    // The card list itself must fit inside the viewport (its
+    // scrollWidth and clientWidth match — no internal horizontal
+    // overflow that would force the user to scroll sideways).
+    const dims = await cardList.evaluate((el) => ({
+      scrollWidth: (el as HTMLElement).scrollWidth,
+      clientWidth: (el as HTMLElement).clientWidth,
+    }));
+    expect(dims.scrollWidth).toBeLessThanOrEqual(dims.clientWidth + 1);
+    await expectNoBodyHorizontalOverflow(page, MOBILE_360.width);
   });
 });
 
@@ -180,11 +206,16 @@ test("390px: ticket detail page workflow buttons are tappable", async ({
   // the "render workflow buttons" path instead of a blank one.
   await loginAs(page, DEMO_USERS.customerB3);
   await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: "Pantry zeepdispenser" })
+  // Sprint 22 final polish: at 390px the dashboard renders the
+  // `[data-testid="ticket-card-list"]` card list, not the desktop
+  // table. Find the right card by its title text and tap it.
+  const card = page
+    .locator('[data-testid="ticket-card-list"] .ticket-card', {
+      hasText: "Pantry zeepdispenser",
+    })
     .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  await expect(card).toBeVisible({ timeout: 10_000 });
+  await card.locator(".ticket-card-link").click();
   const buttons = page.locator(".status-actions .status-btn");
   await expect(buttons.first()).toBeVisible({ timeout: 10_000 });
   // Each workflow button must have a tap target of at least 36px on
@@ -209,8 +240,12 @@ test("390px: admin users page is readable for SUPER_ADMIN", async ({
   await page.setViewportSize(MOBILE_390);
   await loginAs(page, DEMO_USERS.super);
   await page.goto("/admin/users");
+  // Sprint 22 final mobile + copy polish: below 600px the desktop
+  // `.data-table` is `display: none` and the parallel
+  // `[data-testid="admin-card-list"]` of `.admin-card` items is
+  // visible instead. Assert against the card list directly.
   await expect(
-    page.locator(".data-table tbody tr").first(),
+    page.locator('[data-testid="admin-card-list"] .admin-card').first(),
   ).toBeVisible({ timeout: 10_000 });
   await expectNoBodyHorizontalOverflow(page, MOBILE_390.width);
 });
@@ -224,10 +259,12 @@ test("390px: /admin/audit-logs renders for SUPER_ADMIN without page overflow", a
   await expect(
     page.locator('[data-testid="audit-logs-page"]'),
   ).toBeVisible({ timeout: 10_000 });
-  // Either at least one audit row or the empty-state card mounts.
-  const rows = page.locator('[data-testid="audit-row"]');
+  // Either at least one audit card (mobile) or the empty-state card
+  // mounts. `[data-testid="audit-row"]` (the desktop <tr>) is hidden
+  // at 390px under the new card list; check the card instead.
+  const cards = page.locator('[data-testid="audit-card"]');
   const empty = page.locator('[data-testid="audit-empty"]');
-  await expect(rows.first().or(empty)).toBeVisible({ timeout: 10_000 });
+  await expect(cards.first().or(empty)).toBeVisible({ timeout: 10_000 });
   await expectNoBodyHorizontalOverflow(page, MOBILE_390.width);
 });
 
@@ -604,8 +641,16 @@ for (const vp of [MOBILE_360, MOBILE_430]) {
     // not enough rows, the empty/footer area is still the last block
     // — pick the last child of the .card so the test is robust to
     // either case.
+    //
+    // Sprint 22 final mobile + copy polish: at phone widths the
+    // desktop `.table-wrap` is `display: none`; the visible
+    // last-content block is the mobile `.admin-card-list` or the
+    // pagination row below it. Include it in the selector so the
+    // last-block lookup keeps working at 360/430.
     const lastBlock = page
-      .locator(".card .table-wrap, .card .pagination, .card .empty-state")
+      .locator(
+        ".card .table-wrap, .card .admin-card-list, .card .pagination, .card .empty-state",
+      )
       .last();
     await expect(lastBlock).toBeAttached({ timeout: 10_000 });
     await scrollDocumentToBottom(page);

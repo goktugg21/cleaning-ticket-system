@@ -1,5 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 
+import i18n from "../i18n";
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
 
@@ -120,33 +122,54 @@ api.interceptors.response.use(
   },
 );
 
+// Sprint 22: human-friendly fallbacks per HTTP status. DRF still wins
+// when it returns a useful `detail` or field-error payload (we surface
+// that verbatim — it is usually the most precise message). When the
+// server only returns a status code, or when we never reached it, we
+// emit a translated sentence instead of raw text like "Bad Request".
+function statusFallback(status: number): string {
+  if (status === 401) return i18n.t("api_error.session_expired");
+  if (status === 403) return i18n.t("api_error.not_allowed");
+  if (status === 404) return i18n.t("api_error.not_found");
+  if (status === 429) return i18n.t("api_error.too_many_requests");
+  if (status >= 500) return i18n.t("api_error.server_unavailable");
+  if (status >= 400) return i18n.t("api_error.invalid_input");
+  return i18n.t("api_error.unexpected");
+}
+
 export function getApiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data;
+    const status = error.response?.status;
 
-    if (typeof data === "string") return data;
-    if (data?.detail) return String(data.detail);
-    if (data?.code) return String(data.code);
-
+    // DRF-shaped payloads first. These are usually the most precise
+    // message we can show ("Email already taken", "Invalid token", …)
+    // so we surface them verbatim instead of a generic status sentence.
+    if (typeof data === "string" && data.trim().length > 0) return data;
     if (data && typeof data === "object") {
-      const firstKey = Object.keys(data)[0];
-      const firstValue = firstKey ? data[firstKey] : null;
-
-      if (Array.isArray(firstValue)) {
+      const record = data as Record<string, unknown>;
+      if (typeof record.detail === "string" && record.detail.trim().length > 0) {
+        return record.detail;
+      }
+      const firstKey = Object.keys(record)[0];
+      const firstValue = firstKey ? record[firstKey] : null;
+      if (Array.isArray(firstValue) && firstValue.length > 0) {
         return String(firstValue[0]);
       }
-
-      if (firstValue) {
-        return String(firstValue);
+      if (typeof firstValue === "string" && firstValue.trim().length > 0) {
+        return firstValue;
       }
     }
 
-    if (error.response?.status === 401) {
-      return "Your session expired. Please sign in again.";
-    }
+    // No useful body — fall back to a status-aware sentence. Better
+    // than echoing "Network Error" or "Request failed with status 403".
+    if (typeof status === "number") return statusFallback(status);
 
-    if (error.message) return error.message;
+    // No response at all (network error / CORS / DNS).
+    if (error.code === "ERR_NETWORK" || error.message === "Network Error") {
+      return i18n.t("api_error.network");
+    }
   }
 
-  return "Unexpected error.";
+  return i18n.t("api_error.unexpected");
 }

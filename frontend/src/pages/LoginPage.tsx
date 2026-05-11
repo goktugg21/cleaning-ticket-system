@@ -49,8 +49,9 @@ interface DemoUser {
 // Sprint 21 v2: every persona email follows the
 // `<name>-<role>-<tenant>@<tenant>.demo` pattern so an operator
 // looking at /admin/users can identify each demo account at a glance.
-const COMPANY_A_LABEL = "Osius Demo — B Amsterdam";
-const COMPANY_B_LABEL = "Bright Facilities — Rotterdam";
+// Sprint 22: the company section labels resolve through the `login`
+// i18n namespace (demo_section_super / demo_section_company_a /
+// demo_section_company_b) so a Dutch audience sees them translated.
 
 const DEMO_USERS_COMPANY_A: DemoUser[] = [
   {
@@ -289,8 +290,14 @@ export function LoginPage() {
               <div className="qa-hint">
                 {t("demo_credentials_hint", { password: DEMO_PASSWORD })}
               </div>
+
+              <div
+                className="qa-company-label"
+                data-testid="demo-section-super-label"
+              >
+                {t("demo_section_super")}
+              </div>
               <div className="qa-grid">
-                {/* Super admin spans both companies — shown first. */}
                 <button
                   type="button"
                   key={SUPER_ADMIN_DEMO_USER.id}
@@ -306,6 +313,7 @@ export function LoginPage() {
                     <div className="qa-id">
                       <div className="qa-name">{SUPER_ADMIN_DEMO_USER.name}</div>
                       <div className="qa-title">{t(SUPER_ADMIN_DEMO_USER.roleKey)}</div>
+                      <div className="qa-scope">{t("demo_super_scope")}</div>
                     </div>
                   </div>
                   <span className="qa-role-pill">{t(SUPER_ADMIN_DEMO_USER.pillKey)}</span>
@@ -316,7 +324,7 @@ export function LoginPage() {
                 className="qa-company-label"
                 data-testid="demo-company-a-label"
               >
-                {COMPANY_A_LABEL}
+                {t("demo_section_company_a")}
               </div>
               <div className="qa-grid" data-testid="demo-company-a-grid">
                 {DEMO_USERS_COMPANY_A.map((user) => (
@@ -353,7 +361,7 @@ export function LoginPage() {
                 className="qa-company-label"
                 data-testid="demo-company-b-label"
               >
-                {COMPANY_B_LABEL}
+                {t("demo_section_company_b")}
               </div>
               <div className="qa-grid" data-testid="demo-company-b-grid">
                 {DEMO_USERS_COMPANY_B.map((user) => (
