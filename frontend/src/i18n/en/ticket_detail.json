@@ -86,5 +86,14 @@
   "delete_ticket_confirm_label": "Type ticket number to confirm",
   "delete_ticket_confirm_button": "Delete ticket",
   "delete_ticket_confirm_busy": "Deleting…",
-  "delete_ticket_failed": "Could not delete the ticket. {{detail}}"
+  "delete_ticket_failed": "Could not delete the ticket. {{detail}}",
+
+  "assigned_staff_title": "Assigned OSIUS staff",
+  "assigned_staff_empty": "No staff assigned yet.",
+  "assigned_staff_role": "OSIUS field staff",
+  "request_assignment": "Request assignment",
+  "requesting_assignment": "Sending request…",
+  "request_assignment_hint": "Ask an OSIUS manager to assign you to this ticket.",
+  "request_assignment_success": "Request sent. A manager will review it shortly.",
+  "request_assignment_already_pending": "You already have a pending request for this ticket."
 }

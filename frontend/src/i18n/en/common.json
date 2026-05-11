@@ -414,14 +414,6 @@
   "access_role.customer_location_manager": "Location manager",
   "access_role.customer_company_admin": "Company admin",
 
-  "ticket_detail.assigned_staff_title": "Assigned OSIUS staff",
-  "ticket_detail.assigned_staff_empty": "No staff assigned yet.",
-  "ticket_detail.assigned_staff_role": "OSIUS field staff",
-  "ticket_detail.request_assignment": "Request assignment",
-  "ticket_detail.requesting_assignment": "Sending request…",
-  "ticket_detail.request_assignment_hint": "Ask an OSIUS manager to assign you to this ticket.",
-  "ticket_detail.request_assignment_success": "Request sent. A manager will review it shortly.",
-  "ticket_detail.request_assignment_already_pending": "You already have a pending request for this ticket.",
 
   "staff_requests.title": "Staff assignment requests",
   "staff_requests.subtitle_loading": "Loading requests…",
@@ -433,6 +425,7 @@
   "staff_requests.col_ticket": "Ticket",
   "staff_requests.col_status": "Status",
   "staff_requests.col_actions": "Actions",
+  "staff_requests.col_reviewer": "Reviewer",
   "staff_requests.status_pending": "Pending",
   "staff_requests.status_approved": "Approved",
   "staff_requests.status_rejected": "Rejected",
