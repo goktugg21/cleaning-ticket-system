@@ -3,8 +3,9 @@
   "eyebrow": "New ticket",
   "title": "Create ticket",
   "subtitle": "Capture the request clearly and assign the right location.",
+  "required_fields_hint": "Fields marked with * are required.",
 
-  "no_access_message": "You don't have access to any building or customer to create a ticket against.",
+  "no_access_message": "You don't have access to any building or customer to create a ticket against. Ask your company admin to grant access, then refresh this page.",
 
   "section_issue_title": "Issue details",
   "field_category_label": "Category",

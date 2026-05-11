@@ -3,8 +3,9 @@
   "eyebrow": "Nieuw ticket",
   "title": "Ticket aanmaken",
   "subtitle": "Beschrijf het verzoek duidelijk en wijs de juiste locatie toe.",
+  "required_fields_hint": "Velden met * zijn verplicht.",
 
-  "no_access_message": "U heeft geen toegang tot een gebouw of klant om een ticket voor aan te maken.",
+  "no_access_message": "U heeft geen toegang tot een gebouw of klant om een ticket voor aan te maken. Vraag uw bedrijfsbeheerder om toegang en ververs deze pagina.",
 
   "section_issue_title": "Probleemgegevens",
   "field_category_label": "Categorie",

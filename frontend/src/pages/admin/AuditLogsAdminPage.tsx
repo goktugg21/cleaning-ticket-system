@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listAuditLogs } from "../../api/admin";
 import type { AuditLogListParams } from "../../api/admin";
@@ -27,12 +28,13 @@ import type { AuditAction, AuditLog } from "../../api/types";
  * any field.
  */
 
-const PAGE_SIZE = 25;
-
-const ACTION_LABEL: Record<AuditAction, string> = {
-  CREATE: "Create",
-  UPDATE: "Update",
-  DELETE: "Delete",
+// Sprint 22: action labels resolve through i18n at render time. The
+// raw enum still drives the colored tag class so the visual state
+// machine stays language-agnostic.
+const ACTION_LABEL_KEY: Record<AuditAction, string> = {
+  CREATE: "audit_logs.action_create",
+  UPDATE: "audit_logs.action_update",
+  DELETE: "audit_logs.action_delete",
 };
 
 const ACTION_CLASS: Record<AuditAction, string> = {
@@ -68,6 +70,7 @@ function isoEndOfDay(value: string): string {
 }
 
 export function AuditLogsAdminPage() {
+  const { t } = useTranslation("common");
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [count, setCount] = useState(0);
   const [next, setNext] = useState<string | null>(null);
@@ -118,7 +121,6 @@ export function AuditLogsAdminPage() {
     load();
   }, [load]);
 
-  const pageCount = Math.max(1, Math.ceil(count / PAGE_SIZE));
   const hasActiveFilters = Object.keys(applied).length > 0;
 
   function applyFilters(event: FormEvent) {
@@ -149,18 +151,21 @@ export function AuditLogsAdminPage() {
     setPage(1);
   }
 
+  const countLabel = t(
+    count === 1 ? "audit_logs.count_one" : "audit_logs.count_other",
+    { count },
+  );
+
   return (
     <div data-testid="audit-logs-page">
       <div className="page-header">
         <div>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Admin
+            {t("nav.admin_group")}
           </div>
-          <h2 className="page-title">Audit log</h2>
+          <h2 className="page-title">{t("audit_logs.title")}</h2>
           <p className="page-sub">
-            {loading
-              ? "Loading audit log…"
-              : `${count} audit ${count === 1 ? "entry" : "entries"}`}
+            {loading ? t("audit_logs.subtitle_loading") : countLabel}
           </p>
         </div>
         <div className="page-header-actions">
@@ -171,10 +176,17 @@ export function AuditLogsAdminPage() {
             disabled={loading}
           >
             <RefreshCw size={14} strokeWidth={2.5} />
-            Refresh
+            {t("refresh")}
           </button>
         </div>
       </div>
+
+      <p
+        className="page-sub"
+        style={{ marginTop: -8, marginBottom: 16, maxWidth: 720 }}
+      >
+        {t("audit_logs.intro")}
+      </p>
 
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
@@ -185,42 +197,46 @@ export function AuditLogsAdminPage() {
       <div className="card" style={{ overflow: "hidden" }}>
         <form className="filter-bar" onSubmit={applyFilters}>
           <div className="filter-field">
-            <span className="filter-label">Target model</span>
+            <span className="filter-label">
+              {t("audit_logs.filter_target_model")}
+            </span>
             <input
               className="filter-control"
               type="text"
-              placeholder="e.g. accounts.User"
+              placeholder={t("audit_logs.filter_target_model_placeholder")}
               value={targetModelInput}
               onChange={(event) => setTargetModelInput(event.target.value)}
               data-testid="audit-filter-target-model"
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">Target id</span>
+            <span className="filter-label">
+              {t("audit_logs.filter_target_id")}
+            </span>
             <input
               className="filter-control"
               type="number"
               min={1}
-              placeholder="e.g. 42"
+              placeholder={t("audit_logs.filter_target_id_placeholder")}
               value={targetIdInput}
               onChange={(event) => setTargetIdInput(event.target.value)}
               data-testid="audit-filter-target-id"
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">Actor id</span>
+            <span className="filter-label">{t("audit_logs.filter_actor")}</span>
             <input
               className="filter-control"
               type="number"
               min={1}
-              placeholder="user id"
+              placeholder={t("audit_logs.filter_actor_placeholder")}
               value={actorInput}
               onChange={(event) => setActorInput(event.target.value)}
               data-testid="audit-filter-actor"
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">From</span>
+            <span className="filter-label">{t("audit_logs.filter_from")}</span>
             <input
               className="filter-control"
               type="date"
@@ -230,7 +246,7 @@ export function AuditLogsAdminPage() {
             />
           </div>
           <div className="filter-field">
-            <span className="filter-label">To</span>
+            <span className="filter-label">{t("audit_logs.filter_to")}</span>
             <input
               className="filter-control"
               type="date"
@@ -241,7 +257,7 @@ export function AuditLogsAdminPage() {
           </div>
           <div className="filter-actions">
             <button type="submit" className="btn btn-secondary btn-sm">
-              Apply
+              {t("audit_logs.apply")}
             </button>
             {hasActiveFilters && (
               <button
@@ -249,7 +265,7 @@ export function AuditLogsAdminPage() {
                 className="btn btn-ghost btn-sm"
                 onClick={clearFilters}
               >
-                Clear
+                {t("clear")}
               </button>
             )}
           </div>
@@ -265,12 +281,12 @@ export function AuditLogsAdminPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>When</th>
-                <th>Actor</th>
-                <th>Action</th>
-                <th>Target</th>
-                <th>Request</th>
-                <th aria-label="Changes" />
+                <th>{t("audit_logs.col_when")}</th>
+                <th>{t("audit_logs.col_actor")}</th>
+                <th>{t("audit_logs.col_action")}</th>
+                <th>{t("audit_logs.col_target")}</th>
+                <th>{t("audit_logs.col_request")}</th>
+                <th aria-label={t("audit_logs.col_changes")} />
               </tr>
             </thead>
             <tbody>
@@ -281,13 +297,15 @@ export function AuditLogsAdminPage() {
                     {log.actor_email ? (
                       <span title={log.actor_email}>{log.actor_email}</span>
                     ) : (
-                      <span className="muted">system</span>
+                      <span className="muted">
+                        {t("audit_logs.system_actor")}
+                      </span>
                     )}
                   </td>
                   <td>
                     <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
                       <i />
-                      {ACTION_LABEL[log.action]}
+                      {t(ACTION_LABEL_KEY[log.action])}
                     </span>
                   </td>
                   <td>
@@ -307,7 +325,7 @@ export function AuditLogsAdminPage() {
                         style={{ cursor: "pointer" }}
                         data-testid="audit-row-changes-summary"
                       >
-                        Changes
+                        {t("audit_logs.changes_summary")}
                       </summary>
                       <pre
                         // Sprint 20: max-width handled via the
@@ -341,13 +359,13 @@ export function AuditLogsAdminPage() {
               <div className="empty-icon">·</div>
               <div className="empty-title">
                 {hasActiveFilters
-                  ? "No audit entries match your filters"
-                  : "No audit entries yet"}
+                  ? t("audit_logs.empty_filtered_title")
+                  : t("audit_logs.empty_initial_title")}
               </div>
               <p className="empty-sub">
                 {hasActiveFilters
-                  ? "Try widening the date range or clearing filters."
-                  : "Audit rows appear here as soon as a tracked entity is created, updated, or deleted."}
+                  ? t("audit_logs.empty_filtered_desc")
+                  : t("audit_logs.empty_initial_desc")}
               </p>
               {hasActiveFilters && (
                 <button
@@ -355,7 +373,7 @@ export function AuditLogsAdminPage() {
                   className="btn btn-secondary btn-sm"
                   onClick={clearFilters}
                 >
-                  Clear filters
+                  {t("audit_logs.empty_clear")}
                 </button>
               )}
             </div>
@@ -364,7 +382,7 @@ export function AuditLogsAdminPage() {
 
         <div className="pagination">
           <span className="pagination-info">
-            {`Page ${page} of ${pageCount} · ${count} total`}
+            {t("admin.pagination_page", { page, total: count })}
           </span>
           <div className="pagination-controls">
             <button
@@ -373,7 +391,7 @@ export function AuditLogsAdminPage() {
               disabled={loading || !previous || page <= 1}
               onClick={() => setPage((current) => Math.max(1, current - 1))}
             >
-              Previous
+              {t("previous")}
             </button>
             <button
               type="button"
@@ -381,7 +399,7 @@ export function AuditLogsAdminPage() {
               disabled={loading || !next}
               onClick={() => setPage((current) => current + 1)}
             >
-              Next
+              {t("next")}
             </button>
           </div>
         </div>
