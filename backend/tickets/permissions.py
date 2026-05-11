@@ -3,7 +3,7 @@ from rest_framework.permissions import BasePermission
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.scoping import scope_tickets_for
-from buildings.models import BuildingManagerAssignment
+from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
 from companies.models import CompanyUserMembership
 from customers.models import CustomerUserBuildingAccess
 
@@ -38,6 +38,22 @@ def user_has_scope_for_ticket(user, ticket):
         return CompanyUserMembership.objects.filter(user=user, company_id=ticket.company_id).exists()
     if user.role == UserRole.BUILDING_MANAGER:
         return BuildingManagerAssignment.objects.filter(user=user, building_id=ticket.building_id).exists()
+    if user.role == UserRole.STAFF:
+        # Sprint 23A: STAFF gets ticket scope via either an explicit
+        # assignment (TicketStaffAssignment) OR a building-wide
+        # visibility row. This mirrors the union scope_tickets_for
+        # computes for STAFF — keeping this helper in sync prevents
+        # the messages / attachments serializers from over-blocking
+        # staff who DO have read access to the ticket.
+        from tickets.models import TicketStaffAssignment
+
+        if TicketStaffAssignment.objects.filter(
+            ticket=ticket, user=user
+        ).exists():
+            return True
+        return BuildingStaffVisibility.objects.filter(
+            user=user, building_id=ticket.building_id
+        ).exists()
     if user.role == UserRole.CUSTOMER_USER:
         # Sprint 15: customer-users need the exact (customer, building)
         # pair access, matching scope_tickets_for. This function is
@@ -45,9 +61,26 @@ def user_has_scope_for_ticket(user, ticket):
         # without the pair check a customer-user with membership to
         # Customer X but no building access for B1 could post a
         # message on a B1 ticket of the same customer.
-        return CustomerUserBuildingAccess.objects.filter(
+        #
+        # Sprint 23A: ignore inactive access rows, matching
+        # scope_tickets_for's union of CUSTOMER_USER + LOCATION_MGR
+        # + COMPANY_ADMIN access paths.
+        if CustomerUserBuildingAccess.objects.filter(
             membership__user=user,
             membership__customer_id=ticket.customer_id,
             building_id=ticket.building_id,
+            is_active=True,
+        ).exists():
+            return True
+        # CUSTOMER_COMPANY_ADMIN access at ANY building of the
+        # customer also grants pair-level access (the company admin
+        # spans buildings).
+        return CustomerUserBuildingAccess.objects.filter(
+            membership__user=user,
+            membership__customer_id=ticket.customer_id,
+            is_active=True,
+            access_role=(
+                CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+            ),
         ).exists()
     return False

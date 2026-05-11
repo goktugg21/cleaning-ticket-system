@@ -521,6 +521,267 @@ class Sprint23AFoundationTests(TestCase):
             ).exists()
         )
 
+    # ---- 18-21. is_staff_role() must include the new STAFF role. ----
+
+    def test_18_staff_can_post_internal_note_and_customer_cannot_see_it(self):
+        """
+        STAFF must be treated as service-provider-side in
+        tickets/serializers.py + tickets/views.py. Internal notes
+        should be:
+          - creatable by a STAFF actor.
+          - hidden from a CUSTOMER_USER reading the same ticket.
+        Without is_staff_role() including STAFF, the serializer's
+        message_type=INTERNAL_NOTE validation 403s the STAFF user
+        and the message list view re-tags the message as PUBLIC
+        for them.
+        """
+        # Assign the staff user so they can post on the ticket.
+        TicketStaffAssignment.objects.create(
+            ticket=self.t_a_b1, user=self.staff_visible_b1
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.staff_visible_b1)
+        post = client.post(
+            f"/api/tickets/{self.t_a_b1.id}/messages/",
+            {
+                "message": "Internal: customer phoned — quote ready",
+                "message_type": "INTERNAL_NOTE",
+            },
+            format="json",
+        )
+        self.assertEqual(post.status_code, 201, post.data)
+        self.assertEqual(post.data["message_type"], "INTERNAL_NOTE")
+
+        # Customer A's user on B1 must NOT see this note.
+        client.force_authenticate(user=self.cust_user_a)
+        listing = client.get(f"/api/tickets/{self.t_a_b1.id}/messages/")
+        self.assertEqual(listing.status_code, 200, listing.data)
+        msg_rows = listing.data.get("results", listing.data)
+        bodies = [m.get("message", "") for m in msg_rows]
+        self.assertFalse(
+            any("Internal:" in b for b in bodies),
+            f"Customer leaked internal note: {bodies}",
+        )
+
+    def test_19_staff_can_access_hidden_attachment_only_when_in_scope(self):
+        """
+        Hidden attachments (or attachments tied to an internal-note
+        message) must be downloadable only by service-provider-side
+        users. STAFF must be on that side AND still respect the
+        scope helper — a STAFF user without visibility / assignment
+        on a ticket cannot reach its attachments.
+        """
+        # Build a hidden attachment on the B1 ticket. The file is
+        # required (FieldFile is not nullable on the model); a 1-byte
+        # placeholder is enough — the view never opens it during a
+        # list request.
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from tickets.models import TicketAttachment
+
+        attachment = TicketAttachment.objects.create(
+            ticket=self.t_a_b1,
+            uploaded_by=self.manager_b1,
+            file=SimpleUploadedFile(
+                "internal-budget.pdf",
+                b"x",
+                content_type="application/pdf",
+            ),
+            original_filename="internal-budget.pdf",
+            mime_type="application/pdf",
+            file_size=1,
+            is_hidden=True,
+        )
+
+        client = APIClient()
+        # staff_visible_b1 has BuildingStaffVisibility on B1 →
+        # scope_tickets_for returns t_a_b1 → request enters the
+        # hidden-attachment branch with is_staff_role=True → allowed.
+        client.force_authenticate(user=self.staff_visible_b1)
+        list_resp = client.get(
+            f"/api/tickets/{self.t_a_b1.id}/attachments/"
+        )
+        self.assertEqual(list_resp.status_code, 200, list_resp.data)
+        rows = list_resp.data.get("results", list_resp.data)
+        ids = [a["id"] for a in rows]
+        self.assertIn(attachment.id, ids)
+
+        # staff_no_visibility has no scope on B1 → 404 at the
+        # ticket-level scope check (_get_ticket raises Http404).
+        client.force_authenticate(user=self.staff_no_visibility)
+        list_resp2 = client.get(
+            f"/api/tickets/{self.t_a_b1.id}/attachments/"
+        )
+        self.assertEqual(list_resp2.status_code, 404)
+
+        # Customer A's user on B1 cannot see the hidden attachment
+        # (already covered by other tests but we re-assert here
+        # because the regression target overlaps).
+        client.force_authenticate(user=self.cust_user_a)
+        list_resp3 = client.get(
+            f"/api/tickets/{self.t_a_b1.id}/attachments/"
+        )
+        self.assertEqual(list_resp3.status_code, 200)
+        cust_rows = list_resp3.data.get("results", list_resp3.data)
+        cust_ids = [a["id"] for a in cust_rows]
+        self.assertNotIn(attachment.id, cust_ids)
+
+    def test_20_staff_first_message_stamps_first_response_at(self):
+        """
+        Posting the first non-customer message must set
+        ticket.first_response_at. Without STAFF in is_staff_role(),
+        a STAFF user's first message is silently downgraded to a
+        PUBLIC_REPLY and the `mark_first_response_if_needed` branch
+        below it is skipped → the SLA "time-to-first-response"
+        metric is wrong for every STAFF-handled ticket.
+        """
+        # Build a fresh ticket so no other staff message has fired.
+        ticket = Ticket.objects.create(
+            company=self.company,
+            building=self.b1,
+            customer=self.customer_a,
+            created_by=self.cust_user_a,
+            title="New for first-response stamp",
+            description="x",
+        )
+        TicketStaffAssignment.objects.create(
+            ticket=ticket, user=self.staff_visible_b1
+        )
+        self.assertIsNone(ticket.first_response_at)
+        client = APIClient()
+        client.force_authenticate(user=self.staff_visible_b1)
+        r = client.post(
+            f"/api/tickets/{ticket.id}/messages/",
+            {"message": "On it.", "message_type": "PUBLIC_REPLY"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 201, r.data)
+        ticket.refresh_from_db()
+        self.assertIsNotNone(
+            ticket.first_response_at,
+            "STAFF first message should stamp first_response_at",
+        )
+
+    def test_21_staff_is_not_treated_as_customer_in_change_status_gate(self):
+        """
+        TicketViewSet.change_status blocks customer users from
+        every transition except APPROVED / REJECTED (their own
+        approval). STAFF must NOT trip that gate when they perform
+        a staff-side transition like OPEN→IN_PROGRESS.
+
+        Concretely: with the broken (Sprint 22) version of
+        is_staff_role(), a STAFF user POSTing to_status=IN_PROGRESS
+        on an OPEN ticket would 403 with the customer-only
+        message; after the Sprint 23A fix the gate accepts it.
+        """
+        # Fresh OPEN ticket, staff assigned to it.
+        ticket = Ticket.objects.create(
+            company=self.company,
+            building=self.b1,
+            customer=self.customer_a,
+            created_by=self.cust_user_a,
+            title="Status gate check",
+            description="x",
+        )
+        TicketStaffAssignment.objects.create(
+            ticket=ticket, user=self.staff_visible_b1
+        )
+        client = APIClient()
+        client.force_authenticate(user=self.staff_visible_b1)
+        r = client.post(
+            f"/api/tickets/{ticket.id}/status/",
+            {"to_status": "IN_PROGRESS"},
+            format="json",
+        )
+        # We do NOT assert 200 here, because the underlying state-
+        # machine may still reject the transition for a different
+        # reason (Sprint 23B will widen the allowed-set for STAFF).
+        # The specific assertion is: the response is NOT the
+        # customer-only 403 message. If the gate broke, this would
+        # be 403 with that text.
+        self.assertNotEqual(
+            r.status_code,
+            403,
+            f"STAFF was treated as customer in change_status gate: {r.data!r}",
+        )
+
+    # ---- 22. CustomerUserBuildingAccess UPDATE audit coverage. ----
+
+    def test_22_customeruserbuildingaccess_update_emits_audit(self):
+        """
+        Spec requires audit for customer-user-building-access
+        changes — explicitly role changes, permission overrides,
+        and active/inactive toggles. Sprint 14 only logged CREATE
+        and DELETE. Sprint 23A adds an UPDATE path keyed on the
+        three editable fields (`access_role`, `permission_overrides`,
+        `is_active`).
+        """
+        AuditLog.objects.all().delete()
+        access = self.access_a_user_b1
+        # 1. Change access_role.
+        access.access_role = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        access.save(update_fields=["access_role"])
+
+        # 2. Change permission_overrides.
+        access.permission_overrides = {
+            "customer.ticket.approve_location": True
+        }
+        access.save(update_fields=["permission_overrides"])
+
+        # 3. Change is_active.
+        access.is_active = False
+        access.save(update_fields=["is_active"])
+
+        updates = list(
+            AuditLog.objects.filter(
+                target_model="customers.CustomerUserBuildingAccess",
+                action="UPDATE",
+            )
+        )
+        self.assertEqual(
+            len(updates),
+            3,
+            f"Expected 3 UPDATE rows (one per save). Got: "
+            f"{[(u.action, u.changes) for u in updates]}",
+        )
+
+        changes_by_field = set()
+        for log in updates:
+            for field in log.changes.keys():
+                changes_by_field.add(field)
+        self.assertIn("access_role", changes_by_field)
+        self.assertIn("permission_overrides", changes_by_field)
+        self.assertIn("is_active", changes_by_field)
+
+        # Spot-check one diff body: access_role should record the
+        # before/after correctly.
+        role_log = next(
+            log for log in updates if "access_role" in log.changes
+        )
+        self.assertEqual(
+            role_log.changes["access_role"]["before"],
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
+        )
+        self.assertEqual(
+            role_log.changes["access_role"]["after"],
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER,
+        )
+
+        # An update that touches NONE of the three tracked fields
+        # must NOT emit an UPDATE row (regression guard against
+        # noisy audit log when downstream code rewrites the row).
+        before_count = AuditLog.objects.filter(
+            target_model="customers.CustomerUserBuildingAccess",
+            action="UPDATE",
+        ).count()
+        access.save()  # no changes
+        after_count = AuditLog.objects.filter(
+            target_model="customers.CustomerUserBuildingAccess",
+            action="UPDATE",
+        ).count()
+        self.assertEqual(after_count, before_count)
+
 
 # ---------------------------------------------------------------- helpers
 

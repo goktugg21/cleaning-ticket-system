@@ -36,10 +36,27 @@ class IsCustomerUser(IsAuthenticatedAndActive):
 
 
 def is_staff_role(user):
+    """
+    True iff `user` is a service-provider-side ("OSIUS-side") user.
+
+    Used by tickets.views / tickets.serializers as the gate for
+    staff-only behaviours: internal notes, hidden attachments,
+    first-response stamping, the assignable-managers endpoint, and
+    the "did a staff actor act on this ticket" branch of the
+    change_status gate.
+
+    Sprint 23A: STAFF is added here so the new field-staff role
+    inherits the OSIUS-side ticket behaviour. Without this, STAFF
+    users would be silently treated as customers in every call
+    site — they would not be able to post internal notes, would
+    not stamp first_response_at, and would be blocked from the
+    staff branch of the status-change gate.
+    """
     return getattr(user, "role", None) in (
         UserRole.SUPER_ADMIN,
         UserRole.COMPANY_ADMIN,
         UserRole.BUILDING_MANAGER,
+        UserRole.STAFF,
     )
 
 
