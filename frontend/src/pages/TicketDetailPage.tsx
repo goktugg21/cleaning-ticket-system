@@ -299,16 +299,25 @@ export function TicketDetailPage() {
   // this ticket so the UI can show a Cancel button instead of the
   // submit-once banner. The backend's STAFF queryset is narrowed to
   // `staff=request.user`, so this list call is bounded to the
-  // viewer's own requests; ticket/status filtering is done in JS
-  // because the viewset declares no DRF filterset and ignoring an
-  // unknown query param is safer than relying on backend filtering.
+  // viewer's own requests.
+  //
+  // Sprint 24D — the viewset now declares `filterset_fields =
+  // ["status", "ticket", "staff"]`, so we can ask for exactly the
+  // single row we care about (`?ticket=<id>&status=PENDING`). The
+  // backend's duplicate guard allows one PENDING per (staff, ticket),
+  // so this returns 0 or 1 row regardless of pagination — fixing the
+  // pre-24D bug where a staff user with >25 lifetime requests could
+  // miss their own PENDING row if it fell off the first page.
   useEffect(() => {
     if (me?.role !== "STAFF" || !id) return;
     let cancelled = false;
-    listStaffAssignmentRequests()
+    const numericId = Number(id);
+    listStaffAssignmentRequests({
+      ticket: numericId,
+      status: "PENDING",
+    })
       .then((response) => {
         if (cancelled) return;
-        const numericId = Number(id);
         const match = response.results.find(
           (r) => r.ticket === numericId && r.status === "PENDING",
         );
