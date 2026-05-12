@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test login.spec.ts routes.spec.ts scope.spec.ts workflow.spec.ts sprint24c_staff_cancel_assignment.spec.ts sprint24d_pending_discovery.spec.ts",
+    "test:e2e:sprint": "playwright test sprint",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:install": "playwright install chromium"
   },

@@ -1,0 +1,183 @@
+name: playwright
+
+# Sprint 24E — Playwright is intentionally NOT a per-PR gate. The
+# full suite takes 20+ minutes on a GitHub-hosted runner and the
+# per-PR test.yml backend + frontend-build jobs already enforce the
+# critical contracts (Django check, migrations, type/build).
+#
+# Triggers:
+#   - workflow_dispatch — maintainer kicks it off on demand from the
+#     Actions tab. Useful before a release / for risky PRs.
+#   - schedule — nightly cron at 03:30 UTC catches drift between
+#     nightly builds without slowing daily PR iteration.
+#
+# The job spins up the dev docker compose stack (backend + Postgres
+# + Redis), builds the frontend image, runs the official Playwright
+# container against the bundled prod nginx, then tears the stack
+# back down. The runner needs ~5 GB free for the build + browser
+# binaries — well within the 14 GB GitHub-hosted ubuntu-latest
+# budget.
+on:
+  workflow_dispatch:
+    inputs:
+      spec_filter:
+        description: >-
+          Optional Playwright spec path or grep filter
+          (e.g. "sprint24c_staff_cancel_assignment.spec.ts"). Leave
+          blank for the full suite.
+        required: false
+        default: ""
+  schedule:
+    # 03:30 UTC every day. Picked outside business hours in both
+    # Europe and the Americas so a failing nightly does not greet
+    # the team mid-morning before triage capacity exists.
+    - cron: "30 3 * * *"
+
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    name: Full Playwright (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      # Match the dev compose env so seed_demo_data + the standard
+      # backend test path work identically to local.
+      POSTGRES_DB: cleaning_ticket_db
+      POSTGRES_USER: cleaning_ticket_user
+      POSTGRES_PASSWORD: ci-dummy-postgres-password
+      DJANGO_SECRET_KEY: ci-dummy-secret-do-not-use-in-prod
+      DJANGO_DEBUG: "True"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,frontend,backend"
+      DJANGO_LOG_LEVEL: WARNING
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_TASK_ALWAYS_EAGER: "True"
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+      DEFAULT_FROM_EMAIL: ci@example.com
+      SENTRY_DSN: ""
+      VITE_API_BASE_URL: /api
+      VITE_DEMO_MODE: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Materialise compose .env from CI env vars
+        # docker compose reads .env to populate ${POSTGRES_PASSWORD}
+        # etc. in docker-compose.yml. We re-export the CI env so the
+        # compose stack sees the same values as the backend job.
+        run: |
+          {
+            echo "POSTGRES_DB=${POSTGRES_DB}"
+            echo "POSTGRES_USER=${POSTGRES_USER}"
+            echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+            echo "POSTGRES_HOST=db"
+            echo "POSTGRES_PORT=5432"
+            echo "DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY}"
+            echo "DJANGO_DEBUG=${DJANGO_DEBUG}"
+            echo "DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}"
+            echo "DJANGO_LOG_LEVEL=${DJANGO_LOG_LEVEL}"
+            echo "CELERY_BROKER_URL=${CELERY_BROKER_URL}"
+            echo "CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}"
+            echo "CELERY_TASK_ALWAYS_EAGER=${CELERY_TASK_ALWAYS_EAGER}"
+            echo "EMAIL_BACKEND=${EMAIL_BACKEND}"
+            echo "DEFAULT_FROM_EMAIL=${DEFAULT_FROM_EMAIL}"
+            echo "SENTRY_DSN=${SENTRY_DSN}"
+          } > .env
+
+      - name: Bring up backend / db / redis
+        run: docker compose up -d --build db redis backend
+
+      - name: Wait for backend healthy
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/health/ready >/dev/null 2>&1; then
+              echo "backend ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "backend never reported ready" >&2
+          docker compose logs backend
+          exit 1
+
+      - name: Migrate + seed demo data
+        run: |
+          docker compose exec -T backend python manage.py migrate --noinput
+          docker compose exec -T backend python manage.py seed_demo_data
+
+      - name: Build + run prod frontend image
+        run: |
+          docker build \
+            --build-arg VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+            --build-arg VITE_DEMO_MODE=${VITE_DEMO_MODE} \
+            -t cleaning-ticket-system-frontend:ci \
+            frontend
+          # Attach to the compose network so nginx can proxy /api/ to
+          # the `backend` service hostname.
+          docker run -d --name ci_frontend \
+            --network cleaning-ticket-system_default \
+            -p 5173:80 \
+            cleaning-ticket-system-frontend:ci
+
+      - name: Wait for frontend healthy
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:5173/ >/dev/null 2>&1; then
+              echo "frontend ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "frontend never responded on :5173" >&2
+          docker logs ci_frontend
+          exit 1
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Playwright deps
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run Playwright
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:5173
+        run: |
+          if [[ -n "${{ inputs.spec_filter }}" ]]; then
+            echo "Running filtered spec(s): ${{ inputs.spec_filter }}"
+            npx playwright test ${{ inputs.spec_filter }}
+          else
+            npm run test:e2e
+          fi
+
+      - name: Upload Playwright report on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Compose teardown
+        if: ${{ always() }}
+        run: |
+          docker rm -f ci_frontend || true
+          docker compose down --remove-orphans
