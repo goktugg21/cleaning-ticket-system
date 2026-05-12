@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -12,6 +12,8 @@ import type {
   StaffAssignmentRequest,
   StaffAssignmentRequestStatus,
 } from "../../api/types";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 
 /**
  * Sprint 23B — minimal review queue for staff-initiated
@@ -21,18 +23,21 @@ import type {
  * BUILDING_MANAGER sees its buildings; CUSTOMER_USER + STAFF see
  * nothing or only their own respectively). This page lists what
  * the API returns and lets a reviewer approve / reject pending
- * requests in one click.
+ * requests via a confirmation modal.
  *
- * Out of scope for 23B:
- *  - inline cancel (no staff-side cancel endpoint yet)
- *  - reviewer-note input modal (we send "" today; spec only
- *    requires the API path to accept it)
- *  - filtering by building, by staff name, by date range
- *
- * Those are deferred to Sprint 23C.
+ * Sprint 24B — the one-click approve/reject path is replaced with
+ * a proper review modal that collects an optional reviewer note
+ * before posting. The reviewer_note travels back on the response
+ * and is rendered next to the reviewer email on reviewed rows
+ * (both desktop table and mobile card). The pre-24B "send empty
+ * note" UX was acceptable for the spec but offered no audit value
+ * for the requesting staff member — Sprint 24B closes that gap
+ * without changing the backend contract (the API already accepted
+ * the note since Sprint 23A).
  */
 
 type Filter = "pending" | "all";
+type ReviewAction = "approve" | "reject";
 
 const STATUS_LABEL_KEY: Record<StaffAssignmentRequestStatus, string> = {
   PENDING: "staff_requests.status_pending",
@@ -62,6 +67,10 @@ function formatTimestamp(value: string): string {
   }
 }
 
+function ticketLabel(req: StaffAssignmentRequest): string {
+  return `${req.ticket_no || `#${req.ticket}`} · ${req.ticket_title}`;
+}
+
 export function StaffAssignmentRequestsAdminPage() {
   const { t } = useTranslation("common");
   const [requests, setRequests] = useState<StaffAssignmentRequest[]>([]);
@@ -69,7 +78,19 @@ export function StaffAssignmentRequestsAdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("pending");
-  const [reviewBusyId, setReviewBusyId] = useState<number | null>(null);
+
+  // Sprint 24B — review modal state. `target` holds the row being
+  // reviewed; `action` says whether we're approving or rejecting.
+  // The note textarea is a separate React state so cancelling does
+  // not clear it mid-typing on accidental escape, while opening a
+  // fresh dialog resets it.
+  const [reviewTarget, setReviewTarget] =
+    useState<StaffAssignmentRequest | null>(null);
+  const [reviewAction, setReviewAction] = useState<ReviewAction>("approve");
+  const [reviewerNote, setReviewerNote] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [successBanner, setSuccessBanner] = useState("");
+  const reviewDialogRef = useRef<ConfirmDialogHandle>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,30 +112,60 @@ export function StaffAssignmentRequestsAdminPage() {
     load();
   }, [load]);
 
-  async function handleApprove(id: number) {
-    setReviewBusyId(id);
+  function openReviewDialog(
+    req: StaffAssignmentRequest,
+    action: ReviewAction,
+  ) {
+    setReviewTarget(req);
+    setReviewAction(action);
+    setReviewerNote("");
     setError("");
+    setSuccessBanner("");
+    // Defer the showModal call to after the dialog body re-renders with
+    // the fresh target — useImperativeHandle's open() is synchronous so
+    // a microtask is enough.
+    queueMicrotask(() => reviewDialogRef.current?.open());
+  }
+
+  async function submitReview() {
+    if (!reviewTarget) return;
+    setReviewBusy(true);
+    setError("");
+    const note = reviewerNote.trim();
+    const targetSnapshot = reviewTarget;
+    const actionSnapshot = reviewAction;
     try {
-      await approveStaffAssignmentRequest(id);
+      if (actionSnapshot === "approve") {
+        await approveStaffAssignmentRequest(targetSnapshot.id, note);
+        setSuccessBanner(
+          t("staff_requests.banner_approved", {
+            staff: targetSnapshot.staff_email,
+            ticket: ticketLabel(targetSnapshot),
+          }),
+        );
+      } else {
+        await rejectStaffAssignmentRequest(targetSnapshot.id, note);
+        setSuccessBanner(
+          t("staff_requests.banner_rejected", {
+            staff: targetSnapshot.staff_email,
+            ticket: ticketLabel(targetSnapshot),
+          }),
+        );
+      }
+      reviewDialogRef.current?.close();
+      setReviewTarget(null);
       await load();
     } catch (err) {
       setError(getApiError(err));
     } finally {
-      setReviewBusyId(null);
+      setReviewBusy(false);
     }
   }
 
-  async function handleReject(id: number) {
-    setReviewBusyId(id);
-    setError("");
-    try {
-      await rejectStaffAssignmentRequest(id);
-      await load();
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setReviewBusyId(null);
-    }
+  function cancelReviewDialog() {
+    if (reviewBusy) return;
+    setReviewTarget(null);
+    setReviewerNote("");
   }
 
   const countLabel = useMemo(
@@ -127,6 +178,19 @@ export function StaffAssignmentRequestsAdminPage() {
       ),
     [count, t],
   );
+
+  const reviewDialogTitle = useMemo(() => {
+    if (!reviewTarget) return "";
+    return reviewAction === "approve"
+      ? t("staff_requests.review_dialog_approve_title")
+      : t("staff_requests.review_dialog_reject_title");
+  }, [reviewAction, reviewTarget, t]);
+
+  const reviewDialogConfirmLabel = useMemo(() => {
+    return reviewAction === "approve"
+      ? t("staff_requests.approve")
+      : t("staff_requests.reject");
+  }, [reviewAction, t]);
 
   return (
     <div data-testid="staff-requests-page">
@@ -161,6 +225,17 @@ export function StaffAssignmentRequestsAdminPage() {
         {t("staff_requests.intro")}
       </p>
 
+      {successBanner && (
+        <div
+          className="alert-info"
+          style={{ marginBottom: 16 }}
+          role="status"
+          data-testid="staff-requests-success-banner"
+        >
+          {successBanner}
+        </div>
+      )}
+
       {error && (
         <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
           {error}
@@ -194,11 +269,8 @@ export function StaffAssignmentRequestsAdminPage() {
         {/* Sprint 23C hardening: the desktop table is wrapped in
             `admin-list-wrap` so the existing @media (max-width: 600px)
             CSS rule hides it on phones and the `.admin-card-list`
-            sibling below takes over. Same pattern as
-            /admin/{users,customers,buildings,...}. Without this, the
-            table's min-width: 860px (from index.css) plus the card
-            header + filter bar push the page over 430px and the
-            workspace develops a horizontal scrollbar. */}
+            sibling below takes over. Sprint 24B adds a Reviewer note
+            column so reviewed rows surface the persisted note inline. */}
         <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
@@ -207,6 +279,7 @@ export function StaffAssignmentRequestsAdminPage() {
                 <th>{t("staff_requests.col_staff")}</th>
                 <th>{t("staff_requests.col_ticket")}</th>
                 <th>{t("staff_requests.col_status")}</th>
+                <th>{t("staff_requests.col_reviewer_note")}</th>
                 <th aria-label={t("staff_requests.col_actions")} />
               </tr>
             </thead>
@@ -218,9 +291,7 @@ export function StaffAssignmentRequestsAdminPage() {
                   </td>
                   <td>{req.staff_email}</td>
                   <td>
-                    <Link to={`/tickets/${req.ticket}`}>
-                      {req.ticket_no || `#${req.ticket}`} · {req.ticket_title}
-                    </Link>
+                    <Link to={`/tickets/${req.ticket}`}>{ticketLabel(req)}</Link>
                   </td>
                   <td>
                     <span className={`cell-tag ${STATUS_CLASS[req.status]}`}>
@@ -230,23 +301,34 @@ export function StaffAssignmentRequestsAdminPage() {
                   </td>
                   <td>
                     {req.status === "PENDING" ? (
+                      <span className="muted small">—</span>
+                    ) : req.reviewer_note ? (
+                      <span data-testid="staff-request-reviewer-note">
+                        {req.reviewer_note}
+                      </span>
+                    ) : (
+                      <span className="muted small">
+                        {t("staff_requests.reviewer_note_empty")}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {req.status === "PENDING" ? (
                       <div style={{ display: "flex", gap: 6 }}>
                         <button
                           type="button"
                           className="btn btn-primary btn-sm"
-                          disabled={reviewBusyId === req.id}
-                          onClick={() => handleApprove(req.id)}
+                          disabled={reviewBusy}
+                          onClick={() => openReviewDialog(req, "approve")}
                           data-testid={`approve-${req.id}`}
                         >
-                          {reviewBusyId === req.id
-                            ? t("staff_requests.reviewing")
-                            : t("staff_requests.approve")}
+                          {t("staff_requests.approve")}
                         </button>
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
-                          disabled={reviewBusyId === req.id}
-                          onClick={() => handleReject(req.id)}
+                          disabled={reviewBusy}
+                          onClick={() => openReviewDialog(req, "reject")}
                           data-testid={`reject-${req.id}`}
                         >
                           {t("staff_requests.reject")}
@@ -268,7 +350,10 @@ export function StaffAssignmentRequestsAdminPage() {
             this only at <=600px (admin-card-list); on desktop the
             table above is visible. Card rows are NOT wrapped in an
             <a> because the actions are buttons, not a navigation
-            target; the inner ticket-no still links to the ticket. */}
+            target; the inner ticket-no still links to the ticket.
+            Sprint 24B adds a Reviewer-note meta-row for reviewed
+            cards so the persisted note surfaces alongside the
+            reviewer's email. */}
         <ul
           className="admin-card-list"
           data-testid="staff-requests-card-list"
@@ -286,7 +371,7 @@ export function StaffAssignmentRequestsAdminPage() {
                     to={`/tickets/${req.ticket}`}
                     className="admin-card-title"
                   >
-                    {req.ticket_no || `#${req.ticket}`} · {req.ticket_title}
+                    {ticketLabel(req)}
                   </Link>
                   <span className={`cell-tag ${STATUS_CLASS[req.status]}`}>
                     <i />
@@ -308,6 +393,22 @@ export function StaffAssignmentRequestsAdminPage() {
                       <dd>{req.reviewer_email}</dd>
                     </div>
                   )}
+                  {req.status !== "PENDING" && (
+                    <div className="admin-card-meta-row">
+                      <dt>{t("staff_requests.col_reviewer_note")}</dt>
+                      <dd>
+                        {req.reviewer_note ? (
+                          <span data-testid="staff-request-reviewer-note-mobile">
+                            {req.reviewer_note}
+                          </span>
+                        ) : (
+                          <span className="muted small">
+                            {t("staff_requests.reviewer_note_empty")}
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                  )}
                 </dl>
                 {req.status === "PENDING" && (
                   <div
@@ -317,19 +418,17 @@ export function StaffAssignmentRequestsAdminPage() {
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
-                      disabled={reviewBusyId === req.id}
-                      onClick={() => handleApprove(req.id)}
+                      disabled={reviewBusy}
+                      onClick={() => openReviewDialog(req, "approve")}
                       data-testid={`approve-card-${req.id}`}
                     >
-                      {reviewBusyId === req.id
-                        ? t("staff_requests.reviewing")
-                        : t("staff_requests.approve")}
+                      {t("staff_requests.approve")}
                     </button>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      disabled={reviewBusyId === req.id}
-                      onClick={() => handleReject(req.id)}
+                      disabled={reviewBusy}
+                      onClick={() => openReviewDialog(req, "reject")}
                       data-testid={`reject-card-${req.id}`}
                     >
                       {t("staff_requests.reject")}
@@ -357,6 +456,79 @@ export function StaffAssignmentRequestsAdminPage() {
           </div>
         )}
       </div>
+
+      {/* Sprint 24B — review modal. We pass a JSX body so the
+          textarea can be a real <textarea> bound to the parent
+          state. ConfirmDialog renders its body inside the
+          <dialog> already, so accessibility / focus trap come
+          for free. */}
+      <ConfirmDialog
+        ref={reviewDialogRef}
+        title={reviewDialogTitle}
+        confirmLabel={reviewDialogConfirmLabel}
+        busyLabel={t("staff_requests.reviewing")}
+        onConfirm={submitReview}
+        onCancel={cancelReviewDialog}
+        busy={reviewBusy}
+        body={
+          reviewTarget ? (
+            <div data-testid="staff-requests-review-dialog">
+              <p style={{ marginBottom: 12 }}>
+                {t(
+                  reviewAction === "approve"
+                    ? "staff_requests.review_dialog_approve_intro"
+                    : "staff_requests.review_dialog_reject_intro",
+                  {
+                    staff: reviewTarget.staff_email,
+                    ticket: ticketLabel(reviewTarget),
+                  },
+                )}
+              </p>
+              <dl
+                className="admin-card-meta"
+                style={{ marginBottom: 12, fontSize: 13 }}
+              >
+                <div className="admin-card-meta-row">
+                  <dt>{t("staff_requests.review_dialog_meta_staff")}</dt>
+                  <dd>{reviewTarget.staff_email}</dd>
+                </div>
+                <div className="admin-card-meta-row">
+                  <dt>{t("staff_requests.review_dialog_meta_ticket")}</dt>
+                  <dd>{ticketLabel(reviewTarget)}</dd>
+                </div>
+                <div className="admin-card-meta-row">
+                  <dt>{t("staff_requests.review_dialog_meta_when")}</dt>
+                  <dd>{formatTimestamp(reviewTarget.requested_at)}</dd>
+                </div>
+              </dl>
+              <label
+                className="field-label"
+                htmlFor="staff-review-reviewer-note"
+              >
+                {t("staff_requests.reviewer_note_label")}
+              </label>
+              <textarea
+                id="staff-review-reviewer-note"
+                className="field-input"
+                rows={3}
+                value={reviewerNote}
+                onChange={(event) => setReviewerNote(event.target.value)}
+                placeholder={t(
+                  "staff_requests.reviewer_note_placeholder",
+                )}
+                disabled={reviewBusy}
+                data-testid="staff-review-reviewer-note"
+                style={{ resize: "vertical", width: "100%" }}
+              />
+            </div>
+          ) : (
+            // Body must be a defined ReactNode even when target is
+            // null so the dialog's initial render does not error;
+            // a closed dialog never paints this branch.
+            <span />
+          )
+        }
+      />
     </div>
   );
 }
