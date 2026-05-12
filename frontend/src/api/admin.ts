@@ -646,3 +646,66 @@ export async function cancelStaffAssignmentRequest(
   );
   return response.data;
 }
+
+// ---- Sprint 25A — admin/manager direct staff assignment -----------------
+//
+// Pilot-readiness audit found that the Sprint 23B approve-flow was the
+// only path to populate `TicketStaffAssignment`. Sprint 25A adds the
+// admin-driven inverse: an admin/manager picks an eligible STAFF user
+// from `assignable-staff` and adds them with a single POST. Same
+// backend gate as the approve flow (osius.ticket.assign_staff on the
+// ticket's building). No staff-initiated request is required.
+
+export interface AssignableStaff {
+  id: number;
+  email: string;
+  full_name: string;
+  role: "STAFF";
+}
+
+export interface TicketStaffAssignmentAdmin {
+  id: number;
+  ticket: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  assigned_by_id: number | null;
+  assigned_by_email: string | null;
+  assigned_at: string;
+}
+
+export async function listAssignableStaff(
+  ticketId: number,
+): Promise<AssignableStaff[]> {
+  const response = await api.get<AssignableStaff[]>(
+    `/tickets/${ticketId}/assignable-staff/`,
+  );
+  return response.data;
+}
+
+export async function listTicketStaffAssignments(
+  ticketId: number,
+): Promise<PaginatedResponse<TicketStaffAssignmentAdmin>> {
+  const response = await api.get<PaginatedResponse<TicketStaffAssignmentAdmin>>(
+    `/tickets/${ticketId}/staff-assignments/`,
+  );
+  return response.data;
+}
+
+export async function addTicketStaffAssignment(
+  ticketId: number,
+  userId: number,
+): Promise<TicketStaffAssignmentAdmin> {
+  const response = await api.post<TicketStaffAssignmentAdmin>(
+    `/tickets/${ticketId}/staff-assignments/`,
+    { user_id: userId },
+  );
+  return response.data;
+}
+
+export async function removeTicketStaffAssignment(
+  ticketId: number,
+  userId: number,
+): Promise<void> {
+  await api.delete(`/tickets/${ticketId}/staff-assignments/${userId}/`);
+}

@@ -102,5 +102,18 @@
   "request_assignment_cancelling": "Cancelling…",
   "request_assignment_cancelled_success": "Request cancelled. You can submit a new request if you change your mind.",
   "request_assignment_cancel_dialog_title": "Cancel this assignment request?",
-  "request_assignment_cancel_dialog_body": "The request will move to Cancelled. You can submit a new request for this ticket later."
+  "request_assignment_cancel_dialog_body": "The request will move to Cancelled. You can submit a new request for this ticket later.",
+
+  "assigned_staff_admin_title": "Assign field staff",
+  "assigned_staff_admin_desc": "Add a staff member to this ticket directly. They do not need to submit an assignment request first.",
+  "assigned_staff_admin_select_placeholder": "Select an eligible staff member…",
+  "assigned_staff_admin_no_eligible": "No eligible staff for this building.",
+  "assigned_staff_admin_add_button": "Add staff",
+  "assigned_staff_admin_adding": "Adding…",
+  "assigned_staff_admin_remove_button": "Remove",
+  "assigned_staff_admin_removing": "Removing…",
+  "assigned_staff_admin_remove_dialog_title": "Remove {{name}} from this ticket?",
+  "assigned_staff_admin_remove_dialog_body": "{{name}} will no longer appear as assigned to this ticket. You can add them again later.",
+  "assigned_staff_admin_banner_added": "{{name}} added as assigned staff.",
+  "assigned_staff_admin_banner_removed": "{{name}} removed from assigned staff."
 }
