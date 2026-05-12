@@ -1,18 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
+  addStaffVisibility,
   deactivateUser,
+  getStaffProfile,
   getUser,
   listBuildings,
   listCompanies,
   listCustomers,
+  listStaffVisibility,
   reactivateUser,
+  removeStaffVisibility,
+  updateStaffProfile,
+  updateStaffVisibility,
   updateUser,
 } from "../../api/admin";
-import type { Role, UserAdminDetail } from "../../api/types";
+import type {
+  BuildingAdmin,
+  BuildingStaffVisibilityAdmin,
+  Role,
+  StaffProfileAdmin,
+  UserAdminDetail,
+} from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -371,6 +384,23 @@ export function UserFormPage() {
             </div>
           </form>
 
+          {/* Sprint 24A — Staff details + building visibility editor.
+              Only shown for STAFF users. SUPER_ADMIN sees it for any
+              STAFF; COMPANY_ADMIN sees it for STAFF in their own
+              company. BUILDING_MANAGER / STAFF / CUSTOMER_USER never
+              reach this page (the Users admin route is gated). The
+              section consumes its own endpoints
+              (/api/users/<id>/staff-profile/ and
+              /api/users/<id>/staff-visibility/) so the parent form's
+              PATCH does not need a new field. */}
+          {user.role === "STAFF" && (
+            <StaffDetailsSection
+              userId={numericId}
+              userEmail={user.email}
+              canEdit={!isSelf}
+            />
+          )}
+
           <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
             <h3 className="section-title">{t("user_form.memberships_title")}</h3>
             <p className="muted small" style={{ marginBottom: 12 }}>
@@ -441,5 +471,609 @@ export function UserFormPage() {
         busy={actionBusy}
       />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 24A — Staff details + building visibility editor.
+//
+// Embedded in UserFormPage when the target user has role=STAFF. Owns
+// two GET/PATCH cycles (profile + visibility list) plus building
+// add/remove. Backend permissions:
+//
+//   - StaffProfileView                 : SUPER_ADMIN / COMPANY_ADMIN
+//                                        of the staff user's company
+//   - BuildingStaffVisibilityViews     : same gate
+//
+// Cross-company COMPANY_ADMIN attempts are rejected by the backend
+// before any state mutates; we surface the error inline rather than
+// guess at the actor's company in the frontend.
+//
+// Mobile note: the visibility editor renders cards/list at <=600px
+// via the existing `.admin-card-list` / `.admin-list-wrap` swap
+// (Sprint 22 pattern). The widest control is a per-row select +
+// remove button stacked vertically on phones.
+// ---------------------------------------------------------------------------
+
+interface StaffDetailsSectionProps {
+  userId: number;
+  userEmail: string;
+  canEdit: boolean;
+}
+
+function StaffDetailsSection({
+  userId,
+  userEmail,
+  canEdit,
+}: StaffDetailsSectionProps) {
+  const { t } = useTranslation("common");
+
+  const [profile, setProfile] = useState<StaffProfileAdmin | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
+  const [profileBanner, setProfileBanner] = useSavedBanner({
+    saved: t("staff_admin.banner_profile_saved"),
+  });
+  const [phone, setPhone] = useState("");
+  const [internalNote, setInternalNote] = useState("");
+  const [canRequestAssignment, setCanRequestAssignment] = useState(true);
+  const [isActive, setIsActive] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+
+  const [visibility, setVisibility] = useState<BuildingStaffVisibilityAdmin[]>(
+    [],
+  );
+  const [visibilityLoading, setVisibilityLoading] = useState(true);
+  const [visibilityError, setVisibilityError] = useState("");
+  const [visibilityBanner, setVisibilityBanner] = useSavedBanner({
+    saved: t("staff_admin.banner_visibility_saved"),
+  });
+  const [allBuildings, setAllBuildings] = useState<BuildingAdmin[]>([]);
+  const [selectedBuildingToAdd, setSelectedBuildingToAdd] = useState<
+    number | ""
+  >("");
+  const [visibilityBusyKey, setVisibilityBusyKey] = useState<string | null>(
+    null,
+  );
+
+  const [removeTarget, setRemoveTarget] =
+    useState<BuildingStaffVisibilityAdmin | null>(null);
+  const removeDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  // Profile load.
+  useEffect(() => {
+    let cancelled = false;
+    setProfileLoading(true);
+    getStaffProfile(userId)
+      .then((data) => {
+        if (cancelled) return;
+        setProfile(data);
+        setPhone(data.phone ?? "");
+        setInternalNote(data.internal_note ?? "");
+        setCanRequestAssignment(data.can_request_assignment);
+        setIsActive(data.is_active);
+        setProfileError("");
+      })
+      .catch((err) => {
+        if (!cancelled) setProfileError(getApiError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Visibility list load.
+  const reloadVisibility = useCallback(async () => {
+    setVisibilityLoading(true);
+    try {
+      const response = await listStaffVisibility(userId);
+      setVisibility(response.results);
+      setVisibilityError("");
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    reloadVisibility();
+  }, [reloadVisibility]);
+
+  // Pre-fetch the candidate building list once so the add-control can
+  // render synchronously. `is_active=true` filter mirrors what every
+  // other admin add-list uses; the backend additionally enforces the
+  // same-company guard so a COMPANY_ADMIN cannot grant cross-company
+  // visibility by tampering with the dropdown.
+  useEffect(() => {
+    let cancelled = false;
+    listBuildings({ is_active: "true", page_size: 200 })
+      .then((response) => {
+        if (!cancelled) setAllBuildings(response.results);
+      })
+      .catch(() => {
+        if (!cancelled) setAllBuildings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const grantedBuildingIds = useMemo(
+    () => new Set(visibility.map((v) => v.building_id)),
+    [visibility],
+  );
+  const grantableBuildings = useMemo(
+    () => allBuildings.filter((b) => !grantedBuildingIds.has(b.id)),
+    [allBuildings, grantedBuildingIds],
+  );
+
+  async function handleProfileSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!canEdit) return;
+    setProfileSaving(true);
+    setProfileError("");
+    try {
+      const updated = await updateStaffProfile(userId, {
+        phone: phone.trim(),
+        internal_note: internalNote,
+        can_request_assignment: canRequestAssignment,
+        is_active: isActive,
+      });
+      setProfile(updated);
+      setProfileBanner(t("staff_admin.banner_profile_saved"));
+    } catch (err) {
+      setProfileError(getApiError(err));
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function handleAddVisibility(event: FormEvent) {
+    event.preventDefault();
+    if (selectedBuildingToAdd === "") return;
+    const buildingId = Number(selectedBuildingToAdd);
+    setVisibilityBusyKey(`add-${buildingId}`);
+    setVisibilityError("");
+    try {
+      await addStaffVisibility(userId, buildingId);
+      setSelectedBuildingToAdd("");
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
+  async function handleToggleCanRequest(
+    row: BuildingStaffVisibilityAdmin,
+    next: boolean,
+  ) {
+    setVisibilityBusyKey(`toggle-${row.building_id}`);
+    setVisibilityError("");
+    try {
+      await updateStaffVisibility(userId, row.building_id, next);
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
+  function openRemoveDialog(row: BuildingStaffVisibilityAdmin) {
+    setRemoveTarget(row);
+    removeDialogRef.current?.open();
+  }
+
+  async function handleConfirmRemove() {
+    if (!removeTarget) return;
+    setVisibilityBusyKey(`remove-${removeTarget.building_id}`);
+    setVisibilityError("");
+    try {
+      await removeStaffVisibility(userId, removeTarget.building_id);
+      removeDialogRef.current?.close();
+      setRemoveTarget(null);
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+      removeDialogRef.current?.close();
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
+  return (
+    <section
+      aria-label={t("staff_admin.aria_section")}
+      data-testid="staff-details-section"
+    >
+      {/* ---------- Staff profile card ---------- */}
+      <form
+        className="card"
+        style={{ marginTop: 16, padding: "20px 22px" }}
+        onSubmit={handleProfileSubmit}
+        data-testid="staff-profile-form"
+      >
+        <h3 className="section-title">{t("staff_admin.profile_title")}</h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          {t("staff_admin.profile_desc")}
+        </p>
+
+        {profileBanner && (
+          <div className="alert-info" role="status" style={{ marginBottom: 12 }}>
+            {profileBanner}
+          </div>
+        )}
+        {profileError && (
+          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+            {profileError}
+          </div>
+        )}
+
+        {profileLoading || !profile ? (
+          <div className="loading-bar">
+            <div className="loading-bar-fill" />
+          </div>
+        ) : (
+          <>
+            <div className="field">
+              <label className="field-label" htmlFor="staff-phone">
+                {t("staff_admin.field_phone")}
+              </label>
+              <input
+                id="staff-phone"
+                className="field-input"
+                type="tel"
+                value={phone}
+                placeholder={t("staff_admin.field_phone_placeholder")}
+                onChange={(event) => setPhone(event.target.value)}
+                disabled={!canEdit || profileSaving}
+                data-testid="staff-phone-input"
+              />
+            </div>
+            <div className="field">
+              <label className="field-label" htmlFor="staff-internal-note">
+                {t("staff_admin.field_internal_note")}
+              </label>
+              <textarea
+                id="staff-internal-note"
+                className="field-input"
+                rows={3}
+                value={internalNote}
+                placeholder={t("staff_admin.field_internal_note_placeholder")}
+                onChange={(event) => setInternalNote(event.target.value)}
+                disabled={!canEdit || profileSaving}
+                data-testid="staff-internal-note-input"
+                style={{ resize: "vertical" }}
+              />
+            </div>
+            <div className="field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: canEdit ? "pointer" : "default",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={canRequestAssignment}
+                  onChange={(event) =>
+                    setCanRequestAssignment(event.target.checked)
+                  }
+                  disabled={!canEdit || profileSaving}
+                  data-testid="staff-can-request-checkbox"
+                />
+                <span>{t("staff_admin.field_can_request_assignment")}</span>
+              </label>
+              <p className="muted small" style={{ marginTop: 4 }}>
+                {t("staff_admin.field_can_request_assignment_hint")}
+              </p>
+            </div>
+            <div className="field">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: canEdit ? "pointer" : "default",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isActive}
+                  onChange={(event) => setIsActive(event.target.checked)}
+                  disabled={!canEdit || profileSaving}
+                  data-testid="staff-profile-active-checkbox"
+                />
+                <span>{t("staff_admin.field_is_active")}</span>
+              </label>
+              <p className="muted small" style={{ marginTop: 4 }}>
+                {t("staff_admin.field_is_active_hint")}
+              </p>
+            </div>
+            <div className="form-actions">
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!canEdit || profileSaving}
+                data-testid="staff-profile-save"
+              >
+                {profileSaving
+                  ? t("admin_form.saving")
+                  : t("admin_form.save_changes")}
+              </button>
+            </div>
+          </>
+        )}
+      </form>
+
+      {/* ---------- Building visibility card ---------- */}
+      <section
+        className="card"
+        style={{ marginTop: 16, padding: "20px 22px" }}
+        data-testid="staff-visibility-section"
+      >
+        <h3 className="section-title">{t("staff_admin.visibility_title")}</h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          {t("staff_admin.visibility_desc")}
+        </p>
+
+        {visibilityBanner && (
+          <div className="alert-info" role="status" style={{ marginBottom: 12 }}>
+            {visibilityBanner}
+          </div>
+        )}
+        {visibilityError && (
+          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+            {visibilityError}
+          </div>
+        )}
+
+        {visibilityLoading ? (
+          <div className="loading-bar">
+            <div className="loading-bar-fill" />
+          </div>
+        ) : visibility.length === 0 ? (
+          <p className="muted small" style={{ padding: "12px 0" }}>
+            {t("staff_admin.visibility_no_rows")}
+          </p>
+        ) : (
+          <>
+            {/* Desktop table — Sprint 22 pattern: hidden at <=600px in
+                index.css so the mobile card list below takes over. */}
+            <div className="table-wrap admin-list-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t("staff_admin.col_building")}</th>
+                    <th>{t("staff_admin.col_can_request")}</th>
+                    <th aria-label={t("staff_admin.col_actions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibility.map((row) => {
+                    const toggleBusy =
+                      visibilityBusyKey === `toggle-${row.building_id}`;
+                    const removeBusy =
+                      visibilityBusyKey === `remove-${row.building_id}`;
+                    return (
+                      <tr
+                        key={row.id}
+                        data-testid="staff-visibility-row"
+                        data-building-id={row.building_id}
+                      >
+                        <td className="td-subject">{row.building_name}</td>
+                        <td>
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              cursor: canEdit ? "pointer" : "default",
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={row.can_request_assignment}
+                              onChange={(event) =>
+                                handleToggleCanRequest(
+                                  row,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={!canEdit || toggleBusy}
+                              data-testid="staff-visibility-can-request"
+                            />
+                            <span className="muted small">
+                              {t(
+                                "staff_admin.visibility_can_request_label",
+                              )}
+                            </span>
+                          </label>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openRemoveDialog(row)}
+                            disabled={!canEdit || removeBusy}
+                            data-testid="staff-visibility-remove"
+                          >
+                            {t("staff_admin.visibility_remove_button")}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile parallel — phone-class viewports show this list
+                instead of the desktop table. Sprint 22 pattern. */}
+            <ul
+              className="admin-card-list"
+              data-testid="staff-visibility-card-list"
+              aria-label={t("staff_admin.visibility_title")}
+            >
+              {visibility.map((row) => {
+                const toggleBusy =
+                  visibilityBusyKey === `toggle-${row.building_id}`;
+                const removeBusy =
+                  visibilityBusyKey === `remove-${row.building_id}`;
+                return (
+                  <li
+                    key={row.id}
+                    className="admin-card"
+                    data-testid="staff-visibility-card"
+                    data-building-id={row.building_id}
+                  >
+                    <div
+                      className="admin-card-link"
+                      style={{ cursor: "default" }}
+                    >
+                      <div className="admin-card-head">
+                        <span className="admin-card-title">
+                          {row.building_name}
+                        </span>
+                      </div>
+                      <div
+                        className="admin-card-meta-row"
+                        style={{ marginTop: 6 }}
+                      >
+                        <label
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            cursor: canEdit ? "pointer" : "default",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={row.can_request_assignment}
+                            onChange={(event) =>
+                              handleToggleCanRequest(
+                                row,
+                                event.target.checked,
+                              )
+                            }
+                            disabled={!canEdit || toggleBusy}
+                            data-testid="staff-visibility-can-request-mobile"
+                          />
+                          <span className="muted small">
+                            {t("staff_admin.visibility_can_request_label")}
+                          </span>
+                        </label>
+                      </div>
+                      <div
+                        className="admin-card-actions"
+                        style={{ display: "flex", gap: 6, marginTop: 8 }}
+                      >
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => openRemoveDialog(row)}
+                          disabled={!canEdit || removeBusy}
+                          data-testid="staff-visibility-remove-mobile"
+                        >
+                          {t("staff_admin.visibility_remove_button")}
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+
+        {/* Add row */}
+        {canEdit && (
+          <form
+            onSubmit={handleAddVisibility}
+            style={{
+              display: "flex",
+              gap: 8,
+              marginTop: 12,
+              alignItems: "flex-end",
+              flexWrap: "wrap",
+            }}
+          >
+            <div className="field" style={{ flex: 1, marginBottom: 0, minWidth: 0 }}>
+              <label className="field-label" htmlFor="staff-visibility-add">
+                {t("staff_admin.visibility_add")}
+              </label>
+              <select
+                id="staff-visibility-add"
+                className="field-select"
+                value={
+                  selectedBuildingToAdd === ""
+                    ? ""
+                    : String(selectedBuildingToAdd)
+                }
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setSelectedBuildingToAdd(v === "" ? "" : Number(v));
+                }}
+                disabled={
+                  visibilityBusyKey !== null ||
+                  grantableBuildings.length === 0
+                }
+                data-testid="staff-visibility-add-select"
+              >
+                <option value="">
+                  {grantableBuildings.length === 0
+                    ? t("staff_admin.visibility_no_more")
+                    : t("staff_admin.visibility_select_placeholder")}
+                </option>
+                {grantableBuildings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={
+                visibilityBusyKey !== null || selectedBuildingToAdd === ""
+              }
+              data-testid="staff-visibility-add-button"
+            >
+              {visibilityBusyKey?.startsWith("add-")
+                ? t("admin_form.adding")
+                : t("admin_form.add")}
+            </button>
+          </form>
+        )}
+      </section>
+
+      <ConfirmDialog
+        ref={removeDialogRef}
+        title={t("staff_admin.dialog_remove_title", {
+          building: removeTarget?.building_name ?? "",
+        })}
+        body={t("staff_admin.dialog_remove_body", {
+          email: userEmail,
+        })}
+        confirmLabel={t("staff_admin.visibility_remove_button")}
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setRemoveTarget(null)}
+        busy={visibilityBusyKey !== null}
+        destructive
+      />
+    </section>
   );
 }

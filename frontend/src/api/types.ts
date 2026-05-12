@@ -362,6 +362,34 @@ export interface InvitationAdmin {
   revoked_at: string | null;
 }
 
+// Sprint 24A — admin write shape for the Sprint 23A StaffProfile.
+export interface StaffProfileAdmin {
+  id: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  phone: string;
+  internal_note: string;
+  can_request_assignment: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// Sprint 24A — admin read/write shape for a single BuildingStaffVisibility
+// row keyed on (user, building). Editing happens via PATCH on the
+// detail URL; the only editable field is `can_request_assignment`.
+export interface BuildingStaffVisibilityAdmin {
+  id: number;
+  user_id: number;
+  user_email: string;
+  building_id: number;
+  building_name: string;
+  building_company_id: number;
+  can_request_assignment: boolean;
+  created_at: string;
+}
+
 export type NotificationEventType =
   | "TICKET_CREATED"
   | "TICKET_STATUS_CHANGED"

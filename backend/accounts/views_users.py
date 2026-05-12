@@ -4,7 +4,7 @@ from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from buildings.models import BuildingManagerAssignment
+from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
 from companies.models import CompanyUserMembership
 from customers.models import CustomerUserMembership
 
@@ -66,6 +66,16 @@ class UserViewSet(viewsets.ModelViewSet):
             in_scope_user_ids = in_scope_user_ids.union(
                 CustomerUserMembership.objects.filter(
                     customer__company_id__in=actor_company_ids
+                ).values_list("user_id", flat=True)
+            )
+            # Sprint 24A — STAFF users with visibility on any of the
+            # actor's buildings are in scope. Pairs with the
+            # `_user_in_actor_company` extension in scoping.py so the
+            # Users admin page surfaces the company's STAFF persona
+            # alongside the Sprint-7 membership rows.
+            in_scope_user_ids = in_scope_user_ids.union(
+                BuildingStaffVisibility.objects.filter(
+                    building__company_id__in=actor_company_ids
                 ).values_list("user_id", flat=True)
             )
             base = qs.filter(id__in=in_scope_user_ids)
