@@ -95,5 +95,12 @@
   "requesting_assignment": "Sending request…",
   "request_assignment_hint": "Ask an OSIUS manager to assign you to this ticket.",
   "request_assignment_success": "Request sent. A manager will review it shortly.",
-  "request_assignment_already_pending": "You already have a pending request for this ticket."
+  "request_assignment_already_pending": "You already have a pending request for this ticket.",
+  "request_assignment_pending_title": "Request pending review",
+  "request_assignment_pending_body": "A manager will review your request shortly. You can cancel it before they act on it.",
+  "request_assignment_cancel": "Cancel request",
+  "request_assignment_cancelling": "Cancelling…",
+  "request_assignment_cancelled_success": "Request cancelled. You can submit a new request if you change your mind.",
+  "request_assignment_cancel_dialog_title": "Cancel this assignment request?",
+  "request_assignment_cancel_dialog_body": "The request will move to Cancelled. You can submit a new request for this ticket later."
 }

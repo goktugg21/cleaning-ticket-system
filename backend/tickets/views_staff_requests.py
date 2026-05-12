@@ -239,3 +239,54 @@ class StaffAssignmentRequestViewSet(viewsets.ModelViewSet):
             AssignmentRequestStatus.REJECTED,
             "osius.assignment_request.reject",
         )
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        """
+        Sprint 24C — STAFF self-cancellation.
+
+        A STAFF user may cancel their OWN PENDING request before a
+        reviewer acts on it. Sprint 23A reserved the `CANCELLED`
+        status in `AssignmentRequestStatus.choices` for exactly this
+        purpose, so no migration is needed.
+
+        Permission rules (preserved from Sprint 23A scoping):
+          - STAFF only. Other roles get 403 from the role gate.
+          - The viewset's `get_queryset` already narrows STAFF rows
+            to `staff=request.user`, so trying to cancel another
+            staff member's request transparently 404s — the row is
+            invisible to the actor.
+          - Status MUST be PENDING. Any other status (APPROVED /
+            REJECTED / CANCELLED) returns 400 so an already-acted
+            row is not silently overwritten.
+
+        After the row is CANCELLED, the existing duplicate-prevention
+        in `create()` (filters on `status=PENDING`) lets the staff
+        user submit a fresh request for the same ticket if they
+        change their mind.
+        """
+        if request.user.role != UserRole.STAFF:
+            return Response(
+                {"detail": "Only STAFF users can cancel their own request."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            req = self.get_queryset().get(pk=pk)
+        except StaffAssignmentRequest.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        # Defence in depth — the queryset already enforces this,
+        # but a hand-rolled raw query at some future point should
+        # still reject cancels against other staff's rows.
+        if req.staff_id != request.user.id:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        if req.status != AssignmentRequestStatus.PENDING:
+            return Response(
+                {"detail": "Request is not pending."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        req.status = AssignmentRequestStatus.CANCELLED
+        # `reviewed_*` deliberately stays blank — a cancellation
+        # is staff-initiated, not a reviewer action. Stamping it
+        # would conflate two different audit shapes.
+        req.save(update_fields=["status"])
+        return Response(self.get_serializer(req).data)

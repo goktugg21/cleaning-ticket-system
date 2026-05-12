@@ -95,5 +95,12 @@
   "requesting_assignment": "Aanvraag verzenden…",
   "request_assignment_hint": "Vraag een OSIUS-manager om je aan dit ticket toe te wijzen.",
   "request_assignment_success": "Aanvraag verzonden. Een manager beoordeelt deze binnenkort.",
-  "request_assignment_already_pending": "Je hebt al een openstaande aanvraag voor dit ticket."
+  "request_assignment_already_pending": "Je hebt al een openstaande aanvraag voor dit ticket.",
+  "request_assignment_pending_title": "Aanvraag wacht op beoordeling",
+  "request_assignment_pending_body": "Een manager beoordeelt je aanvraag binnenkort. Je kunt deze nog annuleren voordat dat gebeurt.",
+  "request_assignment_cancel": "Aanvraag annuleren",
+  "request_assignment_cancelling": "Bezig met annuleren…",
+  "request_assignment_cancelled_success": "Aanvraag geannuleerd. Je kunt later een nieuwe aanvraag indienen.",
+  "request_assignment_cancel_dialog_title": "Deze toewijzingsaanvraag annuleren?",
+  "request_assignment_cancel_dialog_body": "De aanvraag wordt verplaatst naar Geannuleerd. Je kunt later een nieuwe aanvraag voor dit ticket indienen."
 }
