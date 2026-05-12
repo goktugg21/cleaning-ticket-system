@@ -1,6 +1,13 @@
 # CI / CD
 
-Two GitHub Actions workflows live under [.github/workflows/](../.github/workflows/).
+Three GitHub Actions workflows live under
+[.github/workflows/](../.github/workflows/).
+
+> For the matching **local** verification ladder (when to run what,
+> warnings to ignore, smoke vs. full), see
+> [docs/dev-verification.md](./dev-verification.md). Sprint 24E
+> introduced a four-tier verification flow so small PRs do not need
+> to wait through the full test universe.
 
 ## test.yml — PR + master push validation
 
@@ -67,8 +74,42 @@ intentionally NOT a required PR job. It needs the full Django stack
 plus the Vite dev server plus a Playwright container, and it exercises
 real browser behaviour against a JWT-authenticated session — none of
 which is cheap or rock-solid in a fresh ephemeral runner. The smoke
-remains a local pre-commit gate; promoting it to a nightly
-`workflow_dispatch` workflow is a follow-up.
+remains a local pre-commit gate.
+
+Sprint 24E added the dedicated `playwright.yml` workflow below for
+the full e2e suite on manual / nightly cadence; see the next section.
+
+## playwright.yml — full e2e suite (manual + nightly)
+
+Triggers:
+- `workflow_dispatch` — maintainer kicks it off from the **Actions**
+  tab. Accepts an optional `spec_filter` input (a Playwright spec
+  path or grep filter) so a single spec can be run in CI without
+  pulling the runner through the full suite.
+- `schedule` — nightly cron at **03:30 UTC** runs against master.
+
+What it does:
+1. Materialises a `.env` from the CI env block so docker compose
+   sees the same dummy secrets as the backend-test job.
+2. `docker compose up -d --build db redis backend`.
+3. Waits for `/health/ready`, then `manage.py migrate` + `seed_demo_data`.
+4. Builds the frontend image with `VITE_DEMO_MODE=true` (the
+   Playwright fixtures rely on the demo login cards) and runs it
+   attached to the compose network on `:5173`.
+5. `npm ci` + `npx playwright install --with-deps chromium`.
+6. `PLAYWRIGHT_BASE_URL=http://localhost:5173 npm run test:e2e`
+   (or a filtered spec set when `spec_filter` is supplied).
+7. On failure, uploads `playwright-report/` + `test-results/` as a
+   workflow artifact (`playwright-report`, 7-day retention).
+8. Tears the stack back down in `always()` so a flake doesn't
+   stick services around for the next run.
+
+The workflow is **NOT** a required PR check. The per-PR test.yml
+job above remains the merge gate. Trigger Playwright manually when:
+- A PR touches a Playwright spec.
+- A PR changes a UI page, route guard, ticket state machine, or
+  permission gate that the per-PR jobs cannot exercise.
+- A reviewer requests the full sweep before merge.
 
 ## build-images.yml — GHCR publishes on master
 
