@@ -7,6 +7,10 @@ from .views import (
     TicketMessageListCreateView,
     TicketViewSet,
 )
+from .views_staff_assignments import (
+    TicketStaffAssignmentDeleteView,
+    TicketStaffAssignmentListCreateView,
+)
 from .views_staff_requests import StaffAssignmentRequestViewSet
 
 
@@ -38,5 +42,20 @@ urlpatterns = [
         "<int:ticket_id>/messages/",
         TicketMessageListCreateView.as_view(),
         name="ticket-messages",
+    ),
+    # Sprint 25A — admin/manager direct staff assignment endpoints.
+    # `GET /<id>/assignable-staff/` lives on the viewset as a DRF
+    # `@action` so the URL is auto-registered via the router; the
+    # add/remove endpoints below are hand-mounted because DELETE's
+    # `<user_id>` path arg is awkward to express through DRF actions.
+    path(
+        "<int:ticket_id>/staff-assignments/",
+        TicketStaffAssignmentListCreateView.as_view(),
+        name="ticket-staff-assignments",
+    ),
+    path(
+        "<int:ticket_id>/staff-assignments/<int:user_id>/",
+        TicketStaffAssignmentDeleteView.as_view(),
+        name="ticket-staff-assignment-delete",
     ),
 ] + router.urls

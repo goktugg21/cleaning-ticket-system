@@ -102,5 +102,18 @@
   "request_assignment_cancelling": "Bezig met annuleren…",
   "request_assignment_cancelled_success": "Aanvraag geannuleerd. Je kunt later een nieuwe aanvraag indienen.",
   "request_assignment_cancel_dialog_title": "Deze toewijzingsaanvraag annuleren?",
-  "request_assignment_cancel_dialog_body": "De aanvraag wordt verplaatst naar Geannuleerd. Je kunt later een nieuwe aanvraag voor dit ticket indienen."
+  "request_assignment_cancel_dialog_body": "De aanvraag wordt verplaatst naar Geannuleerd. Je kunt later een nieuwe aanvraag voor dit ticket indienen.",
+
+  "assigned_staff_admin_title": "Medewerker toewijzen",
+  "assigned_staff_admin_desc": "Voeg een medewerker rechtstreeks aan dit ticket toe. Een aanvraag van de medewerker is niet nodig.",
+  "assigned_staff_admin_select_placeholder": "Kies een geschikte medewerker…",
+  "assigned_staff_admin_no_eligible": "Geen geschikte medewerker voor dit gebouw.",
+  "assigned_staff_admin_add_button": "Medewerker toevoegen",
+  "assigned_staff_admin_adding": "Bezig met toevoegen…",
+  "assigned_staff_admin_remove_button": "Verwijderen",
+  "assigned_staff_admin_removing": "Bezig met verwijderen…",
+  "assigned_staff_admin_remove_dialog_title": "{{name}} van dit ticket verwijderen?",
+  "assigned_staff_admin_remove_dialog_body": "{{name}} wordt niet langer als toegewezen aan dit ticket getoond. Je kunt deze medewerker later opnieuw toevoegen.",
+  "assigned_staff_admin_banner_added": "{{name}} toegevoegd als toegewezen medewerker.",
+  "assigned_staff_admin_banner_removed": "{{name}} verwijderd uit toegewezen medewerkers."
 }

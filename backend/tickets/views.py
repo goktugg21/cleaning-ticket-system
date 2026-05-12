@@ -355,6 +355,22 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get"], url_path="assignable-staff")
+    def assignable_staff(self, request, pk=None):
+        """
+        Sprint 25A — eligible STAFF users for direct admin/manager
+        assignment to this ticket. The matching add/remove endpoints
+        live at `/api/tickets/<id>/staff-assignments/[/<user_id>/]`
+        (see `views_staff_assignments.py`). Eligibility is:
+          - role=STAFF
+          - active StaffProfile
+          - BuildingStaffVisibility on the ticket's building
+        """
+        from .views_staff_assignments import assignable_staff_view
+
+        ticket = self.get_object()
+        return assignable_staff_view(request, ticket)
+
 
 class TicketMessageListCreateView(generics.ListCreateAPIView):
     serializer_class = TicketMessageSerializer

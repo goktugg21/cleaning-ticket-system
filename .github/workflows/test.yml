@@ -21,7 +21,13 @@ jobs:
   backend-test:
     name: Backend (Django, Postgres, Redis)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Sprint 25A — the full Django regression (385+ tests, including
+    # 14+ new Sprint 25A direct-staff-assignment cases) approaches
+    # the 20-minute job ceiling on GitHub-hosted ubuntu-latest
+    # runners. Raising to 40 minutes so a still-running valid test
+    # suite cannot be killed mid-stream by the job timeout while
+    # we keep the full regression as the required PR gate.
+    timeout-minutes: 40
 
     services:
       db:

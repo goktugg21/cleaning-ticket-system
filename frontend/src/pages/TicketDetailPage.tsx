@@ -17,10 +17,14 @@ import {
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import {
+  addTicketStaffAssignment,
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
+  listAssignableStaff,
   listStaffAssignmentRequests,
+  removeTicketStaffAssignment,
 } from "../api/admin";
+import type { AssignableStaff } from "../api/admin";
 import type {
   AssignableManager,
   PaginatedResponse,
@@ -213,6 +217,27 @@ export function TicketDetailPage() {
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<string>("");
   const [assigningTicket, setAssigningTicket] = useState(false);
 
+  // Sprint 25A — admin/manager direct staff assignment.
+  // `assignableStaff` is the candidate list pulled from the
+  // `/tickets/<id>/assignable-staff/` endpoint (STAFF users with
+  // an active StaffProfile + BuildingStaffVisibility on this ticket's
+  // building). The block only renders for service-provider-side
+  // actors (isStaff) — the same gate that governs the existing
+  // BUILDING_MANAGER assignment dropdown for `ticket.assigned_to`.
+  const [assignableStaff, setAssignableStaff] = useState<AssignableStaff[]>(
+    [],
+  );
+  const [selectedStaffToAdd, setSelectedStaffToAdd] = useState<string>("");
+  const [addingStaff, setAddingStaff] = useState(false);
+  const [removingStaffId, setRemovingStaffId] = useState<number | null>(null);
+  const [staffAssignmentError, setStaffAssignmentError] = useState("");
+  const [staffAssignmentBanner, setStaffAssignmentBanner] = useState("");
+  const [removeStaffTarget, setRemoveStaffTarget] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
+  const removeStaffDialogRef = useRef<ConfirmDialogHandle>(null);
+
   const [error, setError] = useState("");
 
   // Sprint 12 — soft-delete state. confirmText is what the operator
@@ -294,6 +319,24 @@ export function TicketDetailPage() {
       cancelled = true;
     };
   }, [id, isStaff]);
+
+  // Sprint 25A — discover the eligible STAFF candidates for direct
+  // admin/manager assignment. Filtered server-side to STAFF users
+  // with an active StaffProfile + BuildingStaffVisibility on this
+  // ticket's building, so the dropdown never offers an ineligible row.
+  const reloadAssignableStaff = useCallback(async () => {
+    if (!isStaff || !id) return;
+    try {
+      const data = await listAssignableStaff(Number(id));
+      setAssignableStaff(data);
+    } catch (err) {
+      setStaffAssignmentError(getApiError(err));
+    }
+  }, [id, isStaff]);
+
+  useEffect(() => {
+    reloadAssignableStaff();
+  }, [reloadAssignableStaff]);
 
   // Sprint 24C — discover the staff user's own PENDING request for
   // this ticket so the UI can show a Cancel button instead of the
@@ -1078,6 +1121,273 @@ export function TicketDetailPage() {
                   })}
                 </ul>
               )}
+
+              {/* Sprint 25A — admin/manager direct staff assignment.
+                  Same gate as the BUILDING_MANAGER assignment
+                  dropdown above (`isStaff` = SUPER_ADMIN /
+                  COMPANY_ADMIN / BUILDING_MANAGER). Hidden from
+                  CUSTOMER_USER and STAFF. The candidate list is
+                  server-filtered to STAFF users with active
+                  StaffProfile + BuildingStaffVisibility on this
+                  ticket's building. */}
+              {isStaff && (() => {
+                const assignedIds = new Set(
+                  ticket.assigned_staff
+                    .filter(
+                      (entry) =>
+                        !("anonymous" in entry && entry.anonymous),
+                    )
+                    .map((entry) => (entry as { id: number }).id),
+                );
+                const candidates = assignableStaff.filter(
+                  (staff) => !assignedIds.has(staff.id),
+                );
+                async function handleAddStaff() {
+                  if (!ticket || selectedStaffToAdd === "") return;
+                  const staff = assignableStaff.find(
+                    (s) => s.id === Number(selectedStaffToAdd),
+                  );
+                  setAddingStaff(true);
+                  setStaffAssignmentError("");
+                  setStaffAssignmentBanner("");
+                  try {
+                    await addTicketStaffAssignment(
+                      ticket.id,
+                      Number(selectedStaffToAdd),
+                    );
+                    setSelectedStaffToAdd("");
+                    const name =
+                      staff?.full_name ||
+                      staff?.email ||
+                      String(selectedStaffToAdd);
+                    setStaffAssignmentBanner(
+                      t("assigned_staff_admin_banner_added", { name }),
+                    );
+                    await loadTicket();
+                    await reloadAssignableStaff();
+                  } catch (err) {
+                    setStaffAssignmentError(getApiError(err));
+                  } finally {
+                    setAddingStaff(false);
+                  }
+                }
+                async function handleConfirmRemoveStaff() {
+                  if (!ticket || !removeStaffTarget) return;
+                  setRemovingStaffId(removeStaffTarget.id);
+                  setStaffAssignmentError("");
+                  try {
+                    await removeTicketStaffAssignment(
+                      ticket.id,
+                      removeStaffTarget.id,
+                    );
+                    removeStaffDialogRef.current?.close();
+                    setStaffAssignmentBanner(
+                      t("assigned_staff_admin_banner_removed", {
+                        name: removeStaffTarget.name,
+                      }),
+                    );
+                    setRemoveStaffTarget(null);
+                    await loadTicket();
+                    await reloadAssignableStaff();
+                  } catch (err) {
+                    setStaffAssignmentError(getApiError(err));
+                    removeStaffDialogRef.current?.close();
+                  } finally {
+                    setRemovingStaffId(null);
+                  }
+                }
+                function openRemoveStaffDialog(staff: {
+                  id: number;
+                  name: string;
+                }) {
+                  setRemoveStaffTarget(staff);
+                  removeStaffDialogRef.current?.open();
+                }
+                return (
+                  <div
+                    data-testid="assigned-staff-admin-block"
+                    style={{
+                      marginTop: 14,
+                      paddingTop: 12,
+                      borderTop: "1px solid var(--border)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: "var(--text-faint)",
+                      }}
+                    >
+                      {t("assigned_staff_admin_title")}
+                    </div>
+                    <p className="muted small" style={{ margin: 0 }}>
+                      {t("assigned_staff_admin_desc")}
+                    </p>
+
+                    {/* Per-assignee remove buttons. Only for non-
+                        anonymous rows; if the customer-visibility
+                        flags hide the staff identity from a
+                        CUSTOMER_USER, this whole block is hidden too
+                        (isStaff gate above). */}
+                    {ticket.assigned_staff.length > 0 && (
+                      <ul
+                        data-testid="assigned-staff-admin-list"
+                        style={{
+                          listStyle: "none",
+                          margin: 0,
+                          padding: 0,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                        }}
+                      >
+                        {ticket.assigned_staff.map((entry, index) => {
+                          if ("anonymous" in entry && entry.anonymous) {
+                            return null;
+                          }
+                          const named = entry as {
+                            id: number;
+                            full_name?: string;
+                            email?: string;
+                          };
+                          const displayName =
+                            named.full_name ||
+                            (named.email
+                              ? named.email.split("@")[0]
+                              : "—");
+                          const isThisRemoving =
+                            removingStaffId === named.id;
+                          return (
+                            <li
+                              key={`admin-row-${named.id}-${index}`}
+                              data-testid="assigned-staff-admin-row"
+                              data-staff-id={named.id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                justifyContent: "space-between",
+                                fontSize: 13,
+                              }}
+                            >
+                              <span>{displayName}</span>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                disabled={isThisRemoving || addingStaff}
+                                onClick={() =>
+                                  openRemoveStaffDialog({
+                                    id: named.id,
+                                    name: displayName,
+                                  })
+                                }
+                                data-testid="assigned-staff-admin-remove"
+                              >
+                                {isThisRemoving
+                                  ? t("assigned_staff_admin_removing")
+                                  : t("assigned_staff_admin_remove_button")}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+
+                    {/* Add dropdown + button. */}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        alignItems: "flex-end",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <select
+                        className="field-select"
+                        value={selectedStaffToAdd}
+                        onChange={(event) =>
+                          setSelectedStaffToAdd(event.target.value)
+                        }
+                        disabled={addingStaff || candidates.length === 0}
+                        data-testid="assigned-staff-admin-select"
+                        style={{ flex: 1, minWidth: 0 }}
+                      >
+                        <option value="">
+                          {candidates.length === 0
+                            ? t("assigned_staff_admin_no_eligible")
+                            : t(
+                                "assigned_staff_admin_select_placeholder",
+                              )}
+                        </option>
+                        {candidates.map((staff) => (
+                          <option key={staff.id} value={String(staff.id)}>
+                            {staff.full_name || staff.email}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={
+                          addingStaff || selectedStaffToAdd === ""
+                        }
+                        onClick={handleAddStaff}
+                        data-testid="assigned-staff-admin-add-button"
+                      >
+                        {addingStaff
+                          ? t("assigned_staff_admin_adding")
+                          : t("assigned_staff_admin_add_button")}
+                      </button>
+                    </div>
+
+                    {staffAssignmentBanner && (
+                      <p
+                        className="muted small"
+                        role="status"
+                        data-testid="assigned-staff-admin-banner"
+                        style={{ margin: 0 }}
+                      >
+                        {staffAssignmentBanner}
+                      </p>
+                    )}
+                    {staffAssignmentError && (
+                      <div
+                        className="alert-error"
+                        role="alert"
+                        style={{ marginTop: 4 }}
+                      >
+                        {staffAssignmentError}
+                      </div>
+                    )}
+
+                    <ConfirmDialog
+                      ref={removeStaffDialogRef}
+                      title={t(
+                        "assigned_staff_admin_remove_dialog_title",
+                        { name: removeStaffTarget?.name ?? "" },
+                      )}
+                      body={t(
+                        "assigned_staff_admin_remove_dialog_body",
+                        { name: removeStaffTarget?.name ?? "" },
+                      )}
+                      confirmLabel={t(
+                        "assigned_staff_admin_remove_button",
+                      )}
+                      busyLabel={t("assigned_staff_admin_removing")}
+                      onConfirm={handleConfirmRemoveStaff}
+                      onCancel={() => setRemoveStaffTarget(null)}
+                      busy={removingStaffId !== null}
+                      destructive
+                    />
+                  </div>
+                );
+              })()}
 
               {/* Sprint 23B — STAFF-only "Request assignment"
                   button. Visible only when:
