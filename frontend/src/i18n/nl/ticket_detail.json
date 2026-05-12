@@ -86,5 +86,14 @@
   "delete_ticket_confirm_label": "Typ het ticketnummer om te bevestigen",
   "delete_ticket_confirm_button": "Ticket verwijderen",
   "delete_ticket_confirm_busy": "Verwijderen…",
-  "delete_ticket_failed": "Kon het ticket niet verwijderen. {{detail}}"
+  "delete_ticket_failed": "Kon het ticket niet verwijderen. {{detail}}",
+
+  "assigned_staff_title": "Toegewezen OSIUS-medewerkers",
+  "assigned_staff_empty": "Nog geen medewerker toegewezen.",
+  "assigned_staff_role": "OSIUS-medewerker",
+  "request_assignment": "Toewijzing aanvragen",
+  "requesting_assignment": "Aanvraag verzenden…",
+  "request_assignment_hint": "Vraag een OSIUS-manager om je aan dit ticket toe te wijzen.",
+  "request_assignment_success": "Aanvraag verzonden. Een manager beoordeelt deze binnenkort.",
+  "request_assignment_already_pending": "Je hebt al een openstaande aanvraag voor dit ticket."
 }

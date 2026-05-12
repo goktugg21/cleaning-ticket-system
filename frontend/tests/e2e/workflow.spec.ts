@@ -40,8 +40,12 @@ test("Amanda sees Approve/Reject on the B3 waiting ticket", async ({
 });
 
 test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
-  // Fetch the B3 ticket id from Tom's view (Tom has access to all).
-  await loginAs(page, DEMO_USERS.customerAll);
+  // Sprint 23A tightened plain CUSTOMER_USER scope to view_own; Tom
+  // (used previously to discover the B3 ticket id) no longer sees
+  // tickets created by other customer users. Fetch the id from
+  // Amanda's view instead — she created the ticket and can always
+  // see her own row. Iris's negative-visibility check is unchanged.
+  await loginAs(page, DEMO_USERS.customerB3);
   await page.waitForLoadState("networkidle");
   const row = page
     .locator(".data-table tbody tr", { hasText: "Pantry zeepdispenser" })

@@ -22,11 +22,13 @@ import {
   removeCustomerUser,
   removeCustomerUserAccess,
   updateCustomer,
+  updateCustomerUserAccessRole,
 } from "../../api/admin";
 import type { AdminFieldErrors, CustomerWritePayload } from "../../api/admin";
 import type {
   BuildingAdmin,
   CompanyAdmin,
+  CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerUserBuildingAccess,
@@ -358,6 +360,42 @@ export function CustomerFormPage() {
     setAccessBusyUserId(membership.user_id);
     try {
       await addCustomerUserAccess(numericId, membership.user_id, buildingId);
+      const response = await listCustomerUserAccess(
+        numericId,
+        membership.user_id,
+      );
+      setAccessByUserId((prev) => ({
+        ...prev,
+        [membership.user_id]: response.results,
+      }));
+    } catch (err) {
+      setAccessError(getApiError(err));
+    } finally {
+      setAccessBusyUserId(null);
+    }
+  }
+
+  // Sprint 23C — change a customer-user's per-building access_role.
+  // PATCHes /api/customers/<id>/users/<uid>/access/<bid>/. Permission
+  // gate: SUPER_ADMIN or COMPANY_ADMIN of the customer's company.
+  // Optimistic refetch on success so the row reflects the new role
+  // (and the access pill background, which keys on is_active).
+  async function handleAccessRoleChange(
+    membership: CustomerUserMembership,
+    access: CustomerUserBuildingAccess,
+    newRole: CustomerAccessRole,
+  ) {
+    if (numericId === null) return;
+    if (newRole === access.access_role) return;
+    setAccessError("");
+    setAccessBusyUserId(membership.user_id);
+    try {
+      await updateCustomerUserAccessRole(
+        numericId,
+        membership.user_id,
+        access.building_id,
+        newRole,
+      );
       const response = await listCustomerUserAccess(
         numericId,
         membership.user_id,
@@ -986,20 +1024,15 @@ export function CustomerFormPage() {
                             }}
                           >
                             {userAccess.map((access) => {
-                              // Sprint 23B — surface access_role
-                              // and is_active read-only inline.
-                              // Editing is deferred to Sprint 23C
-                              // (overrides UI is non-trivial); for
-                              // now reviewers see the persisted
-                              // state and can revoke + re-grant
-                              // to change role via the future UI.
-                              const roleKey =
-                                access.access_role === "CUSTOMER_COMPANY_ADMIN"
-                                  ? "access_role.customer_company_admin"
-                                  : access.access_role ===
-                                      "CUSTOMER_LOCATION_MANAGER"
-                                    ? "access_role.customer_location_manager"
-                                    : "access_role.customer_user";
+                              // Sprint 23C — inline access_role
+                              // editor. The select fires
+                              // handleAccessRoleChange which PATCHes
+                              // the access row and refetches; the
+                              // pill background still reflects
+                              // is_active (editing that field is
+                              // deferred). permission_overrides
+                              // editor is also deferred to a later
+                              // sprint when the per-key UI lands.
                               return (
                                 <span
                                   key={access.id}
@@ -1010,23 +1043,59 @@ export function CustomerFormPage() {
                                     alignItems: "center",
                                     gap: 6,
                                     padding: "2px 8px",
-                                    background: access.is_active === false
-                                      ? "var(--surface-3, var(--surface-2))"
-                                      : "var(--surface-2)",
+                                    background:
+                                      access.is_active === false
+                                        ? "var(--surface-3, var(--surface-2))"
+                                        : "var(--surface-2)",
                                     border: "1px solid var(--border)",
                                     borderRadius: 999,
                                     fontSize: 12,
-                                    opacity: access.is_active === false ? 0.6 : 1,
+                                    opacity:
+                                      access.is_active === false ? 0.6 : 1,
                                   }}
                                 >
                                   <span>{access.building_name}</span>
-                                  <span
-                                    className="muted"
-                                    style={{ fontSize: 11 }}
-                                    data-testid="customer-access-role"
+                                  <span aria-hidden="true">·</span>
+                                  <select
+                                    className="customer-access-role-select"
+                                    data-testid="customer-access-role-select"
+                                    data-user-id={membership.user_id}
+                                    data-building-id={access.building_id}
+                                    value={access.access_role}
+                                    disabled={isThisUserBusy}
+                                    onChange={(event) =>
+                                      handleAccessRoleChange(
+                                        membership,
+                                        access,
+                                        event.target.value as CustomerAccessRole,
+                                      )
+                                    }
+                                    aria-label={t(
+                                      "customer_form.access_role_edit_label",
+                                    )}
+                                    style={{
+                                      fontSize: 11,
+                                      padding: "0 4px",
+                                      height: 20,
+                                      border: "1px solid var(--border)",
+                                      borderRadius: 4,
+                                      background: "transparent",
+                                    }}
                                   >
-                                    · {t(roleKey)}
-                                  </span>
+                                    <option value="CUSTOMER_USER">
+                                      {t("access_role.customer_user")}
+                                    </option>
+                                    <option value="CUSTOMER_LOCATION_MANAGER">
+                                      {t(
+                                        "access_role.customer_location_manager",
+                                      )}
+                                    </option>
+                                    <option value="CUSTOMER_COMPANY_ADMIN">
+                                      {t(
+                                        "access_role.customer_company_admin",
+                                      )}
+                                    </option>
+                                  </select>
                                   <button
                                     type="button"
                                     className="btn btn-ghost btn-xs"
@@ -1036,7 +1105,10 @@ export function CustomerFormPage() {
                                       fontSize: 11,
                                     }}
                                     onClick={() =>
-                                      openRevokeAccessDialog(membership, access)
+                                      openRevokeAccessDialog(
+                                        membership,
+                                        access,
+                                      )
                                     }
                                     disabled={isThisUserBusy}
                                     aria-label={t(

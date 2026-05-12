@@ -324,6 +324,7 @@
   "customer_form.access_select_placeholder": "Selecteer een gebouw…",
   "customer_form.access_no_more": "Alle gekoppelde gebouwen al verleend",
   "customer_form.access_remove_button": "Intrekken",
+  "customer_form.access_role_edit_label": "Gebouwtoegangsrol wijzigen",
   "customer_form.dialog_revoke_access_title": "Toegang van {{email}} tot {{building}} intrekken?",
   "customer_form.dialog_revoke_access_body": "Ze zien geen tickets meer voor dit gebouw onder deze klant. Andere gebouwentoegang blijft onveranderd.",
 
@@ -413,14 +414,6 @@
   "access_role.customer_location_manager": "Locatiebeheerder",
   "access_role.customer_company_admin": "Klant-bedrijfsbeheerder",
 
-  "ticket_detail.assigned_staff_title": "Toegewezen OSIUS-medewerkers",
-  "ticket_detail.assigned_staff_empty": "Nog geen medewerker toegewezen.",
-  "ticket_detail.assigned_staff_role": "OSIUS-medewerker",
-  "ticket_detail.request_assignment": "Toewijzing aanvragen",
-  "ticket_detail.requesting_assignment": "Aanvraag versturen…",
-  "ticket_detail.request_assignment_hint": "Vraag een OSIUS-beheerder om je aan dit ticket toe te wijzen.",
-  "ticket_detail.request_assignment_success": "Aanvraag verzonden. Een beheerder bekijkt deze binnenkort.",
-  "ticket_detail.request_assignment_already_pending": "Je hebt al een openstaande aanvraag voor dit ticket.",
 
   "staff_requests.title": "Medewerker-toewijzingsaanvragen",
   "staff_requests.subtitle_loading": "Aanvragen laden…",
@@ -432,6 +425,7 @@
   "staff_requests.col_ticket": "Ticket",
   "staff_requests.col_status": "Status",
   "staff_requests.col_actions": "Acties",
+  "staff_requests.col_reviewer": "Beoordeeld door",
   "staff_requests.status_pending": "In afwachting",
   "staff_requests.status_approved": "Goedgekeurd",
   "staff_requests.status_rejected": "Afgewezen",

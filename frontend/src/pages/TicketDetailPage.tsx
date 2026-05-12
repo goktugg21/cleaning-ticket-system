@@ -953,7 +953,7 @@ export function TicketDetailPage() {
                   color: "var(--text-faint)",
                 }}
               >
-                {t("ticket_detail:assigned_staff_title")}
+                {t("assigned_staff_title")}
               </div>
             </div>
             <div className="assign-body">
@@ -963,7 +963,7 @@ export function TicketDetailPage() {
                   style={{ padding: "4px 0 12px" }}
                   data-testid="assigned-staff-empty"
                 >
-                  {t("ticket_detail:assigned_staff_empty")}
+                  {t("assigned_staff_empty")}
                 </p>
               ) : (
                 <ul
@@ -1019,7 +1019,7 @@ export function TicketDetailPage() {
                             className="assignee-role"
                             style={{ fontSize: 11 }}
                           >
-                            {t("ticket_detail:assigned_staff_role")}
+                            {t("assigned_staff_role")}
                             {named.email ? ` · ${named.email}` : ""}
                             {named.phone ? ` · ${named.phone}` : ""}
                           </span>
@@ -1064,7 +1064,7 @@ export function TicketDetailPage() {
                     if (/pending request/i.test(message)) {
                       setRequestAssignmentSubmitted(true);
                       setRequestAssignmentError(
-                        t("ticket_detail:request_assignment_already_pending"),
+                        t("request_assignment_already_pending"),
                       );
                     } else {
                       setRequestAssignmentError(message);
@@ -1089,7 +1089,7 @@ export function TicketDetailPage() {
                         data-testid="request-assignment-submitted"
                       >
                         {requestAssignmentError ||
-                          t("ticket_detail:request_assignment_success")}
+                          t("request_assignment_success")}
                       </p>
                     ) : (
                       <>
@@ -1097,7 +1097,7 @@ export function TicketDetailPage() {
                           className="muted small"
                           style={{ margin: 0 }}
                         >
-                          {t("ticket_detail:request_assignment_hint")}
+                          {t("request_assignment_hint")}
                         </p>
                         <button
                           type="button"
@@ -1107,8 +1107,8 @@ export function TicketDetailPage() {
                           data-testid="request-assignment-button"
                         >
                           {requestAssignmentBusy
-                            ? t("ticket_detail:requesting_assignment")
-                            : t("ticket_detail:request_assignment")}
+                            ? t("requesting_assignment")
+                            : t("request_assignment")}
                         </button>
                         {requestAssignmentError && !requestAssignmentSubmitted && (
                           <div

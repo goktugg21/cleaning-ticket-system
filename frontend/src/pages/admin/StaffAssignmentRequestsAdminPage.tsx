@@ -191,7 +191,15 @@ export function StaffAssignmentRequestsAdminPage() {
           </div>
         )}
 
-        <div className="table-wrap">
+        {/* Sprint 23C hardening: the desktop table is wrapped in
+            `admin-list-wrap` so the existing @media (max-width: 600px)
+            CSS rule hides it on phones and the `.admin-card-list`
+            sibling below takes over. Same pattern as
+            /admin/{users,customers,buildings,...}. Without this, the
+            table's min-width: 860px (from index.css) plus the card
+            header + filter bar push the page over 430px and the
+            workspace develops a horizontal scrollbar. */}
+        <div className="table-wrap admin-list-wrap">
           <table className="data-table">
             <thead>
               <tr>
@@ -254,23 +262,100 @@ export function StaffAssignmentRequestsAdminPage() {
               ))}
             </tbody>
           </table>
-
-          {!loading && requests.length === 0 && (
-            <div className="empty-state" data-testid="staff-requests-empty">
-              <div className="empty-icon">·</div>
-              <div className="empty-title">
-                {filter === "pending"
-                  ? t("staff_requests.empty_title")
-                  : t("staff_requests.empty_filtered_title")}
-              </div>
-              <p className="empty-sub">
-                {filter === "pending"
-                  ? t("staff_requests.empty_desc")
-                  : t("staff_requests.empty_filtered_desc")}
-              </p>
-            </div>
-          )}
         </div>
+
+        {/* Sprint 23C hardening: mobile-parallel card list. CSS shows
+            this only at <=600px (admin-card-list); on desktop the
+            table above is visible. Card rows are NOT wrapped in an
+            <a> because the actions are buttons, not a navigation
+            target; the inner ticket-no still links to the ticket. */}
+        <ul
+          className="admin-card-list"
+          data-testid="staff-requests-card-list"
+          aria-label={t("staff_requests.title")}
+        >
+          {requests.map((req) => (
+            <li
+              key={req.id}
+              className="admin-card"
+              data-testid="staff-request-card"
+            >
+              <div className="admin-card-link" style={{ cursor: "default" }}>
+                <div className="admin-card-head">
+                  <Link
+                    to={`/tickets/${req.ticket}`}
+                    className="admin-card-title"
+                  >
+                    {req.ticket_no || `#${req.ticket}`} · {req.ticket_title}
+                  </Link>
+                  <span className={`cell-tag ${STATUS_CLASS[req.status]}`}>
+                    <i />
+                    {t(STATUS_LABEL_KEY[req.status])}
+                  </span>
+                </div>
+                <dl className="admin-card-meta">
+                  <div className="admin-card-meta-row">
+                    <dt>{t("staff_requests.col_when")}</dt>
+                    <dd>{formatTimestamp(req.requested_at)}</dd>
+                  </div>
+                  <div className="admin-card-meta-row">
+                    <dt>{t("staff_requests.col_staff")}</dt>
+                    <dd>{req.staff_email}</dd>
+                  </div>
+                  {req.status !== "PENDING" && req.reviewer_email && (
+                    <div className="admin-card-meta-row">
+                      <dt>{t("staff_requests.col_reviewer")}</dt>
+                      <dd>{req.reviewer_email}</dd>
+                    </div>
+                  )}
+                </dl>
+                {req.status === "PENDING" && (
+                  <div
+                    className="admin-card-actions"
+                    style={{ display: "flex", gap: 6 }}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={reviewBusyId === req.id}
+                      onClick={() => handleApprove(req.id)}
+                      data-testid={`approve-card-${req.id}`}
+                    >
+                      {reviewBusyId === req.id
+                        ? t("staff_requests.reviewing")
+                        : t("staff_requests.approve")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={reviewBusyId === req.id}
+                      onClick={() => handleReject(req.id)}
+                      data-testid={`reject-card-${req.id}`}
+                    >
+                      {t("staff_requests.reject")}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {!loading && requests.length === 0 && (
+          <div className="empty-state" data-testid="staff-requests-empty">
+            <div className="empty-icon">·</div>
+            <div className="empty-title">
+              {filter === "pending"
+                ? t("staff_requests.empty_title")
+                : t("staff_requests.empty_filtered_title")}
+            </div>
+            <p className="empty-sub">
+              {filter === "pending"
+                ? t("staff_requests.empty_desc")
+                : t("staff_requests.empty_filtered_desc")}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

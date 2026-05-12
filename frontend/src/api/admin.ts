@@ -5,6 +5,7 @@ import type {
   BuildingManagerMembership,
   CompanyAdmin,
   CompanyAdminMembership,
+  CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerUserBuildingAccess,
@@ -472,6 +473,25 @@ export async function removeCustomerUserAccess(
   await api.delete(
     `/customers/${customerId}/users/${userId}/access/${buildingId}/`,
   );
+}
+
+// Sprint 23C — PATCH the access_role on a single
+// CustomerUserBuildingAccess row. Backend gate is
+// IsSuperAdminOrCompanyAdminForCompany; cross-company COMPANY_ADMIN
+// attempts return 403 from the object-level check. The PATCH body
+// accepts `access_role` only — `permission_overrides` and
+// `is_active` editing are deferred until the matching UI lands.
+export async function updateCustomerUserAccessRole(
+  customerId: number,
+  userId: number,
+  buildingId: number,
+  accessRole: CustomerAccessRole,
+): Promise<CustomerUserBuildingAccess> {
+  const response = await api.patch<CustomerUserBuildingAccess>(
+    `/customers/${customerId}/users/${userId}/access/${buildingId}/`,
+    { access_role: accessRole },
+  );
+  return response.data;
 }
 
 // ---- Sprint 23B — Staff assignment requests --------------------------

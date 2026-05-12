@@ -17,6 +17,7 @@ from .models import (
 from .serializers_memberships import (
     CustomerBuildingMembershipSerializer,
     CustomerUserBuildingAccessSerializer,
+    CustomerUserBuildingAccessUpdateSerializer,
     CustomerUserMembershipSerializer,
 )
 
@@ -251,9 +252,50 @@ class CustomerUserAccessListCreateView(generics.ListCreateAPIView):
 class CustomerUserAccessDeleteView(generics.GenericAPIView):
     """
     DELETE /api/customers/<customer_id>/users/<user_id>/access/<building_id>/
+    PATCH  /api/customers/<customer_id>/users/<user_id>/access/<building_id>/
+
+    Sprint 23C — PATCH accepts `{"access_role": <choice>}` and
+    re-uses `CustomerUserBuildingAccessUpdateSerializer` for
+    validation. The class-level permission gate
+    (`IsSuperAdminOrCompanyAdminForCompany`) is checked twice: once
+    by `has_permission` against the role (rejects everyone except
+    SUPER_ADMIN / COMPANY_ADMIN), once by `has_object_permission`
+    against the Customer (rejects a company admin acting on a
+    customer outside their own company).
+
+    Audit logging for the role change is handled by the existing
+    accounts/audit signal keyed on the model's editable fields
+    (Sprint 23A), so this view does not write AuditLog rows itself.
     """
 
     permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+
+    def _get_access(self, request, customer_id, user_id, building_id):
+        customer = get_object_or_404(Customer, pk=customer_id)
+        self.check_object_permissions(request, customer)
+        access = get_object_or_404(
+            CustomerUserBuildingAccess,
+            membership__customer=customer,
+            membership__user_id=user_id,
+            building_id=building_id,
+        )
+        return access
+
+    def patch(self, request, customer_id, user_id, building_id):
+        access = self._get_access(request, customer_id, user_id, building_id)
+        serializer = CustomerUserBuildingAccessUpdateSerializer(
+            access, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        # Refresh + re-serialize via the read serializer so the response
+        # carries the joined building / user fields the frontend uses
+        # to render the row.
+        access.refresh_from_db()
+        return Response(
+            CustomerUserBuildingAccessSerializer(access).data,
+            status=status.HTTP_200_OK,
+        )
 
     def delete(self, request, customer_id, user_id, building_id):
         customer = get_object_or_404(Customer, pk=customer_id)
