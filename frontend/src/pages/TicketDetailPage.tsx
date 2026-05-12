@@ -16,7 +16,11 @@ import {
 } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
-import { createStaffAssignmentRequest } from "../api/admin";
+import {
+  cancelStaffAssignmentRequest,
+  createStaffAssignmentRequest,
+  listStaffAssignmentRequests,
+} from "../api/admin";
 import type {
   AssignableManager,
   PaginatedResponse,
@@ -166,17 +170,26 @@ export function TicketDetailPage() {
 
   // Sprint 23B — Request-assignment state for STAFF users on a
   // ticket they have building visibility for but aren't yet
-  // assigned to. `pending` flips true when the local user has
-  // either successfully POSTed a request OR the server reported
-  // a duplicate (the queue already has an open request from this
-  // user). Both states should hide the button so we don't let
-  // the user POST again.
+  // assigned to.
+  //
+  // Sprint 24C — instead of a one-way "submitted" flag, we now
+  // track the actual PENDING request id so the staff user can
+  // cancel it via the new modal. On ticket-detail mount we list
+  // the staff user's requests and find one matching this ticket;
+  // after a successful POST we set the id from the response; on
+  // cancellation we clear it back to null so the "Request
+  // assignment" button reappears (Sprint 23A's duplicate guard
+  // only fires on still-PENDING rows).
   const [requestAssignmentBusy, setRequestAssignmentBusy] =
     useState(false);
-  const [requestAssignmentSubmitted, setRequestAssignmentSubmitted] =
-    useState(false);
+  const [pendingRequestId, setPendingRequestId] =
+    useState<number | null>(null);
   const [requestAssignmentError, setRequestAssignmentError] =
     useState("");
+  const [requestAssignmentBanner, setRequestAssignmentBanner] =
+    useState("");
+  const [cancelRequestBusy, setCancelRequestBusy] = useState(false);
+  const cancelRequestDialogRef = useRef<ConfirmDialogHandle>(null);
 
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
@@ -281,6 +294,33 @@ export function TicketDetailPage() {
       cancelled = true;
     };
   }, [id, isStaff]);
+
+  // Sprint 24C — discover the staff user's own PENDING request for
+  // this ticket so the UI can show a Cancel button instead of the
+  // submit-once banner. The backend's STAFF queryset is narrowed to
+  // `staff=request.user`, so this list call is bounded to the
+  // viewer's own requests; ticket/status filtering is done in JS
+  // because the viewset declares no DRF filterset and ignoring an
+  // unknown query param is safer than relying on backend filtering.
+  useEffect(() => {
+    if (me?.role !== "STAFF" || !id) return;
+    let cancelled = false;
+    listStaffAssignmentRequests()
+      .then((response) => {
+        if (cancelled) return;
+        const numericId = Number(id);
+        const match = response.results.find(
+          (r) => r.ticket === numericId && r.status === "PENDING",
+        );
+        setPendingRequestId(match ? match.id : null);
+      })
+      .catch(() => {
+        if (!cancelled) setPendingRequestId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, me?.role]);
 
   const visibleNextStatuses = useMemo(
     () => (ticket ? getVisibleWorkflowStatuses(ticket) : []),
@@ -1054,15 +1094,23 @@ export function TicketDetailPage() {
                   if (!ticket) return;
                   setRequestAssignmentBusy(true);
                   setRequestAssignmentError("");
+                  setRequestAssignmentBanner("");
                   try {
-                    await createStaffAssignmentRequest(ticket.id);
-                    setRequestAssignmentSubmitted(true);
+                    const created = await createStaffAssignmentRequest(
+                      ticket.id,
+                    );
+                    setPendingRequestId(created.id);
+                    setRequestAssignmentBanner(
+                      t("request_assignment_success"),
+                    );
                   } catch (err) {
                     const message = getApiError(err);
                     // Backend returns "A pending request already exists."
-                    // on duplicates; we re-message it for clarity.
+                    // on duplicates. The pending-discovery effect should
+                    // have set pendingRequestId already; flag the duplicate
+                    // for clarity and let the next useEffect run catch up
+                    // if it raced.
                     if (/pending request/i.test(message)) {
-                      setRequestAssignmentSubmitted(true);
                       setRequestAssignmentError(
                         t("request_assignment_already_pending"),
                       );
@@ -1071,6 +1119,24 @@ export function TicketDetailPage() {
                     }
                   } finally {
                     setRequestAssignmentBusy(false);
+                  }
+                }
+                async function handleConfirmCancel() {
+                  if (!pendingRequestId) return;
+                  setCancelRequestBusy(true);
+                  setRequestAssignmentError("");
+                  try {
+                    await cancelStaffAssignmentRequest(pendingRequestId);
+                    cancelRequestDialogRef.current?.close();
+                    setPendingRequestId(null);
+                    setRequestAssignmentBanner(
+                      t("request_assignment_cancelled_success"),
+                    );
+                  } catch (err) {
+                    setRequestAssignmentError(getApiError(err));
+                    cancelRequestDialogRef.current?.close();
+                  } finally {
+                    setCancelRequestBusy(false);
                   }
                 }
                 return (
@@ -1083,20 +1149,37 @@ export function TicketDetailPage() {
                     }}
                     data-testid="request-assignment-wrap"
                   >
-                    {requestAssignmentSubmitted ? (
-                      <p
-                        className="muted small"
-                        data-testid="request-assignment-submitted"
+                    {pendingRequestId !== null ? (
+                      // Sprint 24C — pending state with cancel option.
+                      <div
+                        data-testid="request-assignment-pending"
+                        style={{ display: "flex", flexDirection: "column", gap: 6 }}
                       >
-                        {requestAssignmentError ||
-                          t("request_assignment_success")}
-                      </p>
-                    ) : (
-                      <>
                         <p
                           className="muted small"
-                          style={{ margin: 0 }}
+                          style={{ margin: 0, fontWeight: 600 }}
                         >
+                          {t("request_assignment_pending_title")}
+                        </p>
+                        <p className="muted small" style={{ margin: 0 }}>
+                          {t("request_assignment_pending_body")}
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          disabled={cancelRequestBusy}
+                          onClick={() => cancelRequestDialogRef.current?.open()}
+                          data-testid="cancel-request-assignment-button"
+                          style={{ alignSelf: "flex-start" }}
+                        >
+                          {cancelRequestBusy
+                            ? t("request_assignment_cancelling")
+                            : t("request_assignment_cancel")}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="muted small" style={{ margin: 0 }}>
                           {t("request_assignment_hint")}
                         </p>
                         <button
@@ -1110,17 +1193,37 @@ export function TicketDetailPage() {
                             ? t("requesting_assignment")
                             : t("request_assignment")}
                         </button>
-                        {requestAssignmentError && !requestAssignmentSubmitted && (
-                          <div
-                            className="alert-error"
-                            role="alert"
-                            style={{ marginTop: 6 }}
-                          >
-                            {requestAssignmentError}
-                          </div>
-                        )}
                       </>
                     )}
+                    {requestAssignmentBanner && (
+                      <p
+                        className="muted small"
+                        role="status"
+                        data-testid="request-assignment-banner"
+                        style={{ marginTop: 4 }}
+                      >
+                        {requestAssignmentBanner}
+                      </p>
+                    )}
+                    {requestAssignmentError && (
+                      <div
+                        className="alert-error"
+                        role="alert"
+                        style={{ marginTop: 6 }}
+                      >
+                        {requestAssignmentError}
+                      </div>
+                    )}
+                    <ConfirmDialog
+                      ref={cancelRequestDialogRef}
+                      title={t("request_assignment_cancel_dialog_title")}
+                      body={t("request_assignment_cancel_dialog_body")}
+                      confirmLabel={t("request_assignment_cancel")}
+                      busyLabel={t("request_assignment_cancelling")}
+                      onConfirm={handleConfirmCancel}
+                      busy={cancelRequestBusy}
+                      destructive
+                    />
                   </div>
                 );
               })()}

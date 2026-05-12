@@ -633,3 +633,16 @@ export async function rejectStaffAssignmentRequest(
   );
   return response.data;
 }
+
+// Sprint 24C — STAFF self-cancellation of their own PENDING request.
+// Backend gates: STAFF role only, must be the request owner, status
+// must be PENDING. Other roles get 403; admins should reject through
+// the existing reviewer-note flow instead.
+export async function cancelStaffAssignmentRequest(
+  id: number,
+): Promise<StaffAssignmentRequest> {
+  const response = await api.post<StaffAssignmentRequest>(
+    `/staff-assignment-requests/${id}/cancel/`,
+  );
+  return response.data;
+}
