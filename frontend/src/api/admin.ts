@@ -3,6 +3,7 @@ import type {
   AuditLog,
   BuildingAdmin,
   BuildingManagerMembership,
+  BuildingStaffVisibilityAdmin,
   CompanyAdmin,
   CompanyAdminMembership,
   CustomerAccessRole,
@@ -15,6 +16,7 @@ import type {
   Role,
   StaffAssignmentRequest,
   StaffAssignmentRequestStatus,
+  StaffProfileAdmin,
   UserAdmin,
   UserAdminDetail,
 } from "./types";
@@ -492,6 +494,85 @@ export async function updateCustomerUserAccessRole(
     { access_role: accessRole },
   );
   return response.data;
+}
+
+// ---- Sprint 24A — Staff profile + building visibility admin -----------
+
+// `/api/users/<id>/staff-profile/` — GET returns the profile (auto-
+// created on first read so the admin UI never needs a separate
+// create call); PATCH accepts phone / internal_note /
+// can_request_assignment / is_active. Permission gate:
+// SUPER_ADMIN or COMPANY_ADMIN of the target staff user's company.
+
+export interface StaffProfileUpdatePayload {
+  phone?: string;
+  internal_note?: string;
+  can_request_assignment?: boolean;
+  is_active?: boolean;
+}
+
+export async function getStaffProfile(
+  userId: number,
+): Promise<StaffProfileAdmin> {
+  const response = await api.get<StaffProfileAdmin>(
+    `/users/${userId}/staff-profile/`,
+  );
+  return response.data;
+}
+
+export async function updateStaffProfile(
+  userId: number,
+  payload: StaffProfileUpdatePayload,
+): Promise<StaffProfileAdmin> {
+  const response = await api.patch<StaffProfileAdmin>(
+    `/users/${userId}/staff-profile/`,
+    payload,
+  );
+  return response.data;
+}
+
+// `/api/users/<id>/staff-visibility/` — list / add building visibility
+// rows for a STAFF user. POST {building_id} grants visibility on a
+// building. COMPANY_ADMIN may only point at buildings of their own
+// company; SUPER_ADMIN may point at any.
+
+export async function listStaffVisibility(
+  userId: number,
+): Promise<PaginatedResponse<BuildingStaffVisibilityAdmin>> {
+  const response = await api.get<
+    PaginatedResponse<BuildingStaffVisibilityAdmin>
+  >(`/users/${userId}/staff-visibility/`);
+  return response.data;
+}
+
+export async function addStaffVisibility(
+  userId: number,
+  buildingId: number,
+): Promise<BuildingStaffVisibilityAdmin> {
+  const response = await api.post<BuildingStaffVisibilityAdmin>(
+    `/users/${userId}/staff-visibility/`,
+    { building_id: buildingId },
+  );
+  return response.data;
+}
+
+export async function updateStaffVisibility(
+  userId: number,
+  buildingId: number,
+  canRequestAssignment: boolean,
+): Promise<BuildingStaffVisibilityAdmin> {
+  const response = await api.patch<BuildingStaffVisibilityAdmin>(
+    `/users/${userId}/staff-visibility/${buildingId}/`,
+    { can_request_assignment: canRequestAssignment },
+  );
+  return response.data;
+}
+
+export async function removeStaffVisibility(
+  userId: number,
+  buildingId: number,
+): Promise<void> {
+  await api.delete(`/users/${userId}/staff-visibility/${buildingId}/`);
 }
 
 // ---- Sprint 23B — Staff assignment requests --------------------------

@@ -106,6 +106,44 @@ class IsSuperAdminOrCompanyAdminForCompany(IsAuthenticatedAndActive):
         ).exists()
 
 
+class CanManageStaffMember(IsAuthenticatedAndActive):
+    """
+    Sprint 24A — gate for the StaffProfile + BuildingStaffVisibility
+    admin endpoints under `/api/users/<user_id>/staff-*/`.
+
+    has_permission: SUPER_ADMIN or COMPANY_ADMIN passes; others 403.
+
+    has_object_permission(target_user):
+      - target_user.role must be STAFF (the editor is the staff admin
+        surface — non-staff users get 400 from the view layer, but
+        the permission still rejects them defensively).
+      - SUPER_ADMIN can act on any STAFF user.
+      - COMPANY_ADMIN can act only on STAFF users that are in their
+        own company's scope as resolved by `_user_in_actor_company`.
+        Sprint 24A extends that helper to include BuildingStaffVisibility
+        so a STAFF user with at least one visibility row in the
+        actor's company is reachable.
+      - BUILDING_MANAGER / STAFF / CUSTOMER_USER never pass.
+    """
+
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        return request.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN)
+
+    def has_object_permission(self, request, view, obj):
+        if getattr(obj, "role", None) != UserRole.STAFF:
+            return False
+        actor = request.user
+        if actor.role == UserRole.SUPER_ADMIN:
+            return True
+        if actor.role != UserRole.COMPANY_ADMIN:
+            return False
+        from .scoping import _user_in_actor_company
+
+        return _user_in_actor_company(actor, obj)
+
+
 class CanManageUser(IsAuthenticatedAndActive):
     """
     Permission for User write operations.

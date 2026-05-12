@@ -69,21 +69,30 @@ async function apiAs(
 /**
  * Pick the first Osius ticket id that the super-admin sees. Used as
  * the navigation target for the STAFF "request assignment" flow.
+ *
+ * Sprint 24A — the original helper relied on a `company_name` field
+ * that the ticket list serializer does NOT expose, so `find()` always
+ * returned undefined and the fallback returned `results[0]`. With the
+ * Sprint 21 v2 seed, the Bright Facilities tickets are created AFTER
+ * the Osius ones (Osius is the first entry in `_COMPANIES`), so the
+ * default `-created_at` ordering puts Bright first — and `results[0]`
+ * becomes a Bright ticket, breaking the "Osius STAFF can see request
+ * button" and "Bright STAFF cannot create request on an Osius ticket"
+ * cases after any `--reset-tickets` cycle. We now filter on
+ * `building_name`, which IS in the list serializer and matches the
+ * "B1 / B2 / B3 Amsterdam" Osius naming convention.
  */
 async function firstOsiusTicketId(api: APIRequestContext): Promise<number> {
-  const response = await api.get(
-    "/api/tickets/?page_size=1&ordering=id",
-  );
+  const response = await api.get("/api/tickets/?page_size=50");
   expect(response.status()).toBe(200);
   const body = (await response.json()) as {
-    results: Array<{ id: number; company_name: string }>;
+    results: Array<{ id: number; building_name?: string }>;
   };
   const osius = body.results.find((t) =>
-    (t.company_name ?? "").includes("Osius"),
+    /Amsterdam/i.test(t.building_name ?? ""),
   );
-  // Fallback: just take the first one — the demo seed only ships two
-  // companies so this is overwhelmingly likely to be Osius anyway.
-  return (osius ?? body.results[0]).id;
+  expect(osius, "demo seed must contain at least one Osius ticket").toBeTruthy();
+  return osius!.id;
 }
 
 // =====================================================================

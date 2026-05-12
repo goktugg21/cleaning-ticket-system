@@ -302,6 +302,14 @@ def _user_in_actor_company(actor, target_user):
 
     Used by CanManageUser. Encapsulates the company-overlap check so callers
     do not duplicate the union-of-three-membership-types query.
+
+    Sprint 24A — adds BuildingStaffVisibility to the union so a STAFF
+    user is in a company-admin's scope as soon as they hold visibility
+    on at least one of that company's buildings. Without this, the
+    new staff profile / visibility admin endpoints could not authorize
+    a COMPANY_ADMIN against the company's own seeded STAFF persona
+    (Ahmet for Osius, Noah for Bright), and the UserViewSet list would
+    silently drop STAFF rows for non-super-admin actors.
     """
     actor_company_ids = list(
         CompanyUserMembership.objects.filter(user=actor).values_list("company_id", flat=True)
@@ -319,6 +327,13 @@ def _user_in_actor_company(actor, target_user):
         return True
     if CustomerUserMembership.objects.filter(
         user=target_user, customer__company_id__in=actor_company_ids
+    ).exists():
+        return True
+    # Sprint 24A — STAFF users are in scope via BuildingStaffVisibility.
+    from buildings.models import BuildingStaffVisibility
+
+    if BuildingStaffVisibility.objects.filter(
+        user=target_user, building__company_id__in=actor_company_ids
     ).exists():
         return True
     return False
