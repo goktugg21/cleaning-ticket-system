@@ -23,6 +23,11 @@ Idempotent invariants after a successful run:
     Customer        : 'B Amsterdam' (consolidated; building=NULL)
                       linked to {B1, B2, B3}
     Tickets (4)     : OPEN / IN_PROGRESS / WAITING_CUSTOMER_APPROVAL / CLOSED
+    Staff workflow  : 1 PENDING StaffAssignmentRequest from Ahmet on
+                      the OPEN ticket (Sprint 23B review queue)
+                    : 1 direct TicketStaffAssignment of Ahmet on the
+                      IN_PROGRESS ticket (Sprint 25A admin direct
+                      staff assignment)
 
   Company B : 'Bright Facilities'    (slug=bright-facilities)
     Buildings (2)   : R1 / R2 Rotterdam
@@ -87,7 +92,15 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
-from tickets.models import Ticket, TicketPriority, TicketStatus, TicketType
+from tickets.models import (
+    AssignmentRequestStatus,
+    StaffAssignmentRequest,
+    Ticket,
+    TicketPriority,
+    TicketStaffAssignment,
+    TicketStatus,
+    TicketType,
+)
 from tickets.state_machine import apply_transition
 
 
@@ -600,6 +613,92 @@ class Command(BaseCommand):
                 status=TicketStatus.OPEN,
             )
             self._walk_to_status(ticket, tspec["target_status"], super_admin)
+
+        # Sprint 25C audit-followup — make the demo seed actually
+        # exercise the staff workflow features Sprints 23B and 25A
+        # added. Without this, an operator on a fresh seed sees an
+        # empty /admin/staff-assignment-requests queue and no
+        # multi-staff assignments anywhere, so the review and
+        # direct-assign UIs cannot be clicked through end-to-end
+        # from cold start. The two rows are idempotent (filter-then-
+        # create) and CASCADE on Ticket deletion, so --reset-tickets
+        # cleans them automatically.
+        self._seed_staff_workflow_demo(company, customer, super_admin)
+
+    # -----------------------------------------------------------------
+    # Sprint 25C audit-followup — staff workflow demo fixtures
+    # -----------------------------------------------------------------
+    def _seed_staff_workflow_demo(self, company, customer, super_admin):
+        """
+        Add one PENDING StaffAssignmentRequest (Sprint 23B flow) and
+        one direct TicketStaffAssignment (Sprint 25A flow) to the
+        Osius demo so a fresh seed exercises both staff-side paths
+        end-to-end.
+
+        Bright Facilities intentionally stays clean: it exists so
+        cross-tenant isolation tests can prove that staff in one
+        provider company never reach the other's tickets, and adding
+        rows on the Bright side would muddy that signal.
+
+        Targets (Osius only):
+          * "[DEMO] Open lobby light" (OPEN, B1)  →  PENDING request
+            from Ahmet awaiting manager review.
+          * "[DEMO] In progress hallway scuff" (IN_PROGRESS, B2)  →
+            direct TicketStaffAssignment of Ahmet, assigned_by the
+            super admin (mirroring the admin/manager direct-assign
+            path).
+
+          The "Pantry zeepdispenser" (WCA) and "Closed kitchen tap"
+          (CLOSED) tickets are intentionally LEFT UNTOUCHED — both
+          are referenced by Playwright tests that don't expect
+          pre-seeded staff assignments. The Sprint 24D pending-
+          discovery test's `pickFreshOsiusTicketId` filters out
+          tickets that already carry a PENDING for Ahmet or an
+          existing assignment to Ahmet, so it falls through to one
+          of those two without flakiness.
+        """
+        if company.slug != "osius-demo":
+            return
+
+        User = get_user_model()
+        try:
+            staff = User.objects.get(
+                email="ahmet-staff-osius@b-amsterdam.demo",
+                role=UserRole.STAFF,
+            )
+        except User.DoesNotExist:
+            return
+
+        pending_ticket = Ticket.objects.filter(
+            customer=customer,
+            title=f"{DEMO_TICKET_PREFIX} Open lobby light",
+        ).first()
+        if pending_ticket is not None:
+            has_pending = StaffAssignmentRequest.objects.filter(
+                staff=staff,
+                ticket=pending_ticket,
+                status=AssignmentRequestStatus.PENDING,
+            ).exists()
+            already_assigned = TicketStaffAssignment.objects.filter(
+                ticket=pending_ticket, user=staff
+            ).exists()
+            if not has_pending and not already_assigned:
+                StaffAssignmentRequest.objects.create(
+                    staff=staff,
+                    ticket=pending_ticket,
+                    status=AssignmentRequestStatus.PENDING,
+                )
+
+        in_progress_ticket = Ticket.objects.filter(
+            customer=customer,
+            title=f"{DEMO_TICKET_PREFIX} In progress hallway scuff",
+        ).first()
+        if in_progress_ticket is not None:
+            TicketStaffAssignment.objects.get_or_create(
+                ticket=in_progress_ticket,
+                user=staff,
+                defaults={"assigned_by": super_admin},
+            )
 
     # -----------------------------------------------------------------
     # Legacy demo cleanup
