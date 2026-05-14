@@ -73,6 +73,8 @@
   "workflow_customer_reject_warning": "Als u dit ticket afwijst, schrijf dan eerst de reden in het statusnotitieveld.",
   "workflow_customer_rejection_required": "Schrijf eerst de afwijzingsreden in het statusnotitieveld.",
   "workflow_move_to": "Wijzig naar {{status}}",
+  "workflow_completion_evidence_hint": "Upload indien mogelijk een foto van het uitgevoerde werk. Zo kunnen de manager en de klant het resultaat controleren. Als er geen foto beschikbaar is, schrijf dan in plaats daarvan een korte afrondingsnotitie.",
+  "workflow_completion_evidence_required": "Voeg een afrondingsnotitie toe of plaats een foto van het uitgevoerde werk voordat u dit ticket ter goedkeuring aan de klant stuurt.",
 
   "card_history_title": "Statusgeschiedenis",
   "history_empty": "Nog geen statuswijzigingen.",

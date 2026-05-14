@@ -9,6 +9,41 @@ from customers.models import CustomerUserBuildingAccess
 from .models import Ticket, TicketStatus, TicketStatusHistory
 
 
+# Sprint 25C — OSIUS staff completion-evidence rule.
+#
+# When a ticket moves from IN_PROGRESS to WAITING_CUSTOMER_APPROVAL,
+# at least one of the following MUST be true on the ticket:
+#   1. The transition carries a non-empty note (note.strip()), or
+#   2. The ticket already has ≥1 visible attachment, where "visible"
+#      mirrors the existing customer-side attachment filter in
+#      tickets/views.py:TicketAttachmentListCreateView — i.e. the row
+#      itself is not is_hidden=True AND it is not attached to an
+#      internal-note or is_hidden TicketMessage.
+#
+# Photos are strongly encouraged in the UI but the rule treats them
+# as equivalent to a note: empty completion (no note + no visible
+# attachment) is the only forbidden case. This matches the OSIUS
+# product brief: "note only, photo only, note + photo all OK; no
+# note + no photo rejected."
+COMPLETION_EVIDENCE_TRANSITIONS = {
+    (TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CUSTOMER_APPROVAL),
+}
+
+
+def _ticket_has_visible_attachment(ticket):
+    """
+    True iff the ticket has at least one TicketAttachment that a
+    customer user would see. Imported locally to avoid a circular
+    import between state_machine.py and models.py.
+    """
+    from .models import TicketAttachment, TicketMessageType
+
+    qs = TicketAttachment.objects.filter(ticket=ticket, is_hidden=False)
+    qs = qs.exclude(message__is_hidden=True)
+    qs = qs.exclude(message__message_type=TicketMessageType.INTERNAL_NOTE)
+    return qs.exists()
+
+
 SCOPE_ANY = "any"
 SCOPE_COMPANY_MEMBER = "company_member"
 SCOPE_BUILDING_ASSIGNED = "building_assigned"
@@ -132,6 +167,24 @@ def apply_transition(ticket, user, to_status, note=""):
             f"Transition {ticket.status} -> {to_status} not allowed for role {user.role}.",
             code="forbidden_transition",
         )
+
+    # Sprint 25C — OSIUS staff-completion evidence rule. The role +
+    # scope checks above already ran, so a 400 here is only ever
+    # returned to an actor who would otherwise have been permitted
+    # to perform the transition. Internal/hidden artefacts do not
+    # satisfy the rule — they can't be shown to the customer, so
+    # they are not "evidence the work happened" from the customer's
+    # standpoint.
+    if (str(ticket.status), str(to_status)) in {
+        (str(a), str(b)) for (a, b) in COMPLETION_EVIDENCE_TRANSITIONS
+    }:
+        if not (note and note.strip()) and not _ticket_has_visible_attachment(ticket):
+            raise TransitionError(
+                "Please leave a completion note or attach a photo of the "
+                "completed work before sending this ticket for customer "
+                "approval.",
+                code="completion_evidence_required",
+            )
 
     locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
     if locked.status != ticket.status:

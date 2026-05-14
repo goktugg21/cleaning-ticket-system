@@ -37,7 +37,14 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
 
     def test_approval_stamps_resolved_at(self):
         ticket = apply_transition(self.ticket, self.manager, TicketStatus.IN_PROGRESS)
-        ticket = apply_transition(ticket, self.manager, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        # Sprint 25C — IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL requires
+        # a completion note or visible attachment. A note is sufficient.
+        ticket = apply_transition(
+            ticket,
+            self.manager,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="completion ok",
+        )
 
         self.assertIsNone(ticket.resolved_at)
 
@@ -103,12 +110,25 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(ctx.exception.code, "forbidden_transition")
 
     def test_reapproval_overwrites_resolved_at(self):
+        # Sprint 25C — every IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL hop
+        # in this loop test gets a completion note so the evidence rule
+        # passes. Other transitions are unchanged.
         ticket = apply_transition(self.ticket, self.manager, TicketStatus.IN_PROGRESS)
-        ticket = apply_transition(ticket, self.manager, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        ticket = apply_transition(
+            ticket,
+            self.manager,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="completion ok",
+        )
         ticket = apply_transition(ticket, self.customer_user, TicketStatus.REJECTED)
 
         ticket = apply_transition(ticket, self.manager, TicketStatus.IN_PROGRESS)
-        ticket = apply_transition(ticket, self.manager, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        ticket = apply_transition(
+            ticket,
+            self.manager,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="completion ok",
+        )
         ticket = apply_transition(ticket, self.customer_user, TicketStatus.APPROVED)
 
         first_resolved = ticket.resolved_at
@@ -117,7 +137,12 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
         ticket = apply_transition(ticket, self.company_admin, TicketStatus.CLOSED)
         ticket = apply_transition(ticket, self.company_admin, TicketStatus.REOPENED_BY_ADMIN)
         ticket = apply_transition(ticket, self.manager, TicketStatus.IN_PROGRESS)
-        ticket = apply_transition(ticket, self.manager, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        ticket = apply_transition(
+            ticket,
+            self.manager,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="completion ok",
+        )
         ticket = apply_transition(ticket, self.customer_user, TicketStatus.APPROVED)
 
         self.assertIsNotNone(ticket.resolved_at)

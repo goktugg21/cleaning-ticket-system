@@ -73,6 +73,8 @@
   "workflow_customer_reject_warning": "If you reject this ticket, please write the reason in the status note field first.",
   "workflow_customer_rejection_required": "Please write the rejection reason in the status note field first.",
   "workflow_move_to": "Move to {{status}}",
+  "workflow_completion_evidence_hint": "Please upload a photo of the completed work if possible. This helps the manager and customer verify the result. If a photo isn't available, write a short completion note instead.",
+  "workflow_completion_evidence_required": "Add a completion note or attach a photo of the completed work before sending this ticket for customer approval.",
 
   "card_history_title": "Status history",
   "history_empty": "No status changes yet.",

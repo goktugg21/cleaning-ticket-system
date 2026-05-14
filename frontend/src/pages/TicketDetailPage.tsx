@@ -1752,6 +1752,24 @@ export function TicketDetailPage() {
                     />
                   </div>
 
+                  {/* Sprint 25C — OSIUS staff-completion evidence hint.
+                      Backend rejects the IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL
+                      hop unless the ticket carries a note OR at least one
+                      visible attachment. The page already has a full
+                      attachments card lower down (upload + list); this hint
+                      nudges the operator toward proof-of-work without
+                      blocking the flow when a note alone is enough. */}
+                  {isStaff &&
+                    ticket.status === "IN_PROGRESS" &&
+                    visibleNextStatuses.includes("WAITING_CUSTOMER_APPROVAL") && (
+                      <p
+                        className="muted small"
+                        data-testid="workflow-completion-evidence-hint"
+                        style={{ marginTop: 4, marginBottom: 4 }}
+                      >
+                        {t("workflow_completion_evidence_hint")}
+                      </p>
+                    )}
 
                   {pendingAdminDecisionOverride && (
                     <div className="alert-warning">
