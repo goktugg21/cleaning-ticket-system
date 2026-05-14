@@ -33,6 +33,7 @@ urlpatterns = [
     path("api/buildings/", include("buildings.urls")),
     path("api/customers/", include("customers.urls")),
     path("api/tickets/", include("tickets.urls")),
+    path("api/extra-work/", include("extra_work.urls")),
     path("api/reports/", include("reports.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),

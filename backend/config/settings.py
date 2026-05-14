@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "buildings",
     "customers",
     "tickets",
+    "extra_work",
     "reports",
     "notifications",
     "sla",
