@@ -3,38 +3,26 @@ Sprint 27A — RBAC safety net (audit app).
 
 T-7  test_building_staff_visibility_can_request_assignment_update_is_audited
 
-DOCUMENTED GAP (G-B4): on master @ 95748b3 the audit signal
-registration at [audit/signals.py:454-471] treats
-`BuildingStaffVisibility` as a CREATE/DELETE-only membership.
-Toggling `can_request_assignment` on an existing visibility row
-therefore leaves no `AuditLog` row, while every other
-"permission toggle" surface (`StaffProfile.is_active`,
-`Customer.show_assigned_staff_*`, `CustomerUserBuildingAccess.
-permission_overrides`) IS audited.
+Locks the audit shape for the per-building `can_request_assignment`
+toggle on `BuildingStaffVisibility`: every UPDATE produces an
+`AuditLog` row with the before/after pair on `changes`.
 
-This test asserts the corrected future behaviour: every UPDATE
-to `BuildingStaffVisibility.can_request_assignment` produces an
-`AuditLog` row with the before/after pair. It is decorated with
-`@unittest.expectedFailure` so the CI / full test suite stays
-green while still keeping the assertion alive as a regression
-lock — the moment Sprint 27B lands the audit signal fix, this
-test will start passing and the `expectedFailure` decorator must
-be removed (an unexpected success is a test-level failure under
-unittest, so CI will surface the green flip automatically).
+History:
+  * Sprint 27A landed this test as `@unittest.expectedFailure` —
+    on master @ 95748b3 the audit signal registration treated
+    `BuildingStaffVisibility` as CREATE/DELETE-only and the
+    UPDATE was silently dropped (gap G-B4 in
+    docs/architecture/sprint-27-rbac-matrix.md).
+  * Sprint 27B added a dedicated pre_save snapshot + post_save
+    UPDATE-only handler for the model in `audit/signals.py`,
+    keeping the existing membership CREATE/DELETE shape unchanged.
+    The expectedFailure decorator was removed and the test now
+    asserts the corrected behaviour directly.
 
-See section H-10 + gap G-B4 in
+See section H-10 + gap G-B4 (now marked closed by Sprint 27B) in
 docs/architecture/sprint-27-rbac-matrix.md.
-
-Sprint 27B TODO: when the BuildingStaffVisibility audit signal
-fix lands (promoting it from membership-only signal group into
-the fully-tracked group, or adding a custom field-diff handler
-for `can_request_assignment`), DELETE the `@unittest.expectedFailure`
-decorator on the test below. The test body itself does not need
-to change.
 """
 from __future__ import annotations
-
-import unittest
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -71,28 +59,16 @@ class BuildingStaffVisibilityUpdateAuditTests(TestCase):
             can_request_assignment=True,
         )
 
-    # Sprint 27A documents gap G-B4:
-    #   * BuildingStaffVisibility.can_request_assignment UPDATEs are
-    #     NOT audited on master @ 95748b3 (only CREATE/DELETE on the
-    #     visibility row itself are tracked).
-    #   * The assertion below describes the corrected future shape.
-    #   * Sprint 27B should remove this @unittest.expectedFailure
-    #     decorator once the audit signal fix lands; an unexpected
-    #     success will surface in CI automatically so we cannot
-    #     accidentally ship the fix without unflipping this test.
-    @unittest.expectedFailure
     def test_building_staff_visibility_can_request_assignment_update_is_audited(
         self,
     ):
-        """T-7: toggling can_request_assignment must write an
+        """T-7: toggling `can_request_assignment` writes an
         AuditLog UPDATE row carrying the before/after pair.
 
-        Wrapped in @unittest.expectedFailure today — documented as
-        gap G-B4. Sprint 27B will promote BuildingStaffVisibility
-        from the membership-only signal group into the fully-tracked
-        group (or register a custom field-diff handler for the
-        can_request_assignment field) and at the same time remove
-        this decorator.
+        Closed in Sprint 27B by a dedicated pre_save/post_save
+        UPDATE-only handler in `audit/signals.py` (the CREATE/DELETE
+        shape on `BuildingStaffVisibility` is unchanged — those
+        still go through the existing membership handlers).
         """
         # Snapshot: no UPDATE row for this visibility row yet.
         before = AuditLog.objects.filter(

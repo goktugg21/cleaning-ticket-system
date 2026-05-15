@@ -77,7 +77,7 @@ These are the security floor. Any change that contradicts them is a P0 regressio
 | H-7 | **Only SUPER_ADMIN can grant `CUSTOMER_COMPANY_ADMIN` access_role.** | Same as H-6. | Sprint 27A T-1, T-2 |
 | H-8 | **COMPANY_ADMIN cannot self-promote to SUPER_ADMIN.** | [accounts/serializers_users.py:84-98](../../backend/accounts/serializers_users.py#L84-L98) — blocks self-target + blocks SUPER_ADMIN target | [test_user_crud.py:115](../../backend/accounts/tests/test_user_crud.py#L115) (already green) |
 | H-9 | **Nobody can grow their own scope.** | No API surface lets a user write `CompanyUserMembership` / `BuildingManagerAssignment` / `CustomerUserMembership` rows referencing themselves; `validate_role` blocks self-target ([serializers_users.py:85-86](../../backend/accounts/serializers_users.py#L85-L86)). | [test_user_crud.py:154](../../backend/accounts/tests/test_user_crud.py#L154), [test_sprint23c_access_role_editor.py:102](../../backend/customers/tests/test_sprint23c_access_role_editor.py#L102) |
-| H-10 | **Permission/role/scope changes must be audit-logged.** | Audit signals at [audit/signals.py:424-510](../../backend/audit/signals.py#L424-L510). `User`, `Customer`, `Company`, `Building`, `StaffProfile`, `StaffAssignmentRequest` fully tracked; memberships tracked CREATE/DELETE; `CustomerUserBuildingAccess` tracks `access_role / permission_overrides / is_active`. | [test_audit_membership.py](../../backend/audit/tests/test_audit_membership.py) |
+| H-10 | **Permission/role/scope changes must be audit-logged.** | Audit signals at [audit/signals.py](../../backend/audit/signals.py). `User`, `Customer`, `Company`, `Building`, `StaffProfile`, `StaffAssignmentRequest` fully tracked; memberships tracked CREATE/DELETE; `CustomerUserBuildingAccess` tracks `access_role / permission_overrides / is_active`. **Sprint 27B**: `BuildingStaffVisibility.can_request_assignment` UPDATEs now tracked too via a dedicated pre_save / post_save UPDATE-only handler (CREATE/DELETE still via the existing membership handler — shape unchanged). | [test_audit_membership.py](../../backend/audit/tests/test_audit_membership.py), [test_sprint27a_rbac_safety_net.py T-7](../../backend/audit/tests/test_sprint27a_rbac_safety_net.py) |
 | H-11 | **Permission override and workflow override are separate concepts in code, model, audit.** | Permission override = `CustomerUserBuildingAccess.permission_overrides` JSON + `is_active`. Workflow override = Extra Work's `is_override + override_reason` ([extra_work/state_machine.py:198-273](../../backend/extra_work/state_machine.py#L198-L273)) + `ExtraWorkRequest.override_by/_reason/_at`. **Ticket workflow override is currently NOT separately modeled — see G-B3 in §5.** | Sprint 27A T-6 |
 
 ## 4. Permission override vs workflow override (the two are NOT the same)
@@ -108,7 +108,8 @@ field, and vice versa.
 | `CUSTOMER_COMPANY_ADMIN`-granting guard (Sprint 27A) | [serializers_memberships.py validate_access_role](../../backend/customers/serializers_memberships.py) |
 | StaffProfile PATCH | [accounts/views_staff.py:104-116](../../backend/accounts/views_staff.py#L104-L116) |
 | BuildingStaffVisibility CREATE/PATCH/DELETE | [accounts/views_staff.py:153-230](../../backend/accounts/views_staff.py#L153-L230) |
-| Audit signals (which models / which fields) | [audit/signals.py:424-510](../../backend/audit/signals.py#L424-L510) |
+| Audit signals (which models / which fields) | [audit/signals.py](../../backend/audit/signals.py) |
+| Effective-permission composer (Sprint 27B) | [accounts/permissions_effective.py](../../backend/accounts/permissions_effective.py) |
 | Audit log shape | [audit/models.py:11-64](../../backend/audit/models.py#L11-L64) |
 
 ## 6. Current frontend gaps (defense-in-depth UI; backend is the real gate)
@@ -127,7 +128,7 @@ field, and vice versa.
 |---|---|---|
 | **G-B2.** `permission_overrides` and `CustomerUserBuildingAccess.is_active` editing is API-deferred ([serializers_memberships.py:97-101](../../backend/customers/serializers_memberships.py#L97-L101)). Backend endpoint exists, only accepts `access_role`. Must ship together with a **self-edit guard** (actor.id ≠ target.user.id) AND a permission-key allow-list. | P1 | Sprint 27C |
 | **G-B3.** Ticket workflow override has no `is_override` flag, no reason column, no audit row on the generic `AuditLog`. Only email-context derived flag at [tickets/views.py:214-217](../../backend/tickets/views.py#L214-L217). | P1 | Sprint 27F |
-| **G-B4.** `BuildingStaffVisibility.can_request_assignment` UPDATEs are not audited — model registered as CREATE/DELETE-only membership at [audit/signals.py:454-471](../../backend/audit/signals.py#L454-L471). The Sprint 27A T-7 test exists to LOCK the future fix; it is **expected to fail** today and that failure is the documented gap. | P1 | Sprint 27F |
+| ~~**G-B4.** `BuildingStaffVisibility.can_request_assignment` UPDATEs are not audited.~~ **CLOSED by Sprint 27B.** A dedicated pre_save snapshot + UPDATE-only post_save handler now writes an `AuditLog` UPDATE row with the before/after pair on `changes`. CREATE/DELETE shape unchanged. The Sprint 27A T-7 regression lock now passes normally. | ~~P1~~ | ~~Sprint 27F~~ **Sprint 27B** |
 | **G-B5.** Company-level / customer-policy fields are sparse — only three `show_assigned_staff_*` booleans. Needs a `CustomerCompanyPolicy` model for "this customer company can create extra work" etc. | P2 | Sprint 27C |
 | **G-B6.** No `reason` column on `AuditLog`. | P2 | Sprint 27F |
 | **G-B7.** STAFF cannot see Extra Work at all — `scope_extra_work_for` returns `.none()` for STAFF ([extra_work/scoping.py:67-71](../../backend/extra_work/scoping.py#L67-L71)). | P2 (intentional MVP gap; needs the staff-execution surface) | Sprint 27 follow-up sprint after 27G |
@@ -136,10 +137,33 @@ field, and vice versa.
 
 ## 8. Sprint 27B-G follow-up plan
 
-### Sprint 27B — backend effective-permission service
-- Introduce `accounts/permissions_effective.py` composing today's two resolvers behind a single `effective_permissions(user, *, customer_id=None, building_id=None) -> dict[str, bool]` API.
-- Migrate one call site to consume the new service; shadow-test that the old and new resolvers agree on every key.
-- Add `BuildingStaffVisibility.can_request_assignment` audit signal (closes **G-B4** + makes T-7 pass).
+### Sprint 27B — backend effective-permission service ✅ **DELIVERED**
+- ✅ Introduced [`accounts/permissions_effective.py`](../../backend/accounts/permissions_effective.py) composing today's two resolvers behind:
+  * `has_permission(user, key, *, customer_id=None, building_id=None) -> bool`
+  * `effective_permissions(user, *, customer_id=None, building_id=None) -> dict[str, bool]`
+
+  The composer is **read-only** and behaviorally equivalent to the underlying resolvers — it introduces no new permission rules and broadens no scope. Routing: `osius.*` keys → `user_has_osius_permission`; `customer.*` keys → `user_can` (returns False if `customer_id` is None); unknown keys → False; anonymous user → False.
+
+- ✅ Shadow / parity tests at [`accounts/tests/test_sprint27b_effective_permissions.py`](../../backend/accounts/tests/test_sprint27b_effective_permissions.py) prove the composer ≡ underlying resolver for every key in `OSIUS_PERMISSION_KEYS ∪ CUSTOMER_PERMISSION_KEYS`, across SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER / STAFF / CUSTOMER_USER (each of the three access_role variants). Also locks:
+  * Permission overrides on `CustomerUserBuildingAccess.permission_overrides` are honoured.
+  * `is_active=False` on a customer access row collapses every customer.* key to False.
+  * No cross-customer or cross-provider leak.
+  * Anonymous / unknown-key / customer-key-without-customer-id all return False.
+
+- ⏸ **Call-site migration deliberately deferred.** Today's call sites
+  (`tickets/views_staff_assignments.py`, `tickets/views_staff_requests.py`,
+  `extra_work/state_machine.py`, `extra_work/serializers.py`,
+  `accounts/scoping.py`, `extra_work/scoping.py`) all use one of the two
+  underlying resolvers directly and work correctly. Swapping any single
+  call site to the composer is a behaviorally-equivalent no-op (the
+  parity tests prove this), so introducing the churn has no runtime
+  benefit until a new consumer (e.g. the Sprint 27C permission-override
+  editor or a future "what can this user do here" admin surface) needs
+  the unified API. The composer ships unused-from-existing-paths in 27B
+  and will pick up its first real consumer in 27C/E. This is documented
+  here so the deferred work doesn't get lost.
+
+- ✅ `BuildingStaffVisibility.can_request_assignment` audit signal added (closes **G-B4** above + makes Sprint 27A T-7 pass normally, no longer `@unittest.expectedFailure`).
 
 ### Sprint 27C — customer-side permission model + write endpoint
 - New `CustomerCompanyPolicy` model with three migrated booleans plus the new toggles (G-B5).
@@ -176,7 +200,7 @@ Tests added in Sprint 27A (test-first):
 | T-4 | `test_staff_cannot_approve_or_override_ticket_completion` | `tickets/tests/test_sprint27a_rbac_safety_net.py` | Passes today (state machine has no STAFF approval transition). |
 | T-5 | `test_staff_cannot_approve_or_override_extra_work_pricing` | `extra_work/tests/test_sprint27a_rbac_safety_net.py` | Passes today (`_is_provider_operator` excludes STAFF). |
 | T-6 | `test_permission_override_is_distinct_from_workflow_override` | `customers/tests/test_sprint27a_rbac_safety_net.py` | Passes today — proves toggling a permission override does NOT touch any workflow-override field, and vice versa. |
-| T-7 | `test_building_staff_visibility_can_request_assignment_update_is_audited` | `audit/tests/test_sprint27a_rbac_safety_net.py` | **Expected to FAIL today** — documents gap **G-B4**. Will be closed by Sprint 27B. |
+| T-7 | `test_building_staff_visibility_can_request_assignment_update_is_audited` | `audit/tests/test_sprint27a_rbac_safety_net.py` | Sprint 27A: shipped as `@unittest.expectedFailure` documenting gap **G-B4**. **Sprint 27B: closed the gap and removed the decorator — test now passes normally.** |
 
 **Backend code change (only one allowed):** add
 `validate_access_role` on `CustomerUserBuildingAccessUpdateSerializer`

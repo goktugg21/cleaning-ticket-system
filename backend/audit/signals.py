@@ -220,9 +220,20 @@ def _membership_changes(membership, *, action: str) -> dict:
 
 def _on_membership_post_save(sender, instance, created, **kwargs):
     if not created:
-        # Membership rows have no editable fields; an UPDATE would be a
-        # surprise but we still want to know about it. Emit an UPDATE log
-        # with the same shape as a CREATE so the row stays inspectable.
+        # Sprint 27B: `BuildingStaffVisibility` has its own dedicated
+        # UPDATE-diff handler below (`_on_building_staff_visibility_post_save_update`)
+        # so the field change on `can_request_assignment` lands as a
+        # proper diff row, not as the CREATE-shape fallback this branch
+        # emits. Skip the fallback for that model so we don't write two
+        # AuditLog rows per UPDATE. CREATE and DELETE on BSV still go
+        # through the membership shape — only UPDATE is delegated.
+        if sender.__name__ == "BuildingStaffVisibility":
+            return
+
+        # Other membership rows have no editable fields; an UPDATE would
+        # be a surprise but we still want to know about it. Emit an
+        # UPDATE log with the same shape as a CREATE so the row stays
+        # inspectable.
         try:
             _create_log(
                 instance,
@@ -421,6 +432,77 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
         )
 
 
+# Sprint 27B (closes gap G-B4 from docs/architecture/sprint-27-rbac-matrix.md):
+# `BuildingStaffVisibility` is still registered with the membership-only
+# CREATE/DELETE handlers above — that shape is unchanged. But its single
+# editable field, `can_request_assignment`, is a per-building permission
+# toggle whose changes need to land on the audit feed just like the
+# CustomerUserBuildingAccess editable trio.
+#
+# The pattern below mirrors the Sprint 23A CUBA UPDATE diff: a tiny
+# pre_save snapshot of just the tracked field, plus a post_save handler
+# that fires UPDATE-only (CREATE is left to the existing membership
+# handler so the rich payload doesn't get duplicated).
+_BSV_TRACKED_FIELDS = ("can_request_assignment",)
+
+
+def _bsv_snapshot_for_pre_save(instance):
+    """Snapshot the Sprint 27B editable field on BuildingStaffVisibility."""
+    if instance.pk is None:
+        return None
+    from buildings.models import BuildingStaffVisibility
+
+    try:
+        previous = BuildingStaffVisibility.objects.get(pk=instance.pk)
+    except BuildingStaffVisibility.DoesNotExist:
+        return None
+    return {field: getattr(previous, field) for field in _BSV_TRACKED_FIELDS}
+
+
+def _on_building_staff_visibility_pre_save(sender, instance, **kwargs):
+    """Snapshot the pre-update state so post_save can diff it."""
+    try:
+        snapshot = _bsv_snapshot_for_pre_save(instance)
+        _state_map()[
+            ("buildings.BuildingStaffVisibility", instance.pk)
+        ] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: BuildingStaffVisibility pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_building_staff_visibility_post_save_update(
+    sender, instance, created, **kwargs
+):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of
+    the tracked field. CREATE is intentionally a no-op here — the
+    membership handler already emits the rich CREATE payload."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("buildings.BuildingStaffVisibility", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _BSV_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = getattr(instance, field)
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: BuildingStaffVisibility post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _connect():
     User = _user_model()
     # Lazy import: StaffProfile lives in accounts and would create a
@@ -507,6 +589,23 @@ def _connect():
         sender=CustomerUserBuildingAccess,
         weak=False,
         dispatch_uid="audit:customer_access:del:CustomerUserBuildingAccess",
+    )
+
+    # Sprint 27B (closes G-B4): UPDATE-diff handler for the per-building
+    # `can_request_assignment` toggle on BuildingStaffVisibility. The
+    # CREATE/DELETE shape stays on the existing membership handlers
+    # registered above; this pair adds the missing UPDATE coverage.
+    pre_save.connect(
+        _on_building_staff_visibility_pre_save,
+        sender=BuildingStaffVisibility,
+        weak=False,
+        dispatch_uid="audit:bsv:pre:BuildingStaffVisibility",
+    )
+    post_save.connect(
+        _on_building_staff_visibility_post_save_update,
+        sender=BuildingStaffVisibility,
+        weak=False,
+        dispatch_uid="audit:bsv:post_update:BuildingStaffVisibility",
     )
 
 
