@@ -283,8 +283,15 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
 
     def patch(self, request, customer_id, user_id, building_id):
         access = self._get_access(request, customer_id, user_id, building_id)
+        # Sprint 27A — pass request through so the
+        # CustomerUserBuildingAccessUpdateSerializer.validate_access_role
+        # guard can read actor.role from context. Without this the
+        # guard would reject every PATCH (actor would be None).
         serializer = CustomerUserBuildingAccessUpdateSerializer(
-            access, data=request.data, partial=True
+            access,
+            data=request.data,
+            partial=True,
+            context={"request": request},
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()

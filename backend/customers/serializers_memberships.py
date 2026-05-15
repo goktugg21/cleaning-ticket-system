@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from accounts.models import UserRole
+
 from .models import (
     CustomerBuildingMembership,
     CustomerUserBuildingAccess,
@@ -108,3 +110,25 @@ class CustomerUserBuildingAccessUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomerUserBuildingAccess
         fields = ["access_role"]
+
+    def validate_access_role(self, value):
+        """
+        Sprint 27A guard (H-7 in docs/architecture/sprint-27-rbac-matrix.md):
+        only SUPER_ADMIN may grant the CUSTOMER_COMPANY_ADMIN
+        access_role. Provider COMPANY_ADMIN can still grant the
+        two narrower customer-side roles (CUSTOMER_USER,
+        CUSTOMER_LOCATION_MANAGER) — the endpoint's class-level
+        permission already excludes everyone else.
+
+        The endpoint passes the DRF request via the serializer
+        context, which is how we look up the actor's role.
+        """
+        if value == CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN:
+            request = self.context.get("request")
+            actor = getattr(request, "user", None)
+            if getattr(actor, "role", None) != UserRole.SUPER_ADMIN:
+                raise serializers.ValidationError(
+                    "Only a Super Admin may grant the Customer Company "
+                    "Admin access role.",
+                )
+        return value
