@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  AlertTriangle,
   ChevronLeft,
   Clock,
   History,
@@ -14,6 +15,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
+import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import {
@@ -33,6 +35,7 @@ import type {
   TicketMessage,
   TicketMessageType,
   TicketStatus,
+  TicketStatusChangePayload,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -162,10 +165,16 @@ export function TicketDetailPage() {
     }
   };
 
-  const adminDecisionOverrideMessage = (nextStatus: TicketStatus): string => {
-    if (nextStatus === "APPROVED") return t("workflow_admin_override_approved");
-    if (nextStatus === "REJECTED") return t("workflow_admin_override_rejected");
-    return "";
+  // Sprint 27F-F1 — the inline "click again to confirm" banner copy is
+  // retained for cases where the override modal copy needs a short
+  // form (still wired via i18n). The two-press confirmation now lives
+  // in a modal — see `overrideDecision` state below.
+  const overrideModalSubmitLabel = (nextStatus: TicketStatus): string => {
+    if (nextStatus === "APPROVED")
+      return t("override_modal_submit_approve");
+    if (nextStatus === "REJECTED")
+      return t("override_modal_submit_reject");
+    return t("override_modal_submit_approve");
   };
 
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
@@ -198,8 +207,21 @@ export function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
   const [statusBusy, setStatusBusy] = useState<TicketStatus | null>(null);
-  const [pendingAdminDecisionOverride, setPendingAdminDecisionOverride] =
+  // Sprint 27F-F1 — ticket-override modal state. Mirrors the
+  // ExtraWorkDetailPage shape:
+  //   overrideDecision  the target status the operator picked
+  //                     (null = modal closed).
+  //   overrideReason    bound to the mandatory textarea.
+  //   overrideError     i18n string when the reason is empty or
+  //                     when the backend returns
+  //                     `code: "override_reason_required"`.
+  //   overrideBusy      gates the submit button while the request
+  //                     is in flight.
+  const [overrideDecision, setOverrideDecision] =
     useState<TicketStatus | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+  const [overrideBusy, setOverrideBusy] = useState(false);
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<TicketMessageType>("PUBLIC_REPLY");
@@ -300,8 +322,13 @@ export function TicketDetailPage() {
     );
   }, [ticket?.id, ticket?.assigned_to]);
 
+  // Sprint 27F-F1 — clear any pending override modal state when the
+  // ticket loads or its status changes (so a successful transition
+  // does not leave a stale reason in the textarea).
   useEffect(() => {
-    setPendingAdminDecisionOverride(null);
+    setOverrideDecision(null);
+    setOverrideReason("");
+    setOverrideError(null);
   }, [ticket?.id, ticket?.status]);
 
   useEffect(() => {
@@ -430,17 +457,23 @@ export function TicketDetailPage() {
 
     setError("");
 
+    // Sprint 27F-F1 — provider-driven customer-decision overrides now
+    // route through the dedicated override modal. The button click
+    // opens the modal (setting `overrideDecision`); the actual API
+    // call fires from `submitOverride` below, which posts
+    // `is_override + override_reason` per the 27F-B1 contract. The
+    // existing isAdminCustomerDecisionOverride gate still governs
+    // *who sees* the buttons — it has not moved.
     const needsAdminDecisionOverride = isAdminCustomerDecisionOverride(
       ticket.status,
       toStatus,
       me?.role,
     );
 
-    if (
-      needsAdminDecisionOverride &&
-      pendingAdminDecisionOverride !== toStatus
-    ) {
-      setPendingAdminDecisionOverride(toStatus);
+    if (needsAdminDecisionOverride) {
+      setOverrideDecision(toStatus);
+      setOverrideReason("");
+      setOverrideError(null);
       return;
     }
 
@@ -457,22 +490,73 @@ export function TicketDetailPage() {
     setStatusBusy(toStatus);
 
     try {
+      const payload: TicketStatusChangePayload = {
+        to_status: toStatus,
+        note: statusNote.trim(),
+      };
       const response = await api.post<TicketDetail>(
         `/tickets/${id}/status/`,
-        {
-          to_status: toStatus,
-          note: statusNote.trim(),
-        },
+        payload,
       );
 
       setTicket(response.data);
       setStatusNote("");
-      setPendingAdminDecisionOverride(null);
     } catch (err) {
       setError(getApiError(err));
     } finally {
       setStatusBusy(null);
     }
+  }
+
+  // Sprint 27F-F1 — mirrors ExtraWorkDetailPage.handleOverrideSubmit.
+  // Submits {to_status, is_override:true, override_reason} and
+  // refetches the ticket on success so the timeline picks up the new
+  // status_history row carrying is_override + override_reason. On the
+  // 400 `code: "override_reason_required"` response we surface the
+  // i18n string (we match the stable `code` field, never the message).
+  async function submitOverride(event: FormEvent) {
+    event.preventDefault();
+    if (!id || !overrideDecision) return;
+    if (!overrideReason.trim()) {
+      setOverrideError(t("override_modal_reason_required"));
+      return;
+    }
+    setOverrideError(null);
+    setOverrideBusy(true);
+    try {
+      const payload: TicketStatusChangePayload = {
+        to_status: overrideDecision,
+        is_override: true,
+        override_reason: overrideReason.trim(),
+        note: statusNote.trim(),
+      };
+      await api.post<TicketDetail>(`/tickets/${id}/status/`, payload);
+      // Refetch via loadTicket so messages / attachments stay in sync
+      // alongside the new status_history row.
+      await loadTicket();
+      setStatusNote("");
+      setOverrideDecision(null);
+      setOverrideReason("");
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as
+          | { code?: string; detail?: string }
+          | undefined;
+        if (data?.code === "override_reason_required") {
+          setOverrideError(t("override_modal_reason_required"));
+          return;
+        }
+      }
+      setOverrideError(getApiError(err));
+    } finally {
+      setOverrideBusy(false);
+    }
+  }
+
+  function cancelOverride() {
+    setOverrideDecision(null);
+    setOverrideReason("");
+    setOverrideError(null);
   }
 
   async function submitMessage(event: FormEvent) {
@@ -714,6 +798,24 @@ export function TicketDetailPage() {
                           return cleaned ? `. ${cleaned}` : ".";
                         })()}
                       </div>
+                      {/* Sprint 27F-F1 — override badge + reason sub-
+                          line. Backend always emits both fields
+                          (defaulted false / ""); we only render the
+                          badge for actual overrides. */}
+                      {entry.is_override && (
+                        <div
+                          className="muted small"
+                          data-testid="timeline-override-badge"
+                          style={{ marginTop: 4 }}
+                        >
+                          <b>{t("timeline_override_badge")}</b>
+                          {entry.override_reason
+                            ? ` · ${t("timeline_override_reason", {
+                                reason: entry.override_reason,
+                              })}`
+                            : ""}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))
@@ -1771,14 +1873,6 @@ export function TicketDetailPage() {
                       </p>
                     )}
 
-                  {pendingAdminDecisionOverride && (
-                    <div className="alert-warning">
-                      {adminDecisionOverrideMessage(
-                        pendingAdminDecisionOverride,
-                      )}
-                    </div>
-                  )}
-
                   {me?.role === "CUSTOMER_USER" &&
                     ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
                     visibleNextStatuses.includes("REJECTED") && (
@@ -1811,6 +1905,102 @@ export function TicketDetailPage() {
               )}
             </div>
           </div>
+
+          {/* Sprint 27F-F1 — provider customer-decision override modal.
+              Mirrors the ExtraWorkDetailPage shape: opens when the
+              operator clicks "Override → Customer approved" /
+              "Override → Customer rejected", requires a mandatory
+              reason, and posts {is_override:true, override_reason} so
+              the new TicketStatusHistory row carries the override flag
+              + the typed reason. CUSTOMER_USER never triggers this
+              path — `isAdminCustomerDecisionOverride` filters by role. */}
+          {overrideDecision && (
+            <div className="card" data-testid="ticket-override-modal">
+              <div className="section-head">
+                <div
+                  className="section-head-title"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: "var(--text-faint)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <AlertTriangle size={14} strokeWidth={2.2} />
+                  {t("override_modal_title")}
+                </div>
+              </div>
+              <form
+                onSubmit={submitOverride}
+                style={{ padding: "12px 18px 16px" }}
+              >
+                <div className="alert-warning" style={{ marginBottom: 12 }}>
+                  {t("override_modal_prompt")}
+                </div>
+                <div className="field">
+                  <label
+                    className="field-label"
+                    htmlFor="ticket-override-reason"
+                  >
+                    {t("override_modal_reason_label")}
+                  </label>
+                  <textarea
+                    id="ticket-override-reason"
+                    data-testid="ticket-override-reason"
+                    className="field-textarea"
+                    rows={3}
+                    value={overrideReason}
+                    onChange={(event) =>
+                      setOverrideReason(event.target.value)
+                    }
+                    required
+                  />
+                </div>
+                {overrideError && (
+                  <div
+                    className="alert-error"
+                    role="alert"
+                    data-testid="ticket-override-error"
+                    style={{ marginTop: 8 }}
+                  >
+                    {overrideError}
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={cancelOverride}
+                    disabled={overrideBusy}
+                    data-testid="ticket-override-cancel"
+                  >
+                    {t("override_modal_cancel")}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={overrideBusy}
+                    data-testid="ticket-override-submit"
+                  >
+                    {overrideBusy
+                      ? t("updating")
+                      : overrideModalSubmitLabel(overrideDecision)}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           <div className="card">
             <div className="card-head-icon">
@@ -1862,6 +2052,22 @@ export function TicketDetailPage() {
                           <div className="history-note">{cleaned}</div>
                         ) : null;
                       })()}
+                      {/* Sprint 27F-F1 — override badge mirrors the
+                          activity timeline. */}
+                      {item.is_override && (
+                        <div
+                          className="muted small"
+                          data-testid="history-override-badge"
+                          style={{ marginTop: 4 }}
+                        >
+                          <b>{t("timeline_override_badge")}</b>
+                          {item.override_reason
+                            ? ` · ${t("timeline_override_reason", {
+                                reason: item.override_reason,
+                              })}`
+                            : ""}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))

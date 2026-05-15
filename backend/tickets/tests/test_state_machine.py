@@ -56,7 +56,18 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
     def test_company_admin_can_approve_in_company_scope(self):
         ticket = self.move_ticket_to_customer_approval()
 
-        ticket = apply_transition(ticket, self.company_admin, TicketStatus.APPROVED)
+        # Sprint 27F-B1 — COMPANY_ADMIN driving WAITING_CUSTOMER_APPROVAL
+        # → APPROVED is, by definition, a workflow override of the
+        # customer's decision. The new state-machine layer coerces
+        # is_override=True and enforces an override_reason on this
+        # transition. Pass a reason so the existing scope test still
+        # locks COMPANY_ADMIN-can-approve behaviour.
+        ticket = apply_transition(
+            ticket,
+            self.company_admin,
+            TicketStatus.APPROVED,
+            override_reason="Customer phoned to approve.",
+        )
 
         self.assertEqual(ticket.status, TicketStatus.APPROVED)
         self.assertIsNotNone(ticket.approved_at)
@@ -73,11 +84,15 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
     def test_company_admin_can_reject_in_company_scope(self):
         ticket = self.move_ticket_to_customer_approval()
 
+        # Sprint 27F-B1 — same override coercion as the approve sibling
+        # above. The reason is the standard "customer non-response" case
+        # that the new override surface exists to handle.
         ticket = apply_transition(
             ticket,
             self.company_admin,
             TicketStatus.REJECTED,
             note="Customer did not respond within SLA window.",
+            override_reason="Customer did not respond within SLA window.",
         )
 
         self.assertEqual(ticket.status, TicketStatus.REJECTED)

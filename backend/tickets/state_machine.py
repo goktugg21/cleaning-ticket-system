@@ -153,7 +153,15 @@ def can_transition(user, ticket, to_status):
 
 
 @transaction.atomic
-def apply_transition(ticket, user, to_status, note=""):
+def apply_transition(
+    ticket,
+    user,
+    to_status,
+    note="",
+    *,
+    is_override: bool = False,
+    override_reason: str = "",
+):
     if to_status not in TicketStatus.values:
         raise TransitionError(f"Unknown status '{to_status}'.", code="unknown_status")
 
@@ -166,6 +174,30 @@ def apply_transition(ticket, user, to_status, note=""):
         raise TransitionError(
             f"Transition {ticket.status} -> {to_status} not allowed for role {user.role}.",
             code="forbidden_transition",
+        )
+
+    # Sprint 27F-B1 — provider-driven customer-decision transition is
+    # ALWAYS an override. Mirrors `extra_work/state_machine.py:250-265`.
+    # If a SUPER_ADMIN or COMPANY_ADMIN drives WAITING_CUSTOMER_APPROVAL
+    # -> APPROVED / REJECTED, that is by definition a workflow override
+    # of the customer's decision, even when the client forgot the flag.
+    # We coerce here BEFORE the override-reason gate so the reason
+    # requirement still fires.
+    provider_driven_customer_decision = (
+        getattr(user, "role", None)
+        in {UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN}
+        and str(ticket.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        and str(to_status)
+        in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
+    )
+    if provider_driven_customer_decision:
+        is_override = True
+
+    if is_override and not override_reason.strip():
+        raise TransitionError(
+            "Override reason is required when a provider operator "
+            "drives a customer-decision transition.",
+            code="override_reason_required",
         )
 
     # Sprint 25C — OSIUS staff-completion evidence rule. The role +
@@ -214,6 +246,8 @@ def apply_transition(ticket, user, to_status, note=""):
         new_status=to_status,
         changed_by=user,
         note=note or "",
+        is_override=is_override,
+        override_reason=override_reason if is_override else "",
     )
     return locked
 

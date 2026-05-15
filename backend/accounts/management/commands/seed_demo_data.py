@@ -877,11 +877,18 @@ class Command(BaseCommand):
             TicketStatus.CLOSED,
         ]
         for stop in path:
+            # Sprint 27F-B1 — provider-driven customer-decision transitions
+            # (WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED) are now coerced
+            # to is_override=True with a mandatory reason. The seed walks
+            # tickets through APPROVED as super_admin to build fixtures, so
+            # pass a fixture-marker reason on every hop (no-op on hops the
+            # coercion doesn't touch).
             ticket = apply_transition(
                 ticket,
                 super_admin,
                 stop,
                 note=f"seed_demo_data → {stop}",
+                override_reason="seed_demo_data fixture walk",
             )
             if str(stop) == str(target_status):
                 return

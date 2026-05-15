@@ -117,5 +117,15 @@
   "assigned_staff_admin_remove_dialog_title": "Remove {{name}} from this ticket?",
   "assigned_staff_admin_remove_dialog_body": "{{name}} will no longer appear as assigned to this ticket. You can add them again later.",
   "assigned_staff_admin_banner_added": "{{name}} added as assigned staff.",
-  "assigned_staff_admin_banner_removed": "{{name}} removed from assigned staff."
+  "assigned_staff_admin_banner_removed": "{{name}} removed from assigned staff.",
+
+  "override_modal_title": "Override customer decision",
+  "override_modal_prompt": "Why are you overriding the customer's decision? This will be recorded in the audit log.",
+  "override_modal_reason_label": "Reason",
+  "override_modal_reason_required": "A reason is required.",
+  "override_modal_submit_approve": "Confirm override → Customer approved",
+  "override_modal_submit_reject": "Confirm override → Customer rejected",
+  "override_modal_cancel": "Cancel",
+  "timeline_override_badge": "Override",
+  "timeline_override_reason": "Reason: {{reason}}"
 }

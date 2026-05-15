@@ -87,6 +87,10 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TicketStatusHistory
+        # Sprint 27F-B1 — expose the new workflow-override columns so
+        # the UI timeline can render the override badge alongside the
+        # operator's reason. Both fields default to safe values (False
+        # / empty string) on legacy rows post-migration.
         fields = [
             "id",
             "old_status",
@@ -95,6 +99,8 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
             "changed_by_email",
             "note",
             "created_at",
+            "is_override",
+            "override_reason",
         ]
         read_only_fields = fields
 
@@ -569,6 +575,18 @@ class TicketStatusChangeSerializer(serializers.Serializer):
 
     to_status = serializers.ChoiceField(choices=TicketStatus.choices)
     note = serializers.CharField(required=False, allow_blank=True, default="")
+    # Sprint 27F-B1 — workflow override surface. Mirrors the Extra Work
+    # transition endpoint: clients send `is_override + override_reason`
+    # when a provider operator is driving a customer-decision
+    # transition. The state-machine layer coerces `is_override=True`
+    # for SUPER_ADMIN / COMPANY_ADMIN driving WAITING_CUSTOMER_APPROVAL
+    # -> APPROVED/REJECTED even if the client forgot the flag, and
+    # rejects with `override_reason_required` when the reason is
+    # missing.
+    is_override = serializers.BooleanField(required=False, default=False)
+    override_reason = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
 
     def save(self, **kwargs):
         ticket = self.context["ticket"]
@@ -579,6 +597,8 @@ class TicketStatusChangeSerializer(serializers.Serializer):
                 user=user,
                 to_status=self.validated_data["to_status"],
                 note=self.validated_data.get("note", ""),
+                is_override=self.validated_data.get("is_override", False),
+                override_reason=self.validated_data.get("override_reason", ""),
             )
         except TransitionError as exc:
             raise serializers.ValidationError({"detail": str(exc), "code": exc.code})

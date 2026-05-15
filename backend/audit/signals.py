@@ -90,14 +90,27 @@ def _label(instance) -> str:
 def _create_log(instance, action: str, changes: dict) -> None:
     """Write one AuditLog row. Swallows all exceptions."""
     try:
+        # Sprint 27F-B2 (G-B6): every audit row records the operator-supplied
+        # reason (default "") + a JSON snapshot of the actor's role + scope
+        # anchors at write time (default {}). Reason is opt-in per-view via
+        # `audit.context.set_current_reason`; actor_scope is seeded by the
+        # middleware but resolved lazily here against the live request.user
+        # because DRF JWT auth populates request.user at the VIEW layer
+        # (after middleware fired with AnonymousUser).
+        actor = context.get_current_actor()
+        actor_scope = context.get_current_actor_scope() or {}
+        if not actor_scope and actor is not None:
+            actor_scope = context.snapshot_actor_scope(actor) or {}
         AuditLog.objects.create(
-            actor=context.get_current_actor(),
+            actor=actor,
             action=action,
             target_model=_label(instance),
             target_id=instance.pk,
             changes=changes or {},
             request_ip=context.get_current_request_ip(),
             request_id=context.get_current_request_id(),
+            reason=context.get_current_reason(),
+            actor_scope=actor_scope,
         )
     except Exception:  # pragma: no cover — defensive; never fail the caller
         logger.exception(

@@ -251,6 +251,16 @@ class TicketStatusHistory(models.Model):
         related_name="ticket_status_changes",
     )
     note = models.TextField(blank=True)
+    # Sprint 27F-B1 — workflow override flag. Mirrors
+    # `ExtraWorkStatusHistory.is_override` / `override_reason`. Set
+    # when a provider operator drives a customer-decision transition
+    # (WAITING_CUSTOMER_APPROVAL -> APPROVED/REJECTED) — the reason
+    # is the operator's audit-trail explanation. Distinct from
+    # `note` (which is a generic transition note that may be empty
+    # on non-override transitions). H-11 invariant: workflow
+    # override is separate from permission override.
+    is_override = models.BooleanField(default=False)
+    override_reason = models.TextField(blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
 

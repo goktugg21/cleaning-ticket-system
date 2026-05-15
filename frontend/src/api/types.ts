@@ -116,7 +116,27 @@ export interface TicketStatusHistory {
   changed_by: number;
   changed_by_email: string;
   note: string;
+  // Sprint 27F-B1 — workflow override columns. Required on the
+  // wire because the backend always emits them (`is_override`
+  // defaults to `false`, `override_reason` defaults to `""`).
+  is_override: boolean;
+  override_reason: string;
   created_at: string;
+}
+
+// Sprint 27F-F1 — request body for POST /tickets/{id}/status/.
+// `is_override` + `override_reason` are optional because non-
+// override transitions omit them; the backend still coerces
+// SUPER_ADMIN / COMPANY_ADMIN driving WAITING_CUSTOMER_APPROVAL
+// → APPROVED|REJECTED to `is_override=true` regardless. The
+// reason is still required when override=true and the backend
+// rejects an empty/whitespace string with the stable code
+// `override_reason_required`.
+export interface TicketStatusChangePayload {
+  to_status: TicketStatus;
+  note?: string;
+  is_override?: boolean;
+  override_reason?: string;
 }
 
 // Sprint 23B — list of staff currently assigned to a ticket via

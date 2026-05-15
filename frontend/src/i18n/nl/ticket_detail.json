@@ -117,5 +117,15 @@
   "assigned_staff_admin_remove_dialog_title": "{{name}} van dit ticket verwijderen?",
   "assigned_staff_admin_remove_dialog_body": "{{name}} wordt niet langer als toegewezen aan dit ticket getoond. Je kunt deze medewerker later opnieuw toevoegen.",
   "assigned_staff_admin_banner_added": "{{name}} toegevoegd als toegewezen medewerker.",
-  "assigned_staff_admin_banner_removed": "{{name}} verwijderd uit toegewezen medewerkers."
+  "assigned_staff_admin_banner_removed": "{{name}} verwijderd uit toegewezen medewerkers.",
+
+  "override_modal_title": "Klantbeslissing overschrijven",
+  "override_modal_prompt": "Waarom overschrijf je de beslissing van de klant? Dit wordt vastgelegd in het auditlog.",
+  "override_modal_reason_label": "Reden",
+  "override_modal_reason_required": "Een reden is verplicht.",
+  "override_modal_submit_approve": "Bevestig overschrijven → Klant goedgekeurd",
+  "override_modal_submit_reject": "Bevestig overschrijven → Klant afgewezen",
+  "override_modal_cancel": "Annuleren",
+  "timeline_override_badge": "Overrule",
+  "timeline_override_reason": "Reden: {{reason}}"
 }

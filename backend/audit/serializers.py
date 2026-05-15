@@ -8,6 +8,10 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = AuditLog
+        # Sprint 27F-B2 (G-B6): explicit list — appending `reason` and
+        # `actor_scope` so the new audit columns surface on the read API
+        # alongside the existing fields. Both are read-only (the audit
+        # log is immutable from the API's perspective).
         fields = [
             "id",
             "actor",
@@ -19,6 +23,8 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "created_at",
             "request_ip",
             "request_id",
+            "reason",
+            "actor_scope",
         ]
         read_only_fields = fields
 

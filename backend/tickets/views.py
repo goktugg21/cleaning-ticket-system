@@ -167,8 +167,21 @@ class TicketViewSet(
         ticket.save(update_fields=["deleted_at", "deleted_by", "updated_at"])
 
         try:
+            # Sprint 27F-B2 (G-B6): pass `reason` + `actor_scope` explicitly
+            # so the audit contract stays visible at every call site. The
+            # soft-delete endpoint has no reason capture today (no modal),
+            # so `reason` falls through to the empty string. The
+            # `actor_scope` falls through to the lazy middleware-seeded
+            # snapshot (resolved by `_create_log` in audit/signals.py),
+            # but here we resolve it directly off the JWT-authenticated
+            # request.user so the snapshot is anchored even when the
+            # middleware ran with AnonymousUser.
+            _actor = audit_context.get_current_actor()
+            _scope = audit_context.get_current_actor_scope() or {}
+            if not _scope and _actor is not None:
+                _scope = audit_context.snapshot_actor_scope(_actor) or {}
             AuditLog.objects.create(
-                actor=audit_context.get_current_actor(),
+                actor=_actor,
                 action=AuditAction.DELETE,
                 target_model="tickets.Ticket",
                 target_id=ticket.id,
@@ -183,6 +196,8 @@ class TicketViewSet(
                 },
                 request_ip=audit_context.get_current_request_ip(),
                 request_id=audit_context.get_current_request_id(),
+                reason=audit_context.get_current_reason(),
+                actor_scope=_scope,
             )
         except Exception:  # pragma: no cover — audit must not block delete
             _audit_logger.exception(
