@@ -126,11 +126,11 @@ field, and vice versa.
 
 | Gap | Location | Sprint to close |
 |---|---|---|
-| **G-F1.** No UI to edit `permission_overrides` JSON. | Deferred at [UserFormPage.tsx:1033-1035](../../frontend/src/pages/admin/UserFormPage.tsx#L1033-L1035) | Sprint 27E |
-| **G-F2.** No UI to set `CustomerUserBuildingAccess.is_active=False` without deleting the row. | [CustomerFormPage.tsx:1059-1098](../../frontend/src/pages/admin/CustomerFormPage.tsx#L1059-L1098) edits `access_role` only. | Sprint 27E |
+| ~~**G-F1.** No UI to edit `permission_overrides` JSON.~~ **CLOSED by Sprint 27E.** Each access pill on `CustomerFormPage` now exposes an **Edit permissions** button that opens a per-access section with a 3-way Inherit / Grant / Revoke radio control per key in `CUSTOMER_PERMISSION_KEYS`. "Inherit" means "omit the key from `permission_overrides`" (the resolver falls through to policy + role default); "Grant" / "Revoke" PATCH the explicit override boolean. Save uses full-replacement semantics matching the Sprint 27C backend contract. The Sprint 27C self-edit guard is mirrored in the UI (controls disabled on the actor's own access row). Provider `osius.*` keys are never offered — the key list comes from the typed `CUSTOMER_PERMISSION_KEYS` constant. | Deferred at [UserFormPage.tsx:1033-1035](../../frontend/src/pages/admin/UserFormPage.tsx#L1033-L1035) | ~~Sprint 27E~~ **Sprint 27E ✅** |
+| ~~**G-F2.** No UI to set `CustomerUserBuildingAccess.is_active=False` without deleting the row.~~ **CLOSED by Sprint 27E.** Each access pill now carries an **Active** checkbox bound to a Sprint 27C-style PATCH `{is_active: bool}` call. The pill background + opacity already keyed on `is_active`; the Sprint 27E change is the editable bind + the same self-edit guard mirror as the override editor. | [CustomerFormPage.tsx:1059-1098](../../frontend/src/pages/admin/CustomerFormPage.tsx#L1059-L1098) | ~~Sprint 27E~~ **Sprint 27E ✅** |
 | **G-F3.** Ticket workflow override has no mandatory-reason input. | [TicketDetailPage.tsx:57-67,165-169](../../frontend/src/pages/TicketDetailPage.tsx#L57-L67) — only a confirmation modal. Extra Work pattern at [ExtraWorkDetailPage.tsx:250-273](../../frontend/src/pages/ExtraWorkDetailPage.tsx#L250-L273) is the right shape to mirror. | Sprint 27F (lands together with the backend `TicketStatusHistory.is_override + override_reason` columns) |
-| **G-F4.** STAFF role intentionally hidden from `UserFormPage` create/edit. | [UserFormPage.tsx:49-54](../../frontend/src/pages/admin/UserFormPage.tsx#L49-L54). Add a helper note. | Sprint 27E |
-| **G-F5.** No company-level policy toggles UI for "this customer company can create extra work" etc. | Only the three `show_assigned_staff_*` toggles exist today on `CustomerFormPage`. | Sprint 27C / 27E |
+| ~~**G-F4.** STAFF role intentionally hidden from `UserFormPage` create/edit.~~ **CLOSED by Sprint 27E.** `UserFormPage` now renders a persistent helper note under the role select pointing operators at the STAFF profile / per-building-visibility surface (`user_form.role_staff_helper`). STAFF stays out of the role dropdown — the helper makes that intentional rather than confusing. | [UserFormPage.tsx:49-54](../../frontend/src/pages/admin/UserFormPage.tsx#L49-L54) | ~~Sprint 27E~~ **Sprint 27E ✅** |
+| ~~**G-F5.** No company-level policy toggles UI for "this customer company can create extra work" etc.~~ **CLOSED by Sprint 27E.** New `CustomerCompanyPolicy` panel on `CustomerFormPage` (edit mode only) renders the four Sprint 27C/27D permission-policy booleans as labelled checkboxes with a single Save button → PATCH `/api/customers/<id>/policy/`. The legacy `show_assigned_staff_*` visibility toggles stay on the parent form (and on the `Customer` model) until the runtime read switch lands; the policy panel intentionally does NOT duplicate them in Sprint 27E. | Only the three `show_assigned_staff_*` toggles existed before Sprint 27E. | ~~Sprint 27C / 27E~~ **Sprint 27E ✅** |
 
 ## 7. Documented gaps (NOT fixed in 27A — sized for later sprints)
 
@@ -204,10 +204,17 @@ field, and vice versa.
 - ⏸ **Effective-permissions call-site migration deferred again.** Same rationale as 27B/27C: no existing call site benefits from swapping to `has_permission()` — every consumer of the two underlying resolvers gets the byte-identical answer back through the now-31 parity tests (14 from 27B + 12 new from 27D + 5 from the 27B dict-shape suite). The composer was always shaped for **new** consumers (the Sprint 27E permission editor will call `effective_permissions()` to render per-key inherit/grant/revoke state with policy + override layered in correctly). Migrating an existing site is busy-work with no behavioral or readability gain — and post-27D the composer's answers now correctly reflect both the policy DENY layer (via `user_can` → `access_has_permission`) and the narrowed provider-management keys (via `user_has_osius_permission`), so the deferred migration is more valuable, not less. Documented here so it doesn't get lost.
 - ✅ Audit coverage unchanged: the four `customer_users_can_*` fields are part of `CustomerCompanyPolicy`, which Sprint 27C already registered with the full-CRUD audit trio. No new audit signal handlers needed in 27D — the existing trio already writes a UPDATE row with the before/after diff on every policy field mutation.
 
-### Sprint 27E — frontend permission management UI
-- Permission-override editor wired to Sprint 27C endpoint (closes G-F1, G-F2).
-- Customer-company-policy panel (G-F5).
-- STAFF helper note (G-F4).
+### Sprint 27E — frontend permission management UI ✅ **DELIVERED**
+- ✅ Permission-override editor on `CustomerFormPage` (closes **G-F1**). Each access pill has an **Edit permissions** button that opens an inline section with one row per key in `CUSTOMER_PERMISSION_KEYS`; each row is a 3-way Inherit / Grant / Revoke radio. "Inherit" omits the key (resolver falls through to policy + role default); "Grant" / "Revoke" PATCH the explicit boolean. Save uses full-replacement semantics matching the Sprint 27C backend contract. Sprint 27C self-edit guard mirrored in the UI (controls disabled on the actor's own access row + warning banner). Provider `osius.*` keys are never offered — the key list comes from the typed `CUSTOMER_PERMISSION_KEYS` constant in `frontend/src/api/types.ts`, kept in sync with the backend frozenset.
+- ✅ Per-access **Active** checkbox on `CustomerFormPage` (closes **G-F2**). Toggle PATCHes `is_active`; self-edit guard mirrored.
+- ✅ STAFF helper note under the role select on `UserFormPage` (closes **G-F4**). Persistent muted note pointing operators at the StaffProfile + per-building-visibility surface so the absent STAFF role-dropdown option is intentional rather than confusing.
+- ✅ `CustomerCompanyPolicy` panel on `CustomerFormPage` edit mode (closes **G-F5**). Four labelled checkboxes for the Sprint 27C/27D permission-policy booleans + one Save button → PATCH `/api/customers/<id>/policy/`. Legacy `show_assigned_staff_*` visibility toggles stay on the parent form until the runtime read switch lands; Sprint 27E intentionally does NOT duplicate them in the policy panel.
+- ✅ **Backend additions to support the UI:**
+  * `CustomerCompanyPolicySerializer` (read/write) with a `_StrictBooleanField` that mirrors the Sprint 27C `type(v) is bool` rule (rejects `0/1`/string/None/list/dict — DRF's default `BooleanField` accepts `"true"`/`1` which would be wrong for a typed JSON admin API).
+  * `CustomerCompanyPolicyView` (GET + PATCH) at `/api/customers/<customer_id>/policy/`, gated by `IsSuperAdminOrCompanyAdminForCompany` — same gate as the surrounding membership endpoints. SUPER_ADMIN reads/writes any customer; COMPANY_ADMIN only inside their provider company (cross-provider → 403); BUILDING_MANAGER / STAFF / CUSTOMER_USER never reach the view.
+  * `customer_id` is read-only in the serializer so a PATCH body that tries to rebind the policy to another customer is silently ignored (defends against scope-bleed via the endpoint).
+  * Audit coverage is unchanged: the Sprint 27C signal trio on `CustomerCompanyPolicy` already emits an `AuditLog` UPDATE row for every field mutation; the new endpoint inherits that for free, locked by the new `CustomerCompanyPolicyAuditTests`.
+- ⏸ **Effective-permissions call-site migration deferred again.** The override editor uses the explicit Inherit / Grant / Revoke shape so the operator's intent is what's displayed — no resolver computation, no preview surface. Adding an `effective_permissions` API as a preview would let the UI render the "what would this user actually see" answer for each (user, customer, building), but that adds a new read endpoint with its own cross-customer leak surface; we have explicit per-key controls without it, so the cost is not worth taking on in 27E. Documented here so the deferral doesn't get lost. The composer remains shaped for that future consumer.
 
 ### Sprint 27F — audit log hardening + ticket workflow override
 - `AuditLog.reason` + `AuditLog.actor_scope` columns (G-B6).
@@ -285,3 +292,19 @@ Tests added in Sprint 27D (test-first):
 | `PrecedenceTests` | override-grant beats policy-deny; override-revoke still wins over role+policy True; `is_active=False` beats both; role-default unchanged when policy=True and no override |
 | `EffectivePermissionsParityWithPolicyLayerTests` | composer ≡ resolver for every customer key × representative actor × non-trivial policy/override state |
 | `NoCrossCustomerPolicyLeakTests` | Customer A's policy never affects Customer B's users (both directions); policy lookup is anchored at the access row's own customer |
+
+## 12. Test footprint (Sprint 27E delta)
+
+Tests added in Sprint 27E (test-first):
+
+### G-F5 backend — CustomerCompanyPolicy API
+[`backend/customers/tests/test_sprint27e_customer_company_policy_api.py`](../../backend/customers/tests/test_sprint27e_customer_company_policy_api.py) — three test classes, 13 tests:
+
+| Class | Tests |
+|---|---|
+| `CustomerCompanyPolicyReadTests` | SUPER_ADMIN GET 200; COMPANY_ADMIN GET own 200; COMPANY_ADMIN GET cross-provider 403; CUSTOMER_USER 403; anonymous 401/403 |
+| `CustomerCompanyPolicyWriteTests` | SUPER_ADMIN PATCH 200 (untouched fields preserved); COMPANY_ADMIN PATCH own 200; COMPANY_ADMIN PATCH cross-provider 403; CUSTOMER_USER PATCH 403; non-boolean values rejected (`0/1/string/None/list/dict`); unknown payload field ignored; `customer_id` is read-only (cannot rebind policy) |
+| `CustomerCompanyPolicyAuditTests` | UPDATE via API writes exactly one `AuditLog` UPDATE row with before/after diff + actor captured from the JWT request |
+
+### G-F1 / G-F2 / G-F4 / G-F5 frontend
+TypeScript-typed key list (`CUSTOMER_PERMISSION_KEYS` in [`frontend/src/api/types.ts`](../../frontend/src/api/types.ts)) prevents the override editor from offering provider `osius.*` keys; the backend rejects them anyway via `validate_permission_overrides`. No new frontend tests added in 27E — the project's frontend test suite is Playwright-only and the smoke + RBAC scenarios live in `tests/e2e/`; the new UI is covered by the typed contract + the existing Tier 1 `tsc --noEmit` check.

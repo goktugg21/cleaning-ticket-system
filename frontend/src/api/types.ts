@@ -326,11 +326,55 @@ export interface CustomerUserBuildingAccess {
   building_id: number;
   building_name: string;
   // Sprint 23B — Sprint 23A fields surfaced read-only for the
-  // admin UI. Editing them is deferred to Sprint 23C.
+  // admin UI. Sprint 23C added write support for access_role;
+  // Sprint 27C added write support for permission_overrides
+  // and is_active. Sprint 27E surfaces both as editable UI.
   access_role: CustomerAccessRole;
   is_active: boolean;
   permission_overrides: Record<string, boolean>;
   created_at: string;
+}
+
+// Sprint 23A — canonical customer-side permission keys (mirrors
+// `customers.permissions.CUSTOMER_PERMISSION_KEYS`). Sprint 27E's
+// permission-override editor renders one row per key with a 3-way
+// Inherit/Grant/Revoke control. The key list lives in source code
+// rather than being fetched so the UI can render synchronously;
+// the backend serializer rejects unknown keys on PATCH so a stale
+// frontend cannot widen the allow-list.
+export const CUSTOMER_PERMISSION_KEYS = [
+  "customer.ticket.create",
+  "customer.ticket.view_own",
+  "customer.ticket.view_location",
+  "customer.ticket.view_company",
+  "customer.ticket.approve_own",
+  "customer.ticket.approve_location",
+  "customer.extra_work.create",
+  "customer.extra_work.view_own",
+  "customer.extra_work.view_location",
+  "customer.extra_work.view_company",
+  "customer.extra_work.approve_own",
+  "customer.extra_work.approve_location",
+  "customer.users.invite",
+  "customer.users.manage",
+  "customer.users.assign_location_role",
+  "customer.users.manage_permissions",
+] as const;
+export type CustomerPermissionKey = (typeof CUSTOMER_PERMISSION_KEYS)[number];
+
+// Sprint 27E — per-customer policy row. Mirrors the backend
+// `CustomerCompanyPolicy` model. Both halves (visibility + the
+// four `customer_users_can_*` booleans) are editable from the
+// Sprint 27E CustomerFormPage policy panel.
+export interface CustomerCompanyPolicyAdmin {
+  customer_id: number;
+  show_assigned_staff_name: boolean;
+  show_assigned_staff_email: boolean;
+  show_assigned_staff_phone: boolean;
+  customer_users_can_create_tickets: boolean;
+  customer_users_can_approve_ticket_completion: boolean;
+  customer_users_can_create_extra_work: boolean;
+  customer_users_can_approve_extra_work_pricing: boolean;
 }
 
 export interface UserAdmin {

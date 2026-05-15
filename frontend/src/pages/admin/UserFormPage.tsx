@@ -363,6 +363,18 @@ export function UserFormPage() {
                     {form.fieldErrors.role}
                   </div>
                 )}
+                {/* Sprint 27E (closes G-F4) — make the absence of
+                    STAFF in the dropdown intentional and discoverable
+                    rather than confusing. Always shown so a SUPER_ADMIN
+                    or COMPANY_ADMIN landing on a non-STAFF user has
+                    the breadcrumb to the right surface. */}
+                <p
+                  className="muted small"
+                  data-testid="user-form-staff-helper"
+                  style={{ marginTop: 4 }}
+                >
+                  {t("user_form.role_staff_helper")}
+                </p>
               </div>
             </div>
 

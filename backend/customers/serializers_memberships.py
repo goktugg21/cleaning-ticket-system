@@ -4,10 +4,22 @@ from accounts.models import UserRole
 
 from .models import (
     CustomerBuildingMembership,
+    CustomerCompanyPolicy,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
 from .permissions import CUSTOMER_PERMISSION_KEYS
+
+
+_POLICY_BOOLEAN_FIELDS = (
+    "show_assigned_staff_name",
+    "show_assigned_staff_email",
+    "show_assigned_staff_phone",
+    "customer_users_can_create_tickets",
+    "customer_users_can_approve_ticket_completion",
+    "customer_users_can_create_extra_work",
+    "customer_users_can_approve_extra_work_pricing",
+)
 
 
 class CustomerUserMembershipSerializer(serializers.ModelSerializer):
@@ -175,3 +187,61 @@ class CustomerUserBuildingAccessUpdateSerializer(serializers.ModelSerializer):
                     f"{type(override_value).__name__}."
                 )
         return value
+
+
+class _StrictBooleanField(serializers.Field):
+    """Sprint 27E — boolean-only field. Mirrors the `type(v) is bool`
+    rule we already enforce on `permission_overrides`: rejects ints
+    (so `0/1` can't sneak in via Python's `bool is int` coercion),
+    strings, None, lists and dicts. This is stricter than DRF's
+    `BooleanField`, which accepts `"true"`/`"false"`/`1`/`0` —
+    behavior that would be fine for an HTML form post but is wrong
+    for a typed JSON admin API."""
+
+    def to_internal_value(self, data):
+        if type(data) is not bool:  # noqa: E721 — see docstring
+            raise serializers.ValidationError(
+                f"Value must be a boolean, got {type(data).__name__}."
+            )
+        return data
+
+    def to_representation(self, value):
+        return bool(value)
+
+
+class CustomerCompanyPolicySerializer(serializers.ModelSerializer):
+    """
+    Sprint 27E — read/write serializer for the per-customer
+    CustomerCompanyPolicy row (closes the backend half of G-F5).
+
+    Exposes every policy field the Sprint 27E UI panel needs:
+
+      * Visibility policy (mirror of legacy Customer.* fields,
+        kept in parallel until the runtime read switch lands in
+        a later sprint).
+      * Permission-policy booleans wired into the resolver in
+        Sprint 27D — flipping any of these off immediately
+        narrows what customer-side users can do under this
+        customer.
+
+    Validation: every boolean field uses `_StrictBooleanField` so
+    ints / strings / None / lists / dicts are rejected with a 400.
+
+    `customer_id` is read-only — the URL kwarg owns the binding;
+    a PATCH body that tries to send `customer_id` is silently
+    ignored (test
+    `test_customer_id_is_read_only_in_response` pins this).
+    """
+
+    customer_id = serializers.IntegerField(source="customer.id", read_only=True)
+    show_assigned_staff_name = _StrictBooleanField()
+    show_assigned_staff_email = _StrictBooleanField()
+    show_assigned_staff_phone = _StrictBooleanField()
+    customer_users_can_create_tickets = _StrictBooleanField()
+    customer_users_can_approve_ticket_completion = _StrictBooleanField()
+    customer_users_can_create_extra_work = _StrictBooleanField()
+    customer_users_can_approve_extra_work_pricing = _StrictBooleanField()
+
+    class Meta:
+        model = CustomerCompanyPolicy
+        fields = ["customer_id", *_POLICY_BOOLEAN_FIELDS]

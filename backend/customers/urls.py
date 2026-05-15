@@ -5,6 +5,7 @@ from .views import CustomerViewSet
 from .views_memberships import (
     CustomerBuildingDeleteView,
     CustomerBuildingListCreateView,
+    CustomerCompanyPolicyView,
     CustomerUserAccessDeleteView,
     CustomerUserAccessListCreateView,
     CustomerUserDeleteView,
@@ -48,5 +49,11 @@ urlpatterns = [
         "<int:customer_id>/users/<int:user_id>/access/<int:building_id>/",
         CustomerUserAccessDeleteView.as_view(),
         name="customer-user-access-delete",
+    ),
+    # Sprint 27E — per-customer CustomerCompanyPolicy read/write.
+    path(
+        "<int:customer_id>/policy/",
+        CustomerCompanyPolicyView.as_view(),
+        name="customer-policy",
     ),
 ] + router.urls

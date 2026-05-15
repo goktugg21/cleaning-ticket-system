@@ -11,11 +11,13 @@ from config.pagination import UnboundedPagination
 from .models import (
     Customer,
     CustomerBuildingMembership,
+    CustomerCompanyPolicy,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
 from .serializers_memberships import (
     CustomerBuildingMembershipSerializer,
+    CustomerCompanyPolicySerializer,
     CustomerUserBuildingAccessSerializer,
     CustomerUserBuildingAccessUpdateSerializer,
     CustomerUserMembershipSerializer,
@@ -328,3 +330,58 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
         if deleted == 0:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ===========================================================================
+# Sprint 27E — CustomerCompanyPolicy read/write endpoint
+# ===========================================================================
+
+
+class CustomerCompanyPolicyView(generics.GenericAPIView):
+    """
+    GET   /api/customers/<customer_id>/policy/   read the policy row.
+    PATCH /api/customers/<customer_id>/policy/   update one or more booleans.
+
+    Permission gate is `IsSuperAdminOrCompanyAdminForCompany`
+    (the same one used for the surrounding membership endpoints).
+    SUPER_ADMIN may act on any customer; COMPANY_ADMIN only on
+    customers inside their own provider company; BUILDING_MANAGER /
+    STAFF / CUSTOMER_USER never reach the view.
+
+    The PATCH PATH is the only write surface for the new permission-
+    policy booleans (Sprint 27C/27D) and for the three legacy
+    `show_assigned_staff_*` mirrors. Audit coverage is owned by the
+    existing Sprint 27C signal trio on `CustomerCompanyPolicy`; this
+    view does not write to `AuditLog` itself.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    serializer_class = CustomerCompanyPolicySerializer
+
+    def _get_policy(self, request, customer_id):
+        customer = get_object_or_404(Customer, pk=customer_id)
+        self.check_object_permissions(request, customer)
+        # The Sprint 27C post_save signal + backfill migration
+        # together guarantee every Customer has a policy row, so
+        # this is a get(), not a get_or_create().
+        return get_object_or_404(CustomerCompanyPolicy, customer=customer)
+
+    def get(self, request, customer_id):
+        policy = self._get_policy(request, customer_id)
+        return Response(
+            CustomerCompanyPolicySerializer(policy).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request, customer_id):
+        policy = self._get_policy(request, customer_id)
+        serializer = CustomerCompanyPolicySerializer(
+            policy, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        policy.refresh_from_db()
+        return Response(
+            CustomerCompanyPolicySerializer(policy).data,
+            status=status.HTTP_200_OK,
+        )

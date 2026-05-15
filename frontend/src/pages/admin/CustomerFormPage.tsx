@@ -11,6 +11,7 @@ import {
   createCustomer,
   deactivateCustomer,
   getCustomer,
+  getCustomerPolicy,
   listBuildings,
   listCompanies,
   listCustomerBuildings,
@@ -22,6 +23,8 @@ import {
   removeCustomerUser,
   removeCustomerUserAccess,
   updateCustomer,
+  updateCustomerPolicy,
+  updateCustomerUserAccess,
   updateCustomerUserAccessRole,
 } from "../../api/admin";
 import type { AdminFieldErrors, CustomerWritePayload } from "../../api/admin";
@@ -31,10 +34,38 @@ import type {
   CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
+  CustomerCompanyPolicyAdmin,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
   UserAdmin,
 } from "../../api/types";
+import { CUSTOMER_PERMISSION_KEYS } from "../../api/types";
+
+// Sprint 27E — 3-way control per permission key. "inherit" means
+// "remove the key from `permission_overrides`" (the resolver falls
+// through to policy + role default); "grant"/"revoke" set the
+// override boolean explicitly.
+type OverrideTriState = "inherit" | "grant" | "revoke";
+
+function tristateFromOverride(
+  overrides: Record<string, boolean>,
+  key: string,
+): OverrideTriState {
+  if (!(key in overrides)) return "inherit";
+  return overrides[key] ? "grant" : "revoke";
+}
+
+function buildOverridesPayload(
+  draft: Record<string, OverrideTriState>,
+): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(draft)) {
+    if (value === "grant") out[key] = true;
+    else if (value === "revoke") out[key] = false;
+    // "inherit" → omit (full-replacement semantics on the server)
+  }
+  return out;
+}
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -175,6 +206,49 @@ export function CustomerFormPage() {
     access: CustomerUserBuildingAccess;
   } | null>(null);
   const revokeAccessDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  // Sprint 27E — permission-override editor state. When the user
+  // clicks "Edit permissions" on an access pill, we open a per-access
+  // section below the row with a 3-way (Inherit/Grant/Revoke) control
+  // per CUSTOMER_PERMISSION_KEY. Sending an empty dict on save means
+  // "Inherit every key" (backend full-replacement semantics).
+  const [editingOverrideFor, setEditingOverrideFor] = useState<{
+    membership: CustomerUserMembership;
+    access: CustomerUserBuildingAccess;
+  } | null>(null);
+  const [overrideDraft, setOverrideDraft] = useState<
+    Record<string, OverrideTriState>
+  >({});
+  const [overrideSaving, setOverrideSaving] = useState(false);
+  const [overrideBanner, setOverrideBanner] = useSavedBanner({
+    saved: t("customer_form.access_overrides_saved_banner"),
+  });
+
+  // Sprint 27E — CustomerCompanyPolicy panel state (closes G-F5).
+  const [policy, setPolicy] = useState<CustomerCompanyPolicyAdmin | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(true);
+  const [policyError, setPolicyError] = useState("");
+  const [policySaving, setPolicySaving] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState<
+    Pick<
+      CustomerCompanyPolicyAdmin,
+      | "customer_users_can_create_tickets"
+      | "customer_users_can_approve_ticket_completion"
+      | "customer_users_can_create_extra_work"
+      | "customer_users_can_approve_extra_work_pricing"
+    >
+  >({
+    customer_users_can_create_tickets: true,
+    customer_users_can_approve_ticket_completion: true,
+    customer_users_can_create_extra_work: true,
+    customer_users_can_approve_extra_work_pricing: true,
+  });
+  const [policyBanner, setPolicyBanner] = useSavedBanner({
+    saved: t("customer_form.policy_saved_banner"),
+  });
+
+  const isSelfAccess = (access: CustomerUserBuildingAccess) =>
+    me?.id === access.user_id;
 
   const reloadMembers = useMemo(
     () => async () => {
@@ -419,6 +493,88 @@ export function CustomerFormPage() {
     revokeAccessDialogRef.current?.open();
   }
 
+  // Sprint 27E — flip `is_active` on an access row. Backend
+  // `IsSuperAdminOrCompanyAdminForCompany` gate + Sprint 27C
+  // self-edit guard apply; we mirror the self-edit guard in the UI
+  // (button disabled) so an actor never sees a 403 toast for their
+  // own row.
+  async function handleToggleAccessActive(
+    membership: CustomerUserMembership,
+    access: CustomerUserBuildingAccess,
+    nextActive: boolean,
+  ) {
+    if (numericId === null) return;
+    setAccessError("");
+    setAccessBusyUserId(membership.user_id);
+    try {
+      await updateCustomerUserAccess(
+        numericId,
+        membership.user_id,
+        access.building_id,
+        { is_active: nextActive },
+      );
+      const response = await listCustomerUserAccess(
+        numericId,
+        membership.user_id,
+      );
+      setAccessByUserId((prev) => ({
+        ...prev,
+        [membership.user_id]: response.results,
+      }));
+    } catch (err) {
+      setAccessError(getApiError(err));
+    } finally {
+      setAccessBusyUserId(null);
+    }
+  }
+
+  // Sprint 27E — open the per-access override editor.
+  function openOverrideEditor(
+    membership: CustomerUserMembership,
+    access: CustomerUserBuildingAccess,
+  ) {
+    const draft: Record<string, OverrideTriState> = {};
+    for (const key of CUSTOMER_PERMISSION_KEYS) {
+      draft[key] = tristateFromOverride(access.permission_overrides, key);
+    }
+    setOverrideDraft(draft);
+    setEditingOverrideFor({ membership, access });
+  }
+
+  function closeOverrideEditor() {
+    setEditingOverrideFor(null);
+    setOverrideDraft({});
+  }
+
+  async function handleSaveOverrides() {
+    if (numericId === null || !editingOverrideFor) return;
+    const { membership, access } = editingOverrideFor;
+    setOverrideSaving(true);
+    setAccessError("");
+    try {
+      await updateCustomerUserAccess(
+        numericId,
+        membership.user_id,
+        access.building_id,
+        { permission_overrides: buildOverridesPayload(overrideDraft) },
+      );
+      const response = await listCustomerUserAccess(
+        numericId,
+        membership.user_id,
+      );
+      setAccessByUserId((prev) => ({
+        ...prev,
+        [membership.user_id]: response.results,
+      }));
+      setOverrideBanner(t("customer_form.access_overrides_saved_banner"));
+      closeOverrideEditor();
+    } catch (err) {
+      setAccessError(getApiError(err));
+    } finally {
+      setOverrideSaving(false);
+    }
+  }
+
   async function handleConfirmRevokeAccess() {
     if (numericId === null || !revokeAccessTarget) return;
     const { membership, access } = revokeAccessTarget;
@@ -445,6 +601,64 @@ export function CustomerFormPage() {
       revokeAccessDialogRef.current?.close();
     } finally {
       setAccessBusyUserId(null);
+    }
+  }
+
+  // Sprint 27E — load the per-customer policy row when we have an
+  // id (edit mode only). The backend signal guarantees the row
+  // exists for every Customer; this is a plain GET.
+  useEffect(() => {
+    if (isCreate || numericId === null) return;
+    let cancelled = false;
+    setPolicyLoading(true);
+    getCustomerPolicy(numericId)
+      .then((data) => {
+        if (cancelled) return;
+        setPolicy(data);
+        setPolicyDraft({
+          customer_users_can_create_tickets: data.customer_users_can_create_tickets,
+          customer_users_can_approve_ticket_completion:
+            data.customer_users_can_approve_ticket_completion,
+          customer_users_can_create_extra_work:
+            data.customer_users_can_create_extra_work,
+          customer_users_can_approve_extra_work_pricing:
+            data.customer_users_can_approve_extra_work_pricing,
+        });
+        setPolicyError("");
+      })
+      .catch((err) => {
+        if (!cancelled) setPolicyError(getApiError(err));
+      })
+      .finally(() => {
+        if (!cancelled) setPolicyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCreate, numericId]);
+
+  async function handleSavePolicy(event: FormEvent) {
+    event.preventDefault();
+    if (numericId === null) return;
+    setPolicySaving(true);
+    setPolicyError("");
+    try {
+      const updated = await updateCustomerPolicy(numericId, policyDraft);
+      setPolicy(updated);
+      setPolicyDraft({
+        customer_users_can_create_tickets: updated.customer_users_can_create_tickets,
+        customer_users_can_approve_ticket_completion:
+          updated.customer_users_can_approve_ticket_completion,
+        customer_users_can_create_extra_work:
+          updated.customer_users_can_create_extra_work,
+        customer_users_can_approve_extra_work_pricing:
+          updated.customer_users_can_approve_extra_work_pricing,
+      });
+      setPolicyBanner(t("customer_form.policy_saved_banner"));
+    } catch (err) {
+      setPolicyError(getApiError(err));
+    } finally {
+      setPolicySaving(false);
     }
   }
 
@@ -1025,14 +1239,15 @@ export function CustomerFormPage() {
                           >
                             {userAccess.map((access) => {
                               // Sprint 23C — inline access_role
-                              // editor. The select fires
-                              // handleAccessRoleChange which PATCHes
-                              // the access row and refetches; the
-                              // pill background still reflects
-                              // is_active (editing that field is
-                              // deferred). permission_overrides
-                              // editor is also deferred to a later
-                              // sprint when the per-key UI lands.
+                              // editor. Sprint 27E adds: an Active
+                              // checkbox (PATCH is_active), an
+                              // "Edit permissions" button that opens
+                              // the per-key override editor section
+                              // below, and the Sprint 27C self-edit
+                              // guard mirrored in the UI so actor
+                              // controls are disabled on their own
+                              // access row.
+                              const isSelf = isSelfAccess(access);
                               return (
                                 <span
                                   key={access.id}
@@ -1062,7 +1277,7 @@ export function CustomerFormPage() {
                                     data-user-id={membership.user_id}
                                     data-building-id={access.building_id}
                                     value={access.access_role}
-                                    disabled={isThisUserBusy}
+                                    disabled={isThisUserBusy || isSelf}
                                     onChange={(event) =>
                                       handleAccessRoleChange(
                                         membership,
@@ -1096,6 +1311,62 @@ export function CustomerFormPage() {
                                       )}
                                     </option>
                                   </select>
+                                  <label
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: 4,
+                                      fontSize: 11,
+                                      cursor:
+                                        isThisUserBusy || isSelf
+                                          ? "default"
+                                          : "pointer",
+                                    }}
+                                    title={t(
+                                      "customer_form.access_active_hint",
+                                    )}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      data-testid="customer-access-active-toggle"
+                                      data-user-id={membership.user_id}
+                                      data-building-id={access.building_id}
+                                      checked={access.is_active !== false}
+                                      disabled={isThisUserBusy || isSelf}
+                                      onChange={(event) =>
+                                        handleToggleAccessActive(
+                                          membership,
+                                          access,
+                                          event.target.checked,
+                                        )
+                                      }
+                                    />
+                                    <span>
+                                      {t(
+                                        "customer_form.access_active_label",
+                                      )}
+                                    </span>
+                                  </label>
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-xs"
+                                    data-testid="customer-access-overrides-button"
+                                    data-user-id={membership.user_id}
+                                    data-building-id={access.building_id}
+                                    style={{
+                                      height: 18,
+                                      padding: "0 6px",
+                                      fontSize: 11,
+                                    }}
+                                    onClick={() =>
+                                      openOverrideEditor(membership, access)
+                                    }
+                                    disabled={isThisUserBusy}
+                                  >
+                                    {t(
+                                      "customer_form.access_overrides_button",
+                                    )}
+                                  </button>
                                   <button
                                     type="button"
                                     className="btn btn-ghost btn-xs"
@@ -1214,6 +1485,240 @@ export function CustomerFormPage() {
             </button>
           </form>
         </section>
+      )}
+
+      {/* Sprint 27E — per-access override editor panel. Opens
+          inline below the users section when "Edit permissions" is
+          clicked on any access pill above. Save fires
+          handleSaveOverrides which PATCHes permission_overrides
+          (full replacement) and re-fetches the row. */}
+      {!isCreate && customer && editingOverrideFor && (
+        <section
+          className="card"
+          data-testid="section-customer-overrides-editor"
+          style={{ marginTop: 16, padding: "20px 22px" }}
+        >
+          <h3 className="section-title">
+            {t("customer_form.access_overrides_section_title", {
+              email: editingOverrideFor.access.user_email,
+              building: editingOverrideFor.access.building_name,
+            })}
+          </h3>
+          <p className="muted small" style={{ marginBottom: 12 }}>
+            {t("customer_form.access_overrides_section_helper")}
+          </p>
+
+          {overrideBanner && (
+            <div className="alert-info" role="status" style={{ marginBottom: 12 }}>
+              {overrideBanner}
+            </div>
+          )}
+          {isSelfAccess(editingOverrideFor.access) && (
+            <div className="alert-warn" role="alert" style={{ marginBottom: 12 }}>
+              {t("customer_form.access_overrides_self_edit_warning")}
+            </div>
+          )}
+          {editingOverrideFor.access.is_active === false && (
+            <div className="alert-warn" role="alert" style={{ marginBottom: 12 }}>
+              {t("customer_form.access_overrides_inactive_warning")}
+            </div>
+          )}
+
+          <div className="table-wrap">
+            <table className="data-table" data-testid="customer-overrides-table">
+              <tbody>
+                {CUSTOMER_PERMISSION_KEYS.map((key) => {
+                  const value = overrideDraft[key] ?? "inherit";
+                  return (
+                    <tr key={key} data-testid="customer-overrides-row" data-permission-key={key}>
+                      <td className="td-subject">
+                        {t(`customer_form.permission_key.${key}`)}
+                        <div
+                          className="muted small"
+                          style={{ fontFamily: "monospace", fontSize: 11 }}
+                        >
+                          {key}
+                        </div>
+                      </td>
+                      <td>
+                        <div
+                          role="radiogroup"
+                          aria-label={key}
+                          style={{ display: "inline-flex", gap: 12 }}
+                        >
+                          {(["inherit", "grant", "revoke"] as const).map((opt) => (
+                            <label
+                              key={opt}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontSize: 12,
+                                cursor: isSelfAccess(editingOverrideFor.access)
+                                  ? "default"
+                                  : "pointer",
+                              }}
+                            >
+                              <input
+                                type="radio"
+                                name={`override-${key}`}
+                                value={opt}
+                                data-testid="customer-overrides-radio"
+                                data-permission-key={key}
+                                data-tristate={opt}
+                                checked={value === opt}
+                                disabled={
+                                  overrideSaving ||
+                                  isSelfAccess(editingOverrideFor.access)
+                                }
+                                onChange={() =>
+                                  setOverrideDraft((prev) => ({
+                                    ...prev,
+                                    [key]: opt,
+                                  }))
+                                }
+                              />
+                              <span>
+                                {t(`customer_form.access_overrides_${opt}`)}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div
+            className="form-actions"
+            style={{ display: "flex", gap: 8, marginTop: 12 }}
+          >
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={closeOverrideEditor}
+              disabled={overrideSaving}
+              data-testid="customer-overrides-close"
+            >
+              {t("customer_form.access_overrides_close")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSaveOverrides}
+              data-testid="customer-overrides-save"
+              disabled={
+                overrideSaving || isSelfAccess(editingOverrideFor.access)
+              }
+            >
+              {overrideSaving
+                ? t("admin_form.saving")
+                : t("customer_form.access_overrides_save")}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Sprint 27E — CustomerCompanyPolicy panel. Only the
+          permission-policy booleans live here; the three
+          show_assigned_staff_* mirrors remain on the parent form
+          (and on the Customer model) until the runtime read switch
+          lands. Backend audit is owned by the Sprint 27C signal trio
+          on CustomerCompanyPolicy. */}
+      {!isCreate && customer && (
+        <form
+          className="card"
+          data-testid="section-customer-company-policy"
+          style={{ marginTop: 16, padding: "20px 22px" }}
+          onSubmit={handleSavePolicy}
+        >
+          <h3 className="section-title">{t("customer_form.policy_title")}</h3>
+          <p className="muted small" style={{ marginBottom: 12 }}>
+            {t("customer_form.policy_helper")}
+          </p>
+
+          {policyBanner && (
+            <div className="alert-info" role="status" style={{ marginBottom: 12 }}>
+              {policyBanner}
+            </div>
+          )}
+          {policyError && (
+            <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+              {policyError}
+            </div>
+          )}
+
+          {policyLoading || !policy ? (
+            <div className="loading-bar">
+              <div className="loading-bar-fill" />
+            </div>
+          ) : (
+            <>
+              {(
+                [
+                  [
+                    "customer_users_can_create_tickets",
+                    "customer_form.policy_field_create_tickets",
+                  ],
+                  [
+                    "customer_users_can_approve_ticket_completion",
+                    "customer_form.policy_field_approve_ticket_completion",
+                  ],
+                  [
+                    "customer_users_can_create_extra_work",
+                    "customer_form.policy_field_create_extra_work",
+                  ],
+                  [
+                    "customer_users_can_approve_extra_work_pricing",
+                    "customer_form.policy_field_approve_extra_work_pricing",
+                  ],
+                ] as const
+              ).map(([field, label]) => (
+                <div className="field" key={field}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      cursor: policySaving ? "default" : "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="customer-policy-toggle"
+                      data-policy-field={field}
+                      checked={policyDraft[field]}
+                      onChange={(event) =>
+                        setPolicyDraft((prev) => ({
+                          ...prev,
+                          [field]: event.target.checked,
+                        }))
+                      }
+                      disabled={policySaving}
+                    />
+                    <span>{t(label)}</span>
+                  </label>
+                </div>
+              ))}
+
+              <div className="form-actions">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  data-testid="customer-policy-save"
+                  disabled={policySaving}
+                >
+                  {policySaving
+                    ? t("admin_form.saving")
+                    : t("customer_form.policy_save")}
+                </button>
+              </div>
+            </>
+          )}
+        </form>
       )}
 
       <ConfirmDialog

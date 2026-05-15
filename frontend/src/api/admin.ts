@@ -9,6 +9,7 @@ import type {
   CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
+  CustomerCompanyPolicyAdmin,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
   InvitationAdmin,
@@ -492,6 +493,75 @@ export async function updateCustomerUserAccessRole(
   const response = await api.patch<CustomerUserBuildingAccess>(
     `/customers/${customerId}/users/${userId}/access/${buildingId}/`,
     { access_role: accessRole },
+  );
+  return response.data;
+}
+
+// Sprint 27E — generic write helper for the Sprint 27C-extended
+// PATCH endpoint. Surfaces `permission_overrides` and `is_active`
+// to the new override editor + active toggle UI.
+//
+// Backend contract reminders (locked by the Sprint 27C test suite):
+//   - `permission_overrides` uses full-replacement semantics — the
+//     dict in the PATCH body overwrites the previous one verbatim.
+//   - Every override key must be in CUSTOMER_PERMISSION_KEYS;
+//     provider `osius.*` keys are rejected with 400.
+//   - Each override value must be a true boolean.
+//   - Actor cannot edit their own access row (self-edit guard at
+//     the view layer — 403 before the serializer runs).
+//
+// `partial` semantics: every field is independently optional; only
+// keys the caller sends are PATCHed.
+export interface CustomerUserAccessPatchPayload {
+  access_role?: CustomerAccessRole;
+  permission_overrides?: Record<string, boolean>;
+  is_active?: boolean;
+}
+
+export async function updateCustomerUserAccess(
+  customerId: number,
+  userId: number,
+  buildingId: number,
+  payload: CustomerUserAccessPatchPayload,
+): Promise<CustomerUserBuildingAccess> {
+  const response = await api.patch<CustomerUserBuildingAccess>(
+    `/customers/${customerId}/users/${userId}/access/${buildingId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+// Sprint 27E — CustomerCompanyPolicy read/write (closes G-F5).
+//
+// `/api/customers/<customer_id>/policy/` GET returns the policy row
+// (auto-created on Customer creation by the Sprint 27C signal, so
+// the call is always a plain GET — no first-write provisioning),
+// PATCH accepts any subset of the seven boolean fields.
+//
+// Backend permissions: SUPER_ADMIN or COMPANY_ADMIN of the
+// customer's provider company; CUSTOMER_USER never reaches the
+// endpoint. Cross-provider COMPANY_ADMIN attempts return 403.
+
+export async function getCustomerPolicy(
+  customerId: number,
+): Promise<CustomerCompanyPolicyAdmin> {
+  const response = await api.get<CustomerCompanyPolicyAdmin>(
+    `/customers/${customerId}/policy/`,
+  );
+  return response.data;
+}
+
+export type CustomerCompanyPolicyPatchPayload = Partial<
+  Omit<CustomerCompanyPolicyAdmin, "customer_id">
+>;
+
+export async function updateCustomerPolicy(
+  customerId: number,
+  payload: CustomerCompanyPolicyPatchPayload,
+): Promise<CustomerCompanyPolicyAdmin> {
+  const response = await api.patch<CustomerCompanyPolicyAdmin>(
+    `/customers/${customerId}/policy/`,
+    payload,
   );
   return response.data;
 }
