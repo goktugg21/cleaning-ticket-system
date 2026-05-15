@@ -17,7 +17,12 @@ from __future__ import annotations
 
 from typing import Optional
 
-from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
+from buildings.models import (
+    Building,
+    BuildingManagerAssignment,
+    BuildingStaffVisibility,
+)
+from companies.models import CompanyUserMembership
 
 from .models import UserRole
 
@@ -37,6 +42,52 @@ OSIUS_PERMISSION_KEYS: frozenset[str] = frozenset(
         "osius.customer_company.manage",
     }
 )
+
+
+# Sprint 27D — closes G-B9.
+#
+# These three keys had been declared in OSIUS_PERMISSION_KEYS since
+# Sprint 23A but were never narrowed: COMPANY_ADMIN's universal
+# "return True" branch granted them globally, which left a latent
+# cross-provider leak waiting for the first call site to pass a
+# building_id from another provider. The set below scopes them so:
+#
+#   * SUPER_ADMIN keeps universal True (unchanged).
+#   * COMPANY_ADMIN gets them only inside their own provider company
+#     (membership-anchored; building_id, if provided, must belong
+#     to one of their companies).
+#   * BUILDING_MANAGER / STAFF / CUSTOMER_USER stay False — these
+#     are explicitly company-level management keys and live above
+#     the building-manager pay grade by design.
+_PROVIDER_MANAGEMENT_KEYS: frozenset[str] = frozenset(
+    {
+        "osius.staff.manage",
+        "osius.building.manage",
+        "osius.customer_company.manage",
+    }
+)
+
+
+def _company_admin_has_management_key(
+    user, building_id: Optional[int]
+) -> bool:
+    """Sprint 27D — narrowed COMPANY_ADMIN handler for the three
+    management keys. Returns True iff the actor is a member of at
+    least one provider company AND (when `building_id` is given)
+    that building's company is one of the actor's companies.
+    """
+    actor_company_ids = list(
+        CompanyUserMembership.objects.filter(user=user).values_list(
+            "company_id", flat=True
+        )
+    )
+    if not actor_company_ids:
+        return False
+    if building_id is None:
+        return True
+    return Building.objects.filter(
+        id=building_id, company_id__in=actor_company_ids
+    ).exists()
 
 
 def user_has_osius_permission(
@@ -62,6 +113,14 @@ def user_has_osius_permission(
         # SUPER_ADMIN has every osius.* permission by definition.
         return True
     if user.role == UserRole.COMPANY_ADMIN:
+        # Sprint 27D (closes G-B9): the three provider-management
+        # keys are narrowed to the actor's own provider company.
+        # Every other osius.* key keeps the pre-27D universal True
+        # behavior for COMPANY_ADMIN — call sites that need a
+        # building-scoped check already pass `building_id` and the
+        # downstream scoping helpers do the queryset filtering.
+        if permission_key in _PROVIDER_MANAGEMENT_KEYS:
+            return _company_admin_has_management_key(user, building_id)
         # Company admins see and manage everything inside their
         # service-provider company. Building-scoped is implicit.
         return True

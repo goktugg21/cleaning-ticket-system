@@ -56,11 +56,21 @@ Defined at [customers/models.py:168-177](../../backend/customers/models.py#L168-
 | `CUSTOMER_COMPANY_ADMIN` | Every one of the 16 customer permission keys (full customer-org view + management) |
 
 Role-default table at [customers/permissions.py:53-101](../../backend/customers/permissions.py#L53-L101).
-Resolver at [customers/permissions.py:109-126](../../backend/customers/permissions.py#L109-L126).
-Resolution order:
+Resolver at [customers/permissions.py](../../backend/customers/permissions.py).
+Resolution order (Sprint 27D — adds the policy DENY layer):
 1. `access.is_active` is False → every key resolves to False.
 2. Key present in `access.permission_overrides` JSON → override value wins (True = grant, False = revoke).
-3. Otherwise → return the per-`access_role` default.
+3. **Sprint 27D**: if the customer's `CustomerCompanyPolicy` field that owns this key's family is False → False. Policy can only NARROW role defaults; it cannot grant a key the role default doesn't already grant.
+4. Otherwise → return the per-`access_role` default.
+
+The policy fields and their families (Sprint 27D):
+
+| Policy field | Keys it can deny |
+|---|---|
+| `customer_users_can_create_tickets` | `customer.ticket.create` |
+| `customer_users_can_approve_ticket_completion` | `customer.ticket.approve_own`, `customer.ticket.approve_location` |
+| `customer_users_can_create_extra_work` | `customer.extra_work.create` |
+| `customer_users_can_approve_extra_work_pricing` | `customer.extra_work.approve_own`, `customer.extra_work.approve_location` |
 
 ## 3. Hard invariants (must be enforced AND tested)
 
@@ -129,11 +139,11 @@ field, and vice versa.
 | ~~**G-B2.** `permission_overrides` and `CustomerUserBuildingAccess.is_active` editing is API-deferred. Backend endpoint exists, only accepts `access_role`. Must ship together with a self-edit guard AND a permission-key allow-list.~~ **CLOSED by Sprint 27C.** The PATCH endpoint at `/api/customers/<cid>/users/<uid>/access/<bid>/` now accepts all three Sprint 23A editable fields: `access_role`, `permission_overrides`, `is_active`. Override keys are allow-listed against `CUSTOMER_PERMISSION_KEYS` (provider `osius.*` keys explicitly rejected). Values must be true Python booleans (`type is bool`, rejecting `0/1` via int↔bool coercion). Full-replacement semantics on the override dict. Self-edit guard added at the view layer (`request.user.id == int(user_id)` → 403, runs before object lookup). Sprint 27A guard (SUPER_ADMIN-only `CUSTOMER_COMPANY_ADMIN`) preserved. UPDATEs land on `AuditLog` via the existing `_CUBA_TRACKED_FIELDS` handler with no change. | ~~P1~~ | ~~Sprint 27C~~ **Sprint 27C ✅** |
 | **G-B3.** Ticket workflow override has no `is_override` flag, no reason column, no audit row on the generic `AuditLog`. Only email-context derived flag at [tickets/views.py:214-217](../../backend/tickets/views.py#L214-L217). | P1 | Sprint 27F |
 | ~~**G-B4.** `BuildingStaffVisibility.can_request_assignment` UPDATEs are not audited.~~ **CLOSED by Sprint 27B.** A dedicated pre_save snapshot + UPDATE-only post_save handler now writes an `AuditLog` UPDATE row with the before/after pair on `changes`. CREATE/DELETE shape unchanged. The Sprint 27A T-7 regression lock now passes normally. | ~~P1~~ | ~~Sprint 27F~~ **Sprint 27B** |
-| **G-B5.** ~~Company-level / customer-policy fields are sparse — only three `show_assigned_staff_*` booleans. Needs a `CustomerCompanyPolicy` model for "this customer company can create extra work" etc.~~ **PARTIALLY CLOSED by Sprint 27C.** [`CustomerCompanyPolicy`](../../backend/customers/models.py) model lives, one-to-one with `Customer`, carrying the three legacy `show_assigned_staff_*` booleans plus four new permission-policy booleans (`customer_users_can_{create_tickets, approve_ticket_completion, create_extra_work, approve_extra_work_pricing}`). Migration `customers/0006_backfill_customer_company_policy.py` creates one row per pre-existing Customer copying the visibility values; the new `customers/signals.py` post_save handler auto-creates a policy row for every new Customer with the visibility values mirrored from the parent row. `CustomerCompanyPolicy` is registered with the audit full-CRUD trio in `audit/signals.py`. **Still deferred:** (1) the runtime read path for `show_assigned_staff_*` continues to consult the legacy `Customer.*` fields — switch is intentionally a separate sprint so the ticket serializer contract is not entangled with the new model in 27C; (2) the new permission-policy booleans have **no runtime consumer yet** — they are data-write-only this sprint. Sprint 27D/E will wire them into the customer permission resolver and the editor UI. | ~~P2~~ | ~~Sprint 27C~~ **27C ✅ (partial) → 27D/E for the runtime + UI wiring** |
+| **G-B5.** ~~Company-level / customer-policy fields are sparse — only three `show_assigned_staff_*` booleans. Needs a `CustomerCompanyPolicy` model for "this customer company can create extra work" etc.~~ **PERMISSION-POLICY HALF CLOSED by Sprint 27D.** [`CustomerCompanyPolicy`](../../backend/customers/models.py) model and audit (Sprint 27C) + runtime resolver wiring (Sprint 27D): `customers.permissions.access_has_permission` now consults the policy as a DENY layer between explicit overrides and role defaults. The four `customer_users_can_*` booleans actively shape resolution today. **Still deferred:** the runtime read path for `show_assigned_staff_*` continues to consult the legacy `Customer.*` fields — switch is intentionally a separate sprint so the ticket serializer contract is not entangled with the new model. Sprint 27E will land the editor UI on top of the 27C write endpoint + 27D resolver. | ~~P2~~ | ~~Sprint 27C~~ **27C (data) ✅ + 27D (resolver) ✅ → 27E for editor UI; visibility runtime switch deferred** |
 | **G-B6.** No `reason` column on `AuditLog`. | P2 | Sprint 27F |
 | **G-B7.** STAFF cannot see Extra Work at all — `scope_extra_work_for` returns `.none()` for STAFF ([extra_work/scoping.py:67-71](../../backend/extra_work/scoping.py#L67-L71)). | P2 (intentional MVP gap; needs the staff-execution surface) | Sprint 27 follow-up sprint after 27G |
 | **G-B8.** `osius.*` permission-key naming-debt rename. | P2 | own future sprint (do not bundle) |
-| **G-B9.** `osius.staff.manage`, `osius.building.manage`, `osius.customer_company.manage` keys declared but unwired in resolver. | P2 | Sprint 27D |
+| ~~**G-B9.** `osius.staff.manage`, `osius.building.manage`, `osius.customer_company.manage` keys declared but unwired in resolver.~~ **CLOSED by Sprint 27D.** [`accounts/permissions_v2.py`](../../backend/accounts/permissions_v2.py) `user_has_osius_permission` now narrows COMPANY_ADMIN's universal-True branch for these three keys to require `CompanyUserMembership`-anchored scope (and if `building_id` is given, the building must belong to one of the actor's companies). SUPER_ADMIN keeps universal True. BUILDING_MANAGER / STAFF / CUSTOMER_USER stay False (the keys are explicitly company-level management; they live above the building-manager pay grade by design). A latent cross-provider leak — previously hidden because no call site passed a foreign `building_id` to a management key — is closed before the first consumer arrives. | ~~P2~~ | ~~Sprint 27D~~ **Sprint 27D ✅** |
 
 ## 8. Sprint 27B-G follow-up plan
 
@@ -182,9 +192,17 @@ field, and vice versa.
 
 - ⏸ **Effective-permissions call-site migration deferred again.** No existing call site benefits from swapping in `accounts.permissions_effective.has_permission()` — every site that consumes one of the two underlying resolvers gets the byte-identical answer back through the 14 parity tests (locked in 27B). Migrating any site is busy-work for zero behavioral or readability gain. The composer was always shaped for **new** consumers (the Sprint 27E permission editor will call `effective_permissions()` to render the per-key inherit/grant/revoke state). The new `validate_permission_overrides` in Sprint 27C imports `CUSTOMER_PERMISSION_KEYS` from `customers.permissions` directly — not the composer — because the validator only needs the key allow-list, not the resolver.
 
-### Sprint 27D — provider-side staff / building-manager permission model
-- Wire the three stubbed `osius.*` keys (G-B9).
-- Add per-building-manager toggles (e.g. workflow-override disable).
+### Sprint 27D — provider key wiring + customer-policy runtime ✅ **DELIVERED**
+- ✅ Wired the three stubbed provider-management keys (closes **G-B9**):
+  * `osius.staff.manage`, `osius.building.manage`, `osius.customer_company.manage` now route through a narrowed COMPANY_ADMIN branch in [`accounts/permissions_v2.py`](../../backend/accounts/permissions_v2.py). COMPANY_ADMIN gets these keys only when the actor is a member (via `CompanyUserMembership`) of a provider company AND (when `building_id` is given) the building belongs to one of their companies. SUPER_ADMIN: universal True (unchanged). BUILDING_MANAGER / STAFF / CUSTOMER_USER: False. Closes the latent cross-provider leak before its first consumer.
+- ✅ Wired the four `CustomerCompanyPolicy` permission booleans into the customer permission resolver (finishes the permission-policy half of **G-B5**):
+  * `customers.permissions.access_has_permission` consults the policy as a DENY layer between explicit `permission_overrides` and per-role defaults.
+  * Precedence (high → low): (1) `is_active=False` denies everything; (2) explicit `permission_overrides[key]` wins; (3) `CustomerCompanyPolicy.<field> is False` denies the key's family; (4) otherwise the per-`access_role` default.
+  * Policy can only NARROW role defaults — it cannot grant a key the role default doesn't already grant. This keeps the policy's blast radius bounded and prevents accidental scope widening.
+  * **Override > policy** is the chosen precedence (vs override < policy). Rationale: an explicit per-user override is operator intent for ONE user; a policy field is the company-wide default. An override written AFTER setting the policy represents the operator's newer, more-specific intent and must beat the company default. The opposite precedence would mean an operator could never re-enable a single user without also flipping the company-wide policy. Safety is preserved because (a) `is_active=False` still beats both, and (b) the override write endpoint (Sprint 27C) has the SUPER_ADMIN-only `CUSTOMER_COMPANY_ADMIN` guard + self-edit guard + provider-side `osius.*` key rejection.
+  * Lookup is anchored at `access.membership.customer_id` so the policy that applies is always the access row's own customer — never the caller-supplied `customer_id`. Defends in depth against any future call site that mismatches anchors.
+- ⏸ **Effective-permissions call-site migration deferred again.** Same rationale as 27B/27C: no existing call site benefits from swapping to `has_permission()` — every consumer of the two underlying resolvers gets the byte-identical answer back through the now-31 parity tests (14 from 27B + 12 new from 27D + 5 from the 27B dict-shape suite). The composer was always shaped for **new** consumers (the Sprint 27E permission editor will call `effective_permissions()` to render per-key inherit/grant/revoke state with policy + override layered in correctly). Migrating an existing site is busy-work with no behavioral or readability gain — and post-27D the composer's answers now correctly reflect both the policy DENY layer (via `user_can` → `access_has_permission`) and the narrowed provider-management keys (via `user_has_osius_permission`), so the deferred migration is more valuable, not less. Documented here so it doesn't get lost.
+- ✅ Audit coverage unchanged: the four `customer_users_can_*` fields are part of `CustomerCompanyPolicy`, which Sprint 27C already registered with the full-CRUD audit trio. No new audit signal handlers needed in 27D — the existing trio already writes a UPDATE row with the before/after diff on every policy field mutation.
 
 ### Sprint 27E — frontend permission management UI
 - Permission-override editor wired to Sprint 27C endpoint (closes G-F1, G-F2).
@@ -243,3 +261,27 @@ Tests added in Sprint 27C (test-first):
 | `CustomerCompanyPolicyDefaultsTests` | one-to-one constraint; safe defaults; cascade delete from Customer |
 | `CustomerCompanyPolicyBackfillTests` | new Customer with non-default visibility → policy row carries the same values (live-signal version of the migration backfill) |
 | `CustomerCompanyPolicyAuditTests` | CREATE and UPDATE produce exactly one AuditLog row each, with the before/after diff on changed fields |
+
+## 11. Test footprint (Sprint 27D delta)
+
+Tests added in Sprint 27D (test-first):
+
+### G-B9 — provider-management keys
+[`backend/accounts/tests/test_sprint27d_provider_permission_keys.py`](../../backend/accounts/tests/test_sprint27d_provider_permission_keys.py) — five test classes, 9 tests:
+
+| Class | Tests |
+|---|---|
+| `SuperAdminProviderKeyTests` | SUPER_ADMIN has all three keys (no-building, building_a, building_b) |
+| `CompanyAdminProviderKeyTests` | own-company True; cross-provider False (both directions); orphan COMPANY_ADMIN (no membership) False |
+| `NonAdminProviderKeyTests` | BUILDING_MANAGER, STAFF, CUSTOMER_USER all False for the three keys |
+| `EffectivePermissionsParityForProviderKeysTests` | composer ≡ resolver for every (actor × building × key) combination; all three keys still in `OSIUS_PERMISSION_KEYS` |
+
+### G-B5 (resolver half) — CustomerCompanyPolicy runtime
+[`backend/customers/tests/test_sprint27d_customer_company_policy_permissions.py`](../../backend/customers/tests/test_sprint27d_customer_company_policy_permissions.py) — four test classes, 15 tests:
+
+| Class | Tests |
+|---|---|
+| `PolicyDenyAgainstRoleDefaultsTests` | each of the four policy fields disables its key family for basic / loc-mgr / co-admin; policy doesn't grant outside its families; policy doesn't affect unrelated keys |
+| `PrecedenceTests` | override-grant beats policy-deny; override-revoke still wins over role+policy True; `is_active=False` beats both; role-default unchanged when policy=True and no override |
+| `EffectivePermissionsParityWithPolicyLayerTests` | composer ≡ resolver for every customer key × representative actor × non-trivial policy/override state |
+| `NoCrossCustomerPolicyLeakTests` | Customer A's policy never affects Customer B's users (both directions); policy lookup is anchored at the access row's own customer |
