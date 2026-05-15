@@ -44,6 +44,7 @@ from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Customer,
     CustomerBuildingMembership,
+    CustomerCompanyPolicy,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
@@ -519,6 +520,10 @@ def _connect():
         Company,
         Building,
         Customer,
+        # Sprint 27C — CustomerCompanyPolicy joins the full-CRUD audit
+        # trio so every visibility / permission-policy toggle lands
+        # on the AuditLog with the before/after diff.
+        CustomerCompanyPolicy,
         StaffProfile,
         StaffAssignmentRequest,
     ):

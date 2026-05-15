@@ -282,6 +282,19 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
         return access
 
     def patch(self, request, customer_id, user_id, building_id):
+        # Sprint 27C self-edit guard: nobody can edit their own
+        # access_role, permission_overrides, or is_active via this
+        # endpoint — even SUPER_ADMIN. The guard runs BEFORE
+        # _get_access so we don't reveal whether the row exists
+        # to someone attempting to mutate themselves.
+        if request.user.id == int(user_id):
+            return Response(
+                {
+                    "detail": "You cannot edit your own customer access row.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         access = self._get_access(request, customer_id, user_id, building_id)
         # Sprint 27A — pass request through so the
         # CustomerUserBuildingAccessUpdateSerializer.validate_access_role

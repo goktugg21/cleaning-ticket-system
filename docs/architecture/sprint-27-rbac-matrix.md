@@ -126,10 +126,10 @@ field, and vice versa.
 
 | Gap | Severity | Sprint to close |
 |---|---|---|
-| **G-B2.** `permission_overrides` and `CustomerUserBuildingAccess.is_active` editing is API-deferred ([serializers_memberships.py:97-101](../../backend/customers/serializers_memberships.py#L97-L101)). Backend endpoint exists, only accepts `access_role`. Must ship together with a **self-edit guard** (actor.id ≠ target.user.id) AND a permission-key allow-list. | P1 | Sprint 27C |
+| ~~**G-B2.** `permission_overrides` and `CustomerUserBuildingAccess.is_active` editing is API-deferred. Backend endpoint exists, only accepts `access_role`. Must ship together with a self-edit guard AND a permission-key allow-list.~~ **CLOSED by Sprint 27C.** The PATCH endpoint at `/api/customers/<cid>/users/<uid>/access/<bid>/` now accepts all three Sprint 23A editable fields: `access_role`, `permission_overrides`, `is_active`. Override keys are allow-listed against `CUSTOMER_PERMISSION_KEYS` (provider `osius.*` keys explicitly rejected). Values must be true Python booleans (`type is bool`, rejecting `0/1` via int↔bool coercion). Full-replacement semantics on the override dict. Self-edit guard added at the view layer (`request.user.id == int(user_id)` → 403, runs before object lookup). Sprint 27A guard (SUPER_ADMIN-only `CUSTOMER_COMPANY_ADMIN`) preserved. UPDATEs land on `AuditLog` via the existing `_CUBA_TRACKED_FIELDS` handler with no change. | ~~P1~~ | ~~Sprint 27C~~ **Sprint 27C ✅** |
 | **G-B3.** Ticket workflow override has no `is_override` flag, no reason column, no audit row on the generic `AuditLog`. Only email-context derived flag at [tickets/views.py:214-217](../../backend/tickets/views.py#L214-L217). | P1 | Sprint 27F |
 | ~~**G-B4.** `BuildingStaffVisibility.can_request_assignment` UPDATEs are not audited.~~ **CLOSED by Sprint 27B.** A dedicated pre_save snapshot + UPDATE-only post_save handler now writes an `AuditLog` UPDATE row with the before/after pair on `changes`. CREATE/DELETE shape unchanged. The Sprint 27A T-7 regression lock now passes normally. | ~~P1~~ | ~~Sprint 27F~~ **Sprint 27B** |
-| **G-B5.** Company-level / customer-policy fields are sparse — only three `show_assigned_staff_*` booleans. Needs a `CustomerCompanyPolicy` model for "this customer company can create extra work" etc. | P2 | Sprint 27C |
+| **G-B5.** ~~Company-level / customer-policy fields are sparse — only three `show_assigned_staff_*` booleans. Needs a `CustomerCompanyPolicy` model for "this customer company can create extra work" etc.~~ **PARTIALLY CLOSED by Sprint 27C.** [`CustomerCompanyPolicy`](../../backend/customers/models.py) model lives, one-to-one with `Customer`, carrying the three legacy `show_assigned_staff_*` booleans plus four new permission-policy booleans (`customer_users_can_{create_tickets, approve_ticket_completion, create_extra_work, approve_extra_work_pricing}`). Migration `customers/0006_backfill_customer_company_policy.py` creates one row per pre-existing Customer copying the visibility values; the new `customers/signals.py` post_save handler auto-creates a policy row for every new Customer with the visibility values mirrored from the parent row. `CustomerCompanyPolicy` is registered with the audit full-CRUD trio in `audit/signals.py`. **Still deferred:** (1) the runtime read path for `show_assigned_staff_*` continues to consult the legacy `Customer.*` fields — switch is intentionally a separate sprint so the ticket serializer contract is not entangled with the new model in 27C; (2) the new permission-policy booleans have **no runtime consumer yet** — they are data-write-only this sprint. Sprint 27D/E will wire them into the customer permission resolver and the editor UI. | ~~P2~~ | ~~Sprint 27C~~ **27C ✅ (partial) → 27D/E for the runtime + UI wiring** |
 | **G-B6.** No `reason` column on `AuditLog`. | P2 | Sprint 27F |
 | **G-B7.** STAFF cannot see Extra Work at all — `scope_extra_work_for` returns `.none()` for STAFF ([extra_work/scoping.py:67-71](../../backend/extra_work/scoping.py#L67-L71)). | P2 (intentional MVP gap; needs the staff-execution surface) | Sprint 27 follow-up sprint after 27G |
 | **G-B8.** `osius.*` permission-key naming-debt rename. | P2 | own future sprint (do not bundle) |
@@ -165,10 +165,22 @@ field, and vice versa.
 
 - ✅ `BuildingStaffVisibility.can_request_assignment` audit signal added (closes **G-B4** above + makes Sprint 27A T-7 pass normally, no longer `@unittest.expectedFailure`).
 
-### Sprint 27C — customer-side permission model + write endpoint
-- New `CustomerCompanyPolicy` model with three migrated booleans plus the new toggles (G-B5).
-- `permission_overrides` write endpoint with self-edit guard + permission-key allow-list (closes G-B2).
-- New test: `test_self_cannot_edit_own_permission_overrides`.
+### Sprint 27C — customer-side permission model + write endpoint ✅ **DELIVERED**
+- ✅ `permission_overrides` + `is_active` write support on PATCH `/api/customers/<cid>/users/<uid>/access/<bid>/` (closes **G-B2**):
+  * `CustomerUserBuildingAccessUpdateSerializer.Meta.fields` extended to `["access_role", "permission_overrides", "is_active"]`.
+  * `validate_permission_overrides`: must be a dict; each key allow-listed against `CUSTOMER_PERMISSION_KEYS` (so `osius.*` is rejected with 400); each value must be a true Python `bool` (`type(v) is bool`, rejecting `0/1` through Python's `bool is int` coercion); full-replacement semantics.
+  * Self-edit guard added at the view layer in [`customers/views_memberships.py`](../../backend/customers/views_memberships.py) `patch()`: `request.user.id == int(user_id) → 403` (runs before `_get_access` so existence isn't revealed).
+  * Sprint 27A guard (SUPER_ADMIN-only `CUSTOMER_COMPANY_ADMIN`) preserved.
+  * UPDATEs continue to land on `AuditLog` via the existing `_CUBA_TRACKED_FIELDS` handler — both `permission_overrides` and `is_active` were already in the tracked tuple.
+
+- ✅ `CustomerCompanyPolicy` model + migration + audit (partially closes **G-B5** — see G-B5 row in §7 for the deferred runtime-read switch):
+  * One-to-one with `Customer`. Carries the three legacy `show_assigned_staff_*` booleans (parallel to the Customer ones; **legacy Customer fields kept in place** so the ticket serializer contract is unchanged) plus four new permission-policy booleans (`customer_users_can_{create_tickets, approve_ticket_completion, create_extra_work, approve_extra_work_pricing}`), all defaulting to True.
+  * Schema migration `customers/0005_customercompanypolicy.py` + data migration `customers/0006_backfill_customer_company_policy.py` that copies the visibility values into one new policy row per pre-existing Customer.
+  * `customers/signals.py` registers a `post_save` handler on `Customer` that auto-creates the policy row for every new Customer with the visibility values mirrored from the parent row.
+  * `CustomerCompanyPolicy` registered with the full-CRUD audit trio in [`audit/signals.py`](../../backend/audit/signals.py).
+  * **Not done in 27C (deliberately):** the runtime read path for `show_assigned_staff_*` is unchanged; the new permission-policy booleans have no runtime consumer yet. Both wirings will land in 27D (resolver) / 27E (editor UI).
+
+- ⏸ **Effective-permissions call-site migration deferred again.** No existing call site benefits from swapping in `accounts.permissions_effective.has_permission()` — every site that consumes one of the two underlying resolvers gets the byte-identical answer back through the 14 parity tests (locked in 27B). Migrating any site is busy-work for zero behavioral or readability gain. The composer was always shaped for **new** consumers (the Sprint 27E permission editor will call `effective_permissions()` to render the per-key inherit/grant/revoke state). The new `validate_permission_overrides` in Sprint 27C imports `CUSTOMER_PERMISSION_KEYS` from `customers.permissions` directly — not the composer — because the validator only needs the key allow-list, not the resolver.
 
 ### Sprint 27D — provider-side staff / building-manager permission model
 - Wire the three stubbed `osius.*` keys (G-B9).
@@ -206,3 +218,28 @@ Tests added in Sprint 27A (test-first):
 `validate_access_role` on `CustomerUserBuildingAccessUpdateSerializer`
 so the actor must be `UserRole.SUPER_ADMIN` to set
 `access_role=CUSTOMER_COMPANY_ADMIN`.
+
+## 10. Test footprint (Sprint 27C delta)
+
+Tests added in Sprint 27C (test-first):
+
+### G-B2 — `permission_overrides` + `is_active` write endpoint
+[`backend/customers/tests/test_sprint27c_permission_overrides.py`](../../backend/customers/tests/test_sprint27c_permission_overrides.py) — five test classes, 14 tests:
+
+| Class | Tests |
+|---|---|
+| `PermissionOverridesWriteTests` | happy path, full-replacement semantics, empty-dict clears, unknown key → 400, `osius.*` key → 400, non-bool value → 400 (all of 1/0/string/None/list/dict), non-dict payload → 400 |
+| `IsActiveWriteTests` | deactivate + reactivate via PATCH |
+| `SelfEditGuardTests` | actor cannot edit own access_role / permission_overrides / is_active (403 — both SUPER_ADMIN and COMPANY_ADMIN) |
+| `SprintTwentyASevenGuardStillHoldsTests` | Sprint 27A guard regression net (only SUPER_ADMIN may grant CUSTOMER_COMPANY_ADMIN) |
+| `CustomerSideCannotReachEndpointTests` | `User.role=CUSTOMER_USER` (even at `CUSTOMER_COMPANY_ADMIN` access_role) still hits class-level 403 |
+| `AuditCoverageTests` | `permission_overrides` UPDATE writes exactly one AuditLog row with the before/after diff; `is_active` UPDATE same |
+
+### G-B5 — CustomerCompanyPolicy
+[`backend/customers/tests/test_sprint27c_customer_company_policy.py`](../../backend/customers/tests/test_sprint27c_customer_company_policy.py) — three test classes, 6 tests:
+
+| Class | Tests |
+|---|---|
+| `CustomerCompanyPolicyDefaultsTests` | one-to-one constraint; safe defaults; cascade delete from Customer |
+| `CustomerCompanyPolicyBackfillTests` | new Customer with non-default visibility → policy row carries the same values (live-signal version of the migration backfill) |
+| `CustomerCompanyPolicyAuditTests` | CREATE and UPDATE produce exactly one AuditLog row each, with the before/after diff on changed fields |

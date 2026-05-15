@@ -212,3 +212,73 @@ class CustomerUserBuildingAccess(models.Model):
 
     def __str__(self):
         return f"{self.membership} @ {self.building}"
+
+
+class CustomerCompanyPolicy(models.Model):
+    """
+    Sprint 27C — one-to-one customer-company policy carrier
+    (starts RBAC gap G-B5).
+
+    Holds the booleans an OSIUS Admin / Provider Company Admin can
+    flip per customer organisation to shape what its users see and
+    do. The two groups of fields:
+
+      Visibility policy — copied 1:1 from the existing fields on
+      Customer (`show_assigned_staff_{name,email,phone}`). Those
+      legacy fields stay in place this sprint so the ticket-detail
+      serializer contract is unchanged. A future sprint will
+      migrate the runtime read path here and drop the Customer
+      copies.
+
+      Permission policy — new in Sprint 27C, no runtime consumer
+      yet. These toggles will become the data backbone of the
+      Sprint 27E permission-management UI:
+
+        * customer_users_can_create_tickets
+        * customer_users_can_approve_ticket_completion
+        * customer_users_can_create_extra_work
+        * customer_users_can_approve_extra_work_pricing
+
+    Every default is True so backfilling on existing customers
+    preserves today's behaviour.
+
+    Each new Customer automatically gets a policy row via the
+    accounts/signals.py CREATE signal. Pre-existing customers are
+    handled by the matching data migration that ships with this
+    model.
+    """
+
+    customer = models.OneToOneField(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name="policy",
+    )
+
+    # Visibility policy (mirror of legacy Customer.show_assigned_staff_*
+    # fields; both sets live in parallel during Sprint 27C).
+    show_assigned_staff_name = models.BooleanField(default=True)
+    show_assigned_staff_email = models.BooleanField(default=True)
+    show_assigned_staff_phone = models.BooleanField(default=True)
+
+    # Permission policy (new). The runtime resolver does NOT consume
+    # these yet — the field shape is locked in 27C so the editor
+    # surface (27E) can write to them, and a follow-up sprint can
+    # introduce the lookup in the customer permission resolver.
+    customer_users_can_create_tickets = models.BooleanField(default=True)
+    customer_users_can_approve_ticket_completion = models.BooleanField(
+        default=True
+    )
+    customer_users_can_create_extra_work = models.BooleanField(default=True)
+    customer_users_can_approve_extra_work_pricing = models.BooleanField(
+        default=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "customer company policy"
+        verbose_name_plural = "customer company policies"
+
+    def __str__(self):
+        return f"Policy for {self.customer}"
