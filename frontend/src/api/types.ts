@@ -427,6 +427,108 @@ export interface AuditLog {
   request_id: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Sprint 26B — Extra Work MVP types
+// ---------------------------------------------------------------------------
+export type ExtraWorkCategory =
+  | "DEEP_CLEANING"
+  | "WINDOW_CLEANING"
+  | "FLOOR_MAINTENANCE"
+  | "SANITARY_SERVICE"
+  | "WASTE_REMOVAL"
+  | "FURNITURE_MOVING"
+  | "EVENT_CLEANING"
+  | "EMERGENCY_CLEANING"
+  | "OTHER";
+
+export type ExtraWorkUrgency = "NORMAL" | "HIGH" | "URGENT";
+
+export type ExtraWorkStatus =
+  | "REQUESTED"
+  | "UNDER_REVIEW"
+  | "PRICING_PROPOSED"
+  | "CUSTOMER_APPROVED"
+  | "CUSTOMER_REJECTED"
+  | "CANCELLED";
+
+export type ExtraWorkUnitType =
+  | "HOURS"
+  | "SQUARE_METERS"
+  | "FIXED"
+  | "ITEM"
+  | "OTHER";
+
+// List shape (lean — no description / notes / line items).
+export interface ExtraWorkRequestList {
+  id: number;
+  company: number;
+  company_name: string;
+  building: number;
+  building_name: string;
+  customer: number;
+  customer_name: string;
+  title: string;
+  category: ExtraWorkCategory;
+  urgency: ExtraWorkUrgency;
+  status: ExtraWorkStatus;
+  subtotal_amount: string;
+  vat_amount: string;
+  total_amount: string;
+  created_by: number;
+  created_by_email: string;
+  requested_at: string;
+  updated_at: string;
+  pricing_proposed_at: string | null;
+  customer_decided_at: string | null;
+}
+
+// Provider-side pricing line item — full shape with internal note.
+// Customer-side reads come back with internal_cost_note omitted.
+export interface ExtraWorkPricingLineItem {
+  id: number;
+  description: string;
+  unit_type: ExtraWorkUnitType;
+  quantity: string;
+  unit_price: string;
+  vat_rate: string;
+  subtotal: string;
+  vat_amount: string;
+  total: string;
+  customer_visible_note: string;
+  internal_cost_note?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Detail shape — role-aware. Provider-only fields (manager_note,
+// internal_cost_note, override_*) are absent on customer responses.
+export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
+  description: string;
+  category_other_text: string;
+  preferred_date: string | null;
+  customer_visible_note: string;
+  pricing_note: string;
+  // Provider-only fields — optional because the API strips them
+  // for CUSTOMER_USER actors.
+  manager_note?: string;
+  internal_cost_note?: string;
+  override_by?: number | null;
+  override_reason?: string;
+  override_at?: string | null;
+  pricing_line_items: ExtraWorkPricingLineItem[];
+  allowed_next_statuses: ExtraWorkStatus[];
+}
+
+export interface ExtraWorkStatusHistoryEntry {
+  id: number;
+  old_status: ExtraWorkStatus;
+  new_status: ExtraWorkStatus;
+  changed_by_email: string | null;
+  note: string;
+  is_override: boolean;
+  created_at: string;
+}
+
 export interface CompanyAdminMembership {
   id: number;
   company: number;

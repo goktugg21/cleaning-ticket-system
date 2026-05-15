@@ -3,13 +3,17 @@ import { Suspense, lazy } from "react";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AdminRoute } from "./components/AdminRoute";
+import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
+import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { ExtraWorkDetailPage } from "./pages/ExtraWorkDetailPage";
+import { ExtraWorkListPage } from "./pages/ExtraWorkListPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -94,6 +98,34 @@ export default function App() {
               <ProtectedRoute>
                 <SettingsPage />
               </ProtectedRoute>
+            }
+          />
+          {/* Sprint 26C — Extra Work MVP. STAFF is excluded by the
+              ExtraWorkRoute guard because the backend's
+              scope_extra_work_for returns .none() for staff in this
+              MVP (no staff-execution surface yet). */}
+          <Route
+            path="/extra-work"
+            element={
+              <ExtraWorkRoute>
+                <ExtraWorkListPage />
+              </ExtraWorkRoute>
+            }
+          />
+          <Route
+            path="/extra-work/new"
+            element={
+              <ExtraWorkRoute>
+                <CreateExtraWorkPage />
+              </ExtraWorkRoute>
+            }
+          />
+          <Route
+            path="/extra-work/:id"
+            element={
+              <ExtraWorkRoute>
+                <ExtraWorkDetailPage />
+              </ExtraWorkRoute>
             }
           />
           <Route

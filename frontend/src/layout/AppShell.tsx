@@ -10,6 +10,7 @@ import {
   MapPin,
   Menu,
   PlusCircle,
+  Receipt,
   Settings,
   UserCog,
   Users,
@@ -20,6 +21,17 @@ import { useAuth } from "../auth/AuthContext";
 import { useLanguageSync } from "../i18n/useLanguageSync";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+// Sprint 26C — Extra Work MVP. STAFF is excluded because the
+// backend's scope_extra_work_for returns .none() for staff today
+// (no staff-execution surface yet). Mirror the ExtraWorkRoute
+// guard so staff users don't see a sidebar link that leads to an
+// empty list.
+const EXTRA_WORK_ROLES = new Set([
+  "SUPER_ADMIN",
+  "COMPANY_ADMIN",
+  "BUILDING_MANAGER",
+  "CUSTOMER_USER",
+]);
 // Sprint 23B — the staff-assignment-request review queue is for
 // service-provider-side reviewers. Building managers also see it
 // (their own buildings only — backend queryset gate). STAFF and
@@ -137,6 +149,14 @@ export function AppShell({ children }: AppShellProps) {
             </span>
             {t("nav.new_ticket")}
           </NavLink>
+          {me?.role && EXTRA_WORK_ROLES.has(me.role) && (
+            <NavLink to="/extra-work" className={navClass}>
+              <span className="nav-icon">
+                <Receipt size={16} strokeWidth={2} />
+              </span>
+              Extra Work
+            </NavLink>
+          )}
           {me?.role && REPORTS_ROLES.has(me.role) && (
             <NavLink to="/reports" className={navClass}>
               <span className="nav-icon">
