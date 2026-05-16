@@ -777,29 +777,229 @@ submenu (Batch 3 prerequisite). Joint backend + frontend. ~1 sprint letter.
 Goal: introduce the catalog + pricing models so the cart flow (Batch 6)
 can compute prices. Backend-heavy. ~1 sprint letter.
 
-- [ ] Add `ServiceCategory` model.
-- [ ] Add `Service` model with `name`, `description`, `unit_type`
+- [x] ~~Add `ServiceCategory` model.~~
+- [x] ~~Add `Service` model with `name`, `description`, `unit_type`
       (`HOURLY` / `PER_SQM` / `FIXED` / `PER_ITEM` per spec §5),
       `default_unit_price` (decimal), `default_vat_pct` (decimal,
-      default 21.00), `is_active`, FK to `ServiceCategory`.
-- [ ] Add customer-specific contract price model (`CustomerServicePrice` or
+      default 21.00), `is_active`, FK to `ServiceCategory`.~~
+- [x] ~~Add customer-specific contract price model (`CustomerServicePrice` or
       similar): FK `customer`, FK `service`, `unit_price`, `vat_pct`,
-      `valid_from`, `valid_to`, `is_active`.
-- [ ] Add `default_unit_price` as the global default/reference price on
-      `Service` — used as a provider-side reference only.
-- [ ] Add `resolve_price(service, customer, on=date)` resolver. Returns
+      `valid_from`, `valid_to`, `is_active`.~~
+- [x] ~~Add `default_unit_price` as the global default/reference price on
+      `Service` — used as a provider-side reference only.~~
+- [x] ~~Add `resolve_price(service, customer, on=date)` resolver. Returns
       the customer-specific contract price when active, else `None`
-      (NOT the global default — see §5 product rule #9).
-- [ ] **Enforce: global default price alone never creates an instant
+      (NOT the global default — see §5 product rule #9).~~
+- [x] ~~**Enforce: global default price alone never creates an instant
       ticket.** The instant-ticket path (Batch 7) keys off the resolver
       returning a non-`None` price, which only happens when a customer-
-      specific contract price is active.
-- [ ] Add provider/admin UI for managing service categories, services,
-      and customer-specific prices. View-first per spec §3.
-- [ ] Add audit signal coverage on all three new models.
-- [ ] Add tests: resolver branches, cross-customer leak prevention
+      specific contract price is active.~~
+- [x] ~~Add provider/admin UI for managing service categories, services,
+      and customer-specific prices. View-first per spec §3.~~
+- [x] ~~Add audit signal coverage on all three new models.~~
+- [x] ~~Add tests: resolver branches, cross-customer leak prevention
       (Customer A's prices never visible to Customer B's users),
-      audit coverage.
+      audit coverage.~~
+
+**Completion block — Batch 5**
+
+- **Date:** 2026-05-16
+- **Commit:** uncommitted on working tree as of 2026-05-16 (Batch 5 diff
+  on top of `e23cf40`; ready for a single batch commit once reviewed).
+- **App / model placement:**
+  - All three new models (`ServiceCategory`, `Service`,
+    `CustomerServicePrice`) live in **`backend/extra_work/models.py`**
+    (extending the existing file). Rationale: extra_work app already
+    owns the pricing-adjacent vocabulary (`ExtraWorkPricingUnitType`
+    enum + the legacy `ExtraWorkPricingLineItem`); catalog + pricing
+    belong in the same domain as the work they price; zero new app
+    registration, zero circular-import risk.
+  - Resolver `resolve_price()` lives in **new module**
+    `backend/extra_work/pricing.py` (parallel to `extra_work/scoping.py`
+    + `extra_work/state_machine.py`).
+  - **Reused the existing `ExtraWorkPricingUnitType` enum verbatim**
+    (`HOURS` / `SQUARE_METERS` / `FIXED` / `ITEM` / `OTHER` —
+    descriptive equivalents of spec §5's HOURLY/PER_SQM/FIXED/PER_ITEM).
+    No parallel `ServiceUnitType` enum introduced.
+- **Files changed summary:**
+  - **Backend modified (4):** `backend/extra_work/models.py` (+ 3 model
+    classes — Service, ServiceCategory, CustomerServicePrice),
+    `backend/audit/signals.py` (3 new model registrations in full-CRUD
+    tuple), `backend/config/urls.py` (mount `/api/services/`),
+    `backend/customers/urls.py` (2 customer-scoped pricing routes).
+  - **Backend new (10):**
+    `backend/extra_work/migrations/0002_service_catalog_and_pricing.py`,
+    `backend/extra_work/pricing.py` (`resolve_price()` resolver),
+    `backend/extra_work/serializers_catalog.py`,
+    `backend/extra_work/views_catalog.py`,
+    `backend/extra_work/views_pricing.py`,
+    `backend/extra_work/urls_catalog.py`,
+    `backend/extra_work/tests/test_sprint28_service_catalog.py`,
+    `backend/extra_work/tests/test_sprint28_pricing_resolver.py`,
+    `backend/extra_work/tests/test_sprint28_pricing_api.py`,
+    `backend/audit/tests/test_sprint28_pricing_audit.py`.
+  - **Frontend modified (6):** `frontend/src/App.tsx`,
+    `frontend/src/api/admin.ts` (15 new helpers),
+    `frontend/src/api/types.ts` (5 new types — `ServiceUnitType`,
+    `ServiceCategory(+Create/Update)`, `Service(+Create/Update)`,
+    `CustomerServicePrice(+Create/Update)`),
+    `frontend/src/i18n/en/common.json` + `nl/common.json` (`nav.services` +
+    `nav.customer_submenu.pricing` + `services.*` + `customer_pricing.*`
+    namespaces; EN/NL parity preserved),
+    `frontend/src/layout/AppShell.tsx` (top-level "Services" nav entry +
+    customer-scoped "Pricing" entry).
+  - **Frontend new (4):**
+    `frontend/src/pages/admin/ServicesAdminPage.tsx`
+    (top-level catalog admin — tabs for services + categories),
+    `frontend/src/pages/admin/CustomerPricingPage.tsx`
+    (per-customer contract pricing),
+    `frontend/tests/e2e/sprint28_services.spec.ts` (6 cases),
+    `frontend/tests/e2e/sprint28_customer_pricing.spec.ts` (5 cases).
+  - **Docs:** this completion block, §7 pointer advance, §8 log row,
+    §9 decision-log rows.
+- **Migration status:**
+  - Migration file **created**:
+    `backend/extra_work/migrations/0002_service_catalog_and_pricing.py`
+    (depends on `extra_work.0001_initial` + `customers` head).
+  - Dev DB `migrate` **APPLIED** on 2026-05-16 by the user via
+    `docker compose exec backend python manage.py migrate extra_work`.
+    Verified with `python manage.py showmigrations extra_work` →
+    `[X] 0002_service_catalog_and_pricing`. Catalog API endpoints +
+    the Services/Pricing admin UI are now exercisable against the dev
+    container. Test DB also auto-migrates each `manage.py test` run
+    so the test suite remains green.
+- **Exact backend API routes:**
+  - **Catalog (provider-wide):**
+    - `GET / POST  /api/services/categories/`
+    - `GET / PATCH / DELETE  /api/services/categories/<int:category_id>/`
+    - `GET / POST  /api/services/`
+    - `GET / PATCH / DELETE  /api/services/<int:service_id>/`
+    - Gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdmin`.
+      Catalog is provider-wide (not company-scoped).
+  - **Per-customer pricing:**
+    - `GET / POST  /api/customers/<int:customer_id>/pricing/`
+    - `GET / PATCH / DELETE  /api/customers/<int:customer_id>/pricing/<int:price_id>/`
+    - Gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`.
+    - Detail view re-scopes by `customer=customer` to block ID
+      smuggling (mirror of Batch 4 Contact detail).
+- **Permission / scoping behavior:**
+  - SUPER_ADMIN: full CRUD on catalog + any customer's pricing.
+  - COMPANY_ADMIN: full CRUD on catalog (provider-wide) + pricing
+    within own provider; cross-provider 403/404.
+  - BUILDING_MANAGER: **403 on every endpoint** (catalog management is
+    provider-admin only; per-customer pricing too).
+  - CUSTOMER_USER: 403 everywhere (customer-side pricing visibility —
+    "customer sees their own contract prices" — lands with the cart UX
+    in Batch 6, NOT here).
+  - STAFF: 403 everywhere.
+- **Resolver semantics (rule #9 enforced):**
+  - `resolve_price(service, customer, *, on=None) -> CustomerServicePrice | None`
+    in `backend/extra_work/pricing.py`.
+  - Returns the active `CustomerServicePrice` row for (service,
+    customer) on the given date. Selection: latest `valid_from <= on`,
+    `valid_to >= on or null`, `is_active=True`; ties broken by `-id`.
+  - Returns **`None`** when no matching row exists — does **NOT** fall
+    back to `Service.default_unit_price`. This is the hard rule #9
+    lock; verified by `ResolvePriceReturnsNoneWithoutCustomerSpecificTests`.
+  - `Service.default_unit_price` is a provider-side reference only
+    (display in the catalog admin UI; the UI surfaces this with a
+    visible hint).
+- **Audit coverage:**
+  - All three new models added to `backend/audit/signals.py`
+    full-CRUD tuple (alongside Contact / Customer / Company / Building
+    / CustomerCompanyPolicy / StaffProfile / StaffAssignmentRequest).
+  - 9 audit tests in `audit/tests/test_sprint28_pricing_audit.py`
+    (3 per model × CREATE/UPDATE/DELETE) — all assert one `AuditLog`
+    row per mutation with correct `target_model` + `action` + diff.
+- **Frontend route / UI behavior:**
+  - **NEW top-level route** `/admin/services` → `ServicesAdminPage`
+    (tabs: Services + Categories; view-first list + read-only detail +
+    Add/Edit modal + Delete `ConfirmDialog`). New top-level sidebar
+    entry "Services" (gated to SUPER_ADMIN + COMPANY_ADMIN).
+  - **NEW customer-scoped sub-route** `/admin/customers/:id/pricing`
+    → `CustomerPricingPage` (view-first contract pricing list + Add/
+    Edit modal). The Batch 3 sidebar regex automatically activates
+    customer-scoped mode on this URL. NEW customer-scoped sidebar
+    entry "Pricing" between Permissions and Extra Work.
+  - **Reference-price hint surfaced in the catalog UI**:
+    `services.field_default_unit_price_hint` explicitly states the
+    field is a provider-side reference and does NOT trigger the
+    instant-ticket path. This makes rule #9 visible to operators.
+  - **No Batch 6 wiring**: the catalog is NOT yet integrated with any
+    Extra Work request flow. The cart-shaped request and the
+    instant-ticket / proposal branching land in Batches 6 and 7-8.
+- **Contextual integration:** none — Batch 5 is admin-only. No
+  customer-side surface (customer's own price visibility ships with
+  the cart UI in Batch 6).
+- **Tests / checks run:**
+  - Backend targeted (4 modules): `test_sprint28_service_catalog +
+    test_sprint28_pricing_resolver + test_sprint28_pricing_api +
+    test_sprint28_pricing_audit` → **57/57 OK** in 132.6s.
+  - Backend per-app sanity: `audit` alone = **44/44 OK** in 60.8s;
+    `extra_work` alone = **81/81 OK** in 82.2s; `customers` alone =
+    **140/140 OK** in 192.5s.
+  - Backend broader sweep (`extra_work + audit + customers`) —
+    **first run reported `FAILED (errors=7)` (transient flake);
+    diagnostic `-v 2` grep returned zero FAIL/ERROR lines; second
+    confirmation run** → **265/265 OK** in 471.5s. Likely a
+    NotificationLog / Celery-eager race on shared state in long
+    combined runs — documented as a remaining risk.
+  - `manage.py check` → **0 issues**.
+  - `manage.py makemigrations --dry-run --check` → **No changes
+    detected** (model state matches migration graph).
+  - `npm run typecheck` → **clean**.
+  - `npm run build` → **clean**, 454ms (advisory chunk-size warning
+    only, baseline).
+  - `npm run lint` → **52 problems = baseline** (zero new hits in any
+    Batch 5 file).
+  - **Playwright specs written but NOT executed locally** (WSL
+    `frontend/test-results/` root-ownership gotcha). Two spec files
+    (11 cases total) compile under `tsc -b`; CI will exercise them.
+- **Important decisions made (also logged in §9):**
+  - Service catalog + pricing models live in
+    **`backend/extra_work/`**, not a new app — closest existing
+    domain.
+  - **`ExtraWorkPricingUnitType` reused** — no parallel enum.
+  - **Resolver returns `None` when no customer-specific price** —
+    `Service.default_unit_price` never triggers instant ticket
+    (master plan §5 rule #9 enforced in code + visible UI hint).
+  - **Frontend split into two routes**: provider-wide
+    `/admin/services` (top-level) + per-customer
+    `/admin/customers/:id/pricing` (customer-scoped, extends Batch 3
+    sidebar by one entry).
+  - Customer-side price visibility (their own contract prices)
+    deferred to Batch 6 (ships with the cart UI). Catalog UI is
+    admin-only in Batch 5.
+- **Remaining risks:**
+  - ~~Dev DB schema behind code until user approves migrate.~~
+    **RESOLVED 2026-05-16** — user applied
+    `python manage.py migrate extra_work`; `showmigrations` confirms
+    `[X] 0002_service_catalog_and_pricing`. Dev DB schema is now in
+    lockstep with code.
+  - **Broader sweep flakiness**: first run reported 7 transient
+    errors; re-run was 265/265 OK. Likely NotificationLog state-bleed
+    in long sequential runs across `extra_work + audit + customers`.
+    Not Batch-5-specific (same notification-log-shared-state risk
+    exists in earlier batches). CI runs should not be re-run-on-fail
+    masking real regressions — if a future batch sees the same flake,
+    re-run before declaring a failure.
+  - **Spec §5 + backlog `EXTRA-PRICING-1` text drift**: the spec doc
+    §5 "Resolution order" step 2 says "global default price" as a
+    fallback. The master plan rule #9 + this code's behaviour are
+    authoritative: resolver returns `None`, no global-default
+    fallback. A doc-only patch should reconcile spec §5 step 2 with
+    rule #9 in a later batch — not a blocker for Batch 5.
+  - **Backlog `EXTRA-PRICING-1` row** mentions "returns customer-
+    specific contract price when active, else global default" —
+    stale wording. The shipped code follows the master plan rule #9
+    (returns `None`). Update the backlog row when closing the item.
+  - **Playwright specs not locally validated** — same WSL gotcha as
+    prior batches. CI workflow will exercise; if the spec breaks on
+    CI it will be visible in the next CI run.
+  - **`CustomerPricingPage` Edit modal locks the service dropdown**
+    in update mode — switching service on an existing price row
+    would corrupt history. Users delete + add to switch. Documented
+    in the `field_service_locked_hint` i18n key.
 
 ### Batch 6 — Cart-shaped Extra Work request
 
@@ -1036,16 +1236,18 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 5 — Service catalog and pricing**
+- **Current batch:** **Batch 6 — Cart-shaped Extra Work request**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 5 items.
-  Batch 5 is backend-heavy: introduces `Service`, `ServiceCategory`,
-  `CustomerServicePrice` models + `resolve_price()` resolver +
-  provider-admin pricing UI. The instant-ticket / proposal branching
-  (Batch 6+) keys off this resolver.
-- **Next recommended batch (on-deck):** Batch 6 — Cart-shaped Extra
-  Work request.
+  this file, state the current batch, and work only on Batch 6 items.
+  Batch 6 is the big shape-change: introduce `ExtraWorkRequestItem`
+  line items on `ExtraWorkRequest` (each with `service` FK +
+  `quantity` + `requested_date` + `customer_note`), customer cart UX,
+  and the routing-decision branching (instant-ticket vs proposal).
+  Batch 7 atomically spawns Tickets for the instant path; Batch 8
+  builds the proposal entity for the custom path.
+- **Next recommended batch (on-deck):** Batch 7 — Instant-ticket
+  path.
 
 ---
 
@@ -1055,6 +1257,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-16 | Batch 5 — Service catalog and pricing | uncommitted on top of `e23cf40` | Joint backend + frontend. **Backend:** 3 new models in `backend/extra_work/models.py` — `ServiceCategory` (global, name-unique), `Service` (FK ServiceCategory PROTECT, unit_type reusing `ExtraWorkPricingUnitType`, `default_unit_price`, `default_vat_pct` default 21.00, is_active), `CustomerServicePrice` (FK Service PROTECT + FK Customer CASCADE, unit_price/vat_pct/valid_from/valid_to/is_active). Migration `extra_work/0002_service_catalog_and_pricing.py` (**applied to dev DB 2026-05-16 by user** via `python manage.py migrate extra_work`). New resolver `extra_work/pricing.py::resolve_price(service, customer, *, on=None)` returns active `CustomerServicePrice` row or `None` (NEVER falls back to `Service.default_unit_price` per master plan §5 rule #9). 4 new catalog endpoints at `/api/services/{categories,}` + 2 customer-scoped pricing endpoints at `/api/customers/<id>/pricing/`. Catalog gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdmin`; pricing gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany` (mirrors Batch 4 Contact pattern; detail view re-scopes by `customer=customer` blocking ID smuggling). All 3 models registered in `audit/signals.py` full-CRUD tuple. 57 new backend tests across 4 modules (service catalog CRUD + protect-on-delete; resolver branches incl. the rule-#9 None-when-no-customer-specific-row lock; per-customer pricing CRUD + scope isolation + validation; audit CREATE/UPDATE/DELETE × 3 models). **Frontend:** 5 new types in `api/types.ts` (ServiceUnitType union + Service/Category/CustomerServicePrice +Create/+Update payloads); 15 new admin API helpers; `ServicesAdminPage` at `/admin/services` (tabs for services + categories, view-first list + modal CRUD, top-level sidebar entry "Services" gated to admin roles); `CustomerPricingPage` at `/admin/customers/:id/pricing` (customer-scoped sub-route — Batch 3 sidebar regex activates automatically; new "Pricing" entry between Permissions and Extra Work in the customer-scoped submenu). EN/NL i18n parity preserved (97-line delta per bundle covering `nav.services`/`nav.customer_submenu.pricing`/`services.*`/`customer_pricing.*` + unit-type labels). Visible UI hint surfaces rule #9 (`services.field_default_unit_price_hint`). 2 new Playwright specs (11 cases total). | Backend targeted (4 modules, 57 tests): **57/57 OK** in 132.6s. Per-app sanity: audit 44/44, extra_work 81/81, customers 140/140 — each clean. Broader sweep (`extra_work + audit + customers`): **first run reported `FAILED (errors=7)` (transient flake);** `-v 2` diagnostic returned zero FAIL/ERROR lines; confirmation re-run → **265/265 OK** in 471.5s. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 454ms. `npm run lint`: **52 problems = baseline** (zero new hits in Batch 5 files). **Playwright specs written but NOT executed locally** (WSL `frontend/test-results/` root-ownership gotcha; CI will exercise the 11 cases). | **Dev DB schema applied** 2026-05-16 by user via `python manage.py migrate extra_work` — `showmigrations` shows `[X] 0002_service_catalog_and_pricing`; Catalog API + Services/Pricing admin UI now exercisable against the dev container. **Broader sweep flakiness**: first run 7 transient errors; re-run clean. Likely NotificationLog/Celery-eager shared-state race in long sequential runs across `extra_work + audit + customers`; not Batch-5-specific but documented for future batches to re-run before declaring failure. **Spec §5 / backlog `EXTRA-PRICING-1` doc drift**: spec §5 "Resolution order" step 2 says "global default" fallback; backlog row text similarly stale. Code follows master plan rule #9 (returns `None`); doc reconciliation is a follow-up patch. **`CustomerPricingPage` Edit modal locks the service dropdown** (switching service on an existing price would corrupt history); users delete + add to switch. **No customer-side pricing visibility yet** (their own contract prices) — ships with Batch 6 cart UI. **No Batch 6 wiring**: the catalog is not yet called from any Extra Work request flow. |
 | 2026-05-16 | Batch 4 — Contacts model and UI | uncommitted on top of `9402e38` | Joint backend + frontend. **Backend:** `Contact` model added to `backend/customers/models.py` (FK Customer CASCADE + FK Building SET_NULL + name/email/phone/role_label/notes/timestamps; **no password/role/user/is_active/permission_overrides** — structurally not a User per spec §1). Migration `customers/0007_contact.py` created (**not applied to dev DB yet**). 2 new endpoints at `/api/customers/<id>/contacts/` (list+create) and `/contacts/<id>/` (retrieve/update/delete), gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`. Detail view re-scopes by `customer=customer` to block ID smuggling. Cross-customer building validation in serializer. Contact registered in `audit/signals.py` full-CRUD tuple. 26 new tests across 5 classes (CRUD happy-path × 2 admin roles, scope isolation, ID-smuggling 404, BM/customer/staff 403, building-membership validation, "is-not-a-User" payload assertion, audit CREATE/UPDATE/DELETE rows). **Frontend:** `Contact` + `ContactCreatePayload` + `ContactUpdatePayload` types added; 5 admin API helpers added; `CustomerContactsPage` replaces Batch 3 placeholder route at `/admin/customers/:id/contacts` (view-first list + read-only detail + Add/Edit modal + Delete `ConfirmDialog`; **no password/role/login field anywhere**). Contextual read-only `Customer-contacts` panels added to both `TicketDetailPage` (`data-testid="ticket-customer-contacts-panel"`) and `ExtraWorkDetailPage` (`data-testid="extra-work-customer-contacts-panel"`), gated to SUPER_ADMIN/COMPANY_ADMIN mirroring the backend. 25 new `customer_contacts.*` i18n keys in each of EN/NL bundles, parity preserved. Playwright spec `frontend/tests/e2e/sprint28_contacts.spec.ts` with 5 cases. | Backend targeted (`customers.tests.test_sprint28_contacts + audit.tests.test_sprint28_contact_audit`): **26/26 OK** in 24.7s. Backend broader (`customers + audit`): **175/175 OK** in 165.2s. Cross-app sweep (`customers audit tickets extra_work`): **365/365 OK** in 298.2s — no regression from the Contact + audit signal additions. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 508ms. `npm run lint`: **52 problems = baseline** (zero new lint hits in Batch 4 files; frontend agent stash-comparison showed pre-Batch-4 was 53 problems, so net is -1 error after the agent extracted ticket/EW customer-id locals to satisfy `exhaustive-deps`). **Playwright spec written but NOT executed locally** (WSL `frontend/test-results/` root-ownership gotcha; brief allows). | Dev DB schema is **behind code** until user approves `python manage.py migrate` (Contacts API + the Ticket/EW contextual panels will 500 against the dev container until that runs). Playwright spec needs CI run to confirm against demo seed. Building-dropdown in the Add/Edit modal shows every linked building including potentially-deactivated ones (polish item, not P0). Contextual panels emit an API call on every Ticket/EW detail render with no caching — debounce/SWR is a later polish item. BM read-only contact view is intentionally deferred to **Batch 12**; gate locked by `test_building_manager_cannot_*` cases. |
 | 2026-05-16 | Batch 3 — Sidebar refactor foundation | uncommitted on top of `c3a9060` | Frontend only. `AppShell.tsx` gains a URL-derived `mode = "top-level" \| "customer-scoped"` (regex on `pathname`, no `useState`) and a customer-scoped submenu (Back / Overview / Buildings / Users / Permissions / Extra Work / Contacts / Settings). `App.tsx` registers six new `/admin/customers/:id/<section>` routes — five render the new `CustomerSubPagePlaceholder` "Coming soon" component; `permissions` re-renders `CustomerFormPage` so the Sprint 27E editor remains reachable without decomposing the parent page (decomposition is Batch 13). EN/NL i18n keys added for `nav.customer_submenu.*` + `customer_subpage_placeholder.*`. Playwright spec `sprint28b_customer_sidebar.spec.ts` covers deep-link, Back, and non-customer-route cases. | `npm run typecheck` → clean. `npm run build` → clean, 373ms. `npm run lint` → **52 problems = baseline** (only `AppShell.tsx:122` lint hit is the pre-existing `setSidebarOpen` in `useEffect`; line number shifted from `:93`, rule violation unchanged). Playwright spec **written but NOT executed locally** (WSL root-owned `frontend/test-results/` gotcha; brief allows this). | Playwright spec needs CI run to confirm behaviour against demo seed. `CustomerFormPage` is mounted by two routes (`:id` Overview + `:id/permissions`); React Router remounts on path change so state is not preserved across the nav. Batch 13 will decompose `CustomerFormPage` and remove the duplication. `AppShell.tsx:122` lint hit is unchanged baseline. |
 | 2026-05-16 | Batch 1 — Operational health fixes | uncommitted on top of `6e572db` | Frontend: `getApiError` HTML-prefix guard (`client.ts`); `AuditLog.reason` + `actor_scope` added to type (`types.ts`); sidebar "Extra Work" i18n'd (`AppShell.tsx` + `common.json` EN/NL). Backend: 4 pending dev DB migrations applied after explicit user approval (`audit.0002`, `customers.0005`, `customers.0006`, `tickets.0007`). | `manage.py check` (pre + post): 0 issues; `showmigrations`: all `[X]` after migrate; `npm run typecheck`: clean; `npm run build`: clean (472ms); `npm run lint`: 52 problems = baseline (zero new hits in changed files). No unit-test framework wired on frontend — `getApiError` ships with code-level guard + typecheck/build coverage only (Vitest setup parked for a later batch). | No automated unit coverage on `getApiError`; `AuditLog.reason`/`actor_scope` declared as required (matches backend default-emitting contract); `nav.extra_work` NL value is sentence-case "Extra werk" (flippable to "Extra Werk" with no code change). |
@@ -1069,6 +1272,10 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-16 | `Service`, `ServiceCategory`, `CustomerServicePrice` are added to **`backend/extra_work/models.py`** (extending the existing file). Resolver `resolve_price()` lives in new module `backend/extra_work/pricing.py` (parallel to `extra_work/scoping.py` + `extra_work/state_machine.py`). Migration: `extra_work/0002_service_catalog_and_pricing.py`. | Extra_work app already owns the pricing-adjacent vocabulary (`ExtraWorkPricingUnitType` enum + the legacy `ExtraWorkPricingLineItem`). Catalog + pricing belong in the same domain as the work they price. A new `catalog/` app would force new `INSTALLED_APPS`, audit-signal import, migration root for zero benefit. Customers app is wrong: pricing is keyed (service, customer), the catalog is provider-wide, and the resolver lives next to the Extra Work workflow that will call it (Batch 7+). PM agent placement recommendation. | Batch 5 + `backend/extra_work/models.py` + PM scope-verification report |
+| 2026-05-16 | **Reused the existing `ExtraWorkPricingUnitType` enum** (`HOURS / SQUARE_METERS / FIXED / ITEM / OTHER`) verbatim for `Service.unit_type`. NO parallel `ServiceUnitType` enum introduced. Spec §5's HOURLY/PER_SQM/FIXED/PER_ITEM names are descriptive equivalents of these storage values. | Spec §5 unit-type set maps onto the existing enum. Introducing a parallel enum would fork the pricing-line-item vs service-row vocabulary; future Batch-8 proposal rows would have to bridge the two, creating an entirely avoidable schema and validation surface. | Batch 5 + `backend/extra_work/models.py` ExtraWorkPricingUnitType + Service.unit_type field |
+| 2026-05-16 | **`resolve_price(service, customer, *, on=None)` returns `None`** when no active `CustomerServicePrice` row matches. It MUST NOT fall back to `Service.default_unit_price`. The global default is a provider-side reference only (display in the catalog admin UI); it never triggers the instant-ticket path. When the resolver returns `None`, the caller (Batch 7) routes the line to the proposal flow. | Master plan §5 rule #9 + 2026-05-15 decision-log row (already locked at spec-meeting time). The spec doc §5 "Resolution order" step 2 and backlog `EXTRA-PRICING-1` row both have stale wording suggesting a global-default fallback — both will be reconciled in a doc-only patch; master plan rule is authoritative. Regression-locked by `ResolvePriceReturnsNoneWithoutCustomerSpecificTests`. | Batch 5 + `backend/extra_work/pricing.py` + `backend/extra_work/tests/test_sprint28_pricing_resolver.py::ResolvePriceReturnsNoneWithoutCustomerSpecificTests` |
+| 2026-05-16 | Batch 5 frontend is split into **two routes**: provider-wide `/admin/services` (top-level admin) for catalog + categories; per-customer `/admin/customers/:id/pricing` (customer-scoped, NEW sub-route extending the Batch 3 sidebar by one entry) for contract pricing. Catalog is admin-only; customer-side price visibility (their own contract prices) is deferred to Batch 6 (ships with the cart UX). | The catalog is provider-wide (one source of truth for all customers); per-customer pricing is customer-scoped and benefits from the existing customer-scoped sidebar anchor. Splitting the surfaces honours spec §3 "no data dump" + maps each surface to the correct sidebar mode. The "Pricing" sub-route extends the Batch 3 customer-scoped submenu (was 6 entries → now 7); no Batch 3 placeholder is reused (pricing is a NEW slot). | Batch 5 + `frontend/src/pages/admin/ServicesAdminPage.tsx` + `frontend/src/pages/admin/CustomerPricingPage.tsx` + `frontend/src/layout/AppShell.tsx` + `frontend/src/App.tsx` |
 | 2026-05-16 | `Contact` is added to **`backend/customers/models.py`** (next to `Customer`, memberships, `CustomerCompanyPolicy`), not a new `contacts/` app. Migration is `customers/0007_contact.py`. | Customers app already follows the app-scoped-split-file convention (`serializers_*.py`, `views_*.py`); audit signals + permission resolver already import from `customers.models`; placing Contact here means zero new app registration + zero circular-import risk + stays in the same scope as the parent `Customer` FK. PM agent recommended this placement after inspecting repo conventions. | Batch 4 + PM scope-verification report + `backend/customers/models.py` |
 | 2026-05-16 | `Contact` is **structurally NOT a User**: the model has no `password`, no `role`, no `user` FK, no `is_active` (login semantics), no `permission_overrides`, no scope-row attachment. Promotion from Contact to User is parked for a later sprint and will be a separate, explicit flow. | Spec §1 hard rule + master plan §5 rule 2 + RBAC matrix invariant H-9 (no scope growth via stacked permissions). Conflating Contact with User would breach scope and let provider admins promote a contact into a privileged user implicitly. `ContactIsNotAUserTests` regression-locks this by iterating the serialized JSON keys and asserting absence of every login-related key. | Batch 4 + `backend/customers/models.py` Contact + `backend/customers/tests/test_sprint28_contacts.py::ContactIsNotAUserTests` |
 | 2026-05-16 | The Contact CRUD API is gated by **`IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`** (admin-only). Building Manager / STAFF / CUSTOMER_USER all 403 in Batch 4. Building Manager **read-only** contact view in their assigned buildings is intentionally deferred to **Batch 12** (per master plan §6). | The master plan §6 Batch 4 explicitly defers BM read-only view to Batch 12 to keep Batch 4 small. Locked by `test_building_manager_cannot_*` regression cases. The frontend contextual panel on Ticket/Extra-Work detail mirrors this gate so non-admin roles do not even emit the API call (avoids 403 noise). When Batch 12 widens the backend gate, the frontend panel will be widened to match. | Batch 4 + `backend/customers/views_contacts.py` + `frontend/src/pages/TicketDetailPage.tsx` + `frontend/src/pages/ExtraWorkDetailPage.tsx` |

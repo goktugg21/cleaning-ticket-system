@@ -1,6 +1,11 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
+from extra_work.views_pricing import (
+    CustomerServicePriceDetailView,
+    CustomerServicePriceListCreateView,
+)
+
 from .views import CustomerViewSet
 from .views_contacts import (
     CustomerContactDetailView,
@@ -70,5 +75,20 @@ urlpatterns = [
         "<int:customer_id>/contacts/<int:contact_id>/",
         CustomerContactDetailView.as_view(),
         name="customer-contact-detail",
+    ),
+    # Sprint 28 Batch 5 — per-customer service contract prices.
+    # View classes live in extra_work/views_pricing.py (the model
+    # app owns the views); the URL anchor is here so the path is
+    # customer-scoped and the IsSuperAdminOrCompanyAdminForCompany
+    # gate resolves on the Customer object.
+    path(
+        "<int:customer_id>/pricing/",
+        CustomerServicePriceListCreateView.as_view(),
+        name="customer-pricing-list",
+    ),
+    path(
+        "<int:customer_id>/pricing/<int:price_id>/",
+        CustomerServicePriceDetailView.as_view(),
+        name="customer-pricing-detail",
     ),
 ] + router.urls

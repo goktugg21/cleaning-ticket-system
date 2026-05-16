@@ -25,9 +25,11 @@ import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
+import { CustomerPricingPage } from "./pages/admin/CustomerPricingPage";
 import { CustomerSubPagePlaceholder } from "./pages/admin/CustomerSubPagePlaceholder";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
+import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserFormPage } from "./pages/admin/UserFormPage";
 import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
@@ -253,11 +255,32 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 28 Batch 5 — per-customer contract pricing. The
+              real page; mirrors the Batch 4 contacts shape. */}
+          <Route
+            path="/admin/customers/:id/pricing"
+            element={
+              <AdminRoute>
+                <CustomerPricingPage />
+              </AdminRoute>
+            }
+          />
           <Route
             path="/admin/customers/:id/settings"
             element={
               <AdminRoute>
                 <CustomerSubPagePlaceholder />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 28 Batch 5 — provider-wide service catalog. Single
+              page with two tabs (Services + Categories) to honour
+              §3 "no data dumps". */}
+          <Route
+            path="/admin/services"
+            element={
+              <AdminRoute>
+                <ServicesAdminPage />
               </AdminRoute>
             }
           />

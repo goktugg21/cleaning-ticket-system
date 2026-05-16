@@ -49,6 +49,11 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from extra_work.models import (
+    CustomerServicePrice,
+    Service,
+    ServiceCategory,
+)
 from tickets.models import StaffAssignmentRequest, TicketStaffAssignment
 
 from . import context
@@ -545,6 +550,14 @@ def _connect():
         # notes / building) produce meaningful UPDATE diffs, so the
         # full CRUD trio is the right shape.
         Contact,
+        # Sprint 28 Batch 5 — provider service catalog
+        # (ServiceCategory + Service) and per-customer contract
+        # prices (CustomerServicePrice). All three carry editable
+        # fields (e.g. is_active toggles, price / VAT updates,
+        # validity-window changes) that need full CRUD audit.
+        ServiceCategory,
+        Service,
+        CustomerServicePrice,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")

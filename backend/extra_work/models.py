@@ -336,6 +336,188 @@ class ExtraWorkPricingLineItem(models.Model):
         super().save(*args, **kwargs)
 
 
+class ServiceCategory(models.Model):
+    """
+    Sprint 28 Batch 5 — provider-side service catalog: top-level
+    category groupings.
+
+    Categories are global (provider-wide). They are the parent rows
+    for `Service` entries that customers eventually pick from when
+    composing an Extra Work cart. A category can be soft-deactivated
+    by toggling `is_active=False`; deletion is blocked while any
+    `Service` row still references it (`PROTECT` on the FK below).
+
+    Distinct from `ExtraWorkCategory` (the legacy text-choices enum
+    on `ExtraWorkRequest.category`): that enum classifies a single
+    ad-hoc Extra Work request; this row drives the catalog of
+    bookable services with their own per-customer pricing tables.
+    """
+
+    name = models.CharField(max_length=128, unique=True)
+    description = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "service category"
+        verbose_name_plural = "service categories"
+
+    def __str__(self):
+        return self.name
+
+
+class Service(models.Model):
+    """
+    Sprint 28 Batch 5 — provider-side service catalog row.
+
+    A `Service` is one bookable line in the catalog: it sits under a
+    `ServiceCategory`, declares its `unit_type` (re-using the existing
+    `ExtraWorkPricingUnitType` enum — HOURS / SQUARE_METERS / FIXED /
+    ITEM / OTHER), and ships with a `default_unit_price` that is the
+    provider-side reference number shown in the catalog UI.
+
+    The default price is NOT used by the instant-ticket resolver
+    (`extra_work.pricing.resolve_price`). Per the master plan §5 rule
+    #9, the only price that triggers the instant-ticket flow is the
+    customer-specific `CustomerServicePrice` row. The default lives
+    here purely as catalog metadata: a baseline operators can quote
+    from when no contract row exists yet.
+
+    `default_vat_pct` defaults to 21.00 (Dutch BTW) per the
+    2026-05-15 stakeholder meeting spec §5; per-customer rows can
+    override.
+    """
+
+    category = models.ForeignKey(
+        ServiceCategory,
+        on_delete=models.PROTECT,
+        related_name="services",
+    )
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    unit_type = models.CharField(
+        max_length=20,
+        choices=ExtraWorkPricingUnitType.choices,
+    )
+    default_unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text=(
+            "Provider-side reference price for the catalog UI. NOT "
+            "consumed by the instant-ticket pricing resolver — a "
+            "customer-specific CustomerServicePrice row is required "
+            "before a line can skip the proposal phase."
+        ),
+    )
+    default_vat_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("21.00"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["category__name", "name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "name"],
+                name="uniq_service_name_per_category",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.category.name} / {self.name}"
+
+
+class CustomerServicePrice(models.Model):
+    """
+    Sprint 28 Batch 5 — per-customer contract price for a Service.
+
+    A `CustomerServicePrice` row is the only thing the instant-ticket
+    pricing resolver (`extra_work.pricing.resolve_price`) cares about.
+    Its presence, validity window and `is_active` flag together decide
+    whether an Extra Work cart line skips the proposal phase and
+    spawns operational tickets directly (master plan §5 rule #9 +
+    2026-05-15 decision log).
+
+    `valid_from` is required. `valid_to` is optional — leaving it
+    NULL means the contract row applies open-endedly from
+    `valid_from` onward. `is_active=False` disables the row without
+    losing its audit history (mirrors the `CustomerUserBuildingAccess`
+    pattern).
+
+    `service` uses PROTECT so a Service cannot be deleted while any
+    customer still has a contract pointing at it. `customer` uses
+    CASCADE: contract rows are owned by their customer and should not
+    outlive a customer-org deletion.
+    """
+
+    service = models.ForeignKey(
+        Service,
+        on_delete=models.PROTECT,
+        related_name="customer_prices",
+    )
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="service_prices",
+    )
+
+    unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    vat_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("21.00"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+
+    valid_from = models.DateField()
+    valid_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["customer__name", "service__name", "-valid_from", "id"]
+        indexes = [
+            # Hot path for the resolver (filter by service + customer,
+            # order by -valid_from). The composite index keeps it index-
+            # only even as the table grows.
+            models.Index(
+                fields=["service", "customer", "-valid_from"],
+                name="idx_csp_lookup",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.customer.name} — {self.service.name} @ {self.unit_price}"
+        )
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+
+        if self.valid_to is not None and self.valid_from is not None:
+            if self.valid_to < self.valid_from:
+                raise ValidationError(
+                    {"valid_to": "valid_to must be on or after valid_from."}
+                )
+
+
 class ExtraWorkStatusHistory(models.Model):
     """
     Append-only audit log of every successful state transition on an

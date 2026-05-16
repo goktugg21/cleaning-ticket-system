@@ -13,11 +13,20 @@ import type {
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
+  CustomerServicePrice,
+  CustomerServicePriceCreatePayload,
+  CustomerServicePriceUpdatePayload,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
   InvitationAdmin,
   PaginatedResponse,
   Role,
+  Service,
+  ServiceCategory,
+  ServiceCategoryCreatePayload,
+  ServiceCategoryUpdatePayload,
+  ServiceCreatePayload,
+  ServiceUpdatePayload,
   StaffAssignmentRequest,
   StaffAssignmentRequestStatus,
   StaffProfileAdmin,
@@ -849,4 +858,185 @@ export async function removeTicketStaffAssignment(
   userId: number,
 ): Promise<void> {
   await api.delete(`/tickets/${ticketId}/staff-assignments/${userId}/`);
+}
+
+// ---- Sprint 28 Batch 5 — Service catalog (provider-wide) ----------------
+//
+// `/api/services/categories/` and `/api/services/` — list + create.
+// `/api/services/categories/<id>/` and `/api/services/<id>/` — detail /
+// update / delete.
+//
+// Backend permission gate: SUPER_ADMIN or COMPANY_ADMIN of ANY company.
+// CUSTOMER_USER / BUILDING_MANAGER / STAFF never reach these views.
+// List endpoints accept `?category=<id>` (services only) and
+// `?is_active=true|false` filters. Lists return the standard
+// {count, next, previous, results} envelope; we unwrap to a flat array
+// for the consuming page (the catalog page renders the full list in
+// one go — pagination is not a UX concern at this batch's row count).
+
+export interface ServiceCategoryListParams {
+  is_active?: boolean;
+}
+
+export async function listServiceCategories(
+  params: ServiceCategoryListParams = {},
+): Promise<ServiceCategory[]> {
+  const query: Record<string, string> = {};
+  if (params.is_active !== undefined) {
+    query.is_active = params.is_active ? "true" : "false";
+  }
+  const response = await api.get<PaginatedResponse<ServiceCategory>>(
+    "/services/categories/",
+    { params: query },
+  );
+  return response.data.results;
+}
+
+export async function createServiceCategory(
+  payload: ServiceCategoryCreatePayload,
+): Promise<ServiceCategory> {
+  const response = await api.post<ServiceCategory>(
+    "/services/categories/",
+    payload,
+  );
+  return response.data;
+}
+
+export async function getServiceCategory(id: number): Promise<ServiceCategory> {
+  const response = await api.get<ServiceCategory>(`/services/categories/${id}/`);
+  return response.data;
+}
+
+export async function updateServiceCategory(
+  id: number,
+  payload: ServiceCategoryUpdatePayload,
+): Promise<ServiceCategory> {
+  const response = await api.patch<ServiceCategory>(
+    `/services/categories/${id}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteServiceCategory(id: number): Promise<void> {
+  await api.delete(`/services/categories/${id}/`);
+}
+
+export interface ServiceListParams {
+  category?: number;
+  is_active?: boolean;
+}
+
+export async function listServices(
+  params: ServiceListParams = {},
+): Promise<Service[]> {
+  const query: Record<string, string | number> = {};
+  if (params.category !== undefined) {
+    query.category = params.category;
+  }
+  if (params.is_active !== undefined) {
+    query.is_active = params.is_active ? "true" : "false";
+  }
+  const response = await api.get<PaginatedResponse<Service>>("/services/", {
+    params: query,
+  });
+  return response.data.results;
+}
+
+export async function createService(
+  payload: ServiceCreatePayload,
+): Promise<Service> {
+  const response = await api.post<Service>("/services/", payload);
+  return response.data;
+}
+
+export async function getService(id: number): Promise<Service> {
+  const response = await api.get<Service>(`/services/${id}/`);
+  return response.data;
+}
+
+export async function updateService(
+  id: number,
+  payload: ServiceUpdatePayload,
+): Promise<Service> {
+  const response = await api.patch<Service>(`/services/${id}/`, payload);
+  return response.data;
+}
+
+export async function deleteService(id: number): Promise<void> {
+  await api.delete(`/services/${id}/`);
+}
+
+// ---- Sprint 28 Batch 5 — Per-customer pricing ---------------------------
+//
+// `/api/customers/<customer_id>/pricing/` — list + create.
+// `/api/customers/<customer_id>/pricing/<price_id>/` — detail / update /
+// delete.
+//
+// Backend permission gate: SUPER_ADMIN or COMPANY_ADMIN of the customer's
+// provider company. Cross-provider COMPANY_ADMIN attempts return 403.
+// Cross-customer price id smuggling is blocked by the detail view (404
+// when the price's customer does not match the URL).
+//
+// List filter `?service=<id>` narrows the rows to one service. Default
+// backend ordering is most-recent active row first, so a fresh PATCH
+// floats to the top of the list without explicit re-sort.
+
+export interface CustomerServicePriceListParams {
+  service?: number;
+}
+
+export async function listCustomerPrices(
+  customerId: number,
+  params: CustomerServicePriceListParams = {},
+): Promise<CustomerServicePrice[]> {
+  const query: Record<string, string | number> = {};
+  if (params.service !== undefined) {
+    query.service = params.service;
+  }
+  const response = await api.get<PaginatedResponse<CustomerServicePrice>>(
+    `/customers/${customerId}/pricing/`,
+    { params: query },
+  );
+  return response.data.results;
+}
+
+export async function createCustomerPrice(
+  customerId: number,
+  payload: CustomerServicePriceCreatePayload,
+): Promise<CustomerServicePrice> {
+  const response = await api.post<CustomerServicePrice>(
+    `/customers/${customerId}/pricing/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function getCustomerPrice(
+  customerId: number,
+  priceId: number,
+): Promise<CustomerServicePrice> {
+  const response = await api.get<CustomerServicePrice>(
+    `/customers/${customerId}/pricing/${priceId}/`,
+  );
+  return response.data;
+}
+
+export async function updateCustomerPrice(
+  customerId: number,
+  priceId: number,
+  payload: CustomerServicePriceUpdatePayload,
+): Promise<CustomerServicePrice> {
+  const response = await api.patch<CustomerServicePrice>(
+    `/customers/${customerId}/pricing/${priceId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteCustomerPrice(
+  customerId: number,
+  priceId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/pricing/${priceId}/`);
 }

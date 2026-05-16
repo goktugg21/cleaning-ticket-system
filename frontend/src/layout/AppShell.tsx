@@ -11,10 +11,12 @@ import {
   MailPlus,
   MapPin,
   Menu,
+  Package,
   PlusCircle,
   Receipt,
   Settings,
   ShieldCheck,
+  Tag,
   UserCog,
   Users,
   X,
@@ -229,6 +231,17 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.customer_submenu.permissions")}
               </NavLink>
+              {/* Sprint 28 Batch 5 — per-customer pricing. */}
+              <NavLink
+                to={`/admin/customers/${sidebar.customerId}/pricing`}
+                className={navClass}
+                data-testid="sidebar-customer-pricing"
+              >
+                <span className="nav-icon">
+                  <Tag size={16} strokeWidth={2} />
+                </span>
+                {t("nav.customer_submenu.pricing")}
+              </NavLink>
               <NavLink
                 to={`/admin/customers/${sidebar.customerId}/extra-work`}
                 className={navClass}
@@ -320,6 +333,17 @@ export function AppShell({ children }: AppShellProps) {
                       <Users size={16} strokeWidth={2} />
                     </span>
                     {t("nav.customers")}
+                  </NavLink>
+                  {/* Sprint 28 Batch 5 — provider-wide service catalog. */}
+                  <NavLink
+                    to="/admin/services"
+                    className={navClass}
+                    data-testid="sidebar-services"
+                  >
+                    <span className="nav-icon">
+                      <Package size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.services")}
                   </NavLink>
                   <NavLink to="/admin/users" className={navClass}>
                     <span className="nav-icon">

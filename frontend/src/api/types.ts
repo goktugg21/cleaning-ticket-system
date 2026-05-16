@@ -668,3 +668,109 @@ export interface ContactCreatePayload {
 
 // PATCH semantics — every field optional.
 export type ContactUpdatePayload = Partial<ContactCreatePayload>;
+
+// ---------------------------------------------------------------------------
+// Sprint 28 Batch 5 — Service catalog (provider-wide) + per-customer pricing
+// ---------------------------------------------------------------------------
+//
+// A `ServiceCategory` groups related `Service` rows (e.g. "Deep cleaning",
+// "Window cleaning"). A `Service` is the catalog entry the provider offers,
+// with a *reference* default price/VAT used for display only. The instant-
+// ticket gate consults `CustomerServicePrice` rows exclusively — the
+// `default_unit_price` on Service is NOT the resolver fallback.
+//
+// Pricing resolver order (decided by the master plan, frontend just renders):
+//   1. Active CustomerServicePrice for (customer, service) → use it.
+//   2. Otherwise → no agreed price; proposal phase required.
+//
+// Backend serializers live under `backend/services/serializers*.py` and
+// `backend/customers/serializers_pricing.py`. Permission gate on every
+// catalog + pricing endpoint: SUPER_ADMIN or COMPANY_ADMIN of the customer's
+// provider company. CUSTOMER_USER, STAFF, BUILDING_MANAGER never reach them.
+
+// Unit type vocabulary mirrors the backend `ExtraWorkPricingUnitType`
+// enum already used by Extra Work proposal line items. The 2026-05-15
+// meeting (§5) uses the labels HOURLY / PER_SQM / FIXED / PER_ITEM —
+// those map onto the storage values HOURS / SQUARE_METERS / FIXED / ITEM.
+// OTHER is the historical catch-all and is kept for parity with
+// `ExtraWorkUnitType`.
+export type ServiceUnitType =
+  | "HOURS"
+  | "SQUARE_METERS"
+  | "FIXED"
+  | "ITEM"
+  | "OTHER";
+
+export interface ServiceCategory {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceCategoryCreatePayload {
+  name: string;
+  description?: string;
+  is_active?: boolean;
+}
+
+export type ServiceCategoryUpdatePayload = Partial<ServiceCategoryCreatePayload>;
+
+export interface Service {
+  id: number;
+  category: number;
+  category_name: string;
+  name: string;
+  description: string;
+  unit_type: ServiceUnitType;
+  // DRF serializes Decimal as a string to preserve precision; the form
+  // converts to/from number locally and re-emits as a string on submit.
+  default_unit_price: string;
+  default_vat_pct: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceCreatePayload {
+  category: number;
+  name: string;
+  description?: string;
+  unit_type: ServiceUnitType;
+  default_unit_price: string;
+  default_vat_pct: string;
+  is_active?: boolean;
+}
+
+export type ServiceUpdatePayload = Partial<ServiceCreatePayload>;
+
+// Per-customer contract price. Only an active row triggers the instant-
+// ticket path (Batch 7); absence means the request must go through the
+// proposal phase. `valid_to` null means open-ended.
+export interface CustomerServicePrice {
+  id: number;
+  customer: number;
+  service: number;
+  service_name: string;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerServicePriceCreatePayload {
+  service: number;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to?: string | null;
+  is_active?: boolean;
+}
+
+export type CustomerServicePriceUpdatePayload =
+  Partial<CustomerServicePriceCreatePayload>;
