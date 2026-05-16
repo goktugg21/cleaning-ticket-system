@@ -1,4 +1,10 @@
 // Sprint 26C — Extra Work detail page.
+// Sprint 28 Batch 6 — translated through the `extra_work` i18n
+// namespace; also renders the new cart `line_items` array and the
+// `routing_decision` badge. The pricing-proposal panel, workflow
+// transitions, and provider override block are functionally
+// unchanged — only the user-visible strings were threaded through
+// `t()`.
 //
 // Role-aware view:
 //   * CUSTOMER_USER: details, pricing line items (without
@@ -31,40 +37,59 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import type {
   Contact,
+  ExtraWorkCategory,
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
   ExtraWorkUnitType,
+  ExtraWorkUrgency,
   Role,
+  ServiceUnitType,
 } from "../api/types";
 
 
-const STATUS_LABELS: Record<ExtraWorkStatus, string> = {
-  REQUESTED: "Requested",
-  UNDER_REVIEW: "Under review",
-  PRICING_PROPOSED: "Pricing proposed",
-  CUSTOMER_APPROVED: "Customer approved",
-  CUSTOMER_REJECTED: "Customer rejected",
-  CANCELLED: "Cancelled",
+const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
+  REQUESTED: "status.requested",
+  UNDER_REVIEW: "status.under_review",
+  PRICING_PROPOSED: "status.pricing_proposed",
+  CUSTOMER_APPROVED: "status.customer_approved",
+  CUSTOMER_REJECTED: "status.customer_rejected",
+  CANCELLED: "status.cancelled",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  DEEP_CLEANING: "Deep cleaning",
-  WINDOW_CLEANING: "Window cleaning",
-  FLOOR_MAINTENANCE: "Floor maintenance",
-  SANITARY_SERVICE: "Sanitary service",
-  WASTE_REMOVAL: "Waste removal",
-  FURNITURE_MOVING: "Furniture moving",
-  EVENT_CLEANING: "Event cleaning",
-  EMERGENCY_CLEANING: "Emergency cleaning",
-  OTHER: "Other",
+const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
+  DEEP_CLEANING: "category.deep_cleaning",
+  WINDOW_CLEANING: "category.window_cleaning",
+  FLOOR_MAINTENANCE: "category.floor_maintenance",
+  SANITARY_SERVICE: "category.sanitary_service",
+  WASTE_REMOVAL: "category.waste_removal",
+  FURNITURE_MOVING: "category.furniture_moving",
+  EVENT_CLEANING: "category.event_cleaning",
+  EMERGENCY_CLEANING: "category.emergency_cleaning",
+  OTHER: "category.other",
 };
 
-const UNIT_TYPES: { value: ExtraWorkUnitType; label: string }[] = [
-  { value: "HOURS", label: "Hours" },
-  { value: "SQUARE_METERS", label: "m²" },
-  { value: "FIXED", label: "Fixed price" },
-  { value: "ITEM", label: "Per item" },
-  { value: "OTHER", label: "Other" },
+const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
+  NORMAL: "urgency.normal",
+  HIGH: "urgency.high",
+  URGENT: "urgency.urgent",
+};
+
+// Sprint 26C ExtraWorkUnitType and Sprint 28 B5 ServiceUnitType
+// share the same storage values; one i18n map covers both.
+const UNIT_TYPE_I18N_KEY: Record<ExtraWorkUnitType | ServiceUnitType, string> = {
+  HOURS: "unit_type.hours",
+  SQUARE_METERS: "unit_type.square_meters",
+  FIXED: "unit_type.fixed",
+  ITEM: "unit_type.item",
+  OTHER: "unit_type.other",
+};
+
+const UNIT_TYPE_VALUES: ExtraWorkUnitType[] = [
+  "HOURS",
+  "SQUARE_METERS",
+  "FIXED",
+  "ITEM",
+  "OTHER",
 ];
 
 const PROVIDER_ROLES: Set<Role> = new Set([
@@ -100,7 +125,7 @@ function fmtMoney(value: string | null | undefined): string {
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
-  const { t } = useTranslation("common");
+  const { t } = useTranslation(["extra_work", "common"]);
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -210,9 +235,9 @@ export function ExtraWorkDetailPage() {
           <div>
             <Link to="/extra-work" className="link-back">
               <ChevronLeft size={14} strokeWidth={2.5} />
-              Back to Extra Work
+              {t("back_to_extra_work")}
             </Link>
-            <h2 className="page-title">Extra Work not found</h2>
+            <h2 className="page-title">{t("detail.not_found")}</h2>
           </div>
         </div>
         {error && (
@@ -289,7 +314,7 @@ export function ExtraWorkDetailPage() {
     event.preventDefault();
     if (!id || !overrideDecision) return;
     if (!overrideReason.trim()) {
-      setOverrideError("Override reason is required.");
+      setOverrideError(t("detail.override_reason_required"));
       return;
     }
     setOverrideError("");
@@ -314,7 +339,7 @@ export function ExtraWorkDetailPage() {
     event.preventDefault();
     if (!id) return;
     if (!pricingForm.description.trim()) {
-      setPricingError("Description is required.");
+      setPricingError(t("detail.pricing_error_description_required"));
       return;
     }
     setPricingError("");
@@ -358,21 +383,21 @@ export function ExtraWorkDetailPage() {
   }
 
   return (
-    <div>
+    <div data-testid="extra-work-detail-page">
       <div className="page-header">
         <div>
           <Link to="/extra-work" className="link-back">
             <ChevronLeft size={14} strokeWidth={2.5} />
-            Back to Extra Work
+            {t("back_to_extra_work")}
           </Link>
           <h2 className="page-title">{ew.title}</h2>
           <p className="page-sub">
-            {STATUS_LABELS[ew.status]} ·{" "}
-            {CATEGORY_LABELS[ew.category] ?? ew.category}
+            {t(STATUS_I18N_KEY[ew.status])} ·{" "}
+            {t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}
             {ew.category === "OTHER" && ew.category_other_text
               ? ` — ${ew.category_other_text}`
               : ""}{" "}
-            · {ew.urgency}
+            · {t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}
           </p>
         </div>
       </div>
@@ -386,34 +411,42 @@ export function ExtraWorkDetailPage() {
       {/* ----- Core details ----- */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="form-section">
-          <div className="form-section-title">Details</div>
+          <div className="form-section-title">
+            {t("detail.details_section_title")}
+          </div>
           <div className="form-2col">
             <div>
-              <div className="muted small">Building</div>
+              <div className="muted small">{t("detail.field_building")}</div>
               <div>{ew.building_name}</div>
             </div>
             <div>
-              <div className="muted small">Customer</div>
+              <div className="muted small">{t("detail.field_customer")}</div>
               <div>{ew.customer_name}</div>
             </div>
           </div>
           <div className="form-2col">
             <div>
-              <div className="muted small">Requested at</div>
+              <div className="muted small">
+                {t("detail.field_requested_at")}
+              </div>
               <div>{fmtDate(ew.requested_at)}</div>
             </div>
             <div>
-              <div className="muted small">Preferred date</div>
-              <div>{ew.preferred_date ?? "—"}</div>
+              <div className="muted small">
+                {t("detail.field_preferred_date")}
+              </div>
+              <div>{ew.preferred_date ?? t("detail.empty_dash")}</div>
             </div>
           </div>
           <div className="field">
-            <div className="muted small">Description</div>
+            <div className="muted small">{t("detail.field_description")}</div>
             <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
           </div>
           {ew.customer_visible_note && (
             <div className="field">
-              <div className="muted small">Note from provider</div>
+              <div className="muted small">
+                {t("detail.field_customer_visible_note")}
+              </div>
               <div style={{ whiteSpace: "pre-wrap" }}>
                 {ew.customer_visible_note}
               </div>
@@ -421,7 +454,9 @@ export function ExtraWorkDetailPage() {
           )}
           {ew.pricing_note && (
             <div className="field">
-              <div className="muted small">Pricing note</div>
+              <div className="muted small">
+                {t("detail.field_pricing_note")}
+              </div>
               <div style={{ whiteSpace: "pre-wrap" }}>{ew.pricing_note}</div>
             </div>
           )}
@@ -430,13 +465,17 @@ export function ExtraWorkDetailPage() {
               customer users. */}
           {isProvider && ew.manager_note && (
             <div className="field">
-              <div className="muted small">Internal manager note (provider only)</div>
+              <div className="muted small">
+                {t("detail.field_manager_note")}
+              </div>
               <div style={{ whiteSpace: "pre-wrap" }}>{ew.manager_note}</div>
             </div>
           )}
           {isProvider && ew.internal_cost_note && (
             <div className="field">
-              <div className="muted small">Internal cost note (provider only)</div>
+              <div className="muted small">
+                {t("detail.field_internal_cost_note")}
+              </div>
               <div style={{ whiteSpace: "pre-wrap" }}>
                 {ew.internal_cost_note}
               </div>
@@ -444,7 +483,7 @@ export function ExtraWorkDetailPage() {
           )}
           {isProvider && ew.override_at && (
             <div className="alert-warning" style={{ marginTop: 12 }}>
-              <strong>Provider override applied.</strong>
+              <strong>{t("detail.override_applied")}</strong>
               {ew.override_reason && (
                 <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>
                   {ew.override_reason}
@@ -455,6 +494,18 @@ export function ExtraWorkDetailPage() {
               </div>
             </div>
           )}
+
+          {/* Sprint 28 Batch 6 — routing decision badge. */}
+          <div className="field">
+            <div className="muted small">
+              {t("detail.routing_decision_label")}
+            </div>
+            <div data-testid="extra-work-detail-routing-decision">
+              {ew.routing_decision === "INSTANT"
+                ? t("detail.routing_decision_instant")
+                : t("detail.routing_decision_proposal")}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -471,14 +522,14 @@ export function ExtraWorkDetailPage() {
         >
           <div className="form-section">
             <div className="form-section-title">
-              {t("customer_contacts.panel_title")}
+              {t("customer_contacts.panel_title", { ns: "common" })}
             </div>
             {customerContacts.length === 0 ? (
               <div
                 className="muted small"
                 data-testid="extra-work-customer-contacts-empty"
               >
-                {t("customer_contacts.panel_empty")}
+                {t("customer_contacts.panel_empty", { ns: "common" })}
               </div>
             ) : (
               <ul
@@ -522,27 +573,94 @@ export function ExtraWorkDetailPage() {
         </div>
       )}
 
+      {/* ----- Cart line items (Sprint 28 Batch 6) ----- */}
+      <div
+        className="card"
+        style={{ marginBottom: 16 }}
+        data-testid="extra-work-detail-line-items"
+      >
+        <div className="form-section">
+          <div className="form-section-title">
+            {t("detail.line_items_section_title")}
+          </div>
+          {ew.line_items.length === 0 ? (
+            <div
+              className="muted small"
+              data-testid="extra-work-detail-line-items-empty"
+            >
+              {t("detail.line_items_empty")}
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>{t("detail.line_column_service")}</th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.line_column_quantity")}
+                  </th>
+                  <th>{t("detail.line_column_unit")}</th>
+                  <th>{t("detail.line_column_requested_date")}</th>
+                  <th>{t("detail.line_column_note")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ew.line_items.map((item) => (
+                  <tr
+                    key={item.id}
+                    data-testid="extra-work-detail-line-item-row"
+                  >
+                    <td>{item.service_name}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {fmtMoney(item.quantity)}
+                    </td>
+                    <td>
+                      {t(
+                        UNIT_TYPE_I18N_KEY[item.unit_type] ?? item.unit_type,
+                      )}
+                    </td>
+                    <td>{item.requested_date}</td>
+                    <td>{item.customer_note || t("detail.empty_dash")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {/* ----- Pricing line items ----- */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="form-section">
-          <div className="form-section-title">Pricing proposal</div>
+          <div className="form-section-title">
+            {t("detail.pricing_section_title")}
+          </div>
           {ew.pricing_line_items.length === 0 && (
-            <div className="muted small">
-              No pricing line items yet.
-            </div>
+            <div className="muted small">{t("detail.pricing_empty")}</div>
           )}
           {ew.pricing_line_items.length > 0 && (
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Description</th>
-                  <th>Unit</th>
-                  <th style={{ textAlign: "right" }}>Qty</th>
-                  <th style={{ textAlign: "right" }}>Unit price</th>
-                  <th style={{ textAlign: "right" }}>VAT %</th>
-                  <th style={{ textAlign: "right" }}>Subtotal</th>
-                  <th style={{ textAlign: "right" }}>VAT</th>
-                  <th style={{ textAlign: "right" }}>Total</th>
+                  <th>{t("detail.pricing_column_description")}</th>
+                  <th>{t("detail.pricing_column_unit")}</th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.pricing_column_qty")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.pricing_column_unit_price")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.pricing_column_vat_pct")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.pricing_column_subtotal")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.pricing_column_vat")}
+                  </th>
+                  <th style={{ textAlign: "right" }}>
+                    {t("detail.pricing_column_total")}
+                  </th>
                   {isProvider && <th />}
                 </tr>
               </thead>
@@ -565,7 +683,11 @@ export function ExtraWorkDetailPage() {
                         </div>
                       )}
                     </td>
-                    <td>{item.unit_type}</td>
+                    <td>
+                      {t(
+                        UNIT_TYPE_I18N_KEY[item.unit_type] ?? item.unit_type,
+                      )}
+                    </td>
                     <td style={{ textAlign: "right" }}>
                       {fmtMoney(item.quantity)}
                     </td>
@@ -591,7 +713,7 @@ export function ExtraWorkDetailPage() {
                           className="btn btn-ghost btn-sm"
                           onClick={() => handleDeletePricingItem(item.id)}
                         >
-                          Remove
+                          {t("detail.pricing_remove_button")}
                         </button>
                       </td>
                     )}
@@ -617,21 +739,22 @@ export function ExtraWorkDetailPage() {
           {isProvider && (
             <>
               {pricingError && (
-                <div className="alert-error" style={{ marginTop: 12 }} role="alert">
+                <div
+                  className="alert-error"
+                  style={{ marginTop: 12 }}
+                  role="alert"
+                >
                   {pricingError}
                 </div>
               )}
-              <form
-                onSubmit={handleAddPricingItem}
-                style={{ marginTop: 12 }}
-              >
+              <form onSubmit={handleAddPricingItem} style={{ marginTop: 12 }}>
                 <div className="form-2col">
                   <div className="field">
                     <label
                       className="field-label"
                       htmlFor="pricing-description"
                     >
-                      Description
+                      {t("detail.pricing_form_description")}
                     </label>
                     <input
                       id="pricing-description"
@@ -644,16 +767,15 @@ export function ExtraWorkDetailPage() {
                           description: event.target.value,
                         }))
                       }
-                      placeholder="e.g. Crew time on Saturday"
+                      placeholder={t(
+                        "detail.pricing_form_description_placeholder",
+                      )}
                       required
                     />
                   </div>
                   <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor="pricing-unit-type"
-                    >
-                      Unit
+                    <label className="field-label" htmlFor="pricing-unit-type">
+                      {t("detail.pricing_form_unit")}
                     </label>
                     <select
                       id="pricing-unit-type"
@@ -666,9 +788,9 @@ export function ExtraWorkDetailPage() {
                         }))
                       }
                     >
-                      {UNIT_TYPES.map((u) => (
-                        <option key={u.value} value={u.value}>
-                          {u.label}
+                      {UNIT_TYPE_VALUES.map((value) => (
+                        <option key={value} value={value}>
+                          {t(UNIT_TYPE_I18N_KEY[value])}
                         </option>
                       ))}
                     </select>
@@ -677,7 +799,7 @@ export function ExtraWorkDetailPage() {
                 <div className="form-2col">
                   <div className="field">
                     <label className="field-label" htmlFor="pricing-qty">
-                      Quantity
+                      {t("detail.pricing_form_quantity")}
                     </label>
                     <input
                       id="pricing-qty"
@@ -696,8 +818,11 @@ export function ExtraWorkDetailPage() {
                     />
                   </div>
                   <div className="field">
-                    <label className="field-label" htmlFor="pricing-unit-price">
-                      Unit price
+                    <label
+                      className="field-label"
+                      htmlFor="pricing-unit-price"
+                    >
+                      {t("detail.pricing_form_unit_price")}
                     </label>
                     <input
                       id="pricing-unit-price"
@@ -719,7 +844,7 @@ export function ExtraWorkDetailPage() {
                 <div className="form-2col">
                   <div className="field">
                     <label className="field-label" htmlFor="pricing-vat">
-                      VAT %
+                      {t("detail.pricing_form_vat")}
                     </label>
                     <input
                       id="pricing-vat"
@@ -742,7 +867,7 @@ export function ExtraWorkDetailPage() {
                       className="field-label"
                       htmlFor="pricing-customer-note"
                     >
-                      Customer-visible explanation
+                      {t("detail.pricing_form_customer_note")}
                     </label>
                     <input
                       id="pricing-customer-note"
@@ -755,7 +880,9 @@ export function ExtraWorkDetailPage() {
                           customer_visible_note: event.target.value,
                         }))
                       }
-                      placeholder="Shown to the customer alongside this line"
+                      placeholder={t(
+                        "detail.pricing_form_customer_note_placeholder",
+                      )}
                     />
                   </div>
                 </div>
@@ -764,7 +891,7 @@ export function ExtraWorkDetailPage() {
                     className="field-label"
                     htmlFor="pricing-internal-note"
                   >
-                    Internal cost note (provider-only)
+                    {t("detail.pricing_form_internal_note")}
                   </label>
                   <input
                     id="pricing-internal-note"
@@ -777,7 +904,9 @@ export function ExtraWorkDetailPage() {
                         internal_cost_note: event.target.value,
                       }))
                     }
-                    placeholder="Never shown to the customer"
+                    placeholder={t(
+                      "detail.pricing_form_internal_note_placeholder",
+                    )}
                   />
                 </div>
                 <div
@@ -792,7 +921,9 @@ export function ExtraWorkDetailPage() {
                     className="btn btn-primary btn-sm"
                     disabled={pricingBusy}
                   >
-                    {pricingBusy ? "Adding…" : "Add pricing line"}
+                    {pricingBusy
+                      ? t("detail.pricing_form_submitting")
+                      : t("detail.pricing_form_submit")}
                   </button>
                 </div>
               </form>
@@ -804,7 +935,9 @@ export function ExtraWorkDetailPage() {
       {/* ----- Workflow / transitions ----- */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="form-section">
-          <div className="form-section-title">Workflow</div>
+          <div className="form-section-title">
+            {t("detail.workflow_section_title")}
+          </div>
 
           {/* Customer approve / reject — only when allowed by backend
               and the actor is a customer-side user. Override path
@@ -812,10 +945,12 @@ export function ExtraWorkDetailPage() {
           {(canApproveAsCustomer || canRejectAsCustomer) && (
             <div style={{ marginBottom: 8 }}>
               <p className="muted small" style={{ marginTop: 0 }}>
-                The provider has proposed pricing. Please review the
-                lines above and approve or reject.
+                {t("detail.workflow_customer_decision_helper")}
               </p>
-              <div className="status-actions" style={{ display: "flex", gap: 8 }}>
+              <div
+                className="status-actions"
+                style={{ display: "flex", gap: 8 }}
+              >
                 {canApproveAsCustomer && (
                   <button
                     type="button"
@@ -824,8 +959,8 @@ export function ExtraWorkDetailPage() {
                     onClick={() => handleCustomerDecision("CUSTOMER_APPROVED")}
                   >
                     {transitionBusy === "CUSTOMER_APPROVED"
-                      ? "Approving…"
-                      : "Approve pricing"}
+                      ? t("detail.workflow_approving")
+                      : t("detail.workflow_approve_button")}
                   </button>
                 )}
                 {canRejectAsCustomer && (
@@ -836,8 +971,8 @@ export function ExtraWorkDetailPage() {
                     onClick={() => handleCustomerDecision("CUSTOMER_REJECTED")}
                   >
                     {transitionBusy === "CUSTOMER_REJECTED"
-                      ? "Rejecting…"
-                      : "Reject pricing"}
+                      ? t("detail.workflow_rejecting")
+                      : t("detail.workflow_reject_button")}
                   </button>
                 )}
               </div>
@@ -846,7 +981,10 @@ export function ExtraWorkDetailPage() {
 
           {/* Provider-side workflow buttons (non-override transitions). */}
           {isProvider && providerWorkflowTargets.length > 0 && (
-            <div className="status-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div
+              className="status-actions"
+              style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+            >
               {providerWorkflowTargets.map((target) => (
                 <button
                   key={target}
@@ -856,8 +994,10 @@ export function ExtraWorkDetailPage() {
                   onClick={() => handleTransition(target)}
                 >
                   {transitionBusy === target
-                    ? "Working…"
-                    : `Move to ${STATUS_LABELS[target]}`}
+                    ? t("detail.workflow_working")
+                    : t("detail.workflow_move_to", {
+                        label: t(STATUS_I18N_KEY[target]),
+                      })}
                 </button>
               ))}
             </div>
@@ -867,7 +1007,7 @@ export function ExtraWorkDetailPage() {
             !canRejectAsCustomer &&
             providerWorkflowTargets.length === 0 && (
               <p className="muted small" style={{ margin: 0 }}>
-                No further transitions are available to you in this status.
+                {t("detail.workflow_no_transitions")}
               </p>
             )}
         </div>
@@ -886,15 +1026,12 @@ export function ExtraWorkDetailPage() {
                 }}
               >
                 <AlertTriangle size={16} strokeWidth={2.2} />
-                Provider override
+                {t("detail.override_section_title")}
               </span>
             </div>
             <div className="alert-warning" style={{ marginBottom: 12 }}>
-              <strong>Override the customer decision.</strong> Use only
-              when the customer has agreed by phone, email, or another
-              out-of-band channel. Every override is recorded in the
-              status history with your name, the chosen outcome, and
-              the reason you type below.
+              <strong>{t("detail.override_warning_title")}</strong>{" "}
+              {t("detail.override_warning_body")}
             </div>
 
             {overrideDecision === null ? (
@@ -905,7 +1042,7 @@ export function ExtraWorkDetailPage() {
                     className="btn btn-secondary btn-sm"
                     onClick={() => setOverrideDecision("CUSTOMER_APPROVED")}
                   >
-                    Override → Customer approved
+                    {t("detail.override_choose_approve")}
                   </button>
                 )}
                 {allowed.includes("CUSTOMER_REJECTED") && (
@@ -914,18 +1051,15 @@ export function ExtraWorkDetailPage() {
                     className="btn btn-secondary btn-sm"
                     onClick={() => setOverrideDecision("CUSTOMER_REJECTED")}
                   >
-                    Override → Customer rejected
+                    {t("detail.override_choose_reject")}
                   </button>
                 )}
               </div>
             ) : (
               <form onSubmit={handleOverrideSubmit}>
                 <div className="field">
-                  <label
-                    className="field-label"
-                    htmlFor="override-reason"
-                  >
-                    Reason for the override (required)
+                  <label className="field-label" htmlFor="override-reason">
+                    {t("detail.override_reason_label")}
                   </label>
                   <textarea
                     id="override-reason"
@@ -933,7 +1067,7 @@ export function ExtraWorkDetailPage() {
                     rows={3}
                     value={overrideReason}
                     onChange={(event) => setOverrideReason(event.target.value)}
-                    placeholder="e.g. Customer confirmed by phone on 2026-05-15 at 14:00. Their email follow-up is in the ticket thread."
+                    placeholder={t("detail.override_reason_placeholder")}
                     required
                   />
                 </div>
@@ -959,7 +1093,7 @@ export function ExtraWorkDetailPage() {
                       setOverrideError("");
                     }}
                   >
-                    Cancel
+                    {t("detail.override_cancel")}
                   </button>
                   <button
                     type="submit"
@@ -967,8 +1101,10 @@ export function ExtraWorkDetailPage() {
                     disabled={overrideBusy}
                   >
                     {overrideBusy
-                      ? "Submitting…"
-                      : `Confirm override → ${STATUS_LABELS[overrideDecision]}`}
+                      ? t("detail.override_submitting")
+                      : t("detail.override_confirm", {
+                          label: t(STATUS_I18N_KEY[overrideDecision]),
+                        })}
                   </button>
                 </div>
               </form>
@@ -981,7 +1117,7 @@ export function ExtraWorkDetailPage() {
         className="muted small"
         style={{ textAlign: "right", marginTop: 8 }}
       >
-        Updated {fmtDate(ew.updated_at)}
+        {t("detail.updated_at", { date: fmtDate(ew.updated_at) })}
       </div>
     </div>
   );

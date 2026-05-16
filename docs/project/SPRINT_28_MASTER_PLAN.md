@@ -1006,30 +1006,249 @@ can compute prices. Backend-heavy. ~1 sprint letter.
 Goal: reshape `ExtraWorkRequest` from single-line to parent + N line
 items; ship the customer cart UI. ~1 sprint letter.
 
-- [ ] Add `ExtraWorkRequestItem` (or equivalent cart-line model) with FK
+- [x] ~~Add `ExtraWorkRequestItem` (or equivalent cart-line model) with FK
       to `ExtraWorkRequest`, FK to `Service`, `quantity`, `requested_date`
       (per-line, per spec §4), `customer_note`. Migration with a data
-      backfill so existing single-line requests get one line item.
-- [ ] Update `ExtraWorkRequest` to be the parent record. Keep the request-
-      level `description` field (per §10 question 3 default).
-- [ ] Customer can add multiple contract services and/or custom requests
+      backfill so existing single-line requests get one line item.~~
+- [x] ~~Update `ExtraWorkRequest` to be the parent record. Keep the request-
+      level `description` field (per §10 question 3 default).~~
+- [x] ~~Customer can add multiple contract services and/or custom requests
       to one cart. Spec §4 branching rule: if any line lacks an agreed
       price, the whole cart routes to the proposal flow (Batch 8); else
-      instant-ticket (Batch 7).
-- [ ] Add per-line `quantity`, `unit_type` (denormalised from Service for
-      historical accuracy), `requested_date`, `customer_note`.
-- [ ] Separate the mixed cart according to the spec §4 rule (single
+      instant-ticket (Batch 7).~~
+- [x] ~~Add per-line `quantity`, `unit_type` (denormalised from Service for
+      historical accuracy), `requested_date`, `customer_note`.~~
+- [x] ~~Separate the mixed cart according to the spec §4 rule (single
       property on the request — e.g. `routing_decision = "INSTANT" |
-      "PROPOSAL"` — computed at submission time).
-- [ ] Rewrite [`frontend/src/pages/CreateExtraWorkPage.tsx`](../../frontend/src/pages/CreateExtraWorkPage.tsx)
+      "PROPOSAL"` — computed at submission time).~~
+- [x] ~~Rewrite [`frontend/src/pages/CreateExtraWorkPage.tsx`](../../frontend/src/pages/CreateExtraWorkPage.tsx)
       to the cart shape: category browser + add-to-cart + per-line date
-      picker + submit.
-- [ ] Add `extra_work` i18n namespace in both `en/` and `nl/`. Thread
+      picker + submit.~~
+- [x] ~~Add `extra_work` i18n namespace in both `en/` and `nl/`. Thread
       `t()` through all three EW pages
       (`Create`, `List`, `Detail`). This is the first time the EW
-      surface gets i18n.
-- [ ] Add tests: backend API for parent + line creation; scope on cart
-      lines; frontend Playwright for the cart UX.
+      surface gets i18n.~~
+- [x] ~~Add tests: backend API for parent + line creation; scope on cart
+      lines; frontend Playwright for the cart UX.~~
+
+**Completion block — Batch 6**
+
+- **Date:** 2026-05-16
+- **Commit:** uncommitted on working tree as of 2026-05-16 (Batch 6 diff
+  on top of `13fb819`; ready for a single batch commit once reviewed).
+- **Batch 6 scope implemented:** Reshape `ExtraWorkRequest` into a
+  parent + N `ExtraWorkRequestItem` line items; data backfill of
+  existing single-line requests; new `routing_decision` field on
+  `ExtraWorkRequest` (computed at submission via `resolve_price()` per
+  line — no ticket spawn yet); customer-facing cart UI replaces the
+  legacy single-line form; full `extra_work` i18n namespace added with
+  `t()` threaded through all three EW pages; 5-case Playwright spec.
+- **Files changed summary:**
+  - **Backend modified (4):** `backend/audit/signals.py`
+    (`ExtraWorkRequestItem` registered full-CRUD; `ExtraWorkRequest`
+    intentionally NOT registered in Batch 6 per the brief's "leave that
+    alone" guidance), `backend/extra_work/models.py` (+
+    `ExtraWorkRoutingDecision` choices + `routing_decision` field on
+    `ExtraWorkRequest` + new `ExtraWorkRequestItem` model),
+    `backend/extra_work/serializers.py` (+ `ExtraWorkRequestItemSerializer`
+    + nested-write `create()` that calls `resolve_price()` per line +
+    `routing_decision` exposed on list + detail serializers),
+    `backend/extra_work/tests/test_extra_work_mvp.py` (2-test compat
+    update for the new `line_items`-required payload).
+  - **Backend new (4):**
+    `backend/extra_work/migrations/0003_request_items_and_routing.py`
+    (schema + idempotent data backfill creating one `service=None`,
+    `quantity=1`, `unit_type="OTHER"`, `routing_decision="PROPOSAL"`
+    line per existing request; reverse_code = noop),
+    `backend/extra_work/tests/test_sprint28_cart_request.py` (20
+    tests covering CRUD, routing-decision computation, validation,
+    no-ticket-spawn assertion, scope isolation),
+    `backend/extra_work/tests/test_sprint28_cart_request_backfill.py`
+    (6 tests verifying the migration backfill creates one line per
+    request, with NULL service + PROPOSAL routing),
+    `backend/audit/tests/test_sprint28_cart_request_audit.py` (5
+    tests asserting `ExtraWorkRequestItem` CREATE/UPDATE/DELETE
+    audit; documents `ExtraWorkRequest` is NOT audited in Batch 6).
+  - **Frontend modified (5):** `frontend/src/api/types.ts`
+    (`RoutingDecision` union + `ExtraWorkRequestItem` +
+    `ExtraWorkRequestCartCreatePayload`; extended
+    `ExtraWorkRequestDetail` with `line_items` + `routing_decision`),
+    `frontend/src/api/extraWork.ts` (`createExtraWork()` takes cart
+    payload), `frontend/src/i18n/index.ts` (register `extra_work`
+    namespace), `frontend/src/pages/CreateExtraWorkPage.tsx` (FULL
+    REWRITE to cart UI — parent fields preserved + cart array with
+    add/remove lines + per-line service-dropdown / qty /
+    requested_date / customer_note + post-submit result panel with
+    INSTANT/PROPOSAL banner; i18n throughout),
+    `frontend/src/pages/ExtraWorkListPage.tsx` (`t()` via
+    `extra_work` namespace),
+    `frontend/src/pages/ExtraWorkDetailPage.tsx` (`t()` via
+    `extra_work` namespace; read-only `line_items` table +
+    `routing_decision` badge).
+  - **Frontend new (3):** `frontend/src/i18n/en/extra_work.json`
+    (full bundle for the new namespace),
+    `frontend/src/i18n/nl/extra_work.json` (EN/NL parity preserved),
+    `frontend/tests/e2e/sprint28_extra_work_cart.spec.ts` (5
+    Playwright cases — INSTANT banner / PROPOSAL banner / empty-cart
+    block / duplicate-service block / detail-page line-item render).
+  - **Docs:** this completion block, §7 pointer advance, §8 log row,
+    §9 decision-log rows.
+- **Migration status:**
+  - Migration file **created**:
+    `backend/extra_work/migrations/0003_request_items_and_routing.py`
+    (depends on `extra_work.0002_service_catalog_and_pricing`).
+    Schema operations: `AddField(ExtraWorkRequest.routing_decision)` +
+    `CreateModel(ExtraWorkRequestItem)`. Data operation: `RunPython`
+    creates one `service=None`, `quantity=1`, `unit_type="OTHER"`,
+    `requested_date = preferred_date or requested_at.date()`,
+    `customer_note=""` line per existing `ExtraWorkRequest`, and
+    force-sets `routing_decision="PROPOSAL"` on every backfilled
+    request. Idempotent under reapply (skips requests that already
+    have a line item). Reverse_code is a documented no-op (line-item
+    rows are NOT auto-deleted on rollback — real cart lines would be
+    destroyed).
+  - Dev DB `migrate` **NOT applied yet** (per master plan §3 rule 5 —
+    requires explicit user approval). Test DB auto-migrates each test
+    run so the new tests + broader sweep validate against the new
+    schema; production behaviour is locked. The dev container's
+    running DB still has Sprint 28 Batch 5 schema until the user
+    approves `docker compose exec backend python manage.py migrate
+    extra_work`. Cart endpoint + the rewritten `CreateExtraWorkPage`
+    will 500 against the dev container until migrate runs.
+- **Exact backend API contract:**
+  - **POST `/api/extra-work/`** — now requires nested `line_items:
+    [{ service, quantity, requested_date, customer_note }, …]`
+    array (at least one entry, all `service` distinct, each
+    `service.is_active=True`, `quantity > 0`). The `unit_type` is
+    server-computed from `Service.unit_type` and rejected if
+    supplied by the client. Response shape adds `line_items`
+    (full nested array) + `routing_decision` ("INSTANT" or
+    "PROPOSAL"). Backwards-incompat with the legacy single-line
+    payload — the existing `test_extra_work_mvp.py` MVP `CreateTests`
+    were updated (2 tests; documented).
+  - **GET `/api/extra-work/`** (list) — adds `routing_decision` so
+    inbox UIs can branch without a detail fetch.
+  - **GET `/api/extra-work/<id>/`** (detail) — adds `line_items` +
+    `routing_decision`.
+  - No new top-level endpoint; no per-line `ExtraWorkRequestItem`
+    CRUD endpoint (line-item edit is Batch 8 territory). Existing
+    transition endpoint untouched.
+- **Permission / scoping behavior:** unchanged from the existing
+  `ExtraWorkRequestViewSet.permission_classes =
+  [IsAuthenticatedAndActive]` shape. Scope is enforced by
+  `scope_extra_work_for`. CUSTOMER_USER may POST (customer
+  self-service cart submission). Provider admins (SUPER_ADMIN /
+  COMPANY_ADMIN / BUILDING_MANAGER) may compose on behalf via the
+  same endpoint. STAFF stays blocked by the existing G-B7
+  `scope_extra_work_for` `.none()` branch. Cross-customer /
+  cross-provider rejected via existing scope + the new per-line
+  serializer validation (locked by `CartRequestScopeTests`).
+- **`resolve_price()` usage:** called inside
+  `ExtraWorkRequestCreateSerializer.create()` at
+  `backend/extra_work/serializers.py`, per line, with
+  `on=line["requested_date"]`. Aggregation: every line non-None →
+  `routing_decision = "INSTANT"`; any line None →
+  `routing_decision = "PROPOSAL"`. Everything inside the existing
+  `transaction.atomic()` block. **No ticket creation, no state
+  transition, no proposal route taken — Batch 6 stores the
+  decision; Batches 7 and 8 will act on it.** Locked by
+  `test_instant_routing_does_not_spawn_tickets` and
+  `test_status_remains_requested`.
+- **Audit coverage:**
+  - `ExtraWorkRequestItem` registered in
+    `backend/audit/signals.py` full-CRUD tuple (right after
+    Batch 5's `CustomerServicePrice`).
+  - `ExtraWorkRequest` itself is **intentionally NOT registered**
+    in Batch 6 (the parent row was already-unregistered pre-Batch-6
+    per the brief's "leave that alone" guidance). A dedicated test
+    class `ExtraWorkRequestRoutingDecisionAuditTests` pins this
+    contract (asserts no parent-row AuditLog is written) so a
+    future sprint adding registration will see a clear test
+    failure to update.
+- **Frontend route / UI behavior:**
+  - `/extra-work/new` now renders the cart UI (legacy single-line
+    form replaced). View-first compliance: the form itself is the
+    Create surface (a form, intentionally); the post-submit
+    **result panel** is read-only and shows either an INSTANT
+    banner ("Your order is being processed — operational tickets
+    will be created shortly") or a PROPOSAL banner ("Your request
+    has been sent for pricing review"). No navigation to a detail
+    page yet — Batch 7 will wire the INSTANT path to ticket
+    creation.
+  - `/extra-work/<id>/` (detail) renders the cart line items as a
+    read-only table and a `routing_decision` badge.
+  - All three EW pages now use `useTranslation("extra_work")` —
+    audit doc §7 row 19 (i18n missing on EW) closed by this batch.
+- **Tests / checks run:**
+  - Backend targeted (3 modules, 31 new tests):
+    `extra_work.tests.test_sprint28_cart_request` +
+    `extra_work.tests.test_sprint28_cart_request_backfill` +
+    `audit.tests.test_sprint28_cart_request_audit` → **31/31 OK**
+    in 5.1s.
+  - Backend broader (`extra_work + audit + customers`) reported by
+    the Backend agent: **296/296 OK** in 233.9s.
+  - `manage.py check`: 0 issues. `makemigrations --dry-run
+    --check`: No changes detected.
+  - `npm run typecheck`: clean.
+  - `npm run build`: clean, 338ms (advisory chunk-size warning
+    only).
+  - `npm run lint`: **52 problems = baseline**; zero new hits.
+    The 4 hits in modified files (`CreateExtraWorkPage.tsx:215/228/243`
+    + `ExtraWorkDetailPage.tsx:191`) are pre-existing `setState-in-
+    effect` patterns carried over verbatim from the original files
+    (auto-sync `useEffect` for building/customer pairing + the
+    customer-contacts panel effect Batch 4 added).
+  - **Playwright spec written but NOT executed locally** (WSL
+    root-owned `frontend/test-results/` gotcha). 5 cases in
+    `sprint28_extra_work_cart.spec.ts`; spec compiles under
+    `tsc -b`; CI will exercise.
+- **Important decisions made (also logged in §9):**
+  - **Reshape** `ExtraWorkRequest` rather than keeping a parallel
+    deprecated single-line shape — backwards-incompat with legacy
+    payload is acceptable because the data-migration backfill
+    provides a one-line-item view of every existing request, and
+    the only existing payload sender (the legacy
+    `CreateExtraWorkPage`) is rewritten in this same batch.
+  - **`service` FK is nullable** on `ExtraWorkRequestItem` (model
+    level) to accommodate the backfill of pre-Batch-5 requests
+    that have no `Service` catalog row. Serializer enforces
+    non-null on new submissions — only the migration backfill
+    creates NULL-service rows.
+  - **`resolve_price()` IS called at submission to compute
+    `routing_decision`, but Batch 6 does NOT act on the result.**
+    The field is stored; Batch 7 will read it to spawn tickets;
+    Batch 8 will read it to enter the proposal queue. Storing the
+    decision now lets the existing EW workflow state machine
+    remain untouched in this batch.
+  - **`ExtraWorkRequest` audit registration deferred** per the
+    PM's brief: the parent row is not currently audit-tracked,
+    and adding registration in Batch 6 would be scope creep. A
+    dedicated test asserts no parent-row AuditLog is written;
+    when a future batch adds registration, that test will fail
+    loudly.
+- **Remaining risks:**
+  - **Dev DB schema behind code** until user approves
+    `python manage.py migrate extra_work`. Cart endpoint + the
+    rewritten `CreateExtraWorkPage` will 500 against the dev
+    container until that runs.
+  - **Playwright spec not locally validated** — same WSL gotcha as
+    prior batches. CI workflow will exercise the 5 cases.
+  - **2 existing MVP tests in `test_extra_work_mvp.py` were
+    updated** to send the new cart payload (documented in brief).
+    No other tests adjusted; all 30 other MVP tests pass
+    unchanged.
+  - **`routing_decision` is computed once at submission and not
+    re-computed**. If a future batch lets the operator edit a line
+    after submission (Batch 8 territory), the field can drift —
+    Batch 8 must explicitly handle recomputation.
+  - **Unit-type i18n duplication**: Batch 6 added unit-type labels
+    under the `extra_work` namespace; Batch 5 has analogous labels
+    under the `services` namespace. Frontend agent flagged this as
+    a follow-up consolidation candidate; not a Batch 6 blocker.
+  - **`ExtraWorkPricingLineItem` (legacy provider-built pricing
+    rows on the legacy single-line request) is UNTOUCHED** — it's
+    a different concept from the new `ExtraWorkRequestItem`.
+    Batch 8 will reckon with it when the proposal model ships.
 
 ### Batch 7 — Instant-ticket path
 
@@ -1236,18 +1455,16 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 6 — Cart-shaped Extra Work request**
+- **Current batch:** **Batch 7 — Instant-ticket path**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 6 items.
-  Batch 6 is the big shape-change: introduce `ExtraWorkRequestItem`
-  line items on `ExtraWorkRequest` (each with `service` FK +
-  `quantity` + `requested_date` + `customer_note`), customer cart UX,
-  and the routing-decision branching (instant-ticket vs proposal).
-  Batch 7 atomically spawns Tickets for the instant path; Batch 8
-  builds the proposal entity for the custom path.
-- **Next recommended batch (on-deck):** Batch 7 — Instant-ticket
-  path.
+  this file, state the current batch, and work only on Batch 7 items.
+  Batch 7 reads the `routing_decision="INSTANT"` field that Batch 6
+  computes at submission and atomically spawns one `tickets.Ticket`
+  per `ExtraWorkRequestItem` inside the same `transaction.atomic()`
+  as the request transition. `routing_decision="PROPOSAL"` is parked
+  for Batch 8 (proposal builder).
+- **Next recommended batch (on-deck):** Batch 8 — Proposal builder.
 
 ---
 
@@ -1257,6 +1474,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-16 | Batch 6 — Cart-shaped Extra Work request | uncommitted on top of `13fb819` | Joint backend + frontend, reshape sprint. **Backend:** `ExtraWorkRequest` becomes the parent record; new `ExtraWorkRequestItem` line items model added (FK `ExtraWorkRequest` CASCADE + FK `Service` PROTECT, NULL-allowed for legacy backfill, `quantity` Decimal, `unit_type` denormalised from Service, `requested_date` per-line, `customer_note` per-line, timestamps); new `routing_decision` field on `ExtraWorkRequest` (`"INSTANT"` vs `"PROPOSAL"` with default `"PROPOSAL"`). Migration `extra_work/0003_request_items_and_routing.py` ships schema + idempotent data backfill (one line per existing request, `service=None`, `routing_decision="PROPOSAL"`); reverse_code = noop. **`resolve_price()` is called per line at submission** to compute `routing_decision`; ALL lines must resolve to a non-None `CustomerServicePrice` → `"INSTANT"`, otherwise `"PROPOSAL"`. Batch 6 **stores** the decision but does NOT act on it (no ticket spawn, no state transition, no proposal route taken — those are Batches 7 + 8). Locked by `test_instant_routing_does_not_spawn_tickets` and `test_status_remains_requested`. Permission gate unchanged (existing `IsAuthenticatedAndActive` + `scope_extra_work_for`); CUSTOMER_USER can compose carts, provider admins can compose on behalf, STAFF blocked by existing G-B7 scope. Audit: `ExtraWorkRequestItem` registered full-CRUD; `ExtraWorkRequest` intentionally NOT audit-tracked in Batch 6 (parent was already-unregistered pre-batch — locked by `ExtraWorkRequestRoutingDecisionAuditTests` so a future addition shows as a failing test to update). 31 new backend tests across 3 modules: 20 in `test_sprint28_cart_request` (CRUD, routing-decision computation, validation, no-ticket-spawn assertion, scope isolation, cross-customer/provider rejection), 6 in `test_sprint28_cart_request_backfill` (migration backfill verifies legacy single-line requests get NULL-service + PROPOSAL), 5 in `test_sprint28_cart_request_audit`. 2 existing MVP `CreateTests` updated to send the new cart payload (documented as expected per brief). **Frontend:** new `RoutingDecision` union + `ExtraWorkRequestItem` + `ExtraWorkRequestCartCreatePayload` types in `api/types.ts`; existing `ExtraWorkRequestDetail` extended with `line_items` + `routing_decision`; `createExtraWork()` takes the cart payload type; new `extra_work` i18n namespace registered for both EN + NL bundles (parity preserved). `CreateExtraWorkPage.tsx` **fully rewritten** to a cart UI (parent fields preserved: title / description / customer / building / category / urgency / preferred_date; new cart array with add/remove lines, per-line service-dropdown + quantity + requested_date + customer_note; post-submit result panel with `INSTANT`/`PROPOSAL` banner — no navigation, ticket spawn is Batch 7 backend's job). `ExtraWorkListPage` + `ExtraWorkDetailPage` threaded with `useTranslation("extra_work")` (closes audit doc §7 row 19 — i18n missing on EW). Detail page renders a read-only line-items table + `routing_decision` badge. New Playwright spec `sprint28_extra_work_cart.spec.ts` with 5 cases (INSTANT banner, PROPOSAL banner, empty cart blocks submit, duplicate service blocks submit, detail page renders the new line item correctly). | Backend targeted (3 modules, 31 new tests): **31/31 OK** in 5.1s. Backend broader (`extra_work + audit + customers`): **296/296 OK** in 233.9s — no regression. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 338ms. `npm run lint`: **52 problems = baseline**; zero new hits. The 4 hits in modified files (`CreateExtraWorkPage.tsx:215/228/243` + `ExtraWorkDetailPage.tsx:191`) are pre-existing `setState-in-effect` patterns carried over verbatim from the original files (auto-sync `useEffect` for building/customer pairing + the Batch-4 customer-contacts panel effect). **Playwright spec written but NOT executed locally** (WSL gotcha; CI will exercise the 5 cases). | **Dev DB schema behind code** until user approves `python manage.py migrate extra_work` (Batch 6 migration `0003_request_items_and_routing.py` — Cart endpoint + rewritten `CreateExtraWorkPage` will 500 against the dev container until that runs). Playwright spec needs CI run to confirm behaviour against demo seed. **2 legacy MVP tests updated** to send the new cart payload (backwards-incompat is intentional; the legacy `CreateExtraWorkPage` is rewritten in this same batch — no external callers of the legacy payload remain). **Unit-type i18n duplication**: Batch 6 added unit-type labels under the `extra_work` namespace; Batch 5 has analogous labels under the `services` namespace. Consolidation is a follow-up polish item (not P0). **`routing_decision` is computed once at submission and not recomputed** if a future batch (Batch 8) lets operators edit a line — Batch 8 must explicitly handle recomputation. **`ExtraWorkPricingLineItem` (legacy provider-built pricing rows on the legacy single-line request) is UNTOUCHED** — a different concept from the new `ExtraWorkRequestItem`. Batch 8 will reckon with it when the proposal model ships. |
 | 2026-05-16 | Batch 5 — Service catalog and pricing | uncommitted on top of `e23cf40` | Joint backend + frontend. **Backend:** 3 new models in `backend/extra_work/models.py` — `ServiceCategory` (global, name-unique), `Service` (FK ServiceCategory PROTECT, unit_type reusing `ExtraWorkPricingUnitType`, `default_unit_price`, `default_vat_pct` default 21.00, is_active), `CustomerServicePrice` (FK Service PROTECT + FK Customer CASCADE, unit_price/vat_pct/valid_from/valid_to/is_active). Migration `extra_work/0002_service_catalog_and_pricing.py` (**applied to dev DB 2026-05-16 by user** via `python manage.py migrate extra_work`). New resolver `extra_work/pricing.py::resolve_price(service, customer, *, on=None)` returns active `CustomerServicePrice` row or `None` (NEVER falls back to `Service.default_unit_price` per master plan §5 rule #9). 4 new catalog endpoints at `/api/services/{categories,}` + 2 customer-scoped pricing endpoints at `/api/customers/<id>/pricing/`. Catalog gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdmin`; pricing gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany` (mirrors Batch 4 Contact pattern; detail view re-scopes by `customer=customer` blocking ID smuggling). All 3 models registered in `audit/signals.py` full-CRUD tuple. 57 new backend tests across 4 modules (service catalog CRUD + protect-on-delete; resolver branches incl. the rule-#9 None-when-no-customer-specific-row lock; per-customer pricing CRUD + scope isolation + validation; audit CREATE/UPDATE/DELETE × 3 models). **Frontend:** 5 new types in `api/types.ts` (ServiceUnitType union + Service/Category/CustomerServicePrice +Create/+Update payloads); 15 new admin API helpers; `ServicesAdminPage` at `/admin/services` (tabs for services + categories, view-first list + modal CRUD, top-level sidebar entry "Services" gated to admin roles); `CustomerPricingPage` at `/admin/customers/:id/pricing` (customer-scoped sub-route — Batch 3 sidebar regex activates automatically; new "Pricing" entry between Permissions and Extra Work in the customer-scoped submenu). EN/NL i18n parity preserved (97-line delta per bundle covering `nav.services`/`nav.customer_submenu.pricing`/`services.*`/`customer_pricing.*` + unit-type labels). Visible UI hint surfaces rule #9 (`services.field_default_unit_price_hint`). 2 new Playwright specs (11 cases total). | Backend targeted (4 modules, 57 tests): **57/57 OK** in 132.6s. Per-app sanity: audit 44/44, extra_work 81/81, customers 140/140 — each clean. Broader sweep (`extra_work + audit + customers`): **first run reported `FAILED (errors=7)` (transient flake);** `-v 2` diagnostic returned zero FAIL/ERROR lines; confirmation re-run → **265/265 OK** in 471.5s. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 454ms. `npm run lint`: **52 problems = baseline** (zero new hits in Batch 5 files). **Playwright specs written but NOT executed locally** (WSL `frontend/test-results/` root-ownership gotcha; CI will exercise the 11 cases). | **Dev DB schema applied** 2026-05-16 by user via `python manage.py migrate extra_work` — `showmigrations` shows `[X] 0002_service_catalog_and_pricing`; Catalog API + Services/Pricing admin UI now exercisable against the dev container. **Broader sweep flakiness**: first run 7 transient errors; re-run clean. Likely NotificationLog/Celery-eager shared-state race in long sequential runs across `extra_work + audit + customers`; not Batch-5-specific but documented for future batches to re-run before declaring failure. **Spec §5 / backlog `EXTRA-PRICING-1` doc drift**: spec §5 "Resolution order" step 2 says "global default" fallback; backlog row text similarly stale. Code follows master plan rule #9 (returns `None`); doc reconciliation is a follow-up patch. **`CustomerPricingPage` Edit modal locks the service dropdown** (switching service on an existing price would corrupt history); users delete + add to switch. **No customer-side pricing visibility yet** (their own contract prices) — ships with Batch 6 cart UI. **No Batch 6 wiring**: the catalog is not yet called from any Extra Work request flow. |
 | 2026-05-16 | Batch 4 — Contacts model and UI | uncommitted on top of `9402e38` | Joint backend + frontend. **Backend:** `Contact` model added to `backend/customers/models.py` (FK Customer CASCADE + FK Building SET_NULL + name/email/phone/role_label/notes/timestamps; **no password/role/user/is_active/permission_overrides** — structurally not a User per spec §1). Migration `customers/0007_contact.py` created (**not applied to dev DB yet**). 2 new endpoints at `/api/customers/<id>/contacts/` (list+create) and `/contacts/<id>/` (retrieve/update/delete), gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`. Detail view re-scopes by `customer=customer` to block ID smuggling. Cross-customer building validation in serializer. Contact registered in `audit/signals.py` full-CRUD tuple. 26 new tests across 5 classes (CRUD happy-path × 2 admin roles, scope isolation, ID-smuggling 404, BM/customer/staff 403, building-membership validation, "is-not-a-User" payload assertion, audit CREATE/UPDATE/DELETE rows). **Frontend:** `Contact` + `ContactCreatePayload` + `ContactUpdatePayload` types added; 5 admin API helpers added; `CustomerContactsPage` replaces Batch 3 placeholder route at `/admin/customers/:id/contacts` (view-first list + read-only detail + Add/Edit modal + Delete `ConfirmDialog`; **no password/role/login field anywhere**). Contextual read-only `Customer-contacts` panels added to both `TicketDetailPage` (`data-testid="ticket-customer-contacts-panel"`) and `ExtraWorkDetailPage` (`data-testid="extra-work-customer-contacts-panel"`), gated to SUPER_ADMIN/COMPANY_ADMIN mirroring the backend. 25 new `customer_contacts.*` i18n keys in each of EN/NL bundles, parity preserved. Playwright spec `frontend/tests/e2e/sprint28_contacts.spec.ts` with 5 cases. | Backend targeted (`customers.tests.test_sprint28_contacts + audit.tests.test_sprint28_contact_audit`): **26/26 OK** in 24.7s. Backend broader (`customers + audit`): **175/175 OK** in 165.2s. Cross-app sweep (`customers audit tickets extra_work`): **365/365 OK** in 298.2s — no regression from the Contact + audit signal additions. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 508ms. `npm run lint`: **52 problems = baseline** (zero new lint hits in Batch 4 files; frontend agent stash-comparison showed pre-Batch-4 was 53 problems, so net is -1 error after the agent extracted ticket/EW customer-id locals to satisfy `exhaustive-deps`). **Playwright spec written but NOT executed locally** (WSL `frontend/test-results/` root-ownership gotcha; brief allows). | Dev DB schema is **behind code** until user approves `python manage.py migrate` (Contacts API + the Ticket/EW contextual panels will 500 against the dev container until that runs). Playwright spec needs CI run to confirm against demo seed. Building-dropdown in the Add/Edit modal shows every linked building including potentially-deactivated ones (polish item, not P0). Contextual panels emit an API call on every Ticket/EW detail render with no caching — debounce/SWR is a later polish item. BM read-only contact view is intentionally deferred to **Batch 12**; gate locked by `test_building_manager_cannot_*` cases. |
 | 2026-05-16 | Batch 3 — Sidebar refactor foundation | uncommitted on top of `c3a9060` | Frontend only. `AppShell.tsx` gains a URL-derived `mode = "top-level" \| "customer-scoped"` (regex on `pathname`, no `useState`) and a customer-scoped submenu (Back / Overview / Buildings / Users / Permissions / Extra Work / Contacts / Settings). `App.tsx` registers six new `/admin/customers/:id/<section>` routes — five render the new `CustomerSubPagePlaceholder` "Coming soon" component; `permissions` re-renders `CustomerFormPage` so the Sprint 27E editor remains reachable without decomposing the parent page (decomposition is Batch 13). EN/NL i18n keys added for `nav.customer_submenu.*` + `customer_subpage_placeholder.*`. Playwright spec `sprint28b_customer_sidebar.spec.ts` covers deep-link, Back, and non-customer-route cases. | `npm run typecheck` → clean. `npm run build` → clean, 373ms. `npm run lint` → **52 problems = baseline** (only `AppShell.tsx:122` lint hit is the pre-existing `setSidebarOpen` in `useEffect`; line number shifted from `:93`, rule violation unchanged). Playwright spec **written but NOT executed locally** (WSL root-owned `frontend/test-results/` gotcha; brief allows this). | Playwright spec needs CI run to confirm behaviour against demo seed. `CustomerFormPage` is mounted by two routes (`:id` Overview + `:id/permissions`); React Router remounts on path change so state is not preserved across the nav. Batch 13 will decompose `CustomerFormPage` and remove the duplication. `AppShell.tsx:122` lint hit is unchanged baseline. |
@@ -1272,6 +1490,10 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-16 | `ExtraWorkRequest` is **reshaped** to a parent record with N `ExtraWorkRequestItem` line items (per master plan §6 Batch 6 verbatim wording: "Migration with a data backfill so existing single-line requests get one line item"). The legacy single-line payload shape is no longer accepted by the API; the existing `CreateExtraWorkPage` is rewritten in the same batch so no external callers remain. 2 MVP tests updated to send the new cart payload (documented in PM brief). | Master plan §6 Batch 6 explicitly chose reshape over a parallel-deprecated shape. Keeping a parallel single-line shape would dual-maintain the form + the validator and would still require the data backfill (one row → one line item) when Batch 7 starts reading `line_items`. The backwards-incompat is acceptable because there is exactly one production caller (the page being rewritten) and the backfill provides a one-line-item view of every historical request. | Batch 6 + `backend/extra_work/migrations/0003_request_items_and_routing.py` + `frontend/src/pages/CreateExtraWorkPage.tsx` |
+| 2026-05-16 | `ExtraWorkRequestItem.service` FK is **NULL-allowed** at the model level (with `null=True, blank=True, on_delete=PROTECT`). The serializer enforces non-null on new submissions; only the migration backfill creates NULL-service rows (for legacy `ExtraWorkRequest` rows that pre-date the Batch 5 Service catalog). | The data backfill must create one line item per existing request, but pre-Batch-5 requests have no `Service` catalog row to point at. The alternative — creating a sentinel "legacy single-line request" Service — would clutter the catalog with an admin-visible row. NULL-on-backfill keeps the historical signal clean (these requests don't represent catalog-driven work) and the serializer prevents new NULL-service rows. Locked by `test_sprint28_cart_request_backfill` + `CartRequestValidationTests`. | Batch 6 + `backend/extra_work/models.py` ExtraWorkRequestItem + `backend/extra_work/migrations/0003_request_items_and_routing.py` |
+| 2026-05-16 | **`resolve_price()` is called at submission to compute `routing_decision`, but Batch 6 does NOT act on the result.** The field is computed and stored; no `tickets.Ticket` is created, no state-machine transition is fired, no proposal route is taken. Batch 7 reads the field to spawn tickets for the `"INSTANT"` path; Batch 8 reads it to enter the proposal queue for the `"PROPOSAL"` path. | Storing the decision now (rather than recomputing at every action) lets Batch 6 ship the customer-facing cart without changing the existing EW workflow state machine. It also makes routing observable for audit / debugging before any downstream system acts on it. Trade-off: if a future batch (Batch 8) lets the operator edit a line after submission, the field can drift — Batch 8 must explicitly handle recomputation. Locked by `test_instant_routing_does_not_spawn_tickets` and `test_status_remains_requested`. | Batch 6 + `backend/extra_work/serializers.py` ExtraWorkRequestCreateSerializer.create() + `backend/extra_work/tests/test_sprint28_cart_request.py` |
+| 2026-05-16 | `ExtraWorkRequest` itself is **intentionally NOT registered in `audit/signals.py`** in Batch 6. Only the new `ExtraWorkRequestItem` is added to the full-CRUD tuple. The parent row was already-unregistered pre-batch; adding registration now would be scope creep. A dedicated test class `ExtraWorkRequestRoutingDecisionAuditTests` asserts no parent-row `AuditLog` is written so a future sprint adding registration will see a clear failing test to update. | The brief instructed "if `ExtraWorkRequest` isn't yet registered in either, leave that alone for Batch 6". Audit registration of `ExtraWorkRequest` is a separate, deliberate decision — it would emit signals for every transition (state-machine writes) and might double-fire with the existing `ExtraWorkStatusHistory` mechanism. Defer to a dedicated future batch that audits the trade-off. | Batch 6 + `backend/audit/signals.py` + `backend/audit/tests/test_sprint28_cart_request_audit.py::ExtraWorkRequestRoutingDecisionAuditTests` |
 | 2026-05-16 | `Service`, `ServiceCategory`, `CustomerServicePrice` are added to **`backend/extra_work/models.py`** (extending the existing file). Resolver `resolve_price()` lives in new module `backend/extra_work/pricing.py` (parallel to `extra_work/scoping.py` + `extra_work/state_machine.py`). Migration: `extra_work/0002_service_catalog_and_pricing.py`. | Extra_work app already owns the pricing-adjacent vocabulary (`ExtraWorkPricingUnitType` enum + the legacy `ExtraWorkPricingLineItem`). Catalog + pricing belong in the same domain as the work they price. A new `catalog/` app would force new `INSTALLED_APPS`, audit-signal import, migration root for zero benefit. Customers app is wrong: pricing is keyed (service, customer), the catalog is provider-wide, and the resolver lives next to the Extra Work workflow that will call it (Batch 7+). PM agent placement recommendation. | Batch 5 + `backend/extra_work/models.py` + PM scope-verification report |
 | 2026-05-16 | **Reused the existing `ExtraWorkPricingUnitType` enum** (`HOURS / SQUARE_METERS / FIXED / ITEM / OTHER`) verbatim for `Service.unit_type`. NO parallel `ServiceUnitType` enum introduced. Spec §5's HOURLY/PER_SQM/FIXED/PER_ITEM names are descriptive equivalents of these storage values. | Spec §5 unit-type set maps onto the existing enum. Introducing a parallel enum would fork the pricing-line-item vs service-row vocabulary; future Batch-8 proposal rows would have to bridge the two, creating an entirely avoidable schema and validation surface. | Batch 5 + `backend/extra_work/models.py` ExtraWorkPricingUnitType + Service.unit_type field |
 | 2026-05-16 | **`resolve_price(service, customer, *, on=None)` returns `None`** when no active `CustomerServicePrice` row matches. It MUST NOT fall back to `Service.default_unit_price`. The global default is a provider-side reference only (display in the catalog admin UI); it never triggers the instant-ticket path. When the resolver returns `None`, the caller (Batch 7) routes the line to the proposal flow. | Master plan §5 rule #9 + 2026-05-15 decision-log row (already locked at spec-meeting time). The spec doc §5 "Resolution order" step 2 and backlog `EXTRA-PRICING-1` row both have stale wording suggesting a global-default fallback — both will be reconciled in a doc-only patch; master plan rule is authoritative. Regression-locked by `ResolvePriceReturnsNoneWithoutCustomerSpecificTests`. | Batch 5 + `backend/extra_work/pricing.py` + `backend/extra_work/tests/test_sprint28_pricing_resolver.py::ResolvePriceReturnsNoneWithoutCustomerSpecificTests` |

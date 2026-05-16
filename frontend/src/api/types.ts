@@ -571,6 +571,34 @@ export interface ExtraWorkPricingLineItem {
   updated_at: string;
 }
 
+// Sprint 28 Batch 6 — routing decision returned alongside an
+// Extra Work create response. `"INSTANT"` means every cart line
+// resolved to an active CustomerServicePrice — the proposal phase
+// was skipped and operational tickets will be spawned (Batch 7).
+// `"PROPOSAL"` means at least one line had no agreed price, so
+// the request needs provider review before tickets are created.
+export type RoutingDecision = "INSTANT" | "PROPOSAL";
+
+// Sprint 28 Batch 6 — cart line item on an Extra Work request.
+// One row per service in the customer's submitted cart.
+// `service` is nullable only for legacy backfilled rows from the
+// pre-Batch-6 single-line shape; new requests always have a non-
+// null service FK. `unit_type` is denormalised from the Service
+// at create time so the line stays renderable even if the catalog
+// row is later deleted.
+export interface ExtraWorkRequestItem {
+  id: number;
+  service: number | null;
+  service_name: string;
+  // DRF serialises Decimal as a string to preserve precision.
+  quantity: string;
+  unit_type: ServiceUnitType;
+  requested_date: string;
+  customer_note: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // Detail shape — role-aware. Provider-only fields (manager_note,
 // internal_cost_note, override_*) are absent on customer responses.
 export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
@@ -587,7 +615,36 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   override_reason?: string;
   override_at?: string | null;
   pricing_line_items: ExtraWorkPricingLineItem[];
+  // Sprint 28 Batch 6 — cart line items + routing decision.
+  // `line_items` is always present on responses (empty array for
+  // legacy single-line requests that pre-date the cart shape).
+  // `routing_decision` is computed by the backend on every detail
+  // read.
+  line_items: ExtraWorkRequestItem[];
+  routing_decision: RoutingDecision;
   allowed_next_statuses: ExtraWorkStatus[];
+}
+
+// Sprint 28 Batch 6 — cart-shaped POST payload for /extra-work/.
+// Replaces the single-line CreateExtraWorkPayload shape on the
+// client side. The backend keeps the existing parent fields and
+// adds `line_items` as the authoritative cart.
+export interface ExtraWorkRequestCartCreatePayload {
+  title: string;
+  description: string;
+  building: number;
+  customer: number;
+  category: string;
+  category_other_text?: string;
+  urgency: string;
+  preferred_date?: string | null;
+  line_items: Array<{
+    service: number;
+    // Decimal as string per DRF convention.
+    quantity: string;
+    requested_date: string;
+    customer_note?: string;
+  }>;
 }
 
 export interface ExtraWorkStatusHistoryEntry {

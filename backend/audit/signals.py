@@ -51,6 +51,7 @@ from customers.models import (
 )
 from extra_work.models import (
     CustomerServicePrice,
+    ExtraWorkRequestItem,
     Service,
     ServiceCategory,
 )
@@ -558,6 +559,16 @@ def _connect():
         ServiceCategory,
         Service,
         CustomerServicePrice,
+        # Sprint 28 Batch 6 — cart line items on ExtraWorkRequest.
+        # Each row has editable fields (quantity, requested_date,
+        # customer_note) so the full CRUD trio is the right shape:
+        # CREATE / UPDATE / DELETE all produce meaningful diffs.
+        # NB: parent `ExtraWorkRequest` is intentionally NOT registered
+        # in Batch 6 — adding it (in particular tracking the new
+        # `routing_decision` field) is scope creep for this batch and
+        # is left to a follow-up that designs the right shape (full
+        # CRUD vs targeted-field UPDATE diff) for the request itself.
+        ExtraWorkRequestItem,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")

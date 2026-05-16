@@ -26,8 +26,12 @@ from .models import (
     ExtraWorkCategory,
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
+    ExtraWorkRequestItem,
+    ExtraWorkRoutingDecision,
     ExtraWorkStatus,
+    Service,
 )
+from .pricing import resolve_price
 from .state_machine import allowed_next_statuses
 
 
@@ -116,6 +120,76 @@ class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
+# Sprint 28 Batch 6 — cart line item
+# ---------------------------------------------------------------------------
+class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
+    """
+    Nested line-item serializer for the Extra Work cart flow.
+
+    Used in two roles:
+      * Read-only on `ExtraWorkRequestDetailSerializer.line_items`.
+      * Write-only nested input on `ExtraWorkRequestCreateSerializer`,
+        accepting the per-line `service` + `quantity` + `requested_date`
+        + `customer_note`. `unit_type` is denormalised from the
+        chosen `Service.unit_type` by the parent serializer's
+        `create()` — clients do NOT supply it on the wire.
+
+    `service` is **required on the wire** for new submissions (the
+    Batch 6 contract: no service ⇒ proposal-only line, and the
+    cart flow only accepts catalog-linked lines). The DB column is
+    NULL-allowed only so the migration backfill can adopt legacy
+    single-line rows; the serializer never accepts NULL.
+    """
+
+    service = serializers.PrimaryKeyRelatedField(
+        queryset=Service.objects.all(),
+    )
+    service_name = serializers.CharField(
+        source="service.name",
+        read_only=True,
+        default=None,
+    )
+
+    class Meta:
+        model = ExtraWorkRequestItem
+        fields = [
+            "id",
+            "service",
+            "service_name",
+            "quantity",
+            "unit_type",
+            "requested_date",
+            "customer_note",
+        ]
+        read_only_fields = [
+            "id",
+            "service_name",
+            # `unit_type` is denormalised by the parent serializer at
+            # create time from Service.unit_type — clients must not
+            # supply it.
+            "unit_type",
+        ]
+
+    def validate_quantity(self, value):
+        if value <= Decimal("0"):
+            raise serializers.ValidationError(
+                "Quantity must be greater than zero."
+            )
+        return value
+
+    def validate_service(self, value):
+        if value is None:
+            raise serializers.ValidationError(
+                "Service is required for new line items."
+            )
+        if not value.is_active:
+            raise serializers.ValidationError(
+                "Cannot order an inactive service."
+            )
+        return value
+
+
+# ---------------------------------------------------------------------------
 # Extra Work — list (lean)
 # ---------------------------------------------------------------------------
 class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
@@ -140,6 +214,10 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "category",
             "urgency",
             "status",
+            # Sprint 28 Batch 6 — cart routing taxonomy. Surfaced on
+            # the lean list shape so the inbox / overview UIs can
+            # branch on INSTANT vs PROPOSAL without a detail fetch.
+            "routing_decision",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
@@ -171,6 +249,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         source="created_by.email", read_only=True
     )
     pricing_line_items = serializers.SerializerMethodField()
+    line_items = ExtraWorkRequestItemSerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
 
     class Meta:
@@ -190,6 +269,12 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "urgency",
             "preferred_date",
             "status",
+            # Sprint 28 Batch 6 — cart routing taxonomy + nested line
+            # items. routing_decision is computed at submission time by
+            # the create serializer and is read-only thereafter (Batch 7
+            # will act on the value; Batch 6 only stores it).
+            "routing_decision",
+            "line_items",
             "customer_visible_note",
             "pricing_note",
             # Provider-only fields below — explicitly stripped for
@@ -222,6 +307,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "customer",
             "customer_name",
             "status",
+            "routing_decision",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
@@ -278,7 +364,23 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
       * the actor has an active CustomerUserBuildingAccess row for
         the (customer, building) pair AND that row resolves
         `customer.extra_work.create`,
-      * category=OTHER requires category_other_text.
+      * category=OTHER requires category_other_text,
+      * Sprint 28 Batch 6: at least one `line_items` entry is
+        supplied, each line references a distinct active Service,
+        each line carries a `requested_date`, and `quantity > 0`.
+        The serializer denormalises `Service.unit_type` onto each
+        new `ExtraWorkRequestItem` at create time so a later catalog
+        edit cannot rewrite the historical cart line's pricing
+        semantics.
+
+    Routing decision: after creating the line items, the serializer
+    calls `resolve_price(line.service, request.customer, on=line.
+    requested_date)` per line. If EVERY line resolves to an active
+    `CustomerServicePrice` the request's `routing_decision` is set
+    to "INSTANT"; if ANY line returns None the value is "PROPOSAL".
+    The value is stored on the request and read back through the
+    detail serializer; Batch 6 does NOT spawn tickets or trigger a
+    state transition based on it (Batch 7 will).
     """
 
     building = serializers.PrimaryKeyRelatedField(
@@ -287,6 +389,7 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
         queryset=Customer.objects.filter(is_active=True)
     )
+    line_items = ExtraWorkRequestItemSerializer(many=True)
 
     class Meta:
         model = ExtraWorkRequest
@@ -300,8 +403,34 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "category_other_text",
             "urgency",
             "preferred_date",
+            "line_items",
         ]
         read_only_fields = ["id"]
+
+    def validate_line_items(self, value):
+        # Empty cart -> reject. The Batch 6 contract requires at
+        # least one line item; no implicit single-line fallback.
+        if not value:
+            raise serializers.ValidationError(
+                "At least one line item is required."
+            )
+
+        # Defense in depth: a duplicate service entry in the same
+        # cart is ambiguous (which requested_date / quantity wins?)
+        # and rejected at the serializer layer. Same-service-twice-
+        # with-different-dates is a future feature.
+        seen_service_ids = set()
+        for line in value:
+            service = line.get("service")
+            sid = service.pk if service is not None else None
+            if sid is not None and sid in seen_service_ids:
+                raise serializers.ValidationError(
+                    "Duplicate service in cart: each service may "
+                    "appear only once per submission."
+                )
+            seen_service_ids.add(sid)
+
+        return value
 
     def validate(self, attrs):
         request = self.context["request"]
@@ -377,10 +506,55 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        from django.db import transaction
+
+        line_items_data = validated_data.pop("line_items", [])
         validated_data["company"] = validated_data["customer"].company
         validated_data["created_by"] = self.context["request"].user
         validated_data["status"] = ExtraWorkStatus.REQUESTED
-        return super().create(validated_data)
+
+        # Sprint 28 Batch 6 — parent + line items + routing decision
+        # all land inside a single transaction so a half-created cart
+        # (parent saved, no lines) is never observable.
+        with transaction.atomic():
+            request = super().create(validated_data)
+
+            customer = request.customer
+            all_lines_have_contract = True
+            for line in line_items_data:
+                service = line["service"]
+                # Denormalise unit_type at create time — see model
+                # docstring for the "pin the historical pricing
+                # semantics" rationale.
+                ExtraWorkRequestItem.objects.create(
+                    extra_work_request=request,
+                    service=service,
+                    quantity=line["quantity"],
+                    unit_type=service.unit_type,
+                    requested_date=line["requested_date"],
+                    customer_note=line.get("customer_note", ""),
+                )
+                # Per master plan §5 rule #9 + 2026-05-15 decision
+                # log: resolver-returns-None ⇒ proposal; only an
+                # active CustomerServicePrice row triggers the
+                # instant-ticket path. Service.default_unit_price
+                # does NOT count.
+                price_row = resolve_price(
+                    service,
+                    customer,
+                    on=line["requested_date"],
+                )
+                if price_row is None:
+                    all_lines_have_contract = False
+
+            request.routing_decision = (
+                ExtraWorkRoutingDecision.INSTANT
+                if all_lines_have_contract
+                else ExtraWorkRoutingDecision.PROPOSAL
+            )
+            request.save(update_fields=["routing_decision", "updated_at"])
+
+        return request
 
 
 # ---------------------------------------------------------------------------

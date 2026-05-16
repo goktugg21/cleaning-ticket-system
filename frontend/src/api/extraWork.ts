@@ -7,6 +7,7 @@
 import { api } from "./client";
 import type {
   ExtraWorkPricingLineItem,
+  ExtraWorkRequestCartCreatePayload,
   ExtraWorkRequestDetail,
   ExtraWorkRequestList,
   ExtraWorkStatus,
@@ -31,19 +32,14 @@ export async function getExtraWork(
   return response.data;
 }
 
-export interface CreateExtraWorkPayload {
-  building: number;
-  customer: number;
-  title: string;
-  description: string;
-  category: string;
-  category_other_text?: string;
-  urgency?: string;
-  preferred_date?: string | null;
-}
+// Sprint 28 Batch 6 — cart-shaped create payload. The pre-batch-6
+// `CreateExtraWorkPayload` shape (no `line_items`) is no longer
+// emitted by the frontend; the backend keeps wire-level
+// backwards-compatibility but the client always sends the cart shape.
+export type CreateExtraWorkPayload = ExtraWorkRequestCartCreatePayload;
 
 export async function createExtraWork(
-  payload: CreateExtraWorkPayload,
+  payload: ExtraWorkRequestCartCreatePayload,
 ): Promise<ExtraWorkRequestDetail> {
   const response = await api.post<ExtraWorkRequestDetail>(
     "/extra-work/",

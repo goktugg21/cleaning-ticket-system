@@ -91,6 +91,28 @@ class ExtraWorkPricingUnitType(models.TextChoices):
     OTHER = "OTHER", "Other"
 
 
+class ExtraWorkRoutingDecision(models.TextChoices):
+    """
+    Sprint 28 Batch 6 — routing taxonomy computed at submission time
+    from the cart's line items.
+
+    INSTANT  -> every line item resolved to an active
+                `CustomerServicePrice` (per `extra_work.pricing.
+                resolve_price`); the request is eligible for the
+                instant-ticket flow in Batch 7.
+    PROPOSAL -> at least one line had no active contract price
+                (resolver returned None) or the line has no `service`
+                FK (legacy / ad-hoc). The whole request goes to the
+                provider proposal flow.
+
+    The default is PROPOSAL — safer for legacy and partially-resolved
+    carts. Batch 7 will act on the value; Batch 6 only stores it.
+    """
+
+    INSTANT = "INSTANT", "Instant ticket"
+    PROPOSAL = "PROPOSAL", "Proposal"
+
+
 def _two_places(value: Decimal) -> Decimal:
     """Quantize a Decimal to 2 places, the canonical money rounding
     used everywhere in the Extra Work domain."""
@@ -155,6 +177,18 @@ class ExtraWorkRequest(models.Model):
         max_length=32,
         choices=ExtraWorkStatus.choices,
         default=ExtraWorkStatus.REQUESTED,
+    )
+
+    # Sprint 28 Batch 6 — routing taxonomy computed at submission time
+    # by `ExtraWorkRequestCreateSerializer.create()` from the cart's
+    # line items + `extra_work.pricing.resolve_price`. PROPOSAL is the
+    # safe default until the serializer has run the per-line resolver.
+    # Batch 7 will branch on this field to spawn tickets vs hand off to
+    # the proposal flow; Batch 6 only stores it.
+    routing_decision = models.CharField(
+        max_length=10,
+        choices=ExtraWorkRoutingDecision.choices,
+        default=ExtraWorkRoutingDecision.PROPOSAL,
     )
 
     # Visible notes — provider operators write these for the customer
@@ -558,3 +592,82 @@ class ExtraWorkStatusHistory(models.Model):
         return (
             f"{self.extra_work_id}: {self.old_status} -> {self.new_status}"
         )
+
+
+class ExtraWorkRequestItem(models.Model):
+    """
+    Sprint 28 Batch 6 — per-line shopping-cart entry on an
+    `ExtraWorkRequest`.
+
+    Distinct from `ExtraWorkPricingLineItem`: the pricing model is the
+    provider-side, post-hoc quoted line (`description` + `unit_price`
+    + `vat_rate` etc.) on the legacy single-line request. The item
+    model below is the customer-facing cart line: a `service` FK to
+    the Batch 5 service catalog, the requested quantity, a per-line
+    `requested_date`, and an optional per-line `customer_note`.
+
+    `service` is NULL-allowed so the Batch 6 data migration can
+    backfill exactly one item row per legacy `ExtraWorkRequest`
+    without inventing a synthetic Service catalog entry. New
+    submissions through the serializer enforce non-null + active
+    Service.
+
+    `unit_type` is denormalised from `Service.unit_type` at create
+    time. A later edit to the catalog row's `unit_type` therefore
+    does NOT retroactively rewrite the historical line's pricing
+    semantics — the cart line stays pinned to the unit it was
+    booked under.
+    """
+
+    extra_work_request = models.ForeignKey(
+        ExtraWorkRequest,
+        on_delete=models.CASCADE,
+        related_name="line_items",
+    )
+    service = models.ForeignKey(
+        Service,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cart_items",
+        help_text=(
+            "Catalog row for this cart line. NULL on rows backfilled "
+            "from legacy single-line ExtraWorkRequests; new "
+            "submissions enforce non-null + Service.is_active."
+        ),
+    )
+    quantity = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    unit_type = models.CharField(
+        max_length=20,
+        choices=ExtraWorkPricingUnitType.choices,
+        help_text=(
+            "Denormalised from Service.unit_type at create time so a "
+            "later catalog edit cannot rewrite the historical cart "
+            "line's pricing semantics."
+        ),
+    )
+    requested_date = models.DateField()
+    customer_note = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Per-line free-text note from the customer. Distinct from "
+            "the request-level `description` which describes the cart "
+            "as a whole."
+        ),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [models.Index(fields=["extra_work_request"])]
+
+    def __str__(self):
+        label = self.service.name if self.service is not None else "legacy"
+        return f"{label} × {self.quantity}"
