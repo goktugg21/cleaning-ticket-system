@@ -24,6 +24,7 @@ import { BuildingsAdminPage } from "./pages/admin/BuildingsAdminPage";
 import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
+import { CustomerSubPagePlaceholder } from "./pages/admin/CustomerSubPagePlaceholder";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
@@ -197,6 +198,65 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerFormPage />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 28 Batch 3 — customer-scoped submenu routes.
+              The sidebar (see `AppShell.tsx`) switches into a
+              customer-scoped mode under `/admin/customers/:id/*`.
+              Most sub-routes render `CustomerSubPagePlaceholder`
+              (a "coming soon" empty state); they will be replaced
+              by real sub-pages in later batches (Contacts — Batch
+              4; cart UX — Batch 6; view-first refactor — Batch
+              13). `permissions` is the deliberate exception:
+              re-renders `CustomerFormPage` so the Sprint 27E
+              permission editor stays reachable without touching
+              the parent page. */}
+          <Route
+            path="/admin/customers/:id/buildings"
+            element={
+              <AdminRoute>
+                <CustomerSubPagePlaceholder />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/users"
+            element={
+              <AdminRoute>
+                <CustomerSubPagePlaceholder />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/permissions"
+            element={
+              <AdminRoute>
+                <CustomerFormPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/extra-work"
+            element={
+              <AdminRoute>
+                <CustomerSubPagePlaceholder />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/contacts"
+            element={
+              <AdminRoute>
+                <CustomerSubPagePlaceholder />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/settings"
+            element={
+              <AdminRoute>
+                <CustomerSubPagePlaceholder />
               </AdminRoute>
             }
           />

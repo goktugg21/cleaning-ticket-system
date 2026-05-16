@@ -430,21 +430,142 @@ Goal: introduce the hierarchical customer-scoped submenu so subsequent
 batches have a structural anchor for sub-views. Frontend only; no backend
 or schema. ~1 sprint letter.
 
-- [ ] Add top-level vs customer-scoped sidebar mode to
+- [x] ~~Add top-level vs customer-scoped sidebar mode to
       [`frontend/src/layout/AppShell.tsx`](../../frontend/src/layout/AppShell.tsx).
-      State machine: `mode = "top-level" | "customer-scoped"`.
-- [ ] Add the customer-scoped submenu entries: Buildings, Users,
+      State machine: `mode = "top-level" | "customer-scoped"`.~~
+- [x] ~~Add the customer-scoped submenu entries: Buildings, Users,
       Permissions, Extra Work, Contacts, Settings. Some entries may show
       empty states until later batches land their content — that is fine,
-      the navigation structure ships first.
-- [ ] Add a visible **Back** action that returns the sidebar to top-level
-      mode.
-- [ ] Encode submenu state in the URL so deep links work and browser-back
+      the navigation structure ships first.~~
+- [x] ~~Add a visible **Back** action that returns the sidebar to top-level
+      mode.~~
+- [x] ~~Encode submenu state in the URL so deep links work and browser-back
       behaves predictably. Use a nested `<Routes>` block under
-      `/admin/customers/:id/*`.
-- [ ] Add route tests / Playwright coverage. Spec must assert: clicking a
+      `/admin/customers/:id/*`.~~
+- [x] ~~Add route tests / Playwright coverage. Spec must assert: clicking a
       customer enters submenu mode, Back returns to top-level, deep link
-      to a sub-route shows the correct submenu state.
+      to a sub-route shows the correct submenu state.~~
+
+**Completion block — Batch 3**
+
+- **Date:** 2026-05-16
+- **Commit:** uncommitted on working tree as of 2026-05-16 (Batch 3 diff
+  on top of `c3a9060`; ready for a single batch commit once reviewed).
+- **Files changed summary:**
+  - **Frontend (modified):**
+    - `frontend/src/layout/AppShell.tsx` — added URL-derived
+      `deriveSidebarMode` (regex against `pathname`), the
+      `CUSTOMER_SCOPED_PATH` matcher, and a branch in the
+      `.sidebar-nav` that renders **either** the existing top-level
+      operations/admin/staff-requests groups **or** a new
+      customer-scoped submenu (Back, Overview, Buildings, Users,
+      Permissions, Extra Work, Contacts, Settings). Added `ChevronLeft`,
+      `Mail`, `ShieldCheck` to the `lucide-react` imports. Mode is **not**
+      `useState` — it is a pure function of `location.pathname`, so a
+      hard refresh on `/admin/customers/:id/permissions` preserves the
+      customer-scoped sidebar.
+    - `frontend/src/App.tsx` — added imports for
+      `CustomerSubPagePlaceholder`; added six new nested routes under
+      `/admin/customers/:id/*` (buildings, users, permissions,
+      extra-work, contacts, settings). Five render the placeholder;
+      `permissions` re-renders `CustomerFormPage` so the Sprint 27E
+      editor remains reachable on the deep link. The existing
+      `/admin/customers/:id` route is unchanged.
+    - `frontend/src/i18n/en/common.json` and
+      `frontend/src/i18n/nl/common.json` — added eight
+      `nav.customer_submenu.*` keys and two
+      `customer_subpage_placeholder.*` keys. EN/NL parity preserved.
+  - **Frontend (new):**
+    - `frontend/src/pages/admin/CustomerSubPagePlaceholder.tsx` — single
+      shared "Coming soon" empty-state component (uses `t()`, no
+      editable surface, view-first per spec §3).
+    - `frontend/tests/e2e/sprint28b_customer_sidebar.spec.ts` — three
+      Playwright cases: customer deep link shows customer-scoped
+      sidebar; Back returns to top-level + URL becomes
+      `/admin/customers`; non-customer admin route shows top-level
+      sidebar. Auth as `COMPANY_ADMIN` Ramazan; customer id resolved
+      via API lookup of "B Amsterdam" so the spec is reseed-stable.
+  - **Backend:** no changes. **Migrations:** no changes. **Audit
+    signals:** no changes.
+  - **Docs:** this completion block, §7 pointer advance, §8 log row,
+    §9 decision-log row(s).
+- **Tests / checks run:**
+  - `npm run typecheck` → clean (empty diagnostic output — no errors).
+  - `npm run build` → clean, 373–435ms; advisory chunk-size warning is
+    the same pre-existing baseline (not from this diff).
+  - `npm run lint` → **52 problems (49 errors, 3 warnings)** —
+    **identical** to the Batch 1 baseline. The only lint hit in a
+    modified file is `AppShell.tsx:122` (the pre-existing
+    `react-hooks/set-state-in-effect` warning on `setSidebarOpen(false)`
+    inside `useEffect` — line number shifted from `:93` to `:122` purely
+    because of the new code above it; the rule violation is unchanged
+    and not introduced by this batch).
+  - **Playwright spec:** **WRITTEN but NOT executed locally.** Per the
+    Batch 3 brief and the standing WSL gotcha
+    (`docs/CLAUDE_CODE_OPERATIONAL_NOTES.md` — root-owned
+    `frontend/test-results/` after a container run), we did not invoke
+    `npm run test:e2e` in this pass. The spec compiles under
+    `tsc -b` (the build step ran clean with the spec present in the
+    tree) and follows the same fixture pattern as
+    `sprint23c_access_role_editor.spec.ts` /
+    `sprint27f_ticket_override.spec.ts`. Run via CI Playwright workflow
+    or `./scripts/final_validation.sh` to actually exercise it.
+- **Important decisions made:**
+  - **Sidebar mode is URL-derived, not React state.** A regex (`/^\
+    /admin\/customers\/(\d+)(?:\/.*)?$/`) maps `pathname` to `mode +
+    customerId`. The match deliberately excludes `/admin/customers`
+    (the list page) and `/admin/customers/new` so the customer-scoped
+    submenu only activates for an actual customer record. Browser
+    refresh on a deep link preserves the submenu; the back-button
+    behaves predictably; no global state is needed. See §9 decision
+    row.
+  - **Single placeholder component for five of six submenu sub-routes.**
+    `Buildings`, `Users`, `Extra Work`, `Contacts`, `Settings`
+    all render `CustomerSubPagePlaceholder` (a 30-line component that
+    just shows the "Coming soon" empty state through `t()`). The
+    `Permissions` sub-route is the deliberate exception — it
+    re-renders `CustomerFormPage` so the Sprint 27E permission editor
+    stays reachable on a deep link **without decomposing the parent
+    page** (decomposition is Batch 13 work). `Overview` keeps the
+    existing `/admin/customers/:id` route unchanged. See §9 decision
+    row.
+  - **Back is a real route navigation, not `history.back()`.** The
+    Back entry is a `<NavLink to="/admin/customers" end>` so deep-link
+    entries (e.g. a teammate pasting `/admin/customers/42/contacts`)
+    still resolve to the customers list when Back is pressed, even
+    when the browser history is empty.
+  - **Role filtering deferred to the existing `AdminRoute` gate.** The
+    customer-scoped submenu is only ever rendered inside an
+    `AdminRoute`-gated route (`SUPER_ADMIN` + `COMPANY_ADMIN` only),
+    so no per-link role filters are added in `AppShell.tsx`. This
+    matches the brief's "don't add new role filters; the route guard
+    handles it" instruction.
+- **Remaining risks:**
+  - **Playwright spec not locally validated.** Three cases written
+    against the existing demo seed (Osius / "B Amsterdam" customer
+    resolved via API; COMPANY_ADMIN Ramazan). If a future reseed
+    renames the customer or changes the auth flow, the spec needs an
+    update. Run via the CI Playwright workflow before merging.
+  - **`CustomerFormPage` is mounted twice when navigating between
+    `/admin/customers/:id` (Overview) and
+    `/admin/customers/:id/permissions`.** Both routes register the
+    same component. React Router will remount on the path change, so
+    state is not preserved across the navigation. Acceptable for
+    Batch 3 (the editor is self-loading and reseeds its state from the
+    `:id` URL param). Batch 13 will decompose `CustomerFormPage` and
+    eliminate the duplication.
+  - **No new icon imports beyond `lucide-react` defaults.** The
+    submenu uses `ChevronLeft`, `LayoutGrid`, `MapPin`, `UserCog`,
+    `ShieldCheck`, `Receipt`, `Mail`, `Settings` — all already in the
+    project's icon set or trivially added from the same package. No
+    new dependency installed.
+  - **`AppShell.tsx:122` lint hit (`react-hooks/set-state-in-effect`)
+    is unchanged from baseline.** Line number shifted but the rule
+    violation is the same pre-existing `setSidebarOpen(false)` in
+    `useEffect`; refactoring that loop is parked for a separate
+    sprint (it would need a different mobile-sidebar dismiss strategy
+    — likely an `onClick` on each `NavLink` — which is out of Batch
+    3 scope).
 
 ### Batch 4 — Contacts model and UI
 
@@ -746,14 +867,20 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 3 — Sidebar refactor foundation**
+- **Current batch:** **Batch 4 — Contacts model and UI**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 3 items.
-  Batch 3 is frontend-only (sidebar mode + customer-scoped submenu +
-  URL-encoded state); no backend or schema change.
-- **Next recommended batch (on-deck):** Batch 4 — Contacts model and
-  UI.
+  this file, state the current batch, and work only on Batch 4 items.
+  Batch 4 is joint backend + frontend: introduces the `Contact` model
+  (no password / role / scope rows), CRUD API gated by
+  `IsSuperAdminOrCompanyAdminForCompany`, audit signal coverage, the
+  `CustomerContactsPage` under `/admin/customers/:id/contacts` (which
+  replaces the Batch 3 placeholder at that route), and contextual
+  contact display panels on `TicketDetailPage` /
+  `ExtraWorkDetailPage`. Batch 3 (sidebar foundation) ships the
+  navigation home for the new page.
+- **Next recommended batch (on-deck):** Batch 5 — Service catalog and
+  pricing.
 
 ---
 
@@ -763,6 +890,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-16 | Batch 3 — Sidebar refactor foundation | uncommitted on top of `c3a9060` | Frontend only. `AppShell.tsx` gains a URL-derived `mode = "top-level" \| "customer-scoped"` (regex on `pathname`, no `useState`) and a customer-scoped submenu (Back / Overview / Buildings / Users / Permissions / Extra Work / Contacts / Settings). `App.tsx` registers six new `/admin/customers/:id/<section>` routes — five render the new `CustomerSubPagePlaceholder` "Coming soon" component; `permissions` re-renders `CustomerFormPage` so the Sprint 27E editor remains reachable without decomposing the parent page (decomposition is Batch 13). EN/NL i18n keys added for `nav.customer_submenu.*` + `customer_subpage_placeholder.*`. Playwright spec `sprint28b_customer_sidebar.spec.ts` covers deep-link, Back, and non-customer-route cases. | `npm run typecheck` → clean. `npm run build` → clean, 373ms. `npm run lint` → **52 problems = baseline** (only `AppShell.tsx:122` lint hit is the pre-existing `setSidebarOpen` in `useEffect`; line number shifted from `:93`, rule violation unchanged). Playwright spec **written but NOT executed locally** (WSL root-owned `frontend/test-results/` gotcha; brief allows this). | Playwright spec needs CI run to confirm behaviour against demo seed. `CustomerFormPage` is mounted by two routes (`:id` Overview + `:id/permissions`); React Router remounts on path change so state is not preserved across the nav. Batch 13 will decompose `CustomerFormPage` and remove the duplication. `AppShell.tsx:122` lint hit is unchanged baseline. |
 | 2026-05-16 | Batch 1 — Operational health fixes | uncommitted on top of `6e572db` | Frontend: `getApiError` HTML-prefix guard (`client.ts`); `AuditLog.reason` + `actor_scope` added to type (`types.ts`); sidebar "Extra Work" i18n'd (`AppShell.tsx` + `common.json` EN/NL). Backend: 4 pending dev DB migrations applied after explicit user approval (`audit.0002`, `customers.0005`, `customers.0006`, `tickets.0007`). | `manage.py check` (pre + post): 0 issues; `showmigrations`: all `[X]` after migrate; `npm run typecheck`: clean; `npm run build`: clean (472ms); `npm run lint`: 52 problems = baseline (zero new hits in changed files). No unit-test framework wired on frontend — `getApiError` ships with code-level guard + typecheck/build coverage only (Vitest setup parked for a later batch). | No automated unit coverage on `getApiError`; `AuditLog.reason`/`actor_scope` declared as required (matches backend default-emitting contract); `nav.extra_work` NL value is sentence-case "Extra werk" (flippable to "Extra Werk" with no code change). |
 | 2026-05-16 | Batch 2 — Verify mild backend risk | uncommitted on top of `739e347` | **Real bug found and fixed.** STAFF could `POST /api/tickets/<id>/assign/` and mutate `ticket.assigned_to` because both the view gate (`tickets/views.py:250`) and the serializer gate (`tickets/serializers.py:626`) used `is_staff_role` (which returns True for STAFF since Sprint 23A). Tightened both to an explicit `{SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER}` allow-list. New regression test `tickets/tests/test_sprint28a_staff_assign_block.py` (4 cases). H-4 matrix attribution drift resolved by rewriting the test-reference cell to cite the structural enforcement + the new Sprint 28 Batch 2 test. | Pre-fix targeted run: 3 of 4 new tests FAILED (200 != 403) — proves bug. Post-fix targeted run: 4/4 OK. Broader `python manage.py test tickets --keepdb -v 1`: **157 tests OK** in 101.6s. `manage.py check`: 0 issues. No frontend files touched. | `is_staff_role` remains the gate in 10+ other call sites and was deliberately NOT changed (refactor). Customer-user error message changed from "Customer users cannot assign tickets." to "This role cannot assign tickets." (status code 403 unchanged; existing test asserts only status). Batch 10's per-building `can_assign` flag will need to widen the explicit gate when it lands — do NOT pre-empt. |
 
@@ -775,6 +903,8 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-16 | Sidebar mode is **URL-derived** (regex against `location.pathname`), not React state. A pathname matching `/^\/admin\/customers\/(\d+)(?:\/.*)?$/` switches the sidebar into customer-scoped mode; any other pathname is top-level. The list page `/admin/customers` and `/admin/customers/new` deliberately do NOT trigger the submenu. | Browser refresh on a deep link must preserve the customer-scoped sidebar; back-button behaviour must be predictable; no global state library is needed. The audit (§7) called out the lack of hierarchical state on the sidebar as a P1 issue; this is the structural anchor for the view-first refactor Batches 4, 6, and 13 will build on. | Batch 3 + `frontend/src/layout/AppShell.tsx` `deriveSidebarMode` |
+| 2026-05-16 | Five of the six customer-scoped submenu sub-routes (`buildings`, `users`, `extra-work`, `contacts`, `settings`) render a **single shared `CustomerSubPagePlaceholder`** "Coming soon" component. The `permissions` sub-route is the deliberate exception — it re-renders `CustomerFormPage` so the Sprint 27E permission editor stays reachable via the deep link `/admin/customers/:id/permissions` **without** decomposing the parent page in this batch. `CustomerFormPage` decomposition is Batch 13 work. | The brief explicitly allowed "minimal routing integration" for the Permissions editor and asked for a single placeholder for the rest; this keeps the Batch 3 diff small, ships the structural anchor without coupling to later sub-page implementations, and avoids forking the Sprint 27E editor. | Batch 3 + `frontend/src/pages/admin/CustomerSubPagePlaceholder.tsx` + `frontend/src/App.tsx` |
 | 2026-05-15 | Global default service price alone is **not** sufficient to create an instant ticket. Customer-specific active contract price is required. | Spec §5 + §4.1 + product rule #9. Global default exists as a provider-side reference only. | [`docs/product/meeting-2026-05-15-system-requirements.md`](../product/meeting-2026-05-15-system-requirements.md) §5 |
 | 2026-05-15 | Contacts are not login Users. Separate entity, no password / role / membership / permission overrides. Promotion to User is a later, explicit sprint. | Spec §1. Prevents conflation that would breach RBAC scope. | [`docs/product/meeting-2026-05-15-system-requirements.md`](../product/meeting-2026-05-15-system-requirements.md) §1 |
 | 2026-05-15 | Detail pages load **view-first / read-only by default**. Editing requires explicit Edit/Add → modal or separate page. Sprint 27E `CustomerFormPage` permission editor is the reference shape. | Spec §3. Prevents accidental mutation and gives a stable mental model across pages. | [`docs/product/meeting-2026-05-15-system-requirements.md`](../product/meeting-2026-05-15-system-requirements.md) §3 |

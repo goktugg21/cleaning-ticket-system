@@ -17,6 +17,18 @@
   "nav.invitations": "Uitnodigingen",
   "nav.audit_logs": "Auditlog",
 
+  "nav.customer_submenu.back": "Terug naar klanten",
+  "nav.customer_submenu.overview": "Overzicht",
+  "nav.customer_submenu.buildings": "Gebouwen",
+  "nav.customer_submenu.users": "Gebruikers",
+  "nav.customer_submenu.permissions": "Permissies",
+  "nav.customer_submenu.extra_work": "Extra werk",
+  "nav.customer_submenu.contacts": "Contacten",
+  "nav.customer_submenu.settings": "Instellingen",
+
+  "customer_subpage_placeholder.title": "Binnenkort beschikbaar",
+  "customer_subpage_placeholder.description": "Deze sectie wordt in een toekomstige sprint geïmplementeerd. De navigatie-structuur wordt eerst opgeleverd.",
+
   "topbar.kicker": "Ticketbeheer",
   "topbar.title": "Facility servicedesk",
   "topbar.online": "Online",

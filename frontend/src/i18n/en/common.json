@@ -17,6 +17,18 @@
   "nav.invitations": "Invitations",
   "nav.audit_logs": "Audit log",
 
+  "nav.customer_submenu.back": "Back to customers",
+  "nav.customer_submenu.overview": "Overview",
+  "nav.customer_submenu.buildings": "Buildings",
+  "nav.customer_submenu.users": "Users",
+  "nav.customer_submenu.permissions": "Permissions",
+  "nav.customer_submenu.extra_work": "Extra Work",
+  "nav.customer_submenu.contacts": "Contacts",
+  "nav.customer_submenu.settings": "Settings",
+
+  "customer_subpage_placeholder.title": "Coming soon",
+  "customer_subpage_placeholder.description": "This section will be implemented in a future sprint. The navigation foundation ships first.",
+
   "topbar.kicker": "Ticket Management",
   "topbar.title": "Facility service desk",
   "topbar.online": "Online",
