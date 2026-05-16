@@ -154,7 +154,7 @@ export function AppShell({ children }: AppShellProps) {
               <span className="nav-icon">
                 <Receipt size={16} strokeWidth={2} />
               </span>
-              Extra Work
+              {t("nav.extra_work")}
             </NavLink>
           )}
           {me?.role && REPORTS_ROLES.has(me.role) && (

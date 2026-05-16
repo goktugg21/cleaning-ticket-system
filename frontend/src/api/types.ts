@@ -489,6 +489,13 @@ export interface AuditLog {
   created_at: string;
   request_ip: string | null;
   request_id: string | null;
+  // Sprint 27F-B2 — operator-supplied free text explaining a privileged
+  // mutation. Default empty for legacy / system writes.
+  reason: string;
+  // Sprint 27F-B2 — snapshot of the actor's role + scope anchors at write
+  // time. Shape: { role, user_id, company_ids, customer_id, building_id }.
+  // Empty dict for anonymous / system writes.
+  actor_scope: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------

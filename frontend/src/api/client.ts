@@ -145,7 +145,22 @@ export function getApiError(error: unknown): string {
     // DRF-shaped payloads first. These are usually the most precise
     // message we can show ("Email already taken", "Invalid token", …)
     // so we surface them verbatim instead of a generic status sentence.
-    if (typeof data === "string" && data.trim().length > 0) return data;
+    // Sprint 28 Batch 1: but NEVER pass through HTML — Django's DEBUG=False
+    // 500 page and the dev server's debug response both arrive as
+    // `text/html`. Rendering that body in the UI's error banner leaks the
+    // full debug page into the customer surface and confuses operators.
+    // Detect an HTML prefix (whitespace-tolerant) and drop to the
+    // status-aware fallback below.
+    if (typeof data === "string" && data.trim().length > 0) {
+      const trimmed = data.trimStart();
+      const looksLikeHtml =
+        trimmed.startsWith("<!DOCTYPE") ||
+        trimmed.startsWith("<!doctype") ||
+        trimmed.startsWith("<html") ||
+        trimmed.startsWith("<HTML");
+      if (!looksLikeHtml) return data;
+      // Fall through to statusFallback(status) below.
+    }
     if (data && typeof data === "object") {
       const record = data as Record<string, unknown>;
       if (typeof record.detail === "string" && record.detail.trim().length > 0) {

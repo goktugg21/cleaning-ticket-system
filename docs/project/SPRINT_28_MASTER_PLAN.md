@@ -218,26 +218,102 @@ previous one lands. Do NOT implement items from later batches.
 Goal: clear the four operational gotchas the audit flagged. Zero schema
 risk. ~1 day of work.
 
-- [ ] Apply pending dev DB migrations manually, after confirming with the
+- [x] ~~Apply pending dev DB migrations manually, after confirming with the
       user. (`audit.0002_auditlog_reason_actor_scope`,
       `customers.0005_customercompanypolicy`,
       `customers.0006_backfill_customer_company_policy`,
       `tickets.0007_ticketstatushistory_is_override_and_more`.) Do **not**
       run migrations automatically without explicit user approval. Mark
-      this item as planned/manual and request confirmation.
-- [ ] Fix frontend `getApiError` raw HTML handling at
+      this item as planned/manual and request confirmation.~~
+- [x] ~~Fix frontend `getApiError` raw HTML handling at
       [`frontend/src/api/client.ts:148`](../../frontend/src/api/client.ts#L148).
       Detect `<!DOCTYPE` / `<html` prefix and downgrade to the status
-      fallback string. ~5-line change. Add a unit/contract test.
-- [ ] Add Sprint 27F-B2 `AuditLog.reason: string` and
+      fallback string. ~5-line change. Add a unit/contract test.~~
+- [x] ~~Add Sprint 27F-B2 `AuditLog.reason: string` and
       `AuditLog.actor_scope: Record<string, unknown>` fields to the
       frontend `AuditLog` type at
       [`frontend/src/api/types.ts:481-492`](../../frontend/src/api/types.ts#L481-L492).
-      Keep `tsc --noEmit` green.
-- [ ] Replace the literal `"Extra Work"` string in the sidebar at
+      Keep `tsc --noEmit` green.~~
+- [x] ~~Replace the literal `"Extra Work"` string in the sidebar at
       [`frontend/src/layout/AppShell.tsx:157`](../../frontend/src/layout/AppShell.tsx#L157)
       with a `t()` call. Add the key to both `frontend/src/i18n/en/common.json`
-      and `frontend/src/i18n/nl/common.json`. Preserve EN/NL parity.
+      and `frontend/src/i18n/nl/common.json`. Preserve EN/NL parity.~~
+
+**Completion block — Batch 1**
+
+- **Date:** 2026-05-16
+- **Commit:** uncommitted on working tree as of 2026-05-16 (Batch 1 diff
+  on top of `6e572db`; ready for a single batch commit once reviewed).
+- **Files changed summary:**
+  - Frontend: `frontend/src/api/client.ts` (HTML-prefix guard in
+    `getApiError`), `frontend/src/api/types.ts` (Sprint 27F-B2 fields on
+    `AuditLog`), `frontend/src/layout/AppShell.tsx` (sidebar `t()` call),
+    `frontend/src/i18n/en/common.json` and
+    `frontend/src/i18n/nl/common.json` (new `nav.extra_work` key in both,
+    EN/NL parity preserved).
+  - Backend: no source changes. Dev DB migrations applied after explicit
+    user approval (`audit.0002`, `customers.0005`, `customers.0006`,
+    `tickets.0007`).
+  - Docs: this completion block + §7 pointer advance + §8 log row.
+- **Tests / checks run:**
+  - `docker compose exec backend python manage.py showmigrations audit
+    customers tickets` (pre + post): pre showed 4 unapplied; post showed
+    all `[X]`.
+  - `docker compose exec backend python manage.py migrate`:
+    `audit.0002_auditlog_reason_actor_scope OK`,
+    `customers.0005_customercompanypolicy OK`,
+    `customers.0006_backfill_customer_company_policy OK`,
+    `tickets.0007_ticketstatushistory_is_override_and_more OK`.
+  - `docker compose exec backend python manage.py check` (pre + post
+    migrate): both **0 issues**.
+  - `npm run typecheck`: clean (empty diagnostic output).
+  - `npm run build`: clean, 472ms; advisory chunk-size warning only
+    (baseline; not from this diff).
+  - `npm run lint`: **52 problems (49 errors, 3 warnings)** — identical
+    to the audit-recorded baseline. The single AppShell.tsx hit is at
+    `:93:5` (pre-existing `react-hooks/set-state-in-effect`), not at the
+    `:157` line touched in this batch. Zero new lint hits in the four
+    changed files.
+  - Unit-test infrastructure status: **none wired**. The frontend
+    `package.json` declares no `test` script and lists no Vitest /
+    Jest / Testing-Library dependency; only Playwright e2e exists.
+    The `getApiError` change therefore ships with a defensive code-level
+    guard and typecheck/build coverage, but **no dedicated unit test
+    was added**. A Playwright spec would need a mocked 500 HTML
+    response and a route to render it; that's heavier than the 5-line
+    change warrants. Recommendation: add Vitest + an `api/client.test.ts`
+    in a later batch (e.g. as part of Batch 3 or 13 setup).
+- **Important decisions made:**
+  - HTML detection in `getApiError` matches both upper- and lower-case
+    `<!DOCTYPE` / `<html>` prefixes (Django serves uppercase
+    `<!DOCTYPE html>`; some proxies emit lowercase). Whitespace-tolerant
+    via `trimStart()`. The original DRF-string pass-through is preserved
+    for non-HTML payloads.
+  - `nav.extra_work` translations: **EN** "Extra Work" (brand-preserving
+    capitalisation, matches the existing literal), **NL** "Extra werk"
+    (Dutch sentence-case convention used by sibling keys like "Nieuw
+    ticket"). No decision-log row added; this is purely a translation
+    choice within the i18n contract, not a product decision.
+  - Migrations were applied after explicit user approval (per master
+    plan §7 rule). The migrations themselves were already audit-locked
+    and test-DB-validated by Sprints 27B/27C/27F; this pass only moved
+    the dev container's schema into the same state.
+- **Remaining risks:**
+  - No automated unit-test coverage on `getApiError`. If a future change
+    re-introduces a raw-HTML leak (e.g. an interceptor that converts the
+    HTML to a different non-DOCTYPE prefix), only end-to-end manual
+    smoke would catch it. Adding Vitest is a parked follow-up.
+  - The `AuditLog` type now declares `reason: string` + `actor_scope:
+    Record<string, unknown>` as **required** (not optional). The backend
+    Sprint 27F-B2 serializer always emits both fields with defaults
+    (`""` and `{}`), so this is correct — but any legacy fixture or
+    third-party AuditLog ingester that omits the fields would produce
+    a runtime TypeScript-vs-actual mismatch. None observed in the
+    codebase today.
+  - `nav.extra_work` is the only sidebar entry whose Dutch translation
+    differs in case-convention from the English. If a stakeholder
+    prefers "Extra Werk" (title-case to match the brand), flip the NL
+    value — no other code changes required.
 
 ### Batch 2 — Verify mild backend risk
 
@@ -584,14 +660,14 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 1 — Operational health fixes**
+- **Current batch:** **Batch 2 — Verify mild backend risk**
 - **Current status:** Not started
-- **Next recommended action:** Commit this master plan file together with
-  the audit doc (`docs/audits/current-state-2026-05-16-system-audit.md`)
-  on the same commit. Then start Batch 1 in a **separate implementation
-  pass** that begins by re-reading this file and stating the current batch.
-- **Next recommended batch (on-deck):** Batch 2 — Verify mild backend
-  risk.
+- **Next recommended action:** Open a fresh implementation pass, re-read
+  this file, state the current batch, and work only on Batch 2 items.
+  Batch 2 is read-heavy (audit `TicketAssignSerializer`) and may close
+  without code changes if the gate already refuses STAFF.
+- **Next recommended batch (on-deck):** Batch 3 — Sidebar refactor
+  foundation.
 
 ---
 
@@ -601,8 +677,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
-
-*(empty — Batch 1 not started)*
+| 2026-05-16 | Batch 1 — Operational health fixes | uncommitted on top of `6e572db` | Frontend: `getApiError` HTML-prefix guard (`client.ts`); `AuditLog.reason` + `actor_scope` added to type (`types.ts`); sidebar "Extra Work" i18n'd (`AppShell.tsx` + `common.json` EN/NL). Backend: 4 pending dev DB migrations applied after explicit user approval (`audit.0002`, `customers.0005`, `customers.0006`, `tickets.0007`). | `manage.py check` (pre + post): 0 issues; `showmigrations`: all `[X]` after migrate; `npm run typecheck`: clean; `npm run build`: clean (472ms); `npm run lint`: 52 problems = baseline (zero new hits in changed files). No unit-test framework wired on frontend — `getApiError` ships with code-level guard + typecheck/build coverage only (Vitest setup parked for a later batch). | No automated unit coverage on `getApiError`; `AuditLog.reason`/`actor_scope` declared as required (matches backend default-emitting contract); `nav.extra_work` NL value is sentence-case "Extra werk" (flippable to "Extra Werk" with no code change). |
 
 ---
 
