@@ -554,6 +554,25 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             )
             request.save(update_fields=["routing_decision", "updated_at"])
 
+            # Sprint 28 Batch 7 — instant-route auto-spawn. When every
+            # cart line resolved to a customer-specific contract price
+            # (routing_decision="INSTANT"), the customer's submission
+            # IS the approval: no proposal phase, spawn operational
+            # tickets and advance the parent to CUSTOMER_APPROVED. The
+            # spawn runs INSIDE this transaction.atomic() so a partial
+            # failure (e.g. a contract row deactivated mid-flight) rolls
+            # the parent + line-items + tickets back together.
+            if request.routing_decision == ExtraWorkRoutingDecision.INSTANT:
+                # Imported lazily to avoid circular import:
+                # `instant_tickets.py` imports from this app's models +
+                # state_machine, and a top-level import would create a
+                # cycle through `serializers.py`.
+                from .instant_tickets import spawn_tickets_for_request
+
+                spawn_tickets_for_request(
+                    request, actor=self.context["request"].user
+                )
+
         return request
 
 

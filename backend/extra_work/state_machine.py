@@ -13,11 +13,27 @@ Allowed transitions:
   PRICING_PROPOSED  -> CANCELLED            (provider operator OR creator)
   CUSTOMER_REJECTED -> UNDER_REVIEW         (provider can revise after rejection)
   CUSTOMER_APPROVED -> CANCELLED            (provider override — needs reason)
+  REQUESTED         -> CUSTOMER_APPROVED    (SYSTEM-ONLY — Sprint 28 Batch 7
+                                             instant-ticket spawn; never
+                                             reachable via the user-facing
+                                             transition endpoint)
 
 Operational-execution statuses (ASSIGNED / IN_PROGRESS /
 WAITING_MANAGER_REVIEW / WAITING_CUSTOMER_APPROVAL / COMPLETED) are
 NOT covered here per the Sprint 26B brief. They land with the
 staff-execution sprint that follows.
+
+Sprint 28 Batch 7 system-only transition
+----------------------------------------
+The new `(REQUESTED, CUSTOMER_APPROVED)` pair is the instant-route auto-
+approval written by `extra_work.instant_tickets.spawn_tickets_for_request`.
+It is intentionally NOT reachable via the user-facing
+`POST /api/extra-work/<id>/transition/` endpoint: customers must not be
+able to skip the proposal phase by hand-rolling a transition payload,
+and providers must not be able to drive it without writing the override
+reason on the existing PRICING_PROPOSED path. `_user_can_drive_transition`
+returns False for this pair regardless of actor role; the spawn service
+writes the status + history row directly, bypassing `apply_transition`.
 """
 from __future__ import annotations
 
@@ -50,6 +66,22 @@ ALLOWED_TRANSITIONS: set[tuple[str, str]] = {
     (ExtraWorkStatus.PRICING_PROPOSED, ExtraWorkStatus.CANCELLED),
     (ExtraWorkStatus.CUSTOMER_REJECTED, ExtraWorkStatus.UNDER_REVIEW),
     (ExtraWorkStatus.CUSTOMER_APPROVED, ExtraWorkStatus.CANCELLED),
+    # Sprint 28 Batch 7 — instant-route auto-approval. System-only:
+    # `_user_can_drive_transition` returns False for this pair, so the
+    # public `/transition/` endpoint cannot reach it. The spawn service
+    # writes the status + history row directly (see
+    # `extra_work.instant_tickets.spawn_tickets_for_request`).
+    (ExtraWorkStatus.REQUESTED, ExtraWorkStatus.CUSTOMER_APPROVED),
+}
+
+
+# Sprint 28 Batch 7 — pairs that must never be reachable via the public
+# transition endpoint. `_user_can_drive_transition` short-circuits on
+# any pair in this set so no role / scope combination can drive them
+# via the API. The `extra_work.instant_tickets` spawn service writes
+# these transitions directly, bypassing `apply_transition`.
+SYSTEM_ONLY_TRANSITIONS: set[tuple[str, str]] = {
+    (ExtraWorkStatus.REQUESTED, ExtraWorkStatus.CUSTOMER_APPROVED),
 }
 
 
@@ -101,6 +133,13 @@ def _user_can_drive_transition(
     yet asked the provider to price).
     """
     from_status = extra_work.status
+
+    # Sprint 28 Batch 7 — system-only transitions (e.g. the
+    # instant-route REQUESTED -> CUSTOMER_APPROVED auto-approval) are
+    # never reachable via the user-facing transition endpoint. The
+    # spawn service writes them directly, bypassing apply_transition.
+    if (from_status, to_status) in SYSTEM_ONLY_TRANSITIONS:
+        return False
 
     if user.role == UserRole.SUPER_ADMIN:
         # Super admin can drive any allowed transition globally.

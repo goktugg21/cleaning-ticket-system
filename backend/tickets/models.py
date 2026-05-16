@@ -117,6 +117,21 @@ class Ticket(models.Model):
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
+    # Sprint 28 Batch 7 — link back to the ExtraWorkRequestItem this
+    # Ticket was spawned from. NULL for tickets created by any other
+    # path (legacy creation, direct API submission, etc.). SET_NULL on
+    # the EW side's delete so a Ticket survives if the cart line is
+    # later removed — the operational job has already been scheduled
+    # / executed and dropping it would lose audit history.
+    extra_work_request_item = models.ForeignKey(
+        "extra_work.ExtraWorkRequestItem",
+        on_delete=models.SET_NULL,
+        related_name="spawned_tickets",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
     # SLA tracking. Engine lives in backend/sla/. sla_first_breached_at is a
     # permanent marker that survives reopens; the rest are recomputed by the
     # engine and the periodic reconciliation task.

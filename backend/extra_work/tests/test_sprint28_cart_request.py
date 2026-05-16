@@ -460,17 +460,23 @@ class CartRequestValidationTests(CartFixtureMixin, TestCase):
 
 
 # ---------------------------------------------------------------------------
-# "Batch 6 does not act": no tickets, no transitions
+# Routing → ticket-spawn + status contract (Sprint 28 Batch 7 update)
 # ---------------------------------------------------------------------------
-class CartRequestDoesNotSpawnTicketTests(CartFixtureMixin, TestCase):
+# Originally Batch 6 locked "INSTANT routing must NOT spawn tickets and
+# the request must stay at REQUESTED". Batch 7 reverses that contract on
+# the INSTANT branch only: the spawn service now creates one Ticket per
+# line and drives the parent to CUSTOMER_APPROVED. The PROPOSAL branch
+# keeps the original Batch 6 behaviour (no tickets, status stays at
+# REQUESTED). These tests pin both shapes.
+class CartRequestRoutingSpawnTests(CartFixtureMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls._setup_fixture()
 
-    def test_instant_routing_does_not_spawn_tickets(self):
-        # Lock the contract: even when every line resolves to a
-        # CustomerServicePrice (routing_decision="INSTANT"), Batch 6
-        # MUST NOT create operational Tickets. That's Batch 7's job.
+    def test_instant_routing_spawns_one_ticket_per_line(self):
+        # Sprint 28 Batch 7 — INSTANT routing now DOES spawn one Ticket
+        # per ExtraWorkRequestItem, anchored to the parent request via
+        # the new `Ticket.extra_work_request_item` FK.
         from tickets.models import Ticket
 
         before = Ticket.objects.count()
@@ -482,14 +488,48 @@ class CartRequestDoesNotSpawnTicketTests(CartFixtureMixin, TestCase):
             response.data["routing_decision"],
             ExtraWorkRoutingDecision.INSTANT,
         )
+        # Exactly one new Ticket — the cart had one line.
+        self.assertEqual(Ticket.objects.count(), before + 1)
+        request = ExtraWorkRequest.objects.get(id=response.data["id"])
+        line = request.line_items.get()
+        self.assertEqual(line.spawned_tickets.count(), 1)
+
+    def test_proposal_routing_does_not_spawn_tickets(self):
+        # Batch 6 contract preserved for the PROPOSAL branch: when any
+        # line has no contract price, no Tickets are spawned by
+        # submission. Batch 8 will wire the proposal-approval spawn.
+        from tickets.models import Ticket
+
+        before = Ticket.objects.count()
+        payload = self._base_payload()
+        payload["line_items"][0]["service"] = self.service_unpriced.id
+        response = self._api(self.cust_basic_a).post(
+            URL, payload, format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(
+            response.data["routing_decision"],
+            ExtraWorkRoutingDecision.PROPOSAL,
+        )
         self.assertEqual(Ticket.objects.count(), before)
 
-    def test_status_remains_requested(self):
-        # Routing computation must not trigger a workflow transition;
-        # the new request stays at REQUESTED regardless of decision.
-        for line_service, expected in (
-            (self.service_priced, ExtraWorkRoutingDecision.INSTANT),
-            (self.service_unpriced, ExtraWorkRoutingDecision.PROPOSAL),
+    def test_instant_routing_advances_status_to_customer_approved(self):
+        # Sprint 28 Batch 7 — INSTANT routing auto-approves the request
+        # (the customer's submission IS the approval because the price
+        # is contract-locked). PROPOSAL routing keeps the original Batch
+        # 6 behaviour: the request stays at REQUESTED until a provider
+        # operator drives it forward.
+        for line_service, expected_routing, expected_status in (
+            (
+                self.service_priced,
+                ExtraWorkRoutingDecision.INSTANT,
+                "CUSTOMER_APPROVED",
+            ),
+            (
+                self.service_unpriced,
+                ExtraWorkRoutingDecision.PROPOSAL,
+                "REQUESTED",
+            ),
         ):
             payload = self._base_payload()
             payload["line_items"][0]["service"] = line_service.id
@@ -497,9 +537,10 @@ class CartRequestDoesNotSpawnTicketTests(CartFixtureMixin, TestCase):
                 URL, payload, format="json"
             )
             self.assertEqual(response.status_code, 201, response.data)
-            self.assertEqual(response.data["routing_decision"], expected)
-            # Status not changed by routing computation.
-            self.assertEqual(response.data["status"], "REQUESTED")
+            self.assertEqual(
+                response.data["routing_decision"], expected_routing
+            )
+            self.assertEqual(response.data["status"], expected_status)
 
 
 # ---------------------------------------------------------------------------
