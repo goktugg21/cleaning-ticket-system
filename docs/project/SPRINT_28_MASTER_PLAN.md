@@ -320,23 +320,109 @@ risk. ~1 day of work.
 Goal: confirm whether the `is_staff_role`-permitted `/api/tickets/<id>/assign/`
 path is a real bypass risk. Resolve H-4 attribution drift. ~½ day.
 
-- [ ] Read [`backend/tickets/serializers.py`](../../backend/tickets/serializers.py)
+- [x] ~~Read [`backend/tickets/serializers.py`](../../backend/tickets/serializers.py)
       `TicketAssignSerializer.validate` and trace the path called by the
       `assign` action at
-      [`tickets/views.py:247-280`](../../backend/tickets/views.py#L247-L280).
-- [ ] Confirm STAFF cannot reassign tickets through
+      [`tickets/views.py:247-280`](../../backend/tickets/views.py#L247-L280).~~
+- [x] ~~Confirm STAFF cannot reassign tickets through
       `POST /api/tickets/<id>/assign/`. If the serializer doesn't refuse,
-      that's a real backend bug — escalate per rule 12.
-- [ ] Add a regression test if missing — e.g.
+      that's a real backend bug — escalate per rule 12.~~
+- [x] ~~Add a regression test if missing — e.g.
       `tickets/tests/test_sprint28a_staff_assign_block.py` asserting
-      STAFF POST returns 403 with no DB write.
-- [ ] Fix only if a real bug exists. Do not change the gate if it's already
-      correct.
-- [ ] Resolve H-4 matrix attribution drift in
+      STAFF POST returns 403 with no DB write.~~
+- [x] ~~Fix only if a real bug exists. Do not change the gate if it's already
+      correct.~~
+- [x] ~~Resolve H-4 matrix attribution drift in
       [`docs/architecture/sprint-27-rbac-matrix.md`](../architecture/sprint-27-rbac-matrix.md)
       §3 row 4. Either rewrite the row to cite the structural guard (no
       STAFF entries anywhere in `ALLOWED_TRANSITIONS`) or land an
-      H-4-specific regression test under the same name.
+      H-4-specific regression test under the same name.~~
+
+**Completion block — Batch 2**
+
+- **Date:** 2026-05-16
+- **Commit:** uncommitted on working tree as of 2026-05-16 (Batch 2 diff
+  on top of `739e347`; ready for a single batch commit once reviewed).
+- **Files changed summary:**
+  - **Production fix (real bug found):** `backend/tickets/views.py`
+    (assign action gate — replaced `is_staff_role` with explicit
+    `{SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER}` allow-list),
+    `backend/tickets/serializers.py` (`TicketAssignSerializer.validate`
+    — same allow-list, defense in depth).
+  - **New regression test:**
+    `backend/tickets/tests/test_sprint28a_staff_assign_block.py`
+    (4 test cases: STAFF cannot un-assign with building visibility;
+    STAFF cannot re-assign with building visibility; STAFF with direct
+    `TicketStaffAssignment` cannot re-assign; customer-user 403 path
+    regression-locked).
+  - **Matrix doc:**
+    `docs/architecture/sprint-27-rbac-matrix.md` §3 row H-4 — rewrote
+    the test-reference cell to cite the structural enforcement
+    accurately and reference the new Sprint 28 Batch 2 test. The
+    enforcement-point cell was already correct; only the test-attribution
+    cell changed.
+  - **This file:** Batch 2 completion block, §7 pointer advance, §8 log
+    row, §9 decision log row (1 new entry).
+- **Tests / checks run:**
+  - Pre-fix: `python manage.py test tickets.tests.test_sprint28a_staff_assign_block --keepdb -v 2` →
+    **3 of 4 FAILED** (T-1 / T-2 / T-3 returned `200 != 403`; T-4
+    customer-user passed as expected — proves bug + isolates STAFF as
+    the regression).
+  - Post-fix: same command → **4 passed, 0 failed** (`Ran 4 tests in
+    0.748s; OK`).
+  - Broader regression: `python manage.py test tickets --keepdb -v 1`
+    → **157 tests OK** in 101.6s (no regression on the existing
+    `test_assignment.test_company_admin_can_assign_building_manager_in_scope`
+    happy path nor on the surrounding Sprint 25A direct-staff-assignment
+    suite).
+  - `python manage.py check` → **0 issues**.
+  - No frontend files touched; frontend checks intentionally skipped per
+    Batch 2 brief.
+- **Important decisions made:**
+  - **Real bug confirmed and fixed.** `is_staff_role(user)` returns True
+    for STAFF (Sprint 23A widened the helper so STAFF inherits provider-
+    side ticket behaviour: internal-note visibility, hidden-attachment
+    access, first-response stamping). Using it as the gate on the BM-
+    assign endpoint had the side effect of letting STAFF through. Fix:
+    gate explicitly on `{UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN,
+    UserRole.BUILDING_MANAGER}` at both the view (primary, 403) and
+    the serializer (defense in depth, 400 if reached). `is_staff_role`
+    itself is unchanged — too many call sites depend on its existing
+    "provider-side semantics" contract; changing it would be a refactor.
+  - The Sprint 25A `test_staff_cannot_add` test covers the DIFFERENT
+    endpoint `/api/tickets/<id>/staff-assignments/` (M:N direct staff
+    assignment), not `/api/tickets/<id>/assign/` (BM reassignment). The
+    audit's "STAFF reaching `/assign/`" risk row was a real coverage
+    gap, not a false alarm.
+  - H-4 attribution drift fix: rewrote the matrix test-reference cell
+    rather than inventing a new H-4-specific test. The invariant is
+    locked structurally (no API toggle to remove the `assigned` clause
+    from STAFF scope while assigned), and the Sprint 28 Batch 2 test
+    is now referenced alongside Sprint 25A's perimeter test. Logged
+    as a separate decision-log row (§9).
+- **Remaining risks:**
+  - `is_staff_role` remains the gate in 10+ other call sites
+    (internal-note posting, attachment hiding, first-response stamp,
+    `change_status` "staff acts" branch, etc.). Sprint 28 Batch 2 only
+    tightened the assign-endpoint gates. If a future endpoint also
+    needs "exclude STAFF from a privileged provider-side action", the
+    pattern is the explicit role allow-list used here — do NOT widen
+    `is_staff_role`'s exclusion set, that would silently change every
+    consumer.
+  - The fix changes the customer-user response message from "Customer
+    users cannot assign tickets." to "This role cannot assign tickets."
+    The existing
+    `test_assignment.test_customer_cannot_call_assign_endpoint` only
+    asserts the status code (403), so it still passes. Operators who
+    parse error messages programmatically would see the change; the
+    frontend `getApiError` surfaces this verbatim only on non-HTML
+    bodies — that's acceptable.
+  - When Sprint 28 Batch 10 (staff per-building granularity) lands, it
+    may introduce a per-building `can_assign` flag for STAFF. At that
+    point the explicit gate added here will need to be widened from
+    "exclude STAFF unconditionally" to "exclude STAFF unless their
+    `BuildingStaffVisibility` for this building grants the new flag".
+    Tracked for Batch 10 — do NOT pre-empt.
 
 ### Batch 3 — Sidebar refactor foundation
 
@@ -660,14 +746,14 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 2 — Verify mild backend risk**
+- **Current batch:** **Batch 3 — Sidebar refactor foundation**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 2 items.
-  Batch 2 is read-heavy (audit `TicketAssignSerializer`) and may close
-  without code changes if the gate already refuses STAFF.
-- **Next recommended batch (on-deck):** Batch 3 — Sidebar refactor
-  foundation.
+  this file, state the current batch, and work only on Batch 3 items.
+  Batch 3 is frontend-only (sidebar mode + customer-scoped submenu +
+  URL-encoded state); no backend or schema change.
+- **Next recommended batch (on-deck):** Batch 4 — Contacts model and
+  UI.
 
 ---
 
@@ -678,6 +764,7 @@ Append-only. Newest at the top. One row per closed batch.
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
 | 2026-05-16 | Batch 1 — Operational health fixes | uncommitted on top of `6e572db` | Frontend: `getApiError` HTML-prefix guard (`client.ts`); `AuditLog.reason` + `actor_scope` added to type (`types.ts`); sidebar "Extra Work" i18n'd (`AppShell.tsx` + `common.json` EN/NL). Backend: 4 pending dev DB migrations applied after explicit user approval (`audit.0002`, `customers.0005`, `customers.0006`, `tickets.0007`). | `manage.py check` (pre + post): 0 issues; `showmigrations`: all `[X]` after migrate; `npm run typecheck`: clean; `npm run build`: clean (472ms); `npm run lint`: 52 problems = baseline (zero new hits in changed files). No unit-test framework wired on frontend — `getApiError` ships with code-level guard + typecheck/build coverage only (Vitest setup parked for a later batch). | No automated unit coverage on `getApiError`; `AuditLog.reason`/`actor_scope` declared as required (matches backend default-emitting contract); `nav.extra_work` NL value is sentence-case "Extra werk" (flippable to "Extra Werk" with no code change). |
+| 2026-05-16 | Batch 2 — Verify mild backend risk | uncommitted on top of `739e347` | **Real bug found and fixed.** STAFF could `POST /api/tickets/<id>/assign/` and mutate `ticket.assigned_to` because both the view gate (`tickets/views.py:250`) and the serializer gate (`tickets/serializers.py:626`) used `is_staff_role` (which returns True for STAFF since Sprint 23A). Tightened both to an explicit `{SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER}` allow-list. New regression test `tickets/tests/test_sprint28a_staff_assign_block.py` (4 cases). H-4 matrix attribution drift resolved by rewriting the test-reference cell to cite the structural enforcement + the new Sprint 28 Batch 2 test. | Pre-fix targeted run: 3 of 4 new tests FAILED (200 != 403) — proves bug. Post-fix targeted run: 4/4 OK. Broader `python manage.py test tickets --keepdb -v 1`: **157 tests OK** in 101.6s. `manage.py check`: 0 issues. No frontend files touched. | `is_staff_role` remains the gate in 10+ other call sites and was deliberately NOT changed (refactor). Customer-user error message changed from "Customer users cannot assign tickets." to "This role cannot assign tickets." (status code 403 unchanged; existing test asserts only status). Batch 10's per-building `can_assign` flag will need to widen the explicit gate when it lands — do NOT pre-empt. |
 
 ---
 
@@ -694,6 +781,8 @@ here AND in the batch's completion block.
 | 2026-05-15 | Customer Company Admin **cannot promote anyone to Customer Company Admin** and cannot grant permissions above their own level. | RBAC matrix H-6 / H-7. Enforced via `CustomerUserBuildingAccessUpdateSerializer.validate_access_role`. | [`docs/architecture/sprint-27-rbac-matrix.md`](../architecture/sprint-27-rbac-matrix.md) §3 H-6/H-7 |
 | 2026-05-15 | Staff **may** see normal internal work notes by default, but cost/margin/provider-only proposal notes **must** be hideable from Staff. The privacy model is 3-way: customer / provider-with-staff / provider-only-cost-margin. | Spec §6 + §B.4. Today the system is 2-way only; the 3-way strip lands when STAFF visibility on Extra Work opens. | [`docs/product/meeting-2026-05-15-system-requirements.md`](../product/meeting-2026-05-15-system-requirements.md) §6 |
 | 2026-05-15 | The `TicketStatusHistory` override row (`is_override=True` + `override_reason`) IS the audit trail for ticket workflow override. **Do not** register `TicketStatusHistory` for generic AuditLog tracking — that would double-write the same fact (RBAC matrix H-11). | Sprint 27F-B1 design + matrix H-11. Workflow override (per-transition) and permission override (per-access-row) are separate concepts and must remain so. | [`docs/architecture/sprint-27-rbac-matrix.md`](../architecture/sprint-27-rbac-matrix.md) §3 H-11; [`CLAUDE.md`](../../CLAUDE.md) §2 audit rule |
+| 2026-05-16 | The BM-assign endpoint `/api/tickets/<id>/assign/` gates explicitly on `{SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER}` — STAFF is excluded by name, not by `is_staff_role`. `is_staff_role` keeps its existing Sprint 23A semantics (returns True for STAFF so STAFF inherits internal-note / hidden-attachment / first-response behaviour); widening its exclusion set would silently change every other call site. | Real bug found in Batch 2: STAFF could mutate `ticket.assigned_to` because both gates relied on `is_staff_role` to exclude only CUSTOMER_USER. Fixed at view + serializer (defense in depth) with the explicit allow-list pattern. | Audit row 26 + master plan Batch 2 + `tickets/tests/test_sprint28a_staff_assign_block.py` |
+| 2026-05-16 | H-4 invariant ("STAFF always sees work assigned to them — cannot be removed") is locked **structurally**, not by a dedicated test. The matrix's previous test-reference cell pointing to "Sprint 27A T-7" was incorrect — T-7 audits `BuildingStaffVisibility.can_request_assignment`, not H-4 visibility retention. Sprint 28 Batch 2 rewrote the matrix cell to cite the structural enforcement + the new STAFF-assign-block test as the surrounding perimeter. | Audit row 25 + master plan Batch 2 "Resolve H-4 matrix attribution drift" item. Option 1 from the brief (rewrite to cite structural guard); the existing scoping helper `accounts/scoping.py:211-230` is the actual lock. | [`docs/architecture/sprint-27-rbac-matrix.md`](../architecture/sprint-27-rbac-matrix.md) §3 row H-4 (post-Sprint-28-Batch-2 wording) |
 
 ---
 

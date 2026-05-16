@@ -623,9 +623,20 @@ class TicketAssignSerializer(serializers.Serializer):
         user = request.user
         assigned_to = attrs.get("assigned_to")
 
-        if not is_staff_role(user):
+        # Sprint 28 Batch 2: STAFF must not reassign tickets via this
+        # serializer either. The view-level gate at `tickets/views.py`
+        # is the primary gate (returns 403); this check is defense in
+        # depth so a future call-site that bypasses the view still
+        # rejects with a clear ValidationError. `is_staff_role` returns
+        # True for STAFF and is therefore the wrong gate here — gate
+        # explicitly on the allowed role set.
+        if user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        ):
             raise serializers.ValidationError(
-                {"detail": "Customer users cannot assign tickets."}
+                {"detail": "This role cannot assign tickets."}
             )
 
         if assigned_to is None:

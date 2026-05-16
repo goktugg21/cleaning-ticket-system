@@ -247,10 +247,19 @@ class TicketViewSet(
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
-        if not is_staff_role(request.user):
+        # Sprint 28 Batch 2: `is_staff_role` returns True for STAFF (Sprint
+        # 23A widened it so STAFF inherits internal-note / hidden-attachment
+        # visibility), but the BM-assign endpoint is reserved for the
+        # provider-admin / building-manager triad. Gate explicitly on the
+        # allowed role set. Audit row 26 + master plan Batch 2.
+        if request.user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        ):
             self.permission_denied(
                 request,
-                message="Customer users cannot assign tickets.",
+                message="This role cannot assign tickets.",
             )
         old_assigned_to = ticket.assigned_to
         serializer = TicketAssignSerializer(
