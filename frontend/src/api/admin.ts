@@ -6,6 +6,9 @@ import type {
   BuildingStaffVisibilityAdmin,
   CompanyAdmin,
   CompanyAdminMembership,
+  Contact,
+  ContactCreatePayload,
+  ContactUpdatePayload,
   CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
@@ -564,6 +567,74 @@ export async function updateCustomerPolicy(
     payload,
   );
   return response.data;
+}
+
+// ---- Sprint 28 Batch 4 — Customer contacts (phone book) -------------
+//
+// `/api/customers/<customer_id>/contacts/` — list + create.
+// `/api/customers/<customer_id>/contacts/<contact_id>/` — detail / update /
+// delete.
+//
+// Backend permission gate (both URLs): SUPER_ADMIN or COMPANY_ADMIN of the
+// customer's provider company. BUILDING_MANAGER / STAFF / CUSTOMER_USER are
+// rejected before the view body runs. Cross-customer contact id smuggling
+// is blocked by the detail view (404 on customer mismatch).
+//
+// Contacts are phone-book entries — they are NOT Users. The serializer
+// deliberately omits password / role / scope / is_active fields. Promoting
+// a Contact into a User is an explicit, separate flow (parked).
+
+export async function listCustomerContacts(
+  customerId: number,
+): Promise<Contact[]> {
+  // UnboundedPagination on the backend returns the standard
+  // {count, next, previous, results} envelope. Callers want the flat
+  // list — we unwrap it here so every page can treat the helper as a
+  // plain `Contact[]`.
+  const response = await api.get<PaginatedResponse<Contact>>(
+    `/customers/${customerId}/contacts/`,
+  );
+  return response.data.results;
+}
+
+export async function createCustomerContact(
+  customerId: number,
+  payload: ContactCreatePayload,
+): Promise<Contact> {
+  const response = await api.post<Contact>(
+    `/customers/${customerId}/contacts/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function getCustomerContact(
+  customerId: number,
+  contactId: number,
+): Promise<Contact> {
+  const response = await api.get<Contact>(
+    `/customers/${customerId}/contacts/${contactId}/`,
+  );
+  return response.data;
+}
+
+export async function updateCustomerContact(
+  customerId: number,
+  contactId: number,
+  payload: ContactUpdatePayload,
+): Promise<Contact> {
+  const response = await api.patch<Contact>(
+    `/customers/${customerId}/contacts/${contactId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteCustomerContact(
+  customerId: number,
+  contactId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/contacts/${contactId}/`);
 }
 
 // ---- Sprint 24A — Staff profile + building visibility admin -----------

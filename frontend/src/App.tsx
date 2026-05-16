@@ -23,6 +23,7 @@ import { BuildingFormPage } from "./pages/admin/BuildingFormPage";
 import { BuildingsAdminPage } from "./pages/admin/BuildingsAdminPage";
 import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
+import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
 import { CustomerSubPagePlaceholder } from "./pages/admin/CustomerSubPagePlaceholder";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
@@ -248,7 +249,7 @@ export default function App() {
             path="/admin/customers/:id/contacts"
             element={
               <AdminRoute>
-                <CustomerSubPagePlaceholder />
+                <CustomerContactsPage />
               </AdminRoute>
             }
           />

@@ -572,36 +572,205 @@ or schema. ~1 sprint letter.
 Goal: introduce the Contact entity and surface it on the customer-scoped
 submenu (Batch 3 prerequisite). Joint backend + frontend. ~1 sprint letter.
 
-- [ ] Add `Contact` model under
+- [x] ~~Add `Contact` model under
       [`backend/customers/`](../../backend/customers/) (or new
       `contacts/` app — sprint design decision). Fields: `customer` FK,
       optional `building` FK, `full_name`, `email`, `phone`, `role_label`,
       `notes`. **No password, no role, no scope rows.** Migration in the
-      app's `migrations/`.
-- [ ] Ensure Contact is structurally distinct from `User`. A Contact does
+      app's `migrations/`.~~
+- [x] ~~Ensure Contact is structurally distinct from `User`. A Contact does
       not become a User by setting a password; that is a separate
-      promotion flow parked for a later sprint.
-- [ ] Add Contact CRUD API gated by the same
+      promotion flow parked for a later sprint.~~
+- [x] ~~Add Contact CRUD API gated by the same
       `IsSuperAdminOrCompanyAdminForCompany` permission as the other
       customer-scoped endpoints. Building Manager gets a **read-only**
       view of contacts in their assigned buildings (depends on Batch 12;
-      this batch only ships the write path).
-- [ ] Add audit signal coverage in
+      this batch only ships the write path).~~
+- [x] ~~Add audit signal coverage in
       [`backend/audit/signals.py`](../../backend/audit/signals.py) — full
-      CRUD tracking on the Contact model. Add `audit/tests/` coverage.
-- [ ] Add the `Contact` TypeScript type to
+      CRUD tracking on the Contact model. Add `audit/tests/` coverage.~~
+- [x] ~~Add the `Contact` TypeScript type to
       [`frontend/src/api/types.ts`](../../frontend/src/api/types.ts) and
       the client helpers to
-      [`frontend/src/api/admin.ts`](../../frontend/src/api/admin.ts).
-- [ ] Add `CustomerContactsPage` under
+      [`frontend/src/api/admin.ts`](../../frontend/src/api/admin.ts).~~
+- [x] ~~Add `CustomerContactsPage` under
       `/admin/customers/:id/contacts` (nested under the Batch 3 submenu).
       View-first per spec §3 — list page with "Add contact" modal; row
-      click opens a read-only detail with "Edit" → modal.
-- [ ] Add contextual contact display in ticket / extra-work screens where
+      click opens a read-only detail with "Edit" → modal.~~
+- [x] ~~Add contextual contact display in ticket / extra-work screens where
       useful (e.g. read-only "Customer contacts" panel on
-      `TicketDetailPage` and `ExtraWorkDetailPage`).
-- [ ] Add tests: backend API + scope + audit; frontend Playwright for the
-      view-first flow + the "no login fields" assertion.
+      `TicketDetailPage` and `ExtraWorkDetailPage`).~~
+- [x] ~~Add tests: backend API + scope + audit; frontend Playwright for the
+      view-first flow + the "no login fields" assertion.~~
+
+**Completion block — Batch 4**
+
+- **Date:** 2026-05-16
+- **Commit:** uncommitted on working tree as of 2026-05-16 (Batch 4 diff
+  on top of `9402e38`; ready for a single batch commit once reviewed).
+- **App / model placement:**
+  - `Contact` lives in **`backend/customers/`** (added to the existing
+    `models.py`, not a new app). Rationale: customers app already
+    follows the app-scoped-split-file convention with multiple
+    `serializers_*.py` / `views_*.py`; audit signals + the permission
+    resolver already import from `customers.models`; placing Contact
+    here means zero new app registration, zero circular-import risk,
+    and stays in the same scope as the parent `Customer` FK.
+- **Files changed summary:**
+  - **Backend modified:** `backend/customers/models.py` (Contact model),
+    `backend/customers/urls.py` (2 new routes),
+    `backend/audit/signals.py` (Contact appended to full-CRUD tuple).
+  - **Backend new:** `backend/customers/migrations/0007_contact.py`,
+    `backend/customers/serializers_contacts.py` (read/write +
+    cross-customer building validation),
+    `backend/customers/views_contacts.py`
+    (`CustomerContactListCreateView` +
+    `CustomerContactDetailView`),
+    `backend/customers/tests/test_sprint28_contacts.py` (22 tests in
+    4 classes), `backend/audit/tests/test_sprint28_contact_audit.py`
+    (4 tests).
+  - **Frontend modified:** `frontend/src/api/types.ts` (3 new types:
+    `Contact` + `ContactCreatePayload` + `ContactUpdatePayload`, with
+    explicit absence of `password` / `role` / `is_active` / `user`),
+    `frontend/src/api/admin.ts` (5 new helpers),
+    `frontend/src/App.tsx` (placeholder route swapped for
+    `CustomerContactsPage`; other 4 placeholder routes unchanged),
+    `frontend/src/i18n/en/common.json` and `nl/common.json` (25 new
+    `customer_contacts.*` keys in each, EN/NL parity preserved),
+    `frontend/src/pages/TicketDetailPage.tsx` and
+    `frontend/src/pages/ExtraWorkDetailPage.tsx` (read-only
+    Customer-Contacts panel inserted, gated to
+    SUPER_ADMIN / COMPANY_ADMIN to mirror the backend
+    `IsSuperAdminOrCompanyAdminForCompany` gate).
+  - **Frontend new:** `frontend/src/pages/admin/CustomerContactsPage.tsx`
+    (view-first list + read-only detail + Add/Edit modal + Delete
+    confirm),
+    `frontend/tests/e2e/sprint28_contacts.spec.ts` (5 Playwright
+    cases).
+  - **Docs:** this completion block, §7 pointer advance, §8 log row,
+    §9 decision-log rows.
+- **Migration status:**
+  - Migration file **created**: `backend/customers/migrations/0007_contact.py`
+    (depends on `customers.0006_backfill_customer_company_policy` +
+    `buildings.0002_buildingstaffvisibility`).
+  - Dev DB `migrate` **NOT applied yet** (per master plan §3 rule 5 —
+    requires explicit user approval). Test DB auto-migrates each test
+    run so the 26 new tests + 175-test broader regression validate
+    against the new schema; production behaviour is locked. The dev
+    container's running DB still has Sprint 27's schema until the user
+    approves `docker compose exec backend python manage.py migrate`.
+- **Exact backend API routes:**
+  - `GET / POST  /api/customers/<int:customer_id>/contacts/`
+    → `CustomerContactListCreateView`, gated by
+    `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`.
+  - `GET / PATCH / DELETE  /api/customers/<int:customer_id>/contacts/<int:contact_id>/`
+    → `CustomerContactDetailView`, same gate.
+  - Both views fetch the `Customer` first and run
+    `check_object_permissions(request, customer)` so the FK provider
+    is the scope anchor (not the contact id). Detail view's
+    `get_object` re-filters by `customer=customer` so ID smuggling
+    (customer-A URL + contact-B id) returns 404 instead of operating
+    cross-customer.
+- **Permission / scoping behavior:**
+  - SUPER_ADMIN: full CRUD on any customer's contacts.
+  - COMPANY_ADMIN: full CRUD on contacts within their own provider
+    company; cross-provider attempts get 403/404 per the existing
+    `IsSuperAdminOrCompanyAdminForCompany` shape.
+  - BUILDING_MANAGER: **403 on every endpoint** (BM read-only contact
+    view is intentionally deferred to **Batch 12**).
+  - CUSTOMER_USER: 403 on every endpoint, regardless of access role.
+  - STAFF: 403 on every endpoint.
+- **Audit coverage:**
+  - Contact appended to `backend/audit/signals.py` full-CRUD model
+    tuple (alongside User / Company / Building / Customer /
+    CustomerCompanyPolicy / StaffProfile / StaffAssignmentRequest).
+  - 4 tests in `audit/tests/test_sprint28_contact_audit.py` assert
+    CREATE / UPDATE / DELETE each emit exactly one `AuditLog` row
+    with the right `action` + `target_model="customers.Contact"` +
+    `target_id` + `changes` diff.
+- **Frontend route / UI behavior:**
+  - `/admin/customers/:id/contacts` now renders the real
+    `CustomerContactsPage` (Batch 3 placeholder swapped out). The
+    customer-scoped sidebar Contacts entry from Batch 3 deep-links
+    here.
+  - The page lists contacts in a view-first list; "Add contact"
+    opens a modal; row click opens a read-only detail; the
+    detail has explicit "Edit" and "Delete" actions (Edit opens
+    modal, Delete opens `ConfirmDialog`).
+  - The Add/Edit modal has fields only for: full_name, email,
+    phone, role_label (free text), notes, building (dropdown of the
+    customer's `CustomerBuildingMembership` rows). **No password,
+    no role dropdown, no login-related field, no scope/access UI,
+    no "invite as user" affordance.**
+- **Contextual contact panels — both surfaces landed:**
+  - `TicketDetailPage` — read-only "Customer contacts" panel with
+    `data-testid="ticket-customer-contacts-panel"`. Gated to
+    SUPER_ADMIN / COMPANY_ADMIN to mirror the backend permission
+    class; non-admins do not emit the API call.
+  - `ExtraWorkDetailPage` — same shape with
+    `data-testid="extra-work-customer-contacts-panel"`. Required a
+    small `useTranslation("common")` import; no other refactor of
+    the page.
+  - Both panels show only `full_name / role_label / phone / email`;
+    no edit/add/delete affordance; collapse to a muted "no
+    contacts on file" line when empty.
+- **Tests / checks run:**
+  - Backend targeted: `python manage.py test
+    customers.tests.test_sprint28_contacts
+    audit.tests.test_sprint28_contact_audit --keepdb -v 2`
+    → **26 tests OK** in 24.7s.
+  - Backend broader: `python manage.py test customers audit --keepdb
+    -v 1` → **175 tests OK** in 165.2s.
+  - Backend cross-app: `python manage.py test customers audit tickets
+    extra_work --keepdb -v 1` → **365 tests OK** in 298.2s — no
+    regression from the Contact + audit signal additions.
+  - `python manage.py check` → **0 issues**.
+  - `python manage.py makemigrations --dry-run --check` → **No
+    changes detected** (model state matches migration graph).
+  - `npm run typecheck` → **clean**.
+  - `npm run build` → **clean**, 508ms (only the pre-existing
+    advisory chunk-size warning).
+  - `npm run lint` → **52 problems (49 errors, 3 warnings)** —
+    matches the Batch 1-3 baseline. Frontend agent's reported pre-
+    Batch-4 stash count was 53 problems (50 errors); their new code
+    is one error cleaner because they extracted `ticketCustomerId`
+    / `ewCustomerId` locals to satisfy `react-hooks/exhaustive-deps`
+    on the new effects. **Zero new lint hits in any Batch 4 file.**
+  - **Playwright spec written but NOT executed locally** per Batch 4
+    brief + the standing WSL gotcha (root-owned
+    `frontend/test-results/`). Spec compiles under `tsc -b`; runs
+    via CI Playwright workflow.
+- **Important decisions made (also logged in §9):**
+  - **Contact lives in `customers/`, not a new app** — repo's app-
+    scoped-split-file convention + zero circular-import risk.
+  - **Contact is structurally NOT a User** — model has no
+    `password` / `role` / `user` FK / `is_active` /
+    `permission_overrides`; no API field exposes such; the
+    `ContactIsNotAUserTests` regression-locks this by iterating the
+    serialized JSON keys.
+  - **BM read-only contact view deferred to Batch 12** — Batch 4
+    permission gate is admin-only. Documented explicitly in the
+    test suite (`test_building_manager_cannot_*`).
+  - **Frontend contextual panel gate** mirrors the backend
+    `IsSuperAdminOrCompanyAdminForCompany` admin-only class — BM
+    will see the panel once Batch 12 widens the backend gate; until
+    then non-admin roles don't even emit the API call.
+- **Remaining risks:**
+  - Dev DB schema is **behind code** until `python manage.py migrate`
+    is approved. Test DB and CI both auto-migrate, so the test suite
+    is correct. The "Contact" tab in the running dev container will
+    500 on the API call until migrate runs.
+  - The Playwright spec is **not locally validated** — relies on CI
+    or a manual run. Same condition as Sprint 27F-F1's spec.
+  - The Add/Edit modal's `building` dropdown calls
+    `listCustomerBuildings` — that endpoint returns the full M:N
+    list including potentially-deactivated buildings. The current
+    behaviour is to show every linked building; a Sprint 28+ polish
+    pass may want to filter by `is_active=True`.
+  - The contextual panels on Ticket/Extra-Work detail call the
+    contacts API on every page render — currently no in-memory
+    caching. For high-traffic operator UIs this could be a polish
+    item (debounce / SWR pattern); not P0.
 
 ### Batch 5 — Service catalog and pricing
 
@@ -867,20 +1036,16 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 4 — Contacts model and UI**
+- **Current batch:** **Batch 5 — Service catalog and pricing**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 4 items.
-  Batch 4 is joint backend + frontend: introduces the `Contact` model
-  (no password / role / scope rows), CRUD API gated by
-  `IsSuperAdminOrCompanyAdminForCompany`, audit signal coverage, the
-  `CustomerContactsPage` under `/admin/customers/:id/contacts` (which
-  replaces the Batch 3 placeholder at that route), and contextual
-  contact display panels on `TicketDetailPage` /
-  `ExtraWorkDetailPage`. Batch 3 (sidebar foundation) ships the
-  navigation home for the new page.
-- **Next recommended batch (on-deck):** Batch 5 — Service catalog and
-  pricing.
+  this file, state the current batch, and work only on Batch 5 items.
+  Batch 5 is backend-heavy: introduces `Service`, `ServiceCategory`,
+  `CustomerServicePrice` models + `resolve_price()` resolver +
+  provider-admin pricing UI. The instant-ticket / proposal branching
+  (Batch 6+) keys off this resolver.
+- **Next recommended batch (on-deck):** Batch 6 — Cart-shaped Extra
+  Work request.
 
 ---
 
@@ -890,6 +1055,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-16 | Batch 4 — Contacts model and UI | uncommitted on top of `9402e38` | Joint backend + frontend. **Backend:** `Contact` model added to `backend/customers/models.py` (FK Customer CASCADE + FK Building SET_NULL + name/email/phone/role_label/notes/timestamps; **no password/role/user/is_active/permission_overrides** — structurally not a User per spec §1). Migration `customers/0007_contact.py` created (**not applied to dev DB yet**). 2 new endpoints at `/api/customers/<id>/contacts/` (list+create) and `/contacts/<id>/` (retrieve/update/delete), gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`. Detail view re-scopes by `customer=customer` to block ID smuggling. Cross-customer building validation in serializer. Contact registered in `audit/signals.py` full-CRUD tuple. 26 new tests across 5 classes (CRUD happy-path × 2 admin roles, scope isolation, ID-smuggling 404, BM/customer/staff 403, building-membership validation, "is-not-a-User" payload assertion, audit CREATE/UPDATE/DELETE rows). **Frontend:** `Contact` + `ContactCreatePayload` + `ContactUpdatePayload` types added; 5 admin API helpers added; `CustomerContactsPage` replaces Batch 3 placeholder route at `/admin/customers/:id/contacts` (view-first list + read-only detail + Add/Edit modal + Delete `ConfirmDialog`; **no password/role/login field anywhere**). Contextual read-only `Customer-contacts` panels added to both `TicketDetailPage` (`data-testid="ticket-customer-contacts-panel"`) and `ExtraWorkDetailPage` (`data-testid="extra-work-customer-contacts-panel"`), gated to SUPER_ADMIN/COMPANY_ADMIN mirroring the backend. 25 new `customer_contacts.*` i18n keys in each of EN/NL bundles, parity preserved. Playwright spec `frontend/tests/e2e/sprint28_contacts.spec.ts` with 5 cases. | Backend targeted (`customers.tests.test_sprint28_contacts + audit.tests.test_sprint28_contact_audit`): **26/26 OK** in 24.7s. Backend broader (`customers + audit`): **175/175 OK** in 165.2s. Cross-app sweep (`customers audit tickets extra_work`): **365/365 OK** in 298.2s — no regression from the Contact + audit signal additions. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 508ms. `npm run lint`: **52 problems = baseline** (zero new lint hits in Batch 4 files; frontend agent stash-comparison showed pre-Batch-4 was 53 problems, so net is -1 error after the agent extracted ticket/EW customer-id locals to satisfy `exhaustive-deps`). **Playwright spec written but NOT executed locally** (WSL `frontend/test-results/` root-ownership gotcha; brief allows). | Dev DB schema is **behind code** until user approves `python manage.py migrate` (Contacts API + the Ticket/EW contextual panels will 500 against the dev container until that runs). Playwright spec needs CI run to confirm against demo seed. Building-dropdown in the Add/Edit modal shows every linked building including potentially-deactivated ones (polish item, not P0). Contextual panels emit an API call on every Ticket/EW detail render with no caching — debounce/SWR is a later polish item. BM read-only contact view is intentionally deferred to **Batch 12**; gate locked by `test_building_manager_cannot_*` cases. |
 | 2026-05-16 | Batch 3 — Sidebar refactor foundation | uncommitted on top of `c3a9060` | Frontend only. `AppShell.tsx` gains a URL-derived `mode = "top-level" \| "customer-scoped"` (regex on `pathname`, no `useState`) and a customer-scoped submenu (Back / Overview / Buildings / Users / Permissions / Extra Work / Contacts / Settings). `App.tsx` registers six new `/admin/customers/:id/<section>` routes — five render the new `CustomerSubPagePlaceholder` "Coming soon" component; `permissions` re-renders `CustomerFormPage` so the Sprint 27E editor remains reachable without decomposing the parent page (decomposition is Batch 13). EN/NL i18n keys added for `nav.customer_submenu.*` + `customer_subpage_placeholder.*`. Playwright spec `sprint28b_customer_sidebar.spec.ts` covers deep-link, Back, and non-customer-route cases. | `npm run typecheck` → clean. `npm run build` → clean, 373ms. `npm run lint` → **52 problems = baseline** (only `AppShell.tsx:122` lint hit is the pre-existing `setSidebarOpen` in `useEffect`; line number shifted from `:93`, rule violation unchanged). Playwright spec **written but NOT executed locally** (WSL root-owned `frontend/test-results/` gotcha; brief allows this). | Playwright spec needs CI run to confirm behaviour against demo seed. `CustomerFormPage` is mounted by two routes (`:id` Overview + `:id/permissions`); React Router remounts on path change so state is not preserved across the nav. Batch 13 will decompose `CustomerFormPage` and remove the duplication. `AppShell.tsx:122` lint hit is unchanged baseline. |
 | 2026-05-16 | Batch 1 — Operational health fixes | uncommitted on top of `6e572db` | Frontend: `getApiError` HTML-prefix guard (`client.ts`); `AuditLog.reason` + `actor_scope` added to type (`types.ts`); sidebar "Extra Work" i18n'd (`AppShell.tsx` + `common.json` EN/NL). Backend: 4 pending dev DB migrations applied after explicit user approval (`audit.0002`, `customers.0005`, `customers.0006`, `tickets.0007`). | `manage.py check` (pre + post): 0 issues; `showmigrations`: all `[X]` after migrate; `npm run typecheck`: clean; `npm run build`: clean (472ms); `npm run lint`: 52 problems = baseline (zero new hits in changed files). No unit-test framework wired on frontend — `getApiError` ships with code-level guard + typecheck/build coverage only (Vitest setup parked for a later batch). | No automated unit coverage on `getApiError`; `AuditLog.reason`/`actor_scope` declared as required (matches backend default-emitting contract); `nav.extra_work` NL value is sentence-case "Extra werk" (flippable to "Extra Werk" with no code change). |
 | 2026-05-16 | Batch 2 — Verify mild backend risk | uncommitted on top of `739e347` | **Real bug found and fixed.** STAFF could `POST /api/tickets/<id>/assign/` and mutate `ticket.assigned_to` because both the view gate (`tickets/views.py:250`) and the serializer gate (`tickets/serializers.py:626`) used `is_staff_role` (which returns True for STAFF since Sprint 23A). Tightened both to an explicit `{SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER}` allow-list. New regression test `tickets/tests/test_sprint28a_staff_assign_block.py` (4 cases). H-4 matrix attribution drift resolved by rewriting the test-reference cell to cite the structural enforcement + the new Sprint 28 Batch 2 test. | Pre-fix targeted run: 3 of 4 new tests FAILED (200 != 403) — proves bug. Post-fix targeted run: 4/4 OK. Broader `python manage.py test tickets --keepdb -v 1`: **157 tests OK** in 101.6s. `manage.py check`: 0 issues. No frontend files touched. | `is_staff_role` remains the gate in 10+ other call sites and was deliberately NOT changed (refactor). Customer-user error message changed from "Customer users cannot assign tickets." to "This role cannot assign tickets." (status code 403 unchanged; existing test asserts only status). Batch 10's per-building `can_assign` flag will need to widen the explicit gate when it lands — do NOT pre-empt. |
@@ -903,6 +1069,9 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-16 | `Contact` is added to **`backend/customers/models.py`** (next to `Customer`, memberships, `CustomerCompanyPolicy`), not a new `contacts/` app. Migration is `customers/0007_contact.py`. | Customers app already follows the app-scoped-split-file convention (`serializers_*.py`, `views_*.py`); audit signals + permission resolver already import from `customers.models`; placing Contact here means zero new app registration + zero circular-import risk + stays in the same scope as the parent `Customer` FK. PM agent recommended this placement after inspecting repo conventions. | Batch 4 + PM scope-verification report + `backend/customers/models.py` |
+| 2026-05-16 | `Contact` is **structurally NOT a User**: the model has no `password`, no `role`, no `user` FK, no `is_active` (login semantics), no `permission_overrides`, no scope-row attachment. Promotion from Contact to User is parked for a later sprint and will be a separate, explicit flow. | Spec §1 hard rule + master plan §5 rule 2 + RBAC matrix invariant H-9 (no scope growth via stacked permissions). Conflating Contact with User would breach scope and let provider admins promote a contact into a privileged user implicitly. `ContactIsNotAUserTests` regression-locks this by iterating the serialized JSON keys and asserting absence of every login-related key. | Batch 4 + `backend/customers/models.py` Contact + `backend/customers/tests/test_sprint28_contacts.py::ContactIsNotAUserTests` |
+| 2026-05-16 | The Contact CRUD API is gated by **`IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany`** (admin-only). Building Manager / STAFF / CUSTOMER_USER all 403 in Batch 4. Building Manager **read-only** contact view in their assigned buildings is intentionally deferred to **Batch 12** (per master plan §6). | The master plan §6 Batch 4 explicitly defers BM read-only view to Batch 12 to keep Batch 4 small. Locked by `test_building_manager_cannot_*` regression cases. The frontend contextual panel on Ticket/Extra-Work detail mirrors this gate so non-admin roles do not even emit the API call (avoids 403 noise). When Batch 12 widens the backend gate, the frontend panel will be widened to match. | Batch 4 + `backend/customers/views_contacts.py` + `frontend/src/pages/TicketDetailPage.tsx` + `frontend/src/pages/ExtraWorkDetailPage.tsx` |
 | 2026-05-16 | Sidebar mode is **URL-derived** (regex against `location.pathname`), not React state. A pathname matching `/^\/admin\/customers\/(\d+)(?:\/.*)?$/` switches the sidebar into customer-scoped mode; any other pathname is top-level. The list page `/admin/customers` and `/admin/customers/new` deliberately do NOT trigger the submenu. | Browser refresh on a deep link must preserve the customer-scoped sidebar; back-button behaviour must be predictable; no global state library is needed. The audit (§7) called out the lack of hierarchical state on the sidebar as a P1 issue; this is the structural anchor for the view-first refactor Batches 4, 6, and 13 will build on. | Batch 3 + `frontend/src/layout/AppShell.tsx` `deriveSidebarMode` |
 | 2026-05-16 | Five of the six customer-scoped submenu sub-routes (`buildings`, `users`, `extra-work`, `contacts`, `settings`) render a **single shared `CustomerSubPagePlaceholder`** "Coming soon" component. The `permissions` sub-route is the deliberate exception — it re-renders `CustomerFormPage` so the Sprint 27E permission editor stays reachable via the deep link `/admin/customers/:id/permissions` **without** decomposing the parent page in this batch. `CustomerFormPage` decomposition is Batch 13 work. | The brief explicitly allowed "minimal routing integration" for the Permissions editor and asked for a single placeholder for the rest; this keeps the Batch 3 diff small, ships the structural anchor without coupling to later sub-page implementations, and avoids forking the Sprint 27E editor. | Batch 3 + `frontend/src/pages/admin/CustomerSubPagePlaceholder.tsx` + `frontend/src/App.tsx` |
 | 2026-05-15 | Global default service price alone is **not** sufficient to create an instant ticket. Customer-specific active contract price is required. | Spec §5 + §4.1 + product rule #9. Global default exists as a provider-side reference only. | [`docs/product/meeting-2026-05-15-system-requirements.md`](../product/meeting-2026-05-15-system-requirements.md) §5 |

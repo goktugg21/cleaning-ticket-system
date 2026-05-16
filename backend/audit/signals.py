@@ -42,6 +42,7 @@ from buildings.models import (
 )
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
+    Contact,
     Customer,
     CustomerBuildingMembership,
     CustomerCompanyPolicy,
@@ -539,6 +540,11 @@ def _connect():
         CustomerCompanyPolicy,
         StaffProfile,
         StaffAssignmentRequest,
+        # Sprint 28 Batch 4 — customer-side phone-book Contact rows.
+        # Editable fields (full_name / email / phone / role_label /
+        # notes / building) produce meaningful UPDATE diffs, so the
+        # full CRUD trio is the right shape.
+        Contact,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")

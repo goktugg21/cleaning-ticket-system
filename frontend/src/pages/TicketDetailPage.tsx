@@ -23,12 +23,14 @@ import {
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
   listAssignableStaff,
+  listCustomerContacts,
   listStaffAssignmentRequests,
   removeTicketStaffAssignment,
 } from "../api/admin";
 import type { AssignableStaff } from "../api/admin";
 import type {
   AssignableManager,
+  Contact,
   PaginatedResponse,
   TicketAttachment,
   TicketDetail,
@@ -275,6 +277,15 @@ export function TicketDetailPage() {
     me?.role === "COMPANY_ADMIN" ||
     me?.role === "BUILDING_MANAGER";
 
+  // Sprint 28 Batch 4 — read-only Customer Contacts panel.
+  // Backend `IsSuperAdminOrCompanyAdminForCompany` gate on the
+  // contacts list endpoint rejects everyone else with 403; we mirror
+  // that gate here so BUILDING_MANAGER / STAFF / CUSTOMER_USER never
+  // emit the call (silent fail; the panel just doesn't render).
+  const canSeeCustomerContacts =
+    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
+  const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
+
   // Sprint 12 — mirrors the backend `_user_can_soft_delete_ticket`
   // rule so the button only renders when the API will actually accept
   // the call. Backend stays the source of truth for security; this
@@ -330,6 +341,37 @@ export function TicketDetailPage() {
     setOverrideReason("");
     setOverrideError(null);
   }, [ticket?.id, ticket?.status]);
+
+  // Sprint 28 Batch 4 — fetch the customer's contacts when an admin
+  // viewer opens a ticket attached to a customer. The panel is purely
+  // informational (full_name / role_label / phone / email) and never
+  // edits anything. Backend gate is SUPER_ADMIN / COMPANY_ADMIN only
+  // (see customers/views_contacts.py); we mirror the gate above with
+  // `canSeeCustomerContacts` so the call never even fires for other
+  // roles. Failures are swallowed silently — the panel collapses to
+  // empty state rather than disrupting the ticket flow.
+  const ticketCustomerId = ticket?.customer ?? null;
+  useEffect(() => {
+    const cancelled = { current: false };
+    const customerId =
+      canSeeCustomerContacts && ticketCustomerId ? ticketCustomerId : null;
+    if (customerId === null) {
+      queueMicrotask(() => {
+        if (!cancelled.current) setCustomerContacts([]);
+      });
+    } else {
+      listCustomerContacts(customerId)
+        .then((list) => {
+          if (!cancelled.current) setCustomerContacts(list);
+        })
+        .catch(() => {
+          if (!cancelled.current) setCustomerContacts([]);
+        });
+    }
+    return () => {
+      cancelled.current = true;
+    };
+  }, [canSeeCustomerContacts, ticketCustomerId]);
 
   useEffect(() => {
     if (!isStaff || !id) return;
@@ -1732,6 +1774,83 @@ export function TicketDetailPage() {
               </div>
             </div>
           </div>
+
+          {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
+              Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
+              backend gate; other roles never see this card). Pure
+              information display: name, role label, phone, email. No
+              add / edit / delete affordances here — full management is
+              on `/admin/customers/:id/contacts`. */}
+          {canSeeCustomerContacts && (
+            <div className="card" data-testid="ticket-customer-contacts-panel">
+              <div className="section-head">
+                <div
+                  className="section-head-title"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: "var(--text-faint)",
+                  }}
+                >
+                  {t("common:customer_contacts.panel_title")}
+                </div>
+              </div>
+              <div style={{ padding: "12px 18px 16px" }}>
+                {customerContacts.length === 0 ? (
+                  <p
+                    className="muted small"
+                    data-testid="ticket-customer-contacts-empty"
+                    style={{ margin: 0 }}
+                  >
+                    {t("common:customer_contacts.panel_empty")}
+                  </p>
+                ) : (
+                  <ul
+                    style={{
+                      listStyle: "none",
+                      margin: 0,
+                      padding: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    {customerContacts.map((contact) => (
+                      <li
+                        key={contact.id}
+                        data-testid="ticket-customer-contact-row"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>
+                          {contact.full_name}
+                        </span>
+                        {contact.role_label && (
+                          <span className="muted small">
+                            {contact.role_label}
+                          </span>
+                        )}
+                        {(contact.email || contact.phone) && (
+                          <span
+                            className="muted small"
+                            style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+                          >
+                            {contact.email && <span>{contact.email}</span>}
+                            {contact.phone && <span>{contact.phone}</span>}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="card">
             <div className="section-head">

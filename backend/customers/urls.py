@@ -2,6 +2,10 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from .views import CustomerViewSet
+from .views_contacts import (
+    CustomerContactDetailView,
+    CustomerContactListCreateView,
+)
 from .views_memberships import (
     CustomerBuildingDeleteView,
     CustomerBuildingListCreateView,
@@ -55,5 +59,16 @@ urlpatterns = [
         "<int:customer_id>/policy/",
         CustomerCompanyPolicyView.as_view(),
         name="customer-policy",
+    ),
+    # Sprint 28 Batch 4 — per-customer Contact phone-book CRUD.
+    path(
+        "<int:customer_id>/contacts/",
+        CustomerContactListCreateView.as_view(),
+        name="customer-contacts",
+    ),
+    path(
+        "<int:customer_id>/contacts/<int:contact_id>/",
+        CustomerContactDetailView.as_view(),
+        name="customer-contact-detail",
     ),
 ] + router.urls

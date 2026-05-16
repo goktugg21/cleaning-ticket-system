@@ -18,7 +18,9 @@ import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, ChevronLeft } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
+import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
 import {
   createExtraWorkPricingItem,
@@ -28,6 +30,7 @@ import {
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import type {
+  Contact,
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
   ExtraWorkUnitType,
@@ -97,10 +100,19 @@ function fmtMoney(value: string | null | undefined): string {
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
+  const { t } = useTranslation("common");
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Sprint 28 Batch 4 — read-only Customer Contacts panel. Backend
+  // `IsSuperAdminOrCompanyAdminForCompany` gate on the contacts list
+  // rejects everyone else with 403; mirror the gate here so
+  // BUILDING_MANAGER / CUSTOMER_USER never emit the call.
+  const canSeeCustomerContacts =
+    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
+  const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
 
   // Pricing-line-item form (provider only).
   const [pricingForm, setPricingForm] = useState({
@@ -154,6 +166,32 @@ export function ExtraWorkDetailPage() {
     () => !!me?.role && PROVIDER_ROLES.has(me.role),
     [me?.role],
   );
+
+  // Sprint 28 Batch 4 — fetch contacts when the request loads, but
+  // only for admin viewers (mirrors backend gate). Failures collapse
+  // silently to the empty-state panel.
+  const ewCustomerId = ew?.customer ?? null;
+  useEffect(() => {
+    const cancelled = { current: false };
+    const customerId =
+      canSeeCustomerContacts && ewCustomerId ? ewCustomerId : null;
+    if (customerId === null) {
+      queueMicrotask(() => {
+        if (!cancelled.current) setCustomerContacts([]);
+      });
+    } else {
+      listCustomerContacts(customerId)
+        .then((list) => {
+          if (!cancelled.current) setCustomerContacts(list);
+        })
+        .catch(() => {
+          if (!cancelled.current) setCustomerContacts([]);
+        });
+    }
+    return () => {
+      cancelled.current = true;
+    };
+  }, [canSeeCustomerContacts, ewCustomerId]);
 
   if (loading) {
     return (
@@ -419,6 +457,70 @@ export function ExtraWorkDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
+          Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
+          backend gate; other roles never see this card). Pure
+          informational — full management lives on
+          /admin/customers/:id/contacts. */}
+      {canSeeCustomerContacts && (
+        <div
+          className="card"
+          data-testid="extra-work-customer-contacts-panel"
+          style={{ marginBottom: 16 }}
+        >
+          <div className="form-section">
+            <div className="form-section-title">
+              {t("customer_contacts.panel_title")}
+            </div>
+            {customerContacts.length === 0 ? (
+              <div
+                className="muted small"
+                data-testid="extra-work-customer-contacts-empty"
+              >
+                {t("customer_contacts.panel_empty")}
+              </div>
+            ) : (
+              <ul
+                style={{
+                  listStyle: "none",
+                  margin: 0,
+                  padding: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                {customerContacts.map((contact) => (
+                  <li
+                    key={contact.id}
+                    data-testid="extra-work-customer-contact-row"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>{contact.full_name}</span>
+                    {contact.role_label && (
+                      <span className="muted small">{contact.role_label}</span>
+                    )}
+                    {(contact.email || contact.phone) && (
+                      <span
+                        className="muted small"
+                        style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+                      >
+                        {contact.email && <span>{contact.email}</span>}
+                        {contact.phone && <span>{contact.phone}</span>}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ----- Pricing line items ----- */}
       <div className="card" style={{ marginBottom: 16 }}>

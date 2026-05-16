@@ -629,3 +629,42 @@ export interface CustomerUserMembership {
   user_role: Role;
   created_at: string;
 }
+
+// Sprint 28 Batch 4 — Contact phone-book entries.
+//
+// A Contact is a communication-only person attached to a Customer
+// (optionally narrowed to a single Building). It is NOT a User:
+//   - no password, no login
+//   - no UserRole enum
+//   - no scope memberships or permission overrides
+//   - no last_login / is_active fields
+// See `docs/product/meeting-2026-05-15-system-requirements.md` §1
+// (Contacts vs Users are distinct entities). Promoting a Contact
+// into a User is an explicit, separate flow (parked).
+//
+// Backend serializer: `customers/serializers_contacts.py` (ContactSerializer).
+// Backend permission: SUPER_ADMIN or COMPANY_ADMIN for the customer's provider.
+export interface Contact {
+  id: number;
+  customer: number;
+  building: number | null;
+  full_name: string;
+  email: string;
+  phone: string;
+  role_label: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactCreatePayload {
+  building?: number | null;
+  full_name: string;
+  email?: string;
+  phone?: string;
+  role_label?: string;
+  notes?: string;
+}
+
+// PATCH semantics — every field optional.
+export type ContactUpdatePayload = Partial<ContactCreatePayload>;
