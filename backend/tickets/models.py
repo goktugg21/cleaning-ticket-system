@@ -132,6 +132,21 @@ class Ticket(models.Model):
         default=None,
     )
 
+    # Sprint 28 Batch 8 — link back to the ProposalLine this Ticket
+    # was spawned from. NULL on tickets that came through the instant
+    # route (Batch 7), the legacy ticket-create path, or any other
+    # surface. SET_NULL so a Ticket survives if the proposal / line
+    # is later deleted — the operational job has audit history we
+    # don't want to lose.
+    proposal_line = models.ForeignKey(
+        "extra_work.ProposalLine",
+        on_delete=models.SET_NULL,
+        related_name="spawned_tickets_for_proposal_line",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
     # SLA tracking. Engine lives in backend/sla/. sla_first_breached_at is a
     # permanent marker that survives reopens; the rest are recomputed by the
     # engine and the periodic reconciliation task.

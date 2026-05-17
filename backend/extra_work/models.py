@@ -27,8 +27,10 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Q
 
 
 class ExtraWorkCategory(models.TextChoices):
@@ -671,3 +673,398 @@ class ExtraWorkRequestItem(models.Model):
     def __str__(self):
         label = self.service.name if self.service is not None else "legacy"
         return f"{label} × {self.quantity}"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 28 Batch 8 — provider-built proposal flow
+# ---------------------------------------------------------------------------
+class ProposalStatus(models.TextChoices):
+    """
+    Sprint 28 Batch 8 — proposal lifecycle.
+
+    Distinct from `ExtraWorkStatus` on the parent request. A proposal
+    starts as DRAFT (operator composing), moves to SENT (customer can
+    decide), and lands on CUSTOMER_APPROVED / CUSTOMER_REJECTED. A
+    provider may also CANCEL a draft / sent proposal — replacing it
+    with a new one is done by creating a fresh DRAFT row after a
+    rejection, not by transitioning the existing row backward.
+    """
+
+    DRAFT = "DRAFT", "Draft"
+    SENT = "SENT", "Sent"
+    CUSTOMER_APPROVED = "CUSTOMER_APPROVED", "Customer approved"
+    CUSTOMER_REJECTED = "CUSTOMER_REJECTED", "Customer rejected"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class ProposalTimelineEventType(models.TextChoices):
+    """
+    Sprint 28 Batch 8 — proposal timeline event taxonomy.
+
+    `CREATED` fires on POST proposals; the lifecycle transitions
+    (SENT / CUSTOMER_APPROVED / CUSTOMER_REJECTED / CANCELLED) fire
+    inside `apply_proposal_transition`. `ADMIN_OVERRIDDEN` is emitted
+    alongside the customer-decision event when a provider drives the
+    transition on the customer's behalf — the override fact lives on
+    the proposal's `ProposalStatusHistory` row (H-11), this event is
+    the operator-facing timeline marker. `CUSTOMER_VIEWED` is fired
+    by the customer-facing read endpoint when a customer first opens
+    a SENT proposal.
+    """
+
+    CREATED = "CREATED", "Created"
+    SENT = "SENT", "Sent"
+    CUSTOMER_VIEWED = "CUSTOMER_VIEWED", "Customer viewed"
+    CUSTOMER_APPROVED = "CUSTOMER_APPROVED", "Customer approved"
+    CUSTOMER_REJECTED = "CUSTOMER_REJECTED", "Customer rejected"
+    ADMIN_OVERRIDDEN = "ADMIN_OVERRIDDEN", "Admin overridden"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
+class Proposal(models.Model):
+    """
+    Sprint 28 Batch 8 — provider-built proposal for an
+    `ExtraWorkRequest` whose cart routed to PROPOSAL.
+
+    A proposal carries N `ProposalLine` rows the operator composes,
+    is sent to the customer, and is then approved or rejected. The
+    customer-decision approval path spawns one operational Ticket per
+    line (via `extra_work.proposal_tickets.spawn_tickets_for_proposal`).
+
+    A single ExtraWorkRequest may have at most one DRAFT-or-SENT
+    proposal at a time (enforced by the partial UniqueConstraint
+    below). After CUSTOMER_REJECTED / CANCELLED the operator may
+    create a new DRAFT proposal — keeping the old row as historical
+    record. 1:N parent->proposals is therefore allowed; the
+    constraint only blocks parallel open drafts.
+    """
+
+    extra_work_request = models.ForeignKey(
+        ExtraWorkRequest,
+        on_delete=models.CASCADE,
+        related_name="proposals",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=ProposalStatus.choices,
+        default=ProposalStatus.DRAFT,
+    )
+
+    subtotal_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    vat_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_proposals",
+    )
+
+    sent_at = models.DateTimeField(null=True, blank=True)
+    customer_decided_at = models.DateTimeField(null=True, blank=True)
+
+    # Provider override audit — populated only when a provider operator
+    # forces a customer-side decision (mirror ExtraWorkRequest pattern).
+    override_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="extra_work_proposal_overrides_made",
+    )
+    override_reason = models.TextField(blank=True)
+    override_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            # At most one DRAFT-or-SENT proposal per request. 1:N is
+            # allowed (post-rejection re-quote), but two parallel open
+            # drafts is ambiguous.
+            models.UniqueConstraint(
+                fields=["extra_work_request"],
+                condition=Q(status__in=["DRAFT", "SENT"]),
+                name="uniq_proposal_open_per_request",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Proposal #{self.pk} for EW #{self.extra_work_request_id}"
+
+    def recompute_totals(self) -> None:
+        """
+        Recompute subtotal / vat / total from the current set of
+        proposal lines. Called by the serializer / view layer after
+        every line-item create / update / delete. Mirrors
+        `ExtraWorkRequest.recompute_totals`.
+        """
+        subtotal = Decimal("0.00")
+        vat = Decimal("0.00")
+        total = Decimal("0.00")
+        for line in self.lines.all():
+            subtotal += line.line_subtotal
+            vat += line.line_vat
+            total += line.line_total
+        self.subtotal_amount = _two_places(subtotal)
+        self.vat_amount = _two_places(vat)
+        self.total_amount = _two_places(total)
+        self.save(
+            update_fields=[
+                "subtotal_amount",
+                "vat_amount",
+                "total_amount",
+                "updated_at",
+            ]
+        )
+
+
+class ProposalLine(models.Model):
+    """
+    Sprint 28 Batch 8 — single line on a `Proposal`.
+
+    `service` is NULL-allowed for ad-hoc lines that don't come from
+    the catalog; the serializer enforces a non-empty `description`
+    in that case (see `clean()` below and the serializer's
+    `validate()` mirror).
+
+    The line carries both a customer-visible explanation
+    (`customer_explanation`, surfaced on the customer serializer)
+    and a provider-internal note (`internal_note`, stripped from
+    the customer-facing read). The naming follows the 2026-05-15
+    stakeholder meeting spec §6 verbatim.
+
+    `is_approved_for_spawn` defaults to True. Nothing in Batch 8
+    flips it to False, but the ticket-spawn helper respects it as
+    forward-compat for a future per-line approval UX.
+    """
+
+    proposal = models.ForeignKey(
+        Proposal,
+        on_delete=models.CASCADE,
+        related_name="lines",
+    )
+    service = models.ForeignKey(
+        Service,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="proposal_lines",
+        help_text="NULL when this is an ad-hoc line (no catalog link).",
+    )
+    description = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text=(
+            "Free-text label for ad-hoc lines. Required when "
+            "`service` is NULL."
+        ),
+    )
+
+    quantity = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    unit_type = models.CharField(
+        max_length=20,
+        choices=ExtraWorkPricingUnitType.choices,
+        help_text=(
+            "Denormalised at create time so a later catalog edit to "
+            "the linked Service does not rewrite history."
+        ),
+    )
+    unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    vat_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("21.00"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+
+    customer_explanation = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Customer-visible per-line explanation. Surfaced on the "
+            "customer-facing proposal serializer and on the spawned "
+            "Ticket description (Batch 8 spec §6)."
+        ),
+    )
+    internal_note = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Provider-only per-line note. NEVER serialized for "
+            "CUSTOMER_USER; never propagated into spawned Ticket "
+            "descriptions (Batch 8 spec §6)."
+        ),
+    )
+
+    is_approved_for_spawn = models.BooleanField(
+        default=True,
+        help_text=(
+            "Per-line approval slot. When False the ticket-spawn "
+            "helper skips this line on customer approval. Forward-"
+            "compat for a future per-line approval UX."
+        ),
+    )
+
+    # Stored computed values — backend always recomputes from
+    # quantity / unit_price / vat_pct in save() so frontend-supplied
+    # values are never trusted.
+    line_subtotal = models.DecimalField(max_digits=12, decimal_places=2)
+    line_vat = models.DecimalField(max_digits=12, decimal_places=2)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [models.Index(fields=["proposal"])]
+
+    def __str__(self):
+        if self.service is not None:
+            label = self.service.name
+        elif self.description:
+            label = self.description
+        else:
+            label = "(ad-hoc)"
+        return f"{label} × {self.quantity}"
+
+    def clean(self):
+        super().clean()
+        if self.service is None and not (self.description or "").strip():
+            raise ValidationError(
+                {"description": "Required when service is not set."}
+            )
+
+    def save(self, *args, **kwargs):
+        # Stored totals always recomputed from the inputs.
+        self.line_subtotal = _two_places(self.quantity * self.unit_price)
+        self.line_vat = _two_places(
+            self.line_subtotal * self.vat_pct / Decimal("100")
+        )
+        self.line_total = _two_places(self.line_subtotal + self.line_vat)
+        super().save(*args, **kwargs)
+
+
+class ProposalStatusHistory(models.Model):
+    """
+    Sprint 28 Batch 8 — append-only audit row for every successful
+    state transition on a `Proposal`. Mirrors
+    `ExtraWorkStatusHistory` / `TicketStatusHistory` (Sprint 27F-B1).
+
+    The `is_override` + `override_reason` columns ARE the audit trail
+    for provider-driven customer-decision overrides — by design they
+    are NOT registered in the generic AuditLog (matrix H-11: workflow
+    override and permission override are separate concepts).
+    """
+
+    proposal = models.ForeignKey(
+        Proposal,
+        on_delete=models.CASCADE,
+        related_name="status_history",
+    )
+    old_status = models.CharField(
+        max_length=32, choices=ProposalStatus.choices
+    )
+    new_status = models.CharField(
+        max_length=32, choices=ProposalStatus.choices
+    )
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="proposal_status_changes",
+    )
+    note = models.TextField(blank=True)
+    is_override = models.BooleanField(
+        default=False,
+        help_text=(
+            "True when a provider operator drove a customer-decision "
+            "transition. Always paired with a non-empty override_reason."
+        ),
+    )
+    override_reason = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["proposal", "created_at"])]
+
+    def __str__(self):
+        return (
+            f"{self.proposal_id}: {self.old_status} -> {self.new_status}"
+        )
+
+
+class ProposalTimelineEvent(models.Model):
+    """
+    Sprint 28 Batch 8 — per-action timeline marker on a `Proposal`.
+
+    The status-history row captures the bare transition. The timeline
+    event row captures the same fact PLUS additional context (e.g.
+    `metadata.override_reason` on `ADMIN_OVERRIDDEN`) and is
+    customer-visible-by-default. The customer-facing serializer
+    strips the `metadata` JSON entirely so provider-only context
+    cannot leak.
+
+    H-11 invariant: this model is NOT registered in the generic
+    AuditLog. The row itself IS the audit trail.
+    """
+
+    proposal = models.ForeignKey(
+        Proposal,
+        on_delete=models.CASCADE,
+        related_name="timeline_events",
+    )
+    event_type = models.CharField(
+        max_length=32, choices=ProposalTimelineEventType.choices
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="proposal_timeline_events",
+    )
+    customer_visible = models.BooleanField(
+        default=True,
+        help_text=(
+            "Set at emission time. The customer-facing timeline "
+            "endpoint filters `customer_visible=True`."
+        ),
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Provider-side context (e.g. {'override_reason': ...}). "
+            "Stripped from the customer-facing serializer entirely."
+        ),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["proposal", "created_at"])]
+
+    def __str__(self):
+        return f"{self.proposal_id}: {self.event_type}"

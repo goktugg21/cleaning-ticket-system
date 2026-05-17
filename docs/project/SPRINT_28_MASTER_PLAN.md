@@ -1465,39 +1465,191 @@ skip proposal and spawn Tickets atomically. Depends on Batch 5 + Batch 6.
 Goal: ship the first-class Proposal entity for the custom path. Depends
 on Batch 5 + Batch 6.
 
-- [ ] Add `Proposal` model — FK to `ExtraWorkRequest`, status enum
+- [x] ~~Add `Proposal` model — FK to `ExtraWorkRequest`, status enum
       (`DRAFT` / `SENT` / `CUSTOMER_APPROVED` / `CUSTOMER_REJECTED`),
       computed totals (net / VAT / gross), `sent_at`,
-      `customer_decided_at`, override fields.
-- [ ] Add `ProposalLine` model — FK to `Proposal`, optional FK to
+      `customer_decided_at`, override fields.~~
+- [x] ~~Add `ProposalLine` model — FK to `Proposal`, optional FK to
       `Service` (free-text label allowed for ad-hoc), `quantity`,
       `unit_type`, `unit_price`, `vat_pct`,
       `customer_explanation: TextField` (customer-visible),
       `internal_note: TextField` (provider-only). **Per §10 open question
       1 default: use spec naming — `customer_explanation` and
-      `internal_note` — for the new model. Document the rename in §9.**
-- [ ] Ensure customer-facing endpoints **never** return `internal_note`.
+      `internal_note` — for the new model. Document the rename in §9.**~~
+- [x] ~~Ensure customer-facing endpoints **never** return `internal_note`.
       The `ProposalLineCustomerSerializer` MUST omit it; the admin
       serializer includes it. Add a regression-lock test that serializes
       a proposal as `CUSTOMER_USER` and grep-asserts `internal_note` is
-      absent from the JSON.
-- [ ] Add `ProposalTimelineEvent` for proposal lifecycle events (created,
+      absent from the JSON.~~
+- [x] ~~Add `ProposalTimelineEvent` for proposal lifecycle events (created,
       sent, customer viewed, customer approved, customer rejected, admin
       overridden). Provider sees all; customer sees a filtered subset
       (override marker visible, override reason text not visible to
-      customer).
-- [ ] Add proposal override with mandatory `override_reason` — mirror the
+      customer).~~
+- [x] ~~Add proposal override with mandatory `override_reason` — mirror the
       Sprint 27F-B1 ticket shape: provider-driven `CUSTOMER_APPROVED /
       CUSTOMER_REJECTED` coerces `is_override=True` and requires
       `override_reason`; HTTP 400 with stable code
-      `override_reason_required` when missing.
-- [ ] On customer approval (or admin override approval), create Tickets
+      `override_reason_required` when missing.~~
+- [x] ~~On customer approval (or admin override approval), create Tickets
       transactionally — one per approved line. Rejected lines do not
-      spawn tickets. Atomic with the approval transition.
-- [ ] Audit signal coverage on `Proposal`, `ProposalLine`,
-      `ProposalTimelineEvent`.
-- [ ] Add tests: proposal CRUD, dual-note privacy, timeline emission,
-      override path, atomic ticket spawn, audit coverage.
+      spawn tickets. Atomic with the approval transition.~~
+- [x] ~~Audit signal coverage on `Proposal`, `ProposalLine`,
+      `ProposalTimelineEvent`.~~ (Implemented as: Proposal + ProposalLine
+      registered for full-CRUD; ProposalTimelineEvent + ProposalStatusHistory
+      intentionally NOT registered — H-11 invariant; the history rows ARE
+      the workflow-override audit trail.)
+- [x] ~~Add tests: proposal CRUD, dual-note privacy, timeline emission,
+      override path, atomic ticket spawn, audit coverage.~~
+
+#### Batch 8 completion (2026-05-17)
+
+- **Date:** 2026-05-17.
+- **Commit:** uncommitted on working tree as of 2026-05-17, on top of
+  `7ec3f15`.
+- **Files changed (5 edits + 8 new files):**
+  - **Edits:** `backend/extra_work/models.py` (+395 lines: ProposalStatus,
+    ProposalTimelineEventType, Proposal, ProposalLine, ProposalStatusHistory,
+    ProposalTimelineEvent); `backend/extra_work/serializers.py` (+393 lines:
+    ProposalLineAdminSerializer / ProposalLineCustomerSerializer /
+    ProposalCreateSerializer / ProposalDetailSerializer / ProposalListSerializer
+    / ProposalTransitionSerializer / ProposalStatusHistorySerializer /
+    ProposalTimelineEventAdminSerializer / ProposalTimelineEventCustomerSerializer);
+    `backend/extra_work/urls.py` (+45 lines: 7 new endpoint paths);
+    `backend/tickets/models.py` (+15 lines: nullable
+    `Ticket.proposal_line` FK with `on_delete=SET_NULL`,
+    `related_name="spawned_tickets_for_proposal_line"`);
+    `backend/audit/signals.py` (+17 lines: Proposal + ProposalLine added
+    to full-CRUD tuple; comment block documents the H-11 NON-registration
+    of ProposalStatusHistory + ProposalTimelineEvent).
+  - **New backend modules:** `backend/extra_work/proposal_state_machine.py`
+    (5-entry ALLOWED_TRANSITIONS set, `_user_can_drive_proposal_transition`,
+    `apply_proposal_transition`, `emit_proposal_event`,
+    `allowed_next_proposal_statuses`, override coercion mirror,
+    parent-EW auto-advance bypass); `backend/extra_work/proposal_tickets.py`
+    (`spawn_tickets_for_proposal(proposal, *, actor)` — idempotent,
+    honours `is_approved_for_spawn`, never copies `internal_note` into
+    ticket description); `backend/extra_work/views_proposals.py`
+    (7 view classes — ProposalListCreateView / ProposalDetailView /
+    ProposalTransitionView / ProposalStatusHistoryView /
+    ProposalTimelineView / ProposalLineListCreateView /
+    ProposalLineDetailView; per-action provider-only guards mirror
+    `_require_provider_pricing_permission`).
+  - **New migrations:** `backend/extra_work/migrations/0004_proposal_models.py`
+    (creates Proposal, ProposalLine, ProposalStatusHistory,
+    ProposalTimelineEvent + the partial UniqueConstraint
+    `uniq_proposal_open_per_request` with
+    `condition=Q(status__in=["DRAFT", "SENT"])` + 3 indexes);
+    `backend/tickets/migrations/0009_ticket_proposal_line.py`
+    (cross-app FK on Ticket, depends on `extra_work.0004_proposal_models`).
+  - **New tests:** `backend/extra_work/tests/test_sprint28_proposal.py`
+    (30 tests across 13 classes — ProposalCRUDTests,
+    ProposalSendAdvancesParentTests, CustomerVisibilityTests,
+    DualNotePrivacyTests, CustomerApproveSpawnTests, CustomerRejectTests,
+    ProviderOverrideTests, AtomicityTests, IdempotencyTests,
+    TimelineEmissionTests, ScopeTests, StaffTests,
+    ProposalReSendAfterRejectionTests, UniqueOpenProposalTests);
+    `backend/extra_work/tests/test_sprint28_proposal_state_machine.py`
+    (10 tests across 3 classes — structural allowed-set, role × scope
+    matrix, provider-override coercion); `backend/audit/tests/test_sprint28_proposal_audit.py`
+    (7 tests across 3 classes — Proposal CRUD audit, ProposalLine CRUD audit,
+    H-11 lock asserting zero AuditLog rows for ProposalTimelineEvent +
+    ProposalStatusHistory after a full lifecycle run).
+- **Migration status:** both migration files created. **NOT** applied
+  to the dev DB in this pass — user runs `docker compose exec backend
+  python manage.py migrate extra_work tickets` after the closeout
+  commit when ready. Test DB auto-applies during `manage.py test`.
+- **Tests / checks run:**
+  - Targeted: `python manage.py test
+    extra_work.tests.test_sprint28_proposal
+    extra_work.tests.test_sprint28_proposal_state_machine
+    audit.tests.test_sprint28_proposal_audit --keepdb -v 1` → **47/47 OK**
+    in 15.7s.
+  - Broader sweep: `python manage.py test extra_work tickets audit
+    customers --keepdb -v 1` → **516/516 OK** in 352.4s.
+  - Full backend suite (per backend-engineer report): **994/994 OK**.
+  - `manage.py check`: 0 issues. `makemigrations --dry-run --check`:
+    No changes detected.
+  - No frontend files touched (intentionally — Batch 8 backend-only per
+    PM scope verification); no frontend checks run.
+- **Important decisions made (also in §9):**
+  - **Q1 default applied**: spec names `customer_explanation` +
+    `internal_note` on the new `ProposalLine` (legacy
+    `ExtraWorkPricingLineItem` keeps its `customer_visible_note` /
+    `internal_cost_note` — different concept).
+  - **1:N parent→proposals** with partial UniqueConstraint blocking
+    parallel open (DRAFT/SENT) rows. Re-send after rejection creates a
+    fresh DRAFT row, not a transition on the existing row.
+  - **`Ticket.proposal_line` FK** added (Option A from PM Q5a) — parallel
+    to Batch 7's `extra_work_request_item` FK, not a reuse. Option B
+    (reuse `extra_work_request_item`) was rejected because ProposalLine
+    carries divergent (unit_price, quantity, customer_explanation) values.
+  - **`apply_proposal_transition` BYPASSES `extra_work.state_machine.
+    apply_transition`** for the parent-EW auto-advance on send +
+    approve/reject. This avoids the legacy `pricing_line_items_required`
+    precondition (which targets `ExtraWorkPricingLineItem`, not the
+    new ProposalLine flow). The bypass writes the parent status + a
+    fresh `ExtraWorkStatusHistory` row inside the same atomic block.
+  - **`Proposal.send` rejects when parent EW is in `REQUESTED`** —
+    operator must drive `REQUESTED → UNDER_REVIEW` manually via the
+    existing `/transition/` endpoint before sending. HTTP 400 with
+    stable code `proposal_send_requires_under_review`.
+  - **Provider-driven SENT → CANCELLED is also coerced to
+    `is_override=True` + reason required** (provider withdrawing a sent
+    proposal — significant act, audit trail must explain).
+  - **`is_approved_for_spawn` per-line column added with `default=True`**
+    (forward-compat: parked per-line approve/reject UX). Spawn helper
+    respects it. No UI flips it in Batch 8.
+  - **`customer_visible` flag on `ProposalTimelineEvent`** written at
+    emission time. Customer serializer filters on it AND omits
+    `metadata` entirely (where the override_reason text would live for
+    `ADMIN_OVERRIDDEN` events).
+  - **H-11 audit registration**: Proposal + ProposalLine in full-CRUD
+    AuditLog; ProposalStatusHistory + ProposalTimelineEvent
+    deliberately NOT registered (the history rows ARE the audit trail
+    for workflow override). Regression-locked by
+    `ProposalTimelineEventNotAuditedTests`.
+  - **Reused `osius.ticket.view_building`** for provider building-scope
+    checks on every proposal endpoint — no new `osius.*` keys
+    introduced (master plan §2 "do not rename osius.*" rule extends to
+    "do not invent parallel keys when an existing one expresses the
+    same scope").
+- **Remaining risks:**
+  - **No frontend exposure of the proposal builder yet** — Batch 8 is
+    backend-only per master plan §6 (zero frontend bullets). Operators
+    cannot compose a proposal via the UI until Batch 9 (EW dashboard)
+    or a dedicated frontend batch ships the builder UX.
+  - **`Proposal` CREATE writes TWO AuditLog rows** by design (CREATE +
+    immediate UPDATE for the `recompute_totals` save). The audit test
+    asserts on the CREATE row specifically; future consumers of the
+    audit feed should be aware that proposal creation lands as two
+    rows. Splitting `recompute_totals` to be inline at create-time
+    would diverge from the `ExtraWorkRequest.recompute_totals` pattern
+    the brief asked us to mirror; deferred as a polish item.
+  - **`CUSTOMER_VIEWED` timeline event is emitted on every customer GET**
+    of a SENT proposal — not de-duplicated. PM brief's timeline-emission
+    test asserts on CREATED / SENT / CUSTOMER_APPROVED /
+    CUSTOMER_REJECTED / ADMIN_OVERRIDDEN counts only so we are in
+    compliance; a future batch may want to dedupe per-customer-per-day.
+  - **Parent EW `CUSTOMER_REJECTED → UNDER_REVIEW` must be driven
+    manually by operator** before a new proposal can be POSTed against
+    the same parent (matches `extra_work.state_machine.ALLOWED_TRANSITIONS`).
+    Frontend UX should make this step obvious when shipping the
+    proposal builder UI.
+  - **`Ticket.proposal_line` is `SET_NULL` on ProposalLine delete** —
+    audit history of spawn origin is lost if the line is deleted
+    post-spawn. Same trade-off as Batch 7's `extra_work_request_item`.
+  - **`ExtraWorkRequest` is still NOT registered for audit** — Batch 8
+    propagates status changes from proposal transitions onto the
+    parent (`status`, `override_*`, `customer_decided_at`) but those
+    writes do not land in the generic AuditLog because the parent is
+    unregistered. Pre-existing Batch 6 deferral; a future sprint
+    registering the parent will need to pick up these propagation
+    diffs deliberately.
+  - **Dev DB schema is BEHIND code** until user approves and runs
+    `python manage.py migrate extra_work tickets` (proposal endpoints
+    will 500 against the dev container with `relation does not exist`
+    until the migration is applied).
 
 ### Batch 9 — Extra Work dashboard and stats
 
@@ -1644,19 +1796,18 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 8 — Proposal builder**
+- **Current batch:** **Batch 9 — Extra Work dashboard and stats**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 8 items.
-  Batch 8 introduces the first-class `Proposal` entity (separate from
-  the existing `ExtraWorkPricingLineItem` legacy concept), the
-  `customer_explanation` / `internal_note` dual-note privacy split, a
-  proposal timeline event log, provider-driven override (mirroring the
-  Sprint 27F-B1 ticket pattern), and the atomic ticket-spawn on
-  customer approval. The `routing_decision="PROPOSAL"` path from
-  Batches 6/7 routes here.
-- **Next recommended batch (on-deck):** Batch 9 — Extra Work dashboard
-  and stats.
+  this file, state the current batch, and work only on Batch 9 items.
+  Batch 9 ships the Extra Work stats endpoints + frontend dashboard
+  cards. It is the first batch where the Sprint 28 backend models
+  (Proposal, ProposalLine, ExtraWorkRequestItem) become visible to
+  the operator in aggregate form. Per role-shape rules in §6, the
+  dashboard renders different layouts for provider-side vs
+  customer-side users.
+- **Next recommended batch (on-deck):** Batch 10 — Staff per-building
+  granularity.
 
 ---
 
@@ -1666,6 +1817,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-17 | Batch 8 — Proposal builder | uncommitted on working tree as of 2026-05-17, on top of `7ec3f15` | **Backend-only batch** (master plan §6 Batch 8 has zero frontend bullets — PM scope-verification confirmed). Ships the first-class proposal entity for the custom-priced (`routing_decision="PROPOSAL"`) Extra Work path. **4 new models in `extra_work/models.py`**: `Proposal` (FK ExtraWorkRequest CASCADE; status enum DRAFT/SENT/CUSTOMER_APPROVED/CUSTOMER_REJECTED/CANCELLED; stored totals + `recompute_totals` mirroring `ExtraWorkRequest`; sent_at/customer_decided_at/override_by/override_reason/override_at; partial `UniqueConstraint(extra_work_request, condition=Q(status__in=["DRAFT","SENT"]))` named `uniq_proposal_open_per_request` permits 1:N parent→proposals but blocks parallel open drafts), `ProposalLine` (FK Proposal CASCADE + nullable FK Service PROTECT; ad-hoc `description` CharField required when service is NULL; quantity/unit_type/unit_price/vat_pct; **`customer_explanation` + `internal_note` TextField pair per spec §6 / PM Q1 default**; `is_approved_for_spawn: bool=True` forward-compat slot for parked per-line UX; stored computed `line_subtotal`/`line_vat`/`line_total` recomputed in `save()` mirroring `ExtraWorkPricingLineItem`), `ProposalStatusHistory` (mirrors `ExtraWorkStatusHistory` shape — `is_override`+`override_reason` columns ARE the workflow-override audit trail per H-11), `ProposalTimelineEvent` (event_type enum {CREATED/SENT/CUSTOMER_VIEWED/CUSTOMER_APPROVED/CUSTOMER_REJECTED/ADMIN_OVERRIDDEN/CANCELLED}; `customer_visible: bool` written at emission time; provider-only `metadata: JSONField` carries override_reason text for ADMIN_OVERRIDDEN events; customer serializer strips metadata entirely). **New state machine `backend/extra_work/proposal_state_machine.py`**: 5-entry `ALLOWED_TRANSITIONS` set (DRAFT→SENT, DRAFT→CANCELLED, SENT→CUSTOMER_APPROVED, SENT→CUSTOMER_REJECTED, SENT→CANCELLED); `_user_can_drive_proposal_transition` mirrors `extra_work.state_machine` (SUPER_ADMIN global; COMPANY_ADMIN/BUILDING_MANAGER scoped via reused `osius.ticket.view_building`; CUSTOMER_USER via `customer.extra_work.approve_own`/`approve_location`; STAFF blocked); `apply_proposal_transition` is atomic + select_for_update + emits one timeline event per transition + writes one history row. **Override coercion mirrors Sprint 27F-B1**: provider-driven SENT→CUSTOMER_APPROVED/REJECTED + provider-driven SENT→CANCELLED coerce `is_override=True` and require `override_reason` (HTTP 400 with stable code `override_reason_required`). **Parent-EW auto-advance BYPASSES `extra_work.state_machine.apply_transition`** to avoid the legacy `pricing_line_items_required` precondition: SENT writes UNDER_REVIEW→PRICING_PROPOSED on parent + an `ExtraWorkStatusHistory` row directly in the same atomic block; CUSTOMER_APPROVED writes PRICING_PROPOSED→CUSTOMER_APPROVED; CUSTOMER_REJECTED writes PRICING_PROPOSED→CUSTOMER_REJECTED; override fields propagate to parent EW too. `Proposal.send` REJECTS if parent is in REQUESTED (operator must drive REQUESTED→UNDER_REVIEW manually first) — HTTP 400 stable code `proposal_send_requires_under_review`. **New spawn service `backend/extra_work/proposal_tickets.py::spawn_tickets_for_proposal(proposal, *, actor)`** parallel to Batch 7's `instant_tickets.py`: atomic (caller-held tx), idempotent (skip lines whose `Ticket.proposal_line` already resolves), respects `is_approved_for_spawn=False` (forward-compat), uses customer_explanation NOT internal_note in ticket description, sets `Ticket.proposal_line` FK, writes initial `TicketStatusHistory` OPEN row, returns list of created Tickets. **New `Ticket.proposal_line`** nullable FK (`SET_NULL` on delete; `related_name="spawned_tickets_for_proposal_line"`) parallel to Batch 7's `extra_work_request_item` FK — Option A from PM Q5a (carries divergent unit_price/quantity/customer_explanation that would be lost if Option B reused the cart-line FK). **Migration `extra_work/0004_proposal_models.py`** (4 tables + UniqueConstraint + 3 indexes) + **migration `tickets/0009_ticket_proposal_line.py`** (cross-app FK, depends on `extra_work.0004_proposal_models`). **7 new API endpoints** under `/api/extra-work/<ew_id>/proposals/` (list/create, detail, transition, status-history, timeline, lines list/create, line detail) — provider-only mutations gated by `osius.ticket.view_building` scope helper; customer GET filters DRAFT out of list + 404s on DRAFT detail; customer GET of SENT detail emits CUSTOMER_VIEWED timeline event. **Audit:** Proposal + ProposalLine added to full-CRUD tuple in `audit/signals.py`; **ProposalStatusHistory + ProposalTimelineEvent intentionally NOT registered (H-11)** — the history rows ARE the workflow-override audit trail; regression-locked by `ProposalTimelineEventNotAuditedTests`. **47 new backend tests across 3 modules**: `test_sprint28_proposal.py` (30 tests / 13 classes covering CRUD, parent-EW advancement, customer visibility, dual-note privacy with JSON grep-assert, approve+spawn, reject, provider override, atomicity rollback via monkeypatched Ticket.create, idempotency including is_approved_for_spawn=False, timeline emission, scope across all roles, STAFF exclusion, re-send after rejection, unique-open-proposal constraint), `test_sprint28_proposal_state_machine.py` (10 tests / 3 classes for structural state machine), `test_sprint28_proposal_audit.py` (7 tests / 3 classes including the H-11 lock). | Backend targeted (3 modules, 47 tests): **47/47 OK** in 15.7s. Backend broader (`extra_work tickets audit customers`): **516/516 OK** in 352.4s — no regression. Backend full suite (per backend-engineer report): **994/994 OK**. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. No frontend files touched (intentionally — backend-only batch); no frontend checks run. | **Dev DB schema BEHIND code** until user approves `python manage.py migrate extra_work tickets` (proposal endpoints will 500 with `relation does not exist` until applied). **No frontend exposure** of the proposal builder yet — Batch 8 has zero frontend bullets per master plan §6. Operators cannot compose a proposal via UI until Batch 9 (EW dashboard) or a dedicated frontend batch ships the builder UX. **`Proposal` CREATE writes TWO AuditLog rows** by design (CREATE row + immediate UPDATE for `recompute_totals` save). Audit test asserts on the CREATE row specifically; consumers should be aware. **`CUSTOMER_VIEWED` emitted on every customer GET** of a SENT proposal — not deduplicated. Future polish item. **Parent EW `CUSTOMER_REJECTED → UNDER_REVIEW` must be driven manually** by operator before a new proposal can be POSTed against the same parent. **`Ticket.proposal_line` is `SET_NULL` on ProposalLine delete** — spawn-origin history lost if a line is deleted post-spawn (same trade-off as Batch 7's `extra_work_request_item`). **`ExtraWorkRequest` still NOT registered for audit** — parent EW writes from proposal-driven auto-advance do not land on generic AuditLog (pre-existing Batch 6 deferral; future sprint must pick up these propagation diffs deliberately when registering the parent). |
 | 2026-05-16 | Batch 7 — Instant-ticket path | `afdbf91 feat: spawn tickets for instant extra work` (on top of `4fe16d5`) | **Backend-only batch** (master plan §6 Batch 7 has zero frontend bullets). Atomic spawn of one `tickets.Ticket` per `ExtraWorkRequestItem` for cart submissions where Batch 6 computed `routing_decision="INSTANT"`. New nullable FK `Ticket.extra_work_request_item` (SET_NULL on delete, `related_name="spawned_tickets"`) carries the traceability link. Migration `tickets/0008_ticket_extra_work_request_item.py` (cross-app dependency on `extra_work.0003_request_items_and_routing`). New state-machine transition `REQUESTED → CUSTOMER_APPROVED` reuses the existing status; gated as **system-only** via new `SYSTEM_ONLY_TRANSITIONS` set rejected for every actor in `_user_can_drive_transition` BEFORE role checks — customers cannot bypass the resolver via `POST /api/extra-work/<id>/transition/`. Spawn service `backend/extra_work/instant_tickets.py::spawn_tickets_for_request(request, *, actor)` called from `ExtraWorkRequestCreateSerializer.create()` inside the existing `transaction.atomic()`. Per-line `resolve_price()` is **re-called at spawn time** as a defensive abort: if any line returns None (despite Batch 6 routing_decision=INSTANT) the spawn raises `TransitionError(code="instant_spawn_price_lost")` and the whole submission rolls back. Idempotent: skips items whose `Ticket.extra_work_request_item` already resolves. Each spawned Ticket: company/building/customer from request, created_by=actor, title=`f"{service.name} × {quantity}"`, description = request.description + line customer_note + service.description, priority=NORMAL, status=OPEN, plus an initial `TicketStatusHistory` row. The parent request transitions REQUESTED→CUSTOMER_APPROVED with `ExtraWorkStatusHistory` row (note "instant-route: all lines contract-priced"). `Ticket` intentionally NOT audit-registered (per H-11; lifecycle goes via `TicketStatusHistory`). `ExtraWorkRequest` intentionally NOT audit-registered (Batch 6 lock unchanged). 15 new backend tests across 6 classes (`test_sprint28_instant_tickets.py`); 3 Batch 6 tests rewritten to reflect the new contract (was "no spawn yet" → now "INSTANT spawns + status advances; PROPOSAL still no-op"). | Backend targeted (`test_sprint28_instant_tickets + test_sprint28_cart_request`): **36 tests OK** in 6.6s. Backend broader sweep (`extra_work tickets audit customers`): **469/469 OK** in 336.0s — no regression. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. No frontend files touched (intentionally — backend-only batch); no frontend checks run. | **Dev DB schema applied** 2026-05-16 by user via `python manage.py migrate tickets` — `showmigrations tickets` shows `[X] 0008_ticket_extra_work_request_item`; instant-ticket spawn path now exercisable against the dev container. `TransitionError → 500` propagation in the create view: defensive `instant_spawn_price_lost` raises `TransitionError` which the create view doesn't catch (mirrors existing pattern — only the `transition` view has a try/except). Surfaced status is 500 not 400; race window is microseconds; unreachable under normal operation. **No frontend exposure of spawned-ticket IDs yet** — Batch 6 result panel still shows just `INSTANT`/`PROPOSAL` banner. Master plan §6 Batch 7 has zero frontend bullets so deliberately deferred (likely lands in Batch 9 EW dashboard). **State-machine system-only gate is load-bearing** — if a future refactor removes the `SYSTEM_ONLY_TRANSITIONS` check, customers could bypass the resolver via `POST /transition/`. `SystemOnlyTransitionTests` (4 cases) locks this. **Backlog `EXTRA-INSTANT-TICKET-1` row** mentions transitioning to `IN_PROGRESS (or new INSTANTIATED)` — stale wording; code uses `CUSTOMER_APPROVED` per PM recommendation. Update the backlog row in the closeout commit. |
 | 2026-05-16 | Batch 6 — Cart-shaped Extra Work request | `126bcea feat: add cart-shaped extra work requests` (on top of `13fb819`) | Joint backend + frontend, reshape sprint. **Backend:** `ExtraWorkRequest` becomes the parent record; new `ExtraWorkRequestItem` line items model added (FK `ExtraWorkRequest` CASCADE + FK `Service` PROTECT, NULL-allowed for legacy backfill, `quantity` Decimal, `unit_type` denormalised from Service, `requested_date` per-line, `customer_note` per-line, timestamps); new `routing_decision` field on `ExtraWorkRequest` (`"INSTANT"` vs `"PROPOSAL"` with default `"PROPOSAL"`). Migration `extra_work/0003_request_items_and_routing.py` ships schema + idempotent data backfill (one line per existing request, `service=None`, `routing_decision="PROPOSAL"`); reverse_code = noop. **`resolve_price()` is called per line at submission** to compute `routing_decision`; ALL lines must resolve to a non-None `CustomerServicePrice` → `"INSTANT"`, otherwise `"PROPOSAL"`. Batch 6 **stores** the decision but does NOT act on it (no ticket spawn, no state transition, no proposal route taken — those are Batches 7 + 8). Locked by `test_instant_routing_does_not_spawn_tickets` and `test_status_remains_requested`. Permission gate unchanged (existing `IsAuthenticatedAndActive` + `scope_extra_work_for`); CUSTOMER_USER can compose carts, provider admins can compose on behalf, STAFF blocked by existing G-B7 scope. Audit: `ExtraWorkRequestItem` registered full-CRUD; `ExtraWorkRequest` intentionally NOT audit-tracked in Batch 6 (parent was already-unregistered pre-batch — locked by `ExtraWorkRequestRoutingDecisionAuditTests` so a future addition shows as a failing test to update). 31 new backend tests across 3 modules: 20 in `test_sprint28_cart_request` (CRUD, routing-decision computation, validation, no-ticket-spawn assertion, scope isolation, cross-customer/provider rejection), 6 in `test_sprint28_cart_request_backfill` (migration backfill verifies legacy single-line requests get NULL-service + PROPOSAL), 5 in `test_sprint28_cart_request_audit`. 2 existing MVP `CreateTests` updated to send the new cart payload (documented as expected per brief). **Frontend:** new `RoutingDecision` union + `ExtraWorkRequestItem` + `ExtraWorkRequestCartCreatePayload` types in `api/types.ts`; existing `ExtraWorkRequestDetail` extended with `line_items` + `routing_decision`; `createExtraWork()` takes the cart payload type; new `extra_work` i18n namespace registered for both EN + NL bundles (parity preserved). `CreateExtraWorkPage.tsx` **fully rewritten** to a cart UI (parent fields preserved: title / description / customer / building / category / urgency / preferred_date; new cart array with add/remove lines, per-line service-dropdown + quantity + requested_date + customer_note; post-submit result panel with `INSTANT`/`PROPOSAL` banner — no navigation, ticket spawn is Batch 7 backend's job). `ExtraWorkListPage` + `ExtraWorkDetailPage` threaded with `useTranslation("extra_work")` (closes audit doc §7 row 19 — i18n missing on EW). Detail page renders a read-only line-items table + `routing_decision` badge. New Playwright spec `sprint28_extra_work_cart.spec.ts` with 5 cases (INSTANT banner, PROPOSAL banner, empty cart blocks submit, duplicate service blocks submit, detail page renders the new line item correctly). | Backend targeted (3 modules, 31 new tests): **31/31 OK** in 5.1s. Backend broader (`extra_work + audit + customers`): **296/296 OK** in 233.9s — no regression. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 338ms. `npm run lint`: **52 problems = baseline**; zero new hits. The 4 hits in modified files (`CreateExtraWorkPage.tsx:215/228/243` + `ExtraWorkDetailPage.tsx:191`) are pre-existing `setState-in-effect` patterns carried over verbatim from the original files (auto-sync `useEffect` for building/customer pairing + the Batch-4 customer-contacts panel effect). **Playwright spec written but NOT executed locally** (WSL gotcha; CI will exercise the 5 cases). | **Dev DB schema applied** 2026-05-16 by user via `python manage.py migrate extra_work` — `showmigrations extra_work` shows `[X] 0003_request_items_and_routing`; Cart endpoint + rewritten `CreateExtraWorkPage` now exercisable against the dev container. Playwright spec needs CI run to confirm behaviour against demo seed. **2 legacy MVP tests updated** to send the new cart payload (backwards-incompat is intentional; the legacy `CreateExtraWorkPage` is rewritten in this same batch — no external callers of the legacy payload remain). **Unit-type i18n duplication**: Batch 6 added unit-type labels under the `extra_work` namespace; Batch 5 has analogous labels under the `services` namespace. Consolidation is a follow-up polish item (not P0). **`routing_decision` is computed once at submission and not recomputed** if a future batch (Batch 8) lets operators edit a line — Batch 8 must explicitly handle recomputation. **`ExtraWorkPricingLineItem` (legacy provider-built pricing rows on the legacy single-line request) is UNTOUCHED** — a different concept from the new `ExtraWorkRequestItem`. Batch 8 will reckon with it when the proposal model ships. |
 | 2026-05-16 | Batch 5 — Service catalog and pricing | uncommitted on top of `e23cf40` | Joint backend + frontend. **Backend:** 3 new models in `backend/extra_work/models.py` — `ServiceCategory` (global, name-unique), `Service` (FK ServiceCategory PROTECT, unit_type reusing `ExtraWorkPricingUnitType`, `default_unit_price`, `default_vat_pct` default 21.00, is_active), `CustomerServicePrice` (FK Service PROTECT + FK Customer CASCADE, unit_price/vat_pct/valid_from/valid_to/is_active). Migration `extra_work/0002_service_catalog_and_pricing.py` (**applied to dev DB 2026-05-16 by user** via `python manage.py migrate extra_work`). New resolver `extra_work/pricing.py::resolve_price(service, customer, *, on=None)` returns active `CustomerServicePrice` row or `None` (NEVER falls back to `Service.default_unit_price` per master plan §5 rule #9). 4 new catalog endpoints at `/api/services/{categories,}` + 2 customer-scoped pricing endpoints at `/api/customers/<id>/pricing/`. Catalog gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdmin`; pricing gated by `IsAuthenticatedAndActive + IsSuperAdminOrCompanyAdminForCompany` (mirrors Batch 4 Contact pattern; detail view re-scopes by `customer=customer` blocking ID smuggling). All 3 models registered in `audit/signals.py` full-CRUD tuple. 57 new backend tests across 4 modules (service catalog CRUD + protect-on-delete; resolver branches incl. the rule-#9 None-when-no-customer-specific-row lock; per-customer pricing CRUD + scope isolation + validation; audit CREATE/UPDATE/DELETE × 3 models). **Frontend:** 5 new types in `api/types.ts` (ServiceUnitType union + Service/Category/CustomerServicePrice +Create/+Update payloads); 15 new admin API helpers; `ServicesAdminPage` at `/admin/services` (tabs for services + categories, view-first list + modal CRUD, top-level sidebar entry "Services" gated to admin roles); `CustomerPricingPage` at `/admin/customers/:id/pricing` (customer-scoped sub-route — Batch 3 sidebar regex activates automatically; new "Pricing" entry between Permissions and Extra Work in the customer-scoped submenu). EN/NL i18n parity preserved (97-line delta per bundle covering `nav.services`/`nav.customer_submenu.pricing`/`services.*`/`customer_pricing.*` + unit-type labels). Visible UI hint surfaces rule #9 (`services.field_default_unit_price_hint`). 2 new Playwright specs (11 cases total). | Backend targeted (4 modules, 57 tests): **57/57 OK** in 132.6s. Per-app sanity: audit 44/44, extra_work 81/81, customers 140/140 — each clean. Broader sweep (`extra_work + audit + customers`): **first run reported `FAILED (errors=7)` (transient flake);** `-v 2` diagnostic returned zero FAIL/ERROR lines; confirmation re-run → **265/265 OK** in 471.5s. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. `npm run typecheck`: clean. `npm run build`: clean, 454ms. `npm run lint`: **52 problems = baseline** (zero new hits in Batch 5 files). **Playwright specs written but NOT executed locally** (WSL `frontend/test-results/` root-ownership gotcha; CI will exercise the 11 cases). | **Dev DB schema applied** 2026-05-16 by user via `python manage.py migrate extra_work` — `showmigrations` shows `[X] 0002_service_catalog_and_pricing`; Catalog API + Services/Pricing admin UI now exercisable against the dev container. **Broader sweep flakiness**: first run 7 transient errors; re-run clean. Likely NotificationLog/Celery-eager shared-state race in long sequential runs across `extra_work + audit + customers`; not Batch-5-specific but documented for future batches to re-run before declaring failure. **Spec §5 / backlog `EXTRA-PRICING-1` doc drift**: spec §5 "Resolution order" step 2 says "global default" fallback; backlog row text similarly stale. Code follows master plan rule #9 (returns `None`); doc reconciliation is a follow-up patch. **`CustomerPricingPage` Edit modal locks the service dropdown** (switching service on an existing price would corrupt history); users delete + add to switch. **No customer-side pricing visibility yet** (their own contract prices) — ships with Batch 6 cart UI. **No Batch 6 wiring**: the catalog is not yet called from any Extra Work request flow. |
@@ -1683,6 +1835,16 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-17 | **Proposal line field naming = spec names `customer_explanation` + `internal_note`** on the new `ProposalLine` model. The legacy `ExtraWorkPricingLineItem` keeps its `customer_visible_note` / `internal_cost_note` naming. | §10 Open Question 1 default; spec §6 hard rule that `internal_note` MUST never appear on a customer-facing endpoint or PDF. Legacy model is a different concept (provider-built single-line breakdown) and renaming it would be scope creep. Dual-serializer pattern + JSON grep-assert regression-lock in `DualNotePrivacyTests`. | Batch 8 + `backend/extra_work/models.py::ProposalLine` + `backend/extra_work/serializers.py::ProposalLineAdminSerializer`/`ProposalLineCustomerSerializer` |
+| 2026-05-17 | **1:N parent→proposals with partial UniqueConstraint blocking parallel open rows.** A single `ExtraWorkRequest` may have at most one `Proposal` with `status IN (DRAFT, SENT)` at a time (named `uniq_proposal_open_per_request`, `condition=Q(status__in=["DRAFT","SENT"])`). After CUSTOMER_REJECTED / CANCELLED the operator creates a fresh DRAFT proposal — there is NO `CUSTOMER_REJECTED → DRAFT` transition on the existing row. | Existing parent EW state machine already supports `CUSTOMER_REJECTED → UNDER_REVIEW` (re-pricing); modelling proposals 1:N preserves history (old rejected proposal becomes a historical record), avoids destructive edits, and lets the audit trail explain the full negotiation. A 1:1 shape would have forced lossy in-place edits. Locked by `ProposalReSendAfterRejectionTests` + `UniqueOpenProposalTests`. | Batch 8 + `backend/extra_work/models.py::Proposal.Meta.constraints` + PM Q1 (a) |
+| 2026-05-17 | **`Ticket.proposal_line` is a NEW nullable FK** (`extra_work.ProposalLine`, `on_delete=SET_NULL`, `related_name="spawned_tickets_for_proposal_line"`) parallel to Batch 7's `Ticket.extra_work_request_item` — NOT a reuse of the cart-line FK. Migration `tickets/0009_ticket_proposal_line.py` (cross-app dependency on `extra_work.0004_proposal_models`). Idempotency check: `Ticket.objects.filter(proposal_line=line).exists()`. | PM Q5 (a) Option A. Reusing the cart-line FK (Option B) would have lost the divergent (unit_price, quantity, customer_explanation) values that a ProposalLine carries — the operator may bill differently than the original cart line; the audit trail must point at the proposal-line that actually drove the ticket. SET_NULL preserves the Ticket if the proposal line is later deleted; spawn-origin history is lost in that case (same trade-off as Batch 7's cart-line FK). Locked by `CustomerApproveSpawnTests`. | Batch 8 + `backend/tickets/models.py::Ticket.proposal_line` + `backend/tickets/migrations/0009_ticket_proposal_line.py` + PM Q5 (a) |
+| 2026-05-17 | **`apply_proposal_transition` BYPASSES `extra_work.state_machine.apply_transition` for the parent-EW auto-advance** on send + approve/reject. The bypass writes the parent's `status` field + a fresh `ExtraWorkStatusHistory` row directly inside the proposal-transition's atomic block. | Reusing `apply_transition` would have hit the legacy `pricing_line_items_required` precondition (state_machine.py:272–282) which targets the legacy `ExtraWorkPricingLineItem` flow — the new ProposalLine flow has no such requirement (the Proposal IS the pricing surface). Bypassing keeps both code paths intact: legacy `/pricing-items/` endpoints still validate as before; the proposal flow ships without modifying the legacy precondition. Defensive: parent auto-advance is idempotent (no-op if parent is not in the expected source status). | Batch 8 + `backend/extra_work/proposal_state_machine.py::apply_proposal_transition` + PM Q6 + Q12 |
+| 2026-05-17 | **`Proposal.send` rejects when parent EW is in `REQUESTED`** — operator MUST drive `REQUESTED → UNDER_REVIEW` manually via the existing `/transition/` endpoint before sending. HTTP 400 with stable code `proposal_send_requires_under_review`. | Keeps the state-machine narrative coherent: the parent EW transition (REQUESTED→UNDER_REVIEW) is a deliberate operator act that says "I have reviewed the cart and am building a proposal" — collapsing it into the proposal-send action would have written two parent history rows on a single click and obscured the review step. Locked by `ProposalSendAdvancesParentTests::test_proposal_send_rejects_when_parent_is_requested`. | Batch 8 + `backend/extra_work/proposal_state_machine.py::apply_proposal_transition` + PM Q4 (c) / Q6 |
+| 2026-05-17 | **Provider-driven SENT → CANCELLED is also coerced to `is_override=True` + `override_reason` required** (provider withdrawing a sent proposal). Same coercion shape as provider-driven SENT → CUSTOMER_APPROVED/REJECTED. | Withdrawing a sent proposal is a significant act — the customer has already seen the pricing and the audit trail must explain why the operator is pulling it back. Mirrors the Sprint 27F-B1 ticket-override pattern + the existing EW provider-driven-customer-decision-is-always-override pattern at state_machine.py:289–304. Locked by `ProviderOverrideTests`. | Batch 8 + `backend/extra_work/proposal_state_machine.py::apply_proposal_transition` + PM Q4 (a) |
+| 2026-05-17 | **`is_approved_for_spawn: BooleanField(default=True)` added to `ProposalLine`** as a forward-compat schema slot for the parked per-line approve/reject UX. In Batch 8 nothing flips the column to False, but `spawn_tickets_for_proposal` filters on it so the slot is honoured if a future batch wires up the UI. | Master plan §6 Batch 8 says "one Ticket per approved line"; interpreting as whole-proposal approval is the smallest shape that does not preclude a future per-line split. Reserving the column now means no migration is needed when the UX lands. Locked by `IdempotencyTests::test_lines_with_is_approved_for_spawn_false_do_not_spawn_tickets`. | Batch 8 + `backend/extra_work/models.py::ProposalLine.is_approved_for_spawn` + PM Q2 (b) |
+| 2026-05-17 | **`ProposalTimelineEvent.customer_visible: bool` is written at emission time** (not derived from event_type in the serializer). All six emission helpers default to True; the field exists so a future event can suppress visibility without changing the serializer layer. Customer-facing timeline serializer applies `.filter(customer_visible=True)` AND omits `metadata` entirely (where the override_reason text would otherwise leak via `ADMIN_OVERRIDDEN` events). | Field-level visibility flag avoids coupling the customer serializer to event_type enum semantics — adding a new event_type doesn't accidentally leak it to the customer feed. The `metadata`-strip is the second line of defence: even if `customer_visible` is mis-set on a row, the customer never sees the provider-only context payload. Locked by `TimelineEmissionTests::test_customer_timeline_serializer_omits_metadata`. | Batch 8 + `backend/extra_work/models.py::ProposalTimelineEvent.customer_visible` + `backend/extra_work/serializers.py::ProposalTimelineEventCustomerSerializer` + PM Q3 (b) / (c) |
+| 2026-05-17 | **H-11 audit registration split**: `Proposal` + `ProposalLine` ARE registered for full-CRUD in `audit/signals.py`. `ProposalStatusHistory` + `ProposalTimelineEvent` are deliberately NOT registered. The history rows ARE the workflow-override audit trail (they carry `is_override` + `override_reason` themselves); the timeline event row IS the operator-facing change log. Adding them to the generic AuditLog would double-write the same fact. Regression-locked by `ProposalTimelineEventNotAuditedTests`. | Matrix invariant H-11: workflow override (per-transition) and permission override (per-access-row) are separate concepts; the generic AuditLog tracks permission/scope/role/state-model CRUD, the `*StatusHistory` rows track workflow transitions. Mirrors the Sprint 27F-B1 ticket precedent that does not register `TicketStatusHistory` for AuditLog. | Batch 8 + `backend/audit/signals.py::_connect` + `backend/audit/tests/test_sprint28_proposal_audit.py::ProposalTimelineEventNotAuditedTests` + PM Q8 |
+| 2026-05-17 | **Reuse existing `osius.ticket.view_building` for all provider-side building-scope checks on Proposal endpoints.** No new `osius.*` permission key introduced. | Master plan §2 hard rule "do not rename `osius.*`" extends in spirit to "do not invent parallel keys when an existing one expresses the same scope". `extra_work.state_machine.py:160–189` already reuses `osius.ticket.view_building` for EW transitions; the proposal builder is administratively a subset of the existing Extra Work surface. A new key like `osius.extra_work.build_proposal` would fragment the provider-side scope vocabulary for zero functional gain. Locked by all scope tests across the 47-test Batch 8 footprint. | Batch 8 + `backend/extra_work/proposal_state_machine.py::_provider_in_building_scope` + PM Q10 (c) |
 | 2026-05-16 | The **Batch 7 instant-ticket spawn** lives in a dedicated service module `backend/extra_work/instant_tickets.py::spawn_tickets_for_request(request, *, actor)`, called from `ExtraWorkRequestCreateSerializer.create()` inside the existing `transaction.atomic()`. The spawn re-calls `resolve_price()` per line for defensive abort (raises `TransitionError(code="instant_spawn_price_lost")` and rolls the whole submission back if any line returns None). Idempotent: skips items that already have `Ticket.extra_work_request_item` set. | PM Q4 default chosen. Atomicity: ticket spawn must roll back with the cart on any failure. Idempotency: double-POST / replay must not create duplicate tickets. Service-function placement makes it directly callable from tests + reusable from any future caller (e.g. a manual "re-spawn" admin endpoint) without serializer round-trip. Locked by `InstantSpawnAtomicRollbackTests` + `InstantSpawnIdempotencyTests`. | Batch 7 + `backend/extra_work/instant_tickets.py` + `backend/extra_work/serializers.py` |
 | 2026-05-16 | **Source link is `tickets.Ticket.extra_work_request_item`** — nullable FK to `extra_work.ExtraWorkRequestItem`, `on_delete=SET_NULL`, `related_name="spawned_tickets"`, default NULL. New migration `tickets/0008_ticket_extra_work_request_item.py`. | PM Q2 recommendation. Smallest auditable shape — one column, one direction, supports both audit queries ("show me all tickets spawned from this cart") and the idempotency check (skip-if-exists). SET_NULL preserves the Ticket if the cart line is later removed (history integrity). Inverse direction (item → ticket) or join table is over-engineered. Locked by `TicketTraceabilityTests` (2 cases — FK set on spawn; FK becomes NULL after item delete; Ticket survives). | Batch 7 + `backend/tickets/models.py` + `backend/tickets/migrations/0008_ticket_extra_work_request_item.py` |
 | 2026-05-16 | **New state-machine transition `REQUESTED → CUSTOMER_APPROVED`** reuses the existing status (no new enum value) and is gated as **system-only** via a new `SYSTEM_ONLY_TRANSITIONS` set checked in `_user_can_drive_transition` BEFORE role checks. Customers, COMPANY_ADMIN, SUPER_ADMIN — every actor — gets `False` for this pair via `POST /api/extra-work/<id>/transition/`. The spawn service bypasses `apply_transition` and writes the transition directly (system-only path) when at least one Ticket has been created. | PM Q3 recommendation. The customer's submission of an all-contract-priced cart IS the customer approval; reusing `CUSTOMER_APPROVED` keeps the state machine small (no new enum, no migration). System-only gating prevents a customer from bypassing the resolver (e.g. POSTing `to_status=CUSTOMER_APPROVED` to a `routing_decision="PROPOSAL"` request to force ticket spawn — defence in depth even though the spawn is also FK-gated). Locked by `SystemOnlyTransitionTests` (4 cases). | Batch 7 + `backend/extra_work/state_machine.py` SYSTEM_ONLY_TRANSITIONS + `_user_can_drive_transition` |

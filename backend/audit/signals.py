@@ -52,6 +52,8 @@ from customers.models import (
 from extra_work.models import (
     CustomerServicePrice,
     ExtraWorkRequestItem,
+    Proposal,
+    ProposalLine,
     Service,
     ServiceCategory,
 )
@@ -569,6 +571,21 @@ def _connect():
         # is left to a follow-up that designs the right shape (full
         # CRUD vs targeted-field UPDATE diff) for the request itself.
         ExtraWorkRequestItem,
+        # Sprint 28 Batch 8 — provider-built proposal flow. Both the
+        # parent `Proposal` row (status, totals, override_*) and the
+        # `ProposalLine` rows (quantity, prices, dual-note fields,
+        # is_approved_for_spawn) carry editable fields that produce
+        # meaningful diffs.
+        #
+        # NB: `ProposalStatusHistory` and `ProposalTimelineEvent` are
+        # intentionally NOT registered here — those history rows ARE
+        # the workflow-override audit trail per H-11 (the status row
+        # carries `is_override` + `override_reason` itself). Adding
+        # them to the generic AuditLog would double-write the same
+        # fact and break the H-11 separation between permission
+        # changes and workflow transitions.
+        Proposal,
+        ProposalLine,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")

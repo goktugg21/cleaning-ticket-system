@@ -25,13 +25,20 @@ from customers.permissions import access_has_permission, user_can
 from .models import (
     ExtraWorkCategory,
     ExtraWorkPricingLineItem,
+    ExtraWorkPricingUnitType,
     ExtraWorkRequest,
     ExtraWorkRequestItem,
     ExtraWorkRoutingDecision,
     ExtraWorkStatus,
+    Proposal,
+    ProposalLine,
+    ProposalStatus,
+    ProposalTimelineEvent,
+    ProposalTimelineEventType,
     Service,
 )
 from .pricing import resolve_price
+from .proposal_state_machine import allowed_next_proposal_statuses
 from .state_machine import allowed_next_statuses
 
 
@@ -602,3 +609,389 @@ class ExtraWorkTransitionSerializer(serializers.Serializer):
     override_reason = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 28 Batch 8 — proposal serializers
+# ---------------------------------------------------------------------------
+class ProposalLineAdminSerializer(serializers.ModelSerializer):
+    """
+    Full provider-side proposal-line serializer. Carries both
+    `customer_explanation` (customer-visible) and `internal_note`
+    (provider-only). Used for write paths and admin reads.
+    """
+
+    service_name = serializers.CharField(
+        source="service.name", read_only=True, default=None
+    )
+
+    class Meta:
+        model = ProposalLine
+        fields = [
+            "id",
+            "proposal",
+            "service",
+            "service_name",
+            "description",
+            "quantity",
+            "unit_type",
+            "unit_price",
+            "vat_pct",
+            "customer_explanation",
+            "internal_note",
+            "is_approved_for_spawn",
+            "line_subtotal",
+            "line_vat",
+            "line_total",
+            "created_at",
+            "updated_at",
+        ]
+        # `proposal` is supplied by the view via `serializer.save(
+        # proposal=...)` on the line-create endpoint OR populated by
+        # the parent `ProposalCreateSerializer.create()` in the
+        # nested-write path. Clients never POST it on the wire.
+        read_only_fields = [
+            "id",
+            "proposal",
+            "service_name",
+            "line_subtotal",
+            "line_vat",
+            "line_total",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_quantity(self, value):
+        if value <= Decimal("0"):
+            raise serializers.ValidationError(
+                "Quantity must be greater than zero."
+            )
+        return value
+
+    def validate_service(self, value):
+        if value is None:
+            return value
+        if not value.is_active:
+            raise serializers.ValidationError(
+                "Cannot reference an inactive service."
+            )
+        return value
+
+    def validate(self, attrs):
+        # Ad-hoc lines must carry a description. When this serializer
+        # is used in PATCH mode, fall back to the instance's existing
+        # service/description so a partial edit doesn't trip on
+        # unrelated fields.
+        instance = getattr(self, "instance", None)
+        service = attrs.get("service", getattr(instance, "service", None))
+        description = attrs.get(
+            "description", getattr(instance, "description", "")
+        )
+        if service is None and not (description or "").strip():
+            raise serializers.ValidationError(
+                {"description": "Required when service is not set."}
+            )
+        return attrs
+
+
+class ProposalLineCustomerSerializer(serializers.ModelSerializer):
+    """
+    Customer-facing proposal-line serializer — DROPS `internal_note`.
+    Used for any read path where the requesting user is a
+    CUSTOMER_USER.
+    """
+
+    service_name = serializers.CharField(
+        source="service.name", read_only=True, default=None
+    )
+
+    class Meta:
+        model = ProposalLine
+        fields = [
+            "id",
+            "service",
+            "service_name",
+            "description",
+            "quantity",
+            "unit_type",
+            "unit_price",
+            "vat_pct",
+            "customer_explanation",
+            "line_subtotal",
+            "line_vat",
+            "line_total",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ProposalCreateSerializer(serializers.ModelSerializer):
+    """
+    Write serializer for `POST /api/extra-work/<id>/proposals/`.
+
+    Accepts a nested `lines` array (admin shape — provider-side
+    create). The parent EW is supplied by the URL kwarg, not the
+    payload; the view passes it via `serializer.save(extra_work_
+    request=...)`.
+
+    Parent-EW status guard: rejects when the parent is not in
+    REQUESTED or UNDER_REVIEW. Also rejects when an open proposal
+    (DRAFT or SENT) already exists — the partial UniqueConstraint
+    enforces the same invariant at the DB level, but pre-checking
+    here gives a clean ValidationError instead of an IntegrityError.
+    """
+
+    lines = ProposalLineAdminSerializer(many=True)
+
+    class Meta:
+        model = Proposal
+        fields = ["id", "lines"]
+        read_only_fields = ["id"]
+
+    def validate(self, attrs):
+        extra_work_request: ExtraWorkRequest = self.context.get(
+            "extra_work_request"
+        )
+        if extra_work_request is None:
+            raise serializers.ValidationError(
+                "extra_work_request missing from context."
+            )
+        # Parent EW must be in a state that accepts a new proposal.
+        if extra_work_request.status not in {
+            ExtraWorkStatus.REQUESTED,
+            ExtraWorkStatus.UNDER_REVIEW,
+        }:
+            raise serializers.ValidationError(
+                {
+                    "detail": (
+                        "Cannot create a proposal: parent Extra Work "
+                        f"request is in status '{extra_work_request.status}'."
+                    ),
+                    "code": "proposal_create_invalid_parent_status",
+                }
+            )
+        # One open proposal at a time (DRAFT or SENT). 1:N over
+        # history is allowed; parallel open drafts are not.
+        if Proposal.objects.filter(
+            extra_work_request=extra_work_request,
+            status__in=[ProposalStatus.DRAFT, ProposalStatus.SENT],
+        ).exists():
+            raise serializers.ValidationError(
+                {
+                    "detail": (
+                        "An open proposal already exists for this "
+                        "Extra Work request."
+                    ),
+                    "code": "proposal_open_already_exists",
+                }
+            )
+        return attrs
+
+    def create(self, validated_data):
+        from django.db import transaction
+
+        lines_data = validated_data.pop("lines", [])
+        extra_work_request: ExtraWorkRequest = self.context[
+            "extra_work_request"
+        ]
+        actor = self.context["request"].user
+        with transaction.atomic():
+            proposal = Proposal.objects.create(
+                extra_work_request=extra_work_request,
+                status=ProposalStatus.DRAFT,
+                created_by=actor,
+            )
+            for line in lines_data:
+                ProposalLine.objects.create(
+                    proposal=proposal,
+                    service=line.get("service"),
+                    description=line.get("description", ""),
+                    quantity=line["quantity"],
+                    unit_type=line["unit_type"],
+                    unit_price=line["unit_price"],
+                    vat_pct=line.get("vat_pct", Decimal("21.00")),
+                    customer_explanation=line.get("customer_explanation", ""),
+                    internal_note=line.get("internal_note", ""),
+                    is_approved_for_spawn=line.get(
+                        "is_approved_for_spawn", True
+                    ),
+                )
+            proposal.recompute_totals()
+            # Refresh from DB so the totals computed by recompute_totals
+            # are reflected on the instance returned to the caller.
+            proposal.refresh_from_db()
+            ProposalTimelineEvent.objects.create(
+                proposal=proposal,
+                event_type=ProposalTimelineEventType.CREATED,
+                actor=actor,
+                customer_visible=True,
+                metadata={},
+            )
+        return proposal
+
+
+class ProposalListSerializer(serializers.ModelSerializer):
+    """Lean shape for `GET /api/extra-work/<id>/proposals/`."""
+
+    class Meta:
+        model = Proposal
+        fields = [
+            "id",
+            "extra_work_request",
+            "status",
+            "subtotal_amount",
+            "vat_amount",
+            "total_amount",
+            "sent_at",
+            "customer_decided_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ProposalDetailSerializer(serializers.ModelSerializer):
+    """
+    Role-aware detail serializer. Provider operators see every
+    field. CUSTOMER_USER never sees `override_by`, `override_reason`,
+    `override_at`; per-line `internal_note` is stripped via the
+    customer line serializer.
+    """
+
+    lines = serializers.SerializerMethodField()
+    allowed_next_statuses = serializers.SerializerMethodField()
+    created_by_email = serializers.CharField(
+        source="created_by.email", read_only=True
+    )
+
+    class Meta:
+        model = Proposal
+        fields = [
+            "id",
+            "extra_work_request",
+            "status",
+            "lines",
+            "subtotal_amount",
+            "vat_amount",
+            "total_amount",
+            "sent_at",
+            "customer_decided_at",
+            "override_by",
+            "override_reason",
+            "override_at",
+            "created_by",
+            "created_by_email",
+            "created_at",
+            "updated_at",
+            "allowed_next_statuses",
+        ]
+        read_only_fields = fields
+
+    _PROVIDER_ONLY_FIELDS = (
+        "override_by",
+        "override_reason",
+        "override_at",
+    )
+
+    def get_lines(self, obj):
+        user = (
+            self.context.get("request").user
+            if self.context.get("request")
+            else None
+        )
+        qs = obj.lines.all().select_related("service")
+        if _is_customer(user):
+            return ProposalLineCustomerSerializer(qs, many=True).data
+        return ProposalLineAdminSerializer(qs, many=True).data
+
+    def get_allowed_next_statuses(self, obj):
+        user = (
+            self.context.get("request").user
+            if self.context.get("request")
+            else None
+        )
+        if user is None or not user.is_authenticated:
+            return []
+        return list(allowed_next_proposal_statuses(user, obj))
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        user = (
+            self.context.get("request").user
+            if self.context.get("request")
+            else None
+        )
+        if _is_customer(user):
+            for field in self._PROVIDER_ONLY_FIELDS:
+                data.pop(field, None)
+        return data
+
+
+class ProposalTransitionSerializer(serializers.Serializer):
+    """Mirror `ExtraWorkTransitionSerializer` for proposals."""
+
+    to_status = serializers.ChoiceField(choices=ProposalStatus.choices)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+    is_override = serializers.BooleanField(default=False)
+    override_reason = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+
+class ProposalStatusHistorySerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    old_status = serializers.CharField(read_only=True)
+    new_status = serializers.CharField(read_only=True)
+    changed_by_email = serializers.SerializerMethodField()
+    note = serializers.CharField(read_only=True)
+    is_override = serializers.BooleanField(read_only=True)
+    override_reason = serializers.CharField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+    def get_changed_by_email(self, obj):
+        return obj.changed_by.email if obj.changed_by else None
+
+
+class ProposalTimelineEventAdminSerializer(serializers.ModelSerializer):
+    """Provider-side timeline serializer — includes `metadata`."""
+
+    actor_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProposalTimelineEvent
+        fields = [
+            "id",
+            "proposal",
+            "event_type",
+            "actor",
+            "actor_email",
+            "customer_visible",
+            "metadata",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_actor_email(self, obj):
+        return obj.actor.email if obj.actor else None
+
+
+class ProposalTimelineEventCustomerSerializer(serializers.ModelSerializer):
+    """Customer-facing timeline serializer — STRIPS `metadata`
+    entirely. Provider-only context (override reasons etc.) cannot
+    leak through this surface."""
+
+    actor_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProposalTimelineEvent
+        fields = [
+            "id",
+            "event_type",
+            "actor_email",
+            "customer_visible",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_actor_email(self, obj):
+        return obj.actor.email if obj.actor else None
