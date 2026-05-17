@@ -481,9 +481,29 @@ export interface StaffProfileAdmin {
   updated_at: string;
 }
 
+// Sprint 28 Batch 10 — per-row visibility level on BuildingStaffVisibility.
+// Mirrors backend `BuildingStaffVisibility.VisibilityLevel`:
+//   - "ASSIGNED_ONLY"            — STAFF recognised as a direct-assign
+//                                   target for tickets in this building
+//                                   but does NOT see other tickets.
+//   - "BUILDING_READ"            — sees every ticket in the building
+//                                   (legacy Sprint 24–28 behaviour;
+//                                   default value on existing rows).
+//   - "BUILDING_READ_AND_ASSIGN" — building-read PLUS may call
+//                                   POST /tickets/<id>/assign/ (B3).
+// The vocabulary is owned by the backend model field; the frontend
+// must NEVER pre-filter the building dropdown by level — every BSV
+// row (regardless of level) keeps the STAFF user reachable as an
+// assign target. The selector below is purely a write surface.
+export type StaffVisibilityLevel =
+  | "ASSIGNED_ONLY"
+  | "BUILDING_READ"
+  | "BUILDING_READ_AND_ASSIGN";
+
 // Sprint 24A — admin read/write shape for a single BuildingStaffVisibility
 // row keyed on (user, building). Editing happens via PATCH on the
-// detail URL; the only editable field is `can_request_assignment`.
+// detail URL; writable fields are `can_request_assignment` (Sprint 24A)
+// and `visibility_level` (Sprint 28 Batch 10).
 export interface BuildingStaffVisibilityAdmin {
   id: number;
   user_id: number;
@@ -492,6 +512,7 @@ export interface BuildingStaffVisibilityAdmin {
   building_name: string;
   building_company_id: number;
   can_request_assignment: boolean;
+  visibility_level: StaffVisibilityLevel;
   created_at: string;
 }
 

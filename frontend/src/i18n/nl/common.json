@@ -460,6 +460,7 @@
   "api_error.unexpected": "Er is iets onverwachts gebeurd. Probeer het opnieuw.",
 
   "tickets.assigned_team_anonymous": "Toegewezen aan het OSIUS-team",
+  "tickets.assigned_to_you": "Toegewezen aan jou",
 
   "nav.staff_requests": "Medewerker-aanvragen",
 
@@ -542,6 +543,10 @@
   "staff_admin.col_can_request": "Aanmelden toestaan",
   "staff_admin.col_actions": "Acties",
   "staff_admin.aria_section": "Gegevens medewerker en gebouwtoegang",
+  "staff_admin.level_label": "Zichtbaarheidsniveau",
+  "staff_admin.level.assigned_only": "Alleen toegewezen tickets",
+  "staff_admin.level.building_read": "Alle gebouwtickets (lezen)",
+  "staff_admin.level.building_read_and_assign": "Alle gebouwtickets + toewijzen",
 
   "customer_contacts.page_title": "Contacten",
   "customer_contacts.add_button": "Contact toevoegen",

@@ -24,6 +24,7 @@ import type {
   BuildingStaffVisibilityAdmin,
   Role,
   StaffProfileAdmin,
+  StaffVisibilityLevel,
   UserAdminDetail,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -669,7 +670,33 @@ function StaffDetailsSection({
     setVisibilityBusyKey(`toggle-${row.building_id}`);
     setVisibilityError("");
     try {
-      await updateStaffVisibility(userId, row.building_id, next);
+      await updateStaffVisibility(userId, row.building_id, {
+        can_request_assignment: next,
+      });
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
+  // Sprint 28 Batch 10 — visibility-level write surface. Uses the same
+  // PATCH endpoint as the can-request toggle; the backend accepts
+  // `visibility_level` alongside the existing `can_request_assignment`
+  // field. We send only the level so unrelated rows / concurrent edits
+  // on the can-request flag are not clobbered.
+  async function handleChangeVisibilityLevel(
+    row: BuildingStaffVisibilityAdmin,
+    next: StaffVisibilityLevel,
+  ) {
+    setVisibilityBusyKey(`level-${row.building_id}`);
+    setVisibilityError("");
+    try {
+      await updateStaffVisibility(userId, row.building_id, {
+        visibility_level: next,
+      });
       await reloadVisibility();
       setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
     } catch (err) {
@@ -868,6 +895,7 @@ function StaffDetailsSection({
                 <thead>
                   <tr>
                     <th>{t("staff_admin.col_building")}</th>
+                    <th>{t("staff_admin.level_label")}</th>
                     <th>{t("staff_admin.col_can_request")}</th>
                     <th aria-label={t("staff_admin.col_actions")} />
                   </tr>
@@ -876,6 +904,8 @@ function StaffDetailsSection({
                   {visibility.map((row) => {
                     const toggleBusy =
                       visibilityBusyKey === `toggle-${row.building_id}`;
+                    const levelBusy =
+                      visibilityBusyKey === `level-${row.building_id}`;
                     const removeBusy =
                       visibilityBusyKey === `remove-${row.building_id}`;
                     return (
@@ -885,6 +915,33 @@ function StaffDetailsSection({
                         data-building-id={row.building_id}
                       >
                         <td className="td-subject">{row.building_name}</td>
+                        <td>
+                          <select
+                            className="field-select"
+                            value={row.visibility_level}
+                            onChange={(event) =>
+                              handleChangeVisibilityLevel(
+                                row,
+                                event.target.value as StaffVisibilityLevel,
+                              )
+                            }
+                            disabled={!canEdit || levelBusy}
+                            aria-label={t("staff_admin.level_label")}
+                            data-testid={`staff-visibility-level-select-${row.building_id}`}
+                          >
+                            <option value="ASSIGNED_ONLY">
+                              {t("staff_admin.level.assigned_only")}
+                            </option>
+                            <option value="BUILDING_READ">
+                              {t("staff_admin.level.building_read")}
+                            </option>
+                            <option value="BUILDING_READ_AND_ASSIGN">
+                              {t(
+                                "staff_admin.level.building_read_and_assign",
+                              )}
+                            </option>
+                          </select>
+                        </td>
                         <td>
                           <label
                             style={{
@@ -941,6 +998,8 @@ function StaffDetailsSection({
               {visibility.map((row) => {
                 const toggleBusy =
                   visibilityBusyKey === `toggle-${row.building_id}`;
+                const levelBusy =
+                  visibilityBusyKey === `level-${row.building_id}`;
                 const removeBusy =
                   visibilityBusyKey === `remove-${row.building_id}`;
                 return (
@@ -958,6 +1017,42 @@ function StaffDetailsSection({
                         <span className="admin-card-title">
                           {row.building_name}
                         </span>
+                      </div>
+                      <div
+                        className="admin-card-meta-row"
+                        style={{ marginTop: 6 }}
+                      >
+                        <label
+                          className="field-label"
+                          style={{ display: "block", marginBottom: 4 }}
+                        >
+                          {t("staff_admin.level_label")}
+                        </label>
+                        <select
+                          className="field-select"
+                          value={row.visibility_level}
+                          onChange={(event) =>
+                            handleChangeVisibilityLevel(
+                              row,
+                              event.target.value as StaffVisibilityLevel,
+                            )
+                          }
+                          disabled={!canEdit || levelBusy}
+                          aria-label={t("staff_admin.level_label")}
+                          data-testid={`staff-visibility-level-select-mobile-${row.building_id}`}
+                        >
+                          <option value="ASSIGNED_ONLY">
+                            {t("staff_admin.level.assigned_only")}
+                          </option>
+                          <option value="BUILDING_READ">
+                            {t("staff_admin.level.building_read")}
+                          </option>
+                          <option value="BUILDING_READ_AND_ASSIGN">
+                            {t(
+                              "staff_admin.level.building_read_and_assign",
+                            )}
+                          </option>
+                        </select>
                       </div>
                       <div
                         className="admin-card-meta-row"

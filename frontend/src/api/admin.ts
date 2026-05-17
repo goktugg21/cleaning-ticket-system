@@ -706,14 +706,23 @@ export async function addStaffVisibility(
   return response.data;
 }
 
+// Sprint 28 Batch 10 — `visibility_level` joins `can_request_assignment`
+// as a writable field on the BSV PATCH endpoint. Both fields are
+// optional on the payload so a caller can update one without
+// resending the other; today's UI sends both for convenience.
+export interface StaffVisibilityPatch {
+  can_request_assignment?: boolean;
+  visibility_level?: import("./types").StaffVisibilityLevel;
+}
+
 export async function updateStaffVisibility(
   userId: number,
   buildingId: number,
-  canRequestAssignment: boolean,
+  patch: StaffVisibilityPatch,
 ): Promise<BuildingStaffVisibilityAdmin> {
   const response = await api.patch<BuildingStaffVisibilityAdmin>(
     `/users/${userId}/staff-visibility/${buildingId}/`,
-    { can_request_assignment: canRequestAssignment },
+    patch,
   );
   return response.data;
 }

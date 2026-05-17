@@ -460,6 +460,7 @@
   "api_error.unexpected": "Something unexpected happened. Please try again.",
 
   "tickets.assigned_team_anonymous": "Assigned to the OSIUS team",
+  "tickets.assigned_to_you": "Assigned to you",
 
   "nav.staff_requests": "Staff requests",
 
@@ -542,6 +543,10 @@
   "staff_admin.col_can_request": "Request assignment",
   "staff_admin.col_actions": "Actions",
   "staff_admin.aria_section": "Staff details and building access",
+  "staff_admin.level_label": "Visibility level",
+  "staff_admin.level.assigned_only": "Assigned tickets only",
+  "staff_admin.level.building_read": "All building tickets (read)",
+  "staff_admin.level.building_read_and_assign": "All building tickets + can assign",
 
   "customer_contacts.page_title": "Contacts",
   "customer_contacts.add_button": "Add contact",

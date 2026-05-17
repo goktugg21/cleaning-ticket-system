@@ -38,7 +38,7 @@ sub-enum on `CustomerUserBuildingAccess` (see §2).
 |---|---|---|
 | [`companies.CompanyUserMembership`](../../backend/companies/models.py#L22-L39) | Provider company ↔ User | Scope COMPANY_ADMIN to their provider company |
 | [`buildings.BuildingManagerAssignment`](../../backend/buildings/models.py#L31-L49) | Building ↔ User | Scope BUILDING_MANAGER to their buildings |
-| [`buildings.BuildingStaffVisibility`](../../backend/buildings/models.py#L52-L84) | Building ↔ User (+ `can_request_assignment` per-row flag) | Grant STAFF visibility on a building they aren't directly assigned to |
+| [`buildings.BuildingStaffVisibility`](../../backend/buildings/models.py#L52-L84) | Building ↔ User (+ `can_request_assignment` per-row flag + Sprint 28 Batch 10 `visibility_level` enum: ASSIGNED_ONLY / BUILDING_READ / BUILDING_READ_AND_ASSIGN) | Grant STAFF visibility on a building they aren't directly assigned to (level controls per-row narrowing + per-row assign rights) |
 | [`accounts.StaffProfile`](../../backend/accounts/models.py#L104-L133) | One-to-one User (STAFF only; `phone`, `internal_note`, `is_active`, `can_request_assignment`) | Staff profile + global staff-side toggles |
 | [`tickets.TicketStaffAssignment`](../../backend/tickets/models.py#L265-L308) | Ticket ↔ User (STAFF) | Direct ticket assignment |
 | [`customers.CustomerBuildingMembership`](../../backend/customers/models.py#L83-L114) | Customer org ↔ Building | M:N source of truth for "this customer org operates in this building" |
@@ -81,7 +81,7 @@ These are the security floor. Any change that contradicts them is a P0 regressio
 | H-1 | **No provider company sees another provider company's data.** | Scoping helpers branch by `CompanyUserMembership` etc. — [accounts/scoping.py:155-296](../../backend/accounts/scoping.py#L155-L296), [extra_work/scoping.py:35-119](../../backend/extra_work/scoping.py#L35-L119) | [test_seed_demo_data.py:286-301](../../backend/accounts/tests/test_seed_demo_data.py#L286-L301), [test_extra_work_mvp.py ProviderScopeTests](../../backend/extra_work/tests/test_extra_work_mvp.py) |
 | H-2 | **No customer company sees another customer's data, even in the same building.** | [accounts/scoping.py:232-294](../../backend/accounts/scoping.py#L232-L294) keyed on `customer_id` first | [test_sprint23a_foundation.py:244](../../backend/accounts/tests/test_sprint23a_foundation.py#L244), [test_sprint26a_scope_safety_net.py CrossTicketAttachmentIdSmugglingTests](../../backend/tickets/tests/test_sprint26a_scope_safety_net.py) |
 | H-3 | **Customer users never see all building data unless explicitly granted.** | `view_company` / `view_location` / `view_own` resolved per-access via `access_has_permission` — [accounts/scoping.py:273-292](../../backend/accounts/scoping.py#L273-L292) | [test_sprint23a_foundation.py:255-275](../../backend/accounts/tests/test_sprint23a_foundation.py#L255) |
-| H-4 | **STAFF always sees work assigned to them — cannot be removed.** | STAFF scope is `assigned OR visible` ([accounts/scoping.py:211-230](../../backend/accounts/scoping.py#L211-L230)); the `assigned` clause has no toggle. **Sprint 28 Batch 2 (audit drift fix)**: this invariant is locked **structurally** — no API surface exists to disable the `assigned` clause for a STAFF user while a `TicketStaffAssignment` row exists, and the BM-assign endpoint at `/api/tickets/<id>/assign/` no longer lets STAFF mutate `ticket.assigned_to` either (gate tightened in Sprint 28 Batch 2). The Sprint 27A T-7 reference previously cited here was actually for `BuildingStaffVisibility.can_request_assignment` audit coverage (see §9 T-7 row) and is not an H-4-specific test. | Structural — no dedicated H-4 test today. Sprint 25A `test_staff_cannot_add` + `tickets/tests/test_sprint28a_staff_assign_block.py` together lock the surrounding "STAFF cannot mutate assignment" perimeter; both are necessary defences for H-4 to hold in practice. |
+| H-4 | **STAFF always sees work assigned to them — cannot be removed.** | STAFF scope is `assigned OR visible` ([accounts/scoping.py:211-230](../../backend/accounts/scoping.py#L211-L230)); the `assigned` clause has no toggle. **Sprint 28 Batch 2 (audit drift fix)**: this invariant is locked **structurally** — no API surface exists to disable the `assigned` clause for a STAFF user while a `TicketStaffAssignment` row exists, and the BM-assign endpoint at `/api/tickets/<id>/assign/` no longer lets STAFF mutate `ticket.assigned_to` either (gate tightened in Sprint 28 Batch 2). **Sprint 28 Batch 10**: H-4 floor finally has dedicated test coverage via `StaffH4FloorTests`; the `_assigned=True` Q branch in `scope_tickets_for` STAFF branch is the structural lock — narrowing on the BSV-row side (via `visibility_level`) does NOT touch it. The Sprint 27A T-7 reference previously cited here was actually for `BuildingStaffVisibility.can_request_assignment` audit coverage (see §9 T-7 row) and is not an H-4-specific test. | Sprint 28 Batch 10 `StaffH4FloorTests` (dedicated). Sprint 25A `test_staff_cannot_add` + `tickets/tests/test_sprint28a_staff_assign_block.py` together lock the surrounding "STAFF cannot mutate assignment" perimeter; the new B3 narrowing in Batch 10 is exercised in `StaffB3BuildingReadAndAssignTests` (positive) + `StaffCrossBuildingIsolationTests` (negative). |
 | H-5 | **STAFF cannot approve customer completion / manager review / pricing / workflow override.** | Ticket state machine has no STAFF → APPROVED/REJECTED transition ([tickets/state_machine.py ALLOWED_TRANSITIONS](../../backend/tickets/state_machine.py#L18-L57)); Extra Work `_is_provider_operator` excludes STAFF ([extra_work/state_machine.py:64-71](../../backend/extra_work/state_machine.py#L64-L71)). | Sprint 27A T-4, T-5 |
 | H-6 | **Customer Company Admin cannot promote anyone to Customer Company Admin.** | After Sprint 27A: serializer-level guard at [customers/serializers_memberships.py CustomerUserBuildingAccessUpdateSerializer.validate_access_role](../../backend/customers/serializers_memberships.py#L92) | Sprint 27A T-1, T-3 |
 | H-7 | **Only SUPER_ADMIN can grant `CUSTOMER_COMPANY_ADMIN` access_role.** | Same as H-6. | Sprint 27A T-1, T-2 |
@@ -342,3 +342,55 @@ Tests added in Sprint 27F (test-first):
 | 3 | COMPANY_ADMIN — typed reason confirms override and tags the timeline | Opens the modal, fills a known reason, clicks Submit. Verifies the POST request body carries `is_override:true` + `override_reason` exact match. After 200 the modal closes, the header badge flips to `badge-approved`, and the new `data-testid="timeline-override-badge"` row contains both the override label and the typed reason. |
 
 The Playwright env can re-run between reseeds; the suite resets via `python manage.py seed_demo_data` (same convention as the other mutating specs in the e2e directory).
+
+## 14. Test footprint (Sprint 28 Batch 10 delta)
+
+Tests added in Sprint 28 Batch 10 — STAFF per-building visibility
+granularity (`BuildingStaffVisibility.visibility_level` enum:
+ASSIGNED_ONLY / BUILDING_READ / BUILDING_READ_AND_ASSIGN).
+
+### STAFF scope + assign-gate behaviour
+[`backend/tickets/tests/test_sprint28_staff_building_granularity.py`](../../backend/tickets/tests/test_sprint28_staff_building_granularity.py) — eight test classes:
+
+| Class | Tests |
+|---|---|
+| `StaffVisibilityLevelDefaultTests` | Default level is BUILDING_READ; default-grant STAFF sees every ticket in their building (preserves pre-Batch-10 behaviour). |
+| `StaffB1AssignedOnlyTests` | ASSIGNED_ONLY: own-assigned ticket visible; other staff's ticket → 404; unassigned ticket → 404. |
+| `StaffB2BuildingReadTests` | BUILDING_READ: sees every ticket in the building; `POST /api/tickets/<id>/assign/` → 403. |
+| `StaffB3BuildingReadAndAssignTests` | BUILDING_READ_AND_ASSIGN: sees every ticket; can `POST /api/tickets/<id>/assign/` → 200; the assign emits an AuditLog UPDATE row for the `assigned_to` change. |
+| `StaffCrossBuildingIsolationTests` | STAFF B3-on-X + B1-on-Y in the same company: cannot assign in Y (403); only assigned tickets in Y are visible. |
+| `StaffCrossCompanyIsolationTests` | STAFF B3-in-A: tickets in B → 404; cannot assign in B (404). |
+| `StaffAssignmentTargetValidationUnchangedTests` | `_validate_target_staff` accepts ASSIGNED_ONLY rows as a valid direct-assignment target (admin POST `staff-assignments/` works). |
+| `StaffH4FloorTests` | H-4 invariant lock: no-BSV STAFF with `TicketStaffAssignment` ALWAYS sees the assigned ticket; ASSIGNED_ONLY STAFF + `TicketStaffAssignment` ALWAYS sees the assigned ticket. |
+| `StaffStaffAssignmentsEndpointUnchangedForStaffTests` | STAFF B3 still 403 on `POST /api/tickets/<id>/staff-assignments/` — the M:N multi-staff endpoint stays admin-only (PM Q5). |
+
+### Audit coverage for the new field
+[`backend/audit/tests/test_sprint28_visibility_level_audit.py`](../../backend/audit/tests/test_sprint28_visibility_level_audit.py) — one test class:
+
+| Class | Tests |
+|---|---|
+| `VisibilityLevelAuditTests` | PATCH `visibility_level` via the BSV update endpoint emits exactly one `AuditLog` UPDATE row with `changes["visibility_level"] == {"before": "BUILDING_READ", "after": "BUILDING_READ_AND_ASSIGN"}`. |
+
+Production change summary:
+  * `buildings.BuildingStaffVisibility.visibility_level` enum
+    (`VisibilityLevel.{ASSIGNED_ONLY, BUILDING_READ,
+    BUILDING_READ_AND_ASSIGN}`), migration
+    `buildings/0003_buildingstaffvisibility_visibility_level.py`,
+    default = `BUILDING_READ` (preserves pre-Batch-10 behaviour;
+    backfills existing rows automatically).
+  * `accounts/scoping.py::scope_tickets_for` STAFF branch now restricts
+    the building-wide-read clause to BUILDING_READ /
+    BUILDING_READ_AND_ASSIGN rows. The `building_ids_for` STAFF branch
+    intentionally keeps returning every BSV building_id (asymmetry
+    documented inline) so ASSIGNED_ONLY STAFF still surface "I operate
+    here" in building dropdowns.
+  * `tickets/views.py::TicketViewSet.assign` lets STAFF through only
+    when an explicit B3 BSV row exists for the ticket's building.
+    `views_staff_assignments.py::_gate_actor` unchanged — multi-staff
+    endpoint stays admin-only.
+  * `accounts/serializers_staff.py` exposes `visibility_level` as a
+    read field on `BuildingStaffVisibilitySerializer` and a writable
+    enum-validated field on `BuildingStaffVisibilityUpdateSerializer`.
+  * `audit/signals.py::_BSV_TRACKED_FIELDS` extended to
+    `("can_request_assignment", "visibility_level")` — the existing
+    UPDATE-only diff handler covers the new field for free.

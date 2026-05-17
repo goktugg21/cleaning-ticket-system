@@ -630,7 +630,27 @@ class TicketAssignSerializer(serializers.Serializer):
         # rejects with a clear ValidationError. `is_staff_role` returns
         # True for STAFF and is therefore the wrong gate here — gate
         # explicitly on the allowed role set.
-        if user.role not in (
+        #
+        # Sprint 28 Batch 10: STAFF passes this serializer-level gate
+        # only when the actor holds a `BuildingStaffVisibility` row at
+        # level `BUILDING_READ_AND_ASSIGN` for the ticket's building.
+        # The view layer already enforces the same shape; the
+        # serializer mirror keeps defence-in-depth at the same shape.
+        # PM Q5: the multi-staff endpoint stays admin-only; that's
+        # enforced by `views_staff_assignments.py::_gate_actor` — not
+        # by this serializer.
+        if user.role == UserRole.STAFF:
+            from buildings.models import BuildingStaffVisibility
+
+            if not BuildingStaffVisibility.objects.filter(
+                user=user,
+                building_id=ticket.building_id,
+                visibility_level=BuildingStaffVisibility.VisibilityLevel.BUILDING_READ_AND_ASSIGN,
+            ).exists():
+                raise serializers.ValidationError(
+                    {"detail": "This role cannot assign tickets."}
+                )
+        elif user.role not in (
             UserRole.SUPER_ADMIN,
             UserRole.COMPANY_ADMIN,
             UserRole.BUILDING_MANAGER,

@@ -58,6 +58,14 @@ def building_ids_for(user):
         # scope_tickets_for, but the BUILDING list intentionally
         # stays narrower (the ticket might be in a building the
         # staff has no read-access for outside that assignment).
+        #
+        # Sprint 28 Batch 10 — intentional asymmetry: this helper
+        # returns every BSV building_id regardless of the new
+        # `visibility_level` field. An ASSIGNED_ONLY row still surfaces
+        # the building in building dropdowns / selectors so the STAFF
+        # user can see "I operate here" — they just don't see other
+        # people's tickets at that building (that narrowing lives in
+        # `scope_tickets_for`).
         from buildings.models import BuildingStaffVisibility
 
         return BuildingStaffVisibility.objects.filter(user=user).values_list(
@@ -211,6 +219,16 @@ def scope_tickets_for(user):
     if user.role == UserRole.STAFF:
         # Sprint 23A: STAFF sees tickets they are listed on PLUS
         # tickets in buildings where they hold visibility.
+        #
+        # Sprint 28 Batch 10: only BSV rows with `visibility_level`
+        # of BUILDING_READ or BUILDING_READ_AND_ASSIGN contribute the
+        # building-wide branch. ASSIGNED_ONLY rows recognise the STAFF
+        # user at the building (e.g. for direct-assignment eligibility
+        # via `_validate_target_staff`) but do NOT widen ticket
+        # visibility beyond their TicketStaffAssignment rows. The H-4
+        # floor (STAFF always sees tickets they're assigned to) is
+        # preserved by leaving the `Q(_assigned=True)` branch
+        # unchanged — it has no dependency on `visibility_level`.
         from tickets.models import TicketStaffAssignment
         from buildings.models import BuildingStaffVisibility
 
@@ -218,7 +236,11 @@ def scope_tickets_for(user):
             ticket_id=OuterRef("pk"), user=user
         )
         visibility_building_ids = BuildingStaffVisibility.objects.filter(
-            user=user
+            user=user,
+            visibility_level__in=(
+                BuildingStaffVisibility.VisibilityLevel.BUILDING_READ,
+                BuildingStaffVisibility.VisibilityLevel.BUILDING_READ_AND_ASSIGN,
+            ),
         ).values_list("building_id", flat=True)
         return (
             Ticket.objects.filter(deleted_at__isnull=True)

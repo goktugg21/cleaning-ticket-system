@@ -65,7 +65,12 @@ class StaffProfileUpdateSerializer(serializers.ModelSerializer):
 
 
 class BuildingStaffVisibilitySerializer(serializers.ModelSerializer):
-    """Read shape for /api/users/<id>/staff-visibility/."""
+    """Read shape for /api/users/<id>/staff-visibility/.
+
+    Sprint 28 Batch 10 — exposes the new `visibility_level` enum so
+    the frontend can render and edit per-row granularity (ASSIGNED_ONLY
+    / BUILDING_READ / BUILDING_READ_AND_ASSIGN).
+    """
 
     building_id = serializers.IntegerField(source="building.id", read_only=True)
     building_name = serializers.CharField(source="building.name", read_only=True)
@@ -85,17 +90,28 @@ class BuildingStaffVisibilitySerializer(serializers.ModelSerializer):
             "building_name",
             "building_company_id",
             "can_request_assignment",
+            "visibility_level",
             "created_at",
         ]
         read_only_fields = fields
 
 
 class BuildingStaffVisibilityUpdateSerializer(serializers.ModelSerializer):
-    """PATCH shape — toggle `can_request_assignment` only."""
+    """PATCH shape — toggle `can_request_assignment` and / or
+    `visibility_level`.
+
+    Sprint 28 Batch 10 — `visibility_level` is added as a writable
+    field. DRF's ModelSerializer derives a `ChoiceField` from the
+    model's `choices` automatically, so any value outside the three
+    enum members produces a 400 with the standard
+    `"is not a valid choice."` shape. The response is rendered through
+    `BuildingStaffVisibilitySerializer` so the joined building / user
+    context travels back without a follow-up GET.
+    """
 
     class Meta:
         model = BuildingStaffVisibility
-        fields = ["can_request_assignment"]
+        fields = ["can_request_assignment", "visibility_level"]
 
     def to_representation(self, instance):
         return BuildingStaffVisibilitySerializer(instance, context=self.context).data

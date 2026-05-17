@@ -466,7 +466,10 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
 # pre_save snapshot of just the tracked field, plus a post_save handler
 # that fires UPDATE-only (CREATE is left to the existing membership
 # handler so the rich payload doesn't get duplicated).
-_BSV_TRACKED_FIELDS = ("can_request_assignment",)
+# Sprint 28 Batch 10 adds `visibility_level` to the tracked tuple — the
+# UPDATE-only handler below iterates this tuple and emits a single
+# AuditLog row covering whichever fields changed.
+_BSV_TRACKED_FIELDS = ("can_request_assignment", "visibility_level")
 
 
 def _bsv_snapshot_for_pre_save(instance):

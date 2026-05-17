@@ -252,7 +252,29 @@ class TicketViewSet(
         # visibility), but the BM-assign endpoint is reserved for the
         # provider-admin / building-manager triad. Gate explicitly on the
         # allowed role set. Audit row 26 + master plan Batch 2.
-        if request.user.role not in (
+        #
+        # Sprint 28 Batch 10: STAFF passes the BM-assign gate only when
+        # the actor holds a BuildingStaffVisibility row at level
+        # `BUILDING_READ_AND_ASSIGN` for the ticket's building. STAFF
+        # without an explicit B3 row stays 403 (preserves the Batch 2
+        # block). The multi-staff endpoint at
+        # `/api/tickets/<id>/staff-assignments/` stays admin-only via
+        # `views_staff_assignments.py::_gate_actor` — Batch 10 only
+        # touches the single-target `assigned_to` field on Ticket.
+        user = request.user
+        if user.role == UserRole.STAFF:
+            from buildings.models import BuildingStaffVisibility
+
+            if not BuildingStaffVisibility.objects.filter(
+                user=user,
+                building_id=ticket.building_id,
+                visibility_level=BuildingStaffVisibility.VisibilityLevel.BUILDING_READ_AND_ASSIGN,
+            ).exists():
+                self.permission_denied(
+                    request,
+                    message="STAFF without BUILDING_READ_AND_ASSIGN cannot assign tickets.",
+                )
+        elif user.role not in (
             UserRole.SUPER_ADMIN,
             UserRole.COMPANY_ADMIN,
             UserRole.BUILDING_MANAGER,

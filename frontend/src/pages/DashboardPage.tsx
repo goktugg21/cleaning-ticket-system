@@ -643,6 +643,23 @@ export function DashboardPage() {
                       </td>
                       <td className="td-subject">
                         <Link to={`/tickets/${ticket.id}`}>{ticket.title}</Link>
+                        {/* Sprint 28 Batch 10 — visually prioritise rows
+                            the current STAFF user is personally assigned
+                            to when the list also contains "all building
+                            tickets" rows (BUILDING_READ /
+                            BUILDING_READ_AND_ASSIGN visibility levels). */}
+                        {userRole === "STAFF" &&
+                          me?.id != null &&
+                          ticket.assigned_to === me.id && (
+                            <span
+                              className="cell-tag cell-tag-open"
+                              style={{ marginLeft: 8 }}
+                              data-testid="ticket-row-assigned-to-you"
+                            >
+                              <i />
+                              {t("common:tickets.assigned_to_you")}
+                            </span>
+                          )}
                       </td>
                       <td>
                         <span className={priorityCellClass(ticket.priority)}>
@@ -704,7 +721,24 @@ export function DashboardPage() {
                         {tPriority(ticket.priority)}
                       </span>
                     </div>
-                    <div className="ticket-card-title">{ticket.title}</div>
+                    <div className="ticket-card-title">
+                      {ticket.title}
+                      {/* Sprint 28 Batch 10 — phone-width mirror of the
+                          STAFF "Assigned to you" badge from the desktop
+                          table above. */}
+                      {userRole === "STAFF" &&
+                        me?.id != null &&
+                        ticket.assigned_to === me.id && (
+                          <span
+                            className="cell-tag cell-tag-open"
+                            style={{ marginLeft: 8 }}
+                            data-testid="ticket-card-assigned-to-you"
+                          >
+                            <i />
+                            {t("common:tickets.assigned_to_you")}
+                          </span>
+                        )}
+                    </div>
                     <div className="ticket-card-pills">
                       <span className={statusCellClass(ticket.status)}>
                         <i />
