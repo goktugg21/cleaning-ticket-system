@@ -258,6 +258,47 @@ export interface TicketStatsByBuildingRow {
 
 export type TicketStatsByBuildingResponse = TicketStatsByBuildingRow[];
 
+// Sprint 28 Batch 9 — Extra Work dashboard aggregates.
+//
+// Mirrors backend/extra_work/views.py — `stats` and
+// `stats/by-building` endpoints. The aliases reuse the existing
+// `ExtraWorkStatus` / `ExtraWorkUrgency` / `RoutingDecision`
+// nominal types (defined later in this file) so the wire-side
+// vocabulary is enforced by the type system rather than being
+// duplicated.
+//
+// `by_status` / `by_routing` / `by_urgency` are `Partial<Record<...>>`
+// because the backend omits zero buckets. The KPI fields (`active`,
+// `awaiting_pricing`, `awaiting_customer_approval`, `urgent`) are
+// always present — they default to 0 when out-of-scope (e.g. STAFF,
+// whose `scope_extra_work_for` returns `.none()`).
+export type ExtraWorkStatusValue = ExtraWorkStatus;
+export type ExtraWorkRoutingValue = RoutingDecision;
+export type ExtraWorkUrgencyValue = ExtraWorkUrgency;
+
+export interface ExtraWorkStats {
+  total: number;
+  by_status: Partial<Record<ExtraWorkStatusValue, number>>;
+  by_routing: Partial<Record<ExtraWorkRoutingValue, number>>;
+  by_urgency: Partial<Record<ExtraWorkUrgencyValue, number>>;
+  active: number;
+  awaiting_pricing: number;
+  awaiting_customer_approval: number;
+  urgent: number;
+}
+
+export interface ExtraWorkStatsByBuildingRow {
+  building_id: number;
+  building_name: string;
+  total: number;
+  active: number;
+  awaiting_pricing: number;
+  awaiting_customer_approval: number;
+  urgent: number;
+}
+
+export type ExtraWorkStatsByBuildingResponse = ExtraWorkStatsByBuildingRow[];
+
 export type InvitationStatus =
   | "PENDING"
   | "ACCEPTED"

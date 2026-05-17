@@ -4,7 +4,14 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+import {
+  getExtraWorkStats,
+  getExtraWorkStatsByBuilding,
+} from "../api/extraWork";
 import type {
+  ExtraWorkStats,
+  ExtraWorkStatsByBuildingResponse,
+  ExtraWorkStatusValue,
   PaginatedResponse,
   TicketList,
   TicketStats,
@@ -12,6 +19,7 @@ import type {
   TicketStatsByBuildingRow,
   TicketStatus,
 } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
 import { SLABadge } from "../components/sla/SLABadge";
 
 type SLAFilterValue =
@@ -44,6 +52,27 @@ const STATUS_OPTIONS: TicketStatus[] = [
   "CLOSED",
   "REOPENED_BY_ADMIN",
 ];
+
+// Sprint 28 Batch 9 — Extra Work status vocabulary for the dashboard
+// breakdown. Kept local to this page; centralising labels across
+// namespaces is deliberately out of scope for this batch (per PM brief).
+const EXTRA_WORK_STATUS_ORDER: ExtraWorkStatusValue[] = [
+  "REQUESTED",
+  "UNDER_REVIEW",
+  "PRICING_PROPOSED",
+  "CUSTOMER_APPROVED",
+  "CUSTOMER_REJECTED",
+  "CANCELLED",
+];
+
+const EXTRA_WORK_STATUS_KEY: Record<ExtraWorkStatusValue, string> = {
+  REQUESTED: "extra_work_status_requested",
+  UNDER_REVIEW: "extra_work_status_under_review",
+  PRICING_PROPOSED: "extra_work_status_pricing_proposed",
+  CUSTOMER_APPROVED: "extra_work_status_customer_approved",
+  CUSTOMER_REJECTED: "extra_work_status_customer_rejected",
+  CANCELLED: "extra_work_status_cancelled",
+};
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
@@ -81,7 +110,9 @@ function statusCellClass(status: TicketStatus): string {
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { me } = useAuth();
   const { t } = useTranslation(["dashboard", "common"]);
+  const userRole = me?.role ?? null;
   const tStatus = (status: TicketStatus) =>
     t(`common:status.${status.toLowerCase()}`);
   const tPriority = (priority: string) =>
@@ -102,6 +133,15 @@ export function DashboardPage() {
   const [byBuilding, setByBuilding] = useState<TicketStatsByBuildingRow[] | null>(
     null,
   );
+  // Sprint 28 Batch 9 — Extra Work dashboard aggregates. Kept in
+  // dedicated state so a failure on the Tickets stats endpoint cannot
+  // wipe out the Extra Work section (and vice versa). Initial value
+  // `null` distinguishes "still loading" from "loaded, empty".
+  const [extraWorkStats, setExtraWorkStats] = useState<ExtraWorkStats | null>(
+    null,
+  );
+  const [extraWorkByBuilding, setExtraWorkByBuilding] =
+    useState<ExtraWorkStatsByBuildingResponse | null>(null);
   // Sprint 12: lastUpdated is set after every successful loader run
   // (manual refresh, filter change, or background interval). Rendered
   // as a small indicator in the page header. The "now" tick state
@@ -210,10 +250,42 @@ export function DashboardPage() {
     }
   }, []);
 
+  // Sprint 28 Batch 9 — Extra Work stats loaders. Mirrors the Tickets
+  // loader posture: a failed fetch silently leaves the previous render
+  // (or the loading sentinel) in place, so a transient hiccup on one
+  // endpoint cannot blank out the other dashboard half.
+  const loadExtraWorkStats = useCallback(async () => {
+    try {
+      const data = await getExtraWorkStats();
+      setExtraWorkStats(data);
+    } catch {
+      // Card stays blank if the endpoint fails; Tickets half is unaffected.
+    }
+  }, []);
+
+  const loadExtraWorkStatsByBuilding = useCallback(async () => {
+    try {
+      const data = await getExtraWorkStatsByBuilding();
+      setExtraWorkByBuilding(data);
+    } catch {
+      // Same posture as the other stats loaders.
+    }
+  }, []);
+
   useEffect(() => {
     loadStats();
     loadStatsByBuilding();
-  }, [loadStats, loadStatsByBuilding]);
+    // Sprint 28 Batch 9 — load Extra Work aggregates from the same
+    // effect so the lint baseline (and the existing setState-in-
+    // effect site) stays unchanged.
+    loadExtraWorkStats();
+    loadExtraWorkStatsByBuilding();
+  }, [
+    loadStats,
+    loadStatsByBuilding,
+    loadExtraWorkStats,
+    loadExtraWorkStatsByBuilding,
+  ]);
 
   // Sprint 12: silent auto-refresh every 60s. Always exactly ONE
   // interval per mount of this page; cleanup on unmount; cleanup on
@@ -226,11 +298,21 @@ export function DashboardPage() {
       loadTickets();
       loadStats();
       loadStatsByBuilding();
+      // Sprint 28 Batch 9 — same cadence as Tickets so both halves of
+      // the dashboard age together.
+      loadExtraWorkStats();
+      loadExtraWorkStatsByBuilding();
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => {
       window.clearInterval(handle);
     };
-  }, [loadTickets, loadStats, loadStatsByBuilding]);
+  }, [
+    loadTickets,
+    loadStats,
+    loadStatsByBuilding,
+    loadExtraWorkStats,
+    loadExtraWorkStatsByBuilding,
+  ]);
 
   // Tick "now" every 30s so the "Updated Xs ago" string recomputes
   // without re-fetching. Cheap; no network. Same lifecycle as the
@@ -370,6 +452,18 @@ export function DashboardPage() {
         </div>
       )}
 
+      {/*
+        Sprint 28 Batch 9 — the master plan calls Tickets and Extra
+        Work out as TWO TOP-LEVEL SECTIONS SIDE BY SIDE. The
+        `.dashboard-two-col` wrapper renders them stacked below the
+        wide breakpoint (responsive default) and as a true two-column
+        grid at >=1400px. The inner content of each section is
+        unchanged — only the outer wrapper is new. Each child keeps
+        its own data-testid so the existing Playwright spec contracts
+        still resolve.
+      */}
+      <div className="dashboard-two-col">
+      <section data-testid="dashboard-tickets-section">
       <div className="kpi-row">
         <div className="kpi-card">
           <div className="kpi-label">{t("kpi_total_label")}</div>
@@ -870,6 +964,228 @@ export function DashboardPage() {
             </div>
           </div>
         </div>
+      </div>
+      </section>
+
+      {/*
+        Sprint 28 Batch 9 — Extra Work dashboard section. Renders
+        scope-aware aggregates from /api/extra-work/stats/ +
+        /api/extra-work/stats/by-building/. STAFF receive a zeroed-
+        out payload (backend's scope_extra_work_for returns .none())
+        and we render an explicit empty-state instead of a row of
+        zero KPI cards. CUSTOMER_USER gets visual emphasis on the
+        "awaiting customer" KPI because that is the bucket their
+        action resolves.
+      */}
+      <section
+        data-testid="dashboard-extra-work-section"
+        style={{ marginTop: 28 }}
+      >
+        <div className="section-head" style={{ marginBottom: 14 }}>
+          <div>
+            <div className="section-head-title">
+              {t("extra_work_section_title")}
+            </div>
+            <div className="section-head-sub">
+              {t("extra_work_section_sub")}
+            </div>
+          </div>
+        </div>
+
+        {extraWorkStats === null ? (
+          <p className="muted small" style={{ marginBottom: 16 }}>
+            {t("loading")}
+          </p>
+        ) : extraWorkStats.total === 0 &&
+          Object.keys(extraWorkStats.by_status).length === 0 ? (
+          <div
+            className="empty-state"
+            data-testid="dashboard-extra-work-section-empty"
+          >
+            <div className="empty-icon">＋</div>
+            <div className="empty-title">{t("extra_work_section_empty")}</div>
+          </div>
+        ) : (
+          <>
+            <div className="kpi-row">
+              <div className="kpi-card">
+                <div className="kpi-label">
+                  {t("extra_work_kpi_total_label")}
+                </div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{extraWorkStats.total}</div>
+                </div>
+                <div className="kpi-meta">
+                  {t("extra_work_kpi_total_meta")}
+                </div>
+              </div>
+              <div className="kpi-card">
+                <div className="kpi-label">
+                  {t("extra_work_kpi_active_label")}
+                </div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{extraWorkStats.active}</div>
+                </div>
+                <div className="kpi-meta">
+                  {t("extra_work_kpi_active_meta")}
+                </div>
+              </div>
+              <div className="kpi-card">
+                <div className="kpi-label">
+                  {t("extra_work_kpi_awaiting_pricing_label")}
+                </div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">
+                    {extraWorkStats.awaiting_pricing}
+                  </div>
+                </div>
+                <div className="kpi-meta">
+                  {t("extra_work_kpi_awaiting_pricing_meta")}
+                </div>
+              </div>
+              <div
+                className={`kpi-card${
+                  userRole === "CUSTOMER_USER" ? " kpi-urgent" : ""
+                }`}
+                data-testid="dashboard-extra-work-kpi-awaiting-customer"
+              >
+                <div className="kpi-label">
+                  {t("extra_work_kpi_awaiting_customer_label")}
+                </div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">
+                    {extraWorkStats.awaiting_customer_approval}
+                  </div>
+                </div>
+                <div className="kpi-meta">
+                  {t("extra_work_kpi_awaiting_customer_meta")}
+                </div>
+              </div>
+              <div className="kpi-card kpi-urgent">
+                <div className="kpi-label">
+                  {t("extra_work_kpi_urgent_label")}
+                </div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{extraWorkStats.urgent}</div>
+                </div>
+                <div className="kpi-meta">
+                  {t("extra_work_kpi_urgent_meta")}
+                </div>
+              </div>
+            </div>
+
+            <div className="dash-grid">
+              <div className="dash-main">
+                <div className="card">
+                  <div className="section-head">
+                    <div>
+                      <div className="section-head-title">
+                        {t("extra_work_byb_title")}
+                      </div>
+                      <div className="section-head-sub">
+                        {t("extra_work_byb_sub")}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontFamily: "var(--f-head)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--text-faint)",
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {extraWorkByBuilding
+                        ? t("byb_sites", { count: extraWorkByBuilding.length })
+                        : ""}
+                    </span>
+                  </div>
+                  <div style={{ padding: "16px 20px 18px" }}>
+                    {extraWorkByBuilding === null ? (
+                      <p className="muted small">{t("loading")}</p>
+                    ) : extraWorkByBuilding.length === 0 ? (
+                      <p className="muted small">
+                        {t("extra_work_byb_no_buildings")}
+                      </p>
+                    ) : (
+                      <div className="bld-list">
+                        {extraWorkByBuilding.map((row) => (
+                          <div key={row.building_id}>
+                            <div className="bld-row-head">
+                              <span className="bld-row-name">
+                                {row.building_name}
+                              </span>
+                              <span className="bld-row-count">
+                                {t("extra_work_byb_active_count", {
+                                  count: row.active,
+                                })}
+                              </span>
+                            </div>
+                            <div className="bld-row-foot">
+                              {row.awaiting_pricing > 0 && (
+                                <span className="hi">
+                                  {t("extra_work_byb_awaiting_pricing", {
+                                    count: row.awaiting_pricing,
+                                  })}
+                                </span>
+                              )}
+                              {row.awaiting_customer_approval > 0 && (
+                                <span className="urg">
+                                  {t("extra_work_byb_awaiting_customer", {
+                                    count: row.awaiting_customer_approval,
+                                  })}
+                                </span>
+                              )}
+                              {row.urgent > 0 && (
+                                <span className="urg">
+                                  {t("extra_work_byb_urgent", {
+                                    count: row.urgent,
+                                  })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="dash-side">
+                <div className="card">
+                  <div className="section-head">
+                    <div>
+                      <div className="section-head-title">
+                        {t("section_status_title")}
+                      </div>
+                      <div className="section-head-sub">
+                        {t("section_status_sub")}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ padding: "14px 18px 18px" }}>
+                    <div className="bld-list">
+                      {EXTRA_WORK_STATUS_ORDER.map((key) => {
+                        const value = extraWorkStats.by_status[key] ?? 0;
+                        return (
+                          <div key={key} className="bld-row-head">
+                            <span className="bld-row-name">
+                              {t(EXTRA_WORK_STATUS_KEY[key])}
+                            </span>
+                            <span className="bld-row-count">{value}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
       </div>
     </div>
   );

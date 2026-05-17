@@ -50,5 +50,35 @@
 
   "last_updated_just_now": "Just updated",
   "last_updated_seconds_ago": "Updated {{seconds}}s ago",
-  "last_updated_minutes_ago": "Updated {{minutes}}m ago"
+  "last_updated_minutes_ago": "Updated {{minutes}}m ago",
+
+  "extra_work_section_title": "Extra work",
+  "extra_work_section_sub": "Quoted jobs and customer approvals in your scope",
+  "extra_work_section_empty": "No extra work in your current scope.",
+
+  "extra_work_kpi_total_label": "Total in scope",
+  "extra_work_kpi_total_meta": "All extra work requests you can access",
+  "extra_work_kpi_active_label": "Active",
+  "extra_work_kpi_active_meta": "Not yet approved, rejected, or cancelled",
+  "extra_work_kpi_awaiting_pricing_label": "Awaiting pricing",
+  "extra_work_kpi_awaiting_pricing_meta": "Needs a proposal built",
+  "extra_work_kpi_awaiting_customer_label": "Awaiting customer",
+  "extra_work_kpi_awaiting_customer_meta": "Proposal sent, waiting for decision",
+  "extra_work_kpi_urgent_label": "Urgent",
+  "extra_work_kpi_urgent_meta": "Open and marked urgent",
+
+  "extra_work_byb_title": "Extra work by building",
+  "extra_work_byb_sub": "Open work per building in your scope",
+  "extra_work_byb_no_buildings": "No buildings have extra work in your current scope.",
+  "extra_work_byb_active_count": "{{count}} active",
+  "extra_work_byb_awaiting_pricing": "{{count}} awaiting pricing",
+  "extra_work_byb_awaiting_customer": "{{count}} awaiting customer",
+  "extra_work_byb_urgent": "{{count}} urgent",
+
+  "extra_work_status_requested": "Requested",
+  "extra_work_status_under_review": "Under review",
+  "extra_work_status_pricing_proposed": "Pricing proposed",
+  "extra_work_status_customer_approved": "Approved",
+  "extra_work_status_customer_rejected": "Rejected",
+  "extra_work_status_cancelled": "Cancelled"
 }

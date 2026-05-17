@@ -10,6 +10,8 @@ import type {
   ExtraWorkRequestCartCreatePayload,
   ExtraWorkRequestDetail,
   ExtraWorkRequestList,
+  ExtraWorkStats,
+  ExtraWorkStatsByBuildingResponse,
   ExtraWorkStatus,
   ExtraWorkStatusHistoryEntry,
   PaginatedResponse,
@@ -108,6 +110,25 @@ export async function listExtraWorkStatusHistory(
 ): Promise<ExtraWorkStatusHistoryEntry[]> {
   const response = await api.get<ExtraWorkStatusHistoryEntry[]>(
     `/extra-work/${id}/status-history/`,
+  );
+  return response.data;
+}
+
+// Sprint 28 Batch 9 — Extra Work dashboard aggregates.
+//
+// `GET /extra-work/stats/` returns the scope-respecting bucket summary
+// for the calling user. `GET /extra-work/stats/by-building/` returns
+// a flat list, one row per building visible to the caller. STAFF and
+// other zero-scope actors receive `{total: 0, by_status: {}, ...}` and
+// `[]` respectively — the dashboard renders an empty state in that case.
+export async function getExtraWorkStats(): Promise<ExtraWorkStats> {
+  const response = await api.get<ExtraWorkStats>("/extra-work/stats/");
+  return response.data;
+}
+
+export async function getExtraWorkStatsByBuilding(): Promise<ExtraWorkStatsByBuildingResponse> {
+  const response = await api.get<ExtraWorkStatsByBuildingResponse>(
+    "/extra-work/stats/by-building/",
   );
   return response.data;
 }

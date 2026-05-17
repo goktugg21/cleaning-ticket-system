@@ -1168,6 +1168,35 @@ p { line-height: 1.6; }
   .ops-stat { border-left: none; padding: 0; }
 }
 
+/* Sprint 28 Batch 9 — top-level two-column layout for the Tickets and
+   Extra Work dashboard sections. The master plan calls them out as
+   peers ("Two top-level sections side by side: Tickets and Extra
+   Work"). Below the wide breakpoint they stack (default 1fr). At
+   >=1400px they share the row 50/50; minmax(0, 1fr) is mandatory so
+   the inner recent-tickets table cannot push its column wider than
+   half the viewport. The breakpoint is intentionally higher than the
+   inner .dash-grid breakpoint (1100px) so the Tickets section keeps
+   its own 1fr + 340px split functional inside the left column. */
+.dashboard-two-col {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+@media (min-width: 1400px) {
+  .dashboard-two-col {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  /* When the two sections are side-by-side the Extra Work section's
+     marginTop offset (used in stacked layout to separate it from the
+     Tickets block above) is no longer correct — collapse it so both
+     section tops align with the wrapper grid row. */
+  .dashboard-two-col > [data-testid="dashboard-extra-work-section"] {
+    margin-top: 0;
+  }
+}
+
 /* Filter bar */
 .filter-bar {
   display: grid;

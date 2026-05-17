@@ -50,5 +50,35 @@
 
   "last_updated_just_now": "Zojuist bijgewerkt",
   "last_updated_seconds_ago": "{{seconds}} sec geleden bijgewerkt",
-  "last_updated_minutes_ago": "{{minutes}} min geleden bijgewerkt"
+  "last_updated_minutes_ago": "{{minutes}} min geleden bijgewerkt",
+
+  "extra_work_section_title": "Extra werk",
+  "extra_work_section_sub": "Geoffreerde opdrachten en klantgoedkeuringen in jouw scope",
+  "extra_work_section_empty": "Geen extra werk in jouw huidige scope.",
+
+  "extra_work_kpi_total_label": "Totaal in scope",
+  "extra_work_kpi_total_meta": "Alle extra werk-aanvragen die je kunt zien",
+  "extra_work_kpi_active_label": "Actief",
+  "extra_work_kpi_active_meta": "Nog niet goedgekeurd, afgewezen of geannuleerd",
+  "extra_work_kpi_awaiting_pricing_label": "Wacht op offerte",
+  "extra_work_kpi_awaiting_pricing_meta": "Vereist een prijsvoorstel",
+  "extra_work_kpi_awaiting_customer_label": "Wacht op klant",
+  "extra_work_kpi_awaiting_customer_meta": "Offerte verstuurd, wachtend op beslissing",
+  "extra_work_kpi_urgent_label": "Urgent",
+  "extra_work_kpi_urgent_meta": "Open en gemarkeerd als urgent",
+
+  "extra_work_byb_title": "Extra werk per gebouw",
+  "extra_work_byb_sub": "Open werk per gebouw in jouw scope",
+  "extra_work_byb_no_buildings": "Geen gebouwen met extra werk in jouw huidige scope.",
+  "extra_work_byb_active_count": "{{count}} actief",
+  "extra_work_byb_awaiting_pricing": "{{count}} wacht op offerte",
+  "extra_work_byb_awaiting_customer": "{{count}} wacht op klant",
+  "extra_work_byb_urgent": "{{count}} urgent",
+
+  "extra_work_status_requested": "Aangevraagd",
+  "extra_work_status_under_review": "In behandeling",
+  "extra_work_status_pricing_proposed": "Offerte verstuurd",
+  "extra_work_status_customer_approved": "Goedgekeurd",
+  "extra_work_status_customer_rejected": "Afgewezen",
+  "extra_work_status_cancelled": "Geannuleerd"
 }

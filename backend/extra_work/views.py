@@ -19,6 +19,7 @@ Provider users CAN additionally manage pricing line items.
 """
 from __future__ import annotations
 
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -53,6 +54,20 @@ PROVIDER_ROLES = {
     UserRole.COMPANY_ADMIN,
     UserRole.BUILDING_MANAGER,
 }
+
+
+# Sprint 28 Batch 9 — bucket definitions for the Extra Work stats
+# endpoints. Kept as module-level constants so the `stats` /
+# `stats/by-building` actions share a single source of truth.
+#
+# String literals (not `ExtraWorkStatus.X.value`) match the style of
+# `tickets.views.stats` and keep the Q-filter call sites readable.
+EXTRA_WORK_TERMINAL_STATUSES = (
+    "CUSTOMER_APPROVED",
+    "CUSTOMER_REJECTED",
+    "CANCELLED",
+)
+EXTRA_WORK_AWAITING_PRICING_STATUSES = ("REQUESTED", "UNDER_REVIEW")
 
 
 def _is_provider_operator(user) -> bool:
@@ -124,6 +139,126 @@ class ExtraWorkRequestViewSet(
         rows = ExtraWorkStatusHistory.objects.filter(extra_work=extra_work)
         return Response(
             ExtraWorkStatusHistorySerializer(rows, many=True).data
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """
+        Sprint 28 Batch 9 — aggregate Extra Work stats scoped per role.
+
+        Shape:
+          {
+            "total": int,
+            "by_status": {status: count, ...},
+            "by_routing": {"INSTANT": int, "PROPOSAL": int},
+            "by_urgency": {"NORMAL": int, "HIGH": int, "URGENT": int},
+            "active": int,                      # NOT in terminal set
+            "awaiting_pricing": int,            # routing=PROPOSAL + REQUESTED/UNDER_REVIEW
+            "awaiting_customer_approval": int,  # status == PRICING_PROPOSED
+            "urgent": int,                      # URGENT urgency, not in terminal set
+          }
+
+        STAFF naturally gets all-zeros because `scope_extra_work_for`
+        returns `.none()` for STAFF (MVP — no staff-execution surface
+        on Extra Work yet).
+        """
+        scoped = scope_extra_work_for(request.user)
+
+        status_counts = {
+            row["status"]: row["c"]
+            for row in scoped.values("status").annotate(c=Count("id"))
+        }
+        routing_counts = {
+            row["routing_decision"]: row["c"]
+            for row in scoped.values("routing_decision").annotate(c=Count("id"))
+        }
+        urgency_counts = {
+            row["urgency"]: row["c"]
+            for row in scoped.values("urgency").annotate(c=Count("id"))
+        }
+
+        terminal_states = set(EXTRA_WORK_TERMINAL_STATUSES)
+        active = sum(
+            c for s, c in status_counts.items() if s not in terminal_states
+        )
+        awaiting_pricing = scoped.filter(
+            routing_decision="PROPOSAL",
+            status__in=list(EXTRA_WORK_AWAITING_PRICING_STATUSES),
+        ).count()
+        awaiting_customer_approval = status_counts.get("PRICING_PROPOSED", 0)
+        urgent = (
+            scoped.filter(urgency="URGENT")
+            .exclude(status__in=list(EXTRA_WORK_TERMINAL_STATUSES))
+            .count()
+        )
+        total = sum(status_counts.values())
+
+        return Response(
+            {
+                "total": total,
+                "by_status": status_counts,
+                "by_routing": routing_counts,
+                "by_urgency": urgency_counts,
+                "active": active,
+                "awaiting_pricing": awaiting_pricing,
+                "awaiting_customer_approval": awaiting_customer_approval,
+                "urgent": urgent,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats/by-building")
+    def stats_by_building(self, request):
+        """
+        Sprint 28 Batch 9 — per-building Extra Work breakdown scoped
+        per role.
+
+        Returns a list ordered by building name. Buildings with no
+        Extra Work rows in scope are skipped naturally by the GROUP BY
+        (no padding rows). STAFF gets `[]` for the same reason `stats`
+        zeroes out for them.
+        """
+        scoped = scope_extra_work_for(request.user)
+        terminal = list(EXTRA_WORK_TERMINAL_STATUSES)
+        awaiting_pricing_statuses = list(EXTRA_WORK_AWAITING_PRICING_STATUSES)
+
+        rows = (
+            scoped.values("building_id", "building__name")
+            .annotate(
+                total=Count("id"),
+                active=Count("id", filter=~Q(status__in=terminal)),
+                awaiting_pricing=Count(
+                    "id",
+                    filter=Q(routing_decision="PROPOSAL")
+                    & Q(status__in=awaiting_pricing_statuses),
+                ),
+                awaiting_customer_approval=Count(
+                    "id", filter=Q(status="PRICING_PROPOSED")
+                ),
+                urgent=Count(
+                    "id",
+                    filter=Q(urgency="URGENT") & ~Q(status__in=terminal),
+                ),
+            )
+            .order_by("building__name")
+        )
+
+        return Response(
+            [
+                {
+                    "building_id": row["building_id"],
+                    "building_name": row["building__name"],
+                    "total": row["total"],
+                    "active": row["active"],
+                    "awaiting_pricing": row["awaiting_pricing"],
+                    "awaiting_customer_approval": row[
+                        "awaiting_customer_approval"
+                    ],
+                    "urgent": row["urgent"],
+                }
+                for row in rows
+            ],
+            status=status.HTTP_200_OK,
         )
 
 
