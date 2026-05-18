@@ -23,6 +23,7 @@ line CRUD endpoints.
 from __future__ import annotations
 
 from django.db import IntegrityError
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status, views
 from rest_framework.response import Response
@@ -39,6 +40,7 @@ from .models import (
     ProposalTimelineEvent,
     ProposalTimelineEventType,
 )
+from .proposal_pdf import render_proposal_pdf
 from .proposal_state_machine import (
     TransitionError,
     apply_proposal_transition,
@@ -365,3 +367,31 @@ class ProposalLineDetailView(views.APIView):
         line.delete()
         proposal.recompute_totals()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Proposal PDF export (Sprint 28 Batch 14)
+# ---------------------------------------------------------------------------
+class ProposalPdfView(views.APIView):
+    """
+    GET /api/extra-work/<ew_id>/proposals/<pid>/pdf/
+
+    Render an already-visible proposal as a PDF. Scope + DRAFT
+    visibility inherited from `_resolve_proposal_or_404`. This is a
+    read-only rendering — no `CUSTOMER_VIEWED` timeline event is
+    emitted (unlike `ProposalDetailView`).
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, ew_id: int, pid: int):
+        _, proposal = _resolve_proposal_or_404(request, ew_id, pid)
+        viewer_is_customer = _is_customer(request.user)
+        pdf_bytes = render_proposal_pdf(
+            proposal, viewer_is_customer=viewer_is_customer
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = (
+            f'inline; filename="proposal-{proposal.pk}.pdf"'
+        )
+        return response

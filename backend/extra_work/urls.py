@@ -11,6 +11,7 @@ from .views_proposals import (
     ProposalLineDetailView,
     ProposalLineListCreateView,
     ProposalListCreateView,
+    ProposalPdfView,
     ProposalStatusHistoryView,
     ProposalTimelineView,
     ProposalTransitionView,
@@ -68,5 +69,10 @@ urlpatterns = [
         "<int:ew_id>/proposals/<int:pid>/lines/<int:lid>/",
         ProposalLineDetailView.as_view(),
         name="extra-work-proposal-line-detail",
+    ),
+    path(
+        "<int:ew_id>/proposals/<int:pid>/pdf/",
+        ProposalPdfView.as_view(),
+        name="extra-work-proposal-pdf",
     ),
 ]

@@ -1,0 +1,421 @@
+"""
+Sprint 28 Batch 14 — Proposal PDF export tests.
+
+The 11 cases below pin:
+
+  * Scope (SUPER_ADMIN can fetch; cross-tenant customer 404s; STAFF
+    inherits the parent EW 404).
+  * DRAFT invisibility for customers (proposal-detail parity).
+  * Privacy lock: `internal_note` is NEVER present in the rendered
+    PDF bytes — for ANY caller. (Two tests prove this for both the
+    provider and customer audience.)
+  * Provider-only override block (override_reason is rendered for
+    provider; stripped for customer).
+  * Read-only contract: no `ProposalTimelineEvent` is emitted on a
+    customer PDF read of a SENT proposal — even though
+    `ProposalDetailView` DOES emit `CUSTOMER_VIEWED` for the same
+    customer + same proposal.
+  * Unicode safety: the safe-text helper kills the classic fpdf2
+    `Character ... not in font` crash on `€` / en-dash inputs.
+
+Fixture mirrors `test_sprint28_proposal.py` to keep the surface
+familiar.
+"""
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from rest_framework.test import APIClient
+
+from accounts.models import UserRole
+from buildings.models import Building
+from companies.models import Company, CompanyUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
+from extra_work.models import (
+    ExtraWorkCategory,
+    ExtraWorkPricingUnitType,
+    ExtraWorkRequest,
+    ExtraWorkRequestItem,
+    ExtraWorkStatus,
+    Proposal,
+    ProposalStatus,
+    ProposalTimelineEvent,
+    Service,
+    ServiceCategory,
+)
+
+
+User = get_user_model()
+PASSWORD = "StrongerTestPassword123!"
+
+# Sentinel strings the byte-search tests grep on the raw PDF output.
+EXPLANATION_SENTINEL = "EXPLANATION-PUBLIC-XYZ"
+INTERNAL_SENTINEL = "SECRET-PROVIDER-XYZ"
+OVERRIDE_SENTINEL = "OVERRIDE-REASON-ABC123"
+
+
+def _mk(email: str, role: str, **extra) -> User:
+    return User.objects.create_user(
+        email=email,
+        password=PASSWORD,
+        role=role,
+        full_name=email.split("@")[0],
+        **extra,
+    )
+
+
+class ProposalPdfFixtureMixin:
+    """Shared fixture, modelled on `ProposalFixtureMixin` in
+    `test_sprint28_proposal.py`. Single Customer + Building +
+    Service; one SENT proposal with one line whose
+    `customer_explanation` and `internal_note` carry the sentinel
+    strings the privacy-lock tests grep for."""
+
+    @classmethod
+    def _setup_fixture(cls):
+        cls.company = Company.objects.create(
+            name="Proposal Provider PDF", slug="prov-b14"
+        )
+        cls.other_company = Company.objects.create(
+            name="Other Provider PDF", slug="prov-other-b14"
+        )
+        cls.building = Building.objects.create(
+            company=cls.company, name="Building-B14"
+        )
+        cls.other_building = Building.objects.create(
+            company=cls.other_company, name="Other-Building-B14"
+        )
+        cls.customer = Customer.objects.create(
+            company=cls.company,
+            name="Customer-B14",
+            building=cls.building,
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=cls.customer, building=cls.building
+        )
+        cls.other_customer = Customer.objects.create(
+            company=cls.other_company,
+            name="Other-Customer-B14",
+            building=cls.other_building,
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=cls.other_customer, building=cls.other_building
+        )
+
+        cls.super_admin = _mk(
+            "super-b14@example.com",
+            UserRole.SUPER_ADMIN,
+            is_staff=True,
+            is_superuser=True,
+        )
+        cls.admin = _mk("admin-b14@example.com", UserRole.COMPANY_ADMIN)
+        CompanyUserMembership.objects.create(
+            user=cls.admin, company=cls.company
+        )
+        cls.staff = _mk("staff-b14@example.com", UserRole.STAFF)
+
+        cls.cust_user = _mk("cust-b14@example.com", UserRole.CUSTOMER_USER)
+        membership = CustomerUserMembership.objects.create(
+            customer=cls.customer, user=cls.cust_user
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=cls.building,
+            access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
+        )
+
+        # Cross-tenant customer used by the cross-tenant 404 test.
+        cls.other_cust_user = _mk(
+            "other-cust-b14@example.com", UserRole.CUSTOMER_USER
+        )
+        other_membership = CustomerUserMembership.objects.create(
+            customer=cls.other_customer, user=cls.other_cust_user
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=other_membership,
+            building=cls.other_building,
+            access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
+        )
+
+        cls.service_cat = ServiceCategory.objects.create(name="Cat-B14")
+        cls.service = Service.objects.create(
+            category=cls.service_cat,
+            name="Window cleaning B14",
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            default_unit_price=Decimal("50.00"),
+        )
+
+    def _api(self, user):
+        c = APIClient()
+        c.force_authenticate(user=user)
+        return c
+
+    def _make_ew(
+        self,
+        *,
+        status: str = ExtraWorkStatus.UNDER_REVIEW,
+    ) -> ExtraWorkRequest:
+        ew = ExtraWorkRequest.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.cust_user,
+            title="PDF fixture EW",
+            description="parent description for PDF",
+            category=ExtraWorkCategory.DEEP_CLEANING,
+            status=status,
+        )
+        ExtraWorkRequestItem.objects.create(
+            extra_work_request=ew,
+            service=self.service,
+            quantity=Decimal("1.00"),
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            requested_date=date(2026, 6, 15),
+            customer_note="",
+        )
+        return ew
+
+    def _pdf_url(self, ew_id: int, pid: int) -> str:
+        return f"/api/extra-work/{ew_id}/proposals/{pid}/pdf/"
+
+    def _line_payload(self, **overrides) -> dict:
+        payload = {
+            "service": self.service.id,
+            "quantity": "2.00",
+            "unit_type": ExtraWorkPricingUnitType.HOURS,
+            "unit_price": "50.00",
+            "vat_pct": "21.00",
+            "customer_explanation": EXPLANATION_SENTINEL,
+            "internal_note": INTERNAL_SENTINEL,
+        }
+        payload.update(overrides)
+        return payload
+
+    def _create_proposal(self, ew: ExtraWorkRequest) -> Proposal:
+        response = self._api(self.admin).post(
+            f"/api/extra-work/{ew.id}/proposals/",
+            {"lines": [self._line_payload()]},
+            format="json",
+        )
+        assert response.status_code == 201, response.data
+        return Proposal.objects.get(pk=response.data["id"])
+
+    def _send(self, ew: ExtraWorkRequest, proposal: Proposal):
+        response = self._api(self.admin).post(
+            f"/api/extra-work/{ew.id}/proposals/{proposal.id}/transition/",
+            {"to_status": ProposalStatus.SENT},
+            format="json",
+        )
+        assert response.status_code == 200, response.data
+
+
+class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    # ------------------------------------------------------------------
+    # 1. Happy path — provider
+    # ------------------------------------------------------------------
+    def test_pdf_200_for_super_admin(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+
+        response = self._api(self.super_admin).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
+        self.assertGreater(len(response.content), 200)
+
+    # ------------------------------------------------------------------
+    # 2. Happy path — customer on SENT
+    # ------------------------------------------------------------------
+    def test_pdf_200_for_customer_user_on_sent(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+
+        response = self._api(self.cust_user).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
+    # ------------------------------------------------------------------
+    # 3. DRAFT invisibility for customer
+    # ------------------------------------------------------------------
+    def test_pdf_404_for_customer_user_on_draft(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        # Proposal is DRAFT — customers must not see it via the PDF
+        # endpoint either, mirroring the parity lock on
+        # `_resolve_proposal_or_404`.
+        response = self._api(self.cust_user).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ------------------------------------------------------------------
+    # 4. Staff is excluded
+    # ------------------------------------------------------------------
+    def test_pdf_403_for_staff(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+        # STAFF cannot see the parent EW (scope_extra_work_for returns
+        # .none() for STAFF), so the PDF endpoint 404s — matching how
+        # `ProposalDetailView` answers STAFF on the same fixture.
+        response = self._api(self.staff).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ------------------------------------------------------------------
+    # 5. Cross-tenant customer 404
+    # ------------------------------------------------------------------
+    def test_pdf_404_cross_tenant_customer(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+        # The "other" customer belongs to a different Customer + Company.
+        response = self._api(self.other_cust_user).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ------------------------------------------------------------------
+    # 6. Privacy lock — provider read
+    # ------------------------------------------------------------------
+    def test_pdf_strips_internal_note_for_provider(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+
+        response = self._api(self.super_admin).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200)
+        # internal_note is NEVER rendered, even for the provider.
+        self.assertNotIn(INTERNAL_SENTINEL.encode(), response.content)
+        # The customer-visible explanation IS rendered for the provider.
+        self.assertIn(EXPLANATION_SENTINEL.encode(), response.content)
+
+    # ------------------------------------------------------------------
+    # 7. Privacy lock — customer read
+    # ------------------------------------------------------------------
+    def test_pdf_strips_internal_note_for_customer(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+
+        response = self._api(self.cust_user).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(INTERNAL_SENTINEL.encode(), response.content)
+        self.assertIn(EXPLANATION_SENTINEL.encode(), response.content)
+
+    # ------------------------------------------------------------------
+    # 8. Override block — visible to provider
+    # ------------------------------------------------------------------
+    def test_pdf_includes_override_reason_for_provider_when_set(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+        proposal.override_reason = OVERRIDE_SENTINEL
+        proposal.override_by = self.admin
+        proposal.save(update_fields=["override_reason", "override_by"])
+
+        response = self._api(self.super_admin).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(OVERRIDE_SENTINEL.encode(), response.content)
+
+    # ------------------------------------------------------------------
+    # 9. Override block — stripped for customer
+    # ------------------------------------------------------------------
+    def test_pdf_omits_override_reason_for_customer_when_set(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+        proposal.override_reason = OVERRIDE_SENTINEL
+        proposal.override_by = self.admin
+        proposal.save(update_fields=["override_reason", "override_by"])
+
+        response = self._api(self.cust_user).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(OVERRIDE_SENTINEL.encode(), response.content)
+
+    # ------------------------------------------------------------------
+    # 10. Read-only contract — no CUSTOMER_VIEWED event from PDF reads
+    # ------------------------------------------------------------------
+    def test_pdf_emits_no_timeline_event(self):
+        ew = self._make_ew()
+        proposal = self._create_proposal(ew)
+        self._send(ew, proposal)
+        before = ProposalTimelineEvent.objects.count()
+
+        response = self._api(self.cust_user).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200)
+        # The PDF endpoint is read-only — unlike ProposalDetailView,
+        # which emits CUSTOMER_VIEWED on first customer GET of a SENT
+        # proposal, the PDF endpoint must NOT mutate the timeline.
+        self.assertEqual(ProposalTimelineEvent.objects.count(), before)
+
+    # ------------------------------------------------------------------
+    # 11. Unicode safety — no font-glyph crash
+    # ------------------------------------------------------------------
+    def test_pdf_handles_unicode_safely(self):
+        ew = self._make_ew()
+        # The default Latin-1 PDF core font cannot render `€` or the
+        # en-dash — without the safe-text helper this would raise
+        # `Character ... not in font` mid-render.
+        proposal = Proposal.objects.create(
+            extra_work_request=ew,
+            created_by=self.admin,
+        )
+        # Bypass the API to drop a glyph-heavy explanation directly
+        # onto the line model.
+        from extra_work.models import ProposalLine
+
+        ProposalLine.objects.create(
+            proposal=proposal,
+            service=self.service,
+            quantity=Decimal("1.00"),
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            unit_price=Decimal("50.00"),
+            vat_pct=Decimal("21.00"),
+            customer_explanation="Cafe — EUR 50 €",
+            internal_note="should-not-render-XYZ",
+        )
+        proposal.recompute_totals()
+        # Drive to SENT so the response would be valid for either viewer.
+        from extra_work.proposal_state_machine import (
+            apply_proposal_transition,
+        )
+
+        apply_proposal_transition(
+            proposal, self.admin, ProposalStatus.SENT
+        )
+
+        response = self._api(self.super_admin).get(
+            self._pdf_url(ew.id, proposal.id)
+        )
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        self.assertTrue(response.content.startswith(b"%PDF"))
