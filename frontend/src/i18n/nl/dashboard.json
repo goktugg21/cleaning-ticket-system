@@ -80,5 +80,30 @@
   "extra_work_status_pricing_proposed": "Offerte verstuurd",
   "extra_work_status_customer_approved": "Goedgekeurd",
   "extra_work_status_customer_rejected": "Afgewezen",
-  "extra_work_status_cancelled": "Geannuleerd"
+  "extra_work_status_cancelled": "Geannuleerd",
+
+  "work_view_label": "Operationeel werk",
+  "work_view_all": "Al het werk",
+  "work_view_tickets": "Alleen tickets",
+  "work_view_extra_work": "Alleen extra werk",
+
+  "ops_kpi_total_open_label": "Totaal open werk",
+  "ops_kpi_total_open_meta": "Tickets + extra werk",
+  "ops_kpi_tickets_label": "Actieve tickets",
+  "ops_kpi_tickets_meta": "Open + in behandeling",
+  "ops_kpi_extra_work_label": "Actief extra werk",
+  "ops_kpi_extra_work_meta": "Aanvragen onderweg",
+  "ops_kpi_awaiting_label": "Wacht op goedkeuring",
+  "ops_kpi_awaiting_meta": "Klant- of prijsbeoordeling",
+  "ops_kpi_urgent_label": "Urgent",
+  "ops_kpi_urgent_meta": "Over alle werksoorten",
+  "ops_recent_title": "Recente operationele items",
+  "ops_recent_sub": "Tickets en extra werk delen één wachtrij. Gebruik de type-pill om ze uit elkaar te houden.",
+  "ops_recent_view_all_tickets": "Bekijk alle tickets",
+  "ops_recent_extra_work_link": "{{count}} openstaande extra-werk aanvragen · Bekijk alles",
+  "ops_recent_extra_work_link_zero": "Geen openstaand extra werk · Bekijk alles",
+  "ops_type_ticket": "Ticket",
+  "ops_type_extra_work": "Extra werk",
+  "ops_byb_tickets_title": "Tickets per gebouw",
+  "ops_byb_extra_work_title": "Extra werk per gebouw"
 }

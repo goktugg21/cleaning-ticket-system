@@ -1168,34 +1168,10 @@ p { line-height: 1.6; }
   .ops-stat { border-left: none; padding: 0; }
 }
 
-/* Sprint 28 Batch 9 — top-level two-column layout for the Tickets and
-   Extra Work dashboard sections. The master plan calls them out as
-   peers ("Two top-level sections side by side: Tickets and Extra
-   Work"). Below the wide breakpoint they stack (default 1fr). At
-   >=1400px they share the row 50/50; minmax(0, 1fr) is mandatory so
-   the inner recent-tickets table cannot push its column wider than
-   half the viewport. The breakpoint is intentionally higher than the
-   inner .dash-grid breakpoint (1100px) so the Tickets section keeps
-   its own 1fr + 340px split functional inside the left column. */
-.dashboard-two-col {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 24px;
-}
-
-@media (min-width: 1400px) {
-  .dashboard-two-col {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
-  }
-  /* When the two sections are side-by-side the Extra Work section's
-     marginTop offset (used in stacked layout to separate it from the
-     Tickets block above) is no longer correct — collapse it so both
-     section tops align with the wrapper grid row. */
-  .dashboard-two-col > [data-testid="dashboard-extra-work-section"] {
-    margin-top: 0;
-  }
-}
+/* Sprint 28 Batch 13 rework: `.dashboard-two-col` was removed in
+   favour of the unified `.operations-dashboard` family further below.
+   The CSS rules were deleted because no other consumer references
+   them. */
 
 /* Filter bar */
 .filter-bar {
@@ -3368,3 +3344,265 @@ table.data-table {
     margin-top: 6px;
   }
 }
+
+/* Sprint 28 Batch 13 (rework) — unified operations dashboard composition.
+   Replaces the prior `.work-view-toggle*` family. The dashboard is one
+   coherent column (operations-dashboard) with three bands stacked
+   vertically: the 5-card KPI strip, the work-strip segmented control,
+   and the work-layout grid (1fr main + 340px side). */
+.operations-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.operations-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+
+.operations-kpi-grid .kpi-card {
+  min-height: 110px;
+}
+
+@media (max-width: 1280px) {
+  .operations-kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .operations-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.work-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.work-strip-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-right: 4px;
+}
+
+.work-strip-toggle {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.work-strip-toggle .btn {
+  font-weight: 600;
+}
+
+.work-strip-toggle .btn[aria-pressed="true"] {
+  background: var(--green-faint, var(--surface-2));
+  color: var(--green-2, var(--text));
+  border-color: var(--green-2, var(--border));
+  font-weight: 700;
+}
+
+.work-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .work-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.work-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.work-type-pill-ticket {
+  background: var(--green-faint, rgba(95,212,153,0.12));
+  color: var(--green-2, var(--text));
+  border: 1px solid rgba(95,212,153,0.25);
+}
+
+.work-type-pill-extra-work {
+  background: rgba(95,141,212,0.10);
+  color: #3a5a8a;
+  border: 1px solid rgba(95,141,212,0.25);
+}
+
+.recent-ops-extra-work-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.recent-ops-extra-work-row a { font-weight: 600; }
+
+/* Sprint 28 Batch 13 (rework) — customer overview building blocks. */
+.section-explainer {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+  padding: 14px 18px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+
+.section-explainer strong { color: var(--text); font-weight: 600; }
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .summary-grid { grid-template-columns: 1fr; }
+}
+
+.summary-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.summary-stat:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--green-2, var(--border));
+}
+
+.summary-stat-label {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.summary-stat-value {
+  font-family: var(--f-head);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.summary-stat-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.quicklink-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .quicklink-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .quicklink-grid { grid-template-columns: 1fr; }
+}
+
+.quicklink-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.quicklink-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--green-2, var(--border));
+}
+
+.quicklink-card-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.quicklink-card-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.customer-user-access-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.customer-user-access-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.customer-user-access-pill.inactive { opacity: 0.55; }
+

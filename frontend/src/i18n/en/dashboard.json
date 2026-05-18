@@ -80,5 +80,30 @@
   "extra_work_status_pricing_proposed": "Pricing proposed",
   "extra_work_status_customer_approved": "Approved",
   "extra_work_status_customer_rejected": "Rejected",
-  "extra_work_status_cancelled": "Cancelled"
+  "extra_work_status_cancelled": "Cancelled",
+
+  "work_view_label": "Operational work",
+  "work_view_all": "All work",
+  "work_view_tickets": "Tickets only",
+  "work_view_extra_work": "Extra work only",
+
+  "ops_kpi_total_open_label": "Total open work",
+  "ops_kpi_total_open_meta": "Tickets + extra work",
+  "ops_kpi_tickets_label": "Active tickets",
+  "ops_kpi_tickets_meta": "Open + in progress",
+  "ops_kpi_extra_work_label": "Active extra work",
+  "ops_kpi_extra_work_meta": "Requests in flight",
+  "ops_kpi_awaiting_label": "Awaiting approval",
+  "ops_kpi_awaiting_meta": "Customer or pricing review",
+  "ops_kpi_urgent_label": "Urgent",
+  "ops_kpi_urgent_meta": "Across all work",
+  "ops_recent_title": "Recent operational items",
+  "ops_recent_sub": "Tickets and extra work share one queue. Use the type pill to tell them apart.",
+  "ops_recent_view_all_tickets": "View all tickets",
+  "ops_recent_extra_work_link": "{{count}} extra-work requests open · View all",
+  "ops_recent_extra_work_link_zero": "No open extra work · View all",
+  "ops_type_ticket": "Ticket",
+  "ops_type_extra_work": "Extra work",
+  "ops_byb_tickets_title": "Tickets by building",
+  "ops_byb_extra_work_title": "Extra work by building"
 }

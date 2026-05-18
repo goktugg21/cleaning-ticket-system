@@ -32,6 +32,17 @@ import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
 import { CustomerPricingPage } from "./pages/admin/CustomerPricingPage";
 import { CustomerSubPagePlaceholder } from "./pages/admin/CustomerSubPagePlaceholder";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
+// Sprint 28 Batch 13 — view-first refactor of the customer detail
+// surface. `/admin/customers/:id` (Overview) and `/permissions` are
+// now genuinely different pages instead of two routes onto the same
+// `CustomerFormPage`. `CustomerFormPage` itself is preserved as the
+// create flow (`/admin/customers/new`) and as the basics editor
+// (`/admin/customers/:id/edit`).
+import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
+import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
+import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
+import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
+import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
 import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
@@ -228,33 +239,41 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 28 Batch 13 — for admins, `/admin/customers/:id`
+              is now the view-first `CustomerOverviewPage` (summary +
+              quicklinks), NOT the legacy edit form. BM still gets
+              `BuildingManagerCustomerDetailPage` (unchanged). The
+              old edit form is reachable at `/admin/customers/:id/edit`
+              and remains the create flow at `/admin/customers/new`. */}
           <Route
             path="/admin/customers/:id"
             element={
               <CustomerReadRoute>
                 <ByRole
                   bm={<BuildingManagerCustomerDetailPage />}
-                  admin={<CustomerFormPage />}
+                  admin={<CustomerOverviewPage />}
                 />
               </CustomerReadRoute>
             }
           />
-          {/* Sprint 28 Batch 3 — customer-scoped submenu routes.
-              The sidebar (see `AppShell.tsx`) switches into a
-              customer-scoped mode under `/admin/customers/:id/*`.
-              Most sub-routes render `CustomerSubPagePlaceholder`
-              (a "coming soon" empty state); they will be replaced
-              by real sub-pages in later batches (Contacts — Batch
-              4; cart UX — Batch 6; view-first refactor — Batch
-              13). `permissions` is the deliberate exception:
-              re-renders `CustomerFormPage` so the Sprint 27E
-              permission editor stays reachable without touching
-              the parent page. */}
+          <Route
+            path="/admin/customers/:id/edit"
+            element={
+              <AdminRoute>
+                <CustomerFormPage />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 28 Batch 13 — customer-scoped sub-routes get real
+              view-first pages. The shared sidebar mode still keys on
+              `/admin/customers/:id/*` (see `AppShell.tsx`); the only
+              change here is each entry now points at a dedicated
+              page instead of a placeholder or the legacy mega-form. */}
           <Route
             path="/admin/customers/:id/buildings"
             element={
               <AdminRoute>
-                <CustomerSubPagePlaceholder />
+                <CustomerBuildingsPage />
               </AdminRoute>
             }
           />
@@ -262,7 +281,7 @@ export default function App() {
             path="/admin/customers/:id/users"
             element={
               <AdminRoute>
-                <CustomerSubPagePlaceholder />
+                <CustomerUsersPage />
               </AdminRoute>
             }
           />
@@ -270,7 +289,7 @@ export default function App() {
             path="/admin/customers/:id/permissions"
             element={
               <AdminRoute>
-                <CustomerFormPage />
+                <CustomerPermissionsPage />
               </AdminRoute>
             }
           />
@@ -308,7 +327,7 @@ export default function App() {
             path="/admin/customers/:id/settings"
             element={
               <AdminRoute>
-                <CustomerSubPagePlaceholder />
+                <CustomerSettingsPage />
               </AdminRoute>
             }
           />
