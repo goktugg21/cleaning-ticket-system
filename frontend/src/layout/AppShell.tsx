@@ -201,57 +201,68 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.customer_submenu.overview")}
               </NavLink>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/buildings`}
-                className={navClass}
-                data-testid="sidebar-customer-buildings"
-              >
-                <span className="nav-icon">
-                  <MapPin size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.buildings")}
-              </NavLink>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/users`}
-                className={navClass}
-                data-testid="sidebar-customer-users"
-              >
-                <span className="nav-icon">
-                  <UserCog size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.users")}
-              </NavLink>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/permissions`}
-                className={navClass}
-                data-testid="sidebar-customer-permissions"
-              >
-                <span className="nav-icon">
-                  <ShieldCheck size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.permissions")}
-              </NavLink>
-              {/* Sprint 28 Batch 5 — per-customer pricing. */}
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/pricing`}
-                className={navClass}
-                data-testid="sidebar-customer-pricing"
-              >
-                <span className="nav-icon">
-                  <Tag size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.pricing")}
-              </NavLink>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/extra-work`}
-                className={navClass}
-                data-testid="sidebar-customer-extra-work"
-              >
-                <span className="nav-icon">
-                  <Receipt size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.extra_work")}
-              </NavLink>
+              {/* Sprint 28 Batch 12 — BM-trimmed customer-scoped
+                  submenu. BUILDING_MANAGER only has read-only access
+                  to Overview + Contacts. The other entries
+                  (Buildings, Users, Permissions, Pricing, Extra
+                  Work, Settings) are admin-only edit surfaces and
+                  hiding them keeps the role's surface area
+                  consistent with the route guards. */}
+              {me?.role !== "BUILDING_MANAGER" && (
+                <>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/buildings`}
+                    className={navClass}
+                    data-testid="sidebar-customer-buildings"
+                  >
+                    <span className="nav-icon">
+                      <MapPin size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.buildings")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/users`}
+                    className={navClass}
+                    data-testid="sidebar-customer-users"
+                  >
+                    <span className="nav-icon">
+                      <UserCog size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.users")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/permissions`}
+                    className={navClass}
+                    data-testid="sidebar-customer-permissions"
+                  >
+                    <span className="nav-icon">
+                      <ShieldCheck size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.permissions")}
+                  </NavLink>
+                  {/* Sprint 28 Batch 5 — per-customer pricing. */}
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/pricing`}
+                    className={navClass}
+                    data-testid="sidebar-customer-pricing"
+                  >
+                    <span className="nav-icon">
+                      <Tag size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.pricing")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/extra-work`}
+                    className={navClass}
+                    data-testid="sidebar-customer-extra-work"
+                  >
+                    <span className="nav-icon">
+                      <Receipt size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.extra_work")}
+                  </NavLink>
+                </>
+              )}
               <NavLink
                 to={`/admin/customers/${sidebar.customerId}/contacts`}
                 className={navClass}
@@ -262,16 +273,18 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.customer_submenu.contacts")}
               </NavLink>
-              <NavLink
-                to={`/admin/customers/${sidebar.customerId}/settings`}
-                className={navClass}
-                data-testid="sidebar-customer-settings"
-              >
-                <span className="nav-icon">
-                  <Settings size={16} strokeWidth={2} />
-                </span>
-                {t("nav.customer_submenu.settings")}
-              </NavLink>
+              {me?.role !== "BUILDING_MANAGER" && (
+                <NavLink
+                  to={`/admin/customers/${sidebar.customerId}/settings`}
+                  className={navClass}
+                  data-testid="sidebar-customer-settings"
+                >
+                  <span className="nav-icon">
+                    <Settings size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.customer_submenu.settings")}
+                </NavLink>
+              )}
             </>
           ) : (
             <>

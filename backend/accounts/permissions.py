@@ -106,6 +106,95 @@ class IsSuperAdminOrCompanyAdminForCompany(IsAuthenticatedAndActive):
         ).exists()
 
 
+class IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer(
+    IsAuthenticatedAndActive
+):
+    """
+    Sprint 28 Batch 12 — BM read-only customer/contact gate.
+
+    A permission that admits BUILDING_MANAGER on **safe methods only**
+    (GET / HEAD / OPTIONS), and otherwise defers to the existing
+    `IsSuperAdminOrCompanyAdminForCompany` semantics for unsafe methods
+    (POST / PATCH / PUT / DELETE → SUPER_ADMIN or COMPANY_ADMIN of the
+    customer's company; BM gets 403).
+
+    For BM safe-method access, the customer must be in
+    `scope_customers_for(request.user)` — i.e. linked to at least one
+    of the BM's assigned buildings (either via the new M:N
+    `CustomerBuildingMembership` or the legacy `Customer.building`
+    anchor; the scope helper checks both). Out-of-scope customers
+    yield 404 at the view layer's queryset filter, not 403, to avoid
+    leaking customer existence to a BM.
+
+    Behaviour for other roles is unchanged from the existing
+    `IsSuperAdminOrCompanyAdminForCompany`:
+      - STAFF / CUSTOMER_USER / anonymous → 403 on every method.
+      - SUPER_ADMIN → passes everything.
+      - COMPANY_ADMIN → passes only for customers in their company.
+
+    No new `osius.*` keys are introduced — this is a deliberate
+    re-use of the existing scope helpers (`scope_customers_for`,
+    which already encodes the BM building-assignment branch) +
+    DRF's SAFE_METHODS semantics.
+    """
+
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        # Admins always pass; BM passes ONLY on safe methods. Unsafe
+        # methods for BM fall through to False here so the view's
+        # write actions return 403 just like they did pre-Batch-12.
+        if request.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
+            return True
+        if request.user.role == UserRole.BUILDING_MANAGER:
+            from rest_framework.permissions import SAFE_METHODS
+
+            return request.method in SAFE_METHODS
+        return False
+
+    def has_object_permission(self, request, view, obj):
+        from buildings.models import Building
+        from companies.models import Company, CompanyUserMembership
+        from customers.models import Customer
+
+        if request.user.role == UserRole.SUPER_ADMIN:
+            return True
+
+        if request.user.role == UserRole.COMPANY_ADMIN:
+            if isinstance(obj, Company):
+                company_id = obj.id
+            elif isinstance(obj, (Building, Customer)):
+                company_id = obj.company_id
+            else:
+                return False
+            return CompanyUserMembership.objects.filter(
+                user=request.user, company_id=company_id
+            ).exists()
+
+        if request.user.role == UserRole.BUILDING_MANAGER:
+            # Defence in depth: only Customer objects are reachable
+            # through this gate today (the contacts endpoints look up
+            # the URL-bound Customer and call `check_object_permissions`
+            # against it). For anything else, deny — matches the
+            # admin-gate's branching shape.
+            from rest_framework.permissions import SAFE_METHODS
+
+            if request.method not in SAFE_METHODS:
+                return False
+            if not isinstance(obj, Customer):
+                return False
+            # `scope_customers_for` is the single source of truth for
+            # BM customer visibility (via `customer_ids_for` BM branch
+            # → M:N CustomerBuildingMembership ∪ legacy
+            # Customer.building anchor). Reuse it so the gate cannot
+            # drift from the queryset.
+            from accounts.scoping import scope_customers_for
+
+            return scope_customers_for(request.user).filter(pk=obj.pk).exists()
+
+        return False
+
+
 class CanManageStaffMember(IsAuthenticatedAndActive):
     """
     Sprint 24A — gate for the StaffProfile + BuildingStaffVisibility

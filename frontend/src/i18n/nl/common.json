@@ -688,5 +688,31 @@
   "ticket_staff_complete.error_route_mismatch": "De routering is gewijzigd. Vernieuw de pagina en probeer opnieuw.",
   "ticket_staff_complete.attachment_hint": "Als je een foto hebt, upload deze dan via de bijlagenkaart op deze pagina voordat je verstuurt.",
 
-  "manager_review.label_sent_at": "Verstuurd voor manager-review op"
+  "manager_review.label_sent_at": "Verstuurd voor manager-review op",
+
+  "bm_customers.eyebrow": "Beheerder-weergave",
+  "bm_customers.title": "Klanten in je toegewezen gebouwen",
+  "bm_customers.readonly_hint": "Alleen-lezen — je kunt klanten en hun contactpersonen bekijken in de gebouwen die jij beheert.",
+  "bm_customers.empty": "Er zijn nog geen klanten gekoppeld aan jouw toegewezen gebouwen.",
+
+  "bm_customer_detail.back": "Terug naar klanten",
+  "bm_customer_detail.invalid_id": "Ongeldige klant.",
+  "bm_customer_detail.readonly_hint": "Alleen-lezen klantoverzicht.",
+  "bm_customer_detail.section_basic_title": "Basisgegevens",
+  "bm_customer_detail.field_language": "Taal",
+  "bm_customer_detail.field_active": "Actief",
+  "bm_customer_detail.active_yes": "Ja",
+  "bm_customer_detail.active_no": "Nee",
+  "bm_customer_detail.section_buildings_title": "Gekoppelde gebouwen",
+  "bm_customer_detail.buildings_empty": "Deze klant is niet gekoppeld aan gebouwen die jij kunt zien.",
+  "bm_customer_detail.section_contacts_title": "Contactpersonen",
+  "bm_customer_detail.contacts_hint": "Bekijk de contactpersonen voor deze klant in jouw toegewezen gebouwen.",
+  "bm_customer_detail.contacts_link": "Contactpersonen bekijken",
+
+  "bm_customer_contacts.back": "Terug naar {{name}}",
+  "bm_customer_contacts.invalid_id": "Ongeldige klant.",
+  "bm_customer_contacts.title": "Contactpersonen",
+  "bm_customer_contacts.readonly_hint": "Alleen-lezen — klik op een rij om de details van het contact te zien.",
+  "bm_customer_contacts.empty": "Er zijn nog geen contactpersonen geregistreerd voor deze klant.",
+  "bm_customer_contacts.notes_label": "Notities"
 }

@@ -9,11 +9,18 @@ Routes (registered in `customers/urls.py`):
   PATCH  /api/customers/<customer_id>/contacts/<contact_id>/
   DELETE /api/customers/<customer_id>/contacts/<contact_id>/
 
-Permission gate is `IsSuperAdminOrCompanyAdminForCompany` — the same
-gate used by the existing customer membership endpoints. SUPER_ADMIN
-may act on any customer; COMPANY_ADMIN only on customers inside their
-own provider company; BUILDING_MANAGER / STAFF / CUSTOMER_USER never
-reach the view.
+Permission gate is
+`IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer` — the same
+gate used by the existing customer membership endpoints widened in
+Sprint 28 Batch 12 to admit BUILDING_MANAGER on **safe methods only**
+(GET list + GET detail) when the URL-bound customer is in
+`scope_customers_for(BM)`. SUPER_ADMIN passes everything;
+COMPANY_ADMIN passes only for customers inside their own provider
+company; BM gets read-only access scoped to their assigned
+buildings; STAFF and CUSTOMER_USER never reach the view.
+
+Unsafe methods (POST / PATCH / DELETE) still gate to
+SUPER_ADMIN + COMPANY_ADMIN only; BM gets 403 on every write path.
 
 ID smuggling defence: the detail view re-validates that
 `contact.customer_id == customer.id`. A SUPER_ADMIN could otherwise
@@ -25,7 +32,9 @@ from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
 
-from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
+from accounts.permissions import (
+    IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer,
+)
 from config.pagination import UnboundedPagination
 
 from .models import Contact, Customer
@@ -35,7 +44,13 @@ from .serializers_contacts import ContactSerializer
 class CustomerContactListCreateView(generics.ListCreateAPIView):
     """GET list + POST create at /api/customers/<customer_id>/contacts/."""
 
-    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    # Sprint 28 Batch 12 — BUILDING_MANAGER may GET (list/detail)
+    # contacts when the URL-bound customer is in their scope; unsafe
+    # methods still require admin (the gate's has_permission rejects
+    # BM on POST/PATCH/DELETE).
+    permission_classes = [
+        IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer
+    ]
     serializer_class = ContactSerializer
     pagination_class = UnboundedPagination
 
@@ -74,7 +89,11 @@ class CustomerContactListCreateView(generics.ListCreateAPIView):
 class CustomerContactDetailView(generics.RetrieveUpdateDestroyAPIView):
     """GET / PATCH / DELETE at /api/customers/<customer_id>/contacts/<contact_id>/."""
 
-    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    # Sprint 28 Batch 12 — BUILDING_MANAGER gets GET only (read scoped
+    # to their assigned-building customers); PATCH/DELETE still 403.
+    permission_classes = [
+        IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer
+    ]
     serializer_class = ContactSerializer
 
     def _get_customer(self):

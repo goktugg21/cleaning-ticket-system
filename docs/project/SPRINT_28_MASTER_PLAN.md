@@ -2359,18 +2359,172 @@ Goal: configurable per-staff / per-building routing per product rule #7.
 Goal: Building Manager surfaces customers and contacts in their assigned
 buildings, read-only. Depends on Batch 3 + Batch 4.
 
-- [ ] Building Manager sees customers in assigned buildings — list +
-      detail view, read-only.
-- [ ] Building Manager sees contacts for those customers — list + detail
-      view, read-only.
-- [ ] Read-only by default. No edit affordances on these surfaces.
-- [ ] No global provider settings access. Building Manager cannot reach
+- [x] ~~Building Manager sees customers in assigned buildings — list +
+      detail view, read-only.~~
+- [x] ~~Building Manager sees contacts for those customers — list + detail
+      view, read-only.~~
+- [x] ~~Read-only by default. No edit affordances on these surfaces.~~
+- [x] ~~No global provider settings access. Building Manager cannot reach
       `/admin/companies`, `/admin/buildings` (master list), or settings
-      pages.
-- [ ] Reuse existing scope helpers — no new backend gates needed; the
-      backend already scopes via `building_ids_for(user)`.
-- [ ] Add tests: backend scope tests + frontend Playwright for the
-      read-only assertion (no Edit buttons rendered).
+      pages.~~ (Playwright spec asserts BM hitting these paths gets
+      bounced to `/?admin_required=ok` by `AdminRoute`.)
+- [x] ~~Reuse existing scope helpers — no new backend gates needed; the
+      backend already scopes via `building_ids_for(user)`.~~
+      (Customer reads already worked for BM via `scope_customers_for`;
+      Batch 12 added ONE small permission class
+      `IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer` for
+      the contacts views — the brief acknowledged this as the
+      Batch 4 deferral. No new `osius.*` keys.)
+- [x] ~~Add tests: backend scope tests + frontend Playwright for the
+      read-only assertion (no Edit buttons rendered).~~
+
+#### Batch 12 completion (2026-05-18)
+
+- **Date:** 2026-05-18.
+- **Commit:** uncommitted on working tree as of 2026-05-18, on top of
+  `48bead6`.
+- **Files changed (7 edits + 6 new files):**
+  - **Backend edits:**
+    - `backend/accounts/permissions.py` (+89 — new
+      `IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer`
+      permission class admitting BM on safe methods only when the
+      customer is in `scope_customers_for(user)`; falls through to
+      the existing `IsSuperAdminOrCompanyAdminForCompany` behaviour
+      for unsafe methods / admin roles).
+    - `backend/customers/views_contacts.py` (+~10 — swap the
+      `permission_classes` on `CustomerContactListCreateView` and
+      `CustomerContactDetailView` from
+      `IsSuperAdminOrCompanyAdminForCompany` to the new gate; module
+      docstring updated to document the Batch 12 widening).
+    - `backend/customers/tests/test_sprint28_contacts.py` (+~17 —
+      Batch 4 regression-lock test renamed
+      `test_building_manager_blocked_on_every_endpoint` →
+      `test_building_manager_blocked_on_write_endpoints`; body now
+      asserts BM=200 on GET list/detail in scope AND BM=403 on
+      POST/PATCH/DELETE; the read-side behaviour is locked in the new
+      `test_sprint28_bm_readonly.py` module).
+  - **Frontend edits:**
+    - `frontend/src/App.tsx` (+ — new imports +
+      `CustomerReadRoute` wrapper around `/admin/customers`,
+      `/admin/customers/:id`, `/admin/customers/:id/contacts`;
+      `ByRole` helper dispatches to the BM read-only page when
+      `me.role === "BUILDING_MANAGER"`; `/admin/customers/new` +
+      every other customer sub-route stays admin-only).
+    - `frontend/src/layout/AppShell.tsx` (+~30 — customer-scoped
+      submenu trimmed for BM: only Overview + Contacts; Buildings,
+      Users, Permissions, Pricing, Extra Work, Settings hidden when
+      `me.role === "BUILDING_MANAGER"`).
+    - `frontend/src/i18n/en/common.json` and `nl/common.json` (each
+      +26 keys covering page titles, read-only hints, section
+      labels, empty states; EN/NL parity verified).
+  - **New backend modules / tests:**
+    - `backend/customers/tests/test_sprint28_bm_readonly.py` (22
+      tests across 4 classes — `BMCustomerListDetailScopeTests` 7
+      tests; `BMContactListDetailScopeTests` 7 tests;
+      `BMContactAdminUnchangedTests` 6 tests; `BMWithoutAssignedBuildingTests`
+      2 tests).
+  - **New frontend modules:**
+    - `frontend/src/components/CustomerReadRoute.tsx` — wrapper
+      admitting SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER;
+      bounces other roles to `/?admin_required=ok`.
+    - `frontend/src/pages/admin/BuildingManagerCustomersPage.tsx` —
+      read-only customer list (no Add button, no Edit links;
+      `data-testid="bm-customers-page"`).
+    - `frontend/src/pages/admin/BuildingManagerCustomerDetailPage.tsx`
+      — read-only customer overview + Linked buildings + link to
+      Contacts (no form controls; `data-testid="bm-customer-detail-page"`).
+    - `frontend/src/pages/admin/BuildingManagerCustomerContactsPage.tsx`
+      — read-only contact list + click-to-expand detail panel (no
+      Add/Edit/Delete buttons; `data-testid="bm-customer-contacts-page"`).
+  - **New Playwright spec:**
+    - `frontend/tests/e2e/sprint28_bm_readonly_customers.spec.ts`
+      — 4 cases: BM sees the read-only list (no Add button); BM
+      detail is read-only (zero input/textarea/select controls);
+      BM contacts page is read-only (no `.btn-primary` /
+      `.btn-danger` / form controls); BM cannot reach
+      `/admin/companies`, `/admin/buildings`, `/admin/users`,
+      `/admin/services`, or `/admin/customers/new` — each redirects
+      to `/?admin_required=ok` per `AdminRoute`.
+- **Migration status:** NO migration created for Batch 12 — pure
+  permission-class swap + new page components; no schema change.
+  `makemigrations --dry-run --check`: No changes detected.
+- **Tests / checks run:**
+  - Targeted: `python manage.py test
+    customers.tests.test_sprint28_bm_readonly` → **22/22 OK** in
+    30.2s. Combined with the updated Batch 4 lock test → **31/31 OK**.
+  - Backend customers+buildings+accounts sweep: **400/400 OK** in
+    529.0s (initial run flagged the renamed Batch 4 lock test
+    `test_building_manager_blocked_on_every_endpoint`; updated test
+    now passes — the rename is intentional per the new Batch 12
+    contract).
+  - Broader sweep (`accounts tickets audit customers buildings`):
+    **673/673 OK** in 746.1s — no regression.
+  - `manage.py check`: 0 issues.
+  - `makemigrations --dry-run --check`: No changes detected.
+  - Frontend gates (re-verified via `wsl.exe -d Ubuntu bash -lic`):
+    `tsc --noEmit -p tsconfig.app.json` → clean (EXIT=0);
+    `vite build` → clean in 497ms; `eslint .` → **52 problems =
+    baseline** (zero new hits — 3 `react-hooks/set-state-in-effect`
+    suppressions via `// eslint-disable-line` on the data-loader
+    `setLoading(true)` calls + `queueMicrotask` deferral for the
+    `numericId === null` branches, both mirroring the existing
+    Batch 4 `CustomerContactsPage` precedent).
+  - Playwright spec **written but NOT executed locally** (WSL
+    `frontend/test-results/` root-ownership gotcha; CI exercises).
+- **Important decisions made (also in §9):**
+  - **No new `osius.*` permission keys.** Reused
+    `scope_customers_for(user)` (BM branch already implemented in
+    Sprint 14) as the single source of truth for BM customer
+    visibility. The new permission class is a thin wrapper around
+    the existing scope helper + DRF `SAFE_METHODS`.
+  - **`CustomerViewSet` UNCHANGED.** It already used
+    `IsAuthenticatedAndActive` + `scope_customers_for` on read
+    actions → BM already had read access. Writes are gated by
+    `IsSuperAdminOrCompanyAdminForCompany` → BM already gets 403.
+    Locked by the new `BMCustomerListDetailScopeTests`.
+  - **Contacts gate widened on Batch 4 deferral.** The Batch 4
+    completion log explicitly deferred BM read-only contact view
+    to Batch 12. Batch 12 swaps the permission class on
+    `CustomerContactListCreateView` + `CustomerContactDetailView`
+    to admit BM on safe methods only.
+  - **Frontend uses dedicated BM read-only pages, NOT a "read-only
+    mode" flag on the admin pages.** `CustomerFormPage.tsx` is 1784
+    lines and edit-bound; adding "read-only mode" inline would be
+    invasive and decomposition is parked for Batch 13. Three new
+    BM-only pages (each <200 lines) keep the diff small and
+    purely additive.
+  - **Sidebar trim**: BM customer-scoped submenu shows only
+    Overview + Contacts; Buildings, Users, Permissions, Pricing,
+    Extra Work, Settings hidden. Honours "no global admin access"
+    and matches the route guards (those entries route to
+    `AdminRoute`-protected pages which would bounce BM).
+  - **`/admin/customers/new` stays admin-only.** BM has no create
+    surface anywhere.
+  - **Lint baseline preserved (52)** via the existing Batch 4
+    `queueMicrotask` pattern for the `numericId === null` branch
+    + `// eslint-disable-line` suffix on the `setLoading(true)`
+    data-loader call (mirrors `CustomerPricingPage` /
+    `CustomerContactsPage`).
+- **Remaining risks:**
+  - **`CustomerFormPage` decomposition still parked for Batch 13.**
+    BM uses dedicated read-only pages rather than a "read-only
+    mode" on the admin page. When Batch 13 decomposes the admin
+    page, the BM variants can be retired in favour of unified
+    view-first variants if the decomposition produces a clean
+    read-mode/write-mode split.
+  - **BM not yet exposed to the existing CustomerCompanyPolicy /
+    visibility-flag surfaces.** Sprint 23B's
+    `show_assigned_staff_*` flags on `Customer` are admin-write
+    surfaces; BM has no surface for them and was always 403 on the
+    Customer PATCH path. Batch 12 does not change this. The BM
+    read-only customer detail page does NOT render the visibility
+    flags — they're administrative-policy data not relevant to a
+    BM read.
+  - **Inline contact detail panel (in-page expand)** is the
+    smallest-safe display surface. A more polished modal can land
+    in a future polish batch if needed; the existing
+    `CustomerContactsPage` admin modal is edit-bound and not
+    appropriate for the read-only BM experience.
 
 ### Batch 13 — View-first refactor of admin pages
 
@@ -2415,22 +2569,18 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 12 — Building Manager read-only
-  customer/contact view**
+- **Current batch:** **Batch 13 — View-first refactor of admin pages**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 12 items.
-  Batch 12 ships read-only customer + contact list/detail views for
-  Building Manager in their assigned buildings. Reuse existing scope
-  helpers (`building_ids_for`); no new backend gates needed. The
-  frontend exposes the surfaces inside the existing customer-scoped
-  sidebar (Batch 3 anchor) but the BM persona sees a read-only
-  variant — no Add/Edit affordances. View-first per spec §3.
-  Depends on Batch 3 (sidebar) + Batch 4 (Contact model). No global
-  provider settings access for BM. Batch 4 deferred this BM
-  read-only view explicitly to Batch 12.
-- **Next recommended batch (on-deck):** Batch 13 — View-first refactor
-  of admin pages (including `CustomerFormPage.tsx` decomposition).
+  this file, state the current batch, and work only on Batch 13 items.
+  Batch 13 decomposes the parent record pages (`CustomerFormPage`
+  1784 lines, `UserFormPage` 1091 lines, etc.) into view-first
+  sub-pages per spec §3. The Batch 12 BM dedicated read-only pages
+  can be retired in favour of a unified view-first read-mode if the
+  decomposition produces a clean split — flag this in the Batch 13
+  PM brief.
+- **Next recommended batch (on-deck):** Batch 14 — Proposal PDF and
+  future design docs (lowest priority).
 
 ---
 
@@ -2440,6 +2590,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-18 | Batch 12 — BM read-only customer/contact view | uncommitted on working tree as of 2026-05-18, on top of `48bead6` | Joint backend + frontend, read-only customer/contact surfaces for BUILDING_MANAGER in their assigned-building scope. **Backend:** new `IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer` permission class in `accounts/permissions.py` (admits BM on safe methods only when the customer is in `scope_customers_for(user)`; defers to the existing `IsSuperAdminOrCompanyAdminForCompany` semantics for unsafe methods / admin roles); applied to `views_contacts.py` for both `CustomerContactListCreateView` + `CustomerContactDetailView`. `CustomerViewSet` UNCHANGED — already correctly behaved for BM via `IsAuthenticatedAndActive` + `scope_customers_for` on reads + `IsSuperAdminOrCompanyAdminForCompany` on writes. NO new `osius.*` permission keys. NO migration (pure permission-class swap + new page components). Batch 4 regression-lock test `test_building_manager_blocked_on_every_endpoint` renamed to `test_building_manager_blocked_on_write_endpoints` and body updated to reflect the new Batch 12 contract (BM=200 on GET in scope, BM=403 on POST/PATCH/DELETE). 22 new backend tests across 4 classes in `test_sprint28_bm_readonly.py` covering: BM customer list/retrieve in scope; BM cross-scope 404; BM customer write 403 (create/update/delete/reactivate); BM contact list/retrieve in scope; BM out-of-scope customer-contact 403; BM contact write 403 (create/update/delete); SUPER_ADMIN + COMPANY_ADMIN contact behaviour unchanged; STAFF + CUSTOMER_USER on contacts still 403; bare BM (no `BuildingManagerAssignment`) sees zero customers and 403 on contacts. **Frontend:** new `CustomerReadRoute.tsx` wrapper admitting SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER; bounces other roles to `/?admin_required=ok` matching `AdminRoute` pattern. `App.tsx` swaps three route guards from `AdminRoute` to `CustomerReadRoute` (`/admin/customers`, `/admin/customers/:id`, `/admin/customers/:id/contacts`); new `ByRole` helper dispatches to BM-variant component when `me.role === "BUILDING_MANAGER"`. `/admin/customers/new` + all other customer sub-routes (`/buildings`, `/users`, `/permissions`, `/extra-work`, `/pricing`, `/settings`) stay admin-only. Three new BM-only pages: `BuildingManagerCustomersPage.tsx` (read-only customer list; no Add button; testid `bm-customers-page`), `BuildingManagerCustomerDetailPage.tsx` (read-only customer overview + linked buildings + link to Contacts; zero form controls; testid `bm-customer-detail-page`), `BuildingManagerCustomerContactsPage.tsx` (read-only contact list + click-to-expand detail panel; no Add/Edit/Delete buttons; testid `bm-customer-contacts-page`). `AppShell.tsx` customer-scoped submenu trimmed for BM — only Overview + Contacts visible; Buildings / Users / Permissions / Pricing / Extra Work / Settings hidden when `me.role === "BUILDING_MANAGER"`. EN/NL i18n parity: +26 keys per locale (page titles "Customers in your assigned buildings" / "Klanten in je toegewezen gebouwen"; read-only hints; section labels; empty states). New Playwright spec `sprint28_bm_readonly_customers.spec.ts` (4 cases — BM read-only list no Add button; BM detail no form controls; BM contacts no `.btn-primary`/`.btn-danger`/form controls; BM blocked from `/admin/companies`, `/admin/buildings`, `/admin/users`, `/admin/services`, `/admin/customers/new`). | Backend targeted (`test_sprint28_bm_readonly`): **22/22 OK** in 30.2s. Combined with updated Batch 4 lock (`test_sprint28_contacts.ContactScopeIsolationTests`): **31/31 OK**. Customers + buildings + accounts sweep: **400/400 OK** in 529.0s (initial run flagged the renamed Batch 4 test; updated body now passes per the new Batch 12 contract). Broader sweep (`accounts tickets audit customers buildings`): **673/673 OK** in 746.1s — no regression. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend `tsc --noEmit -p tsconfig.app.json` → clean (EXIT=0); `vite build` → clean in 497ms; `eslint .` → **52 problems = baseline** (zero new hits; the data-loader `setLoading(true)` is suppressed with `// eslint-disable-line` mirroring `CustomerPricingPage`/`CustomerContactsPage` precedent, and the `numericId === null` branches use `queueMicrotask` deferral mirroring the existing Batch 4 `CustomerContactsPage` pattern). Playwright spec written but NOT executed locally (WSL gotcha; CI exercises). | **`CustomerFormPage` decomposition still parked for Batch 13** — BM uses dedicated read-only pages rather than a read-only-mode toggle on the admin page; CustomerFormPage is 1784 lines and inline read-only mode would be invasive. Future Batch 13 can retire the BM variants if decomposition produces a clean read-mode/write-mode split. **BM has no surface for `Customer.show_assigned_staff_*` visibility flags** (admin-write fields; BM always 403 on Customer PATCH); BM read-only detail intentionally does NOT render these. **Inline contact detail panel** (in-page expand) is the smallest-safe display surface; the existing admin modal pattern is edit-bound and not appropriate for read-only BM experience. **No global admin access for BM** — Playwright spec asserts `/admin/companies`, `/admin/buildings`, `/admin/users`, `/admin/services`, `/admin/customers/new` all bounce BM to the dashboard with `?admin_required=ok`. **Renamed Batch 4 lock test**: `test_building_manager_blocked_on_every_endpoint` → `test_building_manager_blocked_on_write_endpoints` — semantic rename reflects the new Batch 12 contract (BM is NOT blocked on reads anymore); test body updated, not new test added (preserves the baseline test count). |
 | 2026-05-17 | Batch 11 — Staff completion routing | uncommitted on working tree as of 2026-05-17, on top of `3d91810` | Joint backend + frontend, configurable per-staff/per-building STAFF completion routing per product rule #7. **Backend:** new `TicketStatus.WAITING_MANAGER_REVIEW` enum value + new `Ticket.manager_review_at: DateTimeField(null=True, blank=True)` column (migration `tickets/0010_waiting_manager_review.py`, `AlterField` regenerates choices + `AddField` for the timestamp). New `BuildingStaffVisibility.staff_completion_routes_to_customer: BooleanField(default=False)` flag (migration `buildings/0004_bsv_staff_completion_routes_to_customer.py`; per-staff-per-building granularity per rule #7; default False preserves manager-review default route). 4 new `ALLOWED_TRANSITIONS` entries: `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` (STAFF default route + SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER on-behalf), `(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` EXTENDED with STAFF row (gated by routing-flag at runtime), `(WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL)` (BM accepts), `(WAITING_MANAGER_REVIEW, IN_PROGRESS)` (BM rejects). New `SCOPE_STAFF_ASSIGNED` scope helper (TicketStaffAssignment membership). `TIMESTAMP_ON_ENTER` extended to stamp `manager_review_at`. `COMPLETION_EVIDENCE_TRANSITIONS` extended to include `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` — same Sprint 25C rule (note OR visible attachment required). New STAFF routing-flag check + BM-rejection-note check in `apply_transition` with stable codes `staff_completion_route_mismatch` + `rejection_note_required` (both also enforced at serializer for view-layer 400 + defence in depth). `TicketDetailSerializer` extended with `is_assigned_staff: bool` SerializerMethodField + `manager_review_at` field (frontend uses `is_assigned_staff` to gate the "Complete work" button without a separate API call). New `@action` on `TicketViewSet` at `GET /api/tickets/<id>/staff-completion-route/` returning `{"route": "manager_review" | "customer_approval"}` for the frontend modal to render the correct destination text + submit-button label. `BuildingStaffVisibilitySerializer` + `BuildingStaffVisibilityUpdateSerializer` extended with the new flag as a writable field (necessary surface extension mirroring Batch 10's `visibility_level` rollout). Audit: `_BSV_TRACKED_FIELDS` extended to include `"staff_completion_routes_to_customer"`; existing UPDATE-diff handler covers the new field. NO new `osius.*` permission keys (model-field + scope-check pattern from Batch 10). `views_staff_assignments.py::_gate_actor` UNCHANGED — multi-staff M:N endpoint remains admin-only (PM Q5; same Batch 10 decision). H-5 invariant preserved: STAFF still has no row in `(WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED)` — the new STAFF transitions are "STAFF marking own work done", structurally distinct from "approving customer completion". 34 new backend tests across 11 classes (`test_sprint28_staff_completion.py` 31 tests + `test_sprint28_staff_completion_route_audit.py` 3 tests): structural transitions, default route, configured route, completion evidence × 4 sub-cases × 2 routes, route mismatch, STAFF-not-assigned forbidden, H-5 STAFF-cannot-approve lock, BM accepts, BM rejects with + without note, endpoint authorization matrix, audit row shape. **Frontend:** new types `WAITING_MANAGER_REVIEW` in `TicketStatus` union + `manager_review_at` + `is_assigned_staff` on `TicketDetail` + `StaffCompletionRoute` + `StaffCompletionRouteResponse` + `BuildingStaffVisibilityAdmin.staff_completion_routes_to_customer` + extended `StaffVisibilityPatch`. New API helper `getStaffCompletionRoute(ticketId)`. `TicketDetailPage.tsx` gets STAFF "Complete work" button (gated on `STAFF + IN_PROGRESS + is_assigned_staff`) + inline-card completion modal mirroring the Sprint 27F-F1 override modal shape (required note textarea + attachment hint + routing-aware destination text from the new endpoint + routing-aware submit label; handlers for `completion_evidence_required` inline error + `staff_completion_route_mismatch` refetch). Testids: `ticket-staff-complete-button`, `-modal`, `-route`, `-note`, `-error`, `-cancel`, `-submit`. `UserFormPage.tsx` `StaffDetailsSection` BSV editor gets new "Completion routes directly to customer" checkbox stacked under `can_request_assignment` (desktop + mobile mirror; testids `staff-completion-routes-to-customer-{buildingId}` + `-mobile-{buildingId}`). 17 new i18n keys per locale, EN/NL parity verified. New Playwright spec `staff-completion-routing.spec.ts` (2 cases — STAFF modal flow + admin checkbox toggle persistence; status verified via API not locale badge text for resilience). Docs: H-5 matrix row clarified (STAFF-marks-own-work-done vs customer-decision) + new §15 Test footprint section; audit row 18 marked OK with Batch 11 reference. | Backend targeted (`test_sprint28_staff_completion + test_sprint28_staff_completion_route_audit`): **34/34 OK** in 8.0s. Backend broader (`accounts tickets audit customers buildings`): **644/644 OK** in 719.7s (parent session re-verification — matches backend agent's 644/644 result). `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend gates from agent environment: `tsc --noEmit -p tsconfig.app.json` → clean (no errors); `vite build` → clean in 619ms (2789 modules); `eslint .` → **52 problems = baseline** (zero new hits — the 7 hits inside `TicketDetailPage.tsx` + `UserFormPage.tsx` are pre-existing `react-hooks/set-state-in-effect` warnings on untouched useEffect blocks). Parent session cannot independently re-verify (WSL/UNC cmd.exe gotcha — `'tsc' is not recognized`); CI will confirm on push. Playwright spec written but NOT executed locally (WSL `frontend/test-results/` root-ownership gotcha; CI exercises). | **Dev DB schema BEHIND code** — THREE pending migrations: Batch 10's `buildings/0003_buildingstaffvisibility_visibility_level` (still not applied from prior commit) + Batch 11's `buildings/0004_bsv_staff_completion_routes_to_customer` + `tickets/0010_waiting_manager_review`. User must run `python manage.py migrate buildings tickets` to catch up. Endpoints touching `WAITING_MANAGER_REVIEW`, `manager_review_at`, `visibility_level`, or `staff_completion_routes_to_customer` will raise `column does not exist` errors against the dev container until applied. **Inline attachment upload inside completion modal is UX debt** — deferred per PM Q12 + backend-engineer report; modal directs operator to existing Attachments card on the page. Backend's `completion_evidence_required` rule still accepts note-only completions. **Frontend gates not independently re-runnable from parent session** — same WSL/UNC cmd.exe limitation as prior batches; agent environments verified green. **EW staff completion routing UNIMPLEMENTED** — parked because STAFF has no EW scope today (G-B7). Future batch can add `staff_completion_routes_to_customer_extra_work` parallel column without collision. **`change_status` view UNCHANGED** — STAFF passes `is_staff_role(...)` (Sprint 23A widened) → reaches serializer + state machine where new logic applies. View-layer touch was unnecessary. **Provider on-behalf completion** supported in `ALLOWED_TRANSITIONS` (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER listed) but frontend exposes no dedicated UI surface; admins use generic status-change. Acceptable for Batch 11 scope. **Playwright spec resolves status via API** (not locale badge text) for resilience against future i18n copy changes. |
 | 2026-05-17 | Batch 10 — Staff per-building granularity | uncommitted on working tree as of 2026-05-17, on top of `eb689a1` | Joint backend + frontend, per-row STAFF visibility level on `BuildingStaffVisibility`. **Backend:** new `BuildingStaffVisibility.VisibilityLevel` TextChoices enum (`ASSIGNED_ONLY` / `BUILDING_READ` / `BUILDING_READ_AND_ASSIGN`); new `visibility_level` CharField with `default=BUILDING_READ` (preserves existing B2 behaviour for every existing BSV row + Sprint 24-28 staff test). Migration `buildings/0003_buildingstaffvisibility_visibility_level.py` (single AddField; backfills automatically). `accounts/scoping.py` STAFF branch updated: only `BUILDING_READ` / `BUILDING_READ_AND_ASSIGN` rows contribute building-wide visibility; `ASSIGNED_ONLY` rows recognise STAFF at the building (for direct-assignment-target eligibility via `_validate_target_staff`) but do NOT widen visibility beyond `TicketStaffAssignment`. H-4 floor (`Q(_assigned=True)`) preserved untouched. `tickets/views.py::assign` action widened: STAFF allowed iff active BSV row exists for `ticket.building_id` with `visibility_level=BUILDING_READ_AND_ASSIGN`. `TicketAssignSerializer.validate` (`tickets/serializers.py`) mirror-widened — necessary deviation: the existing Sprint 28 Batch 2 serializer gate was rejecting all STAFF before view-layer code could fire; both layers now share the same B3 BSV-level check (defence in depth). `views_staff_assignments.py::_gate_actor` UNCHANGED — the multi-staff M:N `TicketStaffAssignment` stays admin-only (PM Q5: B3 maps to BM-assign verb, not multi-staff orchestration). NO new `osius.*` keys (PM Q6: model field is the source of truth). `BuildingStaffVisibilitySerializer` extended with `visibility_level` as a writable field. Audit signal: `_BSV_TRACKED_FIELDS` extended from `("can_request_assignment",)` to include `"visibility_level"`. 19 new backend tests across 9 classes (`test_sprint28_staff_building_granularity.py`) covering default, B1/B2/B3 scope + assign-gate, cross-building + cross-company isolation, target-validation unchanged, H-4 floor (finally dedicated coverage — closes audit row 25 doc-drift), multi-staff endpoint still admin-only; +1 audit test for `visibility_level` UPDATE diff. **Frontend:** new `StaffVisibilityLevel` string-literal union + `visibility_level` field on `BuildingStaffVisibilityAdmin` in `api/types.ts`; `updateStaffVisibility` helper refactored to take a `StaffVisibilityPatch` object (avoids field clobber when toggling one of the two writable fields). `UserFormPage.tsx` `StaffDetailsSection` gets new per-row dropdown in desktop table column + mobile card (`data-testid="staff-visibility-level-select-{buildingId}"`) — smallest-safe addition, no redesign. `DashboardPage.tsx` gets conditional "Assigned to you" badge on STAFF rows where `ticket.assigned_to === me.id` (desktop subject cell + phone-width ticket card); sort-first parked as remaining UX debt. 5 new i18n keys per locale (`staff_admin.level_*` + `tickets.assigned_to_you`), EN/NL parity. New Playwright spec `staff-building-granularity.spec.ts` (2 cases — dropdown renders + three options exist). Matrix doc updated: §1.2 BSV row mentions visibility_level; §3 H-4 paragraph references the new `StaffH4FloorTests`; new §14 Test footprint section. Audit doc updated: row 17 status → OK with Batch 10 reference; row 26 noted as PARTIAL (view + serializer halves closed; deeper serializer audit follow-up still open). | Backend targeted (`test_sprint28_staff_building_granularity + test_sprint28_visibility_level_audit`): **19/19 OK** in 5.1s. Backend broader (`accounts tickets audit customers`): **585/585 OK** in 471.9s — no regression to existing Sprint 24-28 STAFF tests. Backend full suite (per backend agent's environment): **1032/1032 OK**. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend typecheck (agent env): EXIT=0 clean. Frontend lint (agent env): **52 problems = baseline** (zero new hits in changed files). Frontend `vite build`: failed environmentally (rolldown `win32-x64-msvc` native binding missing in WSL — same class of WSL/UNC limitation as prior batches; CI builds cleanly). Playwright spec written, NOT executed locally (WSL `frontend/test-results/` root-ownership gotcha). | **Dev DB schema BEHIND code** until user approves `python manage.py migrate buildings` — `accounts/scoping.py` will raise `column does not exist` against the dev container until applied. **`vite build` not re-runnable from parent session** (rolldown native binding through WSL UNC bridge). **Sort-first prioritisation for own-assigned tickets parked** as remaining UX debt — badge ships; sort would require role-gated shared-list reordering. **`TicketAssignSerializer.validate` deep audit (audit row 26) remains open** — Batch 10 widened the gate consistently across view + serializer; a formal boolean-edge-case audit of the serializer is a follow-up. **Badge does NOT honour multi-staff M:N** — fires only on `ticket.assigned_to === me.id` (legacy single-assignee FK); M:N check requires per-row staff-assignments fetch, deferred. |
 | 2026-05-17 | Batch 9 — Extra Work dashboard and stats | uncommitted on working tree as of 2026-05-17, on top of `ec66380` | Joint backend + frontend, aggregation-only batch (no new models, no new migrations). **Backend:** two new `@action` methods on `ExtraWorkRequestViewSet` at `backend/extra_work/views.py` — `GET /api/extra-work/stats/` returns `{total, by_status, by_routing, by_urgency, active, awaiting_pricing, awaiting_customer_approval, urgent}`; `GET /api/extra-work/stats/by-building/` returns a list of per-building rows `{building_id, building_name, total, active, awaiting_pricing, awaiting_customer_approval, urgent}` ordered by `building_name`, GROUP BY naturally skips zero-row buildings. Both reuse `scope_extra_work_for(request.user)` so H-1/H-2 isolation is inherited; STAFF naturally gets all-zeros because the scope helper returns `.none()` for STAFF (MVP). Two module-level constants `EXTRA_WORK_TERMINAL_STATUSES = ("CUSTOMER_APPROVED", "CUSTOMER_REJECTED", "CANCELLED")` and `EXTRA_WORK_AWAITING_PRICING_STATUSES = ("REQUESTED", "UNDER_REVIEW")` shared between both actions. `awaiting_customer_approval` defined as `status == PRICING_PROPOSED` only (Option A from PM Q2; Batch 8's `apply_proposal_transition` auto-advance contract makes parent EW status the single source of truth — OR-ing in `proposals__status=SENT` would double-count). `awaiting_pricing` = `routing_decision="PROPOSAL"` AND `status IN (REQUESTED, UNDER_REVIEW)` — the operator action queue. `urgent` = `urgency="URGENT"` AND `status NOT IN terminal`. No new permission keys; no migration. **Frontend:** new typed helpers `getExtraWorkStats()` + `getExtraWorkStatsByBuilding()` in `frontend/src/api/extraWork.ts` (Option A from PM Q2); new TS types `ExtraWorkStatusValue` / `ExtraWorkRoutingValue` / `ExtraWorkUrgencyValue` (string-literal unions) + `ExtraWorkStats` / `ExtraWorkStatsByBuildingRow` / `ExtraWorkStatsByBuildingResponse` in `frontend/src/api/types.ts` next to existing `TicketStats` types. `DashboardPage.tsx` ADDITIVE Extra Work section parallel to existing Tickets layout — both top-level `<section>`s wrapped in `<div className="dashboard-two-col">` that renders them **side by side at viewports ≥ 1400px** (CSS Grid `minmax(0, 1fr) minmax(0, 1fr)` with `align-items: start`) and stacked at narrower widths. `<section data-testid="dashboard-tickets-section">` wraps existing Tickets layout untouched, new `<section data-testid="dashboard-extra-work-section">` next to it with 5-KPI row (Total / Active / Awaiting pricing / Awaiting customer / Urgent) + by-building card + status-breakdown card (visual symmetry with Tickets). Empty-state container `data-testid="dashboard-extra-work-section-empty"` when `total === 0 && Object.keys(by_status).length === 0` (STAFF / no-scope users). CUSTOMER_USER gets emphasis class on `data-testid="dashboard-extra-work-kpi-awaiting-customer"`. `frontend/src/index.css` carries the new `.dashboard-two-col` rule + 1400px media query (breakpoint chosen higher than the inner `.dash-grid` 1100px breakpoint so the Tickets section's `1fr + 340px` split stays functional inside the half-viewport column); `minmax(0, 1fr)` is load-bearing to prevent the inner recent-tickets table from overflowing the column. New Extra Work loaders merged into existing tickets-stats `useEffect` to avoid a new `react-hooks/set-state-in-effect` lint hit. Same `AUTO_REFRESH_INTERVAL_MS` cadence. EN/NL i18n parity: +26 keys per locale in `dashboard.json` covering section title/sub, 5 KPI label/meta pairs, by-building title/sub + empty + 4 `{{count}}` count templates, empty section copy, 6 Extra Work status labels under `extra_work_status_*`. New backend test module `backend/extra_work/tests/test_sprint28_extra_work_stats.py` (19 tests / 5 classes — scope across SUPER_ADMIN/COMPANY_ADMIN/BUILDING_MANAGER/CUSTOMER_USER/STAFF, 8 bucket-definition tests, by-building order + zero-row skip + per-row aggregate match, H-1/H-2 cross-tenant isolation lock, soft-delete excluded). New Playwright spec `frontend/tests/e2e/sprint28_extra_work_dashboard.spec.ts` (3 tests — provider sees both sections; CUSTOMER_USER sees awaiting-customer emphasis; STAFF sees empty state). | Backend targeted: `python manage.py test extra_work.tests.test_sprint28_extra_work_stats --keepdb -v 1` → **19/19 OK** in 4.9s. Backend broader: `python manage.py test extra_work tickets audit customers --keepdb -v 1` → **535/535 OK** in 363.1s — no regression. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend in agent environment: `tsc --noEmit -p tsconfig.app.json` → **EXIT=0 clean (strict mode)**; `eslint .` → **52 problems = baseline** (zero new hits in changed files). Frontend gates NOT independently re-run from parent session (WSL/UNC cmd.exe gotcha — well-documented operational limitation). `vite build` NOT run (env mismatch in agent sandbox, unrelated to Batch 9 code; CI exercises on Linux). Playwright spec written but NOT executed locally (WSL `frontend/test-results/` gotcha; CI will exercise the 3 cases). | **At viewports < 1400px the sections stack vertically** — by design (responsive default). Users on 1366×768 / 1440×900 laptop screens may see stacked sections; 1440px+ external monitors see side-by-side. The 1400px breakpoint can be lowered to 1280px or 1200px in a future polish batch if stakeholders want a wider side-by-side range, but lowering further would cramp the Tickets inner `1fr + 340px` split. **Frontend gates not independently re-run from the parent session** — typecheck + lint passed in the frontend agent's environment; CI will confirm on push. **`vite build` not run locally** (Node 20.18 < required 20.19 in agent sandbox + rolldown UNC binding mismatch — unrelated to Batch 9 code; CI builds cleanly). **Auto-refresh loader merged into existing tickets-stats effect** to avoid a new `react-hooks/set-state-in-effect` lint hit (existing effect already trips this rule baseline; new loaders added to it rather than a fresh effect). **`ExtraWorkRequest` still NOT registered for audit** — proposal-driven auto-advance writes do not land on generic AuditLog (pre-existing Batch 6 deferral; surfacing again because Batch 9 surfaces these state changes in the dashboard counts). Stats reads do NOT depend on AuditLog so this risk is information-only. **Status-breakdown card** rendered for visual symmetry with the Tickets section (PM brief made it optional; frontend agent kept it). **Playwright spec needs CI run to confirm behaviour against demo seed** — light assertions only, no count assertions (seed-data-dependent). |
@@ -2461,6 +2612,11 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-18 | **NO new `osius.*` permission keys for Batch 12.** Reused `scope_customers_for(user)` (existing Sprint 14 BM branch already encodes "BM sees customers linked to any of their assigned buildings via M:N `CustomerBuildingMembership` OR legacy `Customer.building`") + DRF `SAFE_METHODS`. The new permission class `IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer` is a thin wrapper. | Same pattern as Batches 10 + 11 — model-field/scope-helper as the source of truth; "do not invent parallel keys when an existing one expresses the same scope" (master plan §2 "do not rename osius.*" extends in spirit). Adding `osius.customer.view_assigned_building` etc. would have required a parallel resolver branch + new admin UI surface for zero functional gain. Locked by `BMCustomerListDetailScopeTests` + `BMContactListDetailScopeTests` + `BMWithoutAssignedBuildingTests`. | Batch 12 + `backend/accounts/permissions.py::IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer` + `backend/accounts/scoping.py::customer_ids_for` BM branch |
+| 2026-05-18 | **`CustomerViewSet` UNCHANGED**. It already correctly returned BM-scoped customers via `IsAuthenticatedAndActive` + `scope_customers_for` on read actions and gated writes via `IsSuperAdminOrCompanyAdminForCompany` (which excludes BM). The Batch 12 changes are confined to (a) the contacts views' permission gate and (b) the frontend BM-variant pages. | The audit at `docs/audits/current-state-2026-05-16-system-audit.md` row 12 had already noted "customers admin list/detail works for BM" pre-batch — the only actual gap was contacts (deferred from Batch 4 to Batch 12). Touching `CustomerViewSet` would have been scope creep. Locked by `BMCustomerListDetailScopeTests` (7 tests pin both read-OK-in-scope and write-403-by-role). | Batch 12 + `backend/customers/views.py` (untouched) + PM Q1 |
+| 2026-05-18 | **Three dedicated BM read-only pages, NOT a "read-only mode" flag on `CustomerFormPage` / `CustomerContactsPage`.** Each BM page is <200 lines and purely additive. The admin pages are untouched. | `CustomerFormPage.tsx` is 1784 lines and edit-bound (Sprint 27E permission editor, customer policy panel, etc.); inline read-only mode would be invasive and decomposition is Batch 13 territory. `CustomerContactsPage.tsx` (731 lines) has a similar edit-modal pattern. Dedicated BM pages keep the diff small, purely additive, and let Batch 13 retire them cleanly if decomposition produces a clean read-mode/write-mode split. Locked by Playwright spec asserting `dashboard-tickets-section` is absent / `bm-customer-detail-page` is present + zero form controls in the BM detail page. | Batch 12 + `frontend/src/pages/admin/BuildingManagerCustomers*Page.tsx` + `frontend/tests/e2e/sprint28_bm_readonly_customers.spec.ts` |
+| 2026-05-18 | **Renamed Batch 4 regression-lock test `test_building_manager_blocked_on_every_endpoint` → `test_building_manager_blocked_on_write_endpoints`** with body rewritten to reflect the new Batch 12 contract: BM=200 on GET in-scope; BM=403 on POST/PATCH/DELETE. The read-side BM behaviour is locked in the new `test_sprint28_bm_readonly.py` module. | The original test name explicitly asserted "blocked on every endpoint" — which is no longer true post-Batch-12. Renaming + reshaping (rather than deleting + re-creating) preserves the test count and keeps the audit trail. The new behaviour is identical to what `IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer` enforces. | Batch 12 + `backend/customers/tests/test_sprint28_contacts.py::ContactScopeIsolationTests::test_building_manager_blocked_on_write_endpoints` |
+| 2026-05-18 | **BM customer-scoped sidebar trimmed to Overview + Contacts** in `AppShell.tsx`. Buildings / Users / Permissions / Pricing / Extra Work / Settings hidden when `me.role === "BUILDING_MANAGER"`. | The hidden entries route to admin-only sub-routes that `AdminRoute` would bounce BM from. Hiding them prevents dead links + clarifies the BM persona's surface (read customer + contacts; nothing else). Honours product rule §3 ("no data dumps") + Batch 12's "no global provider settings access" requirement. Locked by Playwright spec assertions hitting `/admin/companies`, `/admin/buildings`, `/admin/users`, `/admin/services` and confirming the redirect to `/?admin_required=ok`. | Batch 12 + `frontend/src/layout/AppShell.tsx` customer-scoped submenu |
 | 2026-05-17 | **`WAITING_MANAGER_REVIEW` added as a new `TicketStatus` enum value** (between `IN_PROGRESS` and `WAITING_CUSTOMER_APPROVAL` chronologically). Migration `tickets/0010_waiting_manager_review.py` regenerates `choices` via `AlterField` (column type unchanged; existing rows unaffected). New `Ticket.manager_review_at: DateTimeField(null=True, blank=True)` timestamp column added in the same migration; `TIMESTAMP_ON_ENTER` updated so `apply_transition` stamps it automatically. | Master plan §6 Batch 11 fourth bullet + §10 Open Question 2 default both explicitly name `WAITING_MANAGER_REVIEW` as the new status for the default route ("Staff marks done → `WAITING_MANAGER_REVIEW` → Building Manager accepts → `WAITING_CUSTOMER_APPROVAL` or rejects back to `IN_PROGRESS`"). The user's pre-batch brief said "Do NOT add WAITING_MANAGER_REVIEW unless the master plan explicitly requires it and you justify it first" — it explicitly does. Adding the timestamp column lets the timeline/analytics surface (existing pattern for `sent_for_approval_at`, `approved_at`, etc.) capture the manager-review entry point. Locked by `StaffCompletionTransitionStructuralTests` + `StaffDefaultRouteTests`. | Batch 11 + `backend/tickets/models.py::TicketStatus` + `backend/tickets/migrations/0010_waiting_manager_review.py` + PM Q1 |
 | 2026-05-17 | **Routing flag = `BuildingStaffVisibility.staff_completion_routes_to_customer: BooleanField(default=False)`** (per-staff-per-building, on the BSV row — NOT on `StaffProfile`). Affirmative naming (`routes_to_customer` not `skip_manager_review`) keeps `True` as the active deviation from the conservative default. Migration `buildings/0004_bsv_staff_completion_routes_to_customer.py`. | Product rule #7 (master plan §5 lines 178-181) explicitly says "Optional (per staff/building, separately for Tickets vs Extra Work): Staff marks done → directly to customer approval" — per-building granularity is required. `StaffProfile` is per-staff-global and cannot express the per-building rule. The BSV row IS the per-staff-per-building anchor (it was extended with `visibility_level` in Batch 10 for the same reason). Default `False` preserves the manager-review default route for every pre-Batch-11 row + every existing test. Field name explicit on the Ticket side so a future EW equivalent can land as a parallel column (`staff_completion_routes_to_customer_extra_work`) without collision when STAFF gets EW scope. Audit coverage via `_BSV_TRACKED_FIELDS` tuple extension (existing UPDATE-diff handler covers). | Batch 11 + `backend/buildings/models.py::BuildingStaffVisibility.staff_completion_routes_to_customer` + PM Q2 |
 | 2026-05-17 | **Four new `ALLOWED_TRANSITIONS` entries** (1 NEW transition + 1 EXTENDED + 2 NEW for WAITING_MANAGER_REVIEW outbound): `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` (STAFF default route + SUPER_ADMIN/COMPANY_ADMIN/BUILDING_MANAGER on-behalf); `(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` EXTENDED with STAFF row gated by the routing-flag check; `(WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL)` (BM accepts); `(WAITING_MANAGER_REVIEW, IN_PROGRESS)` (BM rejects). New `SCOPE_STAFF_ASSIGNED` scope constant + branch in `_user_passes_scope` (`TicketStaffAssignment` membership check). | The state machine is the single source of truth for what STAFF can drive structurally. Per master plan §6 Batch 11. The flag-gating happens IN-LINE in `apply_transition` (PM Q5 Option A) not in the scope helper — keeps the scope helper pure (membership only) and puts the routing-flag check next to the existing Sprint 27F-B1 override-coercion + Sprint 25C completion-evidence preconditions. Provider operators (SUPER_ADMIN/COMPANY_ADMIN/BUILDING_MANAGER) can drive the on-behalf transitions without the flag-gate — the flag is STAFF-only policy. Locked by `StaffCompletionTransitionStructuralTests` + `StaffRouteMismatchTests` + `BMAcceptsStaffCompletionTests` + `BMRejectsStaffCompletionTests`. | Batch 11 + `backend/tickets/state_machine.py::ALLOWED_TRANSITIONS` + `_user_passes_scope` + PM Q3 + Q4 + Q5 |

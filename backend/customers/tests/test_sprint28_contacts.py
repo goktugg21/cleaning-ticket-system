@@ -221,20 +221,40 @@ class ContactScopeIsolationTests(TenantFixtureMixin, APITestCase):
         )
         self.assertEqual(delete_resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_building_manager_blocked_on_every_endpoint(self):
+    def test_building_manager_blocked_on_write_endpoints(self):
+        """Sprint 28 Batch 12 — BM is no longer blocked on every endpoint.
+        BM gets 200 on GET list/detail when the customer is in their
+        assigned-building scope (the new
+        `IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer`
+        permission gate). BM remains 403 on POST/PATCH/DELETE. This
+        test now asserts the write-side block; the read-side behaviour
+        is locked in `customers/tests/test_sprint28_bm_readonly.py`.
+        """
         self.authenticate(self.manager)
+        # Reads now succeed for BM in scope (Batch 12 change).
         list_resp = self.client.get(self.list_url(self.customer.id))
-        self.assertEqual(list_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+        retrieve_resp = self.client.get(
+            self.detail_url(self.customer.id, self.contact_a.id)
+        )
+        self.assertEqual(retrieve_resp.status_code, status.HTTP_200_OK)
+        # Writes still 403.
         create_resp = self.client.post(
             self.list_url(self.customer.id),
             {"full_name": "Nope"},
             format="json",
         )
         self.assertEqual(create_resp.status_code, status.HTTP_403_FORBIDDEN)
-        retrieve_resp = self.client.get(
+        update_resp = self.client.patch(
+            self.detail_url(self.customer.id, self.contact_a.id),
+            {"full_name": "Renamed by BM"},
+            format="json",
+        )
+        self.assertEqual(update_resp.status_code, status.HTTP_403_FORBIDDEN)
+        delete_resp = self.client.delete(
             self.detail_url(self.customer.id, self.contact_a.id)
         )
-        self.assertEqual(retrieve_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(delete_resp.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_staff_role_blocked_on_every_endpoint(self):
         # STAFF (Sprint 23A service-provider-side field staff) is not on

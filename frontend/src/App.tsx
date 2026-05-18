@@ -3,6 +3,7 @@ import { Suspense, lazy } from "react";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { AdminRoute } from "./components/AdminRoute";
+import { CustomerReadRoute } from "./components/CustomerReadRoute";
 import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
@@ -21,6 +22,9 @@ import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { AuditLogsAdminPage } from "./pages/admin/AuditLogsAdminPage";
 import { BuildingFormPage } from "./pages/admin/BuildingFormPage";
 import { BuildingsAdminPage } from "./pages/admin/BuildingsAdminPage";
+import { BuildingManagerCustomerContactsPage } from "./pages/admin/BuildingManagerCustomerContactsPage";
+import { BuildingManagerCustomerDetailPage } from "./pages/admin/BuildingManagerCustomerDetailPage";
+import { BuildingManagerCustomersPage } from "./pages/admin/BuildingManagerCustomersPage";
 import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
@@ -59,6 +63,26 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   return <AppShell>{children}</AppShell>;
+}
+
+/**
+ * Sprint 28 Batch 12 — role dispatcher for the three customer/contact
+ * routes that admit BUILDING_MANAGER. For BM, render the read-only
+ * variant; for admins, render the existing edit-capable admin page.
+ *
+ * The route wrapper `CustomerReadRoute` already enforces the role
+ * wall (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER) — this
+ * helper only picks the component.
+ */
+function ByRole({
+  bm,
+  admin,
+}: {
+  bm: ReactNode;
+  admin: ReactNode;
+}) {
+  const { me } = useAuth();
+  return <>{me?.role === "BUILDING_MANAGER" ? bm : admin}</>;
 }
 
 export default function App() {
@@ -180,12 +204,20 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 28 Batch 12 — BM read-only access on customer
+              list + detail. Admins keep the existing
+              `CustomersAdminPage` / `CustomerFormPage`; BM gets the
+              new read-only variants. `/admin/customers/new` stays
+              admin-only — BM has no create surface. */}
           <Route
             path="/admin/customers"
             element={
-              <AdminRoute>
-                <CustomersAdminPage />
-              </AdminRoute>
+              <CustomerReadRoute>
+                <ByRole
+                  bm={<BuildingManagerCustomersPage />}
+                  admin={<CustomersAdminPage />}
+                />
+              </CustomerReadRoute>
             }
           />
           <Route
@@ -199,9 +231,12 @@ export default function App() {
           <Route
             path="/admin/customers/:id"
             element={
-              <AdminRoute>
-                <CustomerFormPage />
-              </AdminRoute>
+              <CustomerReadRoute>
+                <ByRole
+                  bm={<BuildingManagerCustomerDetailPage />}
+                  admin={<CustomerFormPage />}
+                />
+              </CustomerReadRoute>
             }
           />
           {/* Sprint 28 Batch 3 — customer-scoped submenu routes.
@@ -247,12 +282,16 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 28 Batch 12 — BM read-only contacts surface. */}
           <Route
             path="/admin/customers/:id/contacts"
             element={
-              <AdminRoute>
-                <CustomerContactsPage />
-              </AdminRoute>
+              <CustomerReadRoute>
+                <ByRole
+                  bm={<BuildingManagerCustomerContactsPage />}
+                  admin={<CustomerContactsPage />}
+                />
+              </CustomerReadRoute>
             }
           />
           {/* Sprint 28 Batch 5 — per-customer contract pricing. The

@@ -688,5 +688,31 @@
   "ticket_staff_complete.error_route_mismatch": "The routing changed. Please refresh and try again.",
   "ticket_staff_complete.attachment_hint": "If you have a photo, upload it from the Attachments card on this page before sending.",
 
-  "manager_review.label_sent_at": "Sent for manager review at"
+  "manager_review.label_sent_at": "Sent for manager review at",
+
+  "bm_customers.eyebrow": "Building manager view",
+  "bm_customers.title": "Customers in your assigned buildings",
+  "bm_customers.readonly_hint": "Read-only — you can view customers and their contacts in the buildings you manage.",
+  "bm_customers.empty": "No customers are linked to your assigned buildings yet.",
+
+  "bm_customer_detail.back": "Back to customers",
+  "bm_customer_detail.invalid_id": "Invalid customer.",
+  "bm_customer_detail.readonly_hint": "Read-only customer overview.",
+  "bm_customer_detail.section_basic_title": "Basics",
+  "bm_customer_detail.field_language": "Language",
+  "bm_customer_detail.field_active": "Active",
+  "bm_customer_detail.active_yes": "Yes",
+  "bm_customer_detail.active_no": "No",
+  "bm_customer_detail.section_buildings_title": "Linked buildings",
+  "bm_customer_detail.buildings_empty": "This customer is not linked to any buildings you can see.",
+  "bm_customer_detail.section_contacts_title": "Contacts",
+  "bm_customer_detail.contacts_hint": "View the contact persons for this customer in your assigned buildings.",
+  "bm_customer_detail.contacts_link": "View contacts",
+
+  "bm_customer_contacts.back": "Back to {{name}}",
+  "bm_customer_contacts.invalid_id": "Invalid customer.",
+  "bm_customer_contacts.title": "Contacts",
+  "bm_customer_contacts.readonly_hint": "Read-only — click a row to see the contact's details.",
+  "bm_customer_contacts.empty": "No contacts have been registered for this customer.",
+  "bm_customer_contacts.notes_label": "Notes"
 }
