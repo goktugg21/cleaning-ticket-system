@@ -27,6 +27,11 @@ from .models import Ticket, TicketStatus, TicketStatusHistory
 # note + no photo rejected."
 COMPLETION_EVIDENCE_TRANSITIONS = {
     (TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CUSTOMER_APPROVAL),
+    # Sprint 28 Batch 11 — STAFF default-route completion (sends the
+    # ticket to manager review) is the same kind of "work-is-done"
+    # transition and must carry the same evidence requirement so the
+    # BM has something to review.
+    (TicketStatus.IN_PROGRESS, TicketStatus.WAITING_MANAGER_REVIEW),
 }
 
 
@@ -48,6 +53,13 @@ SCOPE_ANY = "any"
 SCOPE_COMPANY_MEMBER = "company_member"
 SCOPE_BUILDING_ASSIGNED = "building_assigned"
 SCOPE_CUSTOMER_LINKED = "customer_linked"
+# Sprint 28 Batch 11 — STAFF scope for the two new completion routes.
+# A STAFF user may drive `IN_PROGRESS -> WAITING_MANAGER_REVIEW` (and,
+# when the BSV flag is set, `IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL`)
+# only when they hold a `TicketStaffAssignment` row for the ticket.
+# The routing-flag check inside `apply_transition` then decides which
+# of the two STAFF-permitted targets is actually reachable.
+SCOPE_STAFF_ASSIGNED = "staff_assigned"
 
 
 ALLOWED_TRANSITIONS = {
@@ -56,7 +68,38 @@ ALLOWED_TRANSITIONS = {
         UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
     },
+    # Sprint 28 Batch 11 — STAFF default-route completion path. The
+    # `apply_transition` routing-flag check below decides which of the
+    # two STAFF-permitted IN_PROGRESS targets a given staff actually
+    # reaches; provider operators may drive either target on-behalf
+    # without going through the flag.
+    (TicketStatus.IN_PROGRESS, TicketStatus.WAITING_MANAGER_REVIEW): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+        UserRole.STAFF: SCOPE_STAFF_ASSIGNED,
+    },
     (TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CUSTOMER_APPROVAL): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+        # Sprint 28 Batch 11 — gated by routing-flag in apply_transition.
+        UserRole.STAFF: SCOPE_STAFF_ASSIGNED,
+    },
+    # Sprint 28 Batch 11 — BM accepts a staff completion and forwards
+    # it to the customer for approval. STAFF cannot drive this leg;
+    # H-5 (STAFF cannot approve customer-side decisions) extends here
+    # to "STAFF cannot decide that their own work is good enough to
+    # show the customer."
+    (TicketStatus.WAITING_MANAGER_REVIEW, TicketStatus.WAITING_CUSTOMER_APPROVAL): {
+        UserRole.SUPER_ADMIN: SCOPE_ANY,
+        UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
+    },
+    # Sprint 28 Batch 11 — BM rejects a staff completion and sends it
+    # back to IN_PROGRESS. A non-empty note is required (enforced at
+    # both serializer + state-machine layer below).
+    (TicketStatus.WAITING_MANAGER_REVIEW, TicketStatus.IN_PROGRESS): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
         UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
         UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
@@ -98,6 +141,10 @@ ALLOWED_TRANSITIONS = {
 # TicketStatusHistory, which records every transition.
 TIMESTAMP_ON_ENTER = {
     TicketStatus.WAITING_CUSTOMER_APPROVAL: "sent_for_approval_at",
+    # Sprint 28 Batch 11 — stamped when a STAFF (or provider operator
+    # acting on-behalf) completes work that routes through the manager
+    # review interstitial.
+    TicketStatus.WAITING_MANAGER_REVIEW: "manager_review_at",
     TicketStatus.APPROVED: "approved_at",
     TicketStatus.REJECTED: "rejected_at",
     TicketStatus.CLOSED: "closed_at",
@@ -133,6 +180,17 @@ def _user_passes_scope(user, ticket, scope):
             membership__user=user,
             membership__customer_id=ticket.customer_id,
             building_id=ticket.building_id,
+        ).exists()
+    if scope == SCOPE_STAFF_ASSIGNED:
+        # Sprint 28 Batch 11 — STAFF may drive a completion only when
+        # they hold an explicit `TicketStaffAssignment` row for the
+        # ticket. The follow-on routing-flag check in `apply_transition`
+        # then picks the right target between WAITING_MANAGER_REVIEW
+        # and WAITING_CUSTOMER_APPROVAL.
+        from .models import TicketStaffAssignment
+
+        return TicketStaffAssignment.objects.filter(
+            ticket=ticket, user=user
         ).exists()
     return False
 
@@ -198,6 +256,56 @@ def apply_transition(
             "Override reason is required when a provider operator "
             "drives a customer-decision transition.",
             code="override_reason_required",
+        )
+
+    # Sprint 28 Batch 11 — STAFF completion routing-flag check.
+    # The per-(staff, building) flag on BuildingStaffVisibility decides
+    # which of the two STAFF-permitted IN_PROGRESS -> {WAITING_MANAGER_REVIEW,
+    # WAITING_CUSTOMER_APPROVAL} transitions is actually reachable.
+    # Mismatch -> 400 with a stable code. Provider operators driving the
+    # same transition on-behalf bypass this gate — the flag is a STAFF-only
+    # routing policy.
+    if (
+        getattr(user, "role", None) == UserRole.STAFF
+        and str(ticket.status) == str(TicketStatus.IN_PROGRESS)
+        and str(to_status) in {
+            str(TicketStatus.WAITING_MANAGER_REVIEW),
+            str(TicketStatus.WAITING_CUSTOMER_APPROVAL),
+        }
+    ):
+        from buildings.models import BuildingStaffVisibility
+
+        bsv = BuildingStaffVisibility.objects.filter(
+            user=user, building_id=ticket.building_id
+        ).first()
+        routes_to_customer = bool(
+            bsv and bsv.staff_completion_routes_to_customer
+        )
+        expected_target = (
+            TicketStatus.WAITING_CUSTOMER_APPROVAL
+            if routes_to_customer
+            else TicketStatus.WAITING_MANAGER_REVIEW
+        )
+        if str(to_status) != str(expected_target):
+            raise TransitionError(
+                "Staff completion route does not match the configured "
+                "routing for this building.",
+                code="staff_completion_route_mismatch",
+            )
+
+    # Sprint 28 Batch 11 — BM rejection of a staff completion requires a
+    # non-empty note (mirrors the CUSTOMER_USER reject-note rule).
+    # Defensive: also enforced at serializer layer (TicketStatusChangeSerializer);
+    # this catches programmatic callers (Celery, management commands, etc.).
+    if (
+        str(ticket.status) == str(TicketStatus.WAITING_MANAGER_REVIEW)
+        and str(to_status) == str(TicketStatus.IN_PROGRESS)
+        and not (note and note.strip())
+    ):
+        raise TransitionError(
+            "A note explaining the rejection is required when sending a "
+            "staff-completed ticket back to in-progress.",
+            code="rejection_note_required",
         )
 
     # Sprint 25C — OSIUS staff-completion evidence rule. The role +

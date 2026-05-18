@@ -29,6 +29,7 @@ import type {
   ServiceUpdatePayload,
   StaffAssignmentRequest,
   StaffAssignmentRequestStatus,
+  StaffCompletionRouteResponse,
   StaffProfileAdmin,
   UserAdmin,
   UserAdminDetail,
@@ -710,9 +711,15 @@ export async function addStaffVisibility(
 // as a writable field on the BSV PATCH endpoint. Both fields are
 // optional on the payload so a caller can update one without
 // resending the other; today's UI sends both for convenience.
+//
+// Sprint 28 Batch 11 — `staff_completion_routes_to_customer` joins
+// the patch surface. When true, STAFF marking a ticket in this
+// building as completed routes straight to WAITING_CUSTOMER_APPROVAL
+// (skipping the WAITING_MANAGER_REVIEW gate). Default false.
 export interface StaffVisibilityPatch {
   can_request_assignment?: boolean;
   visibility_level?: import("./types").StaffVisibilityLevel;
+  staff_completion_routes_to_customer?: boolean;
 }
 
 export async function updateStaffVisibility(
@@ -867,6 +874,24 @@ export async function removeTicketStaffAssignment(
   userId: number,
 ): Promise<void> {
   await api.delete(`/tickets/${ticketId}/staff-assignments/${userId}/`);
+}
+
+// ---- Sprint 28 Batch 11 — Staff completion routing helper -------------
+//
+// `GET /api/tickets/<id>/staff-completion-route/` — returns the
+// resolved destination for STAFF marking this ticket as completed.
+// STAFF must have an active TicketStaffAssignment row; the backend
+// 404s otherwise. Provider operators get the conservative
+// "manager_review" default without `?staff_id=<id>`. CUSTOMER_USER
+// never reaches this endpoint (404 by scope).
+
+export async function getStaffCompletionRoute(
+  ticketId: number,
+): Promise<StaffCompletionRouteResponse> {
+  const response = await api.get<StaffCompletionRouteResponse>(
+    `/tickets/${ticketId}/staff-completion-route/`,
+  );
+  return response.data;
 }
 
 // ---- Sprint 28 Batch 5 — Service catalog (provider-wide) ----------------

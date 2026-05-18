@@ -72,6 +72,7 @@
 
   "status.open": "Open",
   "status.in_progress": "In behandeling",
+  "status.waiting_manager_review": "Wachten op manager-review",
   "status.waiting_customer_approval": "Wacht op goedkeuring",
   "status.approved": "Goedgekeurd",
   "status.rejected": "Afgewezen",
@@ -547,6 +548,8 @@
   "staff_admin.level.assigned_only": "Alleen toegewezen tickets",
   "staff_admin.level.building_read": "Alle gebouwtickets (lezen)",
   "staff_admin.level.building_read_and_assign": "Alle gebouwtickets + toewijzen",
+  "staff_admin.routes_to_customer_label": "Voltooiing gaat direct naar klant",
+  "staff_admin.routes_to_customer_hint": "Indien aan, gaat het IN_PROGRESS -> voltooid-verzoek van deze medewerker in dit gebouw rechtstreeks naar klantgoedkeuring, zonder tussenkomst van de manager.",
 
   "customer_contacts.page_title": "Contacten",
   "customer_contacts.add_button": "Contact toevoegen",
@@ -668,5 +671,22 @@
   "customer_pricing.error_price_invalid": "Voer een niet-negatieve eenheidsprijs in.",
   "customer_pricing.error_vat_invalid": "Voer een niet-negatief BTW-percentage in.",
   "customer_pricing.error_valid_from_required": "Kies een startdatum.",
-  "customer_pricing.error_valid_to_before_valid_from": "Geldig-tot moet op of na geldig-vanaf liggen."
+  "customer_pricing.error_valid_to_before_valid_from": "Geldig-tot moet op of na geldig-vanaf liggen.",
+
+  "ticket_staff_complete.button_label": "Werk voltooien",
+  "ticket_staff_complete.modal_title": "Werk markeren als voltooid",
+  "ticket_staff_complete.note_label": "Voltooiingsnotitie",
+  "ticket_staff_complete.note_placeholder": "Beschrijf wat is gedaan…",
+  "ticket_staff_complete.note_required_hint": "Een voltooiingsnotitie of fotobijlage is vereist.",
+  "ticket_staff_complete.route_loading": "Bestemming bepalen…",
+  "ticket_staff_complete.route_manager_review": "Dit gaat naar je manager voor review.",
+  "ticket_staff_complete.route_customer_approval": "Dit wordt verstuurd naar de klant voor goedkeuring.",
+  "ticket_staff_complete.submit_manager_review": "Versturen voor manager-review",
+  "ticket_staff_complete.submit_customer_approval": "Versturen voor klantgoedkeuring",
+  "ticket_staff_complete.cancel": "Annuleren",
+  "ticket_staff_complete.error_evidence_required": "Voeg een notitie of foto toe voordat je verstuurt.",
+  "ticket_staff_complete.error_route_mismatch": "De routering is gewijzigd. Vernieuw de pagina en probeer opnieuw.",
+  "ticket_staff_complete.attachment_hint": "Als je een foto hebt, upload deze dan via de bijlagenkaart op deze pagina voordat je verstuurt.",
+
+  "manager_review.label_sent_at": "Verstuurd voor manager-review op"
 }

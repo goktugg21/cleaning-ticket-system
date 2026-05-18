@@ -23,6 +23,13 @@ class TicketPriority(models.TextChoices):
 class TicketStatus(models.TextChoices):
     OPEN = "OPEN", "Open"
     IN_PROGRESS = "IN_PROGRESS", "In Progress"
+    # Sprint 28 Batch 11 — STAFF default completion route. When a STAFF
+    # user marks their work done, the ticket lands here for BM review.
+    # BM accepts -> WAITING_CUSTOMER_APPROVAL, or rejects -> IN_PROGRESS.
+    # The per-(staff, building) `BuildingStaffVisibility
+    # .staff_completion_routes_to_customer` flag can opt a staff out of
+    # this default and route directly to WAITING_CUSTOMER_APPROVAL.
+    WAITING_MANAGER_REVIEW = "WAITING_MANAGER_REVIEW", "Waiting Manager Review"
     WAITING_CUSTOMER_APPROVAL = "WAITING_CUSTOMER_APPROVAL", "Waiting Customer Approval"
     REJECTED = "REJECTED", "Rejected"
     APPROVED = "APPROVED", "Approved"
@@ -112,6 +119,12 @@ class Ticket(models.Model):
 
     first_response_at = models.DateTimeField(null=True, blank=True)
     sent_for_approval_at = models.DateTimeField(null=True, blank=True)
+    # Sprint 28 Batch 11 — stamped when the ticket enters
+    # WAITING_MANAGER_REVIEW (the STAFF default completion route).
+    # Loop semantics mirror the rest of the timestamp cluster: a BM
+    # rejection back to IN_PROGRESS followed by another STAFF completion
+    # overwrites the value.
+    manager_review_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     rejected_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)

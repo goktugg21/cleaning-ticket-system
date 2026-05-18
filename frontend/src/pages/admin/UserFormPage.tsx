@@ -706,6 +706,31 @@ function StaffDetailsSection({
     }
   }
 
+  // Sprint 28 Batch 11 — STAFF completion routing override. When
+  // true, STAFF marking a ticket in this building as completed sends
+  // it straight to WAITING_CUSTOMER_APPROVAL (skipping the
+  // WAITING_MANAGER_REVIEW gate). Default false. Same PATCH endpoint
+  // as the other BSV fields; we send only the new flag so unrelated
+  // fields are not clobbered.
+  async function handleToggleRoutesToCustomer(
+    row: BuildingStaffVisibilityAdmin,
+    next: boolean,
+  ) {
+    setVisibilityBusyKey(`routes-${row.building_id}`);
+    setVisibilityError("");
+    try {
+      await updateStaffVisibility(userId, row.building_id, {
+        staff_completion_routes_to_customer: next,
+      });
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
   function openRemoveDialog(row: BuildingStaffVisibilityAdmin) {
     setRemoveTarget(row);
     removeDialogRef.current?.open();
@@ -906,6 +931,8 @@ function StaffDetailsSection({
                       visibilityBusyKey === `toggle-${row.building_id}`;
                     const levelBusy =
                       visibilityBusyKey === `level-${row.building_id}`;
+                    const routesBusy =
+                      visibilityBusyKey === `routes-${row.building_id}`;
                     const removeBusy =
                       visibilityBusyKey === `remove-${row.building_id}`;
                     return (
@@ -969,6 +996,39 @@ function StaffDetailsSection({
                               )}
                             </span>
                           </label>
+                          {/* Sprint 28 Batch 11 — completion-routing
+                              checkbox. Stacked below the can-request
+                              toggle to avoid adding a fourth column
+                              (the table already has 4 columns; adding
+                              another widens the layout past the
+                              admin-list-wrap breakpoint). */}
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              cursor: canEdit ? "pointer" : "default",
+                              marginTop: 6,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                row.staff_completion_routes_to_customer
+                              }
+                              onChange={(event) =>
+                                handleToggleRoutesToCustomer(
+                                  row,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={!canEdit || routesBusy}
+                              data-testid={`staff-completion-routes-to-customer-${row.building_id}`}
+                            />
+                            <span className="muted small">
+                              {t("staff_admin.routes_to_customer_label")}
+                            </span>
+                          </label>
                         </td>
                         <td>
                           <button
@@ -1000,6 +1060,8 @@ function StaffDetailsSection({
                   visibilityBusyKey === `toggle-${row.building_id}`;
                 const levelBusy =
                   visibilityBusyKey === `level-${row.building_id}`;
+                const routesBusy =
+                  visibilityBusyKey === `routes-${row.building_id}`;
                 const removeBusy =
                   visibilityBusyKey === `remove-${row.building_id}`;
                 return (
@@ -1080,6 +1142,41 @@ function StaffDetailsSection({
                           />
                           <span className="muted small">
                             {t("staff_admin.visibility_can_request_label")}
+                          </span>
+                        </label>
+                      </div>
+                      {/* Sprint 28 Batch 11 — mobile mirror of the
+                          completion-routing checkbox. Same testid
+                          stem so a Playwright spec can target the
+                          row regardless of viewport (the regex
+                          `/^staff-completion-routes-to-customer-/`
+                          will match both desktop and mobile). */}
+                      <div
+                        className="admin-card-meta-row"
+                        style={{ marginTop: 6 }}
+                      >
+                        <label
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            cursor: canEdit ? "pointer" : "default",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={row.staff_completion_routes_to_customer}
+                            onChange={(event) =>
+                              handleToggleRoutesToCustomer(
+                                row,
+                                event.target.checked,
+                              )
+                            }
+                            disabled={!canEdit || routesBusy}
+                            data-testid={`staff-completion-routes-to-customer-mobile-${row.building_id}`}
+                          />
+                          <span className="muted small">
+                            {t("staff_admin.routes_to_customer_label")}
                           </span>
                         </label>
                       </div>

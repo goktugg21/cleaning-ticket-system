@@ -401,6 +401,74 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get"], url_path="staff-completion-route")
+    def staff_completion_route(self, request, pk=None):
+        """
+        Sprint 28 Batch 11 — read-only helper for the frontend completion
+        modal. Returns the resolved routing destination for STAFF on this
+        ticket: "manager_review" (default) or "customer_approval"
+        (configured per BuildingStaffVisibility.staff_completion_routes_to_customer).
+
+        Authorization: STAFF must have a TicketStaffAssignment row for
+        the ticket. Provider operators in scope (SUPER_ADMIN,
+        COMPANY_ADMIN, BUILDING_MANAGER for the ticket's building) get
+        the route a hypothetical STAFF on this ticket would see; pass
+        `?staff_id=<id>` to ask about a specific STAFF user (useful for
+        on-behalf flows). Without `staff_id` a provider operator gets
+        the conservative "manager_review" default. Out-of-scope -> 404
+        (not 403, to avoid leaking ticket existence).
+        """
+        from buildings.models import BuildingStaffVisibility
+        from .models import TicketStaffAssignment
+
+        ticket = self.get_object()  # 404 if out of scope per scope_tickets_for
+        user = request.user
+
+        if user.role == UserRole.STAFF:
+            if not TicketStaffAssignment.objects.filter(
+                ticket=ticket, user=user
+            ).exists():
+                raise Http404
+            staff_user = user
+        elif user.role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        ):
+            staff_id = request.query_params.get("staff_id")
+            if staff_id is None:
+                return Response({"route": "manager_review"})
+            from accounts.models import User
+
+            try:
+                staff_user = User.objects.get(
+                    pk=staff_id, role=UserRole.STAFF, is_active=True
+                )
+            except (User.DoesNotExist, ValueError, TypeError):
+                raise Http404
+            if not TicketStaffAssignment.objects.filter(
+                ticket=ticket, user=staff_user
+            ).exists():
+                raise Http404
+        else:
+            raise Http404
+
+        bsv = BuildingStaffVisibility.objects.filter(
+            user=staff_user, building_id=ticket.building_id
+        ).first()
+        routes_to_customer = bool(
+            bsv and bsv.staff_completion_routes_to_customer
+        )
+        return Response(
+            {
+                "route": (
+                    "customer_approval"
+                    if routes_to_customer
+                    else "manager_review"
+                )
+            }
+        )
+
     @action(detail=True, methods=["get"], url_path="assignable-staff")
     def assignable_staff(self, request, pk=None):
         """

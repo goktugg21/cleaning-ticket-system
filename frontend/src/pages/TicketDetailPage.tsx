@@ -22,6 +22,7 @@ import {
   addTicketStaffAssignment,
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
+  getStaffCompletionRoute,
   listAssignableStaff,
   listCustomerContacts,
   listStaffAssignmentRequests,
@@ -32,6 +33,7 @@ import type {
   AssignableManager,
   Contact,
   PaginatedResponse,
+  StaffCompletionRoute,
   TicketAttachment,
   TicketDetail,
   TicketMessage,
@@ -224,6 +226,23 @@ export function TicketDetailPage() {
   const [overrideReason, setOverrideReason] = useState("");
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideBusy, setOverrideBusy] = useState(false);
+
+  // Sprint 28 Batch 11 — STAFF "Complete work" modal state.
+  // The modal opens when an assigned STAFF user clicks the Complete
+  // Work button on an IN_PROGRESS ticket. The destination of the
+  // resulting transition (WAITING_MANAGER_REVIEW vs
+  // WAITING_CUSTOMER_APPROVAL) is resolved server-side via
+  // GET /api/tickets/<id>/staff-completion-route/ on modal open. We
+  // refetch the route if the backend ever returns the stable code
+  // `staff_completion_route_mismatch` on submit, which means the
+  // BSV flag changed between open and submit.
+  const [completeModalOpen, setCompleteModalOpen] = useState(false);
+  const [completeNote, setCompleteNote] = useState("");
+  const [completeRoute, setCompleteRoute] =
+    useState<StaffCompletionRoute | null>(null);
+  const [completeRouteLoading, setCompleteRouteLoading] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [completeBusy, setCompleteBusy] = useState(false);
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<TicketMessageType>("PUBLIC_REPLY");
@@ -448,6 +467,16 @@ export function TicketDetailPage() {
     [ticket],
   );
 
+  // Sprint 28 Batch 11 — the "Complete work" button only renders for
+  // a STAFF user who is actually on the ticket's assignment set and
+  // is looking at an IN_PROGRESS ticket. Backend enforces the same
+  // gate on the transition; this is purely UX.
+  const canShowCompleteWorkButton =
+    !!ticket &&
+    me?.role === "STAFF" &&
+    ticket.status === "IN_PROGRESS" &&
+    ticket.is_assigned_staff === true;
+
   async function submitAssignment(event: FormEvent) {
     event.preventDefault();
     if (!id) return;
@@ -599,6 +628,102 @@ export function TicketDetailPage() {
     setOverrideDecision(null);
     setOverrideReason("");
     setOverrideError(null);
+  }
+
+  // Sprint 28 Batch 11 — open the STAFF completion modal and
+  // synchronously fetch the routing destination so the submit button
+  // label and the explanation line match what the backend will do.
+  async function openCompleteModal() {
+    if (!id) return;
+    setCompleteNote("");
+    setCompleteError(null);
+    setCompleteRoute(null);
+    setCompleteModalOpen(true);
+    setCompleteRouteLoading(true);
+    try {
+      const data = await getStaffCompletionRoute(Number(id));
+      setCompleteRoute(data.route);
+    } catch (err) {
+      setCompleteError(getApiError(err));
+    } finally {
+      setCompleteRouteLoading(false);
+    }
+  }
+
+  function closeCompleteModal() {
+    setCompleteModalOpen(false);
+    setCompleteNote("");
+    setCompleteRoute(null);
+    setCompleteError(null);
+  }
+
+  // Sprint 28 Batch 11 — submit the STAFF completion transition.
+  // Maps the route -> target status, posts the status change with
+  // the operator note as completion evidence, and handles the two
+  // backend stable error codes:
+  //   - `completion_evidence_required` — backend says the note (and
+  //     visible attachments) are insufficient. Surface i18n string.
+  //   - `staff_completion_route_mismatch` — BSV flag flipped between
+  //     open and submit; refetch the route and surface i18n string.
+  async function submitCompleteWork(event: FormEvent) {
+    event.preventDefault();
+    if (!id || !ticket) return;
+    if (!completeNote.trim()) {
+      setCompleteError(t("common:ticket_staff_complete.error_evidence_required"));
+      return;
+    }
+    if (!completeRoute) {
+      // Should not happen — the modal disables the submit until the
+      // route resolves. Bail defensively rather than silently posting
+      // a status the backend may not accept.
+      return;
+    }
+    setCompleteError(null);
+    setCompleteBusy(true);
+    try {
+      const toStatus: TicketStatus =
+        completeRoute === "customer_approval"
+          ? "WAITING_CUSTOMER_APPROVAL"
+          : "WAITING_MANAGER_REVIEW";
+      const payload: TicketStatusChangePayload = {
+        to_status: toStatus,
+        note: completeNote.trim(),
+      };
+      await api.post<TicketDetail>(`/tickets/${id}/status/`, payload);
+      await loadTicket();
+      closeCompleteModal();
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        const data = err.response?.data as
+          | { code?: string; detail?: string }
+          | undefined;
+        if (data?.code === "completion_evidence_required") {
+          setCompleteError(
+            t("common:ticket_staff_complete.error_evidence_required"),
+          );
+          return;
+        }
+        if (data?.code === "staff_completion_route_mismatch") {
+          // Refetch the route so the next submit has the correct
+          // target. Show the i18n explanation; submit stays gated
+          // on the new route.
+          setCompleteError(
+            t("common:ticket_staff_complete.error_route_mismatch"),
+          );
+          try {
+            const refreshed = await getStaffCompletionRoute(Number(id));
+            setCompleteRoute(refreshed.route);
+          } catch {
+            // If even the refetch fails, leave the previous route in
+            // place — the user can cancel + retry.
+          }
+          return;
+        }
+      }
+      setCompleteError(getApiError(err));
+    } finally {
+      setCompleteBusy(false);
+    }
   }
 
   async function submitMessage(event: FormEvent) {
@@ -1944,10 +2069,34 @@ export function TicketDetailPage() {
               </div>
             </div>
             <div className="workflow-body">
+              {/* Sprint 28 Batch 11 — STAFF "Complete work" entry
+                  point. Renders only for the assigned STAFF actor on
+                  an IN_PROGRESS ticket; opens a modal that resolves
+                  the destination (manager review vs customer
+                  approval) and submits the corresponding status
+                  transition. Sits ahead of the generic next-status
+                  buttons because STAFF should never see the empty-
+                  state message in this path. */}
+              {canShowCompleteWorkButton && (
+                <div className="status-actions" style={{ marginBottom: 8 }}>
+                  <button
+                    type="button"
+                    className="status-btn"
+                    onClick={openCompleteModal}
+                    disabled={completeModalOpen}
+                    data-testid="ticket-staff-complete-button"
+                  >
+                    {t("common:ticket_staff_complete.button_label")}
+                    <span className="status-btn-arrow">→</span>
+                  </button>
+                </div>
+              )}
               {visibleNextStatuses.length === 0 ? (
-                <p className="muted small">
-                  {t("workflow_no_transitions")}
-                </p>
+                canShowCompleteWorkButton ? null : (
+                  <p className="muted small">
+                    {t("workflow_no_transitions")}
+                  </p>
+                )
               ) : (
                 <>
                   <div className="field">
@@ -2115,6 +2264,130 @@ export function TicketDetailPage() {
                     {overrideBusy
                       ? t("updating")
                       : overrideModalSubmitLabel(overrideDecision)}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Sprint 28 Batch 11 — STAFF completion modal. Inline card
+              shape (matches the override modal above rather than a
+              floating overlay) so it slots into the right-rail
+              naturally. Sourced from common.json
+              `ticket_staff_complete.*` keys (EN/NL parity preserved
+              by Batch 11's bundle update). The submit button label
+              switches based on the resolved route. Photo upload is
+              NOT inline — the page already has a dedicated
+              Attachments card; the modal carries an explicit hint to
+              upload first. Documented as remaining UX debt. */}
+          {completeModalOpen && (
+            <div className="card" data-testid="ticket-staff-complete-modal">
+              <div className="section-head">
+                <div
+                  className="section-head-title"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: "var(--text-faint)",
+                  }}
+                >
+                  {t("common:ticket_staff_complete.modal_title")}
+                </div>
+              </div>
+              <form
+                onSubmit={submitCompleteWork}
+                style={{ padding: "12px 18px 16px" }}
+              >
+                <p
+                  className="muted small"
+                  style={{ marginBottom: 12 }}
+                  data-testid="ticket-staff-complete-route"
+                >
+                  {completeRouteLoading
+                    ? t("common:ticket_staff_complete.route_loading")
+                    : completeRoute === "customer_approval"
+                      ? t(
+                          "common:ticket_staff_complete.route_customer_approval",
+                        )
+                      : completeRoute === "manager_review"
+                        ? t("common:ticket_staff_complete.route_manager_review")
+                        : ""}
+                </p>
+                <div className="field">
+                  <label
+                    className="field-label"
+                    htmlFor="ticket-staff-complete-note"
+                  >
+                    {t("common:ticket_staff_complete.note_label")}
+                  </label>
+                  <textarea
+                    id="ticket-staff-complete-note"
+                    data-testid="ticket-staff-complete-note"
+                    className="field-textarea"
+                    rows={3}
+                    value={completeNote}
+                    onChange={(event) => setCompleteNote(event.target.value)}
+                    placeholder={t(
+                      "common:ticket_staff_complete.note_placeholder",
+                    )}
+                    required
+                  />
+                  <p className="muted small" style={{ marginTop: 4 }}>
+                    {t("common:ticket_staff_complete.note_required_hint")}
+                  </p>
+                </div>
+                <p className="muted small" style={{ marginTop: 4 }}>
+                  {t("common:ticket_staff_complete.attachment_hint")}
+                </p>
+                {completeError && (
+                  <div
+                    className="alert-error"
+                    role="alert"
+                    data-testid="ticket-staff-complete-error"
+                    style={{ marginTop: 8 }}
+                  >
+                    {completeError}
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={closeCompleteModal}
+                    disabled={completeBusy}
+                    data-testid="ticket-staff-complete-cancel"
+                  >
+                    {t("common:ticket_staff_complete.cancel")}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={
+                      completeBusy ||
+                      completeRouteLoading ||
+                      !completeRoute ||
+                      !completeNote.trim()
+                    }
+                    data-testid="ticket-staff-complete-submit"
+                  >
+                    {completeBusy
+                      ? t("updating")
+                      : completeRoute === "customer_approval"
+                        ? t(
+                            "common:ticket_staff_complete.submit_customer_approval",
+                          )
+                        : t(
+                            "common:ticket_staff_complete.submit_manager_review",
+                          )}
                   </button>
                 </div>
               </form>

@@ -2099,33 +2099,260 @@ Goal: enable the B1/B2/B3 example per spec §B.4 / product rule #6.
 
 Goal: configurable per-staff / per-building routing per product rule #7.
 
-- [ ] Add a Staff "I completed my work" flow. STAFF can drive a new
-      transition out of `IN_PROGRESS`.
-- [ ] Require completion note on every Staff completion (already a Sprint
+- [x] ~~Add a Staff "I completed my work" flow. STAFF can drive a new
+      transition out of `IN_PROGRESS`.~~
+- [x] ~~Require completion note on every Staff completion (already a Sprint
       25C invariant for `IN_PROGRESS → WAITING_CUSTOMER_APPROVAL` —
-      extend to the new Staff path).
-- [ ] Support optional completion attachment/photo. Reuse the existing
+      extend to the new Staff path).~~
+- [x] ~~Support optional completion attachment/photo. Reuse the existing
       `TicketAttachment` model + `is_hidden=False` for the visible-evidence
-      semantic.
-- [ ] Default route: Staff marks done → `WAITING_MANAGER_REVIEW` (new
+      semantic.~~ (Inline attachment uploader inside the modal parked as
+      remaining UX debt; modal copy directs operator to the existing
+      Attachments card on the page before submitting. Backend's
+      `completion_evidence_required` rule accepts either note OR visible
+      attachment, so the note-only modal still satisfies the rule.)
+- [x] ~~Default route: Staff marks done → `WAITING_MANAGER_REVIEW` (new
       ticket status), then Building Manager accepts to
       `WAITING_CUSTOMER_APPROVAL` or rejects back to `IN_PROGRESS`.
-      Per §10 open question 2 default.
-- [ ] Optional configured route: when the configurable flag is enabled,
+      Per §10 open question 2 default.~~ (BM rejection requires a note;
+      enforced at both serializer + state-machine layer.)
+- [x] ~~Optional configured route: when the configurable flag is enabled,
       Staff marks done → directly to `WAITING_CUSTOMER_APPROVAL`. Flag
       lives on `BuildingStaffVisibility` or `StaffProfile` — sprint
-      design decides.
-- [ ] Keep Ticket and Extra Work routing configurations **separate** (per
-      product rule #7).
-- [ ] Update `ALLOWED_TRANSITIONS` in
+      design decides.~~ Implemented as
+      `BuildingStaffVisibility.staff_completion_routes_to_customer:
+      BooleanField(default=False)` — per-staff-per-building flag matches
+      product rule #7. PM Q2 chose BSV over StaffProfile for the
+      per-building granularity.
+- [x] ~~Keep Ticket and Extra Work routing configurations **separate** (per
+      product rule #7).~~ Extra Work staff completion is parked because
+      STAFF has no EW scope today (G-B7 — `scope_extra_work_for` returns
+      `.none()`). Future batch can add the EW equivalent without
+      collision: the BSV flag is Ticket-scoped by name, leaving room
+      for a parallel `staff_completion_routes_to_customer_extra_work`
+      column.
+- [x] ~~Update `ALLOWED_TRANSITIONS` in
       [`backend/tickets/state_machine.py:53-92`](../../backend/tickets/state_machine.py#L53-L92)
       with the new STAFF entries. Update matrix doc H-5 row to reflect
-      the structurally-permitted STAFF transitions.
-- [ ] Frontend completion modal for STAFF — completion note required +
-      optional attachment + routing-aware destination text.
-- [ ] Add tests: structural tests on the new transitions; configured-
+      the structurally-permitted STAFF transitions.~~ Four new entries:
+      `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` with STAFF row;
+      `(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` extended with STAFF row
+      (gated by routing-flag check in `apply_transition`);
+      `(WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL)` (BM accepts);
+      `(WAITING_MANAGER_REVIEW, IN_PROGRESS)` (BM rejects).
+      New scope `SCOPE_STAFF_ASSIGNED` (TicketStaffAssignment membership).
+      Matrix H-5 row clarified — STAFF-marks-own-work-done is NOT
+      approving-customer-completion.
+- [x] ~~Frontend completion modal for STAFF — completion note required +
+      optional attachment + routing-aware destination text.~~
+- [x] ~~Add tests: structural tests on the new transitions; configured-
       routing-flag tests; completion-evidence regression tests; matrix
-      H-5 safety net update.
+      H-5 safety net update.~~ 34 new backend tests across 11 classes;
+      Playwright spec written (not executed locally).
+
+#### Batch 11 completion (2026-05-17)
+
+- **Date:** 2026-05-17.
+- **Commit:** uncommitted on working tree as of 2026-05-17, on top of
+  `3d91810`.
+- **Files changed (15 edits + 5 new files):**
+  - **Backend edits (7):**
+    - `backend/tickets/models.py` (+13 — new `TicketStatus.WAITING_MANAGER_REVIEW`
+      enum value + new `Ticket.manager_review_at: DateTimeField(null=True,
+      blank=True)` timestamp column).
+    - `backend/buildings/models.py` (+23 — new
+      `BuildingStaffVisibility.staff_completion_routes_to_customer: BooleanField(default=False)`
+      flag + docstring extension).
+    - `backend/tickets/state_machine.py` (+108 — `SCOPE_STAFF_ASSIGNED`
+      constant + branch in `_user_passes_scope`; 4 new ALLOWED_TRANSITIONS
+      entries (1 NEW + 1 EXTENDED + 2 NEW for WAITING_MANAGER_REVIEW);
+      `TIMESTAMP_ON_ENTER` extension for `manager_review_at`;
+      `COMPLETION_EVIDENCE_TRANSITIONS` extended to include `(IN_PROGRESS,
+      WAITING_MANAGER_REVIEW)`; STAFF routing-flag check + BM rejection-
+      note check in `apply_transition` (both with stable codes
+      `staff_completion_route_mismatch` + `rejection_note_required`)).
+    - `backend/tickets/serializers.py` (+38 — BM rejection-note rule in
+      `TicketStatusChangeSerializer.validate`; `is_assigned_staff`
+      SerializerMethodField + `manager_review_at` field on
+      `TicketDetailSerializer`).
+    - `backend/tickets/views.py` (+68 — new
+      `@action(detail=True, methods=["get"], url_path="staff-completion-route")`
+      on `TicketViewSet`; STAFF must have `TicketStaffAssignment` + ticket
+      in IN_PROGRESS; provider operators in scope; out-of-scope 404).
+    - `backend/accounts/serializers_staff.py` (+11 — adds
+      `staff_completion_routes_to_customer` to BSV read + update
+      Meta.fields so admin PATCHes mutate the new field; necessary
+      extension surface mirroring Batch 10's `visibility_level` rollout).
+    - `backend/audit/signals.py` (+10 — `_BSV_TRACKED_FIELDS` extended
+      from `("can_request_assignment", "visibility_level")` to include
+      `"staff_completion_routes_to_customer"`).
+  - **Frontend edits (6):**
+    - `frontend/src/api/types.ts` (+37 — `WAITING_MANAGER_REVIEW` added
+      to `TicketStatus` union; `manager_review_at` + `is_assigned_staff`
+      added to `TicketDetail`; `StaffVisibilityLevel`-style
+      `StaffCompletionRoute` + `StaffCompletionRouteResponse` types;
+      `BuildingStaffVisibilityAdmin.staff_completion_routes_to_customer`
+      added).
+    - `frontend/src/api/admin.ts` (+25 — `StaffVisibilityPatch` extended;
+      new `getStaffCompletionRoute(ticketId)` helper).
+    - `frontend/src/pages/TicketDetailPage.tsx` (+279 — STAFF
+      "Complete work" button gated on `STAFF + IN_PROGRESS + is_assigned_staff`;
+      inline-card modal mirroring the Sprint 27F-F1 override modal shape
+      (rather than a floating overlay) with required note textarea +
+      attachment hint + routing-aware destination text fetched from
+      the new endpoint + routing-aware submit-button label; handlers
+      for `completion_evidence_required` (inline error) +
+      `staff_completion_route_mismatch` (refetch route + retry).
+      Testids: `ticket-staff-complete-button`, `ticket-staff-complete-modal`,
+      `ticket-staff-complete-route`, `ticket-staff-complete-note`,
+      `ticket-staff-complete-error`, `ticket-staff-complete-cancel`,
+      `ticket-staff-complete-submit`).
+    - `frontend/src/pages/admin/UserFormPage.tsx` (+97 — new
+      "Completion routes directly to customer" checkbox stacked under
+      the existing `can_request_assignment` checkbox in the BSV admin
+      editor (desktop column + mobile card mirror); testids
+      `staff-completion-routes-to-customer-{buildingId}` +
+      `staff-completion-routes-to-customer-mobile-{buildingId}`).
+    - `frontend/src/i18n/en/common.json` (+22 — 17 Batch 11 keys
+      covering modal copy, routing destination strings, submit labels,
+      error messages, attachment hint, status label
+      `ticket_status.waiting_manager_review`, admin checkbox label).
+    - `frontend/src/i18n/nl/common.json` (+22 — NL parity).
+  - **New backend modules / tests (4):**
+    - `backend/tickets/migrations/0010_waiting_manager_review.py` —
+      `AlterField` on `Ticket.status` (regenerates `choices`) +
+      `AddField` for `manager_review_at`.
+    - `backend/buildings/migrations/0004_bsv_staff_completion_routes_to_customer.py`
+      — `AddField` for the new BSV boolean (`default=False`; preserves
+      pre-Batch-11 behaviour).
+    - `backend/tickets/tests/test_sprint28_staff_completion.py` —
+      31 tests across 10 classes (structural transitions; default route;
+      configured route; completion evidence × 4 sub-cases × 2 routes;
+      route mismatch; STAFF-not-assigned forbidden; H-5 STAFF-cannot-
+      approve lock; BM accepts; BM rejects with + without note; new
+      endpoint authorization matrix).
+    - `backend/audit/tests/test_sprint28_staff_completion_route_audit.py`
+      — 3 tests (PATCH flag emits AuditLog UPDATE row; combined PATCH
+      with visibility_level emits ONE row with both diffs; unrelated
+      field PATCH does not include the flag in the diff).
+  - **New frontend tests (1):**
+    - `frontend/tests/e2e/staff-completion-routing.spec.ts` — 2 cases
+      (STAFF completion modal flow + admin checkbox toggle and
+      persistence).
+  - **Docs edits (2):**
+    - `docs/architecture/sprint-27-rbac-matrix.md` (+69 — H-5 row
+      clarified with STAFF-marks-own-work-done vs customer-decision
+      distinction + Batch 11 test references; new §15 Test footprint
+      section).
+    - `docs/audits/current-state-2026-05-16-system-audit.md` (+2 —
+      row 18 status flipped to OK with Sprint 28 Batch 11 reference).
+- **Migration status:** **Both migrations created, NOT applied to dev
+  DB in this pass** — user to approve before applying. NOTE: Batch 10
+  migration `buildings/0003_buildingstaffvisibility_visibility_level`
+  is also still NOT applied to dev DB (user committed Batch 10 without
+  approving migrate). When you approve, the migrate command must apply
+  both `buildings/0003` AND `buildings/0004` AND `tickets/0010` in
+  order. Test DB auto-applies during `manage.py test --keepdb`.
+- **Tests / checks run:**
+  - Targeted: `python manage.py test
+    tickets.tests.test_sprint28_staff_completion
+    audit.tests.test_sprint28_staff_completion_route_audit
+    --keepdb -v 1` → **34/34 OK** in 8.0s.
+  - Backend agent's environment broader sweep (`accounts tickets audit
+    customers buildings`): **644/644 OK** in 515.5s.
+  - Re-verified targeted from parent session: **34/34 OK** in 8.0s.
+    Broader sweep re-run from parent session (`accounts tickets audit
+    customers buildings`): **644/644 OK** in 719.7s — no regression
+    confirmed independently.
+  - `manage.py check`: 0 issues. `makemigrations --dry-run --check`:
+    No changes detected.
+  - Frontend gates from agent environment: `tsc --noEmit -p
+    tsconfig.app.json` → clean (no errors); `vite build` → clean,
+    619ms, 2789 modules transformed; `eslint .` → **52 problems =
+    baseline** (zero new hits in changed files; the 7 hits inside
+    `TicketDetailPage.tsx` + `UserFormPage.tsx` are pre-existing
+    `react-hooks/set-state-in-effect` warnings on untouched useEffect
+    blocks). Parent session cannot independently re-verify (WSL/UNC
+    cmd.exe gotcha — `'tsc' is not recognized`); CI will confirm.
+  - Playwright spec **written but NOT executed locally** (WSL
+    `frontend/test-results/` root-ownership gotcha; CI exercises).
+- **Important decisions made (also in §9):**
+  - **`WAITING_MANAGER_REVIEW` is the new TicketStatus value** per
+    §6 Batch 11 + §10 Q2 explicit default. Migration regenerates
+    `choices` via `AlterField` (no column type change; existing rows
+    unaffected).
+  - **Routing flag = `BuildingStaffVisibility.staff_completion_routes_to_customer`
+    (per-staff-per-building, default False)** per PM Q2. Matches
+    product rule #7's "per staff/building, separately for Tickets vs
+    Extra Work". Default False preserves the manager-review default.
+  - **STAFF completion ALWAYS goes through `apply_transition`** — no
+    bypass. The new routing-flag check sits next to the existing
+    Sprint 27F-B1 override-coercion + Sprint 25C completion-evidence
+    preconditions, same architectural layer. Scope helper stays pure
+    (TicketStaffAssignment membership only).
+  - **BM rejection of staff completion requires a note** — two-layer
+    defence (serializer 400 + state-machine `TransitionError(code=
+    "rejection_note_required")`). Programmatic callers cannot bypass.
+  - **`(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` was EXTENDED with a
+    STAFF row** (not duplicated). The flag-state check filters which
+    of the two new STAFF-permitted transitions is reachable at
+    runtime via the route mismatch error.
+  - **`SCOPE_STAFF_ASSIGNED` new scope helper** — STAFF must be in
+    `TicketStaffAssignment`. No osius.* key (model-field + scope
+    check pattern mirroring Batch 10).
+  - **New endpoint `GET /api/tickets/<id>/staff-completion-route/`** —
+    smallest auditable shape for frontend route discovery. STAFF
+    without assignment → 404; CUSTOMER_USER → 404; provider operators
+    in scope get the conservative `"manager_review"` default without
+    `?staff_id`, or the resolved route with `?staff_id=<id>`.
+  - **`is_assigned_staff: boolean` added to TicketDetailSerializer** —
+    frontend uses this directly to decide whether to render the
+    "Complete work" button; no separate API call needed on render.
+  - **Completion modal is an inline card mirroring the Sprint 27F-F1
+    override modal shape** (NOT a floating overlay) — consistent with
+    the page's existing modal pattern.
+  - **Audit registration via existing `_BSV_TRACKED_FIELDS` tuple
+    extension** — one line; existing UPDATE-diff handler covers.
+  - **H-5 matrix wording updated** to clarify "STAFF cannot drive
+    `WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED`" (the
+    customer-decision); the new Batch 11 STAFF transitions are
+    "STAFF marking own work done" — structurally distinct from
+    "approving customer completion" which remains forbidden.
+- **Remaining risks:**
+  - **Dev DB schema BEHIND code** until user approves migration. **TWO
+    pending migrations now**: `buildings/0003` (Batch 10 — not yet
+    applied) AND `buildings/0004` + `tickets/0010` (Batch 11). User
+    must run `python manage.py migrate buildings tickets` to catch
+    up. Endpoints touching `WAITING_MANAGER_REVIEW`, `manager_review_at`,
+    or BSV.staff_completion_routes_to_customer will raise database
+    errors against the dev container until applied.
+  - **Inline attachment upload in the completion modal is UX debt** —
+    deferred per PM Q12 + backend-engineer report. Modal directs
+    operator to the existing Attachments card on the page. Backend's
+    `completion_evidence_required` rule still accepts note-only
+    completions so the experience is functional.
+  - **Frontend gates not independently re-runnable from parent
+    session** — same WSL/UNC cmd.exe limitation as prior batches.
+    Backend-engineer + frontend-engineer environments both verified
+    green. CI will confirm on push.
+  - **EW staff completion routing UNIMPLEMENTED** — parked because
+    STAFF has no EW scope today (G-B7). Future batch can add a
+    parallel `staff_completion_routes_to_customer_extra_work`
+    column to the BSV row without collision. The current Batch 11
+    flag is intentionally Ticket-only (named for clarity).
+  - **`change_status` view was not touched** — STAFF passes
+    `is_staff_role(...)` gate (Sprint 23A widened); reaches the
+    serializer + state machine where the new logic enforces routing
+    and evidence. View-layer change not needed.
+  - **Provider on-behalf completion** (admin/BM completing work
+    themselves while ticket is IN_PROGRESS) — backend supports it
+    via ALLOWED_TRANSITIONS rows (SUPER_ADMIN / COMPANY_ADMIN /
+    BUILDING_MANAGER are listed alongside STAFF); the frontend
+    does NOT expose a dedicated UI surface for it (admins use the
+    generic status-change). Acceptable for Batch 11 scope.
+  - **Frontend Playwright spec resolves status via API** (not by
+    asserting locale badge text) to keep the test resilient against
+    future i18n copy changes. Light testid-based assertions only.
 
 ### Batch 12 — Building Manager read-only customer/contact view
 
@@ -2188,24 +2415,22 @@ Goal: nice-to-have closure on Sprint 28. Lowest priority.
 
 ## 7. Current batch pointer
 
-- **Current batch:** **Batch 11 — Staff completion routing**
+- **Current batch:** **Batch 12 — Building Manager read-only
+  customer/contact view**
 - **Current status:** Not started
 - **Next recommended action:** Open a fresh implementation pass, re-read
-  this file, state the current batch, and work only on Batch 11 items.
-  Batch 11 adds a configurable per-staff / per-building completion
-  routing per product rule #7: STAFF can drive a new transition out
-  of `IN_PROGRESS` (Default: STAFF marks done → new
-  `WAITING_MANAGER_REVIEW` status → BM accepts → `WAITING_CUSTOMER_
-  APPROVAL`; configured route: STAFF marks done → directly
-  `WAITING_CUSTOMER_APPROVAL`). Update `ALLOWED_TRANSITIONS` in
-  `tickets/state_machine.py`; matrix H-5 row must reflect the new
-  structurally-permitted STAFF transitions; completion-evidence
-  rules from Sprint 25C extend. Ticket vs Extra Work routing
-  configurations stay separate per product rule #7. Frontend ships
-  a completion modal for STAFF (required note + optional
-  attachment + routing-aware destination text).
-- **Next recommended batch (on-deck):** Batch 12 — Building Manager
-  read-only customer/contact view.
+  this file, state the current batch, and work only on Batch 12 items.
+  Batch 12 ships read-only customer + contact list/detail views for
+  Building Manager in their assigned buildings. Reuse existing scope
+  helpers (`building_ids_for`); no new backend gates needed. The
+  frontend exposes the surfaces inside the existing customer-scoped
+  sidebar (Batch 3 anchor) but the BM persona sees a read-only
+  variant — no Add/Edit affordances. View-first per spec §3.
+  Depends on Batch 3 (sidebar) + Batch 4 (Contact model). No global
+  provider settings access for BM. Batch 4 deferred this BM
+  read-only view explicitly to Batch 12.
+- **Next recommended batch (on-deck):** Batch 13 — View-first refactor
+  of admin pages (including `CustomerFormPage.tsx` decomposition).
 
 ---
 
@@ -2215,6 +2440,7 @@ Append-only. Newest at the top. One row per closed batch.
 
 | Date | Batch | Commit | Summary | Tests/checks | Remaining risks |
 |---|---|---|---|---|---|
+| 2026-05-17 | Batch 11 — Staff completion routing | uncommitted on working tree as of 2026-05-17, on top of `3d91810` | Joint backend + frontend, configurable per-staff/per-building STAFF completion routing per product rule #7. **Backend:** new `TicketStatus.WAITING_MANAGER_REVIEW` enum value + new `Ticket.manager_review_at: DateTimeField(null=True, blank=True)` column (migration `tickets/0010_waiting_manager_review.py`, `AlterField` regenerates choices + `AddField` for the timestamp). New `BuildingStaffVisibility.staff_completion_routes_to_customer: BooleanField(default=False)` flag (migration `buildings/0004_bsv_staff_completion_routes_to_customer.py`; per-staff-per-building granularity per rule #7; default False preserves manager-review default route). 4 new `ALLOWED_TRANSITIONS` entries: `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` (STAFF default route + SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER on-behalf), `(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` EXTENDED with STAFF row (gated by routing-flag at runtime), `(WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL)` (BM accepts), `(WAITING_MANAGER_REVIEW, IN_PROGRESS)` (BM rejects). New `SCOPE_STAFF_ASSIGNED` scope helper (TicketStaffAssignment membership). `TIMESTAMP_ON_ENTER` extended to stamp `manager_review_at`. `COMPLETION_EVIDENCE_TRANSITIONS` extended to include `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` — same Sprint 25C rule (note OR visible attachment required). New STAFF routing-flag check + BM-rejection-note check in `apply_transition` with stable codes `staff_completion_route_mismatch` + `rejection_note_required` (both also enforced at serializer for view-layer 400 + defence in depth). `TicketDetailSerializer` extended with `is_assigned_staff: bool` SerializerMethodField + `manager_review_at` field (frontend uses `is_assigned_staff` to gate the "Complete work" button without a separate API call). New `@action` on `TicketViewSet` at `GET /api/tickets/<id>/staff-completion-route/` returning `{"route": "manager_review" | "customer_approval"}` for the frontend modal to render the correct destination text + submit-button label. `BuildingStaffVisibilitySerializer` + `BuildingStaffVisibilityUpdateSerializer` extended with the new flag as a writable field (necessary surface extension mirroring Batch 10's `visibility_level` rollout). Audit: `_BSV_TRACKED_FIELDS` extended to include `"staff_completion_routes_to_customer"`; existing UPDATE-diff handler covers the new field. NO new `osius.*` permission keys (model-field + scope-check pattern from Batch 10). `views_staff_assignments.py::_gate_actor` UNCHANGED — multi-staff M:N endpoint remains admin-only (PM Q5; same Batch 10 decision). H-5 invariant preserved: STAFF still has no row in `(WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED)` — the new STAFF transitions are "STAFF marking own work done", structurally distinct from "approving customer completion". 34 new backend tests across 11 classes (`test_sprint28_staff_completion.py` 31 tests + `test_sprint28_staff_completion_route_audit.py` 3 tests): structural transitions, default route, configured route, completion evidence × 4 sub-cases × 2 routes, route mismatch, STAFF-not-assigned forbidden, H-5 STAFF-cannot-approve lock, BM accepts, BM rejects with + without note, endpoint authorization matrix, audit row shape. **Frontend:** new types `WAITING_MANAGER_REVIEW` in `TicketStatus` union + `manager_review_at` + `is_assigned_staff` on `TicketDetail` + `StaffCompletionRoute` + `StaffCompletionRouteResponse` + `BuildingStaffVisibilityAdmin.staff_completion_routes_to_customer` + extended `StaffVisibilityPatch`. New API helper `getStaffCompletionRoute(ticketId)`. `TicketDetailPage.tsx` gets STAFF "Complete work" button (gated on `STAFF + IN_PROGRESS + is_assigned_staff`) + inline-card completion modal mirroring the Sprint 27F-F1 override modal shape (required note textarea + attachment hint + routing-aware destination text from the new endpoint + routing-aware submit label; handlers for `completion_evidence_required` inline error + `staff_completion_route_mismatch` refetch). Testids: `ticket-staff-complete-button`, `-modal`, `-route`, `-note`, `-error`, `-cancel`, `-submit`. `UserFormPage.tsx` `StaffDetailsSection` BSV editor gets new "Completion routes directly to customer" checkbox stacked under `can_request_assignment` (desktop + mobile mirror; testids `staff-completion-routes-to-customer-{buildingId}` + `-mobile-{buildingId}`). 17 new i18n keys per locale, EN/NL parity verified. New Playwright spec `staff-completion-routing.spec.ts` (2 cases — STAFF modal flow + admin checkbox toggle persistence; status verified via API not locale badge text for resilience). Docs: H-5 matrix row clarified (STAFF-marks-own-work-done vs customer-decision) + new §15 Test footprint section; audit row 18 marked OK with Batch 11 reference. | Backend targeted (`test_sprint28_staff_completion + test_sprint28_staff_completion_route_audit`): **34/34 OK** in 8.0s. Backend broader (`accounts tickets audit customers buildings`): **644/644 OK** in 719.7s (parent session re-verification — matches backend agent's 644/644 result). `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend gates from agent environment: `tsc --noEmit -p tsconfig.app.json` → clean (no errors); `vite build` → clean in 619ms (2789 modules); `eslint .` → **52 problems = baseline** (zero new hits — the 7 hits inside `TicketDetailPage.tsx` + `UserFormPage.tsx` are pre-existing `react-hooks/set-state-in-effect` warnings on untouched useEffect blocks). Parent session cannot independently re-verify (WSL/UNC cmd.exe gotcha — `'tsc' is not recognized`); CI will confirm on push. Playwright spec written but NOT executed locally (WSL `frontend/test-results/` root-ownership gotcha; CI exercises). | **Dev DB schema BEHIND code** — THREE pending migrations: Batch 10's `buildings/0003_buildingstaffvisibility_visibility_level` (still not applied from prior commit) + Batch 11's `buildings/0004_bsv_staff_completion_routes_to_customer` + `tickets/0010_waiting_manager_review`. User must run `python manage.py migrate buildings tickets` to catch up. Endpoints touching `WAITING_MANAGER_REVIEW`, `manager_review_at`, `visibility_level`, or `staff_completion_routes_to_customer` will raise `column does not exist` errors against the dev container until applied. **Inline attachment upload inside completion modal is UX debt** — deferred per PM Q12 + backend-engineer report; modal directs operator to existing Attachments card on the page. Backend's `completion_evidence_required` rule still accepts note-only completions. **Frontend gates not independently re-runnable from parent session** — same WSL/UNC cmd.exe limitation as prior batches; agent environments verified green. **EW staff completion routing UNIMPLEMENTED** — parked because STAFF has no EW scope today (G-B7). Future batch can add `staff_completion_routes_to_customer_extra_work` parallel column without collision. **`change_status` view UNCHANGED** — STAFF passes `is_staff_role(...)` (Sprint 23A widened) → reaches serializer + state machine where new logic applies. View-layer touch was unnecessary. **Provider on-behalf completion** supported in `ALLOWED_TRANSITIONS` (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER listed) but frontend exposes no dedicated UI surface; admins use generic status-change. Acceptable for Batch 11 scope. **Playwright spec resolves status via API** (not locale badge text) for resilience against future i18n copy changes. |
 | 2026-05-17 | Batch 10 — Staff per-building granularity | uncommitted on working tree as of 2026-05-17, on top of `eb689a1` | Joint backend + frontend, per-row STAFF visibility level on `BuildingStaffVisibility`. **Backend:** new `BuildingStaffVisibility.VisibilityLevel` TextChoices enum (`ASSIGNED_ONLY` / `BUILDING_READ` / `BUILDING_READ_AND_ASSIGN`); new `visibility_level` CharField with `default=BUILDING_READ` (preserves existing B2 behaviour for every existing BSV row + Sprint 24-28 staff test). Migration `buildings/0003_buildingstaffvisibility_visibility_level.py` (single AddField; backfills automatically). `accounts/scoping.py` STAFF branch updated: only `BUILDING_READ` / `BUILDING_READ_AND_ASSIGN` rows contribute building-wide visibility; `ASSIGNED_ONLY` rows recognise STAFF at the building (for direct-assignment-target eligibility via `_validate_target_staff`) but do NOT widen visibility beyond `TicketStaffAssignment`. H-4 floor (`Q(_assigned=True)`) preserved untouched. `tickets/views.py::assign` action widened: STAFF allowed iff active BSV row exists for `ticket.building_id` with `visibility_level=BUILDING_READ_AND_ASSIGN`. `TicketAssignSerializer.validate` (`tickets/serializers.py`) mirror-widened — necessary deviation: the existing Sprint 28 Batch 2 serializer gate was rejecting all STAFF before view-layer code could fire; both layers now share the same B3 BSV-level check (defence in depth). `views_staff_assignments.py::_gate_actor` UNCHANGED — the multi-staff M:N `TicketStaffAssignment` stays admin-only (PM Q5: B3 maps to BM-assign verb, not multi-staff orchestration). NO new `osius.*` keys (PM Q6: model field is the source of truth). `BuildingStaffVisibilitySerializer` extended with `visibility_level` as a writable field. Audit signal: `_BSV_TRACKED_FIELDS` extended from `("can_request_assignment",)` to include `"visibility_level"`. 19 new backend tests across 9 classes (`test_sprint28_staff_building_granularity.py`) covering default, B1/B2/B3 scope + assign-gate, cross-building + cross-company isolation, target-validation unchanged, H-4 floor (finally dedicated coverage — closes audit row 25 doc-drift), multi-staff endpoint still admin-only; +1 audit test for `visibility_level` UPDATE diff. **Frontend:** new `StaffVisibilityLevel` string-literal union + `visibility_level` field on `BuildingStaffVisibilityAdmin` in `api/types.ts`; `updateStaffVisibility` helper refactored to take a `StaffVisibilityPatch` object (avoids field clobber when toggling one of the two writable fields). `UserFormPage.tsx` `StaffDetailsSection` gets new per-row dropdown in desktop table column + mobile card (`data-testid="staff-visibility-level-select-{buildingId}"`) — smallest-safe addition, no redesign. `DashboardPage.tsx` gets conditional "Assigned to you" badge on STAFF rows where `ticket.assigned_to === me.id` (desktop subject cell + phone-width ticket card); sort-first parked as remaining UX debt. 5 new i18n keys per locale (`staff_admin.level_*` + `tickets.assigned_to_you`), EN/NL parity. New Playwright spec `staff-building-granularity.spec.ts` (2 cases — dropdown renders + three options exist). Matrix doc updated: §1.2 BSV row mentions visibility_level; §3 H-4 paragraph references the new `StaffH4FloorTests`; new §14 Test footprint section. Audit doc updated: row 17 status → OK with Batch 10 reference; row 26 noted as PARTIAL (view + serializer halves closed; deeper serializer audit follow-up still open). | Backend targeted (`test_sprint28_staff_building_granularity + test_sprint28_visibility_level_audit`): **19/19 OK** in 5.1s. Backend broader (`accounts tickets audit customers`): **585/585 OK** in 471.9s — no regression to existing Sprint 24-28 STAFF tests. Backend full suite (per backend agent's environment): **1032/1032 OK**. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend typecheck (agent env): EXIT=0 clean. Frontend lint (agent env): **52 problems = baseline** (zero new hits in changed files). Frontend `vite build`: failed environmentally (rolldown `win32-x64-msvc` native binding missing in WSL — same class of WSL/UNC limitation as prior batches; CI builds cleanly). Playwright spec written, NOT executed locally (WSL `frontend/test-results/` root-ownership gotcha). | **Dev DB schema BEHIND code** until user approves `python manage.py migrate buildings` — `accounts/scoping.py` will raise `column does not exist` against the dev container until applied. **`vite build` not re-runnable from parent session** (rolldown native binding through WSL UNC bridge). **Sort-first prioritisation for own-assigned tickets parked** as remaining UX debt — badge ships; sort would require role-gated shared-list reordering. **`TicketAssignSerializer.validate` deep audit (audit row 26) remains open** — Batch 10 widened the gate consistently across view + serializer; a formal boolean-edge-case audit of the serializer is a follow-up. **Badge does NOT honour multi-staff M:N** — fires only on `ticket.assigned_to === me.id` (legacy single-assignee FK); M:N check requires per-row staff-assignments fetch, deferred. |
 | 2026-05-17 | Batch 9 — Extra Work dashboard and stats | uncommitted on working tree as of 2026-05-17, on top of `ec66380` | Joint backend + frontend, aggregation-only batch (no new models, no new migrations). **Backend:** two new `@action` methods on `ExtraWorkRequestViewSet` at `backend/extra_work/views.py` — `GET /api/extra-work/stats/` returns `{total, by_status, by_routing, by_urgency, active, awaiting_pricing, awaiting_customer_approval, urgent}`; `GET /api/extra-work/stats/by-building/` returns a list of per-building rows `{building_id, building_name, total, active, awaiting_pricing, awaiting_customer_approval, urgent}` ordered by `building_name`, GROUP BY naturally skips zero-row buildings. Both reuse `scope_extra_work_for(request.user)` so H-1/H-2 isolation is inherited; STAFF naturally gets all-zeros because the scope helper returns `.none()` for STAFF (MVP). Two module-level constants `EXTRA_WORK_TERMINAL_STATUSES = ("CUSTOMER_APPROVED", "CUSTOMER_REJECTED", "CANCELLED")` and `EXTRA_WORK_AWAITING_PRICING_STATUSES = ("REQUESTED", "UNDER_REVIEW")` shared between both actions. `awaiting_customer_approval` defined as `status == PRICING_PROPOSED` only (Option A from PM Q2; Batch 8's `apply_proposal_transition` auto-advance contract makes parent EW status the single source of truth — OR-ing in `proposals__status=SENT` would double-count). `awaiting_pricing` = `routing_decision="PROPOSAL"` AND `status IN (REQUESTED, UNDER_REVIEW)` — the operator action queue. `urgent` = `urgency="URGENT"` AND `status NOT IN terminal`. No new permission keys; no migration. **Frontend:** new typed helpers `getExtraWorkStats()` + `getExtraWorkStatsByBuilding()` in `frontend/src/api/extraWork.ts` (Option A from PM Q2); new TS types `ExtraWorkStatusValue` / `ExtraWorkRoutingValue` / `ExtraWorkUrgencyValue` (string-literal unions) + `ExtraWorkStats` / `ExtraWorkStatsByBuildingRow` / `ExtraWorkStatsByBuildingResponse` in `frontend/src/api/types.ts` next to existing `TicketStats` types. `DashboardPage.tsx` ADDITIVE Extra Work section parallel to existing Tickets layout — both top-level `<section>`s wrapped in `<div className="dashboard-two-col">` that renders them **side by side at viewports ≥ 1400px** (CSS Grid `minmax(0, 1fr) minmax(0, 1fr)` with `align-items: start`) and stacked at narrower widths. `<section data-testid="dashboard-tickets-section">` wraps existing Tickets layout untouched, new `<section data-testid="dashboard-extra-work-section">` next to it with 5-KPI row (Total / Active / Awaiting pricing / Awaiting customer / Urgent) + by-building card + status-breakdown card (visual symmetry with Tickets). Empty-state container `data-testid="dashboard-extra-work-section-empty"` when `total === 0 && Object.keys(by_status).length === 0` (STAFF / no-scope users). CUSTOMER_USER gets emphasis class on `data-testid="dashboard-extra-work-kpi-awaiting-customer"`. `frontend/src/index.css` carries the new `.dashboard-two-col` rule + 1400px media query (breakpoint chosen higher than the inner `.dash-grid` 1100px breakpoint so the Tickets section's `1fr + 340px` split stays functional inside the half-viewport column); `minmax(0, 1fr)` is load-bearing to prevent the inner recent-tickets table from overflowing the column. New Extra Work loaders merged into existing tickets-stats `useEffect` to avoid a new `react-hooks/set-state-in-effect` lint hit. Same `AUTO_REFRESH_INTERVAL_MS` cadence. EN/NL i18n parity: +26 keys per locale in `dashboard.json` covering section title/sub, 5 KPI label/meta pairs, by-building title/sub + empty + 4 `{{count}}` count templates, empty section copy, 6 Extra Work status labels under `extra_work_status_*`. New backend test module `backend/extra_work/tests/test_sprint28_extra_work_stats.py` (19 tests / 5 classes — scope across SUPER_ADMIN/COMPANY_ADMIN/BUILDING_MANAGER/CUSTOMER_USER/STAFF, 8 bucket-definition tests, by-building order + zero-row skip + per-row aggregate match, H-1/H-2 cross-tenant isolation lock, soft-delete excluded). New Playwright spec `frontend/tests/e2e/sprint28_extra_work_dashboard.spec.ts` (3 tests — provider sees both sections; CUSTOMER_USER sees awaiting-customer emphasis; STAFF sees empty state). | Backend targeted: `python manage.py test extra_work.tests.test_sprint28_extra_work_stats --keepdb -v 1` → **19/19 OK** in 4.9s. Backend broader: `python manage.py test extra_work tickets audit customers --keepdb -v 1` → **535/535 OK** in 363.1s — no regression. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. Frontend in agent environment: `tsc --noEmit -p tsconfig.app.json` → **EXIT=0 clean (strict mode)**; `eslint .` → **52 problems = baseline** (zero new hits in changed files). Frontend gates NOT independently re-run from parent session (WSL/UNC cmd.exe gotcha — well-documented operational limitation). `vite build` NOT run (env mismatch in agent sandbox, unrelated to Batch 9 code; CI exercises on Linux). Playwright spec written but NOT executed locally (WSL `frontend/test-results/` gotcha; CI will exercise the 3 cases). | **At viewports < 1400px the sections stack vertically** — by design (responsive default). Users on 1366×768 / 1440×900 laptop screens may see stacked sections; 1440px+ external monitors see side-by-side. The 1400px breakpoint can be lowered to 1280px or 1200px in a future polish batch if stakeholders want a wider side-by-side range, but lowering further would cramp the Tickets inner `1fr + 340px` split. **Frontend gates not independently re-run from the parent session** — typecheck + lint passed in the frontend agent's environment; CI will confirm on push. **`vite build` not run locally** (Node 20.18 < required 20.19 in agent sandbox + rolldown UNC binding mismatch — unrelated to Batch 9 code; CI builds cleanly). **Auto-refresh loader merged into existing tickets-stats effect** to avoid a new `react-hooks/set-state-in-effect` lint hit (existing effect already trips this rule baseline; new loaders added to it rather than a fresh effect). **`ExtraWorkRequest` still NOT registered for audit** — proposal-driven auto-advance writes do not land on generic AuditLog (pre-existing Batch 6 deferral; surfacing again because Batch 9 surfaces these state changes in the dashboard counts). Stats reads do NOT depend on AuditLog so this risk is information-only. **Status-breakdown card** rendered for visual symmetry with the Tickets section (PM brief made it optional; frontend agent kept it). **Playwright spec needs CI run to confirm behaviour against demo seed** — light assertions only, no count assertions (seed-data-dependent). |
 | 2026-05-17 | Batch 8 — Proposal builder | `ec66380 feat: add extra work proposal builder` (on top of `7ec3f15`) | **Backend-only batch** (master plan §6 Batch 8 has zero frontend bullets — PM scope-verification confirmed). Ships the first-class proposal entity for the custom-priced (`routing_decision="PROPOSAL"`) Extra Work path. **4 new models in `extra_work/models.py`**: `Proposal` (FK ExtraWorkRequest CASCADE; status enum DRAFT/SENT/CUSTOMER_APPROVED/CUSTOMER_REJECTED/CANCELLED; stored totals + `recompute_totals` mirroring `ExtraWorkRequest`; sent_at/customer_decided_at/override_by/override_reason/override_at; partial `UniqueConstraint(extra_work_request, condition=Q(status__in=["DRAFT","SENT"]))` named `uniq_proposal_open_per_request` permits 1:N parent→proposals but blocks parallel open drafts), `ProposalLine` (FK Proposal CASCADE + nullable FK Service PROTECT; ad-hoc `description` CharField required when service is NULL; quantity/unit_type/unit_price/vat_pct; **`customer_explanation` + `internal_note` TextField pair per spec §6 / PM Q1 default**; `is_approved_for_spawn: bool=True` forward-compat slot for parked per-line UX; stored computed `line_subtotal`/`line_vat`/`line_total` recomputed in `save()` mirroring `ExtraWorkPricingLineItem`), `ProposalStatusHistory` (mirrors `ExtraWorkStatusHistory` shape — `is_override`+`override_reason` columns ARE the workflow-override audit trail per H-11), `ProposalTimelineEvent` (event_type enum {CREATED/SENT/CUSTOMER_VIEWED/CUSTOMER_APPROVED/CUSTOMER_REJECTED/ADMIN_OVERRIDDEN/CANCELLED}; `customer_visible: bool` written at emission time; provider-only `metadata: JSONField` carries override_reason text for ADMIN_OVERRIDDEN events; customer serializer strips metadata entirely). **New state machine `backend/extra_work/proposal_state_machine.py`**: 5-entry `ALLOWED_TRANSITIONS` set (DRAFT→SENT, DRAFT→CANCELLED, SENT→CUSTOMER_APPROVED, SENT→CUSTOMER_REJECTED, SENT→CANCELLED); `_user_can_drive_proposal_transition` mirrors `extra_work.state_machine` (SUPER_ADMIN global; COMPANY_ADMIN/BUILDING_MANAGER scoped via reused `osius.ticket.view_building`; CUSTOMER_USER via `customer.extra_work.approve_own`/`approve_location`; STAFF blocked); `apply_proposal_transition` is atomic + select_for_update + emits one timeline event per transition + writes one history row. **Override coercion mirrors Sprint 27F-B1**: provider-driven SENT→CUSTOMER_APPROVED/REJECTED + provider-driven SENT→CANCELLED coerce `is_override=True` and require `override_reason` (HTTP 400 with stable code `override_reason_required`). **Parent-EW auto-advance BYPASSES `extra_work.state_machine.apply_transition`** to avoid the legacy `pricing_line_items_required` precondition: SENT writes UNDER_REVIEW→PRICING_PROPOSED on parent + an `ExtraWorkStatusHistory` row directly in the same atomic block; CUSTOMER_APPROVED writes PRICING_PROPOSED→CUSTOMER_APPROVED; CUSTOMER_REJECTED writes PRICING_PROPOSED→CUSTOMER_REJECTED; override fields propagate to parent EW too. `Proposal.send` REJECTS if parent is in REQUESTED (operator must drive REQUESTED→UNDER_REVIEW manually first) — HTTP 400 stable code `proposal_send_requires_under_review`. **New spawn service `backend/extra_work/proposal_tickets.py::spawn_tickets_for_proposal(proposal, *, actor)`** parallel to Batch 7's `instant_tickets.py`: atomic (caller-held tx), idempotent (skip lines whose `Ticket.proposal_line` already resolves), respects `is_approved_for_spawn=False` (forward-compat), uses customer_explanation NOT internal_note in ticket description, sets `Ticket.proposal_line` FK, writes initial `TicketStatusHistory` OPEN row, returns list of created Tickets. **New `Ticket.proposal_line`** nullable FK (`SET_NULL` on delete; `related_name="spawned_tickets_for_proposal_line"`) parallel to Batch 7's `extra_work_request_item` FK — Option A from PM Q5a (carries divergent unit_price/quantity/customer_explanation that would be lost if Option B reused the cart-line FK). **Migration `extra_work/0004_proposal_models.py`** (4 tables + UniqueConstraint + 3 indexes) + **migration `tickets/0009_ticket_proposal_line.py`** (cross-app FK, depends on `extra_work.0004_proposal_models`). **7 new API endpoints** under `/api/extra-work/<ew_id>/proposals/` (list/create, detail, transition, status-history, timeline, lines list/create, line detail) — provider-only mutations gated by `osius.ticket.view_building` scope helper; customer GET filters DRAFT out of list + 404s on DRAFT detail; customer GET of SENT detail emits CUSTOMER_VIEWED timeline event. **Audit:** Proposal + ProposalLine added to full-CRUD tuple in `audit/signals.py`; **ProposalStatusHistory + ProposalTimelineEvent intentionally NOT registered (H-11)** — the history rows ARE the workflow-override audit trail; regression-locked by `ProposalTimelineEventNotAuditedTests`. **47 new backend tests across 3 modules**: `test_sprint28_proposal.py` (30 tests / 13 classes covering CRUD, parent-EW advancement, customer visibility, dual-note privacy with JSON grep-assert, approve+spawn, reject, provider override, atomicity rollback via monkeypatched Ticket.create, idempotency including is_approved_for_spawn=False, timeline emission, scope across all roles, STAFF exclusion, re-send after rejection, unique-open-proposal constraint), `test_sprint28_proposal_state_machine.py` (10 tests / 3 classes for structural state machine), `test_sprint28_proposal_audit.py` (7 tests / 3 classes including the H-11 lock). | Backend targeted (3 modules, 47 tests): **47/47 OK** in 15.7s. Backend broader (`extra_work tickets audit customers`): **516/516 OK** in 352.4s — no regression. Backend full suite (per backend-engineer report): **994/994 OK**. `manage.py check`: 0 issues. `makemigrations --dry-run --check`: No changes detected. No frontend files touched (intentionally — backend-only batch); no frontend checks run. | **Dev DB schema applied 2026-05-17** by user via `python manage.py migrate extra_work tickets` — proposal endpoints exercisable against the dev container. **No frontend exposure** of the proposal builder yet — Batch 8 has zero frontend bullets per master plan §6. Operators cannot compose a proposal via UI until Batch 9 (EW dashboard) or a dedicated frontend batch ships the builder UX. **`Proposal` CREATE writes TWO AuditLog rows** by design (CREATE row + immediate UPDATE for `recompute_totals` save). Audit test asserts on the CREATE row specifically; consumers should be aware. **`CUSTOMER_VIEWED` emitted on every customer GET** of a SENT proposal — not deduplicated. Future polish item. **Parent EW `CUSTOMER_REJECTED → UNDER_REVIEW` must be driven manually** by operator before a new proposal can be POSTed against the same parent. **`Ticket.proposal_line` is `SET_NULL` on ProposalLine delete** — spawn-origin history lost if a line is deleted post-spawn (same trade-off as Batch 7's `extra_work_request_item`). **`ExtraWorkRequest` still NOT registered for audit** — parent EW writes from proposal-driven auto-advance do not land on generic AuditLog (pre-existing Batch 6 deferral; future sprint must pick up these propagation diffs deliberately when registering the parent). |
@@ -2235,6 +2461,17 @@ here AND in the batch's completion block.
 
 | Date | Decision | Reason | Source |
 |---|---|---|---|
+| 2026-05-17 | **`WAITING_MANAGER_REVIEW` added as a new `TicketStatus` enum value** (between `IN_PROGRESS` and `WAITING_CUSTOMER_APPROVAL` chronologically). Migration `tickets/0010_waiting_manager_review.py` regenerates `choices` via `AlterField` (column type unchanged; existing rows unaffected). New `Ticket.manager_review_at: DateTimeField(null=True, blank=True)` timestamp column added in the same migration; `TIMESTAMP_ON_ENTER` updated so `apply_transition` stamps it automatically. | Master plan §6 Batch 11 fourth bullet + §10 Open Question 2 default both explicitly name `WAITING_MANAGER_REVIEW` as the new status for the default route ("Staff marks done → `WAITING_MANAGER_REVIEW` → Building Manager accepts → `WAITING_CUSTOMER_APPROVAL` or rejects back to `IN_PROGRESS`"). The user's pre-batch brief said "Do NOT add WAITING_MANAGER_REVIEW unless the master plan explicitly requires it and you justify it first" — it explicitly does. Adding the timestamp column lets the timeline/analytics surface (existing pattern for `sent_for_approval_at`, `approved_at`, etc.) capture the manager-review entry point. Locked by `StaffCompletionTransitionStructuralTests` + `StaffDefaultRouteTests`. | Batch 11 + `backend/tickets/models.py::TicketStatus` + `backend/tickets/migrations/0010_waiting_manager_review.py` + PM Q1 |
+| 2026-05-17 | **Routing flag = `BuildingStaffVisibility.staff_completion_routes_to_customer: BooleanField(default=False)`** (per-staff-per-building, on the BSV row — NOT on `StaffProfile`). Affirmative naming (`routes_to_customer` not `skip_manager_review`) keeps `True` as the active deviation from the conservative default. Migration `buildings/0004_bsv_staff_completion_routes_to_customer.py`. | Product rule #7 (master plan §5 lines 178-181) explicitly says "Optional (per staff/building, separately for Tickets vs Extra Work): Staff marks done → directly to customer approval" — per-building granularity is required. `StaffProfile` is per-staff-global and cannot express the per-building rule. The BSV row IS the per-staff-per-building anchor (it was extended with `visibility_level` in Batch 10 for the same reason). Default `False` preserves the manager-review default route for every pre-Batch-11 row + every existing test. Field name explicit on the Ticket side so a future EW equivalent can land as a parallel column (`staff_completion_routes_to_customer_extra_work`) without collision when STAFF gets EW scope. Audit coverage via `_BSV_TRACKED_FIELDS` tuple extension (existing UPDATE-diff handler covers). | Batch 11 + `backend/buildings/models.py::BuildingStaffVisibility.staff_completion_routes_to_customer` + PM Q2 |
+| 2026-05-17 | **Four new `ALLOWED_TRANSITIONS` entries** (1 NEW transition + 1 EXTENDED + 2 NEW for WAITING_MANAGER_REVIEW outbound): `(IN_PROGRESS, WAITING_MANAGER_REVIEW)` (STAFF default route + SUPER_ADMIN/COMPANY_ADMIN/BUILDING_MANAGER on-behalf); `(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` EXTENDED with STAFF row gated by the routing-flag check; `(WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL)` (BM accepts); `(WAITING_MANAGER_REVIEW, IN_PROGRESS)` (BM rejects). New `SCOPE_STAFF_ASSIGNED` scope constant + branch in `_user_passes_scope` (`TicketStaffAssignment` membership check). | The state machine is the single source of truth for what STAFF can drive structurally. Per master plan §6 Batch 11. The flag-gating happens IN-LINE in `apply_transition` (PM Q5 Option A) not in the scope helper — keeps the scope helper pure (membership only) and puts the routing-flag check next to the existing Sprint 27F-B1 override-coercion + Sprint 25C completion-evidence preconditions. Provider operators (SUPER_ADMIN/COMPANY_ADMIN/BUILDING_MANAGER) can drive the on-behalf transitions without the flag-gate — the flag is STAFF-only policy. Locked by `StaffCompletionTransitionStructuralTests` + `StaffRouteMismatchTests` + `BMAcceptsStaffCompletionTests` + `BMRejectsStaffCompletionTests`. | Batch 11 + `backend/tickets/state_machine.py::ALLOWED_TRANSITIONS` + `_user_passes_scope` + PM Q3 + Q4 + Q5 |
+| 2026-05-17 | **STAFF routing-flag check sits in `apply_transition`, not in the scope helper** (PM Q5 Option A). When STAFF drives `IN_PROGRESS → {WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL}`, the helper looks up the BSV row's `staff_completion_routes_to_customer` value and compares to the actor's chosen `to_status`. Mismatch → `TransitionError(code="staff_completion_route_mismatch")` (HTTP 400). Provider operators bypass this gate — flag is a STAFF-only policy. | Encoding the flag in the scope helper would have leaked policy into scope semantics + required either two parallel scopes (`SCOPE_STAFF_ASSIGNED_DEFAULT_ROUTE` / `SCOPE_STAFF_ASSIGNED_CUSTOMER_ROUTE`) or a flag-state-aware helper. Keeping it in `apply_transition` keeps the architectural layers clean and lets the audit trail / stable error codes live next to the override-coercion + completion-evidence rules (one inspection point). Locked by `StaffRouteMismatchTests` (4 cases — flag=False + WAITING_CUSTOMER_APPROVAL target = 400; flag=True + WAITING_MANAGER_REVIEW target = 400). | Batch 11 + `backend/tickets/state_machine.py::apply_transition` + PM Q5 |
+| 2026-05-17 | **BM rejection of a staff completion (`WAITING_MANAGER_REVIEW → IN_PROGRESS`) requires a note** — two-layer defence: serializer 400 with `{"note": [...]}` field error + state-machine `TransitionError(code="rejection_note_required")` for programmatic callers. Mirrors the existing CUSTOMER_USER reject-note rule (`TicketStatusChangeSerializer.validate` at lines 565-572). | Without a note, "back to in-progress" is just a state flip with no operator context — the assigned STAFF has no way to know what needs more work. Two-layer defence catches both HTTP and programmatic callers (Celery, management commands, future webhooks). Stable code mirrors the existing `override_reason_required` shape. Locked by `BMRejectsStaffCompletionTests` (3 sub-cases — BM with note 200; BM without note 400 with field error; programmatic call without note → TransitionError). | Batch 11 + `backend/tickets/state_machine.py::apply_transition` + `backend/tickets/serializers.py::TicketStatusChangeSerializer.validate` + PM Q7 |
+| 2026-05-17 | **Completion-evidence rule extended to include `(IN_PROGRESS, WAITING_MANAGER_REVIEW)`** — same Sprint 25C semantic (note OR visible attachment required); same stable error code `completion_evidence_required`. The existing `(IN_PROGRESS, WAITING_CUSTOMER_APPROVAL)` entry stays — STAFF using the configured route (direct to customer) ALSO needs completion evidence. | The "you must show evidence the work happened" rule applies to BOTH routes equally — manager-review-bound or customer-approval-bound. Reusing the existing `COMPLETION_EVIDENCE_TRANSITIONS` set + the existing `_ticket_has_visible_attachment` helper keeps the rule centralised. Sprint 25C invariant preserved + extended. Locked by `StaffCompletionEvidenceTests` (4 sub-cases × 2 target statuses). | Batch 11 + `backend/tickets/state_machine.py::COMPLETION_EVIDENCE_TRANSITIONS` + PM Q6 |
+| 2026-05-17 | **New endpoint `GET /api/tickets/<id>/staff-completion-route/`** returns `{"route": "manager_review" \| "customer_approval"}`. STAFF without `TicketStaffAssignment` → 404; CUSTOMER_USER → 404; provider operators in scope (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER for the ticket's building) without `?staff_id=<id>` get the conservative `"manager_review"` default; with `?staff_id=<id>` get the resolved route for that STAFF. NOT `allowed_next_statuses` filter. | The frontend completion modal needs to render the correct destination text + submit-button label without inspecting the BSV row directly. Filtering inside `allowed_next_statuses` would have couplied state-machine semantics ("structurally allowed transitions") to policy semantics ("which route is resolved for this STAFF + building") — they should stay distinct. The dedicated endpoint is the smallest auditable contract for the frontend. 404 (not 403) for out-of-scope callers avoids leaking ticket existence. Locked by `StaffCompletionRouteEndpointTests` (7 sub-cases). | Batch 11 + `backend/tickets/views.py::TicketViewSet.staff_completion_route` + PM Q9 |
+| 2026-05-17 | **`is_assigned_staff: boolean` added to `TicketDetailSerializer`** as a SerializerMethodField. Computed per-request from `TicketStaffAssignment.objects.filter(ticket=obj, user=user).exists()`. Frontend uses this directly to decide whether to render the STAFF "Complete work" button — no separate API call needed. | The frontend modal needs to know whether the current viewer is assigned to the ticket WITHOUT inspecting the `assigned_staff` array on every render. Embedding a single boolean on the detail payload is the smallest contract that supports the gate (`STAFF + IN_PROGRESS + is_assigned_staff`) without requiring a list scan. The backend gate enforces the same condition on the transition (defence in depth — the boolean is a UX hint, not a security boundary). | Batch 11 + `backend/tickets/serializers.py::TicketDetailSerializer.get_is_assigned_staff` |
+| 2026-05-17 | **`H-5` invariant preserved structurally**: STAFF has NO entry in `(WAITING_CUSTOMER_APPROVAL → APPROVED|REJECTED)` — STAFF still cannot drive the customer-decision transition. The new Batch 11 STAFF transitions (`IN_PROGRESS → WAITING_MANAGER_REVIEW` and `IN_PROGRESS → WAITING_CUSTOMER_APPROVAL`) are "STAFF marking own work done", NOT "approving customer completion". Matrix H-5 row clarified in this commit. | The H-5 floor is the customer-decision lock; the Batch 11 widening is a STAFF-completion lock (different verb). Without the wording clarification a future audit could read the matrix H-5 row + the new transitions and think they conflict — they don't. Lock the distinction explicitly. Regression-locked by `StaffCannotApproveCustomerCompletionTests` (existing H-5 lock) + `StaffCompletionTransitionStructuralTests` (asserts STAFF role IS in the two new outbound IN_PROGRESS transitions). | Batch 11 + `docs/architecture/sprint-27-rbac-matrix.md` §3 row H-5 + `backend/tickets/tests/test_sprint28_staff_completion.py::StaffCannotApproveCustomerCompletionTests` |
+| 2026-05-17 | **NO new `osius.*` permission keys for Batch 11.** The `BuildingStaffVisibility.staff_completion_routes_to_customer` field is the source of truth; routing-flag check + `SCOPE_STAFF_ASSIGNED` membership check live in the state machine. | Same pattern as Batch 10 (`visibility_level` — no new osius key). Master plan §2 "do not invent parallel keys when an existing surface expresses the same scope" extends in spirit. The model field + state-machine policy is one inspection point; adding `osius.staff.complete_work` or similar would fragment the vocabulary + require parallel resolver branches in `permissions_v2.py`. | Batch 11 + `backend/tickets/state_machine.py` + PM Q6 |
+| 2026-05-17 | **Completion modal is an inline card mirroring the Sprint 27F-F1 override modal shape** (NOT a floating overlay). Inline attachment upload deferred as remaining UX debt; modal copy directs operator to the existing Attachments card on the page. | Mirrors the page's existing modal pattern (Sprint 27F-F1 override modal) — consistent visual language, smallest-safe addition. Inline attachment upload inside the modal would have required restructuring the existing TicketAttachment uploader (currently a sibling card on the same page) — out of "smallest-safe" scope for Batch 11. The modal still satisfies the `completion_evidence_required` rule because the backend accepts note-only completions; STAFF can upload via the Attachments card BEFORE opening the modal if they want photo evidence too. Documented as remaining UX debt for a future polish batch. | Batch 11 + `frontend/src/pages/TicketDetailPage.tsx` + PM Q12 + frontend agent's report |
 | 2026-05-17 | **Batch 10 migration + model `default=BUILDING_READ`** (NOT `ASSIGNED_ONLY`). Existing BSV rows are backfilled to `BUILDING_READ`; programmatic `BuildingStaffVisibility.objects.create(user, building)` without an explicit `visibility_level=` kwarg lands as `BUILDING_READ`. | PM-resolved discrepancy in the user's brief. Pre-Batch-10 semantics: a BSV row's mere existence granted full-building read (`accounts/scoping.py:211-230` original code added every BSV row's `building_id` to the visible set). Defaulting the new column to `ASSIGNED_ONLY` would have silently downgraded every existing BSV-holding STAFF user from B2 to B1 — breaking the demo seed (`seed_demo_data.py` creates BSV rows for Ahmet/Noah expecting B2) and a large surface of existing Sprint 24-28 tests that create BSV rows and assert building-wide STAFF visibility. The `BUILDING_READ` default preserves the existing contract; B1 (`ASSIGNED_ONLY`) becomes a NEW opt-in per-row downgrade. Locked by `StaffVisibilityLevelDefaultTests`. | Batch 10 + `backend/buildings/models.py::BuildingStaffVisibility.VisibilityLevel` + `backend/buildings/migrations/0003_buildingstaffvisibility_visibility_level.py` + PM Q2 |
 | 2026-05-17 | **B1 (`ASSIGNED_ONLY`) on a BSV row is a NEW per-row downgrade semantic** — recognise STAFF user at building (so `_validate_target_staff` in `views_staff_assignments.py` still treats them as a valid direct-assignment target) but do NOT widen visibility beyond `TicketStaffAssignment`. | The master plan literally says "Extend `BuildingStaffVisibility` with a per-row permission level" — a per-row level only makes sense WITHIN a row. Interpreting B1 as "no BSV row" would have made the new column meaningless. The split lets admins keep STAFF assignable as a direct-assignment target while limiting what tickets they see — supports the spec §6 "single granular permission without promoting global role" pattern. Locked by `StaffB1AssignedOnlyTests` + `StaffAssignmentTargetValidationUnchangedTests`. | Batch 10 + `backend/accounts/scoping.py` STAFF branch + PM Q3 |
 | 2026-05-17 | **H-4 floor preserved structurally** — the `Q(_assigned=True)` branch in `scope_tickets_for` STAFF branch is untouched; STAFF with a `TicketStaffAssignment` row ALWAYS sees the assigned ticket, regardless of `visibility_level` (or even absence of a BSV row entirely). | Matrix invariant H-4: STAFF always sees work assigned to them — cannot be removed. The `_assigned=True` clause has no toggle. The new `visibility_level` field only narrows the BUILDING-WIDE-visible set; it never narrows the assigned-ticket-visible set. Finally has dedicated regression-lock coverage via `StaffH4FloorTests` (2 cases: no-BSV-row + `ASSIGNED_ONLY`-BSV-row both still see the assigned ticket) — closes the doc-drift previously noted in audit row 25. | Batch 10 + `backend/accounts/scoping.py` STAFF branch + `backend/tickets/tests/test_sprint28_staff_building_granularity.py::StaffH4FloorTests` |

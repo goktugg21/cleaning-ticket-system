@@ -7,9 +7,17 @@ export type Role =
   | "STAFF"
   | "CUSTOMER_USER";
 
+// Sprint 28 Batch 11 — new ticket status for the staff-completion
+// default route: STAFF marks done -> here -> BM accepts (forward to
+// WAITING_CUSTOMER_APPROVAL) or rejects (back to IN_PROGRESS). The
+// optional per-building "routes_to_customer" flag bypasses this
+// status entirely (STAFF completion goes straight to
+// WAITING_CUSTOMER_APPROVAL). Placed chronologically between
+// IN_PROGRESS and WAITING_CUSTOMER_APPROVAL.
 export type TicketStatus =
   | "OPEN"
   | "IN_PROGRESS"
+  | "WAITING_MANAGER_REVIEW"
   | "WAITING_CUSTOMER_APPROVAL"
   | "APPROVED"
   | "REJECTED"
@@ -166,6 +174,11 @@ export interface TicketDetail extends TicketList {
   rejected_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  // Sprint 28 Batch 11 — timestamp the ticket entered
+  // WAITING_MANAGER_REVIEW (null until STAFF marks the work as
+  // completed on the manager-review default route). Mirrored from
+  // the backend `Ticket.manager_review_at` column.
+  manager_review_at: string | null;
   status_history: TicketStatusHistory[];
   allowed_next_statuses: TicketStatus[];
   sla_status: SLAStatus;
@@ -180,6 +193,12 @@ export interface TicketDetail extends TicketList {
   // single-assignee `assigned_to` is the legacy "primary
   // assignee" and remains the field the assign-dropdown writes).
   assigned_staff: AssignedStaffEntry[];
+  // Sprint 28 Batch 11 — true when the viewer (request.user) is in
+  // the ticket's TicketStaffAssignment set. Used by the frontend
+  // to render the "Complete work" button only when the viewer is
+  // actually assigned (and is STAFF). Backend enforces the same
+  // gate on the status transition — this is purely a UX hint.
+  is_assigned_staff: boolean;
 }
 
 // Sprint 23B — Staff-initiated "I want to do this work" request.
@@ -502,8 +521,12 @@ export type StaffVisibilityLevel =
 
 // Sprint 24A — admin read/write shape for a single BuildingStaffVisibility
 // row keyed on (user, building). Editing happens via PATCH on the
-// detail URL; writable fields are `can_request_assignment` (Sprint 24A)
-// and `visibility_level` (Sprint 28 Batch 10).
+// detail URL; writable fields are `can_request_assignment` (Sprint 24A),
+// `visibility_level` (Sprint 28 Batch 10), and
+// `staff_completion_routes_to_customer` (Sprint 28 Batch 11). When the
+// completion-routes flag is true, STAFF marking a ticket in this
+// building as completed sends it straight to WAITING_CUSTOMER_APPROVAL
+// (skipping the WAITING_MANAGER_REVIEW gate). Default false.
 export interface BuildingStaffVisibilityAdmin {
   id: number;
   user_id: number;
@@ -513,7 +536,17 @@ export interface BuildingStaffVisibilityAdmin {
   building_company_id: number;
   can_request_assignment: boolean;
   visibility_level: StaffVisibilityLevel;
+  staff_completion_routes_to_customer: boolean;
   created_at: string;
+}
+
+// Sprint 28 Batch 11 — staff-completion routing helper. Returned by
+// GET /api/tickets/<id>/staff-completion-route/. "manager_review" is
+// the default (STAFF -> BM gate); "customer_approval" is the
+// configured-bypass route from BuildingStaffVisibility.
+export type StaffCompletionRoute = "manager_review" | "customer_approval";
+export interface StaffCompletionRouteResponse {
+  route: StaffCompletionRoute;
 }
 
 export type NotificationEventType =

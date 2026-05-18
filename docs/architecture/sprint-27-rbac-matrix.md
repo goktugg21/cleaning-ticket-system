@@ -82,7 +82,7 @@ These are the security floor. Any change that contradicts them is a P0 regressio
 | H-2 | **No customer company sees another customer's data, even in the same building.** | [accounts/scoping.py:232-294](../../backend/accounts/scoping.py#L232-L294) keyed on `customer_id` first | [test_sprint23a_foundation.py:244](../../backend/accounts/tests/test_sprint23a_foundation.py#L244), [test_sprint26a_scope_safety_net.py CrossTicketAttachmentIdSmugglingTests](../../backend/tickets/tests/test_sprint26a_scope_safety_net.py) |
 | H-3 | **Customer users never see all building data unless explicitly granted.** | `view_company` / `view_location` / `view_own` resolved per-access via `access_has_permission` — [accounts/scoping.py:273-292](../../backend/accounts/scoping.py#L273-L292) | [test_sprint23a_foundation.py:255-275](../../backend/accounts/tests/test_sprint23a_foundation.py#L255) |
 | H-4 | **STAFF always sees work assigned to them — cannot be removed.** | STAFF scope is `assigned OR visible` ([accounts/scoping.py:211-230](../../backend/accounts/scoping.py#L211-L230)); the `assigned` clause has no toggle. **Sprint 28 Batch 2 (audit drift fix)**: this invariant is locked **structurally** — no API surface exists to disable the `assigned` clause for a STAFF user while a `TicketStaffAssignment` row exists, and the BM-assign endpoint at `/api/tickets/<id>/assign/` no longer lets STAFF mutate `ticket.assigned_to` either (gate tightened in Sprint 28 Batch 2). **Sprint 28 Batch 10**: H-4 floor finally has dedicated test coverage via `StaffH4FloorTests`; the `_assigned=True` Q branch in `scope_tickets_for` STAFF branch is the structural lock — narrowing on the BSV-row side (via `visibility_level`) does NOT touch it. The Sprint 27A T-7 reference previously cited here was actually for `BuildingStaffVisibility.can_request_assignment` audit coverage (see §9 T-7 row) and is not an H-4-specific test. | Sprint 28 Batch 10 `StaffH4FloorTests` (dedicated). Sprint 25A `test_staff_cannot_add` + `tickets/tests/test_sprint28a_staff_assign_block.py` together lock the surrounding "STAFF cannot mutate assignment" perimeter; the new B3 narrowing in Batch 10 is exercised in `StaffB3BuildingReadAndAssignTests` (positive) + `StaffCrossBuildingIsolationTests` (negative). |
-| H-5 | **STAFF cannot approve customer completion / manager review / pricing / workflow override.** | Ticket state machine has no STAFF → APPROVED/REJECTED transition ([tickets/state_machine.py ALLOWED_TRANSITIONS](../../backend/tickets/state_machine.py#L18-L57)); Extra Work `_is_provider_operator` excludes STAFF ([extra_work/state_machine.py:64-71](../../backend/extra_work/state_machine.py#L64-L71)). | Sprint 27A T-4, T-5 |
+| H-5 | **STAFF cannot approve customer completion / manager review / pricing / workflow override.** | Ticket state machine has no STAFF → APPROVED/REJECTED transition ([tickets/state_machine.py ALLOWED_TRANSITIONS](../../backend/tickets/state_machine.py)); Extra Work `_is_provider_operator` excludes STAFF ([extra_work/state_machine.py:64-71](../../backend/extra_work/state_machine.py#L64-L71)). **Sprint 28 Batch 11**: STAFF gained the two completion-side legs `IN_PROGRESS -> WAITING_MANAGER_REVIEW` (default) and `IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL` (configured per `BuildingStaffVisibility.staff_completion_routes_to_customer`). These are STAFF *marking their own work done* — they are NOT customer-decision transitions. STAFF still cannot drive `WAITING_CUSTOMER_APPROVAL -> APPROVED/REJECTED` (locked by `StaffCannotApproveCustomerCompletionTests`) nor `WAITING_MANAGER_REVIEW -> WAITING_CUSTOMER_APPROVAL`/`IN_PROGRESS` (the BM-review forward/reject legs are admin-only). H-5 stays intact. | Sprint 27A T-4, T-5; Sprint 28 Batch 11 `StaffCannotApproveCustomerCompletionTests` + `StaffCompletionTransitionStructuralTests` (locks STAFF absence on the WAITING_MANAGER_REVIEW outbound legs). |
 | H-6 | **Customer Company Admin cannot promote anyone to Customer Company Admin.** | After Sprint 27A: serializer-level guard at [customers/serializers_memberships.py CustomerUserBuildingAccessUpdateSerializer.validate_access_role](../../backend/customers/serializers_memberships.py#L92) | Sprint 27A T-1, T-3 |
 | H-7 | **Only SUPER_ADMIN can grant `CUSTOMER_COMPANY_ADMIN` access_role.** | Same as H-6. | Sprint 27A T-1, T-2 |
 | H-8 | **COMPANY_ADMIN cannot self-promote to SUPER_ADMIN.** | [accounts/serializers_users.py:84-98](../../backend/accounts/serializers_users.py#L84-L98) — blocks self-target + blocks SUPER_ADMIN target | [test_user_crud.py:115](../../backend/accounts/tests/test_user_crud.py#L115) (already green) |
@@ -394,3 +394,70 @@ Production change summary:
   * `audit/signals.py::_BSV_TRACKED_FIELDS` extended to
     `("can_request_assignment", "visibility_level")` — the existing
     UPDATE-only diff handler covers the new field for free.
+
+## 15. Test footprint (Sprint 28 Batch 11 delta)
+
+Tests added in Sprint 28 Batch 11 — STAFF completion routing
+(`BuildingStaffVisibility.staff_completion_routes_to_customer` flag +
+new `TicketStatus.WAITING_MANAGER_REVIEW` interstitial + four new
+`ALLOWED_TRANSITIONS` entries).
+
+### STAFF completion routing — happy paths, evidence, mismatch, BM review
+[`backend/tickets/tests/test_sprint28_staff_completion.py`](../../backend/tickets/tests/test_sprint28_staff_completion.py) — ten test classes:
+
+| Class | Tests |
+|---|---|
+| `StaffCompletionTransitionStructuralTests` | `WAITING_MANAGER_REVIEW` is a valid `TicketStatus`; `IN_PROGRESS -> WAITING_MANAGER_REVIEW` and `IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL` both list STAFF in their scope map; `WAITING_MANAGER_REVIEW -> {WAITING_CUSTOMER_APPROVAL, IN_PROGRESS}` BM-review legs exclude STAFF (H-5 lock). |
+| `StaffDefaultRouteTests` | Flag=False → STAFF completion lands in `WAITING_MANAGER_REVIEW`, `manager_review_at` stamped, history row written. |
+| `StaffConfiguredRouteTests` | Flag=True → STAFF completion lands in `WAITING_CUSTOMER_APPROVAL`, `sent_for_approval_at` stamped. |
+| `StaffCompletionEvidenceTests` | Sprint 25C completion-evidence rule extends to the new STAFF route on both targets — note OR visible attachment required; no-note + no-attachment → 400 `completion_evidence_required`; hidden-only attachment also fails. |
+| `StaffRouteMismatchTests` | Flag=False but POST `WAITING_CUSTOMER_APPROVAL` → 400 `staff_completion_route_mismatch`; flag=True but POST `WAITING_MANAGER_REVIEW` → 400 same code. |
+| `StaffNotAssignedTests` | STAFF with BSV but no `TicketStaffAssignment` → 400 `forbidden_transition`. |
+| `StaffCannotApproveCustomerCompletionTests` | H-5 invariant lock — STAFF cannot drive `WAITING_CUSTOMER_APPROVAL -> APPROVED` or `-> REJECTED` even with `TicketStaffAssignment`. No history row written. |
+| `BMAcceptsStaffCompletionTests` | BM drives `WAITING_MANAGER_REVIEW -> WAITING_CUSTOMER_APPROVAL`, `sent_for_approval_at` stamped. |
+| `BMRejectsStaffCompletionTests` | BM `WAITING_MANAGER_REVIEW -> IN_PROGRESS` with note → 200; without note → 400 with serializer-style `{"note": [...]}`; programmatic `apply_transition` without note raises `TransitionError(code="rejection_note_required")`. |
+| `StaffCompletionRouteEndpointTests` | `/api/tickets/<id>/staff-completion-route/` returns `manager_review` for default-flag STAFF, `customer_approval` for configured STAFF; STAFF without TSA → 404; CUSTOMER_USER → 404; SUPER_ADMIN without `staff_id` → `manager_review`; SUPER_ADMIN with `?staff_id=<id>` → correct route; out-of-scope provider → 404. |
+
+### Audit coverage for the new BSV flag
+[`backend/audit/tests/test_sprint28_staff_completion_route_audit.py`](../../backend/audit/tests/test_sprint28_staff_completion_route_audit.py) — one test class:
+
+| Class | Tests |
+|---|---|
+| `StaffCompletionRouteFlagAuditTests` | PATCH `staff_completion_routes_to_customer` False → True emits exactly one `AuditLog` UPDATE row with the field in `changes`. PATCH of both the flag and `visibility_level` in one call emits a single row with both diffs. PATCH of `can_request_assignment` alone does NOT include the routing flag in `changes`. |
+
+Production change summary:
+  * `tickets.TicketStatus.WAITING_MANAGER_REVIEW` enum value +
+    `Ticket.manager_review_at` timestamp, migration
+    `tickets/0010_waiting_manager_review.py`.
+  * `buildings.BuildingStaffVisibility.staff_completion_routes_to_customer`
+    boolean (default False — manager review), migration
+    `buildings/0004_bsv_staff_completion_routes_to_customer.py`.
+  * `tickets/state_machine.py`: new `SCOPE_STAFF_ASSIGNED` scope; four
+    new `ALLOWED_TRANSITIONS` entries (`IN_PROGRESS -> WAITING_MANAGER_REVIEW`,
+    STAFF added to `IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL`,
+    `WAITING_MANAGER_REVIEW -> WAITING_CUSTOMER_APPROVAL`,
+    `WAITING_MANAGER_REVIEW -> IN_PROGRESS`); `TIMESTAMP_ON_ENTER`
+    stamps `manager_review_at`; `COMPLETION_EVIDENCE_TRANSITIONS`
+    extended to cover the new STAFF default route; routing-flag check
+    in `apply_transition` decides which STAFF target is reachable
+    (mismatch → `staff_completion_route_mismatch`); BM rejection
+    requires a non-empty note (`rejection_note_required` at the
+    state-machine layer; mirrored at the serializer for HTTP callers).
+  * `tickets/serializers.py`: `TicketStatusChangeSerializer.validate`
+    enforces the BM rejection-note rule alongside the existing
+    `CUSTOMER_USER` reject-note rule; `TicketDetailSerializer` exposes
+    a per-caller `is_assigned_staff` flag plus the new
+    `manager_review_at` timestamp.
+  * `tickets/views.py::TicketViewSet`: new read-only
+    `staff_completion_route` action at
+    `/api/tickets/<id>/staff-completion-route/` for the frontend
+    completion modal.
+  * `accounts/serializers_staff.py`:
+    `BuildingStaffVisibilitySerializer` exposes the new flag as a read
+    field; `BuildingStaffVisibilityUpdateSerializer` adds it to the
+    writable PATCH surface.
+  * `audit/signals.py::_BSV_TRACKED_FIELDS` extended to
+    `("can_request_assignment", "visibility_level", "staff_completion_routes_to_customer")`
+    — the existing UPDATE-only handler covers the new field for free.
+  * No new `osius.*` permission key — model field + state-machine
+    scope check are sufficient (consistent with Sprint 28 Batch 10).

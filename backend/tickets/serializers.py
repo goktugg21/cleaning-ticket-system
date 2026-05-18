@@ -163,6 +163,11 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     # flags so the customer never sees fields the policy hides.
     # See _assigned_staff_payload() below.
     assigned_staff = serializers.SerializerMethodField()
+    # Sprint 28 Batch 11 — per-current-user "is this caller listed
+    # on TicketStaffAssignment for this ticket?" flag. The frontend
+    # completion-modal logic uses this to decide whether to render the
+    # "Complete work" button without making a separate API call.
+    is_assigned_staff = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -185,10 +190,12 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "assigned_to",
             "assigned_to_email",
             "assigned_staff",
+            "is_assigned_staff",
             "created_at",
             "updated_at",
             "first_response_at",
             "sent_for_approval_at",
+            "manager_review_at",
             "approved_at",
             "rejected_at",
             "resolved_at",
@@ -227,6 +234,23 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         viewer = getattr(request, "user", None) if request else None
         return _assigned_staff_payload(obj, viewer)
+
+    def get_is_assigned_staff(self, obj):
+        """
+        Sprint 28 Batch 11 — True iff the requesting user is listed on
+        a `TicketStaffAssignment` row for this ticket. Used by the
+        frontend completion modal to decide whether to render the
+        "Complete work" button without a separate API call.
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        if user is None or not user.is_authenticated:
+            return False
+        from .models import TicketStaffAssignment
+
+        return TicketStaffAssignment.objects.filter(
+            ticket=obj, user=user
+        ).exists()
 
 
 def _assigned_staff_payload(ticket, viewer):
@@ -569,6 +593,20 @@ class TicketStatusChangeSerializer(serializers.Serializer):
         ):
             raise serializers.ValidationError(
                 {"note": "Please explain why this ticket is rejected."}
+            )
+
+        # Sprint 28 Batch 11 — BM rejection of a staff-completed ticket
+        # (WAITING_MANAGER_REVIEW -> IN_PROGRESS) requires a note. Defence in
+        # depth at the view+serializer layer; state machine also enforces.
+        ticket = self.context.get("ticket")
+        if (
+            ticket is not None
+            and str(ticket.status) == "WAITING_MANAGER_REVIEW"
+            and str(to_status) == "IN_PROGRESS"
+            and not note
+        ):
+            raise serializers.ValidationError(
+                {"note": "Please explain why you are sending this back to in-progress."}
             )
 
         return attrs

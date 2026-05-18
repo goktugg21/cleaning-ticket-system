@@ -72,6 +72,7 @@
 
   "status.open": "Open",
   "status.in_progress": "In progress",
+  "status.waiting_manager_review": "Waiting Manager Review",
   "status.waiting_customer_approval": "Waiting approval",
   "status.approved": "Approved",
   "status.rejected": "Rejected",
@@ -547,6 +548,8 @@
   "staff_admin.level.assigned_only": "Assigned tickets only",
   "staff_admin.level.building_read": "All building tickets (read)",
   "staff_admin.level.building_read_and_assign": "All building tickets + can assign",
+  "staff_admin.routes_to_customer_label": "Completion routes directly to customer",
+  "staff_admin.routes_to_customer_hint": "When on, this staff member's IN_PROGRESS -> completed transitions on this building skip the manager-review gate and go straight to customer approval.",
 
   "customer_contacts.page_title": "Contacts",
   "customer_contacts.add_button": "Add contact",
@@ -668,5 +671,22 @@
   "customer_pricing.error_price_invalid": "Enter a non-negative unit price.",
   "customer_pricing.error_vat_invalid": "Enter a non-negative VAT percentage.",
   "customer_pricing.error_valid_from_required": "Pick a start date.",
-  "customer_pricing.error_valid_to_before_valid_from": "Valid-to must be on or after valid-from."
+  "customer_pricing.error_valid_to_before_valid_from": "Valid-to must be on or after valid-from.",
+
+  "ticket_staff_complete.button_label": "Complete work",
+  "ticket_staff_complete.modal_title": "Mark work as completed",
+  "ticket_staff_complete.note_label": "Completion note",
+  "ticket_staff_complete.note_placeholder": "Describe what was done…",
+  "ticket_staff_complete.note_required_hint": "A completion note or photo attachment is required.",
+  "ticket_staff_complete.route_loading": "Resolving destination…",
+  "ticket_staff_complete.route_manager_review": "This will go to your manager for review.",
+  "ticket_staff_complete.route_customer_approval": "This will be sent to the customer for approval.",
+  "ticket_staff_complete.submit_manager_review": "Send to manager review",
+  "ticket_staff_complete.submit_customer_approval": "Send to customer approval",
+  "ticket_staff_complete.cancel": "Cancel",
+  "ticket_staff_complete.error_evidence_required": "Please add a note or attach a photo before sending.",
+  "ticket_staff_complete.error_route_mismatch": "The routing changed. Please refresh and try again.",
+  "ticket_staff_complete.attachment_hint": "If you have a photo, upload it from the Attachments card on this page before sending.",
+
+  "manager_review.label_sent_at": "Sent for manager review at"
 }

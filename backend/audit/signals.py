@@ -469,7 +469,15 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
 # Sprint 28 Batch 10 adds `visibility_level` to the tracked tuple — the
 # UPDATE-only handler below iterates this tuple and emits a single
 # AuditLog row covering whichever fields changed.
-_BSV_TRACKED_FIELDS = ("can_request_assignment", "visibility_level")
+# Sprint 28 Batch 11 adds `staff_completion_routes_to_customer` — the
+# per-staff-per-building routing flag for STAFF completions. Same
+# handler iterates the tuple, so the flip lands as a one-row UPDATE
+# diff alongside any other tracked-field change in the same PATCH.
+_BSV_TRACKED_FIELDS = (
+    "can_request_assignment",
+    "visibility_level",
+    "staff_completion_routes_to_customer",
+)
 
 
 def _bsv_snapshot_for_pre_save(instance):

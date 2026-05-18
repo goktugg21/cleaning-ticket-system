@@ -77,6 +77,19 @@ class BuildingStaffVisibility(models.Model):
     The independent `can_request_assignment` flag continues to gate
     self-driven `StaffAssignmentRequest` POSTs for unassigned tickets
     in this building.
+
+    Sprint 28 Batch 11 — per-staff-per-building completion-routing flag
+    `staff_completion_routes_to_customer`. False (default) routes a
+    STAFF completion through manager review (the WAITING_MANAGER_REVIEW
+    interstitial); True routes it directly to WAITING_CUSTOMER_APPROVAL
+    and skips manager review. The flag is consulted by
+    `tickets.state_machine.apply_transition` whenever STAFF drives
+    `IN_PROGRESS -> {WAITING_MANAGER_REVIEW, WAITING_CUSTOMER_APPROVAL}`;
+    a mismatch between the target and the configured destination raises
+    `TransitionError(code="staff_completion_route_mismatch")`. Provider
+    operators (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER) driving
+    the same transition on-behalf bypass the gate — the flag is a
+    STAFF-only routing policy.
     """
 
     class VisibilityLevel(models.TextChoices):
@@ -107,6 +120,16 @@ class BuildingStaffVisibility(models.Model):
         max_length=32,
         choices=VisibilityLevel.choices,
         default=VisibilityLevel.BUILDING_READ,
+    )
+    staff_completion_routes_to_customer = models.BooleanField(
+        default=False,
+        help_text=(
+            "Sprint 28 Batch 11 — per-staff-per-building routing flag. "
+            "False (default): STAFF completion goes to manager review "
+            "(WAITING_MANAGER_REVIEW); BM accepts → WAITING_CUSTOMER_APPROVAL "
+            "or rejects → IN_PROGRESS. True: STAFF completion goes directly "
+            "to WAITING_CUSTOMER_APPROVAL (skips manager review)."
+        ),
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

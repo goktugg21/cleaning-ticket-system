@@ -91,6 +91,8 @@ class BuildingStaffVisibilitySerializer(serializers.ModelSerializer):
             "building_company_id",
             "can_request_assignment",
             "visibility_level",
+            # Sprint 28 Batch 11 — STAFF completion routing flag.
+            "staff_completion_routes_to_customer",
             "created_at",
         ]
         read_only_fields = fields
@@ -111,7 +113,14 @@ class BuildingStaffVisibilityUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BuildingStaffVisibility
-        fields = ["can_request_assignment", "visibility_level"]
+        # Sprint 28 Batch 11 — `staff_completion_routes_to_customer`
+        # joins the writable PATCH surface. DRF's ModelSerializer
+        # derives a strict BooleanField from the model declaration.
+        fields = [
+            "can_request_assignment",
+            "visibility_level",
+            "staff_completion_routes_to_customer",
+        ]
 
     def to_representation(self, instance):
         return BuildingStaffVisibilitySerializer(instance, context=self.context).data
