@@ -63,6 +63,8 @@
   "sla_completed_label": "Voltooid op",
 
   "card_workflow_title": "Werkstroom",
+  "card_workflow_title_staff_complete": "Voltooi je toegewezen werk",
+  "card_workflow_subtitle_staff_complete": "Dit wordt gerouteerd op basis van je gebouwinstellingen.",
   "workflow_no_transitions": "Geen statusovergangen beschikbaar voor uw rol.",
   "workflow_status_note_label": "Statusnotitie (optioneel)",
   "workflow_rejection_reason_label": "Afwijzingsreden (verplicht bij afwijzen)",

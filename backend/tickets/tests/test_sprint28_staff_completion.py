@@ -900,3 +900,156 @@ class StaffCompletionRouteEndpointTests(TestCase):
         # Out-of-scope provider gets 404 from `get_object` (queryset
         # filter excludes the ticket entirely).
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+# ===========================================================================
+# 12. UX hotfix — allowed_next_statuses narrowing for STAFF on IN_PROGRESS.
+#
+# Before the hotfix `allowed_next_statuses(staff, in_progress_ticket)`
+# returned BOTH `WAITING_MANAGER_REVIEW` and `WAITING_CUSTOMER_APPROVAL`
+# (the two structurally-allowed STAFF transitions out of IN_PROGRESS),
+# which caused the frontend to render BOTH "Move to X" buttons next to
+# the dedicated "Complete work" CTA. Clicking the wrong one 400'd with
+# `staff_completion_route_mismatch`. The helper now narrows to the
+# single route-resolved target so the API contract matches the
+# `apply_transition` routing-flag gate exactly.
+#
+# Provider operators (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER)
+# are NOT narrowed — they bypass the flag in `apply_transition` and
+# may drive either target on-behalf.
+# ===========================================================================
+
+
+class StaffAllowedNextStatusesNarrowingTests(TestCase):
+    """Sprint 28 Batch 11 UX hotfix — `allowed_next_statuses` for STAFF
+    on IN_PROGRESS returns ONLY the route-resolved completion target."""
+
+    @classmethod
+    def setUpTestData(cls):
+        basics = _seed_basics()
+        cls.company = basics["company"]
+        cls.building = basics["building"]
+        cls.customer = basics["customer"]
+        cls.manager = basics["manager"]
+        cls.cust_user = _mk("cust12@example.com", UserRole.CUSTOMER_USER)
+        # Two STAFF users: one with the default-route BSV (flag=False),
+        # one with the configured-route BSV (flag=True). Each gets a
+        # dedicated IN_PROGRESS ticket they're assigned to.
+        cls.staff_default = _mk("staff12def@example.com", UserRole.STAFF)
+        StaffProfile.objects.create(user=cls.staff_default)
+        BuildingStaffVisibility.objects.create(
+            user=cls.staff_default, building=cls.building
+        )
+        cls.staff_customer = _mk("staff12cust@example.com", UserRole.STAFF)
+        StaffProfile.objects.create(user=cls.staff_customer)
+        BuildingStaffVisibility.objects.create(
+            user=cls.staff_customer,
+            building=cls.building,
+            staff_completion_routes_to_customer=True,
+        )
+        # COMPANY_ADMIN — used to assert provider-side behaviour is
+        # unchanged by the STAFF narrowing.
+        cls.admin = _mk("admin12@example.com", UserRole.COMPANY_ADMIN)
+        CompanyUserMembership.objects.create(user=cls.admin, company=cls.company)
+
+    def setUp(self):
+        self.ticket = _mk_in_progress_ticket(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.cust_user,
+            assigned_to=self.manager,
+        )
+
+    # -- STAFF narrowing ----------------------------------------------------
+    def test_staff_default_route_only_offers_waiting_manager_review(self):
+        """flag=False → only `WAITING_MANAGER_REVIEW`; the other
+        structurally-allowed target is filtered out so the frontend
+        never offers a button that would 400."""
+        from tickets.state_machine import allowed_next_statuses
+
+        TicketStaffAssignment.objects.create(
+            ticket=self.ticket, user=self.staff_default
+        )
+        offered = allowed_next_statuses(self.staff_default, self.ticket)
+        self.assertEqual(
+            offered, [TicketStatus.WAITING_MANAGER_REVIEW]
+        )
+        self.assertNotIn(TicketStatus.WAITING_CUSTOMER_APPROVAL, offered)
+
+    def test_staff_configured_route_only_offers_waiting_customer_approval(self):
+        """flag=True → only `WAITING_CUSTOMER_APPROVAL`; the manager-
+        review target is filtered out."""
+        from tickets.state_machine import allowed_next_statuses
+
+        TicketStaffAssignment.objects.create(
+            ticket=self.ticket, user=self.staff_customer
+        )
+        offered = allowed_next_statuses(self.staff_customer, self.ticket)
+        self.assertEqual(
+            offered, [TicketStatus.WAITING_CUSTOMER_APPROVAL]
+        )
+        self.assertNotIn(TicketStatus.WAITING_MANAGER_REVIEW, offered)
+
+    def test_staff_without_tsa_still_gets_empty(self):
+        """STAFF lacking the `TicketStaffAssignment` row must not be
+        offered any transition out of IN_PROGRESS — the scope helper
+        already excludes them, and the narrowing helper doesn't bring
+        anything back."""
+        from tickets.state_machine import allowed_next_statuses
+
+        offered = allowed_next_statuses(self.staff_default, self.ticket)
+        self.assertEqual(offered, [])
+
+    def test_staff_narrowing_only_applies_on_in_progress(self):
+        """Narrowing is scoped to IN_PROGRESS — STAFF on any other
+        status is unaffected (they can't drive those transitions, but
+        the narrowing helper should not interfere). We assert by
+        flipping the ticket to OPEN and checking the result is the
+        same empty list `_user_passes_scope` would have produced
+        anyway."""
+        from tickets.state_machine import allowed_next_statuses
+
+        TicketStaffAssignment.objects.create(
+            ticket=self.ticket, user=self.staff_default
+        )
+        self.ticket.status = TicketStatus.OPEN
+        self.ticket.save(update_fields=["status"])
+        offered = allowed_next_statuses(self.staff_default, self.ticket)
+        # STAFF has no entry in (OPEN, IN_PROGRESS); the scope helper
+        # rejects every other (OPEN, *) pair. Result is empty either
+        # way — the narrowing didn't introduce a false positive.
+        self.assertEqual(offered, [])
+
+    # -- Provider operators unchanged --------------------------------------
+    def test_company_admin_in_progress_unchanged(self):
+        """COMPANY_ADMIN still sees BOTH `WAITING_MANAGER_REVIEW` and
+        `WAITING_CUSTOMER_APPROVAL` on IN_PROGRESS — they may drive
+        either on-behalf and the routing-flag check in
+        `apply_transition` is STAFF-only."""
+        from tickets.state_machine import allowed_next_statuses
+
+        offered = allowed_next_statuses(self.admin, self.ticket)
+        self.assertIn(TicketStatus.WAITING_MANAGER_REVIEW, offered)
+        self.assertIn(TicketStatus.WAITING_CUSTOMER_APPROVAL, offered)
+
+    def test_building_manager_in_progress_unchanged(self):
+        """BUILDING_MANAGER assigned to the ticket's building sees
+        both completion targets on IN_PROGRESS — narrowing is
+        STAFF-only."""
+        from tickets.state_machine import allowed_next_statuses
+
+        offered = allowed_next_statuses(self.manager, self.ticket)
+        self.assertIn(TicketStatus.WAITING_MANAGER_REVIEW, offered)
+        self.assertIn(TicketStatus.WAITING_CUSTOMER_APPROVAL, offered)
+
+    def test_super_admin_in_progress_unchanged(self):
+        """SUPER_ADMIN keeps the existing all-status shape (returns
+        every status except the current one) — the narrowing helper
+        never executes for SUPER_ADMIN per the early return."""
+        from tickets.state_machine import allowed_next_statuses
+
+        super_admin = _mk("super12@example.com", UserRole.SUPER_ADMIN)
+        offered = allowed_next_statuses(super_admin, self.ticket)
+        self.assertIn(TicketStatus.WAITING_MANAGER_REVIEW, offered)
+        self.assertIn(TicketStatus.WAITING_CUSTOMER_APPROVAL, offered)

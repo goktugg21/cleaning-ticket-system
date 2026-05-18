@@ -369,10 +369,51 @@ def allowed_next_statuses(user, ticket):
             if str(status) != str(ticket.status)
         ]
 
-    return [
+    candidates = [
         to_status
         for (from_status, to_status), role_scopes in ALLOWED_TRANSITIONS.items()
         if from_status == ticket.status
         and user.role in role_scopes
         and _user_passes_scope(user, ticket, role_scopes[user.role])
     ]
+
+    # Sprint 28 Batch 11 UX hotfix — STAFF on IN_PROGRESS has TWO
+    # structurally-allowed completion targets in `ALLOWED_TRANSITIONS`
+    # (`WAITING_MANAGER_REVIEW` and `WAITING_CUSTOMER_APPROVAL`), but
+    # only ONE is actually reachable at runtime — picked by the
+    # `BuildingStaffVisibility.staff_completion_routes_to_customer`
+    # flag and enforced by the routing-flag check in
+    # `apply_transition` (`staff_completion_route_mismatch`).
+    #
+    # Without this narrowing, the API tells the frontend STAFF can
+    # drive both targets, the frontend renders both as generic
+    # "Move to X" buttons, and clicking the wrong one 400s. The fix
+    # is to filter the candidate list to the single route-resolved
+    # target so the API never advertises an unreachable transition.
+    #
+    # Provider operators (SUPER_ADMIN / COMPANY_ADMIN /
+    # BUILDING_MANAGER) bypass this narrowing — they bypass the
+    # flag check in `apply_transition` too and may drive either
+    # target on-behalf.
+    if (
+        getattr(user, "role", None) == UserRole.STAFF
+        and str(ticket.status) == str(TicketStatus.IN_PROGRESS)
+    ):
+        from buildings.models import BuildingStaffVisibility
+
+        bsv = BuildingStaffVisibility.objects.filter(
+            user=user, building_id=ticket.building_id
+        ).first()
+        routes_to_customer = bool(
+            bsv and bsv.staff_completion_routes_to_customer
+        )
+        wanted = (
+            TicketStatus.WAITING_CUSTOMER_APPROVAL
+            if routes_to_customer
+            else TicketStatus.WAITING_MANAGER_REVIEW
+        )
+        candidates = [
+            target for target in candidates if str(target) == str(wanted)
+        ]
+
+    return candidates

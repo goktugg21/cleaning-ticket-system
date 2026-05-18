@@ -63,6 +63,8 @@
   "sla_completed_label": "Completed",
 
   "card_workflow_title": "Workflow",
+  "card_workflow_title_staff_complete": "Complete your assigned work",
+  "card_workflow_subtitle_staff_complete": "This will be routed according to your building settings.",
   "workflow_no_transitions": "No status transitions available for your role.",
   "workflow_status_note_label": "Status note (optional)",
   "workflow_rejection_reason_label": "Rejection reason (required if rejecting)",

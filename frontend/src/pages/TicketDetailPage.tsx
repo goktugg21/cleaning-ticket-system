@@ -2065,7 +2065,9 @@ export function TicketDetailPage() {
                   color: "var(--text-faint)",
                 }}
               >
-                {t("card_workflow_title")}
+                {canShowCompleteWorkButton
+                  ? t("card_workflow_title_staff_complete")
+                  : t("card_workflow_title")}
               </div>
             </div>
             <div className="workflow-body">
@@ -2074,29 +2076,43 @@ export function TicketDetailPage() {
                   an IN_PROGRESS ticket; opens a modal that resolves
                   the destination (manager review vs customer
                   approval) and submits the corresponding status
-                  transition. Sits ahead of the generic next-status
-                  buttons because STAFF should never see the empty-
-                  state message in this path. */}
-              {canShowCompleteWorkButton && (
-                <div className="status-actions" style={{ marginBottom: 8 }}>
-                  <button
-                    type="button"
-                    className="status-btn"
-                    onClick={openCompleteModal}
-                    disabled={completeModalOpen}
-                    data-testid="ticket-staff-complete-button"
+                  transition.
+
+                  UX hotfix: when this CTA renders, the generic
+                  next-status UI (Status note + "Move to X" buttons)
+                  is suppressed entirely so STAFF only sees ONE
+                  clear action — "Complete work". The destination is
+                  resolved server-side via the BSV
+                  `staff_completion_routes_to_customer` flag; the
+                  backend `allowed_next_statuses` also narrows STAFF
+                  + IN_PROGRESS to the single resolved target so the
+                  API contract matches. */}
+              {canShowCompleteWorkButton ? (
+                <>
+                  <p
+                    className="muted small"
+                    data-testid="ticket-staff-complete-card-subtitle"
+                    style={{ marginTop: 0, marginBottom: 8 }}
                   >
-                    {t("common:ticket_staff_complete.button_label")}
-                    <span className="status-btn-arrow">→</span>
-                  </button>
-                </div>
-              )}
-              {visibleNextStatuses.length === 0 ? (
-                canShowCompleteWorkButton ? null : (
-                  <p className="muted small">
-                    {t("workflow_no_transitions")}
+                    {t("card_workflow_subtitle_staff_complete")}
                   </p>
-                )
+                  <div className="status-actions" style={{ marginBottom: 0 }}>
+                    <button
+                      type="button"
+                      className="status-btn"
+                      onClick={openCompleteModal}
+                      disabled={completeModalOpen}
+                      data-testid="ticket-staff-complete-button"
+                    >
+                      {t("common:ticket_staff_complete.button_label")}
+                      <span className="status-btn-arrow">→</span>
+                    </button>
+                  </div>
+                </>
+              ) : visibleNextStatuses.length === 0 ? (
+                <p className="muted small">
+                  {t("workflow_no_transitions")}
+                </p>
               ) : (
                 <>
                   <div className="field">

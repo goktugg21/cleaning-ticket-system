@@ -163,6 +163,31 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
     const completeBtn = page.getByTestId("ticket-staff-complete-button");
     await expect(completeBtn).toBeVisible({ timeout: 15_000 });
 
+    // Sprint 28 Batch 11 UX hotfix — the Workflow card must show the
+    // dedicated "Complete your assigned work" subtitle AND must NOT
+    // expose any of the generic next-status UI for STAFF. The card
+    // subtitle is rendered via `card_workflow_subtitle_staff_complete`
+    // which the testid below anchors stably across locales.
+    await expect(
+      page.getByTestId("ticket-staff-complete-card-subtitle"),
+    ).toBeVisible();
+
+    // No generic Status-note input. The workflow card uses
+    // id="status-note" for that input; getByRole + name is fragile
+    // across locales, so we anchor on the stable DOM id instead.
+    await expect(page.locator("#status-note")).toHaveCount(0);
+
+    // No generic "Move to X" buttons. They are rendered via
+    // `workflow_move_to` in both locales; their EN/NL labels both
+    // contain the string "Move" / "Verplaats" respectively, but the
+    // structural assertion is "the workflow card contains exactly
+    // one status-btn — the Complete work CTA". We verify by counting
+    // `.status-btn` elements inside the workflow card.
+    const workflowCard = page
+      .locator(`xpath=//*[@data-testid="ticket-staff-complete-button"]/ancestor::div[contains(@class, "card")][1]`);
+    await expect(workflowCard).toBeVisible();
+    await expect(workflowCard.locator(".status-btn")).toHaveCount(1);
+
     // Open the modal.
     await completeBtn.click();
     const modal = page.getByTestId("ticket-staff-complete-modal");
