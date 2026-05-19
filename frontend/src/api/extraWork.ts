@@ -16,7 +16,6 @@ import type {
   ExtraWorkStatusHistoryEntry,
   PaginatedResponse,
   Proposal,
-  TicketDetail,
   TicketList,
 } from "./types";
 
@@ -171,61 +170,47 @@ export async function fetchProposalPdf(
 }
 
 // ---------------------------------------------------------------------------
-// Sprint 29 Batch 29.8 — spawned-tickets discovery helper.
+// Sprint 30 Batch 30.1 — spawned-tickets discovery via the new server-side
+// filter.
 //
-// The backend exposes the spawn linkage as
-// `Ticket.extra_work_request_item -> ExtraWorkRequestItem.extra_work_request`,
-// but neither `TicketFilter` (no `extra_work_request_item__*` filter) nor
-// `TicketListSerializer` (no `extra_work_origin` field) admits a direct
-// query. The detail serializer DOES expose `extra_work_origin` with the
-// parent EW id, so we narrow the candidate set with the available
-// `customer` + `building` filters (these are guaranteed to match for any
-// spawned ticket — the spawn helpers inherit both from the parent EW),
-// then resolve each candidate via `GET /api/tickets/<id>/` and keep the
-// ones whose `extra_work_origin.extra_work_request_id` matches.
+// Backend `TicketFilter.extra_work_request` (sprint30) walks both spawn
+// FK chains:
+//   * `extra_work_request_item__extra_work_request_id` (cart route)
+//   * `proposal_line__proposal__extra_work_request_id` (proposal route)
 //
-// This is intentionally limited to scopes the calling user can see:
-// `scope_tickets_for` already filters the list, and the detail call
-// returns 403/404 for out-of-scope ids. Any per-id failure is treated
-// as "not a spawned ticket" and silently skipped so a partial result
-// still renders.
-//
-// Test debt (Sprint 29 Batch 29.8): this is a client-side N+1 walk. A
-// future backend slot should add either a `TicketFilter.extra_work_request`
-// filter or a dedicated `/api/extra-work/<id>/spawned-tickets/` endpoint
-// and the helper should be collapsed to a single call.
+// Replaces the Sprint 29 Batch 29.8 client-side N+1 walk that fetched
+// every customer+building-scoped ticket detail and filtered locally.
+// Scope is still enforced server-side via `scope_tickets_for`.
 export async function listSpawnedTickets(
   ewId: number,
-  customerId: number,
-  buildingId: number,
 ): Promise<TicketList[]> {
-  const candidateResponse = await api.get<PaginatedResponse<TicketList>>(
-    "/tickets/",
-    {
-      params: {
-        customer: customerId,
-        building: buildingId,
-        page_size: 100,
-      },
-    },
+  const response = await api.get<PaginatedResponse<TicketList>>("/tickets/", {
+    params: { extra_work_request: ewId, page_size: 100 },
+  });
+  return response.data.results;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 30 Batch 30.1 — provider-only retry of the legacy ticket-spawn
+// helper.
+//
+// Recovers an EW that landed in CUSTOMER_APPROVED before the auto-spawn
+// fix shipped. Backend gates on SUPER_ADMIN / COMPANY_ADMIN + status ==
+// CUSTOMER_APPROVED + zero existing spawned tickets, and emits a stable
+// `code` field on every 4xx response so the UI can pick a localized
+// message.
+export interface SpawnTicketsResponse {
+  spawned_ticket_ids: number[];
+  count: number;
+}
+
+export async function retrySpawnTicketsForExtraWork(
+  ewId: number | string,
+): Promise<SpawnTicketsResponse> {
+  const response = await api.post<SpawnTicketsResponse>(
+    `/extra-work/${ewId}/spawn/`,
   );
-  const candidates = candidateResponse.data.results;
-  const matched: TicketList[] = [];
-  for (const candidate of candidates) {
-    try {
-      const detailResponse = await api.get<TicketDetail>(
-        `/tickets/${candidate.id}/`,
-      );
-      const origin = detailResponse.data.extra_work_origin;
-      if (origin && origin.extra_work_request_id === ewId) {
-        matched.push(candidate);
-      }
-    } catch {
-      // Out-of-scope or missing detail — skip silently; the panel
-      // renders whatever resolved successfully.
-    }
-  }
-  return matched;
+  return response.data;
 }
 
 

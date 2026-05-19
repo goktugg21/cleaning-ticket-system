@@ -164,8 +164,21 @@
   "detail.actions_workflow_title": "Workflow",
   "detail.actions_override_title": "Aanbieder-override",
   "detail.actions_pdf_title": "Voorstel-document",
+  "detail.actions_retry_spawn_title": "Werk inplannen",
   "detail.pdf_download_button": "Voorstel PDF downloaden",
   "detail.pdf_download_busy": "PDF wordt klaargemaakt…",
+
+  "detail.customer_decision_approve_success": "Prijs goedgekeurd. De aanbieder zal het werk binnenkort inplannen.",
+
+  "detail.retry_spawn": "Werk opnieuw inplannen",
+  "detail.retry_spawn_busy": "Bezig met inplannen…",
+  "detail.retry_spawn_helper": "Er zijn nog geen tickets ingepland voor deze goedgekeurde aanvraag. Probeer ze nu aan te maken.",
+  "detail.retry_spawn_success_one": "1 ticket ingepland.",
+  "detail.retry_spawn_success_other": "{{count}} tickets ingepland.",
+  "detail.retry_spawn_error_wrong_status": "Kan werk niet inplannen: aanvraag staat niet op goedgekeurd.",
+  "detail.retry_spawn_error_already_done": "Er zijn al tickets ingepland voor deze aanvraag.",
+  "detail.retry_spawn_error_forbidden": "U heeft geen rechten om werk in te plannen voor deze aanvraag.",
+  "detail.retry_spawn_error_generic": "Kan werk niet inplannen. Controleer de aanvraagdetails en neem contact op met support.",
 
   "detail.reject_dialog_title": "Deze extra-werk aanvraag afwijzen",
   "detail.reject_dialog_description": "Vertel de aanbieder waarom u dit voorstel afwijst. Uw reden wordt vastgelegd in de tijdlijn van de aanvraag.",
@@ -215,6 +228,7 @@
   "unit_type.item": "Per stuk",
   "unit_type.other": "Anders"
 }
+
 
 
 

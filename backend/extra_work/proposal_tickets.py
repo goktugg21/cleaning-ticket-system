@@ -22,6 +22,24 @@ Contract:
   * **Defensive precondition.** Raises if the caller passes a
     proposal whose `status != CUSTOMER_APPROVED` — that signals a
     caller bug.
+
+Sprint 30 Batch 30.1 — legacy pricing-flow ticket spawn
+-------------------------------------------------------
+`spawn_tickets_for_extra_work_request(ew, actor)` mirrors the shape
+of `extra_work.instant_tickets.spawn_tickets_for_request` but is
+invoked AFTER a `PRICING_PROPOSED -> CUSTOMER_APPROVED` transition
+(customer-driven OR provider-overridden) on an EW that has at least
+one `ExtraWorkPricingLineItem` (the legacy pricing flow) and zero
+`Proposal` rows. Tickets are spawned one-per-`ExtraWorkRequestItem`
+(cart line) and link back via the existing
+`Ticket.extra_work_request_item` FK so the parent-EW auto-sync hook
+in `tickets.state_machine.apply_transition` already drives the
+operational segment (CUSTOMER_APPROVED -> IN_PROGRESS -> COMPLETED).
+
+Idempotent on the `extra_work_request_item` FK existence check;
+defensive precondition mirrors the proposal-flow helper above.
+Errors propagate so a partial spawn rolls every side effect back
+together via the surrounding `apply_transition` atomic block.
 """
 from __future__ import annotations
 
@@ -34,7 +52,14 @@ from tickets.models import (
     TicketStatusHistory,
 )
 
-from .models import Proposal, ProposalLine, ProposalStatus
+from .models import (
+    ExtraWorkRequest,
+    ExtraWorkRequestItem,
+    ExtraWorkStatus,
+    Proposal,
+    ProposalLine,
+    ProposalStatus,
+)
 from .proposal_state_machine import TransitionError
 
 
@@ -124,6 +149,125 @@ def spawn_tickets_for_proposal(
             new_status=TicketStatus.OPEN,
             changed_by=actor,
             note="Spawned from approved Extra Work proposal.",
+            is_override=False,
+            override_reason="",
+        )
+
+        created.append(ticket)
+
+    return created
+
+
+# ---------------------------------------------------------------------------
+# Sprint 30 Batch 30.1 — legacy pricing-flow spawn
+# ---------------------------------------------------------------------------
+def _build_ew_title(item: ExtraWorkRequestItem, *, fallback_title: str) -> str:
+    """Derive a Ticket title from a cart line, falling back to the
+    parent EW title when the cart line has no Service link (legacy
+    backfill row)."""
+    if item.service is not None:
+        return f"{item.service.name} × {item.quantity}"
+    if fallback_title.strip():
+        return f"{fallback_title.strip()} × {item.quantity}"
+    return f"Extra work line × {item.quantity}"
+
+
+def _build_ew_description(
+    ew: ExtraWorkRequest, item: ExtraWorkRequestItem
+) -> str:
+    """Compose a readable Ticket description for a legacy-flow spawn.
+
+    Sections (dropped if blank):
+      1. Parent EW `description`.
+      2. Line-level `customer_note`.
+      3. `Service.description` if the cart line has a Service link.
+
+    Mirrors `instant_tickets._build_description` so legacy-pricing
+    and instant-route tickets read identically on the operational
+    timeline.
+    """
+    parts: List[str] = []
+    if ew.description and ew.description.strip():
+        parts.append(ew.description.strip())
+    if item.customer_note and item.customer_note.strip():
+        parts.append(f"Line note: {item.customer_note.strip()}")
+    if (
+        item.service is not None
+        and item.service.description
+        and item.service.description.strip()
+    ):
+        parts.append(f"Service: {item.service.description.strip()}")
+    return "\n\n".join(parts)
+
+
+def spawn_tickets_for_extra_work_request(
+    ew: ExtraWorkRequest, *, actor
+) -> List[Ticket]:
+    """
+    Sprint 30 Batch 30.1 — legacy pricing-flow ticket spawn.
+
+    Invoked from `extra_work.state_machine.apply_transition` AFTER
+    the EW lands in `CUSTOMER_APPROVED` via the legacy pricing path
+    (`PRICING_PROPOSED -> CUSTOMER_APPROVED`, customer-driven OR
+    provider-overridden). Spawns one `tickets.Ticket` per
+    `ExtraWorkRequestItem` (cart line) on the request and links each
+    Ticket back via `extra_work_request_item` so the existing
+    parent-EW auto-sync hook in
+    `tickets.state_machine.apply_transition` can drive the
+    operational segment (CUSTOMER_APPROVED -> IN_PROGRESS ->
+    COMPLETED) when the spawned tickets start moving.
+
+    Caller MUST hold an active transaction so a mid-loop failure
+    rolls every side effect back together. `apply_transition` is
+    already `@transaction.atomic`-wrapped.
+
+    Idempotent: items whose `Ticket.objects.filter(
+    extra_work_request_item=item).exists()` is True are skipped.
+    Re-running returns an empty list. Used by the retry endpoint
+    `POST /api/extra-work/<id>/spawn/` to recover stuck EWs that
+    were customer-approved before this fix shipped.
+
+    Defensive precondition: raises `TransitionError` with code
+    `ew_spawn_wrong_status` when called on an EW not in
+    CUSTOMER_APPROVED. Mirrors the
+    `instant_spawn_wrong_routing` guard.
+    """
+    from .state_machine import TransitionError as EwTransitionError
+
+    if ew.status != ExtraWorkStatus.CUSTOMER_APPROVED:
+        raise EwTransitionError(
+            "spawn_tickets_for_extra_work_request called on an EW not "
+            f"in CUSTOMER_APPROVED (current={ew.status!r}).",
+            code="ew_spawn_wrong_status",
+        )
+
+    created: List[Ticket] = []
+    items = list(ew.line_items.all().order_by("id"))
+
+    for item in items:
+        if Ticket.objects.filter(extra_work_request_item=item).exists():
+            # Idempotency — already spawned (e.g. an INSTANT-route row
+            # being retried, or a manual re-fire of the retry endpoint).
+            continue
+
+        ticket = Ticket.objects.create(
+            company=ew.company,
+            building=ew.building,
+            customer=ew.customer,
+            created_by=actor,
+            title=_build_ew_title(item, fallback_title=ew.title),
+            description=_build_ew_description(ew, item),
+            priority=TicketPriority.NORMAL,
+            status=TicketStatus.OPEN,
+            extra_work_request_item=item,
+        )
+
+        TicketStatusHistory.objects.create(
+            ticket=ticket,
+            old_status="",
+            new_status=TicketStatus.OPEN,
+            changed_by=actor,
+            note="Spawned from approved Extra Work request (legacy pricing flow).",
             is_override=False,
             override_reason="",
         )

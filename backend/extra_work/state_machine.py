@@ -460,6 +460,33 @@ def apply_transition(
         note=note or "",
         is_override=is_override,
     )
+
+    # Sprint 30 Batch 30.1 — legacy pricing-flow ticket spawn.
+    # When an EW lands in CUSTOMER_APPROVED via the legacy pricing path
+    # (PRICING_PROPOSED -> CUSTOMER_APPROVED, customer-driven OR
+    # provider-overridden), spawn one operational Ticket per cart line
+    # so the operational dashboard / scope filters surface the work
+    # immediately. The new Proposal flow bypasses apply_transition and
+    # owns its own spawn via `proposal_state_machine.
+    # apply_proposal_transition`; this hook only fires on the legacy
+    # path. Idempotency on `extra_work_request_item` guarantees a
+    # no-op if proposal-flow tickets already exist (unusual but
+    # defensive).
+    #
+    # Error propagation: any failure here bubbles up — the spawn IS
+    # part of the customer-approval contract. The surrounding atomic
+    # block rolls back the EW status + history row together.
+    if (
+        old_status == ExtraWorkStatus.PRICING_PROPOSED
+        and to_status == ExtraWorkStatus.CUSTOMER_APPROVED
+    ):
+        # Lazy import to avoid a load-time cycle:
+        # proposal_tickets imports proposal_state_machine which
+        # imports models which imports state_machine.
+        from .proposal_tickets import spawn_tickets_for_extra_work_request
+
+        spawn_tickets_for_extra_work_request(locked, actor=user)
+
     return locked
 
 

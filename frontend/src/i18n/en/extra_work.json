@@ -164,8 +164,21 @@
   "detail.actions_workflow_title": "Workflow",
   "detail.actions_override_title": "Provider override",
   "detail.actions_pdf_title": "Proposal document",
+  "detail.actions_retry_spawn_title": "Schedule work",
   "detail.pdf_download_button": "Download proposal PDF",
   "detail.pdf_download_busy": "Preparing PDF…",
+
+  "detail.customer_decision_approve_success": "Pricing approved. The provider will schedule the work shortly.",
+
+  "detail.retry_spawn": "Retry scheduling work",
+  "detail.retry_spawn_busy": "Scheduling…",
+  "detail.retry_spawn_helper": "No tickets have been scheduled for this approved request yet. Retry to spawn them now.",
+  "detail.retry_spawn_success_one": "1 ticket scheduled.",
+  "detail.retry_spawn_success_other": "{{count}} tickets scheduled.",
+  "detail.retry_spawn_error_wrong_status": "Cannot schedule work: request is not in the approved state.",
+  "detail.retry_spawn_error_already_done": "Tickets are already scheduled for this request.",
+  "detail.retry_spawn_error_forbidden": "You don't have permission to schedule work for this request.",
+  "detail.retry_spawn_error_generic": "Could not schedule work. Check the request details and contact support.",
 
   "detail.reject_dialog_title": "Reject this extra-work request",
   "detail.reject_dialog_description": "Please tell the provider why you're rejecting this proposal. Your reason will appear on the request timeline.",
@@ -215,6 +228,7 @@
   "unit_type.item": "Per item",
   "unit_type.other": "Other"
 }
+
 
 
 

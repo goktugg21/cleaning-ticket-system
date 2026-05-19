@@ -183,6 +183,114 @@ class ExtraWorkRequestViewSet(
             ExtraWorkStatusHistorySerializer(rows, many=True).data
         )
 
+    @action(detail=True, methods=["post"], url_path="spawn")
+    def spawn(self, request, pk=None):
+        """
+        Sprint 30 Batch 30.1 — provider-only retry of the legacy
+        pricing-flow ticket spawn.
+
+        Recovers an EW that landed in CUSTOMER_APPROVED before this
+        fix shipped (no tickets spawned at approval time) by firing
+        the spawn helper manually. Not customer-callable.
+
+        Preconditions:
+          * Actor MUST be SUPER_ADMIN or COMPANY_ADMIN (the broader
+            BUILDING_MANAGER scope is intentionally NOT admitted —
+            this is a corrective admin action).
+          * EW MUST be in CUSTOMER_APPROVED.
+          * EW MUST have zero spawned tickets across BOTH spawn
+            paths (cart-item FK + proposal-line FK chain).
+        """
+        extra_work = self.get_object()  # 404 if out-of-scope
+
+        if request.user.role not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+        }:
+            return Response(
+                {
+                    "detail": (
+                        "Only SUPER_ADMIN or COMPANY_ADMIN may retry "
+                        "Extra Work ticket spawn."
+                    ),
+                    "code": "spawn_forbidden_role",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # COMPANY_ADMIN must own the EW's company (mirrors the
+        # provider-scope rule the rest of the EW endpoints use).
+        if request.user.role == UserRole.COMPANY_ADMIN:
+            if not user_has_osius_permission(
+                request.user,
+                "osius.ticket.view_building",
+                building_id=extra_work.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": "Not in scope for this Extra Work request.",
+                        "code": "spawn_forbidden_scope",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if extra_work.status != ExtraWorkStatus.CUSTOMER_APPROVED:
+            return Response(
+                {
+                    "detail": (
+                        "Retry spawn requires the Extra Work request "
+                        "to be in CUSTOMER_APPROVED "
+                        f"(current={extra_work.status})."
+                    ),
+                    "code": "spawn_wrong_status",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.db.models import Q
+        from tickets.models import Ticket
+
+        existing_count = (
+            Ticket.objects.filter(
+                Q(extra_work_request_item__extra_work_request_id=extra_work.id)
+                | Q(
+                    proposal_line__proposal__extra_work_request_id=extra_work.id
+                )
+            )
+            .distinct()
+            .count()
+        )
+        if existing_count > 0:
+            return Response(
+                {
+                    "detail": (
+                        "Extra Work request already has spawned tickets "
+                        f"(count={existing_count}); refusing to spawn again."
+                    ),
+                    "code": "spawn_already_done",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Lazy import to keep view-module import cheap and avoid
+        # the proposal_tickets <-> state_machine cycle at load time.
+        from .proposal_tickets import spawn_tickets_for_extra_work_request
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            tickets = spawn_tickets_for_extra_work_request(
+                extra_work, actor=request.user
+            )
+
+        return Response(
+            {
+                "spawned_ticket_ids": [t.id for t in tickets],
+                "count": len(tickets),
+            },
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
         """

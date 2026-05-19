@@ -37,6 +37,8 @@ import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, FileSearch, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import axios from "axios";
+
 import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
 import {
@@ -46,6 +48,7 @@ import {
   getExtraWork,
   listProposalsForEw,
   listSpawnedTickets,
+  retrySpawnTicketsForExtraWork,
   transitionExtraWork,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
@@ -68,6 +71,7 @@ import { PageHeader } from "../components/PageHeader";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/ToastProvider";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
@@ -134,11 +138,56 @@ const PROVIDER_ROLES: Set<Role> = new Set([
   "BUILDING_MANAGER",
 ]);
 
+// Sprint 30 Batch 30.1 — roles allowed to call POST /extra-work/<id>/spawn/.
+// The backend gate is intentionally narrower than the broader provider set
+// (BUILDING_MANAGER is excluded — this is a corrective admin action). The
+// UI must mirror that gate exactly so the button never renders for a role
+// the API will refuse anyway.
+const RETRY_SPAWN_ROLES: Set<Role> = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+
+// Sprint 30 Batch 30.1 — map the backend's stable `code` field on the
+// retry-spawn endpoint to a localized toast title. Any other / missing
+// code falls back to the generic message.
+type RetrySpawnErrorCode =
+  | "spawn_wrong_status"
+  | "spawn_already_done"
+  | "spawn_forbidden_role"
+  | "spawn_forbidden_scope"
+  | "spawn_generic";
+
+const RETRY_SPAWN_ERROR_I18N_KEY: Record<RetrySpawnErrorCode, string> = {
+  spawn_wrong_status: "detail.retry_spawn_error_wrong_status",
+  spawn_already_done: "detail.retry_spawn_error_already_done",
+  spawn_forbidden_role: "detail.retry_spawn_error_forbidden",
+  spawn_forbidden_scope: "detail.retry_spawn_error_forbidden",
+  spawn_generic: "detail.retry_spawn_error_generic",
+};
+
+function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data;
+    if (data && typeof data === "object") {
+      const code = (data as Record<string, unknown>).code;
+      if (typeof code === "string") {
+        switch (code) {
+          case "spawn_wrong_status":
+          case "spawn_already_done":
+          case "spawn_forbidden_role":
+          case "spawn_forbidden_scope":
+            return code;
+        }
+      }
+    }
+  }
+  return "spawn_generic";
+}
+
 
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
   const { t } = useTranslation(["extra_work", "common"]);
+  const { push: pushToast } = useToast();
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -187,11 +236,13 @@ export function ExtraWorkDetailPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [pdfBusy, setPdfBusy] = useState(false);
 
-  // Sprint 29 Batch 29.8 — spawned tickets fetched via the
-  // customer+building-scoped fallback (see `listSpawnedTickets`).
-  // Drives both the read-only panel (between line items and actions)
-  // and the cancel-confirmation warning.
+  // Sprint 30 Batch 30.1 — spawned tickets fetched via the new
+  // server-side `extra_work_request` filter. Drives both the
+  // read-only panel (between line items and actions) and the
+  // cancel-confirmation warning.
   const [spawnedTickets, setSpawnedTickets] = useState<TicketList[]>([]);
+  // Sprint 30 Batch 30.1 — retry-spawn button busy flag.
+  const [retrySpawnBusy, setRetrySpawnBusy] = useState(false);
   // Sprint 29 Batch 29.8 — cancel-confirmation dialog. Wraps the
   // existing CANCELLED transition path so the warning about lingering
   // spawned tickets renders before the destructive action fires.
@@ -279,20 +330,17 @@ export function ExtraWorkDetailPage() {
     };
   }, [ewId]);
 
-  // Sprint 29 Batch 29.8 — spawned tickets fetch. Pulls tickets in the
-  // EW's customer+building scope and filters client-side to those whose
-  // detail payload's `extra_work_origin.extra_work_request_id` matches.
-  // Failures collapse silently to an empty list so the panel just does
-  // not render. See `listSpawnedTickets` for the test-debt note.
-  const ewCustomerForTickets = ew?.customer ?? null;
-  const ewBuildingForTickets = ew?.building ?? null;
+  // Sprint 30 Batch 30.1 — spawned tickets fetch using the new
+  // server-side `extra_work_request` filter (walks both the cart-item
+  // FK chain and the proposal-line FK chain). Replaces the Sprint 29
+  // Batch 29.8 client-side N+1 walk.
+  //
+  // Failures collapse silently to an empty list so the panel simply
+  // does not render. Scope is still enforced server-side via
+  // `scope_tickets_for`.
   useEffect(() => {
     let cancelled = false;
-    if (
-      ewId === null ||
-      ewCustomerForTickets === null ||
-      ewBuildingForTickets === null
-    ) {
+    if (ewId === null) {
       queueMicrotask(() => {
         if (!cancelled) setSpawnedTickets([]);
       });
@@ -300,7 +348,7 @@ export function ExtraWorkDetailPage() {
         cancelled = true;
       };
     }
-    listSpawnedTickets(ewId, ewCustomerForTickets, ewBuildingForTickets)
+    listSpawnedTickets(ewId)
       .then((list) => {
         if (!cancelled) setSpawnedTickets(list);
       })
@@ -310,7 +358,7 @@ export function ExtraWorkDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [ewId, ewCustomerForTickets, ewBuildingForTickets]);
+  }, [ewId]);
 
   if (loading) {
     return (
@@ -367,6 +415,17 @@ export function ExtraWorkDetailPage() {
     (ticket) => !TERMINAL_TICKET_STATUSES.has(ticket.status),
   );
 
+  // Sprint 30 Batch 30.1 — retry-spawn button is the recovery path
+  // for EWs that landed in CUSTOMER_APPROVED with zero spawned
+  // tickets (legacy data from before the auto-spawn fix shipped). The
+  // backend gate matches: SUPER_ADMIN / COMPANY_ADMIN only, status
+  // must be CUSTOMER_APPROVED, no tickets yet.
+  const canRetrySpawn =
+    !!me?.role &&
+    RETRY_SPAWN_ROLES.has(me.role) &&
+    ew.status === "CUSTOMER_APPROVED" &&
+    spawnedTickets.length === 0;
+
   // Sprint 28 Batch 15.4 — pick the currently-active proposal for
   // PDF download. SENT and ACCEPTED are the two "live" states; DRAFT
   // is provider-private and not downloadable until sent, REJECTED /
@@ -419,10 +478,59 @@ export function ExtraWorkDetailPage() {
           : {}),
       });
       setEw(updated);
+      // Sprint 30 Batch 30.1 — customer-side approve confirmation toast.
+      // The backend auto-spawns tickets on this transition (when every
+      // line resolves to an agreed price); the toast tells the customer
+      // the provider will schedule the work shortly so they don't sit
+      // staring at a screen wondering whether their click landed.
+      if (target === "CUSTOMER_APPROVED") {
+        pushToast({
+          variant: "success",
+          title: t("detail.customer_decision_approve_success"),
+        });
+      }
     } catch (err) {
       setError(getApiError(err));
     } finally {
       setTransitionBusy(null);
+    }
+  }
+
+  // Sprint 30 Batch 30.1 — provider-only retry of the legacy spawn
+  // helper. Renders when the EW is stuck in CUSTOMER_APPROVED with
+  // zero spawned tickets (legacy data from before the auto-spawn
+  // fix shipped). The backend still re-validates role + status +
+  // emptiness; this handler maps the stable `code` field to a
+  // localized toast on failure.
+  async function handleRetrySpawn() {
+    if (!ew) return;
+    setRetrySpawnBusy(true);
+    try {
+      const result = await retrySpawnTicketsForExtraWork(ew.id);
+      // i18next plural — picks `_one` / `_other` from the `count`.
+      pushToast({
+        variant: "success",
+        title: t("detail.retry_spawn_success", { count: result.count }),
+      });
+      // Refresh the EW + spawned tickets so the panel renders the
+      // new rows and the retry button gates itself off.
+      await refresh();
+      try {
+        const list = await listSpawnedTickets(ew.id);
+        setSpawnedTickets(list);
+      } catch {
+        // Non-fatal — the panel just won't update until the user
+        // refreshes the page.
+      }
+    } catch (err) {
+      const code = retrySpawnErrorCode(err);
+      const titleKey = RETRY_SPAWN_ERROR_I18N_KEY[code];
+      pushToast({
+        variant: "error",
+        title: t(titleKey),
+      });
+    } finally {
+      setRetrySpawnBusy(false);
     }
   }
 
@@ -1290,6 +1398,37 @@ export function ExtraWorkDetailPage() {
             </div>
           )}
 
+          {/* Sprint 30 Batch 30.1 — retry-spawn card. Surfaces only
+              when the EW is stuck in CUSTOMER_APPROVED with zero
+              spawned tickets AND the actor is SUPER_ADMIN /
+              COMPANY_ADMIN. Recovers legacy EWs that landed in
+              CUSTOMER_APPROVED before the auto-spawn fix shipped. */}
+          {canRetrySpawn && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.actions_retry_spawn_title")}
+                </div>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.retry_spawn_helper")}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={retrySpawnBusy}
+                  onClick={() => {
+                    void handleRetrySpawn();
+                  }}
+                  data-testid="extra-work-retry-spawn"
+                >
+                  {retrySpawnBusy
+                    ? t("detail.retry_spawn_busy")
+                    : t("detail.retry_spawn")}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Provider override card */}
           {providerOverrideAvailable && (
             <div className="card">
@@ -1489,6 +1628,7 @@ export function ExtraWorkDetailPage() {
     </div>
   );
 }
+
 
 
 
