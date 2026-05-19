@@ -4805,5 +4805,121 @@ table.data-table {
   }
 }
 
+/* ====================================================================
+   Sprint 28 Batch 15.3 — Extra Work list KPI strip + filters
+                          Users page group headers
+   ==================================================================== */
+
+/* ----- EW list KPI strip ----- */
+.ew-list-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.ew-kpi-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.ew-kpi-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--green-faint);
+  color: var(--green);
+  flex-shrink: 0;
+}
+.ew-kpi-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ew-kpi-card-label {
+  font-family: var(--f-head);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ew-kpi-card-value {
+  font-family: var(--f-head);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.1;
+}
+.ew-kpi-card-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 960px) {
+  .ew-list-kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 520px) {
+  .ew-list-kpi-row { grid-template-columns: 1fr; }
+}
+
+/* ----- EW list filter bar ----- */
+.ew-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.ew-list-filters .filter-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ew-list-filters .filter-field.search {
+  flex: 1;
+  min-width: 200px;
+}
+.ew-list-filters .filter-control {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+/* ----- Users page group headers (inside the table body) ----- */
+.users-group-header td {
+  padding: 12px 14px 6px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.users-group-header-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2, var(--green));
+}
+.users-group-header-count {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
 
 

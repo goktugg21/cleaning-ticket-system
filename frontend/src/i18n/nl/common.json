@@ -250,6 +250,9 @@
   "users.banner_saved": "Gebruiker opgeslagen.",
   "users.banner_deactivated": "Gebruiker gedeactiveerd.",
   "users.banner_reactivated": "Gebruiker geactiveerd.",
+  "users.group_provider": "Providergebruikers",
+  "users.group_customer": "Klantgebruikers",
+  "ops": "Operaties",
 
   "companies.loading": "Bedrijven laden…",
   "companies.count_one": "{{count}} bedrijf",
@@ -904,4 +907,5 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Rechten beheren",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Aangepaste rechten van andere klantgebruikers bewerken."
 }
+
 

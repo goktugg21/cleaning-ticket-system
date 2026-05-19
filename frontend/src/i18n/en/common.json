@@ -250,6 +250,9 @@
   "users.banner_saved": "User saved.",
   "users.banner_deactivated": "User deactivated.",
   "users.banner_reactivated": "User reactivated.",
+  "users.group_provider": "Provider users",
+  "users.group_customer": "Customer users",
+  "ops": "Operations",
 
   "companies.loading": "Loading companies…",
   "companies.count_one": "{{count}} company",
@@ -904,4 +907,5 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Manage permissions",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Edit custom permissions of other customer users."
 }
+
 

@@ -6,6 +6,8 @@ import { getApiError } from "../../api/client";
 import { listAuditLogs } from "../../api/admin";
 import type { AuditLogListParams } from "../../api/admin";
 import type { AuditAction, AuditLog } from "../../api/types";
+import { ChangeDiff } from "../../components/ChangeDiff";
+import { formatDateTime } from "../../lib/intl";
 
 /**
  * Sprint 18 — read-only audit log viewer for SUPER_ADMIN.
@@ -42,21 +44,6 @@ const ACTION_CLASS: Record<AuditAction, string> = {
   UPDATE: "cell-tag-in_progress",
   DELETE: "cell-tag-rejected",
 };
-
-function formatTimestamp(value: string): string {
-  try {
-    return new Date(value).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return value;
-  }
-}
 
 function isoStartOfDay(value: string): string {
   // Convert a "YYYY-MM-DD" picker value into the timezone-aware ISO
@@ -292,7 +279,7 @@ export function AuditLogsAdminPage() {
             <tbody>
               {logs.map((log) => (
                 <tr key={log.id} data-testid="audit-row">
-                  <td className="td-date">{formatTimestamp(log.created_at)}</td>
+                  <td className="td-date">{formatDateTime(log.created_at)}</td>
                   <td>
                     {log.actor_email ? (
                       <span title={log.actor_email}>{log.actor_email}</span>
@@ -327,26 +314,9 @@ export function AuditLogsAdminPage() {
                       >
                         {t("audit_logs.changes_summary")}
                       </summary>
-                      <pre
-                        // Sprint 20: max-width handled via the
-                        // [data-testid="audit-logs-page"] selector
-                        // in index.css so it can clamp to the
-                        // viewport on phones; keep inline styles for
-                        // the per-cell box only.
-                        style={{
-                          background: "var(--bg-soft, #f7f7f7)",
-                          padding: "8px 10px",
-                          borderRadius: 4,
-                          fontSize: 12,
-                          maxHeight: 280,
-                          overflow: "auto",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          marginTop: 6,
-                        }}
-                      >
-                        {JSON.stringify(log.changes, null, 2)}
-                      </pre>
+                      <div style={{ marginTop: 6 }}>
+                        <ChangeDiff changes={log.changes} />
+                      </div>
                     </details>
                   </td>
                 </tr>
@@ -366,7 +336,7 @@ export function AuditLogsAdminPage() {
               <div className="admin-card-link" style={{ cursor: "default" }}>
                 <div className="admin-card-head">
                   <span className="admin-card-title">
-                    {formatTimestamp(log.created_at)}
+                    {formatDateTime(log.created_at)}
                   </span>
                   <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
                     <i />
@@ -398,7 +368,9 @@ export function AuditLogsAdminPage() {
                 </dl>
                 <details>
                   <summary>{t("audit_logs.changes_summary")}</summary>
-                  <pre>{JSON.stringify(log.changes, null, 2)}</pre>
+                  <div style={{ marginTop: 6 }}>
+                    <ChangeDiff changes={log.changes} />
+                  </div>
                 </details>
               </div>
             </li>
@@ -457,3 +429,4 @@ export function AuditLogsAdminPage() {
     </div>
   );
 }
+

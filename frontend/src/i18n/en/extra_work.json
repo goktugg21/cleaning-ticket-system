@@ -13,6 +13,19 @@
   "list.column_customer": "Customer",
   "list.column_total": "Total",
   "list.column_requested": "Requested",
+  "list.search_placeholder": "Search title, building, or customer",
+  "list.filter_all_statuses": "All statuses",
+  "list.filter_all_categories": "All categories",
+  "list.empty_filtered_title": "No requests match your filters",
+  "list.empty_filtered_desc": "Try clearing one of the filters above.",
+  "kpi.open_label": "Open requests",
+  "kpi.open_meta": "Awaiting provider review",
+  "kpi.awaiting_label": "Awaiting customer",
+  "kpi.awaiting_meta": "Pricing proposed",
+  "kpi.approved_label": "Approved",
+  "kpi.approved_meta": "Customer accepted",
+  "kpi.value_label": "Total value",
+  "kpi.value_meta": "Excludes cancelled",
 
   "create.page_title": "New Extra Work request",
   "create.page_subtitle": "Build a cart of services you would like the provider to carry out. Lines with a pre-agreed price are scheduled immediately; lines without one go to a manager for a pricing proposal you can approve.",
@@ -169,3 +182,4 @@
   "unit_type.item": "Per item",
   "unit_type.other": "Other"
 }
+

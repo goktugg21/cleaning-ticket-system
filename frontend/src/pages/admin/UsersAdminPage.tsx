@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { MailPlus, RefreshCw } from "lucide-react";
+import { MailPlus, RefreshCw, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listUsers } from "../../api/admin";
@@ -8,18 +8,13 @@ import type { AdminListParams } from "../../api/admin";
 import type { Role, UserAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { EmptyState } from "../../components/EmptyState";
+import { RoleBadge } from "../../components/RoleBadge";
+import { isProviderRole, roleLabelKey } from "../../lib/enumLabels";
 
 type ActiveFilter = "true" | "false" | "all";
 
 const DEBOUNCE_MS = 300;
-
-const ROLE_KEYS: Record<Role, string> = {
-  SUPER_ADMIN: "common:roles.super_admin",
-  COMPANY_ADMIN: "common:roles.company_admin",
-  BUILDING_MANAGER: "common:roles.building_manager",
-  STAFF: "common:roles.staff",
-  CUSTOMER_USER: "common:roles.customer_user",
-};
 
 // Sprint 23B — STAFF is a valid filter option so reviewers can find
 // existing STAFF users. The list page only reads; the create path
@@ -113,6 +108,19 @@ export function UsersAdminPage() {
     );
   }, [users, searchActive]);
 
+  // Sprint 28 Batch 15.3 — split the visible set by side so the
+  // table can render two group headers (Provider users / Customer
+  // users) without changing the filter or pagination contract.
+  const groupedUsers = useMemo(() => {
+    const provider: UserAdmin[] = [];
+    const customer: UserAdmin[] = [];
+    for (const u of visibleUsers) {
+      if (isProviderRole(u.role)) provider.push(u);
+      else customer.push(u);
+    }
+    return { provider, customer };
+  }, [visibleUsers]);
+
   const hasActiveFilters = Boolean(
     searchActive || activeFilter !== "true" || roleFilter.length > 0,
   );
@@ -122,6 +130,54 @@ export function UsersAdminPage() {
       current.includes(role) ? current.filter((r) => r !== role) : [...current, role],
     );
     setPage(1);
+  }
+
+  // Sprint 28 Batch 15.3 — extracted so the two-group table body can
+  // share the same row rendering for the provider and customer
+  // partitions.
+  function renderUserRow(user: UserAdmin) {
+    const editPath = `/admin/users/${user.id}`;
+    const openEdit = () => navigate(editPath);
+    return (
+      <tr
+        key={user.id}
+        className="admin-row-clickable"
+        role="link"
+        tabIndex={0}
+        aria-label={t("admin.edit") + ": " + user.email}
+        onClick={openEdit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openEdit();
+          }
+        }}
+      >
+        <td className="td-subject">
+          <Link to={editPath}>{user.email}</Link>
+        </td>
+        <td>{user.full_name || "—"}</td>
+        <td data-testid="user-row-role" data-role={user.role}>
+          <RoleBadge role={user.role} compact />
+        </td>
+        <td>{user.language}</td>
+        <td>
+          <span
+            className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
+          >
+            <i />
+            {user.is_active
+              ? t("admin.status_active")
+              : t("admin.status_inactive")}
+          </span>
+        </td>
+        <td>
+          <Link className="btn btn-ghost btn-sm" to={editPath}>
+            {t("admin.edit")}
+          </Link>
+        </td>
+      </tr>
+    );
   }
 
   return (
@@ -214,7 +270,7 @@ export function UsersAdminPage() {
                     aria-pressed={active}
                     data-role={role}
                   >
-                    {t(ROLE_KEYS[role])}
+                    {t(roleLabelKey(role))}
                   </button>
                 );
               })}
@@ -258,50 +314,42 @@ export function UsersAdminPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleUsers.map((user) => {
-                const editPath = `/admin/users/${user.id}`;
-                const openEdit = () => navigate(editPath);
-                return (
+              {groupedUsers.provider.length > 0 && (
+                <>
                   <tr
-                    key={user.id}
-                    className="admin-row-clickable"
-                    role="link"
-                    tabIndex={0}
-                    aria-label={t("admin.edit") + ": " + user.email}
-                    onClick={openEdit}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        openEdit();
-                      }
-                    }}
+                    className="users-group-header"
+                    data-testid="users-group-provider"
                   >
-                    <td className="td-subject">
-                      <Link to={editPath}>{user.email}</Link>
-                    </td>
-                    <td>{user.full_name || "—"}</td>
-                    <td data-testid="user-row-role" data-role={user.role}>
-                      {t(ROLE_KEYS[user.role] ?? "common:roles.fallback")}
-                    </td>
-                    <td>{user.language}</td>
-                    <td>
-                      <span
-                        className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
-                      >
-                        <i />
-                        {user.is_active
-                          ? t("admin.status_active")
-                          : t("admin.status_inactive")}
+                    <td colSpan={6}>
+                      <span className="users-group-header-label">
+                        {t("users.group_provider")}
+                      </span>
+                      <span className="users-group-header-count">
+                        {groupedUsers.provider.length}
                       </span>
                     </td>
-                    <td>
-                      <Link className="btn btn-ghost btn-sm" to={editPath}>
-                        {t("admin.edit")}
-                      </Link>
+                  </tr>
+                  {groupedUsers.provider.map(renderUserRow)}
+                </>
+              )}
+              {groupedUsers.customer.length > 0 && (
+                <>
+                  <tr
+                    className="users-group-header"
+                    data-testid="users-group-customer"
+                  >
+                    <td colSpan={6}>
+                      <span className="users-group-header-label">
+                        {t("users.group_customer")}
+                      </span>
+                      <span className="users-group-header-count">
+                        {groupedUsers.customer.length}
+                      </span>
                     </td>
                   </tr>
-                );
-              })}
+                  {groupedUsers.customer.map(renderUserRow)}
+                </>
+              )}
             </tbody>
           </table>
         </div>
@@ -344,7 +392,7 @@ export function UsersAdminPage() {
                     <div className="admin-card-meta-row">
                       <dt>{t("users.col_role")}</dt>
                       <dd>
-                        {t(ROLE_KEYS[user.role] ?? "common:roles.fallback")}
+                        <RoleBadge role={user.role} compact />
                       </dd>
                     </div>
                     <div className="admin-card-meta-row">
@@ -364,24 +412,29 @@ export function UsersAdminPage() {
         </ul>
 
         {!loading && visibleUsers.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-icon">＋</div>
-            <div className="empty-title">
-              {hasActiveFilters
+          <EmptyState
+            icon={Users}
+            title={
+              hasActiveFilters
                 ? t("users.empty_filtered_title")
-                : t("users.empty_initial_title")}
-            </div>
-            <p className="empty-sub">
-              {hasActiveFilters
+                : t("users.empty_initial_title")
+            }
+            description={
+              hasActiveFilters
                 ? t("admin.empty_filtered_desc")
-                : t("users.empty_initial_desc")}
-            </p>
-            {!hasActiveFilters && (
-              <Link className="btn btn-primary btn-sm" to="/admin/invitations">
-                {t("users.invite_user")}
-              </Link>
-            )}
-          </div>
+                : t("users.empty_initial_desc")
+            }
+            action={
+              !hasActiveFilters ? (
+                <Link
+                  className="btn btn-primary btn-sm"
+                  to="/admin/invitations"
+                >
+                  {t("users.invite_user")}
+                </Link>
+              ) : undefined
+            }
+          />
         )}
 
         {(previous || next) && (
@@ -413,3 +466,4 @@ export function UsersAdminPage() {
     </div>
   );
 }
+

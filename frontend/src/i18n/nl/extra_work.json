@@ -13,6 +13,19 @@
   "list.column_customer": "Klant",
   "list.column_total": "Totaal",
   "list.column_requested": "Aangevraagd",
+  "list.search_placeholder": "Zoek op titel, gebouw of klant",
+  "list.filter_all_statuses": "Alle statussen",
+  "list.filter_all_categories": "Alle categorieën",
+  "list.empty_filtered_title": "Geen aanvragen matchen je filters",
+  "list.empty_filtered_desc": "Probeer een van de bovenstaande filters te verwijderen.",
+  "kpi.open_label": "Open aanvragen",
+  "kpi.open_meta": "Wacht op provider-review",
+  "kpi.awaiting_label": "Wacht op klant",
+  "kpi.awaiting_meta": "Prijsvoorstel verstuurd",
+  "kpi.approved_label": "Goedgekeurd",
+  "kpi.approved_meta": "Klant heeft geaccepteerd",
+  "kpi.value_label": "Totale waarde",
+  "kpi.value_meta": "Exclusief geannuleerd",
 
   "create.page_title": "Nieuwe Extra Werk-aanvraag",
   "create.page_subtitle": "Stel een winkelmandje van diensten samen die u door de aanbieder wilt laten uitvoeren. Regels met een vooraf afgesproken prijs worden direct ingepland; regels zonder vooraf afgesproken prijs gaan naar een manager voor een prijsvoorstel dat u kunt goedkeuren.",
@@ -169,3 +182,4 @@
   "unit_type.item": "Per stuk",
   "unit_type.other": "Anders"
 }
+
