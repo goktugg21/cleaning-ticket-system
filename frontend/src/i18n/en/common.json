@@ -921,7 +921,22 @@
   "customer_permissions.permission_keys.customer.users.assign_location_role.label": "Assign location manager",
   "customer_permissions.permission_keys.customer.users.assign_location_role.description": "Promote another customer user to location manager at a specific building.",
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Manage permissions",
-  "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Edit custom permissions of other customer users."
+  "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Edit custom permissions of other customer users.",
+  "admin_form.cancel": "Cancel",
+  "company_form.back_to_detail": "Back to company",
+  "company_detail.edit_button": "Edit",
+  "company_detail.about_title": "About",
+  "company_detail.about_desc": "Basic company information.",
+  "company_detail.admins_title": "Company admins",
+  "company_detail.admins_desc": "People who can manage this company.",
+  "company_detail.admins_empty": "No company admins yet.",
+  "company_detail.field_name": "Name",
+  "company_detail.field_slug": "Slug",
+  "company_detail.field_default_language": "Default language",
+  "company_detail.field_status": "Status",
+  "company_detail.status_active": "Active",
+  "company_detail.status_inactive": "Inactive",
+  "company_detail.invalid_id": "Invalid company id."
 }
 
 

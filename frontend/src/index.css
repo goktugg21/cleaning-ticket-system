@@ -5208,6 +5208,35 @@ table.data-table {
   cursor: pointer;
 }
 
+/* Sprint 29 Batch 29.3 — read-only field display on detail pages.
+   Used by the new view-first detail surfaces (CompanyDetailPage first;
+   29.4 / 29.5 will reuse). Falls back to the existing --border-soft
+   token when the optional --border-faint token isn't defined. */
+.detail-field-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-faint, var(--border-soft));
+}
+.detail-field-row:last-child { border-bottom: none; }
+.detail-field-label {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.detail-field-value {
+  font-size: 14px;
+  color: var(--text);
+}
+.detail-field-value.muted-empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 
 
 

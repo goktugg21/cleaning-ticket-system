@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addCompanyAdmin,
   createCompany,
-  deactivateCompany,
   getCompany,
   listCompanyAdmins,
   listUsers,
-  reactivateCompany,
   removeCompanyAdmin,
   updateCompany,
 } from "../../api/admin";
@@ -28,7 +26,6 @@ import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 export function CompanyFormPage() {
-  const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
   const { t, i18n } = useTranslation("common");
@@ -79,10 +76,6 @@ export function CompanyFormPage() {
   });
   const company = form.entity;
   const numericId = form.numericId;
-
-  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [actionBusy, setActionBusy] = useState(false);
 
   // Membership section state. Independent of the main form.
   const [members, setMembers] = useState<CompanyAdminMembership[]>([]);
@@ -183,46 +176,24 @@ export function CompanyFormPage() {
     );
   }
 
-  async function handleConfirmDeactivate() {
-    if (numericId === null) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await deactivateCompany(numericId);
-      deactivateDialogRef.current?.close();
-      navigate("/admin/companies?deactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      deactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleConfirmReactivate() {
-    if (numericId === null) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await reactivateCompany(numericId);
-      reactivateDialogRef.current?.close();
-      navigate("/admin/companies?reactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      reactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
   const companyName = company?.name ?? t("company_form.fallback");
 
+  // Sprint 29 Batch 29.3 — back link points at the detail page when
+  // editing (so Cancel and back land in the same place); the create
+  // flow keeps the back-to-list shortcut.
+  const backHref = isCreate || numericId === null
+    ? "/admin/companies"
+    : `/admin/companies/${numericId}`;
+  const backLabel = isCreate
+    ? t("company_form.back")
+    : t("company_form.back_to_detail");
+
   return (
     <div>
-      <Link to="/admin/companies" className="link-back">
+      <Link to={backHref} className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("company_form.back")}
+        {backLabel}
       </Link>
 
       <div className="page-header">
@@ -244,18 +215,6 @@ export function CompanyFormPage() {
             </p>
           )}
         </div>
-        {!isCreate && company && !company.is_active && isSuperAdmin && (
-          <div className="page-header-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              data-testid="reactivate-button"
-              onClick={() => reactivateDialogRef.current?.open()}
-            >
-              {t("admin_form.reactivate")}
-            </button>
-          </div>
-        )}
       </div>
 
       {savedBanner && (
@@ -348,15 +307,14 @@ export function CompanyFormPage() {
 
           </div>
           <div className="form-actions">
-            {!isCreate && company && company.is_active && (
-              <button
-                type="button"
+            {!isCreate && numericId !== null && (
+              <Link
+                to={`/admin/companies/${numericId}`}
                 className="btn btn-ghost"
-                data-testid="deactivate-button"
-                onClick={() => deactivateDialogRef.current?.open()}
+                data-testid="company-edit-cancel"
               >
-                {t("admin_form.deactivate")}
-              </button>
+                {t("admin_form.cancel")}
+              </Link>
             )}
             <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
               {form.submitting
@@ -466,24 +424,6 @@ export function CompanyFormPage() {
           </form>
         </section>
       )}
-
-      <ConfirmDialog
-        ref={deactivateDialogRef}
-        title={t("company_form.dialog_deactivate_title", { name: companyName })}
-        body={t("company_form.dialog_deactivate_body")}
-        confirmLabel={t("admin_form.deactivate")}
-        onConfirm={handleConfirmDeactivate}
-        busy={actionBusy}
-      />
-
-      <ConfirmDialog
-        ref={reactivateDialogRef}
-        title={t("company_form.dialog_reactivate_title", { name: companyName })}
-        body={t("company_form.dialog_reactivate_body")}
-        confirmLabel={t("admin_form.reactivate")}
-        onConfirm={handleConfirmReactivate}
-        busy={actionBusy}
-      />
 
       <ConfirmDialog
         ref={removeDialogRef}

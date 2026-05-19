@@ -921,7 +921,22 @@
   "customer_permissions.permission_keys.customer.users.assign_location_role.label": "Locatiebeheerder toewijzen",
   "customer_permissions.permission_keys.customer.users.assign_location_role.description": "Een andere klantgebruiker promoveren tot locatiebeheerder voor een specifiek gebouw.",
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Rechten beheren",
-  "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Aangepaste rechten van andere klantgebruikers bewerken."
+  "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Aangepaste rechten van andere klantgebruikers bewerken.",
+  "admin_form.cancel": "Annuleren",
+  "company_form.back_to_detail": "Terug naar bedrijf",
+  "company_detail.edit_button": "Bewerken",
+  "company_detail.about_title": "Over",
+  "company_detail.about_desc": "Basisinformatie van het bedrijf.",
+  "company_detail.admins_title": "Bedrijfsbeheerders",
+  "company_detail.admins_desc": "Personen die dit bedrijf kunnen beheren.",
+  "company_detail.admins_empty": "Nog geen bedrijfsbeheerders.",
+  "company_detail.field_name": "Naam",
+  "company_detail.field_slug": "Slug",
+  "company_detail.field_default_language": "Standaardtaal",
+  "company_detail.field_status": "Status",
+  "company_detail.status_active": "Actief",
+  "company_detail.status_inactive": "Inactief",
+  "company_detail.invalid_id": "Ongeldig bedrijfs-ID."
 }
 
 

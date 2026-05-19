@@ -27,6 +27,7 @@ import { BuildingManagerCustomerContactsPage } from "./pages/admin/BuildingManag
 import { BuildingManagerCustomerDetailPage } from "./pages/admin/BuildingManagerCustomerDetailPage";
 import { BuildingManagerCustomersPage } from "./pages/admin/BuildingManagerCustomersPage";
 import { CompaniesAdminPage } from "./pages/admin/CompaniesAdminPage";
+import { CompanyDetailPage } from "./pages/admin/CompanyDetailPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
@@ -185,11 +186,25 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 29 Batch 29.3 — view-first split. The
+              `/admin/companies/:id` URL now renders a read-only detail
+              page; an explicit role-gated Edit button on that page
+              navigates to `/admin/companies/:id/edit`, which still
+              mounts the existing `CompanyFormPage`. `/new` is unchanged
+              and continues to use the form. */}
+          <Route
+            path="/admin/companies/:id/edit"
+            element={
+              <AdminRoute>
+                <CompanyFormPage />
+              </AdminRoute>
+            }
+          />
           <Route
             path="/admin/companies/:id"
             element={
               <AdminRoute>
-                <CompanyFormPage />
+                <CompanyDetailPage />
               </AdminRoute>
             }
           />
