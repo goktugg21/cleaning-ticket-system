@@ -609,6 +609,16 @@ class ExtraWorkTransitionSerializer(serializers.Serializer):
     override_reason = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
+    # Sprint 28 Batch 15.4 — customer-supplied reject reason. Required
+    # (non-blank after .strip()) when a CUSTOMER_USER drives a
+    # PRICING_PROPOSED -> CUSTOMER_REJECTED transition WITHOUT
+    # is_override (the provider override path already requires its own
+    # `override_reason`). Threaded into the status-history `note` by
+    # the view layer so it surfaces on the existing timeline UI
+    # without a new persistence column.
+    customer_reject_reason = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
 
 
 # ---------------------------------------------------------------------------

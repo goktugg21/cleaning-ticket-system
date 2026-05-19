@@ -8,6 +8,7 @@
   "list.empty_state": "No Extra Work requests yet. Create one to get started.",
   "list.column_title": "Title",
   "list.column_status": "Status",
+  "list.column_route": "Route",
   "list.column_category": "Category",
   "list.column_building": "Building",
   "list.column_customer": "Customer",
@@ -155,6 +156,21 @@
   "detail.updated_at": "Updated {{date}}",
   "detail.empty_dash": "—",
 
+  "detail.actions_aria_label": "Actions",
+  "detail.actions_decision_title": "Customer decision",
+  "detail.actions_workflow_title": "Workflow",
+  "detail.actions_override_title": "Provider override",
+  "detail.actions_pdf_title": "Proposal document",
+  "detail.pdf_download_button": "Download proposal PDF",
+  "detail.pdf_download_busy": "Preparing PDF…",
+
+  "detail.reject_dialog_title": "Reject this extra-work request",
+  "detail.reject_dialog_description": "Please tell the provider why you're rejecting this proposal. Your reason will appear on the request timeline.",
+  "detail.reject_dialog_placeholder": "Too expensive, scheduling conflict, no longer needed…",
+  "detail.reject_dialog_confirm": "Confirm rejection",
+  "detail.reject_dialog_cancel": "Cancel",
+  "detail.reject_dialog_required": "A reason is required.",
+
   "category.deep_cleaning": "Deep cleaning",
   "category.window_cleaning": "Window cleaning",
   "category.floor_maintenance": "Floor maintenance",
@@ -182,4 +198,5 @@
   "unit_type.item": "Per item",
   "unit_type.other": "Other"
 }
+
 

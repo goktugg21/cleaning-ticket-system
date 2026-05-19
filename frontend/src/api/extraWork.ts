@@ -15,6 +15,7 @@ import type {
   ExtraWorkStatus,
   ExtraWorkStatusHistoryEntry,
   PaginatedResponse,
+  Proposal,
 } from "./types";
 
 export async function listExtraWork(): Promise<
@@ -55,6 +56,10 @@ export interface TransitionPayload {
   note?: string;
   is_override?: boolean;
   override_reason?: string;
+  // Sprint 28 Batch 15.4 — required by the backend on CUSTOMER_USER-
+  // driven CUSTOMER_REJECTED transitions; ignored on every other
+  // path. Free-text reason captured via the RejectReasonDialog.
+  customer_reject_reason?: string;
 }
 
 export async function transitionExtraWork(
@@ -132,3 +137,34 @@ export async function getExtraWorkStatsByBuilding(): Promise<ExtraWorkStatsByBui
   );
   return response.data;
 }
+
+// Sprint 28 Batch 15.4 — proposal helpers used by the rebuilt
+// detail page. The proposal builder UI itself is parked for a
+// later batch; the detail page only needs to know whether an
+// active SENT/ACCEPTED proposal exists so it can render the PDF-
+// download button.
+//
+// Backend wire shapes:
+//   GET  /extra-work/<ew>/proposals/        -> Proposal[]  (flat array, NOT paginated)
+//   GET  /extra-work/<ew>/proposals/<id>/pdf/  -> binary PDF blob
+
+export async function listProposalsForEw(
+  ewId: number | string,
+): Promise<Proposal[]> {
+  const response = await api.get<Proposal[]>(
+    `/extra-work/${ewId}/proposals/`,
+  );
+  return response.data;
+}
+
+export async function fetchProposalPdf(
+  ewId: number | string,
+  proposalId: number,
+): Promise<Blob> {
+  const response = await api.get<Blob>(
+    `/extra-work/${ewId}/proposals/${proposalId}/pdf/`,
+    { responseType: "blob" },
+  );
+  return response.data;
+}
+

@@ -77,6 +77,11 @@
   "ticket_status.reopened_by_admin": "Reopened by admin",
   "ticket_status.fallback": "Unknown status",
 
+  "route_badge.instant": "Instant",
+  "route_badge.proposal": "Proposal",
+  "route_badge.instant_helper": "All requested services were already priced — tickets were spawned immediately.",
+  "route_badge.proposal_helper": "At least one line had no agreed price — needs a provider proposal before any work begins.",
+
   "extra_work_status.requested": "Requested",
   "extra_work_status.under_review": "Under review",
   "extra_work_status.pricing_proposed": "Pricing proposed",
@@ -907,5 +912,6 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Manage permissions",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Edit custom permissions of other customer users."
 }
+
 
 

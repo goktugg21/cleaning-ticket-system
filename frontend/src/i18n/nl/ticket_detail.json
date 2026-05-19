@@ -129,5 +129,8 @@
   "override_modal_submit_reject": "Bevestig overschrijven → Klant afgewezen",
   "override_modal_cancel": "Annuleren",
   "timeline_override_badge": "Overrule",
-  "timeline_override_reason": "Reden: {{reason}}"
+  "timeline_override_reason": "Reden: {{reason}}",
+
+  "detail.spawned_from_label": "Voortgekomen uit extra werk"
 }
+

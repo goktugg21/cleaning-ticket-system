@@ -95,7 +95,13 @@ test.describe("Sprint 28 Batch 15.3 — Extra Work list rebuild", () => {
         page.locator('[data-testid="extra-work-list-empty"]'),
       ).toBeVisible();
     } else {
-      const statuses = await rows.locator(".badge").allTextContents();
+      // Sprint 28 Batch 15.4 — each row now carries a StatusBadge AND
+      // a RouteBadge (both styled with `.badge`). The RouteBadge has
+      // the `.route-badge` modifier class, so filter to the status
+      // badge by excluding it.
+      const statuses = await rows
+        .locator(".badge:not(.route-badge)")
+        .allTextContents();
       for (const s of statuses) {
         expect(s.toLowerCase()).toMatch(/cancel|geannuleerd/);
       }

@@ -8,6 +8,7 @@
   "list.empty_state": "Nog geen Extra Werk-aanvragen. Maak er een om te beginnen.",
   "list.column_title": "Titel",
   "list.column_status": "Status",
+  "list.column_route": "Route",
   "list.column_category": "Categorie",
   "list.column_building": "Gebouw",
   "list.column_customer": "Klant",
@@ -155,6 +156,21 @@
   "detail.updated_at": "Bijgewerkt {{date}}",
   "detail.empty_dash": "—",
 
+  "detail.actions_aria_label": "Acties",
+  "detail.actions_decision_title": "Klantbeslissing",
+  "detail.actions_workflow_title": "Workflow",
+  "detail.actions_override_title": "Aanbieder-override",
+  "detail.actions_pdf_title": "Voorstel-document",
+  "detail.pdf_download_button": "Voorstel PDF downloaden",
+  "detail.pdf_download_busy": "PDF wordt klaargemaakt…",
+
+  "detail.reject_dialog_title": "Deze extra-werk aanvraag afwijzen",
+  "detail.reject_dialog_description": "Vertel de aanbieder waarom u dit voorstel afwijst. Uw reden wordt vastgelegd in de tijdlijn van de aanvraag.",
+  "detail.reject_dialog_placeholder": "Te duur, planningsconflict, niet meer nodig…",
+  "detail.reject_dialog_confirm": "Afwijzing bevestigen",
+  "detail.reject_dialog_cancel": "Annuleren",
+  "detail.reject_dialog_required": "Een reden is verplicht.",
+
   "category.deep_cleaning": "Grondige reiniging",
   "category.window_cleaning": "Glazenwasserij",
   "category.floor_maintenance": "Vloeronderhoud",
@@ -182,4 +198,5 @@
   "unit_type.item": "Per stuk",
   "unit_type.other": "Anders"
 }
+
 

@@ -44,6 +44,7 @@ import type {
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
+import { RouteBadge } from "../components/RouteBadge";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
@@ -871,6 +872,28 @@ export function TicketDetailPage() {
         </div>
         <h1 className="detail-header-title">{ticket.title}</h1>
         <p className="detail-header-desc">{ticket.description}</p>
+        {/* Sprint 28 Batch 15.4 — spawned-from-EW anchor. Renders only
+            when the backend includes `extra_work_origin` (non-null
+            for tickets created by an ExtraWorkRequest line). Mirrors
+            the RouteBadge so operators can tell at a glance whether
+            the parent EW skipped or went through the proposal phase. */}
+        {ticket.extra_work_origin && (
+          <div
+            className="ticket-extra-work-origin"
+            data-testid="ticket-extra-work-origin"
+            data-origin={ticket.extra_work_origin.origin}
+          >
+            <span className="muted small">
+              {t("detail.spawned_from_label")}
+            </span>{" "}
+            <Link
+              to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+            >
+              {ticket.extra_work_origin.extra_work_request_title}
+            </Link>{" "}
+            <RouteBadge value={ticket.extra_work_origin.origin} />
+          </div>
+        )}
       </div>
 
       {error && (
@@ -2565,3 +2588,4 @@ export function TicketDetailPage() {
     </div>
   );
 }
+

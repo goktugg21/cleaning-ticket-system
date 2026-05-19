@@ -35,6 +35,13 @@ export interface PageHeaderProps {
   breadcrumbs?: PageHeaderBreadcrumb[];
   backLink?: { to: string; label: string };
   statusPill?: ReactNode;
+  /**
+   * Sprint 28 Batch 15.4 — optional badge/meta strip rendered under
+   * the title row (above `subtitle`). Used by ExtraWorkDetailPage to
+   * show StatusBadge + RouteBadge + category/urgency in one inline
+   * row without rolling a custom header.
+   */
+  meta?: ReactNode;
   actions?: ReactNode;
   /** Optional test id attached to the wrapping div. */
   testId?: string;
@@ -47,6 +54,7 @@ export function PageHeader({
   breadcrumbs,
   backLink,
   statusPill,
+  meta,
   actions,
   testId,
 }: PageHeaderProps) {
@@ -85,10 +93,12 @@ export function PageHeader({
           <h2 className="page-title">{title}</h2>
           {statusPill && <span className="page-title-pill">{statusPill}</span>}
         </div>
+        {meta && <div className="page-header-meta">{meta}</div>}
         {subtitle && <p className="page-sub">{subtitle}</p>}
       </div>
       {actions && <div className="page-header-actions">{actions}</div>}
     </div>
   );
 }
+
 

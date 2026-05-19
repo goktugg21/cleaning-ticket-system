@@ -113,13 +113,51 @@ class ExtraWorkRequestViewSet(
         payload = ExtraWorkTransitionSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
+
+        to_status = data["to_status"]
+        is_override = data.get("is_override", False)
+        note = data.get("note", "")
+        customer_reject_reason = data.get(
+            "customer_reject_reason", ""
+        ).strip()
+
+        # Sprint 28 Batch 15.4 — a customer-driven PRICING_PROPOSED ->
+        # CUSTOMER_REJECTED transition MUST carry a non-blank reason.
+        # The provider override path bypasses this rule because it has
+        # its own mandatory `override_reason` (state-machine layer
+        # raises `override_reason_required` when missing).
+        if (
+            to_status == ExtraWorkStatus.CUSTOMER_REJECTED
+            and not is_override
+            and request.user.role == UserRole.CUSTOMER_USER
+            and not customer_reject_reason
+        ):
+            return Response(
+                {
+                    "customer_reject_reason": (
+                        "A reject reason is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Thread the customer reason into the status-history note so it
+        # surfaces on the existing timeline UI. If the client also sent
+        # a free-text `note`, prefix the reject reason so both pieces
+        # are visible.
+        if customer_reject_reason:
+            if note:
+                note = f"[Reject reason] {customer_reject_reason}\n\n{note}"
+            else:
+                note = f"[Reject reason] {customer_reject_reason}"
+
         try:
             updated = apply_transition(
                 extra_work,
                 request.user,
-                data["to_status"],
-                note=data.get("note", ""),
-                is_override=data.get("is_override", False),
+                to_status,
+                note=note,
+                is_override=is_override,
                 override_reason=data.get("override_reason", ""),
             )
         except TransitionError as exc:

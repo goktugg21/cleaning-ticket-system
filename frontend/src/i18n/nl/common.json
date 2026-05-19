@@ -77,6 +77,11 @@
   "ticket_status.reopened_by_admin": "Heropend",
   "ticket_status.fallback": "Onbekende status",
 
+  "route_badge.instant": "Direct",
+  "route_badge.proposal": "Voorstel",
+  "route_badge.instant_helper": "Alle aangevraagde diensten waren al geprijsd — tickets zijn meteen aangemaakt.",
+  "route_badge.proposal_helper": "Ten minste één regel had geen afgesproken prijs — er is een voorstel van de aanbieder nodig voordat het werk kan beginnen.",
+
   "extra_work_status.requested": "Aangevraagd",
   "extra_work_status.under_review": "In behandeling",
   "extra_work_status.pricing_proposed": "Prijsvoorstel",
@@ -907,5 +912,6 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Rechten beheren",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Aangepaste rechten van andere klantgebruikers bewerken."
 }
+
 
 

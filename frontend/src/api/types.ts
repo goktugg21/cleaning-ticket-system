@@ -163,6 +163,22 @@ export type AssignedStaffEntry =
     }
   | { anonymous: true; label_key: string };
 
+// Sprint 28 Batch 15.4 — ticket "spawned from extra work" anchor.
+// Mirrors backend `TicketDetailSerializer.extra_work_origin`. Non-
+// null only for tickets created from an ExtraWorkRequest. The
+// `origin` value mirrors `RoutingDecision`: "INSTANT" tickets came
+// from a cart line that resolved to an active CustomerServicePrice
+// (no proposal phase), "PROPOSAL" tickets came from an accepted
+// proposal line.
+export interface TicketExtraWorkOrigin {
+  extra_work_request_id: number;
+  extra_work_request_title: string;
+  extra_work_request_status: ExtraWorkStatus;
+  extra_work_request_item_id: number;
+  service_name: string | null;
+  origin: "INSTANT" | "PROPOSAL";
+}
+
 export interface TicketDetail extends TicketList {
   description: string;
   room_label: string;
@@ -174,6 +190,10 @@ export interface TicketDetail extends TicketList {
   rejected_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  // Sprint 28 Batch 15.4 — non-null when this ticket was spawned by
+  // an ExtraWorkRequest line. The frontend renders a "Spawned from"
+  // panel in the ticket detail header that links back to the EW.
+  extra_work_origin: TicketExtraWorkOrigin | null;
   // Sprint 28 Batch 11 — timestamp the ticket entered
   // WAITING_MANAGER_REVIEW (null until STAFF marks the work as
   // completed on the manager-review default route). Mirrored from
@@ -646,6 +666,10 @@ export interface ExtraWorkRequestList {
   updated_at: string;
   pricing_proposed_at: string | null;
   customer_decided_at: string | null;
+  // Sprint 28 Batch 15.4 — backend now emits routing_decision on
+  // every list row so the EW list can render an at-a-glance
+  // Instant/Proposal badge per row without a per-row detail fetch.
+  routing_decision: RoutingDecision;
 }
 
 // Provider-side pricing line item — full shape with internal note.
@@ -740,6 +764,30 @@ export interface ExtraWorkRequestCartCreatePayload {
     requested_date: string;
     customer_note?: string;
   }>;
+}
+
+// Sprint 28 Batch 15.4 — minimal frontend shape for a Proposal row.
+// Mirrors `extra_work.serializers.ProposalListSerializer`. The full
+// admin-facing builder UI (line items, transitions, timeline) is a
+// future deliverable; the detail page only needs enough shape to
+// pick the active proposal for the PDF-download button.
+export type ProposalStatus =
+  | "DRAFT"
+  | "SENT"
+  | "ACCEPTED"
+  | "REJECTED"
+  | "CANCELLED";
+
+export interface Proposal {
+  id: number;
+  extra_work_request: number;
+  status: ProposalStatus;
+  subtotal_amount: string;
+  vat_amount: string;
+  total_amount: string;
+  sent_at: string | null;
+  customer_decided_at: string | null;
+  created_at: string;
 }
 
 export interface ExtraWorkStatusHistoryEntry {
@@ -926,3 +974,4 @@ export interface CustomerServicePriceCreatePayload {
 
 export type CustomerServicePriceUpdatePayload =
   Partial<CustomerServicePriceCreatePayload>;
+

@@ -4922,4 +4922,136 @@ table.data-table {
   border-radius: 999px;
 }
 
+/* ====================================================================
+   Sprint 28 Batch 15.4 — Extra Work detail two-column layout
+   ==================================================================== */
+.ew-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 1024px) {
+  .ew-detail-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    align-items: start;
+  }
+}
+.ew-detail-main {
+  min-width: 0;
+}
+.ew-detail-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (min-width: 1024px) {
+  .ew-detail-aside {
+    position: sticky;
+    top: 16px;
+  }
+}
+.ew-detail-aside .card {
+  margin-bottom: 0;
+}
+.ew-detail-actions-section-title {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2, var(--green));
+  margin-bottom: 8px;
+}
+.ew-detail-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+/* PageHeader: optional meta strip rendered under the title row. */
+.page-header-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* RouteBadge — uses the existing badge-* tone classes for the
+   coloured pill; this rule only adds the optional sizing tweak so
+   it sits neatly alongside the StatusBadge in headers and rows. */
+.route-badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Sprint 28 Batch 15.4 — Ticket detail spawned-from-EW anchor.
+   Sits below the description paragraph in the ticket header. */
+.ticket-extra-work-origin {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.4 — RejectReasonDialog modal
+   Lightweight CSS-only modal (no existing .modal primitive in the
+   codebase today). Confined to the namespace `.reject-modal-*` so it
+   never collides with future generic modal styles.
+   ==================================================================== */
+.reject-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.reject-modal {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-soft, #e5e7eb);
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.reject-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.reject-modal-desc {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.reject-modal-textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+}
+.reject-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.reject-modal-confirm[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 

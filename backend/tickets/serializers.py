@@ -168,6 +168,16 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     # completion-modal logic uses this to decide whether to render the
     # "Complete work" button without making a separate API call.
     is_assigned_staff = serializers.SerializerMethodField()
+    # Sprint 28 Batch 15.4 — surface the parent Extra Work request when
+    # the ticket was spawned through either the INSTANT-route auto-
+    # approval (`extra_work_request_item` set) or the PROPOSAL-route
+    # approval (`proposal_line` set). The payload is metadata-only:
+    # parent id + title + status + origin tag + the line's
+    # `service_name`. Provider-only EW fields (`internal_cost_note`,
+    # `manager_note`, override_*) are intentionally NOT surfaced — the
+    # caller must hit `/api/extra-work/<id>/` for that, where the
+    # role-aware serializer enforces visibility.
+    extra_work_origin = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -212,6 +222,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "sla_is_paused",
             "sla_remaining_business_seconds",
             "sla_display_state",
+            "extra_work_origin",
         ]
         read_only_fields = fields
 
@@ -251,6 +262,62 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         return TicketStaffAssignment.objects.filter(
             ticket=obj, user=user
         ).exists()
+
+    def get_extra_work_origin(self, obj):
+        """
+        Sprint 28 Batch 15.4 — surface parent Extra Work metadata when
+        the ticket was spawned from a cart line. Returns None when the
+        ticket was created via the legacy direct-API path. Same payload
+        for every role (the parent EW detail endpoint enforces the
+        provider-only-field stripping; this serializer never carries
+        those fields in the first place).
+
+        Origin resolution:
+          * `extra_work_request_item` set, `proposal_line` null
+              -> INSTANT-route spawn (`extra_work.instant_tickets`).
+          * `proposal_line` set (with or without `extra_work_request_
+            item`) -> PROPOSAL-route spawn
+            (`extra_work.proposal_tickets`). The parent EW + item id
+            are walked back through `proposal_line.proposal.
+            extra_work_request`.
+          * Neither -> None.
+        """
+        item = obj.extra_work_request_item
+        proposal_line = obj.proposal_line
+
+        if proposal_line is not None:
+            # PROPOSAL-route. Walk back to the parent EW request via
+            # the proposal chain. `extra_work_request_item` is normally
+            # None on this path (the proposal spawn helper does not set
+            # it), but we still surface the line item id if the FK was
+            # populated by some future code path.
+            proposal = proposal_line.proposal
+            ew_request = proposal.extra_work_request
+            service = proposal_line.service
+            return {
+                "extra_work_request_id": ew_request.id,
+                "extra_work_request_title": ew_request.title,
+                "extra_work_request_status": ew_request.status,
+                "extra_work_request_item_id": item.id if item is not None else None,
+                "service_name": service.name if service is not None else None,
+                "origin": "PROPOSAL",
+            }
+
+        if item is not None:
+            # INSTANT-route. The cart line carries the parent EW
+            # request and the service catalog row directly.
+            ew_request = item.extra_work_request
+            service = item.service
+            return {
+                "extra_work_request_id": ew_request.id,
+                "extra_work_request_title": ew_request.title,
+                "extra_work_request_status": ew_request.status,
+                "extra_work_request_item_id": item.id,
+                "service_name": service.name if service is not None else None,
+                "origin": "INSTANT",
+            }
+
+        return None
 
 
 def _assigned_staff_payload(ticket, viewer):

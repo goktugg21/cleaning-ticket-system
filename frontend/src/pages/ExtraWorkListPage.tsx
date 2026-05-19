@@ -28,6 +28,7 @@ import { getApiError } from "../api/client";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatDate, formatMoney } from "../lib/intl";
 
@@ -312,6 +313,7 @@ export function ExtraWorkListPage() {
                 <tr>
                   <th>{t("list.column_title")}</th>
                   <th>{t("list.column_status")}</th>
+                  <th>{t("list.column_route")}</th>
                   <th>{t("list.column_category")}</th>
                   <th>{t("list.column_building")}</th>
                   <th>{t("list.column_customer")}</th>
@@ -335,6 +337,9 @@ export function ExtraWorkListPage() {
                       <StatusBadge
                         status={{ kind: "extra-work", value: row.status }}
                       />
+                    </td>
+                    <td>
+                      <RouteBadge value={row.routing_decision} />
                     </td>
                     <td>
                       {t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
@@ -366,11 +371,29 @@ export function ExtraWorkListPage() {
                 >
                   <div className="admin-card-head">
                     <span className="admin-card-title">{row.title}</span>
-                    <StatusBadge
-                      status={{ kind: "extra-work", value: row.status }}
-                    />
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        gap: 6,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <StatusBadge
+                        status={{ kind: "extra-work", value: row.status }}
+                      />
+                      <RouteBadge value={row.routing_decision} />
+                    </span>
                   </div>
                   <dl className="admin-card-meta">
+                    <div className="admin-card-meta-row">
+                      <dt>{t("list.column_route")}</dt>
+                      <dd>
+                        {row.routing_decision === "INSTANT"
+                          ? t("route_badge.instant", { ns: "common" })
+                          : t("route_badge.proposal", { ns: "common" })}
+                      </dd>
+                    </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_category")}</dt>
                       <dd>
@@ -403,4 +426,5 @@ export function ExtraWorkListPage() {
     </div>
   );
 }
+
 

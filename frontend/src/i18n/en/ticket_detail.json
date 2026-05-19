@@ -129,5 +129,8 @@
   "override_modal_submit_reject": "Confirm override → Customer rejected",
   "override_modal_cancel": "Cancel",
   "timeline_override_badge": "Override",
-  "timeline_override_reason": "Reason: {{reason}}"
+  "timeline_override_reason": "Reason: {{reason}}",
+
+  "detail.spawned_from_label": "Spawned from extra work"
 }
+
