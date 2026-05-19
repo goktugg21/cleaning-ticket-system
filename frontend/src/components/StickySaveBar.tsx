@@ -24,6 +24,14 @@ export interface StickySaveBarProps {
   cancelLabel?: string;
   message?: ReactNode;
   testId?: string;
+  /**
+   * Optional testid attached to the inner Save button. Lets a page
+   * preserve a locked testid (e.g. customer-policy-save) when the
+   * actual save control moves into the sticky bar.
+   */
+  saveTestId?: string;
+  /** Optional testid attached to the inner Cancel button. */
+  cancelTestId?: string;
   /** Disable the save button independent of `saving` (e.g. validation errors). */
   saveDisabled?: boolean;
 }
@@ -37,6 +45,8 @@ export function StickySaveBar({
   cancelLabel,
   message,
   testId,
+  saveTestId,
+  cancelTestId,
   saveDisabled = false,
 }: StickySaveBarProps) {
   const { t } = useTranslation("common");
@@ -64,6 +74,7 @@ export function StickySaveBar({
             className="btn btn-secondary btn-sm"
             onClick={onCancel}
             disabled={saving}
+            data-testid={cancelTestId}
           >
             {resolvedCancelLabel}
           </button>
@@ -73,6 +84,7 @@ export function StickySaveBar({
           className="btn btn-primary btn-sm"
           onClick={onSave}
           disabled={saving || saveDisabled}
+          data-testid={saveTestId}
         >
           {resolvedSaveLabel}
         </button>
@@ -80,4 +92,5 @@ export function StickySaveBar({
     </div>
   );
 }
+
 

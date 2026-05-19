@@ -1,4 +1,3 @@
-import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -21,6 +20,7 @@ import type {
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
+  CustomerPermissionKey,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
 } from "../../../api/types";
@@ -28,53 +28,56 @@ import { CUSTOMER_PERMISSION_KEYS } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
-import { useSavedBanner } from "../../../hooks/useSavedBanner";
+import { EmptyState } from "../../../components/EmptyState";
+import { StickySaveBar } from "../../../components/StickySaveBar";
+import { useToast } from "../../../components/ToastProvider";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
-
-// Sprint 27E — 3-way control per permission key. Mirrors the helper
-// in `CustomerFormPage.tsx`; duplicated here intentionally so the
-// permissions page is self-contained (Batch 13 scope, no shared
-// customer-context provider).
-type OverrideTriState = "inherit" | "grant" | "revoke";
-
-function tristateFromOverride(
-  overrides: Record<string, boolean>,
-  key: string,
-): OverrideTriState {
-  if (!(key in overrides)) return "inherit";
-  return overrides[key] ? "grant" : "revoke";
-}
-
-function buildOverridesPayload(
-  draft: Record<string, OverrideTriState>,
-): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  for (const [key, value] of Object.entries(draft)) {
-    if (value === "grant") out[key] = true;
-    else if (value === "revoke") out[key] = false;
-  }
-  return out;
-}
+import { OverrideDrawer } from "./permissions/OverrideDrawer";
+import type { OverrideDraft } from "./permissions/OverrideDrawer";
+import { PolicyToggleGrid } from "./permissions/PolicyToggleGrid";
+import type { PolicyDraft } from "./permissions/PolicyToggleGrid";
+import { UserAccessCard } from "./permissions/UserAccessCard";
+import { ZoneHeader } from "./permissions/ZoneHeader";
+import {
+  buildOverridesPayload,
+  draftValueFromOverride,
+} from "./permissions/effectiveResolver";
+import { Users as UsersIcon } from "lucide-react";
 
 /**
- * Sprint 28 Batch 13 — Customer Permissions page (admin variant).
+ * Sprint 28 Batch 15.2 — Customer Permissions page rebuild.
  *
- * Migrates the per-access access-role + permission-override editor and
- * the `CustomerCompanyPolicy` form OUT of `CustomerFormPage.tsx`. The
- * Overview page no longer renders any permission affordances; this is
- * now the single permissions surface under `/admin/customers/:id/*`.
+ * Reorganises the page into three vertical zones:
+ *   1. Customer-company policy (upstream constraint) — 2x2 toggle
+ *      cards + StickySaveBar.
+ *   2. Users and building access — one card per CustomerUserMembership
+ *      with per-building chips for sub-role + active + a custom-
+ *      permissions pill.
+ *   3. Override drawer — slides in from the right when the operator
+ *      clicks a "Custom permissions" pill. Shows the 16 customer
+ *      permission keys grouped by domain with tri-state inherit /
+ *      allow / deny radios + an inline Effective: ... hint computed
+ *      against the current policy + sub-role.
  *
- * Testids are preserved so the existing Sprint 27E specs continue to
- * resolve: `customer-access-role-select`, `customer-access-overrides-
- * button`, `customer-overrides-row`, `customer-overrides-radio`,
- * `customer-overrides-save`, `customer-overrides-close`,
- * `customer-policy-toggle`, `customer-policy-save`.
+ * All locked testids (customer-permissions-page,
+ * section-customer-company-policy, section-customer-users,
+ * section-customer-overrides-editor on the drawer,
+ * customer-access-badge, customer-access-role-select,
+ * customer-access-active-toggle, customer-access-overrides-button,
+ * customer-overrides-table, customer-overrides-row,
+ * customer-overrides-radio, customer-overrides-close,
+ * customer-overrides-save, customer-policy-toggle,
+ * customer-policy-save, customer-user-access-summary) are preserved.
+ *
+ * Per-access changes (sub-role, active toggle, add/remove building)
+ * still save immediately; only policy and overrides are drafted.
  */
 export function CustomerPermissionsPage() {
   const { id } = useParams();
   const { t } = useTranslation("common");
   const { me } = useAuth();
+  const { push: pushToast } = useToast();
 
   const numericId = useMemo(() => {
     if (!id) return null;
@@ -82,6 +85,7 @@ export function CustomerPermissionsPage() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, [id]);
 
+  // ------- Top-level data state -------
   const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
   const [members, setMembers] = useState<CustomerUserMembership[]>([]);
   const [linkedBuildings, setLinkedBuildings] = useState<
@@ -92,56 +96,46 @@ export function CustomerPermissionsPage() {
   >({});
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [accessError, setAccessError] = useState("");
   const [accessBusyUserId, setAccessBusyUserId] = useState<number | null>(null);
 
-  // Override editor state.
+  // ------- Override drawer state -------
   const [editingOverrideFor, setEditingOverrideFor] = useState<{
     membership: CustomerUserMembership;
     access: CustomerUserBuildingAccess;
   } | null>(null);
-  const [overrideDraft, setOverrideDraft] = useState<
-    Record<string, OverrideTriState>
-  >({});
+  const emptyOverrideDraft = useMemo<OverrideDraft>(() => {
+    const d = {} as OverrideDraft;
+    for (const key of CUSTOMER_PERMISSION_KEYS) d[key] = "inherit";
+    return d;
+  }, []);
+  const [overrideDraft, setOverrideDraft] =
+    useState<OverrideDraft>(emptyOverrideDraft);
   const [overrideSaving, setOverrideSaving] = useState(false);
-  const [overrideBanner, setOverrideBanner] = useSavedBanner({
-    saved: t("customer_form.access_overrides_saved_banner"),
-  });
 
-  // Revoke-access dialog.
+  // ------- Revoke-access dialog state -------
   const revokeAccessDialogRef = useRef<ConfirmDialogHandle>(null);
   const [revokeAccessTarget, setRevokeAccessTarget] = useState<{
     membership: CustomerUserMembership;
     access: CustomerUserBuildingAccess;
   } | null>(null);
 
-  // Policy panel state.
+  // ------- Policy panel state -------
   const [policy, setPolicy] = useState<CustomerCompanyPolicyAdmin | null>(null);
   const [policyLoading, setPolicyLoading] = useState(true);
   const [policyError, setPolicyError] = useState("");
   const [policySaving, setPolicySaving] = useState(false);
-  const [policyDraft, setPolicyDraft] = useState<
-    Pick<
-      CustomerCompanyPolicyAdmin,
-      | "customer_users_can_create_tickets"
-      | "customer_users_can_approve_ticket_completion"
-      | "customer_users_can_create_extra_work"
-      | "customer_users_can_approve_extra_work_pricing"
-    >
-  >({
+  const [policyDraft, setPolicyDraft] = useState<PolicyDraft>({
     customer_users_can_create_tickets: true,
     customer_users_can_approve_ticket_completion: true,
     customer_users_can_create_extra_work: true,
     customer_users_can_approve_extra_work_pricing: true,
   });
-  const [policyBanner, setPolicyBanner] = useSavedBanner({
-    saved: t("customer_form.policy_saved_banner"),
-  });
 
   const isSelfAccess = (access: CustomerUserBuildingAccess) =>
     me?.id === access.user_id;
+  const canGrantCustomerCompanyAdmin = me?.role === "SUPER_ADMIN";
 
-  // Initial load.
+  // ------- Initial load -------
   useEffect(() => {
     let cancelled = false;
     if (numericId === null) {
@@ -176,10 +170,7 @@ export function CustomerPermissionsPage() {
     };
   }, [numericId, t]);
 
-  // Per-user building access load. Triggered after members resolve.
-  // The "empty" branch defers the reset into a microtask to keep the
-  // effect body free of cascading-render lint hits (same shape as
-  // `BuildingManagerCustomerDetailPage.tsx:38-81`).
+  // ------- Per-user building access load -------
   useEffect(() => {
     let cancelled = false;
     if (numericId === null || members.length === 0) {
@@ -210,7 +201,7 @@ export function CustomerPermissionsPage() {
     };
   }, [numericId, members]);
 
-  // Policy load.
+  // ------- Policy load -------
   useEffect(() => {
     if (numericId === null) return;
     let cancelled = false;
@@ -242,25 +233,61 @@ export function CustomerPermissionsPage() {
     };
   }, [numericId]);
 
+  const isPolicyDirty = useMemo(() => {
+    if (!policy) return false;
+    return (
+      policyDraft.customer_users_can_create_tickets !==
+        policy.customer_users_can_create_tickets ||
+      policyDraft.customer_users_can_approve_ticket_completion !==
+        policy.customer_users_can_approve_ticket_completion ||
+      policyDraft.customer_users_can_create_extra_work !==
+        policy.customer_users_can_create_extra_work ||
+      policyDraft.customer_users_can_approve_extra_work_pricing !==
+        policy.customer_users_can_approve_extra_work_pricing
+    );
+  }, [policy, policyDraft]);
+
+  // ------- Helpers ------------------------------------------------------
+
+  async function reloadAccessFor(userId: number) {
+    if (numericId === null) return;
+    try {
+      const response = await listCustomerUserAccess(numericId, userId);
+      setAccessByUserId((prev) => ({ ...prev, [userId]: response.results }));
+    } catch (err) {
+      pushToast({
+        variant: "error",
+        title: t("customer_permissions.toast_save_failed"),
+        description: getApiError(err),
+      });
+    }
+  }
+
+  function pushSaveFailure(err: unknown) {
+    pushToast({
+      variant: "error",
+      title: t("customer_permissions.toast_save_failed"),
+      description: getApiError(err),
+    });
+  }
+
+  // ------- Per-access handlers (immediate-save) -------------------------
+
   async function handleAddAccess(
     membership: CustomerUserMembership,
     buildingId: number,
   ) {
     if (numericId === null) return;
-    setAccessError("");
     setAccessBusyUserId(membership.user_id);
     try {
       await addCustomerUserAccess(numericId, membership.user_id, buildingId);
-      const response = await listCustomerUserAccess(
-        numericId,
-        membership.user_id,
-      );
-      setAccessByUserId((prev) => ({
-        ...prev,
-        [membership.user_id]: response.results,
-      }));
+      await reloadAccessFor(membership.user_id);
+      pushToast({
+        variant: "success",
+        title: t("customer_permissions.toast_access_added"),
+      });
     } catch (err) {
-      setAccessError(getApiError(err));
+      pushSaveFailure(err);
     } finally {
       setAccessBusyUserId(null);
     }
@@ -273,7 +300,6 @@ export function CustomerPermissionsPage() {
   ) {
     if (numericId === null) return;
     if (newRole === access.access_role) return;
-    setAccessError("");
     setAccessBusyUserId(membership.user_id);
     try {
       await updateCustomerUserAccessRole(
@@ -282,16 +308,13 @@ export function CustomerPermissionsPage() {
         access.building_id,
         newRole,
       );
-      const response = await listCustomerUserAccess(
-        numericId,
-        membership.user_id,
-      );
-      setAccessByUserId((prev) => ({
-        ...prev,
-        [membership.user_id]: response.results,
-      }));
+      await reloadAccessFor(membership.user_id);
+      pushToast({
+        variant: "success",
+        title: t("customer_permissions.toast_access_role_saved"),
+      });
     } catch (err) {
-      setAccessError(getApiError(err));
+      pushSaveFailure(err);
     } finally {
       setAccessBusyUserId(null);
     }
@@ -303,7 +326,6 @@ export function CustomerPermissionsPage() {
     nextActive: boolean,
   ) {
     if (numericId === null) return;
-    setAccessError("");
     setAccessBusyUserId(membership.user_id);
     try {
       await updateCustomerUserAccess(
@@ -312,28 +334,34 @@ export function CustomerPermissionsPage() {
         access.building_id,
         { is_active: nextActive },
       );
-      const response = await listCustomerUserAccess(
-        numericId,
-        membership.user_id,
-      );
-      setAccessByUserId((prev) => ({
-        ...prev,
-        [membership.user_id]: response.results,
-      }));
+      await reloadAccessFor(membership.user_id);
+      pushToast({
+        variant: "success",
+        title: t("customer_permissions.toast_access_active_saved", {
+          state: nextActive
+            ? t("customer_permissions.toast_access_active_state.active")
+            : t("customer_permissions.toast_access_active_state.inactive"),
+        }),
+      });
     } catch (err) {
-      setAccessError(getApiError(err));
+      pushSaveFailure(err);
     } finally {
       setAccessBusyUserId(null);
     }
   }
 
+  // ------- Override drawer handlers -------------------------------------
+
   function openOverrideEditor(
     membership: CustomerUserMembership,
     access: CustomerUserBuildingAccess,
   ) {
-    const draft: Record<string, OverrideTriState> = {};
+    const draft = {} as OverrideDraft;
     for (const key of CUSTOMER_PERMISSION_KEYS) {
-      draft[key] = tristateFromOverride(access.permission_overrides, key);
+      draft[key as CustomerPermissionKey] = draftValueFromOverride(
+        access.permission_overrides ?? {},
+        key as CustomerPermissionKey,
+      );
     }
     setOverrideDraft(draft);
     setEditingOverrideFor({ membership, access });
@@ -341,14 +369,13 @@ export function CustomerPermissionsPage() {
 
   function closeOverrideEditor() {
     setEditingOverrideFor(null);
-    setOverrideDraft({});
+    setOverrideDraft(emptyOverrideDraft);
   }
 
   async function handleSaveOverrides() {
     if (numericId === null || !editingOverrideFor) return;
     const { membership, access } = editingOverrideFor;
     setOverrideSaving(true);
-    setAccessError("");
     try {
       await updateCustomerUserAccess(
         numericId,
@@ -356,22 +383,20 @@ export function CustomerPermissionsPage() {
         access.building_id,
         { permission_overrides: buildOverridesPayload(overrideDraft) },
       );
-      const response = await listCustomerUserAccess(
-        numericId,
-        membership.user_id,
-      );
-      setAccessByUserId((prev) => ({
-        ...prev,
-        [membership.user_id]: response.results,
-      }));
-      setOverrideBanner(t("customer_form.access_overrides_saved_banner"));
+      await reloadAccessFor(membership.user_id);
+      pushToast({
+        variant: "success",
+        title: t("customer_permissions.toast_overrides_saved"),
+      });
       closeOverrideEditor();
     } catch (err) {
-      setAccessError(getApiError(err));
+      pushSaveFailure(err);
     } finally {
       setOverrideSaving(false);
     }
   }
+
+  // ------- Revoke access dialog -----------------------------------------
 
   function openRevokeAccessDialog(
     membership: CustomerUserMembership,
@@ -384,7 +409,6 @@ export function CustomerPermissionsPage() {
   async function handleConfirmRevokeAccess() {
     if (numericId === null || !revokeAccessTarget) return;
     const { membership, access } = revokeAccessTarget;
-    setAccessError("");
     setAccessBusyUserId(membership.user_id);
     try {
       await removeCustomerUserAccess(
@@ -392,26 +416,24 @@ export function CustomerPermissionsPage() {
         membership.user_id,
         access.building_id,
       );
-      const response = await listCustomerUserAccess(
-        numericId,
-        membership.user_id,
-      );
-      setAccessByUserId((prev) => ({
-        ...prev,
-        [membership.user_id]: response.results,
-      }));
+      await reloadAccessFor(membership.user_id);
       revokeAccessDialogRef.current?.close();
       setRevokeAccessTarget(null);
+      pushToast({
+        variant: "success",
+        title: t("customer_permissions.toast_access_removed"),
+      });
     } catch (err) {
-      setAccessError(getApiError(err));
+      pushSaveFailure(err);
       revokeAccessDialogRef.current?.close();
     } finally {
       setAccessBusyUserId(null);
     }
   }
 
-  async function handleSavePolicy(event: FormEvent) {
-    event.preventDefault();
+  // ------- Policy save --------------------------------------------------
+
+  async function handleSavePolicy() {
     if (numericId === null) return;
     setPolicySaving(true);
     setPolicyError("");
@@ -428,9 +450,18 @@ export function CustomerPermissionsPage() {
         customer_users_can_approve_extra_work_pricing:
           updated.customer_users_can_approve_extra_work_pricing,
       });
-      setPolicyBanner(t("customer_form.policy_saved_banner"));
+      pushToast({
+        variant: "success",
+        title: t("customer_permissions.toast_policy_saved"),
+      });
     } catch (err) {
-      setPolicyError(getApiError(err));
+      const message = getApiError(err);
+      setPolicyError(message);
+      pushToast({
+        variant: "error",
+        title: t("customer_permissions.toast_save_failed"),
+        description: message,
+      });
     } finally {
       setPolicySaving(false);
     }
@@ -438,16 +469,16 @@ export function CustomerPermissionsPage() {
 
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
+  const editingAccess = editingOverrideFor?.access ?? null;
+  const editingMembership = editingOverrideFor?.membership ?? null;
+  const editingIsSelf = editingAccess ? isSelfAccess(editingAccess) : false;
 
   return (
     <div data-testid="customer-permissions-page">
-      <CustomerSubPageHeader
-        customerName={customerName}
-        isActive={isActive}
-      />
+      <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
 
       {loadError && (
-        <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
+        <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
           {loadError}
         </div>
       )}
@@ -466,447 +497,19 @@ export function CustomerPermissionsPage() {
               customer: customerName,
             })}
           </p>
+
+          {/* ------------------- Zone 1 — Policy --------------------- */}
           <section
-            className="card"
-            data-testid="section-customer-users"
-            style={{ marginBottom: 16, padding: "20px 22px" }}
-          >
-            <h3 className="section-title">
-              {t("customer_view.permissions.title")}
-            </h3>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {t("customer_view.permissions.subtitle")}
-            </p>
-
-            {accessError && (
-              <div
-                className="alert-error"
-                role="alert"
-                style={{ marginBottom: 12 }}
-              >
-                {accessError}
-              </div>
-            )}
-
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>{t("users.col_email")}</th>
-                    <th>{t("users.col_full_name")}</th>
-                    <th>{t("customer_form.col_user_access")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {members.map((membership) => {
-                    const userAccess = accessByUserId[membership.user_id] ?? [];
-                    const userAccessBuildingIds = new Set(
-                      userAccess.map((a) => a.building_id),
-                    );
-                    const grantableBuildings = linkedBuildings.filter(
-                      (l) => !userAccessBuildingIds.has(l.building_id),
-                    );
-                    const isThisUserBusy =
-                      accessBusyUserId === membership.user_id;
-                    return (
-                      <tr key={membership.id}>
-                        <td className="td-subject">{membership.user_email}</td>
-                        <td>{membership.user_full_name || "—"}</td>
-                        <td>
-                          {userAccess.length === 0 ? (
-                            <p
-                              className="muted small"
-                              style={{ marginBottom: 6 }}
-                            >
-                              {t("customer_form.access_no_buildings")}
-                            </p>
-                          ) : (
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: 6,
-                                flexWrap: "wrap",
-                                marginBottom: 6,
-                              }}
-                            >
-                              {userAccess.map((access) => {
-                                const isSelf = isSelfAccess(access);
-                                return (
-                                  <span
-                                    key={access.id}
-                                    className="badge badge-pill"
-                                    data-testid="customer-access-badge"
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 6,
-                                      padding: "2px 8px",
-                                      background:
-                                        access.is_active === false
-                                          ? "var(--surface-3, var(--surface-2))"
-                                          : "var(--surface-2)",
-                                      border: "1px solid var(--border)",
-                                      borderRadius: 999,
-                                      fontSize: 12,
-                                      opacity:
-                                        access.is_active === false ? 0.6 : 1,
-                                    }}
-                                  >
-                                    <span>{access.building_name}</span>
-                                    <span aria-hidden="true">·</span>
-                                    <select
-                                      className="customer-access-role-select"
-                                      data-testid="customer-access-role-select"
-                                      data-user-id={membership.user_id}
-                                      data-building-id={access.building_id}
-                                      value={access.access_role}
-                                      disabled={isThisUserBusy || isSelf}
-                                      onChange={(event) =>
-                                        handleAccessRoleChange(
-                                          membership,
-                                          access,
-                                          event.target.value as CustomerAccessRole,
-                                        )
-                                      }
-                                      aria-label={t(
-                                        "customer_form.access_role_edit_label",
-                                      )}
-                                      style={{
-                                        fontSize: 11,
-                                        padding: "0 4px",
-                                        height: 20,
-                                        border: "1px solid var(--border)",
-                                        borderRadius: 4,
-                                        background: "transparent",
-                                      }}
-                                    >
-                                      <option value="CUSTOMER_USER">
-                                        {t("access_role.customer_user")}
-                                      </option>
-                                      <option value="CUSTOMER_LOCATION_MANAGER">
-                                        {t(
-                                          "access_role.customer_location_manager",
-                                        )}
-                                      </option>
-                                      <option value="CUSTOMER_COMPANY_ADMIN">
-                                        {t(
-                                          "access_role.customer_company_admin",
-                                        )}
-                                      </option>
-                                    </select>
-                                    <label
-                                      style={{
-                                        display: "inline-flex",
-                                        alignItems: "center",
-                                        gap: 4,
-                                        fontSize: 11,
-                                        cursor:
-                                          isThisUserBusy || isSelf
-                                            ? "default"
-                                            : "pointer",
-                                      }}
-                                      title={t(
-                                        "customer_form.access_active_hint",
-                                      )}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        data-testid="customer-access-active-toggle"
-                                        data-user-id={membership.user_id}
-                                        data-building-id={access.building_id}
-                                        checked={access.is_active !== false}
-                                        disabled={isThisUserBusy || isSelf}
-                                        onChange={(event) =>
-                                          handleToggleAccessActive(
-                                            membership,
-                                            access,
-                                            event.target.checked,
-                                          )
-                                        }
-                                      />
-                                      <span>
-                                        {t(
-                                          "customer_form.access_active_label",
-                                        )}
-                                      </span>
-                                    </label>
-                                    <button
-                                      type="button"
-                                      className="btn btn-ghost btn-xs"
-                                      data-testid="customer-access-overrides-button"
-                                      data-user-id={membership.user_id}
-                                      data-building-id={access.building_id}
-                                      style={{
-                                        height: 18,
-                                        padding: "0 6px",
-                                        fontSize: 11,
-                                      }}
-                                      onClick={() =>
-                                        openOverrideEditor(membership, access)
-                                      }
-                                      disabled={isThisUserBusy}
-                                    >
-                                      {t(
-                                        "customer_form.access_overrides_button",
-                                      )}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn btn-ghost btn-xs"
-                                      style={{
-                                        height: 18,
-                                        padding: "0 6px",
-                                        fontSize: 11,
-                                      }}
-                                      onClick={() =>
-                                        openRevokeAccessDialog(
-                                          membership,
-                                          access,
-                                        )
-                                      }
-                                      disabled={isThisUserBusy}
-                                      aria-label={t(
-                                        "customer_form.access_remove_button",
-                                      )}
-                                    >
-                                      ×
-                                    </button>
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <select
-                              className="field-select"
-                              style={{ flex: 1 }}
-                              value=""
-                              onChange={(event) => {
-                                const v = event.target.value;
-                                if (v === "") return;
-                                handleAddAccess(membership, Number(v));
-                                event.target.value = "";
-                              }}
-                              disabled={
-                                isThisUserBusy ||
-                                grantableBuildings.length === 0
-                              }
-                            >
-                              <option value="">
-                                {grantableBuildings.length === 0
-                                  ? t("customer_form.access_no_more")
-                                  : t(
-                                      "customer_form.access_select_placeholder",
-                                    )}
-                              </option>
-                              {grantableBuildings.map((l) => (
-                                <option key={l.id} value={l.building_id}>
-                                  {l.building_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {members.length === 0 && (
-                <p className="muted small" style={{ padding: "12px 0" }}>
-                  {t("customer_form.no_users_yet")}
-                </p>
-              )}
-            </div>
-          </section>
-
-          {editingOverrideFor && (
-            <section
-              className="card"
-              data-testid="section-customer-overrides-editor"
-              style={{ marginBottom: 16, padding: "20px 22px" }}
-            >
-              <h3 className="section-title">
-                {t("customer_form.access_overrides_section_title", {
-                  email: editingOverrideFor.access.user_email,
-                  building: editingOverrideFor.access.building_name,
-                })}
-              </h3>
-              <p className="muted small" style={{ marginBottom: 12 }}>
-                {t("customer_form.access_overrides_section_helper")}
-              </p>
-
-              {overrideBanner && (
-                <div
-                  className="alert-info"
-                  role="status"
-                  style={{ marginBottom: 12 }}
-                >
-                  {overrideBanner}
-                </div>
-              )}
-              {isSelfAccess(editingOverrideFor.access) && (
-                <div
-                  className="alert-warn"
-                  role="alert"
-                  style={{ marginBottom: 12 }}
-                >
-                  {t("customer_form.access_overrides_self_edit_warning")}
-                </div>
-              )}
-              {editingOverrideFor.access.is_active === false && (
-                <div
-                  className="alert-warn"
-                  role="alert"
-                  style={{ marginBottom: 12 }}
-                >
-                  {t("customer_form.access_overrides_inactive_warning")}
-                </div>
-              )}
-
-              <div className="table-wrap">
-                <table
-                  className="data-table"
-                  data-testid="customer-overrides-table"
-                >
-                  <tbody>
-                    {CUSTOMER_PERMISSION_KEYS.map((key) => {
-                      const value = overrideDraft[key] ?? "inherit";
-                      return (
-                        <tr
-                          key={key}
-                          data-testid="customer-overrides-row"
-                          data-permission-key={key}
-                        >
-                          <td className="td-subject">
-                            {t(`customer_form.permission_key.${key}`)}
-                            <div
-                              className="muted small"
-                              style={{
-                                fontFamily: "monospace",
-                                fontSize: 11,
-                              }}
-                            >
-                              {key}
-                            </div>
-                          </td>
-                          <td>
-                            <div
-                              role="radiogroup"
-                              aria-label={key}
-                              style={{ display: "inline-flex", gap: 12 }}
-                            >
-                              {(["inherit", "grant", "revoke"] as const).map(
-                                (opt) => (
-                                  <label
-                                    key={opt}
-                                    style={{
-                                      display: "inline-flex",
-                                      alignItems: "center",
-                                      gap: 4,
-                                      fontSize: 12,
-                                      cursor: isSelfAccess(
-                                        editingOverrideFor.access,
-                                      )
-                                        ? "default"
-                                        : "pointer",
-                                    }}
-                                  >
-                                    <input
-                                      type="radio"
-                                      name={`override-${key}`}
-                                      value={opt}
-                                      data-testid="customer-overrides-radio"
-                                      data-permission-key={key}
-                                      data-tristate={opt}
-                                      checked={value === opt}
-                                      disabled={
-                                        overrideSaving ||
-                                        isSelfAccess(editingOverrideFor.access)
-                                      }
-                                      onChange={() =>
-                                        setOverrideDraft((prev) => ({
-                                          ...prev,
-                                          [key]: opt,
-                                        }))
-                                      }
-                                    />
-                                    <span>
-                                      {t(
-                                        `customer_form.access_overrides_${opt}`,
-                                      )}
-                                    </span>
-                                  </label>
-                                ),
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div
-                className="form-actions"
-                style={{ display: "flex", gap: 8, marginTop: 12 }}
-              >
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={closeOverrideEditor}
-                  disabled={overrideSaving}
-                  data-testid="customer-overrides-close"
-                >
-                  {t("customer_form.access_overrides_close")}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleSaveOverrides}
-                  data-testid="customer-overrides-save"
-                  disabled={
-                    overrideSaving ||
-                    isSelfAccess(editingOverrideFor.access)
-                  }
-                >
-                  {overrideSaving
-                    ? t("admin_form.saving")
-                    : t("customer_form.access_overrides_save")}
-                </button>
-              </div>
-            </section>
-          )}
-
-          <form
-            className="card"
+            className="card permissions-zone permissions-zone-policy"
             data-testid="section-customer-company-policy"
-            style={{ padding: "20px 22px" }}
-            onSubmit={handleSavePolicy}
           >
-            <h3 className="section-title">
-              {t("customer_form.policy_title")}
-            </h3>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {t("customer_form.policy_helper")}
-            </p>
+            <ZoneHeader
+              title={t("customer_permissions.zone_policy_title")}
+              helper={t("customer_permissions.zone_policy_helper")}
+            />
 
-            {policyBanner && (
-              <div
-                className="alert-info"
-                role="status"
-                style={{ marginBottom: 12 }}
-              >
-                {policyBanner}
-              </div>
-            )}
             {policyError && (
-              <div
-                className="alert-error"
-                role="alert"
-                style={{ marginBottom: 12 }}
-              >
+              <div className="alert-error" role="alert">
                 {policyError}
               </div>
             )}
@@ -917,68 +520,98 @@ export function CustomerPermissionsPage() {
               </div>
             ) : (
               <>
-                {(
-                  [
-                    [
-                      "customer_users_can_create_tickets",
-                      "customer_form.policy_field_create_tickets",
-                    ],
-                    [
-                      "customer_users_can_approve_ticket_completion",
-                      "customer_form.policy_field_approve_ticket_completion",
-                    ],
-                    [
-                      "customer_users_can_create_extra_work",
-                      "customer_form.policy_field_create_extra_work",
-                    ],
-                    [
-                      "customer_users_can_approve_extra_work_pricing",
-                      "customer_form.policy_field_approve_extra_work_pricing",
-                    ],
-                  ] as const
-                ).map(([field, label]) => (
-                  <div className="field" key={field}>
-                    <label
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: policySaving ? "default" : "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        data-testid="customer-policy-toggle"
-                        data-policy-field={field}
-                        checked={policyDraft[field]}
-                        onChange={(event) =>
-                          setPolicyDraft((prev) => ({
-                            ...prev,
-                            [field]: event.target.checked,
-                          }))
-                        }
-                        disabled={policySaving}
-                      />
-                      <span>{t(label)}</span>
-                    </label>
-                  </div>
-                ))}
-
-                <div className="form-actions">
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    data-testid="customer-policy-save"
-                    disabled={policySaving}
-                  >
-                    {policySaving
-                      ? t("admin_form.saving")
-                      : t("customer_form.policy_save")}
-                  </button>
-                </div>
+                <PolicyToggleGrid
+                  draft={policyDraft}
+                  setDraft={setPolicyDraft}
+                  disabled={policySaving}
+                />
+                <StickySaveBar
+                  dirty={isPolicyDirty}
+                  saving={policySaving}
+                  onSave={handleSavePolicy}
+                  onCancel={() =>
+                    policy &&
+                    setPolicyDraft({
+                      customer_users_can_create_tickets:
+                        policy.customer_users_can_create_tickets,
+                      customer_users_can_approve_ticket_completion:
+                        policy.customer_users_can_approve_ticket_completion,
+                      customer_users_can_create_extra_work:
+                        policy.customer_users_can_create_extra_work,
+                      customer_users_can_approve_extra_work_pricing:
+                        policy.customer_users_can_approve_extra_work_pricing,
+                    })
+                  }
+                  testId="customer-policy-save-bar"
+                  saveTestId="customer-policy-save"
+                />
               </>
             )}
-          </form>
+          </section>
+
+          {/* ------------------- Zone 2 — Users ---------------------- */}
+          <section
+            className="card permissions-zone permissions-zone-users"
+            data-testid="section-customer-users"
+          >
+            <ZoneHeader
+              title={t("customer_permissions.zone_users_title")}
+              helper={t("customer_permissions.zone_users_helper")}
+            />
+
+            {members.length === 0 ? (
+              <EmptyState
+                icon={UsersIcon}
+                title={t("customer_permissions.no_members_yet")}
+                description={t("customer_view.users.explainer", {
+                  customer: customerName,
+                })}
+              />
+            ) : (
+              <div className="permissions-user-cards">
+                {members.map((membership) => (
+                  <UserAccessCard
+                    key={membership.id}
+                    membership={membership}
+                    accesses={accessByUserId[membership.user_id] ?? []}
+                    linkedBuildings={linkedBuildings}
+                    meId={me?.id}
+                    canGrantCustomerCompanyAdmin={canGrantCustomerCompanyAdmin}
+                    busy={accessBusyUserId === membership.user_id}
+                    onRoleChange={(access, newRole) =>
+                      handleAccessRoleChange(membership, access, newRole)
+                    }
+                    onActiveToggle={(access, nextActive) =>
+                      handleToggleAccessActive(membership, access, nextActive)
+                    }
+                    onOpenOverrides={(access) =>
+                      openOverrideEditor(membership, access)
+                    }
+                    onRemoveAccess={(access) =>
+                      openRevokeAccessDialog(membership, access)
+                    }
+                    onAddBuilding={(buildingId) =>
+                      handleAddAccess(membership, buildingId)
+                    }
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* ------------------- Zone 3 — Override drawer ------------ */}
+          <OverrideDrawer
+            open={editingOverrideFor !== null}
+            membership={editingMembership}
+            access={editingAccess}
+            policy={policy}
+            draft={overrideDraft}
+            setDraft={setOverrideDraft}
+            onClose={closeOverrideEditor}
+            onSave={handleSaveOverrides}
+            saving={overrideSaving}
+            isSelf={editingIsSelf}
+          />
 
           <ConfirmDialog
             ref={revokeAccessDialogRef}
@@ -998,3 +631,4 @@ export function CustomerPermissionsPage() {
     </div>
   );
 }
+
