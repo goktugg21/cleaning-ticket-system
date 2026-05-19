@@ -961,8 +961,31 @@
   "building_detail.field_status": "Status",
   "building_detail.status_active": "Active",
   "building_detail.status_inactive": "Inactive",
-  "building_detail.invalid_id": "Invalid building id."
+  "building_detail.invalid_id": "Invalid building id.",
+  "user_form.back_to_detail": "Back to user",
+  "user_detail.edit_button": "Edit",
+  "user_detail.about_title": "About",
+  "user_detail.about_desc": "Basic user information.",
+  "user_detail.field_full_name": "Full name",
+  "user_detail.field_email": "Email",
+  "user_detail.field_role": "Role",
+  "user_detail.field_language": "Language",
+  "user_detail.field_status": "Status",
+  "user_detail.field_deleted_at": "Deleted",
+  "user_detail.status_active": "Active",
+  "user_detail.status_inactive": "Inactive",
+  "user_detail.memberships.title": "Memberships",
+  "user_detail.memberships.desc": "Companies, buildings, and customers this user belongs to.",
+  "user_detail.memberships.companies_title": "Companies",
+  "user_detail.memberships.buildings_title": "Buildings",
+  "user_detail.memberships.customers_title": "Customers",
+  "user_detail.memberships.empty": "This user has no scope memberships.",
+  "user_detail.customer_access.title": "Customer access",
+  "user_detail.customer_access.desc": "Customers this user can act on. Click View permissions to manage what they can do.",
+  "user_detail.customer_access.view_permissions": "View permissions",
+  "user_detail.invalid_id": "Invalid user id."
 }
+
 
 
 

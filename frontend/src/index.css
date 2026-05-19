@@ -5237,6 +5237,46 @@ table.data-table {
   font-style: italic;
 }
 
+/* Sprint 29 Batch 29.6 — User detail memberships + customer access lists.
+   The membership card renders up to three labelled groups (Companies /
+   Buildings / Customers); each group is a small heading + a vertical
+   list of links. The customer access card uses a row layout with
+   `justify-content: space-between` so 29.7 can drop a permission-
+   override rollup chip on the right side without re-wiring the page. */
+.user-detail-membership-group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-faint, var(--border-soft));
+}
+.user-detail-membership-group:last-child { border-bottom: none; }
+.user-detail-membership-group-title {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.user-detail-membership-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.user-detail-membership-list li { font-size: 14px; }
+.user-detail-customer-access-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.user-detail-customer-access-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--surface-soft, var(--surface-2, #F8FAF8));
+  border-radius: 6px;
+}
+.user-detail-customer-access-name { font-size: 14px; }
+
+
 
 
 

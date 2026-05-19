@@ -261,7 +261,9 @@ test.describe("Sprint 28 Batch 11 — STAFF completion routing", () => {
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.super);
-    await page.goto(`/admin/users/${ahmetId}`);
+    // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only
+    // detail page; the StaffDetailsSection lives on the form at /edit.
+    await page.goto(`/admin/users/${ahmetId}/edit`);
     await page.waitForLoadState("networkidle");
     await expect(
       page.getByTestId("staff-details-section"),

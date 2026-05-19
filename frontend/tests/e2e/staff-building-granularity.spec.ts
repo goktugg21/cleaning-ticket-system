@@ -61,7 +61,10 @@ test.describe("Sprint 28 Batch 10 — Staff per-building visibility selector", (
       .find((u) => u.email === DEMO_USERS.staffOsius.email);
     expect(match, "Ahmet (staffOsius) must exist in seeded data").toBeDefined();
 
-    await page.goto(`/admin/users/${match!.id}`);
+    // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only
+    // detail page; the BuildingStaffVisibility editor lives on the
+    // form at /edit.
+    await page.goto(`/admin/users/${match!.id}/edit`);
     await page.waitForLoadState("networkidle");
 
     // The staff-details section is only rendered for STAFF users.
@@ -99,7 +102,10 @@ test.describe("Sprint 28 Batch 10 — Staff per-building visibility selector", (
       .find((u) => u.email === DEMO_USERS.staffOsius.email);
     expect(match).toBeDefined();
 
-    await page.goto(`/admin/users/${match!.id}`);
+    // Sprint 29 Batch 29.6 — `/admin/users/:id` is the read-only
+    // detail page; the BuildingStaffVisibility editor lives on the
+    // form at /edit.
+    await page.goto(`/admin/users/${match!.id}/edit`);
     await page.waitForLoadState("networkidle");
 
     const selector = page

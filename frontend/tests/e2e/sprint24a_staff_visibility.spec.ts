@@ -388,7 +388,10 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto(`/admin/users/${staffId}`);
+    // Sprint 29 Batch 29.6 — `/admin/users/:id` is now read-only;
+    // the Sprint 24A Staff details + visibility editor lives on the
+    // form at /edit.
+    await page.goto(`/admin/users/${staffId}/edit`);
     await expect(
       page.locator('[data-testid="staff-details-section"]'),
     ).toBeVisible({ timeout: 15_000 });
@@ -426,7 +429,10 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto(`/admin/users/${staffId}`);
+    // Sprint 29 Batch 29.6 — `/admin/users/:id` is now read-only;
+    // the Sprint 24A Staff details + visibility editor lives on the
+    // form at /edit.
+    await page.goto(`/admin/users/${staffId}/edit`);
     const row = page
       .locator('[data-testid="staff-visibility-row"]')
       .filter({ hasText: "B1 Amsterdam" })
@@ -468,7 +474,10 @@ test.describe("Sprint 24A → UserFormPage Staff details UI", () => {
     await sa.dispose();
 
     await loginAs(page, DEMO_USERS.companyAdmin);
-    await page.goto(`/admin/users/${staffId}`);
+    // Sprint 29 Batch 29.6 — `/admin/users/:id` is now read-only;
+    // the Sprint 24A Staff details + visibility editor lives on the
+    // form at /edit.
+    await page.goto(`/admin/users/${staffId}/edit`);
     await expect(
       page.locator('[data-testid="staff-details-section"]'),
     ).toBeVisible({ timeout: 15_000 });

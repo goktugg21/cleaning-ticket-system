@@ -1,19 +1,17 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addStaffVisibility,
-  deactivateUser,
   getStaffProfile,
   getUser,
   listBuildings,
   listCompanies,
   listCustomers,
   listStaffVisibility,
-  reactivateUser,
   removeStaffVisibility,
   updateStaffProfile,
   updateStaffVisibility,
@@ -61,8 +59,8 @@ const ALL_ROLES: Role[] = [
 ];
 
 export function UserFormPage() {
-  const navigate = useNavigate();
   const { id } = useParams();
+  const isCreate = id === undefined;
   const { t } = useTranslation("common");
 
   const { me } = useAuth();
@@ -108,10 +106,6 @@ export function UserFormPage() {
   const user = form.entity;
   const numericId = form.numericId ?? Number.NaN;
 
-  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [actionBusy, setActionBusy] = useState(false);
-
   const isSelf = me?.id === numericId;
   const roleDisabled =
     isSelf ||
@@ -148,7 +142,7 @@ export function UserFormPage() {
           if (!cancelled) setCompanyNames([]);
         });
     } else {
-      setCompanyNames([]);
+      setCompanyNames([]); // eslint-disable-line react-hooks/set-state-in-effect
     }
     if (user.building_ids.length > 0) {
       listBuildings({ page_size: 200 })
@@ -185,43 +179,22 @@ export function UserFormPage() {
     };
   }, [user]);
 
-  async function handleConfirmDeactivate() {
-    if (!user) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await deactivateUser(numericId);
-      deactivateDialogRef.current?.close();
-      navigate("/admin/users?deactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      deactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleConfirmReactivate() {
-    if (!user) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await reactivateUser(numericId);
-      reactivateDialogRef.current?.close();
-      navigate("/admin/users?reactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      reactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
+  // Sprint 29 Batch 29.6 — when editing, the back link returns to the
+  // read-only detail page (which is now the canonical "home" of a
+  // user). When creating, it still goes to the list.
+  const backHref =
+    isCreate || form.numericId === null
+      ? "/admin/users"
+      : `/admin/users/${form.numericId}`;
+  const backLabel = isCreate
+    ? t("user_form.back")
+    : t("user_form.back_to_detail");
 
   return (
     <div>
-      <Link to="/admin/users" className="link-back">
+      <Link to={backHref} className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("user_form.back")}
+        {backLabel}
       </Link>
 
       <div className="page-header">
@@ -244,18 +217,6 @@ export function UserFormPage() {
             {isSelf && <span className="muted small">{t("user_form.this_is_you")}</span>}
           </p>
         </div>
-        {user && !user.is_active && isSuperAdmin && (
-          <div className="page-header-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              data-testid="reactivate-button"
-              onClick={() => reactivateDialogRef.current?.open()}
-            >
-              {t("admin_form.reactivate")}
-            </button>
-          </div>
-        )}
       </div>
 
       {savedBanner && (
@@ -381,15 +342,14 @@ export function UserFormPage() {
 
             </div>
             <div className="form-actions">
-              {user.is_active && !isSelf && (
-                <button
-                  type="button"
+              {!isCreate && form.numericId !== null && (
+                <Link
+                  to={`/admin/users/${form.numericId}`}
                   className="btn btn-ghost"
-                  data-testid="deactivate-button"
-                  onClick={() => deactivateDialogRef.current?.open()}
+                  data-testid="user-edit-cancel"
                 >
-                  {t("admin_form.deactivate")}
-                </button>
+                  {t("admin_form.cancel")}
+                </Link>
               )}
               <button type="submit" className="btn btn-primary" disabled={form.submitting}>
                 {form.submitting ? t("admin_form.saving") : t("admin_form.save_changes")}
@@ -462,27 +422,6 @@ export function UserFormPage() {
         </>
       )}
 
-      <ConfirmDialog
-        ref={deactivateDialogRef}
-        title={t("user_form.dialog_deactivate_title", {
-          email: user?.email ?? "",
-        })}
-        body={t("user_form.dialog_deactivate_body")}
-        confirmLabel={t("admin_form.deactivate")}
-        onConfirm={handleConfirmDeactivate}
-        busy={actionBusy}
-      />
-
-      <ConfirmDialog
-        ref={reactivateDialogRef}
-        title={t("user_form.dialog_reactivate_title", {
-          email: user?.email ?? "",
-        })}
-        body={t("user_form.dialog_reactivate_body")}
-        confirmLabel={t("admin_form.reactivate")}
-        onConfirm={handleConfirmReactivate}
-        busy={actionBusy}
-      />
     </div>
   );
 }
@@ -556,7 +495,7 @@ function StaffDetailsSection({
   // Profile load.
   useEffect(() => {
     let cancelled = false;
-    setProfileLoading(true);
+    setProfileLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     getStaffProfile(userId)
       .then((data) => {
         if (cancelled) return;
@@ -593,7 +532,7 @@ function StaffDetailsSection({
   }, [userId]);
 
   useEffect(() => {
-    reloadVisibility();
+    reloadVisibility(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [reloadVisibility]);
 
   // Pre-fetch the candidate building list once so the add-control can
@@ -1281,3 +1220,4 @@ function StaffDetailsSection({
     </section>
   );
 }
+
