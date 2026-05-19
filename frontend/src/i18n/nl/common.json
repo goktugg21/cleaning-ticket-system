@@ -789,9 +789,17 @@
   "customer_view.overview.summary_section": "Samenvatting",
   "customer_view.overview.linked_buildings_count_one": "{{count}} gebouw gekoppeld",
   "customer_view.overview.linked_buildings_count_other": "{{count}} gebouwen gekoppeld",
-  "customer_view.overview.field_company": "Leverancier",
+  "customer_view.overview.field_company": "Bedrijf",
   "customer_view.overview.field_linked_buildings": "Gekoppelde gebouwen",
   "customer_view.overview.field_active": "Actief",
+  "customer_view.overview.about_title": "Over",
+  "customer_view.overview.about_desc": "Klantcontactgegevens en bedrijf.",
+  "customer_view.overview.field_contact_email": "Contact e-mail",
+  "customer_view.overview.field_phone": "Telefoon",
+  "customer_view.overview.field_language": "Taal",
+  "customer_view.overview.field_status": "Status",
+  "customer_view.overview.status_active": "Actief",
+  "customer_view.overview.status_inactive": "Inactief",
   "customer_view.overview.quicklinks_title": "Beheren",
   "customer_view.overview.quicklink_contacts": "Contacten",
   "customer_view.overview.quicklink_buildings": "Gebouwen",
@@ -955,6 +963,7 @@
   "building_detail.status_inactive": "Inactief",
   "building_detail.invalid_id": "Ongeldig gebouw-ID."
 }
+
 
 
 

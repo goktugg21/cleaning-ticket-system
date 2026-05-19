@@ -202,6 +202,20 @@ export function CustomerOverviewPage() {
         count: buildingsCount,
       });
 
+  // Mirror the languageLabel helper from CompanyDetailPage (Sprint 29.3).
+  // Falls back to the raw code when the language isn't one of the two
+  // bundled options.
+  const languageLabel = (() => {
+    if (!customer) return "";
+    if (customer.language === "nl") {
+      return `${t("language_dutch")} (nl)`;
+    }
+    if (customer.language === "en") {
+      return `${t("language_english")} (en)`;
+    }
+    return customer.language;
+  })();
+
   return (
     <div data-testid="customer-overview-page">
       <CustomerSubPageHeader
@@ -228,6 +242,88 @@ export function CustomerOverviewPage() {
           >
             {explainerText}
           </p>
+
+          <section
+            className="card"
+            data-testid="customer-overview-about-card"
+            style={{ padding: "20px 22px", marginBottom: 16 }}
+          >
+            <div className="section-head" style={{ marginBottom: 8 }}>
+              <div>
+                <div className="section-head-title">
+                  {t("customer_view.overview.about_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("customer_view.overview.about_desc")}
+                </div>
+              </div>
+            </div>
+
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("customer_view.overview.field_company")}
+              </div>
+              <div className="detail-field-value">
+                {providerCompany ? (
+                  <Link to={`/admin/companies/${customer.company}`}>
+                    {providerCompany.name}
+                  </Link>
+                ) : (
+                  <span className="muted-empty">—</span>
+                )}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("customer_view.overview.field_contact_email")}
+              </div>
+              <div className="detail-field-value">
+                {customer.contact_email ? (
+                  <a href={`mailto:${customer.contact_email}`}>
+                    {customer.contact_email}
+                  </a>
+                ) : (
+                  <span className="muted-empty">—</span>
+                )}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("customer_view.overview.field_phone")}
+              </div>
+              <div className="detail-field-value">
+                {customer.phone ? (
+                  <a href={`tel:${customer.phone}`}>{customer.phone}</a>
+                ) : (
+                  <span className="muted-empty">—</span>
+                )}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("customer_view.overview.field_language")}
+              </div>
+              <div className="detail-field-value">{languageLabel}</div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("customer_view.overview.field_status")}
+              </div>
+              <div className="detail-field-value">
+                {isActive ? (
+                  <span className="cell-tag cell-tag-open">
+                    <i />
+                    {t("customer_view.overview.status_active")}
+                  </span>
+                ) : (
+                  <span className="cell-tag cell-tag-closed">
+                    <i />
+                    {t("customer_view.overview.status_inactive")}
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
 
           <div
             className="summary-grid"
@@ -443,3 +539,4 @@ export function CustomerOverviewPage() {
     </div>
   );
 }
+

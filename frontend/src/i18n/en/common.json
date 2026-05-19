@@ -789,9 +789,17 @@
   "customer_view.overview.summary_section": "Summary",
   "customer_view.overview.linked_buildings_count_one": "{{count}} building linked",
   "customer_view.overview.linked_buildings_count_other": "{{count}} buildings linked",
-  "customer_view.overview.field_company": "Provider company",
+  "customer_view.overview.field_company": "Company",
   "customer_view.overview.field_linked_buildings": "Linked buildings",
   "customer_view.overview.field_active": "Active",
+  "customer_view.overview.about_title": "About",
+  "customer_view.overview.about_desc": "Customer contact info and company.",
+  "customer_view.overview.field_contact_email": "Contact email",
+  "customer_view.overview.field_phone": "Phone",
+  "customer_view.overview.field_language": "Language",
+  "customer_view.overview.field_status": "Status",
+  "customer_view.overview.status_active": "Active",
+  "customer_view.overview.status_inactive": "Inactive",
   "customer_view.overview.quicklinks_title": "Manage",
   "customer_view.overview.quicklink_contacts": "Contacts",
   "customer_view.overview.quicklink_buildings": "Buildings",
@@ -955,6 +963,7 @@
   "building_detail.status_inactive": "Inactive",
   "building_detail.invalid_id": "Invalid building id."
 }
+
 
 
 

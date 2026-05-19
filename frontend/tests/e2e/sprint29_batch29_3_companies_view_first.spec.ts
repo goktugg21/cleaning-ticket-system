@@ -1,10 +1,10 @@
-import { expect, request, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 
+import { apiAs } from "./fixtures/apiAs";
 import {
   COMPANY_A_NAME,
   COMPANY_B_NAME,
-  DEMO_PASSWORD,
   DEMO_USERS,
 } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
@@ -25,29 +25,6 @@ import { loginAs } from "./fixtures/login";
  *   4. A non-eligible admin (COMPANY_ADMIN of a different company)
  *      sees no Edit button on a company they don't belong to.
  */
-const API_BASE = process.env.PLAYWRIGHT_API_BASE_URL ?? "http://localhost:8000";
-
-async function apiAs(
-  email: string,
-  password: string = DEMO_PASSWORD,
-): Promise<APIRequestContext> {
-  const loginCtx = await request.newContext({
-    baseURL: API_BASE,
-    ignoreHTTPSErrors: true,
-  });
-  const tokenResponse = await loginCtx.post("/api/auth/token/", {
-    data: { email, password },
-  });
-  expect(tokenResponse.status()).toBe(200);
-  const body = (await tokenResponse.json()) as { access: string };
-  await loginCtx.dispose();
-  return await request.newContext({
-    baseURL: API_BASE,
-    ignoreHTTPSErrors: true,
-    extraHTTPHeaders: { Authorization: `Bearer ${body.access}` },
-  });
-}
-
 async function resolveCompanyIdByName(
   api: APIRequestContext,
   name: string,

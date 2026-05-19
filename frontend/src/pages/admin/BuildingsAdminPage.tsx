@@ -258,8 +258,8 @@ export function BuildingsAdminPage() {
             </thead>
             <tbody>
               {buildings.map((building) => {
-                const editPath = `/admin/buildings/${building.id}`;
-                const openEdit = () => navigate(editPath);
+                const detailPath = `/admin/buildings/${building.id}`;
+                const openDetail = () => navigate(detailPath);
                 return (
                   <tr
                     key={building.id}
@@ -267,16 +267,16 @@ export function BuildingsAdminPage() {
                     role="link"
                     tabIndex={0}
                     aria-label={t("admin.edit") + ": " + building.name}
-                    onClick={openEdit}
+                    onClick={openDetail}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        openEdit();
+                        openDetail();
                       }
                     }}
                   >
                     <td className="td-subject">
-                      <Link to={editPath}>{building.name}</Link>
+                      <Link to={detailPath}>{building.name}</Link>
                     </td>
                     <td>{companyName(building.company)}</td>
                     <td>
@@ -296,7 +296,7 @@ export function BuildingsAdminPage() {
                     <td>
                       <Link
                         className="btn btn-ghost btn-sm"
-                        to={editPath}
+                        to={detailPath}
                       >
                         {t("admin.edit")}
                       </Link>
@@ -315,14 +315,14 @@ export function BuildingsAdminPage() {
           aria-label={t("nav.buildings")}
         >
           {buildings.map((building) => {
-            const editPath = `/admin/buildings/${building.id}`;
+            const detailPath = `/admin/buildings/${building.id}`;
             const address = [building.city, building.postal_code]
               .filter(Boolean)
               .join(" ");
             return (
               <li key={building.id} className="admin-card">
                 <Link
-                  to={editPath}
+                  to={detailPath}
                   className="admin-card-link"
                   aria-label={`${t("admin.edit")}: ${building.name}`}
                 >
@@ -414,3 +414,4 @@ export function BuildingsAdminPage() {
     </div>
   );
 }
+
