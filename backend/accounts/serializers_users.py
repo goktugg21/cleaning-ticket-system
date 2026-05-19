@@ -9,6 +9,8 @@ from .scoping import (
 
 
 class UserListSerializer(serializers.ModelSerializer):
+    scope_summary = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
@@ -19,8 +21,44 @@ class UserListSerializer(serializers.ModelSerializer):
             "language",
             "is_active",
             "deleted_at",
+            "scope_summary",
         ]
         read_only_fields = fields
+
+    def get_scope_summary(self, obj):
+        """
+        Sprint 28 Batch 15.5 — short scope tag for the admin Users list.
+
+        Returns {"label": str, "count": int}. SUPER_ADMIN returns the
+        sentinel {"label": "all", "count": -1} which the frontend renders
+        as "All companies". The reverse accessors are eager-loaded by
+        ``UserViewSet.get_queryset`` via ``prefetch_related`` so a list
+        of N users only fires the four membership SELECTs once.
+        """
+        role = obj.role
+        if role == UserRole.SUPER_ADMIN:
+            return {"label": "all", "count": -1}
+        if role == UserRole.COMPANY_ADMIN:
+            return {
+                "label": "companies",
+                "count": obj.company_memberships.count(),
+            }
+        if role == UserRole.BUILDING_MANAGER:
+            return {
+                "label": "buildings",
+                "count": obj.building_assignments.count(),
+            }
+        if role == UserRole.STAFF:
+            return {
+                "label": "buildings",
+                "count": obj.building_visibility.count(),
+            }
+        if role == UserRole.CUSTOMER_USER:
+            return {
+                "label": "customers",
+                "count": obj.customer_memberships.count(),
+            }
+        return {"label": "all", "count": -1}
 
 
 class UserDetailSerializer(serializers.ModelSerializer):

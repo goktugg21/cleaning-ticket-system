@@ -86,6 +86,20 @@ class UserViewSet(viewsets.ModelViewSet):
         if role_filter:
             roles = [r.strip() for r in role_filter.split(",") if r.strip()]
             base = base.filter(role__in=roles)
+
+        # Sprint 28 Batch 15.5 — prefetch the four scope tables the list
+        # serializer's `scope_summary` counts against, so a list of N
+        # users does not fire 4*N extra SELECTs. Scoped to the list
+        # action because the detail / update / reactivate paths read
+        # the membership rows through their own helpers and would just
+        # pay the prefetch cost for nothing.
+        if self.action == "list":
+            base = base.prefetch_related(
+                "company_memberships",
+                "building_assignments",
+                "building_visibility",
+                "customer_memberships",
+            )
         return base.order_by(*self.ordering)
 
     def get_serializer_class(self):

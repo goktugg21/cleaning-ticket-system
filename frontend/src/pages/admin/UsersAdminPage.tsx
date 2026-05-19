@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listUsers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
-import type { Role, UserAdmin } from "../../api/types";
+import type { Role, UserAdmin, UserScopeSummary } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { EmptyState } from "../../components/EmptyState";
@@ -15,6 +15,27 @@ import { isProviderRole, roleLabelKey } from "../../lib/enumLabels";
 type ActiveFilter = "true" | "false" | "all";
 
 const DEBOUNCE_MS = 300;
+
+// Sprint 28 Batch 15.5 — per-row scope summary chip.
+//
+// The backend (accounts/serializers_users.py::UserAdminListSerializer)
+// emits `scope_summary: { label, count }`. SUPER_ADMIN returns the
+// sentinel `{ label: "all", count: -1 }` — we render it as the
+// localised "All companies" label without a numeric prefix. Every
+// other role returns a real positive count keyed by the dominant
+// scope axis for that role.
+function ScopeChip({ summary }: { summary: UserScopeSummary }) {
+  const { t } = useTranslation("common");
+  if (summary.count === -1) {
+    return <span className="muted small">{t("users.scope_all")}</span>;
+  }
+  return (
+    <span className="users-scope-chip" data-testid="users-scope-chip">
+      <strong>{summary.count}</strong>{" "}
+      <span className="muted">{t(`users.scope_${summary.label}`)}</span>
+    </span>
+  );
+}
 
 // Sprint 23B — STAFF is a valid filter option so reviewers can find
 // existing STAFF users. The list page only reads; the create path
@@ -158,9 +179,12 @@ export function UsersAdminPage() {
         </td>
         <td>{user.full_name || "—"}</td>
         <td data-testid="user-row-role" data-role={user.role}>
-          <RoleBadge role={user.role} compact />
+          <RoleBadge role={user.role} />
         </td>
         <td>{user.language}</td>
+        <td data-testid="user-row-scope">
+          <ScopeChip summary={user.scope_summary} />
+        </td>
         <td>
           <span
             className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
@@ -309,6 +333,7 @@ export function UsersAdminPage() {
                 <th>{t("users.col_full_name")}</th>
                 <th>{t("users.col_role")}</th>
                 <th>{t("users.col_language")}</th>
+                <th>{t("users.col_scope")}</th>
                 <th>{t("status")}</th>
                 <th aria-label={t("admin.col_actions")} />
               </tr>
@@ -320,7 +345,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-provider"
                   >
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <span className="users-group-header-label">
                         {t("users.group_provider")}
                       </span>
@@ -338,7 +363,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-customer"
                   >
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <span className="users-group-header-label">
                         {t("users.group_customer")}
                       </span>
@@ -392,12 +417,18 @@ export function UsersAdminPage() {
                     <div className="admin-card-meta-row">
                       <dt>{t("users.col_role")}</dt>
                       <dd>
-                        <RoleBadge role={user.role} compact />
+                        <RoleBadge role={user.role} />
                       </dd>
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("users.col_language")}</dt>
                       <dd>{user.language}</dd>
+                    </div>
+                    <div className="admin-card-meta-row">
+                      <dt>{t("users.col_scope")}</dt>
+                      <dd>
+                        <ScopeChip summary={user.scope_summary} />
+                      </dd>
                     </div>
                   </dl>
                   <div className="admin-card-actions">
@@ -466,4 +497,5 @@ export function UsersAdminPage() {
     </div>
   );
 }
+
 

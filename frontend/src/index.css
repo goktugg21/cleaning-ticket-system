@@ -4884,9 +4884,27 @@ table.data-table {
   align-items: center;
   gap: 8px;
 }
+/* Sprint 28 Batch 15.5 — keep the search icon inline-left of the
+   input on wide screens. The previous rule inherited `flex-wrap`
+   from the parent and the icon could wrap above the field at
+   >=1200px. Pinning the field to inline-flex with an explicit gap
+   anchors the icon and lets the input flex to fill the remaining
+   row width without ever flipping to two visual rows. */
 .ew-list-filters .filter-field.search {
   flex: 1;
   min-width: 200px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+.ew-list-filters .filter-field.search > svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.ew-list-filters .filter-field.search > .filter-control {
+  flex: 1;
+  min-width: 0;
 }
 .ew-list-filters .filter-control {
   height: 30px;
@@ -5052,6 +5070,81 @@ table.data-table {
 .reject-modal-confirm[disabled] {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* =========================================================================
+   Sprint 28 Batch 15.5
+   ========================================================================= */
+
+/* ----- RouteBadge colour overrides -----------------------------------------
+   The PROPOSAL badge must be visibly amber so it doesn't read as the
+   same colour as the green "approved" status badge that often sits in
+   the next column. The INSTANT badge stays green but with its own
+   explicit palette so it doesn't depend on the status-badge tone
+   classes (which carry status-bar semantic). */
+.route-badge.route-badge-proposal {
+  background: var(--amber-soft, #FEF3C7);
+  color: var(--amber-deep, #92400E);
+  border: 1px solid var(--amber-border, #FDE68A);
+}
+.route-badge.route-badge-instant {
+  background: var(--green-soft, #DCFCE7);
+  color: var(--green-deep, #166534);
+  border: 1px solid var(--green-border, #BBF7D0);
+}
+
+/* ----- Users page: un-compact RoleBadge in a tight row --------------------
+   The Users admin table dropped the `compact` prop in Batch 15.5 so the
+   PROVIDER / CUSTOMER side caption stays visible. Tighten the line
+   height + side font-size inside the admin list wrapper so the badge
+   doesn't push every row taller than the existing rhythm. */
+.admin-list-wrap .role-badge,
+.admin-card-list .role-badge {
+  line-height: 1.1;
+}
+.admin-list-wrap .role-badge-side,
+.admin-card-list .role-badge-side {
+  font-size: 9.5px;
+}
+
+/* ----- Sidebar customer-context chip -------------------------------------- */
+.sidebar-customer-chip {
+  margin: 0 12px 12px 12px;
+  padding: 10px 12px;
+  background: var(--shell-mid, #0A3D2A);
+  border: 1px solid var(--shell-accent, #5FD499);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-customer-chip-eyebrow {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--shell-accent, #5FD499);
+}
+.sidebar-customer-chip-name {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1.1;
+}
+.sidebar-customer-chip-company {
+  font-size: 11px;
+  color: var(--shell-muted, rgba(218, 240, 228, 0.52));
+}
+
+/* ----- Users page: per-row scope chip ------------------------------------- */
+.users-scope-chip {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.users-scope-chip strong {
+  font-weight: 700;
+  margin-right: 4px;
 }
 
 

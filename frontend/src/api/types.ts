@@ -477,6 +477,19 @@ export interface CustomerCompanyPolicyAdmin {
   customer_users_can_approve_extra_work_pricing: boolean;
 }
 
+// Sprint 28 Batch 15.5 — user-list scope summary surfaced as a single
+// chip per row on the Users admin page. Backend contract:
+//   - SUPER_ADMIN  →  { label: "all", count: -1 }  (sentinel: all companies)
+//   - COMPANY_ADMIN / BUILDING_MANAGER / STAFF / CUSTOMER_USER →
+//     a real count keyed by the dominant scope axis for that role
+//     (companies for provider admins, buildings for managers/staff,
+//     customers for customer users). Backend resolver lives in
+//     accounts/serializers_users.py::UserAdminListSerializer.
+export interface UserScopeSummary {
+  label: "all" | "companies" | "buildings" | "customers";
+  count: number;
+}
+
 export interface UserAdmin {
   id: number;
   email: string;
@@ -485,6 +498,11 @@ export interface UserAdmin {
   language: string;
   is_active: boolean;
   deleted_at: string | null;
+  // Sprint 28 Batch 15.5 — added by the user-list serializer. The
+  // field is required on the wire; if the backend ever returns a
+  // payload without it the type-check here flags it at the call
+  // site rather than silently rendering an empty chip.
+  scope_summary: UserScopeSummary;
 }
 
 export interface UserAdminDetail extends UserAdmin {
@@ -974,4 +992,5 @@ export interface CustomerServicePriceCreatePayload {
 
 export type CustomerServicePriceUpdatePayload =
   Partial<CustomerServicePriceCreatePayload>;
+
 

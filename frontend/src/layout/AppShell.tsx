@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
 import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
+import { getCompany, getCustomer } from "../api/admin";
 import { getInitials } from "../lib/initials";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
@@ -86,6 +87,80 @@ function deriveSidebarMode(pathname: string): SidebarModeState {
 
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? "nav-item active" : "nav-item";
+}
+
+/**
+ * Sprint 28 Batch 15.5 — sidebar customer-context chip.
+ *
+ * Renders inside the customer-scoped sidebar branch only. Shows the
+ * customer name and, when resolvable, the provider company name so
+ * an operator deep-linking to `/admin/customers/:id/…` immediately
+ * sees which customer the submenu is scoped to.
+ *
+ * The chip fetches `getCustomer(id)` and then `getCompany(customer.company)`.
+ * `CustomerAdmin` does not currently carry `company_name`, and we
+ * deliberately don't add it to the customer serializer in this
+ * batch (the backend slot is owned by the parallel scope_summary
+ * work). The two REST calls together are tiny and only fire when
+ * the sidebar mode is `customer-scoped`, so they're a non-issue
+ * for top-level routes.
+ */
+function CustomerContextChip({ customerId }: { customerId: string }) {
+  const { t } = useTranslation("common");
+  const [name, setName] = useState<string | null>(null);
+  const [companyName, setCompanyName] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const numericId = Number.parseInt(customerId, 10);
+    // Bail without touching state: the initial values are already
+    // null and triggering a setState in an effect's synchronous body
+    // earns a react-hooks/set-state-in-effect lint error. The chip
+    // simply shows the loading placeholder for the unreachable
+    // non-numeric route which is fine because the URL regex in
+    // deriveSidebarMode only matches positive integers anyway.
+    if (!Number.isFinite(numericId)) {
+      return;
+    }
+    getCustomer(numericId)
+      .then(async (customer) => {
+        if (cancelled) return;
+        setName(customer.name);
+        // Best-effort company-name resolve. Failure here must not
+        // break the chip — the customer name is the primary content.
+        try {
+          const company = await getCompany(customer.company);
+          if (cancelled) return;
+          setCompanyName(company.name);
+        } catch {
+          if (!cancelled) setCompanyName(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setName(null);
+          setCompanyName(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  return (
+    <div
+      className="sidebar-customer-chip"
+      data-testid="sidebar-customer-context-chip"
+    >
+      <div className="sidebar-customer-chip-eyebrow">
+        {t("nav.customer_submenu.scoped_to")}
+      </div>
+      <div className="sidebar-customer-chip-name">{name ?? "…"}</div>
+      {companyName && (
+        <div className="sidebar-customer-chip-company">{companyName}</div>
+      )}
+    </div>
+  );
 }
 
 interface AppShellProps {
@@ -159,6 +234,8 @@ export function AppShell({ children }: AppShellProps) {
             // navigation (not history.back) so deep-link entries
             // still have a sane home target.
             <>
+              {/* Sprint 28 Batch 15.5 — customer-context chip. */}
+              <CustomerContextChip customerId={sidebar.customerId} />
               <NavLink
                 to="/admin/customers"
                 end
@@ -437,4 +514,5 @@ export function AppShell({ children }: AppShellProps) {
     </div>
   );
 }
+
 

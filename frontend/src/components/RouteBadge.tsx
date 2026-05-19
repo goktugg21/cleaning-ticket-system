@@ -25,13 +25,18 @@ export interface RouteBadgeProps {
 
 export function RouteBadge({ value }: RouteBadgeProps) {
   const { t } = useTranslation("common");
-  // Reuse existing badge tones from index.css:
-  //   - INSTANT  → "approved" (green) — work is moving immediately
-  //   - PROPOSAL → "waiting_customer_approval" (amber) — pending price review
-  const toneClass =
-    value === "INSTANT"
-      ? "badge-approved"
-      : "badge-waiting_customer_approval";
+  // Sprint 28 Batch 15.5 — colour fix.
+  //   The original mapping reused `badge-approved` (green) for INSTANT
+  //   and `badge-waiting_customer_approval` (teal) for PROPOSAL. Both
+  //   tones overlapped with the status badge palette, which made the
+  //   EW list visually ambiguous — the PROPOSAL route badge sat next
+  //   to a teal CUSTOMER-APPROVED status badge and an operator could
+  //   not tell them apart at a glance. The route modifier classes
+  //   `route-badge-proposal` / `route-badge-instant` now carry their
+  //   own amber / green overrides defined in index.css (search
+  //   "Sprint 28 Batch 15.5 — RouteBadge colour overrides"). We drop
+  //   the status-badge tone classes so the override is the only
+  //   colour source.
   const labelKey =
     value === "INSTANT" ? "route_badge.instant" : "route_badge.proposal";
   const helperKey =
@@ -40,7 +45,7 @@ export function RouteBadge({ value }: RouteBadgeProps) {
       : "route_badge.proposal_helper";
   return (
     <span
-      className={`badge ${toneClass} route-badge route-badge-${value.toLowerCase()}`}
+      className={`badge route-badge route-badge-${value.toLowerCase()}`}
       title={t(helperKey)}
       data-testid="extra-work-list-route-badge"
       data-route={value}
@@ -49,4 +54,5 @@ export function RouteBadge({ value }: RouteBadgeProps) {
     </span>
   );
 }
+
 
