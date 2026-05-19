@@ -5509,5 +5509,35 @@ table.data-table {
   padding: 0 16px 12px;
 }
 
+/* Sprint 30 Batch 30.1.1.5 — progressive workflow disclosure.
+   The "More actions" toggle is a borderless ghost-link sitting
+   between the primary action group and the secondary list. The
+   secondary list itself is visually softer (smaller font, faint
+   top divider) so the eye lands on the primary actions first. */
+.workflow-more-actions-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.workflow-more-actions-toggle:hover { color: var(--text); }
+.workflow-secondary-list {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workflow-secondary-list .status-btn,
+.status-btn-secondary {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 
 

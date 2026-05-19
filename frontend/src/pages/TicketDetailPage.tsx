@@ -5,11 +5,9 @@ import {
   AlertTriangle,
   ChevronLeft,
   Clock,
-  History,
   MapPin,
   MessageSquare,
   Paperclip,
-  Trash2,
   TriangleAlert,
   UploadCloud,
   UserPlus,
@@ -22,6 +20,7 @@ import {
   addTicketStaffAssignment,
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
+  getCompany,
   getStaffCompletionRoute,
   listAssignableStaff,
   listCustomerContacts,
@@ -72,6 +71,36 @@ function isAdminCustomerDecisionOverride(
     currentStatus === "WAITING_CUSTOMER_APPROVAL" &&
     (nextStatus === "APPROVED" || nextStatus === "REJECTED")
   );
+}
+
+// Sprint 30 Batch 30.1.1.5 — progressive disclosure of workflow
+// transitions. SUPER_ADMIN sees up to 7 transitions on certain
+// statuses; cramming them all as primary buttons buries the obvious
+// forward action. PRIMARY_TRANSITIONS encodes the 1–2 "obvious next
+// step(s)" per current status; everything else in
+// `allowed_next_statuses` becomes secondary and lives behind a
+// "More actions" toggle. The partition does NOT change which
+// transitions are legal — 30.1.1's `visibleNextStatuses` gate still
+// runs first; this only changes how the legal set is laid out.
+const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
+  OPEN: ["IN_PROGRESS"],
+  IN_PROGRESS: ["WAITING_MANAGER_REVIEW", "CLOSED"],
+  WAITING_MANAGER_REVIEW: ["APPROVED", "REJECTED"],
+  WAITING_CUSTOMER_APPROVAL: ["APPROVED", "REJECTED"],
+  APPROVED: ["CLOSED"],
+  REJECTED: ["IN_PROGRESS"],
+  CLOSED: [],
+  REOPENED_BY_ADMIN: ["IN_PROGRESS"],
+};
+
+function partitionTransitions(
+  currentStatus: TicketStatus,
+  allowed: TicketStatus[],
+): { primary: TicketStatus[]; secondary: TicketStatus[] } {
+  const primarySet = new Set(PRIMARY_TRANSITIONS[currentStatus] ?? []);
+  const primary = allowed.filter((s) => primarySet.has(s));
+  const secondary = allowed.filter((s) => !primarySet.has(s));
+  return { primary, secondary };
 }
 
 const ACCEPTED_ATTACHMENT_TYPES =
@@ -212,6 +241,12 @@ export function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [statusNote, setStatusNote] = useState("");
   const [statusBusy, setStatusBusy] = useState<TicketStatus | null>(null);
+  // Sprint 30 Batch 30.1.1.5 — progressive workflow disclosure. The
+  // secondary transition list starts collapsed; the "More actions"
+  // toggle expands it. When the current status has no primary
+  // transitions (CLOSED), the secondary list renders inline-open
+  // and the toggle is hidden — see `shouldDefaultOpen` below.
+  const [secondaryOpen, setSecondaryOpen] = useState(false);
   // Sprint 27F-F1 — ticket-override modal state. Mirrors the
   // ExtraWorkDetailPage shape:
   //   overrideDecision  the target status the operator picked
@@ -306,6 +341,16 @@ export function TicketDetailPage() {
     me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
   const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
 
+  // Sprint 30 Batch 30.1.1 — multi-tenant fix for the Assigned field
+  // staff heading. The TicketDetail payload exposes `company` (id only),
+  // not a `company_name`, so we fetch the providing company once per
+  // ticket to interpolate its name into the heading ("Assigned
+  // {{companyName}} staff"). A 403 / 404 (e.g. a CUSTOMER_USER whose
+  // scope_companies_for(...) does not include the provider) silently
+  // falls back to the unknown-tenant heading. Backend stays the source
+  // of truth for visibility; this is purely a UX label.
+  const [companyName, setCompanyName] = useState<string | null>(null);
+
   // Sprint 12 — mirrors the backend `_user_can_soft_delete_ticket`
   // rule so the button only renders when the API will actually accept
   // the call. Backend stays the source of truth for security; this
@@ -393,6 +438,31 @@ export function TicketDetailPage() {
     };
   }, [canSeeCustomerContacts, ticketCustomerId]);
 
+  // Sprint 30 Batch 30.1.1 — fetch the providing company's name for the
+  // Assigned field staff heading. Re-runs only when the ticket's
+  // `company` id actually changes. Failures collapse to `null`, which
+  // the heading renders as the unknown-tenant variant.
+  const ticketCompanyId = ticket?.company ?? null;
+  useEffect(() => {
+    const cancelled = { current: false };
+    if (ticketCompanyId === null) {
+      queueMicrotask(() => {
+        if (!cancelled.current) setCompanyName(null);
+      });
+    } else {
+      getCompany(ticketCompanyId)
+        .then((c) => {
+          if (!cancelled.current) setCompanyName(c.name);
+        })
+        .catch(() => {
+          if (!cancelled.current) setCompanyName(null);
+        });
+    }
+    return () => {
+      cancelled.current = true;
+    };
+  }, [ticketCompanyId]);
+
   useEffect(() => {
     if (!isStaff || !id) return;
     let cancelled = false;
@@ -467,6 +537,26 @@ export function TicketDetailPage() {
     () => (ticket ? getVisibleWorkflowStatuses(ticket) : []),
     [ticket],
   );
+
+  // Sprint 30 Batch 30.1.1.5 — partition the already-legal transition
+  // set into "obvious next step" primaries vs "edge-case" secondaries.
+  // The partition is purely about visibility; both groups dispatch
+  // through the same `changeStatus` (and through the Sprint 27F
+  // override modal where applicable).
+  const { primary: primaryNextStatuses, secondary: secondaryNextStatuses } =
+    useMemo(
+      () =>
+        ticket
+          ? partitionTransitions(ticket.status, visibleNextStatuses)
+          : { primary: [] as TicketStatus[], secondary: [] as TicketStatus[] },
+      [ticket, visibleNextStatuses],
+    );
+  // CLOSED has no primaries; render the disclosure inline-open by
+  // default so the only available action (REOPENED_BY_ADMIN) is one
+  // click away, without an extra toggle.
+  const shouldDefaultOpenSecondary =
+    primaryNextStatuses.length === 0 && secondaryNextStatuses.length > 0;
+  const isSecondaryOpen = secondaryOpen || shouldDefaultOpenSecondary;
 
   // Sprint 28 Batch 11 — the "Complete work" button only renders for
   // a STAFF user who is actually on the ticket's assignment set and
@@ -849,17 +939,11 @@ export function TicketDetailPage() {
             <ChevronLeft size={14} strokeWidth={2.5} />
             {t("back_to_tickets")}
           </Link>
-          {canDeleteTicket && (
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm detail-delete-btn"
-              onClick={openDeleteDialog}
-              disabled={deletingTicket}
-            >
-              <Trash2 size={14} strokeWidth={2.2} />
-              {t("delete_ticket_button")}
-            </button>
-          )}
+          {/* Sprint 30 Batch 30.1.1 — the header-level "Delete accidental
+              ticket" button has been demoted to a small text link in the
+              Details card footer (see the consolidated Details card
+              below). The confirmation dialog and the delete behaviour
+              are unchanged; only the entry-point affordance moved. */}
         </div>
         <div className="detail-header-meta">
           <span className="detail-header-no">{ticket.ticket_no}</span>
@@ -1227,6 +1311,17 @@ export function TicketDetailPage() {
         </div>
 
         <div className="detail-side">
+          {/* Sprint 30 Batch 30.1.1 — consolidated Assignment card.
+              ONE outer card with TWO clearly-labeled subsections:
+                - Building manager (ticket owner / BM dispatch — writes
+                  `ticket.assigned_to` via /tickets/<id>/assign/).
+                - Assigned {{companyName}} staff (field-staff dispatch —
+                  reads `ticket.assigned_staff` and writes via
+                  /tickets/<id>/staff-assignments/).
+              They ARE different concepts (BM owner vs Field Staff
+              dispatch). The field-staff heading interpolates the
+              ticket's providing company name to remove the prior
+              hardcoded "OSIUS" multi-tenant bug. */}
           <div className="card">
             <div className="section-head">
               <div
@@ -1242,7 +1337,21 @@ export function TicketDetailPage() {
                 {t("card_assignment_title")}
               </div>
             </div>
+
+            {/* --- Subsection 1: Building manager (owner) --- */}
             <div className="assign-body">
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--text-faint)",
+                  marginBottom: 6,
+                }}
+              >
+                {t("assignment_section_bm_heading")}
+              </div>
               <div className="assignee-row">
                 <div className="assignee-avatar">
                   {getInitials(ticket.assigned_to_email || "unassigned@")}
@@ -1315,32 +1424,43 @@ export function TicketDetailPage() {
                 </form>
               ) : null}
             </div>
-          </div>
 
-          {/* Sprint 23B — Assigned-staff list. Backend gates the
-              contact-visibility per Customer.show_assigned_staff_*
-              flags BEFORE returning to a CUSTOMER_USER; we just
-              render what the API gives us. An empty array means
-              no staff assigned yet. */}
-          <div
-            className="card"
-            data-testid="assigned-staff-card"
-          >
-            <div className="section-head">
+            {/* --- Subsection 2: Field staff (dispatch) --- */}
+            {/* Sprint 23B — Assigned-staff list. Backend gates the
+                contact-visibility per Customer.show_assigned_staff_*
+                flags BEFORE returning to a CUSTOMER_USER; we just
+                render what the API gives us. An empty array means
+                no staff assigned yet.
+                Sprint 30 Batch 30.1.1 — preserved `assigned-staff-card`
+                testid on the subsection wrapper (was the outer card in
+                the pre-30.1.1 layout). Existing Playwright specs assert
+                visibility via this testid. */}
+            <div
+              data-testid="assigned-staff-card"
+              style={{
+                marginTop: 14,
+                paddingTop: 14,
+                borderTop: "1px solid var(--border)",
+              }}
+            >
               <div
-                className="section-head-title"
                 style={{
                   fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: "0.12em",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
                   textTransform: "uppercase",
                   color: "var(--text-faint)",
+                  padding: "0 18px",
+                  marginBottom: 6,
                 }}
               >
-                {t("assigned_staff_title")}
+                {companyName
+                  ? t("assignment_section_field_staff_heading", {
+                      companyName,
+                    })
+                  : t("assignment_section_field_staff_heading_unknown")}
               </div>
-            </div>
-            <div className="assign-body">
+              <div className="assign-body">
               {ticket.assigned_staff.length === 0 ? (
                 <p
                   className="muted small"
@@ -1839,8 +1959,17 @@ export function TicketDetailPage() {
                 );
               })()}
             </div>
+            {/* close Sprint 30 Batch 30.1.1 assigned-staff-card subsection wrapper */}
+            </div>
           </div>
 
+          {/* Sprint 30 Batch 30.1.1 — consolidated Details card. Merges
+              the prior Ticket details, Customer Contacts, and SLA cards
+              into ONE card with subtle subsection separators. Contacts
+              are hidden entirely when the list is empty (no "No
+              contacts on file." line). The Delete affordance lives at
+              the card footer as a small text link; the confirmation
+              dialog is unchanged. */}
           <div className="card">
             <div className="section-head">
               <div
@@ -1921,101 +2050,100 @@ export function TicketDetailPage() {
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
-              Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
-              backend gate; other roles never see this card). Pure
-              information display: name, role label, phone, email. No
-              add / edit / delete affordances here — full management is
-              on `/admin/customers/:id/contacts`. */}
-          {canSeeCustomerContacts && (
-            <div className="card" data-testid="ticket-customer-contacts-panel">
-              <div className="section-head">
-                <div
-                  className="section-head-title"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: "0.12em",
-                    textTransform: "uppercase",
-                    color: "var(--text-faint)",
-                  }}
-                >
-                  {t("common:customer_contacts.panel_title")}
-                </div>
-              </div>
-              <div style={{ padding: "12px 18px 16px" }}>
-                {customerContacts.length === 0 ? (
-                  <p
-                    className="muted small"
-                    data-testid="ticket-customer-contacts-empty"
-                    style={{ margin: 0 }}
-                  >
-                    {t("common:customer_contacts.panel_empty")}
-                  </p>
-                ) : (
-                  <ul
-                    style={{
-                      listStyle: "none",
-                      margin: 0,
-                      padding: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    {customerContacts.map((contact) => (
-                      <li
-                        key={contact.id}
-                        data-testid="ticket-customer-contact-row"
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 2,
-                        }}
-                      >
-                        <span style={{ fontWeight: 600 }}>
-                          {contact.full_name}
-                        </span>
-                        {contact.role_label && (
-                          <span className="muted small">
-                            {contact.role_label}
-                          </span>
-                        )}
-                        {(contact.email || contact.phone) && (
-                          <span
-                            className="muted small"
-                            style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
-                          >
-                            {contact.email && <span>{contact.email}</span>}
-                            {contact.phone && <span>{contact.phone}</span>}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="card">
-            <div className="section-head">
+            {/* Sprint 30 Batch 30.1.1 — Customer Contacts subsection
+                inline in the consolidated Details card. SUPER_ADMIN /
+                COMPANY_ADMIN only. The entire subsection (heading +
+                body) is HIDDEN when the list is empty — no
+                "No contacts on file." placeholder line. The previous
+                outer-card `data-testid="ticket-customer-contacts-panel"`
+                is preserved on the subsection wrapper so existing
+                Playwright specs keep working. */}
+            {canSeeCustomerContacts && customerContacts.length > 0 && (
               <div
-                className="section-head-title"
+                data-testid="ticket-customer-contacts-panel"
                 style={{
-                  fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
+                  borderTop: "1px solid var(--border)",
+                  padding: "14px 18px 16px",
                 }}
               >
-                {t("card_sla_title")}
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: "var(--text-faint)",
+                    marginBottom: 10,
+                  }}
+                >
+                  {t("details_subsection_contacts")}
+                </div>
+                <ul
+                  style={{
+                    listStyle: "none",
+                    margin: 0,
+                    padding: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {customerContacts.map((contact) => (
+                    <li
+                      key={contact.id}
+                      data-testid="ticket-customer-contact-row"
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>
+                        {contact.full_name}
+                      </span>
+                      {contact.role_label && (
+                        <span className="muted small">
+                          {contact.role_label}
+                        </span>
+                      )}
+                      {(contact.email || contact.phone) && (
+                        <span
+                          className="muted small"
+                          style={{ display: "flex", gap: 12, flexWrap: "wrap" }}
+                        >
+                          {contact.email && <span>{contact.email}</span>}
+                          {contact.phone && <span>{contact.phone}</span>}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
-            <div style={{ padding: "16px 18px 18px" }}>
+            )}
+
+            {/* Sprint 30 Batch 30.1.1 — SLA subsection inline. The rich
+                rendering (badge + paused/breached/completed meta) is
+                preserved verbatim; only the wrapping card collapsed to
+                a subsection inside Details. */}
+            <div
+              style={{
+                borderTop: "1px solid var(--border)",
+                padding: "14px 18px 16px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--text-faint)",
+                  marginBottom: 10,
+                }}
+              >
+                {t("details_subsection_sla")}
+              </div>
               <div className="sla-detail-row">
                 <SLABadge
                   state={ticket.sla_display_state}
@@ -2074,6 +2202,40 @@ export function TicketDetailPage() {
                 )}
               </div>
             </div>
+
+            {/* Sprint 30 Batch 30.1.1 — Delete-link footer. Demoted
+                from the page header to a small text link in the card
+                footer. The confirmation dialog and the underlying
+                deletion endpoint are unchanged; only the entry-point
+                affordance moved. Visible only to users the backend
+                will actually accept (`canDeleteTicket` mirrors the
+                `_user_can_soft_delete_ticket` rule). */}
+            {canDeleteTicket && (
+              <div
+                style={{
+                  borderTop: "1px solid var(--border)",
+                  padding: "10px 18px 12px",
+                  textAlign: "right",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={openDeleteDialog}
+                  disabled={deletingTicket}
+                  className="link-back"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    color: "var(--text-faint)",
+                    fontSize: 12,
+                  }}
+                >
+                  {t("delete_ticket_footer_link")}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="card">
@@ -2188,12 +2350,28 @@ export function TicketDetailPage() {
                       </div>
                     )}
 
-                  <div className="status-actions">
-                    {visibleNextStatuses.map((status) => (
+                  {/* Sprint 30 Batch 30.1.1.5 — progressive disclosure.
+                      Primary transitions render directly under
+                      `.status-actions` so existing selectors keep
+                      working. Secondary transitions live behind a
+                      "More actions" toggle (or render inline-open
+                      when the current status has zero primaries, e.g.
+                      CLOSED). The per-button JSX is identical for
+                      both groups — the `renderTransitionButton`
+                      helper parameterises only the className. */}
+                  {(() => {
+                    const renderTransitionButton = (
+                      status: TicketStatus,
+                      variant: "primary" | "secondary",
+                    ) => (
                       <button
                         key={status}
                         type="button"
-                        className="status-btn"
+                        className={
+                          variant === "primary"
+                            ? "status-btn"
+                            : "status-btn status-btn-secondary"
+                        }
                         disabled={statusBusy !== null}
                         onClick={() => changeStatus(status)}
                       >
@@ -2206,8 +2384,45 @@ export function TicketDetailPage() {
                           </>
                         )}
                       </button>
-                    ))}
-                  </div>
+                    );
+                    return (
+                      <>
+                        {primaryNextStatuses.length > 0 && (
+                          <div className="status-actions">
+                            {primaryNextStatuses.map((status) =>
+                              renderTransitionButton(status, "primary"),
+                            )}
+                          </div>
+                        )}
+                        {secondaryNextStatuses.length > 0 &&
+                          !shouldDefaultOpenSecondary && (
+                            <button
+                              type="button"
+                              className="workflow-more-actions-toggle"
+                              data-testid="workflow-more-actions-toggle"
+                              aria-expanded={isSecondaryOpen}
+                              onClick={() =>
+                                setSecondaryOpen((prev) => !prev)
+                              }
+                            >
+                              {isSecondaryOpen
+                                ? t("hide_more_actions")
+                                : t("show_more_actions")}
+                            </button>
+                          )}
+                        {secondaryNextStatuses.length > 0 && isSecondaryOpen && (
+                          <div
+                            className="workflow-secondary-list"
+                            data-testid="workflow-secondary-list"
+                          >
+                            {secondaryNextStatuses.map((status) =>
+                              renderTransitionButton(status, "secondary"),
+                            )}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -2433,78 +2648,13 @@ export function TicketDetailPage() {
             </div>
           )}
 
-          <div className="card">
-            <div className="card-head-icon">
-              <span className="card-head-icon-glyph">
-                <History size={14} strokeWidth={2.2} />
-              </span>
-              <span className="card-head-icon-title">
-                {t("card_history_title")}
-              </span>
-              <span className="card-head-icon-spacer" />
-              <span
-                style={{
-                  fontFamily: "var(--f-head)",
-                  fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: "0.06em",
-                  color: "var(--text-faint)",
-                }}
-              >
-                {ticket.status_history.length}
-              </span>
-            </div>
-            <div className="history-list">
-              {ticket.status_history.length === 0 ? (
-                <p
-                  className="muted small"
-                  style={{ padding: "12px 0" }}
-                >
-                  {t("history_empty")}
-                </p>
-              ) : (
-                ticket.status_history.map((item) => (
-                  <div className="history-item" key={item.id}>
-                    <div className="history-dot" />
-                    <div>
-                      <div className="history-change">
-                        <span className="from">
-                          {tStatus(item.old_status)}
-                        </span>
-                        <span className="arrow">→</span>
-                        <b>{tStatus(item.new_status)}</b>
-                      </div>
-                      <div className="history-meta">
-                        {item.changed_by_email} · {formatDate(item.created_at)}
-                      </div>
-                      {(() => {
-                        const cleaned = sanitizeStatusNote(item.note);
-                        return cleaned ? (
-                          <div className="history-note">{cleaned}</div>
-                        ) : null;
-                      })()}
-                      {/* Sprint 27F-F1 — override badge mirrors the
-                          activity timeline. */}
-                      {item.is_override && (
-                        <div
-                          className="muted small"
-                          data-testid="history-override-badge"
-                          style={{ marginTop: 4 }}
-                        >
-                          <b>{t("timeline_override_badge")}</b>
-                          {item.override_reason
-                            ? ` · ${t("timeline_override_reason", {
-                                reason: item.override_reason,
-                              })}`
-                            : ""}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          {/* Sprint 30 Batch 30.1.1 — Status history card removed.
+              The Activity Timeline above the fold already renders the
+              same `ticket.status_history` rows (with override badge
+              `timeline-override-badge`), so the bottom-of-page Status
+              history card was a duplicate widget. The override badge
+              testid for the timeline (`timeline-override-badge`) is
+              still emitted from the activity timeline block above. */}
 
           {ticket.priority === "URGENT" && (
             <div className="card">
