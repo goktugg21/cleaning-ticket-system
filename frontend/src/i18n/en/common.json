@@ -982,9 +982,15 @@
   "user_detail.memberships.empty": "This user has no scope memberships.",
   "user_detail.customer_access.title": "Customer access",
   "user_detail.customer_access.desc": "Customers this user can act on. Click View permissions to manage what they can do.",
-  "user_detail.customer_access.view_permissions": "View permissions",
-  "user_detail.invalid_id": "Invalid user id."
+  "user_detail.invalid_id": "Invalid user id.",
+  "permissions_rollup.default": "Default",
+  "permissions_rollup.custom_one": "Custom (1)",
+  "permissions_rollup.custom_other": "Custom ({{count}})",
+  "permissions_rollup.aria_default": "Permissions follow the customer default. Click to view.",
+  "permissions_rollup.aria_custom_one": "1 custom permission override. Click to view.",
+  "permissions_rollup.aria_custom_other": "{{count}} custom permission overrides. Click to view."
 }
+
 
 
 

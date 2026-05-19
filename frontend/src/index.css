@@ -5276,7 +5276,35 @@ table.data-table {
 }
 .user-detail-customer-access-name { font-size: 14px; }
 
-
-
+/* Sprint 29 Batch 29.7 — permissions rollup chip */
+.permissions-rollup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--f-head);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.permissions-rollup-chip-default {
+  background: var(--surface-soft, #F1F4F1);
+  color: var(--text-muted);
+  border-color: var(--border-faint, #E4E8E4);
+}
+.permissions-rollup-chip-default:hover {
+  background: var(--surface-soft-hover, #E8ECE8);
+}
+.permissions-rollup-chip-custom {
+  background: var(--accent-soft, #E8F0E5);
+  color: var(--accent-strong, #2F5D2A);
+  border-color: var(--accent-soft-border, #C8D8C0);
+}
+.permissions-rollup-chip-custom:hover {
+  background: var(--accent-soft-hover, #DCE8D8);
+}
 
 

@@ -11,6 +11,7 @@ import type {
 import { getInitials } from "../../../../lib/initials";
 import { accessRoleLabelKey } from "../../../../lib/enumLabels";
 import { EmptyState } from "../../../../components/EmptyState";
+import { PermissionsRollupChip } from "../../../../components/PermissionsRollupChip";
 
 /**
  * Sprint 28 Batch 15.2 — replaces the dense "one user per row in a
@@ -26,6 +27,7 @@ import { EmptyState } from "../../../../components/EmptyState";
  * attributes.
  */
 export interface UserAccessCardProps {
+  customerId: number;
   membership: CustomerUserMembership;
   accesses: CustomerUserBuildingAccess[];
   linkedBuildings: CustomerBuildingMembership[];
@@ -52,6 +54,7 @@ function countOverrides(access: CustomerUserBuildingAccess): number {
 }
 
 export function UserAccessCard({
+  customerId,
   membership,
   accesses,
   linkedBuildings,
@@ -97,6 +100,11 @@ export function UserAccessCard({
             <div className="user-access-card-email">{membership.user_email}</div>
           )}
         </div>
+        <PermissionsRollupChip
+          customerId={customerId}
+          userId={membership.user_id}
+          accesses={accesses}
+        />
       </header>
 
       {accesses.length === 0 ? (
@@ -285,5 +293,6 @@ export function UserAccessCard({
     </article>
   );
 }
+
 
 

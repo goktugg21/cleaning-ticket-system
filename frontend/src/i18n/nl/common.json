@@ -982,9 +982,15 @@
   "user_detail.memberships.empty": "Deze gebruiker heeft geen scope-lidmaatschappen.",
   "user_detail.customer_access.title": "Klanttoegang",
   "user_detail.customer_access.desc": "Klanten waarbij deze gebruiker acties kan uitvoeren. Klik op Rechten bekijken om te beheren wat ze kunnen doen.",
-  "user_detail.customer_access.view_permissions": "Rechten bekijken",
-  "user_detail.invalid_id": "Ongeldig gebruiker-ID."
+  "user_detail.invalid_id": "Ongeldig gebruiker-ID.",
+  "permissions_rollup.default": "Standaard",
+  "permissions_rollup.custom_one": "Aangepast (1)",
+  "permissions_rollup.custom_other": "Aangepast ({{count}})",
+  "permissions_rollup.aria_default": "Permissies volgen de klantstandaard. Klik om te bekijken.",
+  "permissions_rollup.aria_custom_one": "1 aangepaste permissie. Klik om te bekijken.",
+  "permissions_rollup.aria_custom_other": "{{count}} aangepaste permissies. Klik om te bekijken."
 }
+
 
 
 

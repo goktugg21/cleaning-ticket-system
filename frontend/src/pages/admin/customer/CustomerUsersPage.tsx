@@ -21,6 +21,7 @@ import type {
 } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
+import { PermissionsRollupChip } from "../../../components/PermissionsRollupChip";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
@@ -291,6 +292,15 @@ export function CustomerUsersPage() {
                               ))}
                             </div>
                           )}
+                          {numericId !== null && (
+                            <div style={{ marginTop: 6 }}>
+                              <PermissionsRollupChip
+                                customerId={numericId}
+                                userId={membership.user_id}
+                                accesses={access}
+                              />
+                            </div>
+                          )}
                         </td>
                         <td>
                           <button
@@ -381,3 +391,4 @@ export function CustomerUsersPage() {
     </div>
   );
 }
+

@@ -9,12 +9,14 @@ import {
   getCompany,
   getCustomer,
   getUser,
+  listCustomerUserAccess,
   reactivateUser,
 } from "../../api/admin";
 import type {
   BuildingAdmin,
   CompanyAdmin,
   CustomerAdmin,
+  CustomerUserBuildingAccess,
   UserAdminDetail,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -22,6 +24,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { PermissionsRollupChip } from "../../components/PermissionsRollupChip";
 import { RoleBadge } from "../../components/RoleBadge";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { formatDateTime } from "../../lib/intl";
@@ -78,6 +81,13 @@ export function UserDetailPage() {
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
+  // Sprint 29 Batch 29.7 — third-tier fan-out resolving per-customer
+  // access rows for this user, used to power the
+  // <PermissionsRollupChip> on each customer access row. Defensive
+  // `.catch` per the entity-name fetch pattern from 29.6.
+  const [accessByCustomerId, setAccessByCustomerId] = useState<
+    Record<number, CustomerUserBuildingAccess[]>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -125,15 +135,41 @@ export function UserDetailPage() {
             ),
           ]);
         if (cancelled) return;
+        const filteredCustomers = resolvedCustomers.filter(
+          (c): c is CustomerAdmin => c !== null,
+        );
         setCompanies(
           resolvedCompanies.filter((c): c is CompanyAdmin => c !== null),
         );
         setBuildings(
           resolvedBuildings.filter((b): b is BuildingAdmin => b !== null),
         );
-        setCustomers(
-          resolvedCustomers.filter((c): c is CustomerAdmin => c !== null),
+        setCustomers(filteredCustomers);
+
+        // Sprint 29 Batch 29.7 — tier-3 fan-out: resolve the per-
+        // customer access rows for this user so the rollup chip can
+        // render the override count on each Customer access row.
+        // Defensive `.catch` — a 403 / 404 on a single customer must
+        // not break the page; the chip falls back to "Default" (0
+        // overrides) when an entry is missing.
+        const accessEntries = await Promise.all(
+          filteredCustomers.map((c) =>
+            listCustomerUserAccess(c.id, userData.id)
+              .then(
+                (r) =>
+                  [c.id, r.results] as [number, CustomerUserBuildingAccess[]],
+              )
+              .catch(
+                () =>
+                  [c.id, [] as CustomerUserBuildingAccess[]] as [
+                    number,
+                    CustomerUserBuildingAccess[],
+                  ],
+              ),
+          ),
         );
+        if (cancelled) return;
+        setAccessByCustomerId(Object.fromEntries(accessEntries));
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
@@ -472,13 +508,12 @@ export function UserDetailPage() {
                     <span className="user-detail-customer-access-name">
                       <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
                     </span>
-                    <Link
-                      to={`/admin/customers/${c.id}/permissions?focus_user=${user.id}`}
-                      className="btn btn-ghost btn-sm"
-                      data-testid={`user-detail-permissions-link-${c.id}`}
-                    >
-                      {t("user_detail.customer_access.view_permissions")}
-                    </Link>
+                    <PermissionsRollupChip
+                      customerId={c.id}
+                      userId={user.id}
+                      accesses={accessByCustomerId[c.id] ?? []}
+                      testId={`user-detail-permissions-link-${c.id}`}
+                    />
                   </li>
                 ))}
               </ul>
@@ -511,4 +546,5 @@ export function UserDetailPage() {
     </div>
   );
 }
+
 

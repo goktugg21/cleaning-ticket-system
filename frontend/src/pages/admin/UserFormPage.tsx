@@ -142,7 +142,7 @@ export function UserFormPage() {
           if (!cancelled) setCompanyNames([]);
         });
     } else {
-      setCompanyNames([]); // eslint-disable-line react-hooks/set-state-in-effect
+      setCompanyNames([]);
     }
     if (user.building_ids.length > 0) {
       listBuildings({ page_size: 200 })
@@ -495,7 +495,7 @@ function StaffDetailsSection({
   // Profile load.
   useEffect(() => {
     let cancelled = false;
-    setProfileLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
+    setProfileLoading(true);
     getStaffProfile(userId)
       .then((data) => {
         if (cancelled) return;
@@ -532,7 +532,7 @@ function StaffDetailsSection({
   }, [userId]);
 
   useEffect(() => {
-    reloadVisibility(); // eslint-disable-line react-hooks/set-state-in-effect
+    reloadVisibility();
   }, [reloadVisibility]);
 
   // Pre-fetch the candidate building list once so the add-control can

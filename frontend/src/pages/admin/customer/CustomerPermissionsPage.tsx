@@ -659,6 +659,7 @@ export function CustomerPermissionsPage() {
                 {members.map((membership) => (
                   <UserAccessCard
                     key={membership.id}
+                    customerId={customer.id}
                     membership={membership}
                     accesses={accessByUserId[membership.user_id] ?? []}
                     linkedBuildings={linkedBuildings}
@@ -718,6 +719,7 @@ export function CustomerPermissionsPage() {
     </div>
   );
 }
+
 
 
 
