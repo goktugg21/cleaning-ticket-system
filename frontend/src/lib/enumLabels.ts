@@ -205,6 +205,10 @@ export function extraWorkStatusLabelKey(
       return "extra_work_status.pricing_proposed";
     case "CUSTOMER_APPROVED":
       return "extra_work_status.customer_approved";
+    case "IN_PROGRESS":
+      return "extra_work_status.in_progress";
+    case "COMPLETED":
+      return "extra_work_status.completed";
     case "CUSTOMER_REJECTED":
       return "extra_work_status.customer_rejected";
     case "CANCELLED":
@@ -225,6 +229,13 @@ export function extraWorkStatusTone(
     case "PRICING_PROPOSED":
       return "waiting";
     case "CUSTOMER_APPROVED":
+      return "approved";
+    // Sprint 29 Batch 29.8 — IN_PROGRESS reuses the ticket-side
+    // "progress" tone (orange/yellow). COMPLETED reuses the "approved"
+    // green; success-completion mirrors the customer-approved tone.
+    case "IN_PROGRESS":
+      return "progress";
+    case "COMPLETED":
       return "approved";
     case "CUSTOMER_REJECTED":
       return "rejected";

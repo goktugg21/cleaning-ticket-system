@@ -1,5 +1,5 @@
 """
-Sprint 26B — Extra Work scoping.
+Extra Work scoping.
 
 Mirrors `accounts.scoping.scope_tickets_for` but for the
 `ExtraWorkRequest` queryset. Customer-side keys are
@@ -8,12 +8,16 @@ Provider-side scope is identical to tickets (company / building /
 super-admin gates) since the operational tenancy hierarchy is the
 same.
 
-STAFF visibility is intentionally MISSING in this MVP: the Sprint
-26B brief defers the staff-execution surface (ASSIGNED /
-IN_PROGRESS / WAITING_MANAGER_REVIEW / WAITING_CUSTOMER_APPROVAL /
-COMPLETED statuses) to a follow-up sprint. Until those statuses
-land, STAFF receives an empty queryset — the customer-pricing
-loop never reaches STAFF eyes.
+Sprint 29 Batch 29.8 — STAFF visibility now reuses the ticket
+scope. A STAFF user sees every Extra Work request whose spawned
+tickets they can see (via either the cart-item path
+`ExtraWorkRequestItem.spawned_tickets` or the proposal-line path
+`ProposalLine.spawned_tickets_for_proposal_line`). No new
+permission key is introduced — the gate is the existing
+`scope_tickets_for(STAFF)` which composes TicketStaffAssignment
+plus BuildingStaffVisibility (BUILDING_READ / BUILDING_READ_AND_ASSIGN).
+EW rows without any spawned ticket the STAFF can see remain
+invisible, preserving H-1 / H-4 by construction.
 """
 from __future__ import annotations
 
@@ -65,10 +69,44 @@ def scope_extra_work_for(user):
         )
 
     if user.role == UserRole.STAFF:
-        # MVP: no staff-execution surface yet. STAFF cannot see any
-        # Extra Work request. Will be revisited when ASSIGNED /
-        # IN_PROGRESS statuses are added in the follow-up sprint.
-        return ExtraWorkRequest.objects.none()
+        # Sprint 29 Batch 29.8 — STAFF visibility is derived from the
+        # tickets they can already see. An EW is visible to STAFF iff
+        # AT LEAST ONE of its spawned tickets is in their
+        # `scope_tickets_for` queryset. Two spawn paths exist:
+        #   1) Cart-item path  -- Ticket.extra_work_request_item ->
+        #      ExtraWorkRequestItem.extra_work_request_id (the FK is
+        #      named `extra_work_request`, not `extra_work`).
+        #   2) Proposal-line path -- Ticket.proposal_line ->
+        #      ProposalLine.proposal -> Proposal.extra_work_request_id.
+        # The two visible-EW id sets are unioned; the EW row is then
+        # fetched (filtering soft-deleted out).
+        from tickets.models import Ticket
+        from accounts.scoping import scope_tickets_for
+
+        visible_ticket_ids = scope_tickets_for(user).values_list(
+            "id", flat=True
+        )
+        ew_ids_from_line_items = Ticket.objects.filter(
+            id__in=visible_ticket_ids,
+            extra_work_request_item__isnull=False,
+        ).values_list(
+            "extra_work_request_item__extra_work_request_id", flat=True
+        )
+        ew_ids_from_proposal_lines = Ticket.objects.filter(
+            id__in=visible_ticket_ids,
+            proposal_line__isnull=False,
+        ).values_list(
+            "proposal_line__proposal__extra_work_request_id", flat=True
+        )
+        visible_ew_ids = set(ew_ids_from_line_items) | set(
+            ew_ids_from_proposal_lines
+        )
+        if not visible_ew_ids:
+            return ExtraWorkRequest.objects.none()
+        return ExtraWorkRequest.objects.filter(
+            deleted_at__isnull=True,
+            id__in=visible_ew_ids,
+        )
 
     if user.role == UserRole.CUSTOMER_USER:
         # Mirrors the Sprint 23A CUSTOMER_USER ticket scope but

@@ -25,6 +25,7 @@ import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { PermissionsRollupChip } from "../../components/PermissionsRollupChip";
+import { PermissionsRollupSummary } from "../../components/PermissionsRollupSummary";
 import { RoleBadge } from "../../components/RoleBadge";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { formatDateTime } from "../../lib/intl";
@@ -94,6 +95,13 @@ export function UserDetailPage() {
   const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const [actionBusy, setActionBusy] = useState(false);
+
+  // Sprint 29 Batch 29.8.5 — per-customer toggle for the inline
+  // <PermissionsRollupSummary>. Single-expansion across all customer
+  // rows so the operator never sees two summaries at once.
+  const [summaryCustomerId, setSummaryCustomerId] = useState<number | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -499,23 +507,54 @@ export function UserDetailPage() {
               </div>
 
               <ul className="user-detail-customer-access-list">
-                {customers.map((c) => (
-                  <li
-                    key={c.id}
-                    className="user-detail-customer-access-row"
-                    data-testid={`user-detail-customer-row-${c.id}`}
-                  >
-                    <span className="user-detail-customer-access-name">
-                      <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
-                    </span>
-                    <PermissionsRollupChip
-                      customerId={c.id}
-                      userId={user.id}
-                      accesses={accessByCustomerId[c.id] ?? []}
-                      testId={`user-detail-permissions-link-${c.id}`}
-                    />
-                  </li>
-                ))}
+                {customers.map((c) => {
+                  const isSummaryOpen = summaryCustomerId === c.id;
+                  const accessList = accessByCustomerId[c.id] ?? [];
+                  return (
+                    <li
+                      key={c.id}
+                      className="user-detail-customer-access-row"
+                      data-testid={`user-detail-customer-row-${c.id}`}
+                    >
+                      <div className="user-detail-customer-access-row-top">
+                        <span className="user-detail-customer-access-name">
+                          <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
+                        </span>
+                        <PermissionsRollupChip
+                          customerId={c.id}
+                          userId={user.id}
+                          accesses={accessList}
+                          testId={`user-detail-permissions-link-${c.id}`}
+                          onToggle={() =>
+                            setSummaryCustomerId((current) =>
+                              current === c.id ? null : c.id,
+                            )
+                          }
+                          expanded={isSummaryOpen}
+                        />
+                      </div>
+                      {isSummaryOpen && (
+                        <PermissionsRollupSummary
+                          userId={user.id}
+                          customerId={c.id}
+                          userLabel={
+                            user.full_name && user.full_name.trim().length > 0
+                              ? user.full_name
+                              : user.email
+                          }
+                          customerLabel={c.name}
+                          accesses={accessList}
+                          onOpenOverrides={(access) => {
+                            navigate(
+                              `/admin/customers/${c.id}/permissions?focus_user=${user.id}&focus_building=${access.building_id}`,
+                            );
+                          }}
+                          onCollapse={() => setSummaryCustomerId(null)}
+                        />
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}

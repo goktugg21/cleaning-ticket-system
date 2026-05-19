@@ -10,10 +10,16 @@ Routes (registered in `extra_work/urls.py`, mounted under
   GET / POST    /api/services/
   GET / PATCH / DELETE  /api/services/<int:service_id>/
 
-Permission gate: `IsSuperAdminOrCompanyAdmin`. The catalog is
-provider-wide (it is NOT scoped per-company-membership) — every
-COMPANY_ADMIN sees the same global catalog. BUILDING_MANAGER /
-STAFF / CUSTOMER_USER never reach the view.
+Permission gate (Sprint 29 Batch 29.8.5 split):
+  * GET (list + retrieve) is open to any authenticated user. The
+    catalog is provider-wide reference data; CUSTOMER_USER needs to
+    read it to populate the Extra Work cart create form (otherwise
+    the create form's mount-time fetch returns 403 and the page
+    surfaces a misleading "no permission" banner).
+  * Writes (POST / PATCH / PUT / DELETE) stay locked to
+    `IsSuperAdminOrCompanyAdmin` — only provider admins curate the
+    catalog. There is no cross-company isolation on the catalog
+    itself (every provider sees the same global list).
 
 Deletion of a `ServiceCategory` that still has `Service` rows
 pointing at it is blocked by `on_delete=PROTECT`. The view catches
@@ -24,6 +30,7 @@ from __future__ import annotations
 
 from django.db.models import ProtectedError
 from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.permissions import IsSuperAdminOrCompanyAdmin
@@ -50,11 +57,20 @@ def _parse_bool_param(value):
 
 
 class ServiceCategoryListCreateView(generics.ListCreateAPIView):
-    """GET (list) + POST (create) at /api/services/categories/."""
+    """GET (list) + POST (create) at /api/services/categories/.
 
-    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    Sprint 29 Batch 29.8.5 — GET opened to any authenticated user so
+    CUSTOMER_USER can populate the Extra Work create-form category
+    dropdown. POST stays admin-only.
+    """
+
     serializer_class = ServiceCategorySerializer
     pagination_class = UnboundedPagination
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
         qs = ServiceCategory.objects.all()
@@ -65,12 +81,20 @@ class ServiceCategoryListCreateView(generics.ListCreateAPIView):
 
 
 class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET / PATCH / DELETE at /api/services/categories/<id>/."""
+    """GET / PATCH / DELETE at /api/services/categories/<id>/.
 
-    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    Sprint 29 Batch 29.8.5 — GET opened to any authenticated user;
+    PATCH / PUT / DELETE stay admin-only.
+    """
+
     serializer_class = ServiceCategorySerializer
     lookup_url_kwarg = "category_id"
     queryset = ServiceCategory.objects.all()
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsSuperAdminOrCompanyAdmin()]
 
     def delete(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -92,11 +116,20 @@ class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class ServiceListCreateView(generics.ListCreateAPIView):
-    """GET (list) + POST (create) at /api/services/."""
+    """GET (list) + POST (create) at /api/services/.
 
-    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    Sprint 29 Batch 29.8.5 — GET opened to any authenticated user so
+    CUSTOMER_USER can populate the Extra Work create-form services
+    dropdown. POST stays admin-only.
+    """
+
     serializer_class = ServiceSerializer
     pagination_class = UnboundedPagination
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
         qs = Service.objects.select_related("category").all()
@@ -114,12 +147,20 @@ class ServiceListCreateView(generics.ListCreateAPIView):
 
 
 class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
-    """GET / PATCH / DELETE at /api/services/<id>/."""
+    """GET / PATCH / DELETE at /api/services/<id>/.
 
-    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    Sprint 29 Batch 29.8.5 — GET opened to any authenticated user;
+    PATCH / PUT / DELETE stay admin-only.
+    """
+
     serializer_class = ServiceSerializer
     lookup_url_kwarg = "service_id"
     queryset = Service.objects.select_related("category").all()
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [IsAuthenticated()]
+        return [IsSuperAdminOrCompanyAdmin()]
 
     def delete(self, request, *args, **kwargs):
         instance = self.get_object()

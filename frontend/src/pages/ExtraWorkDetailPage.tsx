@@ -32,8 +32,8 @@
 // The frontend is defense-in-depth only — it renders only what the
 // backend's allowed_next_statuses field says.
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { AlertTriangle, FileSearch, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -45,6 +45,7 @@ import {
   fetchProposalPdf,
   getExtraWork,
   listProposalsForEw,
+  listSpawnedTickets,
   transitionExtraWork,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
@@ -58,7 +59,10 @@ import type {
   Proposal,
   Role,
   ServiceUnitType,
+  TicketList,
+  TicketStatus,
 } from "../api/types";
+import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
@@ -66,12 +70,24 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
+// Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
+// any of these is considered "done" for the cancel-warning gate; only
+// non-terminal spawned tickets trigger the dialog warning panel.
+const TERMINAL_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<TicketStatus>([
+  "APPROVED",
+  "CLOSED",
+  "REJECTED",
+]);
+
 
 const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
   REQUESTED: "status.requested",
   UNDER_REVIEW: "status.under_review",
   PRICING_PROPOSED: "status.pricing_proposed",
   CUSTOMER_APPROVED: "status.customer_approved",
+  // Sprint 29 Batch 29.8 — operational segment status labels.
+  IN_PROGRESS: "status.in_progress",
+  COMPLETED: "status.completed",
   CUSTOMER_REJECTED: "status.customer_rejected",
   CANCELLED: "status.cancelled",
 };
@@ -171,6 +187,17 @@ export function ExtraWorkDetailPage() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [pdfBusy, setPdfBusy] = useState(false);
 
+  // Sprint 29 Batch 29.8 — spawned tickets fetched via the
+  // customer+building-scoped fallback (see `listSpawnedTickets`).
+  // Drives both the read-only panel (between line items and actions)
+  // and the cancel-confirmation warning.
+  const [spawnedTickets, setSpawnedTickets] = useState<TicketList[]>([]);
+  // Sprint 29 Batch 29.8 — cancel-confirmation dialog. Wraps the
+  // existing CANCELLED transition path so the warning about lingering
+  // spawned tickets renders before the destructive action fires.
+  const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+
   // ----- load -----
   useEffect(() => {
     if (!id) return;
@@ -252,6 +279,39 @@ export function ExtraWorkDetailPage() {
     };
   }, [ewId]);
 
+  // Sprint 29 Batch 29.8 — spawned tickets fetch. Pulls tickets in the
+  // EW's customer+building scope and filters client-side to those whose
+  // detail payload's `extra_work_origin.extra_work_request_id` matches.
+  // Failures collapse silently to an empty list so the panel just does
+  // not render. See `listSpawnedTickets` for the test-debt note.
+  const ewCustomerForTickets = ew?.customer ?? null;
+  const ewBuildingForTickets = ew?.building ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      ewId === null ||
+      ewCustomerForTickets === null ||
+      ewBuildingForTickets === null
+    ) {
+      queueMicrotask(() => {
+        if (!cancelled) setSpawnedTickets([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listSpawnedTickets(ewId, ewCustomerForTickets, ewBuildingForTickets)
+      .then((list) => {
+        if (!cancelled) setSpawnedTickets(list);
+      })
+      .catch(() => {
+        if (!cancelled) setSpawnedTickets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, ewCustomerForTickets, ewBuildingForTickets]);
+
   if (loading) {
     return (
       <div>
@@ -297,6 +357,14 @@ export function ExtraWorkDetailPage() {
   // route through the dedicated override block below.
   const providerWorkflowTargets = allowed.filter(
     (s) => s !== "CUSTOMER_APPROVED" && s !== "CUSTOMER_REJECTED",
+  );
+
+  // Sprint 29 Batch 29.8 — non-terminal spawned tickets that will
+  // outlive a CANCELLED transition (the EW cancel does not propagate
+  // to its operational tickets — see brief Phase I). Drives the
+  // cancel-confirmation dialog warning panel.
+  const activeSpawnedTickets = spawnedTickets.filter(
+    (ticket) => !TERMINAL_TICKET_STATUSES.has(ticket.status),
   );
 
   // Sprint 28 Batch 15.4 — pick the currently-active proposal for
@@ -427,6 +495,27 @@ export function ExtraWorkDetailPage() {
       await refresh();
     } catch (err) {
       setPricingError(getApiError(err));
+    }
+  }
+
+  // Sprint 29 Batch 29.8 — cancel-confirmation handler. Fires the
+  // standard CANCELLED transition once the operator confirms in the
+  // dialog. The backend still gates the transition itself; this is
+  // only the UI safety net (warn about spawned tickets that will
+  // outlive the cancel).
+  async function handleConfirmCancel() {
+    if (!id) return;
+    setCancelBusy(true);
+    try {
+      const updated = await transitionExtraWork(id, {
+        to_status: "CANCELLED",
+      });
+      setEw(updated);
+      cancelDialogRef.current?.close();
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setCancelBusy(false);
     }
   }
 
@@ -1041,6 +1130,49 @@ export function ExtraWorkDetailPage() {
             </div>
           </div>
 
+          {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders
+              read-only when the EW has at least one ticket spawned
+              from a cart line (INSTANT route) or a proposal line
+              (PROPOSAL route). The list is reachable to anyone who
+              can see the EW; per-row link visibility is gated on
+              the linked ticket by `scope_tickets_for` server-side. */}
+          {spawnedTickets.length > 0 && (
+            <section
+              className="card"
+              data-testid="extra-work-spawned-tickets-panel"
+              style={{ marginBottom: 16 }}
+            >
+              <div className="form-section">
+                <div className="form-section-title">
+                  {t("detail.spawned_tickets_title")}
+                </div>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.spawned_tickets_desc")}
+                </p>
+                <ul className="ew-spawned-tickets-list">
+                  {spawnedTickets.map((ticket) => (
+                    <li
+                      key={ticket.id}
+                      className="ew-spawned-ticket-row"
+                      data-testid={`extra-work-spawned-ticket-row-${ticket.id}`}
+                    >
+                      <Link
+                        to={`/tickets/${ticket.id}`}
+                        className="ew-spawned-ticket-link"
+                      >
+                        #{ticket.id} {ticket.title}
+                      </Link>
+                      <StatusBadge
+                        status={{ kind: "ticket", value: ticket.status }}
+                        variant="cell"
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+
           <div
             className="muted small"
             style={{ textAlign: "right", marginTop: 8 }}
@@ -1123,7 +1255,23 @@ export function ExtraWorkDetailPage() {
                         type="button"
                         className="btn btn-secondary btn-sm"
                         disabled={transitionBusy !== null}
-                        onClick={() => handleTransition(target)}
+                        onClick={() => {
+                          // Sprint 29 Batch 29.8 — route CANCELLED
+                          // through the confirmation dialog so the
+                          // spawned-tickets warning renders before
+                          // the destructive transition fires. Every
+                          // other target goes straight through.
+                          if (target === "CANCELLED") {
+                            cancelDialogRef.current?.open();
+                            return;
+                          }
+                          void handleTransition(target);
+                        }}
+                        data-testid={
+                          target === "CANCELLED"
+                            ? "extra-work-cancel-button"
+                            : undefined
+                        }
                       >
                         {transitionBusy === target
                           ? t("detail.workflow_working")
@@ -1296,9 +1444,52 @@ export function ExtraWorkDetailPage() {
           void handleCustomerDecision("CUSTOMER_REJECTED", reason);
         }}
       />
+
+      {/* Sprint 29 Batch 29.8 — cancel-confirmation dialog. Warns when
+          spawned tickets are still active so the operator is aware
+          they will NOT be auto-cancelled. The transition itself is
+          unchanged; this is a UI-only safety net. */}
+      <ConfirmDialog
+        ref={cancelDialogRef}
+        title={t("detail.cancel_dialog_title")}
+        body={
+          <div>
+            {activeSpawnedTickets.length > 0 && (
+              <div
+                className="alert-warning"
+                data-testid="extra-work-cancel-spawned-tickets-warning"
+                style={{ marginBottom: 12 }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                  {t("detail.cancel_dialog_spawned_warning_title", {
+                    count: activeSpawnedTickets.length,
+                  })}
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {activeSpawnedTickets.map((ticket) => (
+                    <li key={ticket.id}>
+                      #{ticket.id} — {ticket.title} ({ticket.status})
+                    </li>
+                  ))}
+                </ul>
+                <p style={{ marginTop: 8, marginBottom: 0 }}>
+                  {t("detail.cancel_dialog_spawned_warning_desc")}
+                </p>
+              </div>
+            )}
+            <p style={{ margin: 0 }}>{t("detail.cancel_dialog_body")}</p>
+          </div>
+        }
+        confirmLabel={t("detail.cancel_dialog_confirm")}
+        cancelLabel={t("detail.cancel_dialog_keep")}
+        onConfirm={handleConfirmCancel}
+        busy={cancelBusy}
+        destructive
+      />
     </div>
   );
 }
+
 
 
 

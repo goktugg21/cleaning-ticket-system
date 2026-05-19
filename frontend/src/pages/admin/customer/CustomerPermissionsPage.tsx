@@ -660,9 +660,11 @@ export function CustomerPermissionsPage() {
                   <UserAccessCard
                     key={membership.id}
                     customerId={customer.id}
+                    customerName={customerName}
                     membership={membership}
                     accesses={accessByUserId[membership.user_id] ?? []}
                     linkedBuildings={linkedBuildings}
+                    policy={policy}
                     meId={me?.id}
                     canGrantCustomerCompanyAdmin={canGrantCustomerCompanyAdmin}
                     busy={accessBusyUserId === membership.user_id}

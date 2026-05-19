@@ -79,6 +79,8 @@
   "extra_work_status_under_review": "In behandeling",
   "extra_work_status_pricing_proposed": "Offerte verstuurd",
   "extra_work_status_customer_approved": "Goedgekeurd",
+  "extra_work_status_in_progress": "In uitvoering",
+  "extra_work_status_completed": "Voltooid",
   "extra_work_status_customer_rejected": "Afgewezen",
   "extra_work_status_cancelled": "Geannuleerd",
 

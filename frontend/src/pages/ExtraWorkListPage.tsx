@@ -49,6 +49,9 @@ const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
   UNDER_REVIEW: "status.under_review",
   PRICING_PROPOSED: "status.pricing_proposed",
   CUSTOMER_APPROVED: "status.customer_approved",
+  // Sprint 29 Batch 29.8 — operational segment.
+  IN_PROGRESS: "status.in_progress",
+  COMPLETED: "status.completed",
   CUSTOMER_REJECTED: "status.customer_rejected",
   CANCELLED: "status.cancelled",
 };
@@ -58,6 +61,11 @@ const STATUS_FILTER_OPTIONS: ReadonlyArray<ExtraWorkStatus> = [
   "UNDER_REVIEW",
   "PRICING_PROPOSED",
   "CUSTOMER_APPROVED",
+  // Sprint 29 Batch 29.8 — surface the operational segment in the
+  // list filter so operators can narrow to in-progress / completed
+  // execution rows.
+  "IN_PROGRESS",
+  "COMPLETED",
   "CUSTOMER_REJECTED",
   "CANCELLED",
 ];

@@ -1,10 +1,11 @@
-import { useMemo } from "react";
-import { Building2, ChevronRight, Plus, X } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Building2, ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type {
   CustomerAccessRole,
   CustomerBuildingMembership,
+  CustomerCompanyPolicyAdmin,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
 } from "../../../../api/types";
@@ -12,6 +13,9 @@ import { getInitials } from "../../../../lib/initials";
 import { accessRoleLabelKey } from "../../../../lib/enumLabels";
 import { EmptyState } from "../../../../components/EmptyState";
 import { PermissionsRollupChip } from "../../../../components/PermissionsRollupChip";
+import { PermissionsRollupSummary } from "../../../../components/PermissionsRollupSummary";
+
+import { AccessPermissionsPanel } from "./AccessPermissionsPanel";
 
 /**
  * Sprint 28 Batch 15.2 — replaces the dense "one user per row in a
@@ -28,9 +32,16 @@ import { PermissionsRollupChip } from "../../../../components/PermissionsRollupC
  */
 export interface UserAccessCardProps {
   customerId: number;
+  customerName: string;
   membership: CustomerUserMembership;
   accesses: CustomerUserBuildingAccess[];
   linkedBuildings: CustomerBuildingMembership[];
+  /**
+   * Sprint 29 Batch 29.8.5 — per-customer policy row, threaded
+   * through so the inline AccessPermissionsPanel can resolve
+   * effective values (the policy denies certain keys family-wide).
+   */
+  policy: CustomerCompanyPolicyAdmin | null;
   /** True only for the current authenticated user. */
   meId: number | undefined;
   /** Whether the active actor can grant CUSTOMER_COMPANY_ADMIN (SUPER_ADMIN only). */
@@ -55,9 +66,11 @@ function countOverrides(access: CustomerUserBuildingAccess): number {
 
 export function UserAccessCard({
   customerId,
+  customerName,
   membership,
   accesses,
   linkedBuildings,
+  policy,
   meId,
   canGrantCustomerCompanyAdmin,
   busy,
@@ -68,6 +81,19 @@ export function UserAccessCard({
   onAddBuilding,
 }: UserAccessCardProps) {
   const { t } = useTranslation("common");
+
+  // Sprint 29 Batch 29.8.5 — single-expansion state per card. Clicking
+  // a pill toggles the inline AccessPermissionsPanel for that access
+  // row; the previous behaviour (pill opens the OverrideDrawer
+  // directly) moves behind an explicit "Edit overrides" button inside
+  // the panel.
+  const [expandedAccessId, setExpandedAccessId] = useState<number | null>(
+    null,
+  );
+  // Sprint 29 Batch 29.8.5 — toggle for the per-user
+  // <PermissionsRollupSummary> on the card header. Independent of the
+  // per-access expansion above so the two surfaces don't fight.
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
 
   const accessBuildingIds = useMemo(
     () => new Set(accesses.map((a) => a.building_id)),
@@ -104,8 +130,27 @@ export function UserAccessCard({
           customerId={customerId}
           userId={membership.user_id}
           accesses={accesses}
+          onToggle={() => setSummaryExpanded((v) => !v)}
+          expanded={summaryExpanded}
         />
       </header>
+
+      {summaryExpanded && (
+        <div className="user-access-card-summary">
+          <PermissionsRollupSummary
+            userId={membership.user_id}
+            customerId={customerId}
+            userLabel={fullName || membership.user_email}
+            customerLabel={customerName}
+            accesses={accesses}
+            onOpenOverrides={(access) => {
+              setSummaryExpanded(false);
+              onOpenOverrides(access);
+            }}
+            onCollapse={() => setSummaryExpanded(false)}
+          />
+        </div>
+      )}
 
       {accesses.length === 0 ? (
         <div className="user-access-card-body">
@@ -136,12 +181,13 @@ export function UserAccessCard({
                       { count: overridesCount },
                     );
 
+            const isExpanded = expandedAccessId === access.id;
             return (
               <li
                 key={access.id}
                 className={`access-chip${
                   access.is_active === false ? " access-chip-inactive" : ""
-                }`}
+                }${isExpanded ? " access-chip-expanded" : ""}`}
                 data-testid="customer-access-badge"
               >
                 <div className="access-chip-building">
@@ -228,19 +274,34 @@ export function UserAccessCard({
                     type="button"
                     className={`custom-permissions-pill${
                       overridesCount > 0 ? " custom-permissions-pill-some" : ""
-                    }`}
+                    }${isExpanded ? " custom-permissions-pill-expanded" : ""}`}
                     data-testid="customer-access-overrides-button"
                     data-user-id={membership.user_id}
                     data-building-id={access.building_id}
-                    onClick={() => onOpenOverrides(access)}
-                    disabled={busy}
+                    onClick={() =>
+                      setExpandedAccessId(isExpanded ? null : access.id)
+                    }
+                    aria-expanded={isExpanded}
+                    aria-controls={`access-permissions-panel-${access.id}`}
                   >
                     <span
                       className="custom-permissions-pill-dot"
                       aria-hidden="true"
                     />
                     <span>{customPermissionsLabel}</span>
-                    <ChevronRight size={14} strokeWidth={2.2} aria-hidden="true" />
+                    {isExpanded ? (
+                      <ChevronUp
+                        size={14}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <ChevronDown
+                        size={14}
+                        strokeWidth={2.2}
+                        aria-hidden="true"
+                      />
+                    )}
                   </button>
 
                   <button
@@ -254,6 +315,20 @@ export function UserAccessCard({
                     <X size={14} strokeWidth={2.4} />
                   </button>
                 </div>
+
+                {isExpanded && (
+                  <div className="access-chip-panel-wrap">
+                    <AccessPermissionsPanel
+                      access={access}
+                      policy={policy}
+                      onEditClick={() => {
+                        setExpandedAccessId(null);
+                        onOpenOverrides(access);
+                      }}
+                      onCollapse={() => setExpandedAccessId(null)}
+                    />
+                  </div>
+                )}
               </li>
             );
           })}
@@ -293,6 +368,7 @@ export function UserAccessCard({
     </article>
   );
 }
+
 
 
 

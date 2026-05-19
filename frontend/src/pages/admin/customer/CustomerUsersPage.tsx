@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -22,6 +22,7 @@ import type {
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { PermissionsRollupChip } from "../../../components/PermissionsRollupChip";
+import { PermissionsRollupSummary } from "../../../components/PermissionsRollupSummary";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
@@ -42,6 +43,7 @@ const ACCESS_ROLE_LABEL: Record<CustomerAccessRole, string> = {
 
 export function CustomerUsersPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { t } = useTranslation("common");
 
   const numericId = useMemo(() => {
@@ -65,6 +67,13 @@ export function CustomerUsersPage() {
   const removeDialogRef = useRef<ConfirmDialogHandle>(null);
   const [removeTarget, setRemoveTarget] =
     useState<CustomerUserMembership | null>(null);
+
+  // Sprint 29 Batch 29.8.5 — per-row toggle for the inline
+  // <PermissionsRollupSummary>. Single-expansion: clicking another row
+  // collapses the previous one. The summary surfaces every (building,
+  // role, override-count) tuple inline so the operator does not need
+  // to navigate away.
+  const [summaryUserId, setSummaryUserId] = useState<number | null>(null);
 
   async function loadAccessForMembers(
     customerId: number,
@@ -256,62 +265,101 @@ export function CustomerUsersPage() {
                 <tbody>
                   {members.map((membership) => {
                     const access = accessByUserId[membership.user_id] ?? [];
+                    const isSummaryOpen = summaryUserId === membership.user_id;
                     return (
-                      <tr
-                        key={membership.id}
-                        data-testid="customer-user-row"
-                      >
-                        <td className="td-subject">{membership.user_email}</td>
-                        <td>{membership.user_full_name || "—"}</td>
-                        <td data-testid="customer-user-access-summary">
-                          {access.length === 0 ? (
-                            <span className="muted small">
-                              {t("customer_view.users.no_access_yet")}
-                            </span>
-                          ) : (
-                            <div className="customer-user-access-pills">
-                              {access.map((row) => (
-                                <span
-                                  key={row.id}
-                                  className={
-                                    "customer-user-access-pill" +
-                                    (row.is_active === false
-                                      ? " inactive"
-                                      : "")
-                                  }
-                                  title={`${row.building_name} · ${t(
-                                    ACCESS_ROLE_LABEL[row.access_role],
-                                  )}`}
-                                >
-                                  <span>{row.building_name}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <span>
-                                    {t(ACCESS_ROLE_LABEL[row.access_role])}
+                      <Fragment key={membership.id}>
+                        <tr data-testid="customer-user-row">
+                          <td className="td-subject">{membership.user_email}</td>
+                          <td>{membership.user_full_name || "—"}</td>
+                          <td data-testid="customer-user-access-summary">
+                            {access.length === 0 ? (
+                              <span className="muted small">
+                                {t("customer_view.users.no_access_yet")}
+                              </span>
+                            ) : (
+                              <div className="customer-user-access-pills">
+                                {access.map((row) => (
+                                  <span
+                                    key={row.id}
+                                    className={
+                                      "customer-user-access-pill" +
+                                      (row.is_active === false
+                                        ? " inactive"
+                                        : "")
+                                    }
+                                    title={`${row.building_name} · ${t(
+                                      ACCESS_ROLE_LABEL[row.access_role],
+                                    )}`}
+                                  >
+                                    <span>{row.building_name}</span>
+                                    <span aria-hidden="true">·</span>
+                                    <span>
+                                      {t(ACCESS_ROLE_LABEL[row.access_role])}
+                                    </span>
                                   </span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {numericId !== null && (
-                            <div style={{ marginTop: 6 }}>
-                              <PermissionsRollupChip
-                                customerId={numericId}
-                                userId={membership.user_id}
-                                accesses={access}
-                              />
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => openRemoveDialog(membership)}
+                                ))}
+                              </div>
+                            )}
+                            {numericId !== null && (
+                              <div style={{ marginTop: 6 }}>
+                                <PermissionsRollupChip
+                                  customerId={numericId}
+                                  userId={membership.user_id}
+                                  accesses={access}
+                                  onToggle={() =>
+                                    setSummaryUserId((current) =>
+                                      current === membership.user_id
+                                        ? null
+                                        : membership.user_id,
+                                    )
+                                  }
+                                  expanded={isSummaryOpen}
+                                />
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => openRemoveDialog(membership)}
+                            >
+                              {t("admin_form.remove")}
+                            </button>
+                          </td>
+                        </tr>
+                        {isSummaryOpen && numericId !== null && (
+                          <tr
+                            className="customer-user-row-summary"
+                            data-testid={`customer-user-row-summary-${membership.user_id}`}
                           >
-                            {t("admin_form.remove")}
-                          </button>
-                        </td>
-                      </tr>
+                            <td colSpan={4}>
+                              <PermissionsRollupSummary
+                                userId={membership.user_id}
+                                customerId={numericId}
+                                userLabel={
+                                  membership.user_full_name ||
+                                  membership.user_email
+                                }
+                                customerLabel={customerName}
+                                accesses={access}
+                                onOpenOverrides={(access) => {
+                                  // The override drawer lives on the
+                                  // Permissions page, not here.
+                                  // Deep-link via 29.2's
+                                  // ?focus_user=&focus_building= shape
+                                  // so the drawer auto-opens on that
+                                  // specific row.
+                                  navigate(
+                                    `/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}&focus_building=${access.building_id}`,
+                                  );
+                                }}
+                                onCollapse={() => setSummaryUserId(null)}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

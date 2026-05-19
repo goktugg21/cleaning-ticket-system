@@ -336,7 +336,9 @@ class ExtraWorkStatsBucketsTests(_StatsFixtureMixin, TestCase):
             routing=ExtraWorkRoutingDecision.PROPOSAL,
             urgency=ExtraWorkUrgency.NORMAL,
         )
-        # CUSTOMER_APPROVED → terminal; NOT active.
+        # Sprint 29 Batch 29.8: CUSTOMER_APPROVED is now an ACTIVE
+        # operational state (entry point of the IN_PROGRESS / COMPLETED
+        # segment). It is no longer counted as terminal.
         cls.ew_approved = cls._make_ew(
             customer=cls.customer_a,
             building=cls.building_a1,
@@ -414,9 +416,10 @@ class ExtraWorkStatsBucketsTests(_StatsFixtureMixin, TestCase):
         self.assertEqual(sum(by_urgency.values()), data["total"])
 
     def test_active_excludes_terminal_states(self):
-        # 8 total - 3 terminal (approved, rejected, cancelled_urgent)
-        # = 5 active.
-        self.assertEqual(self._stats()["active"], 5)
+        # Sprint 29 Batch 29.8: CUSTOMER_APPROVED is now active. The
+        # terminal set is COMPLETED / CUSTOMER_REJECTED / CANCELLED.
+        # 8 total - 2 terminal (rejected, cancelled_urgent) = 6 active.
+        self.assertEqual(self._stats()["active"], 6)
 
     def test_awaiting_pricing_definition(self):
         # PROPOSAL + REQUESTED/UNDER_REVIEW only:
@@ -461,11 +464,15 @@ class ExtraWorkStatsByBuildingTests(_StatsFixtureMixin, TestCase):
             routing=ExtraWorkRoutingDecision.PROPOSAL,
             urgency=ExtraWorkUrgency.NORMAL,
         )
+        # Sprint 29 Batch 29.8 — this row used to be a "terminal"
+        # CUSTOMER_APPROVED. Switched to CANCELLED so the aggregate
+        # `active=2` invariant for Aardenburg still holds without
+        # mis-naming the row (CUSTOMER_APPROVED is now active).
         cls.ew_a1_terminal = cls._make_ew(
             customer=cls.customer_a,
             building=cls.building_a1,
             created_by=cls.admin_a,
-            status_value=ExtraWorkStatus.CUSTOMER_APPROVED,
+            status_value=ExtraWorkStatus.CANCELLED,
             routing=ExtraWorkRoutingDecision.PROPOSAL,
             urgency=ExtraWorkUrgency.NORMAL,
         )
@@ -523,7 +530,9 @@ class ExtraWorkStatsByBuildingTests(_StatsFixtureMixin, TestCase):
         aardenburg = by_name["Aardenburg"]
         self.assertEqual(aardenburg["building_id"], self.building_a1.id)
         self.assertEqual(aardenburg["total"], 3)
-        # active = 3 total - 1 CUSTOMER_APPROVED = 2.
+        # Sprint 29 Batch 29.8: terminal set is COMPLETED /
+        # CUSTOMER_REJECTED / CANCELLED. ew_a1_terminal is CANCELLED.
+        # active = 3 total - 1 CANCELLED = 2.
         self.assertEqual(aardenburg["active"], 2)
         # awaiting_pricing = REQUESTED+PROPOSAL row → 1.
         self.assertEqual(aardenburg["awaiting_pricing"], 1)

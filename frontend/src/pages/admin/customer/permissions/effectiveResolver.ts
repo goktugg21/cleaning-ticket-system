@@ -195,3 +195,67 @@ export function draftValueFromOverride(
   return overrides[key] ? "allow" : "deny";
 }
 
+// Sprint 29 Batch 29.8.5 — read-only resolution for the inline
+// AccessPermissionsPanel. Returns both the boolean effective value
+// AND one of five distinct reasons so the panel can render a
+// per-row "why" hint without recomputing the precedence tree.
+//
+// The mapping intentionally collapses `inactive` and `policy` into
+// `policy_denied` (visually identical user-facing meaning: "denied
+// because of an upstream constraint, not a permission decision");
+// the OverrideDrawer keeps the full 6-reason vocabulary because
+// the operator there is actively editing and needs the finer
+// distinction (Sprint 27E UX).
+export type PanelReason =
+  | "override_granted"
+  | "override_denied"
+  | "policy_denied"
+  | "role_default_granted"
+  | "role_default_denied";
+
+export interface PanelResolution {
+  granted: boolean;
+  reason: PanelReason;
+}
+
+export function resolvePanelValue(args: {
+  key: CustomerPermissionKey;
+  overrides: Record<string, boolean>;
+  isActive: boolean;
+  policy: CustomerCompanyPolicyAdmin | null;
+  accessRole: CustomerAccessRole;
+}): PanelResolution {
+  const draftValue = draftValueFromOverride(args.overrides, args.key);
+  const effective = resolveEffective({
+    key: args.key,
+    draftValue,
+    isActive: args.isActive,
+    policy: args.policy,
+    accessRole: args.accessRole,
+  });
+  if (effective.effective === "allow") {
+    return {
+      granted: true,
+      reason:
+        effective.reason === "override_grant"
+          ? "override_granted"
+          : "role_default_granted",
+    };
+  }
+  // deny variants:
+  switch (effective.reason) {
+    case "override_revoke":
+      return { granted: false, reason: "override_denied" };
+    case "inactive":
+    case "policy":
+      return { granted: false, reason: "policy_denied" };
+    case "role_default_deny":
+    default:
+      return { granted: false, reason: "role_default_denied" };
+  }
+}
+
+export function panelReasonLabelKey(reason: PanelReason): string {
+  return `customer_permissions.access_panel.reason_${reason}`;
+}
+

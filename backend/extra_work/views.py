@@ -62,8 +62,12 @@ PROVIDER_ROLES = {
 #
 # String literals (not `ExtraWorkStatus.X.value`) match the style of
 # `tickets.views.stats` and keep the Q-filter call sites readable.
+# Sprint 29 Batch 29.8 — CUSTOMER_APPROVED is no longer terminal:
+# it is the entry point of the operational segment (IN_PROGRESS /
+# COMPLETED). The dashboard "active EW" count now includes
+# customer-approved rows, matching what operators see in the field.
 EXTRA_WORK_TERMINAL_STATUSES = (
-    "CUSTOMER_APPROVED",
+    "COMPLETED",
     "CUSTOMER_REJECTED",
     "CANCELLED",
 )

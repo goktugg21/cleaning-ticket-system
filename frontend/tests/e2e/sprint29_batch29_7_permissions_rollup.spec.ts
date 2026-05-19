@@ -227,9 +227,13 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     expect(Number(match![1])).toBe(t.count);
   });
 
-  test("clicking the chip deep-links and scrolls the user-access card into view", async ({
+  test("clicking the chip toggles the inline summary; Open full editor deep-links", async ({
     page,
   }) => {
+    // Sprint 29 Batch 29.8.5 — the chip became a toggle button that
+    // opens an inline <PermissionsRollupSummary> rather than
+    // navigating away. The deep-link path is now under the summary's
+    // explicit "Open full editor" link.
     test.skip(
       custom === null,
       "no seed user with overrides and seeding failed",
@@ -237,8 +241,8 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     const t = custom!;
 
     await loginAs(page, DEMO_USERS.super);
-    // Click the chip from the Customer Users tab to prove the deep-
-    // link works from a different surface (not just the Permissions
+    // Click the chip from the Customer Users tab to prove the toggle
+    // works from a different surface (not just the Permissions
     // page itself).
     await page.goto(`/admin/customers/${t.customerId}/users`);
 
@@ -248,6 +252,13 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     await expect(chip).toBeVisible({ timeout: 10_000 });
 
     await chip.click();
+
+    const openFull = page.locator(
+      `[data-testid="permissions-rollup-summary-open-full-${t.userId}-${t.customerId}"]`,
+    );
+    await expect(openFull).toBeVisible({ timeout: 10_000 });
+
+    await openFull.click();
 
     await page.waitForURL(
       (url) =>
@@ -277,9 +288,13 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
     await expect(chip).toHaveClass(/permissions-rollup-chip/);
   });
 
-  test("User detail page chip carries the 29.6 locked testid and links to the customer's Permissions page", async ({
+  test("User detail page chip carries the 29.6 locked testid and toggles the inline summary", async ({
     page,
   }) => {
+    // Sprint 29 Batch 29.8.5 — the chip became a toggle button. The
+    // 29.6 testid contract holds (via the `testId` prop), but href
+    // is no longer set; the deep-link moved to the summary's
+    // "Open full editor" link.
     const t = custom ?? defaultTarget;
     test.skip(t === null, "no targets available");
 
@@ -290,17 +305,30 @@ test.describe("Sprint 29 Batch 29.7 — permissions rollup chip", () => {
       page.locator('[data-testid="user-detail-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
-    // 29.6 contract: the per-customer link on the Customer access
+    // 29.6 contract: the per-customer chip on the Customer access
     // card MUST still expose
     // `user-detail-permissions-link-<customerId>`. 29.7 retains the
-    // testid via the chip's `testId` prop.
-    const link = page.locator(
+    // testid via the chip's `testId` prop; 29.8.5 keeps it.
+    const chip = page.locator(
       `[data-testid="user-detail-permissions-link-${t!.customerId}"]`,
     );
-    await expect(link).toBeVisible({ timeout: 10_000 });
-    await expect(link).toHaveClass(/permissions-rollup-chip/);
+    await expect(chip).toBeVisible({ timeout: 10_000 });
+    await expect(chip).toHaveClass(/permissions-rollup-chip/);
 
-    const href = await link.getAttribute("href");
+    // 29.8.5 — clicking the chip opens the inline summary panel
+    // instead of navigating away.
+    await chip.click();
+    const summary = page.locator(
+      `[data-testid="permissions-rollup-summary-${t!.userId}-${t!.customerId}"]`,
+    );
+    await expect(summary).toBeVisible({ timeout: 10_000 });
+
+    // The summary's "Open full editor" link is the new deep-link
+    // affordance and points at the same Permissions page URL.
+    const openFull = page.locator(
+      `[data-testid="permissions-rollup-summary-open-full-${t!.userId}-${t!.customerId}"]`,
+    );
+    const href = await openFull.getAttribute("href");
     expect(href).toBe(
       `/admin/customers/${t!.customerId}/permissions?focus_user=${t!.userId}`,
     );

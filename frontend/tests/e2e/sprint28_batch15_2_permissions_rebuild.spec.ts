@@ -126,9 +126,13 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await expect(saveBar).toHaveCount(0);
   });
 
-  test("custom-permissions button opens drawer with 16 override rows", async ({
+  test("custom-permissions pill toggles inline panel; Edit opens drawer with 16 override rows", async ({
     page,
   }) => {
+    // Sprint 29 Batch 29.8.5 — the pill now toggles the inline
+    // AccessPermissionsPanel; the drawer opens behind an explicit
+    // "Edit overrides" button inside the panel. The pill's locked
+    // testid is preserved.
     const sa = await apiAs(DEMO_USERS.super.email);
     const id = await resolveFirstCustomerId(sa);
     await sa.dispose();
@@ -142,7 +146,16 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await expect(firstOverridesButton).toBeVisible({ timeout: 10_000 });
     await firstOverridesButton.click();
 
-    // Drawer opens.
+    // 29.8.5 — inline panel opens (drawer does NOT auto-open).
+    const panel = page
+      .locator('[data-testid^="access-permissions-panel-"]')
+      .first();
+    await expect(panel).toBeVisible();
+
+    // Click the panel's Edit button -> drawer opens.
+    await panel
+      .locator('[data-testid^="access-permissions-edit-"]')
+      .click();
     await expect(
       page.locator('[data-testid="section-customer-overrides-editor"]'),
     ).toBeVisible();
@@ -168,8 +181,13 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
 
+    // 29.8.5 — toggle inline panel then click Edit to reach the drawer.
     await page
       .locator('[data-testid="customer-access-overrides-button"]')
+      .first()
+      .click();
+    await page
+      .locator('[data-testid^="access-permissions-edit-"]')
       .first()
       .click();
 
@@ -197,8 +215,13 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
 
+    // 29.8.5 — toggle inline panel then click Edit to reach the drawer.
     await page
       .locator('[data-testid="customer-access-overrides-button"]')
+      .first()
+      .click();
+    await page
+      .locator('[data-testid^="access-permissions-edit-"]')
       .first()
       .click();
 

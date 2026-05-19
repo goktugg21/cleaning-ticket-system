@@ -652,6 +652,14 @@ export type ExtraWorkStatus =
   | "UNDER_REVIEW"
   | "PRICING_PROPOSED"
   | "CUSTOMER_APPROVED"
+  // Sprint 29 Batch 29.8 — operational segment. CUSTOMER_APPROVED is
+  // no longer terminal; the request progresses through IN_PROGRESS
+  // (driven either by the auto-sync hook on the first spawned-ticket
+  // IN_PROGRESS transition, or by a provider manual transition) into
+  // COMPLETED (auto when all spawned tickets are terminal, or
+  // provider manual).
+  | "IN_PROGRESS"
+  | "COMPLETED"
   | "CUSTOMER_REJECTED"
   | "CANCELLED";
 

@@ -67,6 +67,8 @@
   "create.error_building_customer_required": "Building and customer must both be selected.",
   "create.error_category_other_required": "Please describe the unlisted category in the Other field.",
   "create.error_no_access": "No accessible building or customer. Ask your administrator to give you access.",
+  "create.warning_catalog_empty": "No services are configured yet. An admin needs to set up the service catalog before Extra Work can be created.",
+  "create.warning_catalog_unavailable": "The service catalog could not be loaded. Please refresh in a moment or contact support.",
   "create.error_empty_cart": "Add at least one service to the cart before submitting.",
   "create.error_duplicate_service": "Each service can only appear once in the cart. Remove the duplicate.",
   "create.error_inactive_service": "This service is no longer available.",
@@ -172,6 +174,18 @@
   "detail.reject_dialog_cancel": "Cancel",
   "detail.reject_dialog_required": "A reason is required.",
 
+  "detail.spawned_tickets_title": "Spawned tickets",
+  "detail.spawned_tickets_desc": "Operational work generated from this Extra Work approval.",
+  "detail.spawned_tickets_empty": "No tickets have been spawned from this Extra Work yet.",
+
+  "detail.cancel_dialog_title": "Cancel this Extra Work?",
+  "detail.cancel_dialog_body": "This will move the request to Cancelled and write the status change to the audit log.",
+  "detail.cancel_dialog_confirm": "Cancel Extra Work",
+  "detail.cancel_dialog_keep": "Keep open",
+  "detail.cancel_dialog_spawned_warning_title_one": "1 active ticket will remain after cancellation",
+  "detail.cancel_dialog_spawned_warning_title_other": "{{count}} active tickets will remain after cancellation",
+  "detail.cancel_dialog_spawned_warning_desc": "Cancelling this Extra Work does not cancel its spawned tickets — those continue to be operational work. Close or approve them separately.",
+
   "category.deep_cleaning": "Deep cleaning",
   "category.window_cleaning": "Window cleaning",
   "category.floor_maintenance": "Floor maintenance",
@@ -190,6 +204,8 @@
   "status.under_review": "Under review",
   "status.pricing_proposed": "Pricing proposed",
   "status.customer_approved": "Customer approved",
+  "status.in_progress": "In progress",
+  "status.completed": "Completed",
   "status.customer_rejected": "Customer rejected",
   "status.cancelled": "Cancelled",
 
@@ -199,5 +215,6 @@
   "unit_type.item": "Per item",
   "unit_type.other": "Other"
 }
+
 
 

@@ -15,6 +15,11 @@ import {
   resolveEffective,
   type OverrideDraftValue,
 } from "./effectiveResolver";
+import {
+  PERMISSION_GROUP_LABEL_KEY,
+  PERMISSION_KEY_ROWS,
+  type PermissionKeyRow,
+} from "./permissionKeyLabels";
 
 /**
  * Sprint 28 Batch 15.2 — Right-side drawer that replaces the inline
@@ -30,40 +35,14 @@ import {
  *   - customer-overrides-radio (3 per row; value = inherit|allow|deny)
  *   - customer-overrides-close
  *   - customer-overrides-save
+ *
+ * Sprint 29 Batch 29.8.5 — the (key, group) table + per-group i18n
+ * pointer moved to `./permissionKeyLabels` so the new inline
+ * AccessPermissionsPanel can reuse the exact same shape without
+ * duplicating the list.
  */
 
-interface KeyRow {
-  key: CustomerPermissionKey;
-  group: "tickets" | "extra_work" | "users";
-}
-
-const KEY_ROWS: ReadonlyArray<KeyRow> = [
-  // Tickets (6)
-  { key: "customer.ticket.create", group: "tickets" },
-  { key: "customer.ticket.view_own", group: "tickets" },
-  { key: "customer.ticket.view_location", group: "tickets" },
-  { key: "customer.ticket.view_company", group: "tickets" },
-  { key: "customer.ticket.approve_own", group: "tickets" },
-  { key: "customer.ticket.approve_location", group: "tickets" },
-  // Extra Work (6)
-  { key: "customer.extra_work.create", group: "extra_work" },
-  { key: "customer.extra_work.view_own", group: "extra_work" },
-  { key: "customer.extra_work.view_location", group: "extra_work" },
-  { key: "customer.extra_work.view_company", group: "extra_work" },
-  { key: "customer.extra_work.approve_own", group: "extra_work" },
-  { key: "customer.extra_work.approve_location", group: "extra_work" },
-  // Users (4)
-  { key: "customer.users.invite", group: "users" },
-  { key: "customer.users.manage", group: "users" },
-  { key: "customer.users.assign_location_role", group: "users" },
-  { key: "customer.users.manage_permissions", group: "users" },
-];
-
-const GROUP_LABEL_KEY: Record<KeyRow["group"], string> = {
-  tickets: "customer_permissions.permission_groups.tickets",
-  extra_work: "customer_permissions.permission_groups.extra_work",
-  users: "customer_permissions.permission_groups.users",
-};
+type KeyRow = PermissionKeyRow;
 
 export type OverrideDraft = Record<CustomerPermissionKey, OverrideDraftValue>;
 
@@ -165,7 +144,7 @@ export function OverrideDrawer({
       extra_work: [],
       users: [],
     };
-    for (const row of KEY_ROWS) grouped[row.group].push(row);
+    for (const row of PERMISSION_KEY_ROWS) grouped[row.group].push(row);
     return grouped;
   }, []);
 
@@ -249,7 +228,7 @@ export function OverrideDrawer({
               {(["tickets", "extra_work", "users"] as const).map((group) => (
                 <OverrideGroup
                   key={group}
-                  groupLabel={t(GROUP_LABEL_KEY[group])}
+                  groupLabel={t(PERMISSION_GROUP_LABEL_KEY[group])}
                   rows={groupedRows[group]}
                   draft={draft}
                   policy={policy}

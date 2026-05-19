@@ -67,6 +67,8 @@
   "create.error_building_customer_required": "Gebouw en klant moeten beide geselecteerd zijn.",
   "create.error_category_other_required": "Beschrijf de niet-gelijste categorie in het veld 'Andere'.",
   "create.error_no_access": "Geen toegankelijk gebouw of klant. Vraag uw beheerder om toegang.",
+  "create.warning_catalog_empty": "Er zijn nog geen diensten geconfigureerd. Een beheerder moet de dienstencatalogus opzetten voordat Extra Werk kan worden aangevraagd.",
+  "create.warning_catalog_unavailable": "De dienstencatalogus kon niet worden geladen. Vernieuw over een moment of neem contact op met support.",
   "create.error_empty_cart": "Voeg ten minste één dienst toe aan het winkelmandje voordat u indient.",
   "create.error_duplicate_service": "Elke dienst mag slechts één keer in het winkelmandje voorkomen. Verwijder het duplicaat.",
   "create.error_inactive_service": "Deze dienst is niet meer beschikbaar.",
@@ -172,6 +174,18 @@
   "detail.reject_dialog_cancel": "Annuleren",
   "detail.reject_dialog_required": "Een reden is verplicht.",
 
+  "detail.spawned_tickets_title": "Aangemaakte tickets",
+  "detail.spawned_tickets_desc": "Operationeel werk voortkomend uit goedkeuring van dit Extra Werk.",
+  "detail.spawned_tickets_empty": "Er zijn nog geen tickets aangemaakt voor dit Extra Werk.",
+
+  "detail.cancel_dialog_title": "Dit Extra Werk annuleren?",
+  "detail.cancel_dialog_body": "Hiermee wordt de aanvraag op Geannuleerd gezet en de wijziging vastgelegd in het auditlog.",
+  "detail.cancel_dialog_confirm": "Extra Werk annuleren",
+  "detail.cancel_dialog_keep": "Openhouden",
+  "detail.cancel_dialog_spawned_warning_title_one": "Na annulering blijft 1 actief ticket bestaan",
+  "detail.cancel_dialog_spawned_warning_title_other": "Na annulering blijven {{count}} actieve tickets bestaan",
+  "detail.cancel_dialog_spawned_warning_desc": "Door dit Extra Werk te annuleren worden de aangemaakte tickets niet automatisch geannuleerd — die blijven operationeel werk. Sluit of keur ze los af.",
+
   "category.deep_cleaning": "Grondige reiniging",
   "category.window_cleaning": "Glazenwasserij",
   "category.floor_maintenance": "Vloeronderhoud",
@@ -190,6 +204,8 @@
   "status.under_review": "In behandeling",
   "status.pricing_proposed": "Prijs voorgesteld",
   "status.customer_approved": "Klant goedgekeurd",
+  "status.in_progress": "In uitvoering",
+  "status.completed": "Voltooid",
   "status.customer_rejected": "Klant afgewezen",
   "status.cancelled": "Geannuleerd",
 
@@ -199,5 +215,6 @@
   "unit_type.item": "Per stuk",
   "unit_type.other": "Anders"
 }
+
 
 

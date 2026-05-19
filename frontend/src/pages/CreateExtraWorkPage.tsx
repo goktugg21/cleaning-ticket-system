@@ -139,6 +139,13 @@ export function CreateExtraWorkPage() {
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Sprint 29 Batch 29.8.5 — soft warning channel used when the service
+  // catalog endpoint succeeds but is empty, OR when it errors. Either
+  // case still lets the form render (buildings + customers carry the
+  // hard scope contract); without a service the user cannot submit
+  // the cart, but the dropdowns still appear so they can see what they
+  // would normally pick from.
+  const [catalogWarning, setCatalogWarning] = useState("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
   const [cartLines, setCartLines] = useState<CartLineState[]>([emptyCartLine()]);
 
@@ -149,48 +156,76 @@ export function CreateExtraWorkPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      try {
-        const [buildingResponse, customerResponse, servicesResponse] =
-          await Promise.all([
-            api.get<PaginatedResponse<Building>>("/buildings/", {
-              params: { page_size: 200 },
-            }),
-            api.get<PaginatedResponse<Customer>>("/customers/", {
-              params: { page_size: 200 },
-            }),
-            // Sprint 28 Batch 5 — reuse the catalog helper. Only active
-            // services are eligible for the cart.
-            listServices({ is_active: true }),
-          ]);
-        if (cancelled) return;
-        setBuildings(buildingResponse.data.results);
-        setCustomers(customerResponse.data.results);
-        setServices(servicesResponse);
+      // Sprint 29 Batch 29.8.5 — split the three mount fetches into
+      // independent settle paths. Buildings and customers are the
+      // hard scope contract: without them there is nothing to render.
+      // Services are soft-required: a 4xx/5xx (e.g. an admin who hasn't
+      // seeded the catalog yet) downgrades to a yellow warning instead
+      // of blocking the form, so STAFF/CUSTOMER_USER personas don't get
+      // stuck behind a backend hiccup.
+      const [buildingResult, customerResult, servicesResult] =
+        await Promise.allSettled([
+          api.get<PaginatedResponse<Building>>("/buildings/", {
+            params: { page_size: 200 },
+          }),
+          api.get<PaginatedResponse<Customer>>("/customers/", {
+            params: { page_size: 200 },
+          }),
+          // Sprint 28 Batch 5 — reuse the catalog helper. Only active
+          // services are eligible for the cart.
+          listServices({ is_active: true }),
+        ]);
+      if (cancelled) return;
 
-        const firstBuilding = buildingResponse.data.results[0];
-        const firstCustomer = firstBuilding
-          ? customerResponse.data.results.find((customer) =>
-              customerMatchesBuilding(customer, firstBuilding.id),
-            )
-          : undefined;
-        setForm((current) => ({
-          ...current,
-          building:
-            current.building || (firstBuilding ? String(firstBuilding.id) : ""),
-          customer:
-            current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
-        }));
-      } catch (err) {
-        if (!cancelled) setError(getApiError(err));
-      } finally {
-        if (!cancelled) setLoadingOptions(false);
+      // Hard-required: buildings.
+      if (buildingResult.status === "rejected") {
+        setError(getApiError(buildingResult.reason));
+        setLoadingOptions(false);
+        return;
       }
+      // Hard-required: customers.
+      if (customerResult.status === "rejected") {
+        setError(getApiError(customerResult.reason));
+        setLoadingOptions(false);
+        return;
+      }
+
+      const buildingResults = buildingResult.value.data.results;
+      const customerResults = customerResult.value.data.results;
+      setBuildings(buildingResults);
+      setCustomers(customerResults);
+
+      // Soft-required: services.
+      if (servicesResult.status === "fulfilled") {
+        setServices(servicesResult.value);
+        if (servicesResult.value.length === 0) {
+          setCatalogWarning(t("create.warning_catalog_empty"));
+        }
+      } else {
+        setServices([]);
+        setCatalogWarning(t("create.warning_catalog_unavailable"));
+      }
+
+      const firstBuilding = buildingResults[0];
+      const firstCustomer = firstBuilding
+        ? customerResults.find((customer) =>
+            customerMatchesBuilding(customer, firstBuilding.id),
+          )
+        : undefined;
+      setForm((current) => ({
+        ...current,
+        building:
+          current.building || (firstBuilding ? String(firstBuilding.id) : ""),
+        customer:
+          current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
+      }));
+      setLoadingOptions(false);
     }
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   const filteredCustomers = useMemo(() => {
     if (!form.building) return customers;
@@ -432,6 +467,17 @@ export function CreateExtraWorkPage() {
       {noOptions && !error && (
         <div className="alert-error" style={{ marginBottom: 16 }}>
           {t("create.error_no_access")}
+        </div>
+      )}
+
+      {catalogWarning && (
+        <div
+          className="alert-warning"
+          style={{ marginBottom: 16 }}
+          role="status"
+          data-testid="create-ew-catalog-warning"
+        >
+          {catalogWarning}
         </div>
       )}
 

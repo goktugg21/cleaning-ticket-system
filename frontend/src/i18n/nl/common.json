@@ -87,6 +87,8 @@
   "extra_work_status.under_review": "In behandeling",
   "extra_work_status.pricing_proposed": "Prijsvoorstel",
   "extra_work_status.customer_approved": "Klant akkoord",
+  "extra_work_status.in_progress": "In uitvoering",
+  "extra_work_status.completed": "Voltooid",
   "extra_work_status.customer_rejected": "Klant geweigerd",
   "extra_work_status.cancelled": "Geannuleerd",
   "extra_work_status.fallback": "Onbekende status",
@@ -883,6 +885,24 @@
   "customer_permissions.overrides_drawer.close": "Sluiten",
   "customer_permissions.overrides_drawer.self_warning": "Je kunt je eigen toegang niet bewerken. Wissel van gebruiker om hier wijzigingen te maken.",
   "customer_permissions.overrides_drawer.inactive_warning": "Deze toegang is momenteel inactief — elk recht resulteert in Weigeren totdat je het opnieuw activeert.",
+  "customer_permissions.access_panel.title": "Effectieve permissies op {{building}}",
+  "customer_permissions.access_panel.aria_label": "Effectieve permissies op {{building}}",
+  "customer_permissions.access_panel.edit_button": "Overrides bewerken",
+  "customer_permissions.access_panel.collapse": "Inklappen",
+  "customer_permissions.access_panel.reason_override_granted": "Toegekend via override",
+  "customer_permissions.access_panel.reason_override_denied": "Geweigerd via override",
+  "customer_permissions.access_panel.reason_policy_denied": "Geweigerd door klantbeleid",
+  "customer_permissions.access_panel.reason_role_default_granted": "Rolstandaard",
+  "customer_permissions.access_panel.reason_role_default_denied": "Niet toegekend door rol",
+  "permissions_rollup.summary_title": "Permissies voor {{user}} bij {{customer}}",
+  "permissions_rollup.summary_collapse": "Inklappen",
+  "permissions_rollup.summary_open_full": "Volledige editor openen",
+  "permissions_rollup.summary_empty": "Nog geen gebouwtoegang.",
+  "permissions_rollup.summary_loading": "Permissies laden…",
+  "permissions_rollup.summary_overrides_zero": "Geen overrides",
+  "permissions_rollup.summary_overrides_one": "1 override",
+  "permissions_rollup.summary_overrides_other": "{{count}} overrides",
+  "permissions_rollup.summary_edit_row": "Bewerken",
   "customer_permissions.toast_policy_saved": "Beleid opgeslagen",
   "customer_permissions.toast_overrides_saved": "Rechten opgeslagen",
   "customer_permissions.toast_access_role_saved": "Sub-rol bijgewerkt",
@@ -990,6 +1010,8 @@
   "permissions_rollup.aria_custom_one": "1 aangepaste permissie. Klik om te bekijken.",
   "permissions_rollup.aria_custom_other": "{{count}} aangepaste permissies. Klik om te bekijken."
 }
+
+
 
 
 

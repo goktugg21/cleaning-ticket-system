@@ -87,6 +87,8 @@
   "extra_work_status.under_review": "Under review",
   "extra_work_status.pricing_proposed": "Pricing proposed",
   "extra_work_status.customer_approved": "Customer approved",
+  "extra_work_status.in_progress": "In progress",
+  "extra_work_status.completed": "Completed",
   "extra_work_status.customer_rejected": "Customer rejected",
   "extra_work_status.cancelled": "Cancelled",
   "extra_work_status.fallback": "Unknown status",
@@ -883,6 +885,24 @@
   "customer_permissions.overrides_drawer.close": "Close",
   "customer_permissions.overrides_drawer.self_warning": "You cannot edit your own access. Switch users to make changes here.",
   "customer_permissions.overrides_drawer.inactive_warning": "This access is currently inactive — every key resolves to Deny until you re-activate it.",
+  "customer_permissions.access_panel.title": "Effective permissions at {{building}}",
+  "customer_permissions.access_panel.aria_label": "Effective permissions at {{building}}",
+  "customer_permissions.access_panel.edit_button": "Edit overrides",
+  "customer_permissions.access_panel.collapse": "Collapse",
+  "customer_permissions.access_panel.reason_override_granted": "Granted by override",
+  "customer_permissions.access_panel.reason_override_denied": "Denied by override",
+  "customer_permissions.access_panel.reason_policy_denied": "Denied by customer policy",
+  "customer_permissions.access_panel.reason_role_default_granted": "Role default",
+  "customer_permissions.access_panel.reason_role_default_denied": "Not granted by role",
+  "permissions_rollup.summary_title": "Permissions for {{user}} at {{customer}}",
+  "permissions_rollup.summary_collapse": "Collapse",
+  "permissions_rollup.summary_open_full": "Open full editor",
+  "permissions_rollup.summary_empty": "No building access yet.",
+  "permissions_rollup.summary_loading": "Loading permissions…",
+  "permissions_rollup.summary_overrides_zero": "No overrides",
+  "permissions_rollup.summary_overrides_one": "1 override",
+  "permissions_rollup.summary_overrides_other": "{{count}} overrides",
+  "permissions_rollup.summary_edit_row": "Edit",
   "customer_permissions.toast_policy_saved": "Policy saved",
   "customer_permissions.toast_overrides_saved": "Permissions saved",
   "customer_permissions.toast_access_role_saved": "Access role updated",
@@ -990,6 +1010,8 @@
   "permissions_rollup.aria_custom_one": "1 custom permission override. Click to view.",
   "permissions_rollup.aria_custom_other": "{{count}} custom permission overrides. Click to view."
 }
+
+
 
 
 

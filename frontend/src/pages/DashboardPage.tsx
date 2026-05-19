@@ -64,6 +64,9 @@ const EXTRA_WORK_STATUS_KEY: Record<ExtraWorkStatusValue, string> = {
   UNDER_REVIEW: "extra_work_status_under_review",
   PRICING_PROPOSED: "extra_work_status_pricing_proposed",
   CUSTOMER_APPROVED: "extra_work_status_customer_approved",
+  // Sprint 29 Batch 29.8 — operational segment dashboard labels.
+  IN_PROGRESS: "extra_work_status_in_progress",
+  COMPLETED: "extra_work_status_completed",
   CUSTOMER_REJECTED: "extra_work_status_customer_rejected",
   CANCELLED: "extra_work_status_cancelled",
 };

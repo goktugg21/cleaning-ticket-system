@@ -106,19 +106,23 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
         self.assertIn("Inactive Cat", names_inactive)
         self.assertNotIn("Active Cat", names_inactive)
 
-    def test_building_manager_blocked_on_every_endpoint(self):
+    def test_building_manager_blocked_on_write_endpoints(self):
+        """Sprint 29 Batch 29.8.5 — BM can GET (catalog is reference
+        data the EW create form needs to populate) but is blocked
+        from every write endpoint."""
         cat = ServiceCategory.objects.create(name="Existing")
         self.authenticate(self.manager)
         list_resp = self.client.get(CATEGORY_LIST_URL)
-        self.assertEqual(list_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+        retrieve_resp = self.client.get(
+            CATEGORY_DETAIL_URL.format(cat_id=cat.id)
+        )
+        self.assertEqual(retrieve_resp.status_code, status.HTTP_200_OK)
+
         create_resp = self.client.post(
             CATEGORY_LIST_URL, {"name": "Nope"}, format="json"
         )
         self.assertEqual(create_resp.status_code, status.HTTP_403_FORBIDDEN)
-        retrieve_resp = self.client.get(
-            CATEGORY_DETAIL_URL.format(cat_id=cat.id)
-        )
-        self.assertEqual(retrieve_resp.status_code, status.HTTP_403_FORBIDDEN)
         patch_resp = self.client.patch(
             CATEGORY_DETAIL_URL.format(cat_id=cat.id),
             {"description": "Hijack"},
@@ -130,21 +134,33 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
         )
         self.assertEqual(delete_resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_customer_user_blocked_on_every_endpoint(self):
+    def test_customer_user_can_read_blocked_on_writes(self):
+        """Sprint 29 Batch 29.8.5 — CUSTOMER_USER GETs catalog (needed
+        by the EW create form's category dropdown); writes are
+        still 403."""
         cat = ServiceCategory.objects.create(name="Existing")
         self.authenticate(self.customer_user)
         list_resp = self.client.get(CATEGORY_LIST_URL)
-        self.assertEqual(list_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
         retrieve_resp = self.client.get(
             CATEGORY_DETAIL_URL.format(cat_id=cat.id)
         )
-        self.assertEqual(retrieve_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(retrieve_resp.status_code, status.HTTP_200_OK)
+        create_resp = self.client.post(
+            CATEGORY_LIST_URL, {"name": "Nope"}, format="json"
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_staff_role_blocked_on_every_endpoint(self):
+    def test_staff_role_can_read_blocked_on_writes(self):
+        """Sprint 29 Batch 29.8.5 — STAFF can GET catalog; cannot write."""
         staff_user = self.make_user("staff-cat@example.com", UserRole.STAFF)
         self.authenticate(staff_user)
         list_resp = self.client.get(CATEGORY_LIST_URL)
-        self.assertEqual(list_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+        create_resp = self.client.post(
+            CATEGORY_LIST_URL, {"name": "Nope"}, format="json"
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class ServiceCrudTests(TenantFixtureMixin, APITestCase):
@@ -300,7 +316,8 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("default_unit_price", response.data)
 
-    def test_building_manager_blocked_on_every_endpoint(self):
+    def test_building_manager_blocked_on_service_writes(self):
+        """Sprint 29 Batch 29.8.5 — BM can GET Service rows; cannot write."""
         svc = Service.objects.create(
             category=self.cat_a,
             name="Existing Svc",
@@ -308,8 +325,16 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
             default_unit_price=Decimal("10.00"),
         )
         self.authenticate(self.manager)
+        # GETs now succeed.
+        self.assertEqual(
+            self.client.get(SERVICE_LIST_URL).status_code, status.HTTP_200_OK
+        )
+        self.assertEqual(
+            self.client.get(SERVICE_DETAIL_URL.format(svc_id=svc.id)).status_code,
+            status.HTTP_200_OK,
+        )
+        # Writes still blocked.
         for resp in (
-            self.client.get(SERVICE_LIST_URL),
             self.client.post(
                 SERVICE_LIST_URL,
                 {
@@ -320,7 +345,6 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
                 },
                 format="json",
             ),
-            self.client.get(SERVICE_DETAIL_URL.format(svc_id=svc.id)),
             self.client.patch(
                 SERVICE_DETAIL_URL.format(svc_id=svc.id),
                 {"description": "hijack"},
@@ -330,7 +354,9 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         ):
             self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_customer_user_blocked_on_every_endpoint(self):
+    def test_customer_user_can_read_service_blocked_on_writes(self):
+        """Sprint 29 Batch 29.8.5 — CUSTOMER_USER can GET Service rows
+        (needed by EW create form); cannot write."""
         svc = Service.objects.create(
             category=self.cat_a,
             name="Existing Svc",
@@ -339,11 +365,22 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         )
         self.authenticate(self.customer_user)
         list_resp = self.client.get(SERVICE_LIST_URL)
-        self.assertEqual(list_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
         retrieve_resp = self.client.get(
             SERVICE_DETAIL_URL.format(svc_id=svc.id)
         )
-        self.assertEqual(retrieve_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(retrieve_resp.status_code, status.HTTP_200_OK)
+        create_resp = self.client.post(
+            SERVICE_LIST_URL,
+            {
+                "category": self.cat_a.id,
+                "name": "Nope",
+                "unit_type": ExtraWorkPricingUnitType.HOURS,
+                "default_unit_price": "1.00",
+            },
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class ServiceCategoryProtectsServiceTests(TenantFixtureMixin, APITestCase):

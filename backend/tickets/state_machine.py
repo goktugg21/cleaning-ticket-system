@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -7,6 +9,9 @@ from companies.models import CompanyUserMembership
 from customers.models import CustomerUserBuildingAccess
 
 from .models import Ticket, TicketStatus, TicketStatusHistory
+
+
+logger = logging.getLogger(__name__)
 
 
 # Sprint 25C — OSIUS staff completion-evidence rule.
@@ -357,7 +362,136 @@ def apply_transition(
         is_override=is_override,
         override_reason=override_reason if is_override else "",
     )
+
+    # Sprint 29 Batch 29.8 — sync parent EW state.
+    _sync_parent_extra_work_after_ticket_transition(locked, old_status, to_status)
+
     return locked
+
+
+def _sync_parent_extra_work_after_ticket_transition(
+    ticket, old_status, new_status
+):
+    """
+    Sprint 29 Batch 29.8 — auto-sync hook.
+
+    Called from inside `apply_transition` AFTER the Ticket row has been
+    saved and the TicketStatusHistory row has been written. Resolves
+    the ticket's parent ExtraWorkRequest (via either the cart-item
+    `extra_work_request_item` FK or the proposal-line FK chain) and
+    advances the EW status when the operational rules below fire:
+
+      1. Ticket entered IN_PROGRESS AND parent EW is CUSTOMER_APPROVED
+         -> drive EW to IN_PROGRESS (system, user=None).
+      2. Ticket entered a terminal state (APPROVED or CLOSED) AND
+         parent EW is IN_PROGRESS AND every sibling-ticket of the EW
+         (across BOTH spawn paths) is in {APPROVED, CLOSED} -> drive
+         EW to COMPLETED.
+
+    By design this helper NEVER re-raises. Any exception is logged
+    (`logger.exception`) and swallowed; a transient EW sync failure
+    must not roll back a successful ticket transition. The
+    `extra_work.state_machine.apply_transition` call itself is
+    `@transaction.atomic`-wrapped, so the EW state mutation + EW
+    history row remain atomic with respect to each other.
+    """
+    try:
+        # Inline imports defend against circular import risk between
+        # the tickets and extra_work apps.
+        from extra_work.models import ExtraWorkRequest, ExtraWorkStatus
+        from extra_work.state_machine import (
+            apply_transition as ew_apply_transition,
+        )
+
+        ew_id = None
+        if ticket.extra_work_request_item_id is not None:
+            # Cart-item path.
+            ew_id = (
+                Ticket.objects.filter(pk=ticket.pk)
+                .values_list(
+                    "extra_work_request_item__extra_work_request_id",
+                    flat=True,
+                )
+                .first()
+            )
+        if ew_id is None and ticket.proposal_line_id is not None:
+            # Proposal-line path.
+            ew_id = (
+                Ticket.objects.filter(pk=ticket.pk)
+                .values_list(
+                    "proposal_line__proposal__extra_work_request_id",
+                    flat=True,
+                )
+                .first()
+            )
+
+        if ew_id is None:
+            return  # Ticket is not parented by any EW; nothing to sync.
+
+        ew = ExtraWorkRequest.objects.filter(
+            pk=ew_id, deleted_at__isnull=True
+        ).first()
+        if ew is None:
+            return  # Parent EW soft-deleted or missing; bail quietly.
+
+        # Rule 1: first ticket going IN_PROGRESS while EW is
+        # CUSTOMER_APPROVED advances EW to IN_PROGRESS.
+        if (
+            str(new_status) == str(TicketStatus.IN_PROGRESS)
+            and ew.status == ExtraWorkStatus.CUSTOMER_APPROVED
+        ):
+            ew_apply_transition(
+                ew,
+                None,
+                ExtraWorkStatus.IN_PROGRESS,
+                note=(
+                    "Auto-advanced by ticket transition to IN_PROGRESS "
+                    "(Sprint 29 Batch 29.8)."
+                ),
+            )
+            return
+
+        # Rule 2: ticket becoming terminal + EW in IN_PROGRESS + all
+        # siblings terminal -> EW to COMPLETED. Sibling enumeration
+        # spans both spawn paths and uses set() for natural de-dup.
+        terminal_ticket_statuses = {
+            str(TicketStatus.APPROVED),
+            str(TicketStatus.CLOSED),
+        }
+        if (
+            str(new_status) in terminal_ticket_statuses
+            and ew.status == ExtraWorkStatus.IN_PROGRESS
+        ):
+            sibling_qs = Ticket.objects.filter(
+                extra_work_request_item__extra_work_request_id=ew.id
+            ) | Ticket.objects.filter(
+                proposal_line__proposal__extra_work_request_id=ew.id
+            )
+            sibling_statuses = set(
+                sibling_qs.values_list("status", flat=True)
+            )
+            # Empty sibling set is impossible — the current ticket is
+            # in the set. If every sibling is terminal we advance.
+            if sibling_statuses and sibling_statuses.issubset(
+                terminal_ticket_statuses
+            ):
+                ew_apply_transition(
+                    ew,
+                    None,
+                    ExtraWorkStatus.COMPLETED,
+                    note=(
+                        "Auto-advanced by all spawned tickets reaching "
+                        "a terminal state (Sprint 29 Batch 29.8)."
+                    ),
+                )
+    except Exception:  # noqa: BLE001 — never break ticket transitions.
+        logger.exception(
+            "Sprint 29 Batch 29.8 EW auto-sync failed for ticket %s "
+            "(old=%s, new=%s); swallowing.",
+            getattr(ticket, "pk", "?"),
+            old_status,
+            new_status,
+        )
 
 
 def allowed_next_statuses(user, ticket):

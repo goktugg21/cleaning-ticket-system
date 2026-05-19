@@ -16,6 +16,8 @@ import type {
   ExtraWorkStatusHistoryEntry,
   PaginatedResponse,
   Proposal,
+  TicketDetail,
+  TicketList,
 } from "./types";
 
 export async function listExtraWork(): Promise<
@@ -167,4 +169,63 @@ export async function fetchProposalPdf(
   );
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 29 Batch 29.8 — spawned-tickets discovery helper.
+//
+// The backend exposes the spawn linkage as
+// `Ticket.extra_work_request_item -> ExtraWorkRequestItem.extra_work_request`,
+// but neither `TicketFilter` (no `extra_work_request_item__*` filter) nor
+// `TicketListSerializer` (no `extra_work_origin` field) admits a direct
+// query. The detail serializer DOES expose `extra_work_origin` with the
+// parent EW id, so we narrow the candidate set with the available
+// `customer` + `building` filters (these are guaranteed to match for any
+// spawned ticket — the spawn helpers inherit both from the parent EW),
+// then resolve each candidate via `GET /api/tickets/<id>/` and keep the
+// ones whose `extra_work_origin.extra_work_request_id` matches.
+//
+// This is intentionally limited to scopes the calling user can see:
+// `scope_tickets_for` already filters the list, and the detail call
+// returns 403/404 for out-of-scope ids. Any per-id failure is treated
+// as "not a spawned ticket" and silently skipped so a partial result
+// still renders.
+//
+// Test debt (Sprint 29 Batch 29.8): this is a client-side N+1 walk. A
+// future backend slot should add either a `TicketFilter.extra_work_request`
+// filter or a dedicated `/api/extra-work/<id>/spawned-tickets/` endpoint
+// and the helper should be collapsed to a single call.
+export async function listSpawnedTickets(
+  ewId: number,
+  customerId: number,
+  buildingId: number,
+): Promise<TicketList[]> {
+  const candidateResponse = await api.get<PaginatedResponse<TicketList>>(
+    "/tickets/",
+    {
+      params: {
+        customer: customerId,
+        building: buildingId,
+        page_size: 100,
+      },
+    },
+  );
+  const candidates = candidateResponse.data.results;
+  const matched: TicketList[] = [];
+  for (const candidate of candidates) {
+    try {
+      const detailResponse = await api.get<TicketDetail>(
+        `/tickets/${candidate.id}/`,
+      );
+      const origin = detailResponse.data.extra_work_origin;
+      if (origin && origin.extra_work_request_id === ewId) {
+        matched.push(candidate);
+      }
+    } catch {
+      // Out-of-scope or missing detail — skip silently; the panel
+      // renders whatever resolved successfully.
+    }
+  }
+  return matched;
+}
+
 

@@ -79,6 +79,8 @@
   "extra_work_status_under_review": "Under review",
   "extra_work_status_pricing_proposed": "Pricing proposed",
   "extra_work_status_customer_approved": "Approved",
+  "extra_work_status_in_progress": "In progress",
+  "extra_work_status_completed": "Completed",
   "extra_work_status_customer_rejected": "Rejected",
   "extra_work_status_cancelled": "Cancelled",
 

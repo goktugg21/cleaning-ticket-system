@@ -69,18 +69,32 @@ class ExtraWorkUrgency(models.TextChoices):
 
 class ExtraWorkStatus(models.TextChoices):
     """
-    Sprint 26B MVP statuses — customer-pricing loop only.
+    Extra Work request lifecycle.
 
-    Operational-execution statuses (ASSIGNED / IN_PROGRESS /
-    WAITING_MANAGER_REVIEW / WAITING_CUSTOMER_APPROVAL / COMPLETED)
-    are deferred to a follow-up sprint and are not added here so
-    the state machine stays small and obvious.
+    Sprint 26B introduced the customer-pricing loop (REQUESTED ->
+    UNDER_REVIEW -> PRICING_PROPOSED -> CUSTOMER_APPROVED /
+    CUSTOMER_REJECTED / CANCELLED).
+
+    Sprint 29 Batch 29.8 added the operational-execution segment
+    IN_PROGRESS and COMPLETED so customer-approved Extra Work rows
+    become visible to STAFF (via spawned-ticket scope) and stop
+    being mis-counted as terminal on the operational dashboard.
+    The two new states are driven both manually by provider
+    operators (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER) and
+    automatically by `tickets.state_machine.apply_transition` when
+    spawned tickets progress.
+
+    Commercial-execution statuses (FULFILLED / BILLED) remain
+    deferred to a follow-up sprint and are not added here so the
+    state machine stays focused on the operational loop.
     """
 
     REQUESTED = "REQUESTED", "Requested"
     UNDER_REVIEW = "UNDER_REVIEW", "Under review"
     PRICING_PROPOSED = "PRICING_PROPOSED", "Pricing proposed"
     CUSTOMER_APPROVED = "CUSTOMER_APPROVED", "Customer approved"
+    IN_PROGRESS = "IN_PROGRESS", "In progress"
+    COMPLETED = "COMPLETED", "Completed"
     CUSTOMER_REJECTED = "CUSTOMER_REJECTED", "Customer rejected"
     CANCELLED = "CANCELLED", "Cancelled"
 

@@ -5268,11 +5268,16 @@ table.data-table {
 }
 .user-detail-customer-access-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   padding: 10px 12px;
   background: var(--surface-soft, var(--surface-2, #F8FAF8));
   border-radius: 6px;
+}
+.user-detail-customer-access-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .user-detail-customer-access-name { font-size: 14px; }
 
@@ -5306,5 +5311,203 @@ table.data-table {
 .permissions-rollup-chip-custom:hover {
   background: var(--accent-soft-hover, #DCE8D8);
 }
+
+/* Sprint 29 Batch 29.8 — EW detail spawned tickets panel.
+   Reuses the existing .card chrome (handled by the wrapping element)
+   and only adds spacing rules for the list-of-rows layout. */
+.ew-spawned-tickets-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-spawned-ticket-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-soft, #F8FAF8);
+  border-radius: 6px;
+  border: 1px solid var(--border-faint, #EEF1EE);
+}
+.ew-spawned-ticket-link {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+}
+.ew-spawned-ticket-link:hover {
+  text-decoration: underline;
+}
+
+/* Sprint 29 Batch 29.8.5 — inline AccessPermissionsPanel under each
+   custom-permissions pill. Toggle-style read-only view of the 16
+   effective permission rows for a single access. */
+.access-chip-panel-wrap {
+  flex-basis: 100%;
+  margin-top: 10px;
+}
+.access-permissions-panel {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-soft, #fafbfc);
+  padding: 14px 16px;
+}
+.access-permissions-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.access-permissions-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.access-permissions-panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.access-permissions-group {
+  margin-bottom: 10px;
+}
+.access-permissions-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+  margin-bottom: 4px;
+}
+.access-permissions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.access-permission-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.access-permission-row.granted {
+  color: var(--text);
+}
+.access-permission-row.granted .access-permission-row-indicator {
+  color: var(--green, #15803d);
+}
+.access-permission-row.denied {
+  color: var(--muted, #6b7280);
+}
+.access-permission-row.denied .access-permission-row-indicator {
+  color: var(--red, #b91c1c);
+}
+.access-permission-row-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.access-permission-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.access-permission-row-label {
+  font-weight: 500;
+}
+.access-permission-row-description {
+  font-size: 12px;
+}
+.access-permission-row-reason {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Sprint 29 Batch 29.8.5 — inline rollup summary panel that the
+   <PermissionsRollupChip> now toggles in place of the old deep-link
+   navigation. */
+.permissions-rollup-summary {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-soft, #fafbfc);
+  padding: 14px 16px;
+  margin-top: 8px;
+}
+.permissions-rollup-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.permissions-rollup-summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.permissions-rollup-summary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.permissions-rollup-summary-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+}
+.permissions-rollup-summary-row-building {
+  font-weight: 500;
+  color: var(--text);
+}
+.permissions-rollup-summary-row-role {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+}
+.permissions-rollup-summary-row-edit {
+  font-size: 12px;
+}
+.permissions-rollup-summary-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.permissions-rollup-summary-empty {
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+  padding: 6px 0;
+}
+.permissions-rollup-summary-loading {
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+  padding: 6px 0;
+}
+.user-access-card-summary {
+  padding: 0 16px 12px;
+}
+
 
 

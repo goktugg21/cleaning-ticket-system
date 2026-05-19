@@ -1,11 +1,16 @@
 // Sprint 26C — Extra Work route guard.
 //
 // Admits SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER, and
-// CUSTOMER_USER. STAFF is excluded because the backend's
-// `scope_extra_work_for` returns `.none()` for staff in this MVP
+// CUSTOMER_USER. STAFF was originally excluded because the backend's
+// `scope_extra_work_for` returned `.none()` for staff in this MVP
 // (no staff-execution surface yet), so the page would render an
-// empty list. We mirror the backend gate in the SPA so staff
-// users don't see a link that leads to nothing actionable.
+// empty list.
+//
+// Sprint 29 Batch 29.8 opened the backend scope for STAFF (they can
+// now see EWs at buildings where they have BuildingStaffVisibility,
+// mirroring the ticket scope). Sprint 29 Batch 29.8.5 lifts the SPA
+// gate in parallel so STAFF users no longer get redirected to the
+// dashboard when they navigate to /extra-work.
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 
@@ -18,6 +23,7 @@ const ALLOWED_ROLES = new Set([
   "COMPANY_ADMIN",
   "BUILDING_MANAGER",
   "CUSTOMER_USER",
+  "STAFF",
 ]);
 
 
