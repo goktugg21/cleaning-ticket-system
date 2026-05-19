@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
   Building2,
@@ -16,6 +16,7 @@ import {
   Receipt,
   Settings,
   ShieldCheck,
+  Sparkles,
   Tag,
   UserCog,
   Users,
@@ -24,6 +25,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
 import { useLanguageSync } from "../i18n/useLanguageSync";
+import { UserMenu } from "../components/UserMenu";
+import { getInitials } from "../lib/initials";
 
 const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 // Sprint 26C — Extra Work MVP. STAFF is excluded because the
@@ -81,19 +84,6 @@ function deriveSidebarMode(pathname: string): SidebarModeState {
   return { mode: "top-level", customerId: null };
 }
 
-function getInitials(value: string | undefined): string {
-  if (!value) return "FM";
-
-  const clean = value.split("@")[0].replace(/[._-]+/g, " ");
-  const parts = clean.split(" ").filter(Boolean);
-
-  if (parts.length >= 2) {
-    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-  }
-
-  return clean.slice(0, 2).toUpperCase();
-}
-
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? "nav-item active" : "nav-item";
 }
@@ -103,8 +93,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  const { me, logout } = useAuth();
-  const navigate = useNavigate();
+  const { me } = useAuth();
   const location = useLocation();
   const { t } = useTranslation("common");
   useLanguageSync();
@@ -126,18 +115,12 @@ export function AppShell({ children }: AppShellProps) {
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
-  const userEmail = me?.email || "";
   // Role label resolves through the i18n key map: enum value (SUPER_ADMIN
   // etc.) → key (roles.super_admin) → translated label. Falls back to the
   // generic "User" key when role is missing.
   const roleLabel = me?.role
     ? t(ROLE_KEY[me.role] ?? "roles.fallback")
     : t("roles.fallback");
-
-  function handleLogout() {
-    logout();
-    navigate("/login", { replace: true });
-  }
 
   return (
     <div className={`app${sidebarOpen ? " sidebar-mobile-open" : ""}`}>
@@ -151,10 +134,10 @@ export function AppShell({ children }: AppShellProps) {
       )}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-icon">FM</div>
+          <div className="brand-icon">CO</div>
           <div>
-            <div className="brand-name">FacilityPro</div>
-            <div className="brand-tag">{t("topbar.brand_tag")}</div>
+            <div className="brand-name">{t("brand.name")}</div>
+            <div className="brand-tag">{t("brand.tagline")}</div>
           </div>
         </div>
 
@@ -411,8 +394,8 @@ export function AppShell({ children }: AppShellProps) {
 
         <div className="sidebar-footer">
           <div>
-            <div className="footer-sys-name">VERIDIAN</div>
-            <div className="footer-sys-ver">Ops Console v1.0</div>
+            <div className="footer-sys-name">{t("brand.system_short")}</div>
+            <div className="footer-sys-ver">{t("brand.system_version")}</div>
           </div>
           <div className="status-dot">{t("topbar.online")}</div>
         </div>
@@ -433,28 +416,19 @@ export function AppShell({ children }: AppShellProps) {
               <Menu size={18} strokeWidth={2.2} />
             )}
           </button>
-          <div className="topbar-left">
-            <span className="topbar-kicker">{t("topbar.kicker")}</span>
-            <span className="topbar-title">{t("topbar.title")}</span>
+          <div className="topbar-context">
+            <span className="topbar-context-icon" aria-hidden="true">
+              <Sparkles size={16} strokeWidth={2.2} />
+            </span>
+            <div className="topbar-context-text">
+              <span className="topbar-context-eyebrow">
+                {t("brand.tagline")}
+              </span>
+              <span className="topbar-context-name">{t("brand.name")}</span>
+            </div>
           </div>
           <div className="topbar-right">
-            <div className="topbar-identity">
-              <div className="identity-text">
-                <div className="identity-name">{userName}</div>
-                {userEmail && (
-                  <div className="identity-email">{userEmail}</div>
-                )}
-              </div>
-              <span className="identity-role">{roleLabel}</span>
-            </div>
-            <div className="topbar-divider" />
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleLogout}
-            >
-              {t("sign_out")}
-            </button>
+            <UserMenu />
           </div>
         </header>
 
@@ -463,3 +437,4 @@ export function AppShell({ children }: AppShellProps) {
     </div>
   );
 }
+

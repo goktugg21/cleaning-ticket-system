@@ -217,7 +217,7 @@ export function AcceptInvitationPage() {
           <div className="login-brand-row-icon">
             <Building2 size={20} strokeWidth={2} />
           </div>
-          <div className="login-brand-row-name">CleanOps</div>
+          <div className="login-brand-row-name">{t("brand.name")}</div>
         </div>
 
         {loadState.kind === "loading" && (
@@ -487,3 +487,5 @@ export function AcceptInvitationPage() {
     </main>
   );
 }
+
+

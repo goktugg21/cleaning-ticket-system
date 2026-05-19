@@ -1,5 +1,5 @@
 /* ====================================================================
-   CleanOps / FacilityPro — design tokens & base
+   CleanOps — design tokens & base
    Ported from docs/frontend-design/claude-design-reference.html
    ==================================================================== */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
@@ -3605,4 +3605,624 @@ table.data-table {
 }
 
 .customer-user-access-pill.inactive { opacity: 0.55; }
+
+
+/* ====================================================================
+   SPRINT 28 BATCH 15.1 — DESIGN SYSTEM EXTENSIONS
+
+   New primitives:
+     - PageHeader   (.page-title-row, .page-title-pill, breadcrumb tweaks)
+     - EmptyState   (.empty-state-v2)
+     - StatusBadge  (uses existing .badge / .cell-tag classes — no new CSS)
+     - RoleBadge    (.role-badge with provider/customer side variants)
+     - Toast        (.toast-stack, .toast)
+
+   Layout fixes:
+     - Topbar context (.topbar-context)
+     - Responsive table-to-card consistency helpers
+   ==================================================================== */
+
+/* ----- PageHeader extension ----- */
+.page-header-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.page-title-pill {
+  display: inline-flex;
+  align-items: center;
+}
+.breadcrumb-item { display: inline-flex; align-items: center; gap: 6px; }
+.breadcrumb-item a {
+  color: var(--text-muted);
+  transition: color 0.14s;
+}
+.breadcrumb-item a:hover { color: var(--green); }
+
+/* ----- EmptyState v2 ----- */
+.empty-state-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  gap: 10px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+.empty-state-v2-compact {
+  padding: 22px 16px;
+  gap: 6px;
+}
+.empty-state-v2-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--green-faint);
+  color: var(--green);
+  margin-bottom: 4px;
+}
+.empty-state-v2-compact .empty-state-v2-icon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 0;
+}
+.empty-state-v2-title {
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.empty-state-v2-compact .empty-state-v2-title { font-size: 13.5px; }
+.empty-state-v2-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 440px;
+  margin: 0;
+}
+.empty-state-v2-compact .empty-state-v2-desc { font-size: 12.5px; }
+.empty-state-v2-action { margin-top: 8px; }
+
+/* ----- RoleBadge ----- */
+.role-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 5px 10px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  line-height: 1.15;
+  max-width: 100%;
+}
+.role-badge-label {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.role-badge-side {
+  font-family: var(--f-head);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.role-badge-provider {
+  background: var(--green-faint);
+  border-color: rgba(11, 107, 66, 0.18);
+}
+.role-badge-provider .role-badge-label { color: var(--green); }
+.role-badge-provider .role-badge-side { color: var(--green-2); }
+.role-badge-customer {
+  background: var(--teal-soft);
+  border-color: rgba(15, 107, 94, 0.18);
+}
+.role-badge-customer .role-badge-label { color: var(--teal); }
+.role-badge-customer .role-badge-side { color: var(--teal); }
+.role-badge-fallback {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.role-badge-fallback .role-badge-label { color: var(--text-muted); }
+.role-badge-compact {
+  flex-direction: row;
+  align-items: center;
+  padding: 3px 8px;
+  height: 22px;
+}
+.role-badge-compact .role-badge-label { font-size: 11px; }
+.role-badge-compact .role-badge-side { display: none; }
+
+/* ----- Toast ----- */
+.toast-stack {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+  animation: toast-in 0.16s ease-out both;
+}
+@keyframes toast-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.toast-icon {
+  display: inline-flex;
+  align-items: flex-start;
+  padding-top: 1px;
+}
+.toast-text { min-width: 0; }
+.toast-title {
+  font-family: var(--f-head);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+}
+.toast-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+.toast-close {
+  align-self: flex-start;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition: background 0.14s, color 0.14s;
+}
+.toast-close:hover { background: var(--surface-2); color: var(--text); }
+.toast-success .toast-icon { color: var(--green); }
+.toast-success { border-left: 3px solid var(--green); }
+.toast-error .toast-icon { color: var(--red); }
+.toast-error { border-left: 3px solid var(--red); }
+.toast-warning .toast-icon { color: var(--amber); }
+.toast-warning { border-left: 3px solid var(--amber); }
+.toast-info .toast-icon { color: var(--teal); }
+.toast-info { border-left: 3px solid var(--teal); }
+
+@media (max-width: 640px) {
+  .toast-stack {
+    top: auto;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+}
+
+/* ----- Topbar redesign (Batch 15.1) -----
+   Replaces the meaningless "TICKET MANAGEMENT / Facility service desk"
+   eyebrow+title in the topbar with a useful brand+identity layout.
+*/
+.topbar-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.topbar-context-icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--green-faint);
+  color: var(--green);
+  flex-shrink: 0;
+}
+.topbar-context-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.topbar-context-eyebrow {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  line-height: 1;
+}
+.topbar-context-name {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin-top: 3px;
+}
+
+@media (max-width: 640px) {
+  .topbar-context-text { display: none; }
+}
+
+/* ----- Responsive table-to-card consistency -----
+   Several admin list pages have a parallel `.admin-card-list` for
+   the mobile width. The CSS toggle below makes the pattern
+   consistent everywhere the helper class is set on the table wrap.
+*/
+.responsive-table-wrap { width: 100%; }
+@media (max-width: 720px) {
+  .responsive-table-wrap > .data-table { display: none; }
+  .responsive-table-wrap > .admin-card-list { display: flex; }
+}
+@media (min-width: 721px) {
+  .responsive-table-wrap > .admin-card-list { display: none; }
+}
+
+/* ----- Provider-only zone marker -----
+   Used on detail pages where a card/section is visible only to
+   provider operators (e.g. internal_cost_note, manager_note,
+   override audit). Subtle stripe + caption so the operator
+   immediately knows the data is not customer-visible.
+*/
+.provider-only-zone {
+  position: relative;
+  border-left: 3px solid var(--green-2);
+  background: linear-gradient(90deg, var(--green-faint) 0%, transparent 30%);
+  padding-left: 14px;
+}
+.provider-only-zone::before {
+  content: attr(data-zone-label);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2);
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.1 — additional foundation primitives
+   ChangeDiff / UserMenu / StickySaveBar / ClickableRow
+   ==================================================================== */
+
+/* ----- ChangeDiff (human-readable AuditLog) ----- */
+.change-diff {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--f-body);
+  font-size: 13px;
+  color: var(--text);
+}
+.change-diff-empty-block {
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.change-diff-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.change-diff-field {
+  font-weight: 700;
+  color: var(--text-2);
+  font-family: var(--f-head);
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+  margin: 0;
+  align-self: center;
+}
+.change-diff-values {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.change-diff-before,
+.change-diff-after {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+}
+.change-diff-before { color: var(--text-muted); }
+.change-diff-after { color: var(--text); font-weight: 600; }
+.change-diff-arrow {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.change-diff-empty {
+  color: var(--text-faint);
+}
+.change-diff-details {
+  display: inline-block;
+  font-family: var(--f-body);
+  font-size: 12px;
+}
+.change-diff-details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.change-diff-details pre {
+  margin: 6px 0 0;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .change-diff-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
+/* ----- UserMenu (topbar avatar + dropdown) ----- */
+.user-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.user-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--f-head);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.user-menu-trigger:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.user-menu-trigger:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.user-menu-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--shell-mid);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 800;
+  font-family: var(--f-head);
+  letter-spacing: -0.005em;
+}
+.user-menu-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 30px rgba(15, 32, 25, 0.12),
+    0 2px 6px rgba(15, 32, 25, 0.06);
+  padding: 8px 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+}
+.user-menu-header {
+  padding: 8px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.user-menu-name {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-menu-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-menu-role {
+  margin-top: 4px;
+}
+.user-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.user-menu-section {
+  padding: 4px 14px 8px;
+}
+.user-menu-section-label {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.user-menu-lang-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--surface-2);
+}
+.user-menu-lang-option {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 3px 12px;
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.user-menu-lang-option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.user-menu-lang-option-active {
+  background: var(--shell);
+  color: #fff;
+}
+.user-menu-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  font-family: var(--f-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.user-menu-item:hover { background: var(--surface-2); }
+.user-menu-item:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.user-menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.user-menu-item-danger { color: var(--danger, #B0413E); }
+.user-menu-item-danger .user-menu-item-icon { color: var(--danger, #B0413E); }
+
+@media (max-width: 720px) {
+  .user-menu-panel {
+    right: -8px;
+    min-width: 240px;
+  }
+}
+
+/* ----- StickySaveBar ----- */
+.sticky-save-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  margin: 16px -24px -24px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 16px rgba(15, 32, 25, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 30;
+  flex-wrap: wrap;
+}
+.sticky-save-bar-message {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.sticky-save-bar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .sticky-save-bar {
+    margin: 16px -16px -16px;
+    padding: 10px 16px;
+  }
+}
+
+/* ----- ClickableRow ----- */
+.clickable-row {
+  cursor: pointer;
+}
+.clickable-row:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.clickable-row:hover {
+  background: var(--surface-2);
+}
 

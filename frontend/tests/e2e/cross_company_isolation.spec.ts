@@ -7,7 +7,7 @@ import {
   COMPANY_B_NAME,
   DEMO_USERS,
 } from "./fixtures/demoUsers";
-import { loginAs } from "./fixtures/login";
+import { loginAs, logoutFromTopbar } from "./fixtures/login";
 
 /**
  * Sprint 21 — cross-company isolation suite.
@@ -162,7 +162,7 @@ test("Cross-company ticket detail API access returns 404 for Company A admin", a
   // The backend must respond with 404 (or 403). The SPA's detail page
   // renders an error/empty state — but we hit the API directly to
   // catch backend leaks that the UI might hide.
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.companyAdmin);
   const adminAToken = await page.evaluate(() =>
     localStorage.getItem("accessToken"),
@@ -201,7 +201,7 @@ test("Cross-company ticket detail URL renders not-found for Company A admin", as
   });
   expect(companyBTicket).toBeTruthy();
 
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.companyAdmin);
   await page.goto(`/tickets/${companyBTicket!.id}`);
   await expect(
@@ -237,7 +237,7 @@ test("Reports endpoint returns disjoint datasets for the two admins", async ({
   }
 
   // Swap to Company B admin and run the same probe.
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.companyAdminB);
   const adminBToken = await page.evaluate(() =>
     localStorage.getItem("accessToken"),
@@ -283,7 +283,7 @@ test("Admin companies list shows both for super admin, one for company admins", 
   expect(superNames).toContain(COMPANY_B_NAME);
 
   // Company A admin sees only Company A.
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.companyAdmin);
   const adminAToken = await page.evaluate(() =>
     localStorage.getItem("accessToken"),
@@ -301,7 +301,7 @@ test("Admin companies list shows both for super admin, one for company admins", 
   expect(aNames).not.toContain(COMPANY_B_NAME);
 
   // Company B admin sees only Company B.
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.companyAdminB);
   const adminBToken = await page.evaluate(() =>
     localStorage.getItem("accessToken"),

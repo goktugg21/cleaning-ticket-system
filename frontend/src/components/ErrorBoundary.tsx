@@ -34,7 +34,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    // eslint-disable-next-line no-console
     console.error("ErrorBoundary caught:", error, errorInfo);
     Sentry.captureException(error, {
       contexts: {
@@ -87,7 +86,7 @@ function ErrorFallback({ error, errorInfo }: ErrorFallbackProps) {
             letterSpacing: "-0.02em",
           }}
         >
-          CleanOps
+          {t("brand.name")}
         </h1>
 
         <div className="alert-error" role="alert" style={{ flexDirection: "column", gap: 8 }}>
@@ -142,3 +141,4 @@ function ErrorFallback({ error, errorInfo }: ErrorFallbackProps) {
     </main>
   );
 }
+

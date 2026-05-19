@@ -3,6 +3,15 @@
   "language_english": "Engels",
   "nav_settings": "Instellingen",
   "sign_out": "Uitloggen",
+  "save": "Opslaan",
+  "cancel": "Annuleren",
+  "unsaved_changes": "Je hebt niet-opgeslagen wijzigingen",
+  "user_menu.open": "Gebruikersmenu openen",
+  "user_menu.close": "Gebruikersmenu sluiten",
+  "user_menu.language_label": "Taal",
+  "user_menu.lang_nl": "NL",
+  "user_menu.lang_en": "EN",
+  "change_diff.empty": "Geen gevolgde velden zijn gewijzigd.",
 
   "nav.operations_group": "Operaties",
   "nav.admin_group": "Beheer",
@@ -31,8 +40,6 @@
   "customer_subpage_placeholder.title": "Binnenkort beschikbaar",
   "customer_subpage_placeholder.description": "Deze sectie wordt in een toekomstige sprint geïmplementeerd. De navigatie-structuur wordt eerst opgeleverd.",
 
-  "topbar.kicker": "Ticketbeheer",
-  "topbar.title": "Facility servicedesk",
   "topbar.online": "Online",
   "topbar.brand_tag": "Schoonmaakoperaties",
   "topbar.user_fallback": "Facility-gebruiker",
@@ -40,11 +47,56 @@
   "sidebar_close": "Menu sluiten",
 
   "roles.super_admin": "Superbeheerder",
-  "roles.company_admin": "Bedrijfsbeheerder",
-  "roles.building_manager": "Beheerder",
-  "roles.customer_user": "Klant",
+  "roles.company_admin": "Providerbeheerder",
+  "roles.building_manager": "Gebouwbeheerder",
+  "roles.customer_user": "Klantgebruiker",
+  "roles.staff": "Medewerker",
   "roles.fallback": "Gebruiker",
 
+  "role_side.provider": "Provider",
+  "role_side.customer": "Klant",
+  "role_side.fallback": "Gebruiker",
+
+  "access_role.customer_user": "Gebruiker",
+  "access_role.customer_location_manager": "Locatiebeheerder",
+  "access_role.customer_company_admin": "Klantbeheerder",
+  "access_role.fallback": "Klantgebruiker",
+
+  "visibility_level.assigned_only": "Alleen toegewezen tickets",
+  "visibility_level.building_read": "Gebouwtickets lezen",
+  "visibility_level.building_read_and_assign": "Lezen & zelf toewijzen",
+  "visibility_level.fallback": "Standaardzichtbaarheid",
+
+  "ticket_status.open": "Open",
+  "ticket_status.in_progress": "In behandeling",
+  "ticket_status.waiting_manager_review": "Wacht op beheerder",
+  "ticket_status.waiting_customer_approval": "Wacht op klant",
+  "ticket_status.approved": "Goedgekeurd",
+  "ticket_status.rejected": "Afgewezen",
+  "ticket_status.closed": "Gesloten",
+  "ticket_status.reopened_by_admin": "Heropend",
+  "ticket_status.fallback": "Onbekende status",
+
+  "extra_work_status.requested": "Aangevraagd",
+  "extra_work_status.under_review": "In behandeling",
+  "extra_work_status.pricing_proposed": "Prijsvoorstel",
+  "extra_work_status.customer_approved": "Klant akkoord",
+  "extra_work_status.customer_rejected": "Klant geweigerd",
+  "extra_work_status.cancelled": "Geannuleerd",
+  "extra_work_status.fallback": "Onbekende status",
+
+  "priority.normal": "Normaal",
+  "priority.high": "Hoog",
+  "priority.urgent": "Urgent",
+  "priority.fallback": "Normaal",
+
+  "brand.name": "CleanOps",
+  "brand.tagline": "Operationele console",
+  "brand.system_short": "CleanOps Console",
+  "brand.system_version": "v1.0",
+
+  "provider_only_zone.label": "Alleen provider",
+  "provider_only_zone.hint": "Dit gedeelte is niet zichtbaar voor klantgebruikers.",
 
   "search": "Zoeken",
   "filter": "Filter",
@@ -259,7 +311,7 @@
   "user_form.this_is_you": "Dit ben jij",
   "user_form.role_disabled_self": "(u kunt uw eigen rol niet wijzigen)",
   "user_form.role_disabled_actor": "(alleen superbeheerders kunnen deze rol beheren)",
-  "user_form.role_staff_helper": "Veldmedewerkers (STAFF) worden beheerd via het medewerkersprofiel en de zichtbaarheid per gebouw onder het medewerkersprofiel, niet via dit rolmenu. Gebruik Gebruiker toevoegen → CUSTOMER_USER / BUILDING_MANAGER hier; STAFF-aanmaak verloopt via uitnodigingen of seed-scripts.",
+  "user_form.role_staff_helper": "Veldmedewerkers worden beheerd via het medewerkersprofiel en de zichtbaarheid per gebouw onder het medewerkersprofiel, niet via dit rolmenu. Gebruik Gebruiker toevoegen → Klantgebruiker / Gebouwbeheerder hier; veldmedewerker-aanmaak verloopt via uitnodigingen of seed-scripts.",
   "user_form.memberships_title": "Lidmaatschappen",
   "user_form.memberships_desc": "Alleen-lezen overzicht. Lidmaatschappen worden beheerd vanaf de detailpagina's van entiteiten.",
   "user_form.loading_names": "{{count}} (namen laden…)",
@@ -466,12 +518,6 @@
   "tickets.assigned_to_you": "Toegewezen aan jou",
 
   "nav.staff_requests": "Medewerker-aanvragen",
-
-  "roles.staff": "Medewerker",
-
-  "access_role.customer_user": "Klantgebruiker",
-  "access_role.customer_location_manager": "Locatiebeheerder",
-  "access_role.customer_company_admin": "Klant-bedrijfsbeheerder",
 
 
   "staff_requests.title": "Medewerker-toewijzingsaanvragen",
@@ -765,7 +811,7 @@
   "customer_view.users.no_access_yet": "Nog geen gebouwtoegang",
   "customer_view.permissions.explainer": "Toegangsbeheer voor {{customer}}. Gebruik het tabblad Gebruikers om klantaccounts toe te voegen of te verwijderen; hier verfijn je rollen per gebouw, individuele rechten-overrides en het klant-companybeleid dat aanmaken/goedkeuren afdwingt.",
   "customer_view.settings.explainer": "Klantbrede voorkeuren. Wijzigingen gelden voor alle gebruikers en medewerkers die voor {{customer}} handelen.",
-  "customer_view.settings.visibility_helper": "Bepaalt of CUSTOMER_USER-accounts naam / e-mail / telefoon van personeel zien op ticketdetails. Andere rollen zien altijd de volledige contactgegevens.",
+  "customer_view.settings.visibility_helper": "Bepaalt of klantgebruikers naam / e-mail / telefoon van personeel zien op ticketdetails. Andere rollen zien altijd de volledige contactgegevens.",
   "customer_view.settings.lifecycle_title": "Levenscyclus",
   "customer_view.settings.deactivate_consequence": "Deactiveren schakelt inloggen uit voor de gebruikers van deze klant en verbergt ze uit standaardlijsten. Actieve tickets worden NIET automatisch gesloten.",
   "customer_view.settings.reactivate_consequence": "Reactiveren herstelt inloggen en haalt deze klant terug in de standaardlijsten."

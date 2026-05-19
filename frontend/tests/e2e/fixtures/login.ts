@@ -82,3 +82,21 @@ export async function loginAs(page: Page, user: DemoUser): Promise<void> {
     );
   }
 }
+
+/**
+ * Sprint 28 Batch 15.1 — sign-out moved from an inline topbar button
+ * into the UserMenu dropdown. The previous `.topbar-right .btn`
+ * selector no longer resolves. Tests that need to switch personas
+ * mid-spec should call this helper instead of duplicating the
+ * "open menu → click sign-out" sequence inline.
+ */
+export async function logoutFromTopbar(page: Page): Promise<void> {
+  await page.locator(".user-menu-trigger").click();
+  await page
+    .locator(".user-menu-panel")
+    .getByRole("menuitem", { name: /sign out|uitloggen|afmelden/i })
+    .click();
+  await page.waitForURL((url) => url.pathname.includes("/login"), {
+    timeout: 10_000,
+  });
+}

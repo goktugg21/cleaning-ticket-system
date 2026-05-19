@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
-import { loginAs } from "./fixtures/login";
+import { loginAs, logoutFromTopbar } from "./fixtures/login";
 
 /**
  * Sprint 16 — workflow buttons match backend.allowed_next_statuses.
@@ -54,7 +54,7 @@ test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
   expect(href).toBeTruthy();
 
   // Logout, log in as Iris (B1 + B2 only), and navigate directly.
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.customerB1B2);
   await page.goto(href!);
 

@@ -3,6 +3,15 @@
   "language_english": "English",
   "nav_settings": "Settings",
   "sign_out": "Sign out",
+  "save": "Save",
+  "cancel": "Cancel",
+  "unsaved_changes": "You have unsaved changes",
+  "user_menu.open": "Open user menu",
+  "user_menu.close": "Close user menu",
+  "user_menu.language_label": "Language",
+  "user_menu.lang_nl": "NL",
+  "user_menu.lang_en": "EN",
+  "change_diff.empty": "No tracked field changed.",
 
   "nav.operations_group": "Operations",
   "nav.admin_group": "Admin",
@@ -31,8 +40,6 @@
   "customer_subpage_placeholder.title": "Coming soon",
   "customer_subpage_placeholder.description": "This section will be implemented in a future sprint. The navigation foundation ships first.",
 
-  "topbar.kicker": "Ticket Management",
-  "topbar.title": "Facility service desk",
   "topbar.online": "Online",
   "topbar.brand_tag": "Cleaning operations",
   "topbar.user_fallback": "Facility user",
@@ -40,11 +47,56 @@
   "sidebar_close": "Close menu",
 
   "roles.super_admin": "Super admin",
-  "roles.company_admin": "Company admin",
-  "roles.building_manager": "Manager",
-  "roles.customer_user": "Customer",
+  "roles.company_admin": "Provider admin",
+  "roles.building_manager": "Building manager",
+  "roles.customer_user": "Customer user",
+  "roles.staff": "Field staff",
   "roles.fallback": "User",
 
+  "role_side.provider": "Provider",
+  "role_side.customer": "Customer",
+  "role_side.fallback": "User",
+
+  "access_role.customer_user": "User",
+  "access_role.customer_location_manager": "Location manager",
+  "access_role.customer_company_admin": "Customer admin",
+  "access_role.fallback": "Customer user",
+
+  "visibility_level.assigned_only": "Assigned tickets only",
+  "visibility_level.building_read": "Read building tickets",
+  "visibility_level.building_read_and_assign": "Read & self-assign",
+  "visibility_level.fallback": "Default visibility",
+
+  "ticket_status.open": "Open",
+  "ticket_status.in_progress": "In progress",
+  "ticket_status.waiting_manager_review": "Waiting manager review",
+  "ticket_status.waiting_customer_approval": "Waiting customer approval",
+  "ticket_status.approved": "Approved",
+  "ticket_status.rejected": "Rejected",
+  "ticket_status.closed": "Closed",
+  "ticket_status.reopened_by_admin": "Reopened by admin",
+  "ticket_status.fallback": "Unknown status",
+
+  "extra_work_status.requested": "Requested",
+  "extra_work_status.under_review": "Under review",
+  "extra_work_status.pricing_proposed": "Pricing proposed",
+  "extra_work_status.customer_approved": "Customer approved",
+  "extra_work_status.customer_rejected": "Customer rejected",
+  "extra_work_status.cancelled": "Cancelled",
+  "extra_work_status.fallback": "Unknown status",
+
+  "priority.normal": "Normal",
+  "priority.high": "High",
+  "priority.urgent": "Urgent",
+  "priority.fallback": "Normal",
+
+  "brand.name": "CleanOps",
+  "brand.tagline": "Operations console",
+  "brand.system_short": "CleanOps Console",
+  "brand.system_version": "v1.0",
+
+  "provider_only_zone.label": "Provider-only",
+  "provider_only_zone.hint": "This section is not visible to customer users.",
 
   "search": "Search",
   "filter": "Filter",
@@ -259,7 +311,7 @@
   "user_form.this_is_you": "This is you",
   "user_form.role_disabled_self": "(you cannot change your own role)",
   "user_form.role_disabled_actor": "(only super admins can manage this role)",
-  "user_form.role_staff_helper": "Field staff (STAFF) users are managed from the staff profile and per-building staff-visibility flow under each staff user's profile, not from this role dropdown. Use Add user → CUSTOMER_USER / BUILDING_MANAGER here; staff creation goes through invitations or seed scripts.",
+  "user_form.role_staff_helper": "Field staff users are managed from the staff profile and per-building staff-visibility flow under each staff user's profile, not from this role dropdown. Use Add user → Customer user / Building manager here; staff creation goes through invitations or seed scripts.",
   "user_form.memberships_title": "Memberships",
   "user_form.memberships_desc": "Read-only summary. Memberships are managed from the entity detail pages.",
   "user_form.loading_names": "{{count}} (loading names…)",
@@ -466,12 +518,6 @@
   "tickets.assigned_to_you": "Assigned to you",
 
   "nav.staff_requests": "Staff requests",
-
-  "roles.staff": "Staff",
-
-  "access_role.customer_user": "Customer user",
-  "access_role.customer_location_manager": "Location manager",
-  "access_role.customer_company_admin": "Company admin",
 
 
   "staff_requests.title": "Staff assignment requests",
@@ -765,7 +811,7 @@
   "customer_view.users.no_access_yet": "No building access yet",
   "customer_view.permissions.explainer": "Access controls for {{customer}}. Use the Users tab to add or remove customer accounts; here you fine-tune per-building roles, per-permission overrides, and the customer-company policy that gates create / approve actions.",
   "customer_view.settings.explainer": "Customer-wide preferences. Changes apply to all users and staff acting for {{customer}}.",
-  "customer_view.settings.visibility_helper": "Decides whether CUSTOMER_USER accounts see staff name / email / phone on ticket details. Other roles always see full staff contact info.",
+  "customer_view.settings.visibility_helper": "Decides whether customer users see staff name / email / phone on ticket details. Other roles always see full staff contact info.",
   "customer_view.settings.lifecycle_title": "Lifecycle",
   "customer_view.settings.deactivate_consequence": "Deactivating disables logins for this customer's users and hides them from default lists. Active tickets are NOT auto-closed.",
   "customer_view.settings.reactivate_consequence": "Reactivating restores logins and unhides this customer from default lists."
