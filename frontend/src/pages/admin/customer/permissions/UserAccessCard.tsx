@@ -79,7 +79,12 @@ export function UserAccessCard({
   const initials = getInitials(fullName || membership.user_email);
 
   return (
-    <article className="user-access-card" data-testid="customer-user-access-summary">
+    <article
+      className="user-access-card"
+      data-testid="customer-user-access-summary"
+      data-user-access-card-id={membership.user_id}
+      id={`user-access-card-${membership.user_id}`}
+    >
       <header className="user-access-card-header">
         <span className="user-access-card-avatar" aria-hidden="true">
           {initials}
@@ -280,4 +285,5 @@ export function UserAccessCard({
     </article>
   );
 }
+
 

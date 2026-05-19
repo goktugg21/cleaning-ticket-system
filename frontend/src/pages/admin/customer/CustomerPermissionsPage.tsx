@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -473,6 +473,74 @@ export function CustomerPermissionsPage() {
     }
   }
 
+  // Sprint 29 Batch 29.2 — focus-on-mount via URL params. The Edit
+  // Basics page deep-links here with ?focus_user=<id> (row-level) or
+  // ?focus_user=<id>&focus_building=<id> (per-chip). After the
+  // customer + per-user access lists resolve, scroll the matching
+  // UserAccessCard into view, optionally open the OverrideDrawer for
+  // that (user, building) pair, and consume the params so a refresh
+  // does not re-fire the effect.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusUserParam = searchParams.get("focus_user");
+  const focusBuildingParam = searchParams.get("focus_building");
+  const focusConsumedRef = useRef(false);
+
+  useEffect(() => {
+    if (focusConsumedRef.current) return;
+    if (!focusUserParam || loading || !customer) return;
+    const userIdNum = Number(focusUserParam);
+    if (!Number.isFinite(userIdNum) || userIdNum <= 0) {
+      focusConsumedRef.current = true;
+      return;
+    }
+    const membership = members.find((m) => m.user_id === userIdNum) ?? null;
+    if (!membership) {
+      // User is not in the customer's membership list — silently
+      // drop the params and render the page normally.
+      focusConsumedRef.current = true;
+      const next = new URLSearchParams(searchParams);
+      next.delete("focus_user");
+      next.delete("focus_building");
+      setSearchParams(next, { replace: true });
+      return;
+    }
+
+    const userCard = document.getElementById(`user-access-card-${userIdNum}`);
+    if (userCard) {
+      userCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    if (focusBuildingParam) {
+      const buildingIdNum = Number(focusBuildingParam);
+      if (Number.isFinite(buildingIdNum) && buildingIdNum > 0) {
+        const accesses = accessByUserId[userIdNum] ?? [];
+        const access =
+          accesses.find((a) => a.building_id === buildingIdNum) ?? null;
+        if (access) {
+          // Defer the drawer-opening setState off the effect tick so
+          // it does not chain with the searchParams replace below
+          // (the existing CustomerPermissionsPage useEffects use the
+          // same queueMicrotask pattern for the same reason).
+          queueMicrotask(() => openOverrideEditor(membership, access));
+        }
+      }
+    }
+
+    focusConsumedRef.current = true;
+    const next = new URLSearchParams(searchParams);
+    next.delete("focus_user");
+    next.delete("focus_building");
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    focusUserParam,
+    focusBuildingParam,
+    loading,
+    customer,
+    members,
+    accessByUserId,
+  ]);
+
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
   const editingAccess = editingOverrideFor?.access ?? null;
@@ -650,5 +718,6 @@ export function CustomerPermissionsPage() {
     </div>
   );
 }
+
 
 

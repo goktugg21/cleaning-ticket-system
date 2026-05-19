@@ -850,6 +850,7 @@ export function ExtraWorkDetailPage() {
                   )}
                   <form
                     onSubmit={handleAddPricingItem}
+                    className="ew-pricing-add-form"
                     style={{ marginTop: 12 }}
                   >
                     <div className="form-2col">
@@ -1298,5 +1299,6 @@ export function ExtraWorkDetailPage() {
     </div>
   );
 }
+
 
 

@@ -5174,6 +5174,21 @@ table.data-table {
   border-top: 1px solid var(--border);
 }
 
+/* ----- Extra Work pricing add-form spacing (Sprint 29 Batch 29.2) - */
+/* The add-pricing-item form stacks three .form-2col rows + a single
+   internal-note .field row + an action row. The default tight column
+   spacing left the rows feeling squashed; this block bumps inter-row
+   margins without touching the rest of the .form-2col call sites. */
+.ew-pricing-add-form .field {
+  gap: 8px;
+}
+.ew-pricing-add-form .form-2col + .form-2col,
+.ew-pricing-add-form .form-2col + .field,
+.ew-pricing-add-form .field + .form-2col,
+.ew-pricing-add-form .field + .field {
+  margin-top: 14px;
+}
+
 /* ----- "Show technical keys" toggle (Permissions page) ------------ */
 /* Sprint 29 Batch 29.1 — scoped to the PolicyToggleGrid's affects-
    line render. Default-off; persists via localStorage; does NOT
@@ -5192,6 +5207,7 @@ table.data-table {
   margin: 0;
   cursor: pointer;
 }
+
 
 
 

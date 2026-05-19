@@ -419,6 +419,7 @@
   "customer_form.access_active_label": "Active",
   "customer_form.access_active_hint": "Switch off to suspend this building access without deleting it. The user keeps the row in their history; the resolver treats every permission as False while inactive.",
   "customer_form.access_overrides_button": "Edit permissions",
+  "customer_form.user_row_manage_permissions": "Manage permissions",
   "customer_form.access_overrides_section_title": "Permissions for {{email}} at {{building}}",
   "customer_form.access_overrides_section_helper": "Pick a value per permission key. Inherit follows the role default and the customer-company policy; Grant or Revoke is an explicit per-user override. Inactive access denies every permission regardless of overrides.",
   "customer_form.access_overrides_self_edit_warning": "You cannot edit your own access row.",
@@ -922,6 +923,7 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Manage permissions",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Edit custom permissions of other customer users."
 }
+
 
 
 

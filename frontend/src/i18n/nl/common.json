@@ -419,6 +419,7 @@
   "customer_form.access_active_label": "Actief",
   "customer_form.access_active_hint": "Schakel uit om deze gebouwentoegang op te schorten zonder verwijderen. De rij blijft staan; de resolver evalueert elke permissie als False zolang deze inactief is.",
   "customer_form.access_overrides_button": "Permissies bewerken",
+  "customer_form.user_row_manage_permissions": "Rechten beheren",
   "customer_form.access_overrides_section_title": "Permissies voor {{email}} bij {{building}}",
   "customer_form.access_overrides_section_helper": "Kies per permissiesleutel een waarde. Overerven volgt de roldefault en het klantbeleid; Toestaan of Intrekken is een expliciete override per gebruiker. Inactieve toegang weigert elke permissie ongeacht overrides.",
   "customer_form.access_overrides_self_edit_warning": "U kunt uw eigen toegangsrij niet bewerken.",
@@ -922,6 +923,7 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Rechten beheren",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Aangepaste rechten van andere klantgebruikers bewerken."
 }
+
 
 
 
