@@ -936,7 +936,24 @@
   "company_detail.field_status": "Status",
   "company_detail.status_active": "Active",
   "company_detail.status_inactive": "Inactive",
-  "company_detail.invalid_id": "Invalid company id."
+  "company_detail.invalid_id": "Invalid company id.",
+  "building_form.back_to_detail": "Back to building",
+  "building_detail.edit_button": "Edit",
+  "building_detail.about_title": "About",
+  "building_detail.about_desc": "Basic building information.",
+  "building_detail.managers_title": "Building managers",
+  "building_detail.managers_desc": "People who manage this building.",
+  "building_detail.managers_empty": "No building managers yet.",
+  "building_detail.field_company": "Company",
+  "building_detail.field_name": "Name",
+  "building_detail.field_address": "Address",
+  "building_detail.field_city": "City",
+  "building_detail.field_postal_code": "Postal code",
+  "building_detail.field_country": "Country",
+  "building_detail.field_status": "Status",
+  "building_detail.status_active": "Active",
+  "building_detail.status_inactive": "Inactive",
+  "building_detail.invalid_id": "Invalid building id."
 }
 
 

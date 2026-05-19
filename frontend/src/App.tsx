@@ -21,6 +21,7 @@ import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
 import { AuditLogsAdminPage } from "./pages/admin/AuditLogsAdminPage";
+import { BuildingDetailPage } from "./pages/admin/BuildingDetailPage";
 import { BuildingFormPage } from "./pages/admin/BuildingFormPage";
 import { BuildingsAdminPage } from "./pages/admin/BuildingsAdminPage";
 import { BuildingManagerCustomerContactsPage } from "./pages/admin/BuildingManagerCustomerContactsPage";
@@ -224,11 +225,24 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Sprint 29 Batch 29.4 — view-first split mirroring 29.3
+              (companies). `/admin/buildings/:id` now renders the
+              read-only `BuildingDetailPage`; the explicit Edit button
+              navigates to `/admin/buildings/:id/edit` which still
+              mounts `BuildingFormPage`. `/new` is unchanged. */}
+          <Route
+            path="/admin/buildings/:id/edit"
+            element={
+              <AdminRoute>
+                <BuildingFormPage />
+              </AdminRoute>
+            }
+          />
           <Route
             path="/admin/buildings/:id"
             element={
               <AdminRoute>
-                <BuildingFormPage />
+                <BuildingDetailPage />
               </AdminRoute>
             }
           />

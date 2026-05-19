@@ -936,7 +936,24 @@
   "company_detail.field_status": "Status",
   "company_detail.status_active": "Actief",
   "company_detail.status_inactive": "Inactief",
-  "company_detail.invalid_id": "Ongeldig bedrijfs-ID."
+  "company_detail.invalid_id": "Ongeldig bedrijfs-ID.",
+  "building_form.back_to_detail": "Terug naar gebouw",
+  "building_detail.edit_button": "Bewerken",
+  "building_detail.about_title": "Over",
+  "building_detail.about_desc": "Basisinformatie van het gebouw.",
+  "building_detail.managers_title": "Gebouwbeheerders",
+  "building_detail.managers_desc": "Personen die dit gebouw beheren.",
+  "building_detail.managers_empty": "Nog geen gebouwbeheerders.",
+  "building_detail.field_company": "Bedrijf",
+  "building_detail.field_name": "Naam",
+  "building_detail.field_address": "Adres",
+  "building_detail.field_city": "Stad",
+  "building_detail.field_postal_code": "Postcode",
+  "building_detail.field_country": "Land",
+  "building_detail.field_status": "Status",
+  "building_detail.status_active": "Actief",
+  "building_detail.status_inactive": "Inactief",
+  "building_detail.invalid_id": "Ongeldig gebouw-ID."
 }
 
 
