@@ -727,7 +727,7 @@ export function ExtraWorkDetailPage() {
                 <div className="muted small">{t("detail.pricing_empty")}</div>
               )}
               {ew.pricing_line_items.length > 0 && (
-                <table className="data-table">
+                <table className="data-table ew-pricing-table">
                   <thead>
                     <tr>
                       <th>{t("detail.pricing_column_description")}</th>
@@ -808,8 +808,20 @@ export function ExtraWorkDetailPage() {
                         )}
                       </tr>
                     ))}
-                    <tr>
-                      <td colSpan={5} />
+                    <tr className="ew-pricing-totals-row">
+                      <td colSpan={4} />
+                      <td
+                        style={{
+                          textAlign: "right",
+                          fontWeight: 700,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          fontSize: 11,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {t("detail.pricing_totals_label")}
+                      </td>
                       <td style={{ textAlign: "right", fontWeight: 600 }}>
                         {formatMoney(ew.subtotal_amount)}
                       </td>
@@ -1286,4 +1298,5 @@ export function ExtraWorkDetailPage() {
     </div>
   );
 }
+
 

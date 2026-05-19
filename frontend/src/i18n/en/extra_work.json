@@ -116,6 +116,7 @@
   "detail.pricing_column_subtotal": "Subtotal",
   "detail.pricing_column_vat": "VAT",
   "detail.pricing_column_total": "Total",
+  "detail.pricing_totals_label": "Total",
   "detail.pricing_remove_button": "Remove",
   "detail.pricing_form_description": "Description",
   "detail.pricing_form_description_placeholder": "e.g. Crew time on Saturday",

@@ -83,12 +83,22 @@ export interface PolicyToggleGridProps {
   draft: PolicyDraft;
   setDraft: Dispatch<SetStateAction<PolicyDraft>>;
   disabled?: boolean;
+  /**
+   * Sprint 29 Batch 29.1 — when true, each card renders an extra
+   * "Affects: customer.ticket.approve_own, ..." sub-line listing
+   * the technical keys the policy switch flips to deny. Default
+   * false so non-technical customer admins are not confronted
+   * with developer-facing strings. Driven by
+   * `useTechnicalKeysToggle()` on the parent page.
+   */
+  showTechnicalKeys?: boolean;
 }
 
 export function PolicyToggleGrid({
   draft,
   setDraft,
   disabled = false,
+  showTechnicalKeys = false,
 }: PolicyToggleGridProps) {
   const { t } = useTranslation("common");
 
@@ -114,11 +124,13 @@ export function PolicyToggleGrid({
               <span className="policy-toggle-card-helper">
                 {t(card.helperKey)}
               </span>
-              <span className="policy-toggle-card-affects">
-                {t("customer_permissions.policy_card_affects", {
-                  keys: card.affectedKeys.join(", "),
-                })}
-              </span>
+              {showTechnicalKeys && (
+                <span className="policy-toggle-card-affects">
+                  {t("customer_permissions.policy_card_affects", {
+                    keys: card.affectedKeys.join(", "),
+                  })}
+                </span>
+              )}
               {!enabled && (
                 <span className="policy-toggle-card-warning-text">
                   {t("customer_permissions.policy_warning_disabled")}
@@ -145,4 +157,5 @@ export function PolicyToggleGrid({
     </div>
   );
 }
+
 

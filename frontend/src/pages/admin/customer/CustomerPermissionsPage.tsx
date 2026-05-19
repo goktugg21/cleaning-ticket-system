@@ -31,6 +31,7 @@ import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EmptyState } from "../../../components/EmptyState";
 import { StickySaveBar } from "../../../components/StickySaveBar";
 import { useToast } from "../../../components/ToastProvider";
+import { useTechnicalKeysToggle } from "../../../hooks/useTechnicalKeysToggle";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 import { OverrideDrawer } from "./permissions/OverrideDrawer";
@@ -134,6 +135,11 @@ export function CustomerPermissionsPage() {
   const isSelfAccess = (access: CustomerUserBuildingAccess) =>
     me?.id === access.user_id;
   const canGrantCustomerCompanyAdmin = me?.role === "SUPER_ADMIN";
+
+  // Sprint 29 Batch 29.1 — operator-controlled toggle for the
+  // "Affects: customer.ticket.approve_own, ..." sub-lines on
+  // each policy card. Default OFF; persisted in localStorage.
+  const [showTechKeys, setShowTechKeys] = useTechnicalKeysToggle();
 
   // ------- Initial load -------
   useEffect(() => {
@@ -508,6 +514,18 @@ export function CustomerPermissionsPage() {
               helper={t("customer_permissions.zone_policy_helper")}
             />
 
+            <label
+              className="tech-keys-toggle"
+              data-testid="show-technical-keys-toggle"
+            >
+              <input
+                type="checkbox"
+                checked={showTechKeys}
+                onChange={(e) => setShowTechKeys(e.target.checked)}
+              />
+              <span>{t("customer_permissions.show_technical_keys")}</span>
+            </label>
+
             {policyError && (
               <div className="alert-error" role="alert">
                 {policyError}
@@ -524,6 +542,7 @@ export function CustomerPermissionsPage() {
                   draft={policyDraft}
                   setDraft={setPolicyDraft}
                   disabled={policySaving}
+                  showTechnicalKeys={showTechKeys}
                 />
                 <StickySaveBar
                   dirty={isPolicyDirty}
@@ -631,4 +650,5 @@ export function CustomerPermissionsPage() {
     </div>
   );
 }
+
 

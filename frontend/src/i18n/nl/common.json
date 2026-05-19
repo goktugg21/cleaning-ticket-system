@@ -252,9 +252,12 @@
   "users.col_language": "Taal",
   "users.col_scope": "Bereik",
   "users.scope_all": "Alle bedrijven",
-  "users.scope_companies": "bedrijven",
-  "users.scope_buildings": "gebouwen",
-  "users.scope_customers": "klanten",
+  "users.scope_companies_one": "{{count}} bedrijf",
+  "users.scope_companies_other": "{{count}} bedrijven",
+  "users.scope_buildings_one": "{{count}} gebouw",
+  "users.scope_buildings_other": "{{count}} gebouwen",
+  "users.scope_customers_one": "{{count}} klant",
+  "users.scope_customers_other": "{{count}} klanten",
   "users.empty_filtered_title": "Geen gebruikers voldoen aan uw filters",
   "users.empty_initial_title": "Nog geen gebruikers",
   "users.empty_initial_desc": "Nodig de eerste gebruiker uit om te beginnen.",
@@ -835,6 +838,7 @@
   "customer_permissions.zone_users_title": "Gebruikers en gebouwtoegang",
   "customer_permissions.zone_users_helper": "Elke gebruiker heeft per gebouw een sub-rol. Met aangepaste rechten kun je losse rechten bijstellen zonder de hele sub-rol te wijzigen.",
   "customer_permissions.policy_card_affects": "Beïnvloedt: {{keys}}",
+  "customer_permissions.show_technical_keys": "Toon technische sleutels",
   "customer_permissions.policy_warning_disabled": "Uitgeschakeld — beperkt rechten",
   "customer_permissions.access_no_buildings_helper": "Deze gebruiker hoort bij de klant maar heeft nog geen gebouwtoegang. Voeg er hieronder een toe.",
   "customer_permissions.custom_permissions_label_zero": "Geen aangepaste rechten",
@@ -918,6 +922,7 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Rechten beheren",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Aangepaste rechten van andere klantgebruikers bewerken."
 }
+
 
 
 

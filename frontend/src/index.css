@@ -1392,18 +1392,24 @@ table.data-table {
    reading width on wide monitors. */
 .page-form-narrow { max-width: 720px; }
 
-/* Settings page two-column layout: account-overview info card on the
-   left (340px), settings cards stacked on the right. Collapses to a
-   single column below 960px. align-items: start prevents the left
-   card from stretching to match the right column's height. */
+/* Sprint 29 Batch 29.1 — Settings layout rebalance.
+   Account-overview info card on the left (380px), settings cards
+   stacked on the right (1fr). Centred under a 1400px clamp so the
+   page stops looking lonely on ultra-wide monitors. Collapses to a
+   single column at typical laptop widths (<= 1280px); align-items:
+   start prevents the left card from stretching to match the right
+   column's height. */
 .settings-layout {
   display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 28px;
+  grid-template-columns: 380px 1fr;
+  gap: 32px;
   align-items: start;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .settings-main { display: flex; flex-direction: column; gap: 16px; }
-@media (max-width: 960px) {
+@media (max-width: 1280px) {
   .settings-layout { grid-template-columns: 1fr; }
 }
 
@@ -5141,10 +5147,51 @@ table.data-table {
 .users-scope-chip {
   font-size: 12px;
   white-space: nowrap;
+  font-weight: 600;
 }
+/* Sprint 29 Batch 29.1 — chip is now a single text node with the
+   number inlined by i18next pluralization. The legacy <strong>
+   selector stays as a no-op so older snapshots don't break. */
 .users-scope-chip strong {
   font-weight: 700;
   margin-right: 4px;
 }
+
+/* ----- Extra Work pricing table: breathable cells + totals row --- */
+/* Sprint 29 Batch 29.1 — the EW pricing table now carries the
+   class `.ew-pricing-table` (in addition to `.data-table`) so we
+   can dial padding up here without affecting other tables on the
+   page. The `.ew-pricing-totals-row` carries a stronger top border
+   and extra vertical padding so the subtotal/VAT/total line reads
+   as a summary rather than yet another data row. */
+.ew-pricing-table th,
+.ew-pricing-table td {
+  padding: 12px 14px;
+}
+.ew-pricing-table .ew-pricing-totals-row td {
+  padding-top: 16px;
+  padding-bottom: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ----- "Show technical keys" toggle (Permissions page) ------------ */
+/* Sprint 29 Batch 29.1 — scoped to the PolicyToggleGrid's affects-
+   line render. Default-off; persists via localStorage; does NOT
+   appear in the OverrideDrawer (keys are the primary identifier
+   there). */
+.tech-keys-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.tech-keys-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
 
 

@@ -29,10 +29,14 @@ function ScopeChip({ summary }: { summary: UserScopeSummary }) {
   if (summary.count === -1) {
     return <span className="muted small">{t("users.scope_all")}</span>;
   }
+  // Sprint 29 Batch 29.1 — i18next pluralization replaces the bare
+  // "1 customers" rendering. The _one / _other suffix is chosen by
+  // i18next based on `count`. The chip stays in a single text node;
+  // CSS gives the chip its own font-weight rather than wrapping the
+  // numeric prefix in <strong>.
   return (
     <span className="users-scope-chip" data-testid="users-scope-chip">
-      <strong>{summary.count}</strong>{" "}
-      <span className="muted">{t(`users.scope_${summary.label}`)}</span>
+      {t(`users.scope_${summary.label}`, { count: summary.count })}
     </span>
   );
 }
@@ -497,5 +501,6 @@ export function UsersAdminPage() {
     </div>
   );
 }
+
 
 

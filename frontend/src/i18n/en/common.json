@@ -252,9 +252,12 @@
   "users.col_language": "Language",
   "users.col_scope": "Scope",
   "users.scope_all": "All companies",
-  "users.scope_companies": "companies",
-  "users.scope_buildings": "buildings",
-  "users.scope_customers": "customers",
+  "users.scope_companies_one": "{{count}} company",
+  "users.scope_companies_other": "{{count}} companies",
+  "users.scope_buildings_one": "{{count}} building",
+  "users.scope_buildings_other": "{{count}} buildings",
+  "users.scope_customers_one": "{{count}} customer",
+  "users.scope_customers_other": "{{count}} customers",
   "users.empty_filtered_title": "No users match your filters",
   "users.empty_initial_title": "No users yet",
   "users.empty_initial_desc": "Invite the first user to get started.",
@@ -835,6 +838,7 @@
   "customer_permissions.zone_users_title": "Users and building access",
   "customer_permissions.zone_users_helper": "Each user has a sub-role per building. Custom permissions let you tweak individual keys without changing the whole sub-role.",
   "customer_permissions.policy_card_affects": "Affects: {{keys}}",
+  "customer_permissions.show_technical_keys": "Show technical keys",
   "customer_permissions.policy_warning_disabled": "Disabled — narrows permissions",
   "customer_permissions.access_no_buildings_helper": "This user is a member of the customer but has no building access yet. Add one below.",
   "customer_permissions.custom_permissions_label_zero": "No custom permissions",
@@ -918,6 +922,7 @@
   "customer_permissions.permission_keys.customer.users.manage_permissions.label": "Manage permissions",
   "customer_permissions.permission_keys.customer.users.manage_permissions.description": "Edit custom permissions of other customer users."
 }
+
 
 
 

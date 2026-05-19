@@ -116,6 +116,7 @@
   "detail.pricing_column_subtotal": "Subtotaal",
   "detail.pricing_column_vat": "BTW",
   "detail.pricing_column_total": "Totaal",
+  "detail.pricing_totals_label": "Totaal",
   "detail.pricing_remove_button": "Verwijderen",
   "detail.pricing_form_description": "Omschrijving",
   "detail.pricing_form_description_placeholder": "bv. Inzet op zaterdag",
