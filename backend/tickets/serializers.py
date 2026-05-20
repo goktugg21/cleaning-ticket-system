@@ -108,6 +108,7 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
 class TicketListSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    company_name = serializers.CharField(source="company.name", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     sla_is_paused = serializers.SerializerMethodField()
     sla_remaining_business_seconds = serializers.SerializerMethodField()
@@ -123,6 +124,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             "priority",
             "status",
             "company",
+            "company_name",
             "building",
             "building_name",
             "customer",
@@ -150,6 +152,7 @@ class TicketListSerializer(serializers.ModelSerializer):
 class TicketDetailSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    company_name = serializers.CharField(source="company.name", read_only=True)
     created_by_email = serializers.CharField(source="created_by.email", read_only=True)
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
@@ -191,6 +194,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "priority",
             "status",
             "company",
+            "company_name",
             "building",
             "building_name",
             "customer",

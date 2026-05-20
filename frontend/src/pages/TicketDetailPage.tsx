@@ -2,7 +2,6 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  AlertTriangle,
   ChevronLeft,
   Clock,
   MapPin,
@@ -20,7 +19,6 @@ import {
   addTicketStaffAssignment,
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
-  getCompany,
   getStaffCompletionRoute,
   listAssignableStaff,
   listCustomerContacts,
@@ -97,8 +95,16 @@ function partitionTransitions(
   currentStatus: TicketStatus,
   allowed: TicketStatus[],
 ): { primary: TicketStatus[]; secondary: TicketStatus[] } {
-  const primarySet = new Set(PRIMARY_TRANSITIONS[currentStatus] ?? []);
-  const primary = allowed.filter((s) => primarySet.has(s));
+  // Sprint 30 Batch 30.1.3 — preserve PRIMARY_TRANSITIONS *order* so
+  // Approve renders above Reject on every customer-decision step,
+  // regardless of how the backend orders `allowed_next_statuses`.
+  // (SUPER_ADMIN gets statuses in TicketStatus.choices order which
+  // puts REJECTED before APPROVED; reading from PRIMARY_TRANSITIONS
+  // overrides that.)
+  const primaryOrder = PRIMARY_TRANSITIONS[currentStatus] ?? [];
+  const allowedSet = new Set(allowed);
+  const primary = primaryOrder.filter((s) => allowedSet.has(s));
+  const primarySet = new Set(primary);
   const secondary = allowed.filter((s) => !primarySet.has(s));
   return { primary, secondary };
 }
@@ -332,6 +338,37 @@ export function TicketDetailPage() {
     me?.role === "COMPANY_ADMIN" ||
     me?.role === "BUILDING_MANAGER";
 
+  // Sprint 30 Batch 30.1.3 — "provider acting on a customer-decision
+  // step" gate. Used to swap the plain Approve/Reject buttons on a
+  // WCA ticket for the inline override-arming flow (mandatory reason +
+  // two-press confirm) while keeping the CUSTOMER_USER's direct
+  // approve/reject path unchanged.
+  const isProviderOverrideRole =
+    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
+  const isCustomerDecisionStep =
+    !!ticket && ticket.status === "WAITING_CUSTOMER_APPROVAL";
+  const providerActsAsOverride =
+    isProviderOverrideRole && isCustomerDecisionStep;
+
+  // Sprint 30 Batch 30.1.3 — STAFF completion-evidence gate (frontend
+  // mirror of the backend `completion_evidence_required` rule). For
+  // STAFF on the IN_PROGRESS → completion transition we require a
+  // note OR at least one image attachment before enabling the
+  // transition button. The backend already returns 400 with this
+  // stable code; the UX gate here only blocks the obvious empty case.
+  // Note: backend STAFF rule for IN_PROGRESS → WAITING_CUSTOMER_APPROVAL
+  // already enforces note OR attachment; we keep this client check
+  // narrow to the STAFF role + completion targets so we never block
+  // a provider's faster optional-note flow.
+  const hasImageAttachment = useMemo(
+    () => attachments.some((a) => a.mime_type?.startsWith("image/")),
+    [attachments],
+  );
+  const staffCompletionEvidenceRequired =
+    me?.role === "STAFF" &&
+    !!ticket &&
+    ticket.status === "IN_PROGRESS";
+
   // Sprint 28 Batch 4 — read-only Customer Contacts panel.
   // Backend `IsSuperAdminOrCompanyAdminForCompany` gate on the
   // contacts list endpoint rejects everyone else with 403; we mirror
@@ -341,15 +378,12 @@ export function TicketDetailPage() {
     me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
   const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
 
-  // Sprint 30 Batch 30.1.1 — multi-tenant fix for the Assigned field
-  // staff heading. The TicketDetail payload exposes `company` (id only),
-  // not a `company_name`, so we fetch the providing company once per
-  // ticket to interpolate its name into the heading ("Assigned
-  // {{companyName}} staff"). A 403 / 404 (e.g. a CUSTOMER_USER whose
-  // scope_companies_for(...) does not include the provider) silently
-  // falls back to the unknown-tenant heading. Backend stays the source
-  // of truth for visibility; this is purely a UX label.
-  const [companyName, setCompanyName] = useState<string | null>(null);
+  // Sprint 30 Batch 30.1.2 — multi-tenant fix for the Assigned field
+  // staff heading. The TicketDetail payload now exposes `company_name`
+  // directly via `source="company.name"` on the backend serializer
+  // (Sprint 30 Batch 30.1.2 Phase B), so we render it inline without
+  // an extra round-trip. A null value (legacy / hard-deleted provider
+  // row) falls back to the unknown-tenant heading.
 
   // Sprint 12 — mirrors the backend `_user_can_soft_delete_ticket`
   // rule so the button only renders when the API will actually accept
@@ -437,31 +471,6 @@ export function TicketDetailPage() {
       cancelled.current = true;
     };
   }, [canSeeCustomerContacts, ticketCustomerId]);
-
-  // Sprint 30 Batch 30.1.1 — fetch the providing company's name for the
-  // Assigned field staff heading. Re-runs only when the ticket's
-  // `company` id actually changes. Failures collapse to `null`, which
-  // the heading renders as the unknown-tenant variant.
-  const ticketCompanyId = ticket?.company ?? null;
-  useEffect(() => {
-    const cancelled = { current: false };
-    if (ticketCompanyId === null) {
-      queueMicrotask(() => {
-        if (!cancelled.current) setCompanyName(null);
-      });
-    } else {
-      getCompany(ticketCompanyId)
-        .then((c) => {
-          if (!cancelled.current) setCompanyName(c.name);
-        })
-        .catch(() => {
-          if (!cancelled.current) setCompanyName(null);
-        });
-    }
-    return () => {
-      cancelled.current = true;
-    };
-  }, [ticketCompanyId]);
 
   useEffect(() => {
     if (!isStaff || !id) return;
@@ -759,7 +768,11 @@ export function TicketDetailPage() {
   async function submitCompleteWork(event: FormEvent) {
     event.preventDefault();
     if (!id || !ticket) return;
-    if (!completeNote.trim()) {
+    // Sprint 30 Batch 30.1.3 — accept either a typed note OR a
+    // visible image attachment. The backend
+    // `completion_evidence_required` rule for STAFF on IN_PROGRESS →
+    // completion routes uses the same OR semantics; this matches.
+    if (!completeNote.trim() && !hasImageAttachment) {
       setCompleteError(t("common:ticket_staff_complete.error_evidence_required"));
       return;
     }
@@ -1454,9 +1467,9 @@ export function TicketDetailPage() {
                   marginBottom: 6,
                 }}
               >
-                {companyName
+                {ticket.company_name
                   ? t("assignment_section_field_staff_heading", {
-                      companyName,
+                      companyName: ticket.company_name,
                     })
                   : t("assignment_section_field_staff_heading_unknown")}
               </div>
@@ -1493,7 +1506,17 @@ export function TicketDetailPage() {
                           <div className="assignee-avatar">·</div>
                           <div className="assignee-info">
                             <span className="assignee-name">
-                              {t(entry.label_key)}
+                              {/* Sprint 30 Batch 30.1.2 — interpolate the
+                                  ticket's providing company name into the
+                                  anonymous label. The backend emits a fixed
+                                  key (`tickets.assigned_team_anonymous`); the
+                                  frontend swaps to the `_unknown` variant
+                                  when `company_name` is null. */}
+                              {ticket.company_name
+                                ? t(entry.label_key, {
+                                    companyName: ticket.company_name,
+                                  })
+                                : t(`${entry.label_key}_unknown`)}
                             </span>
                           </div>
                         </li>
@@ -2306,11 +2329,14 @@ export function TicketDetailPage() {
                       ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
                       visibleNextStatuses.includes("REJECTED")
                         ? t("workflow_rejection_reason_label")
-                        : t("workflow_status_note_label")}
+                        : staffCompletionEvidenceRequired
+                          ? t("workflow_status_note_label_staff_required")
+                          : t("workflow_status_note_label")}
                     </label>
                     <input
                       id="status-note"
                       className="field-input"
+                      data-testid="workflow-status-note-input"
                       value={statusNote}
                       onChange={(event) => setStatusNote(event.target.value)}
                       placeholder={
@@ -2358,8 +2384,26 @@ export function TicketDetailPage() {
                       when the current status has zero primaries, e.g.
                       CLOSED). The per-button JSX is identical for
                       both groups — the `renderTransitionButton`
-                      helper parameterises only the className. */}
+                      helper parameterises only the className.
+
+                      Sprint 30 Batch 30.1.3 — on WCA, the override
+                      arming flow is folded INTO the primary buttons:
+                      a provider's click on Approve/Reject expands an
+                      inline reason + Confirm/Cancel pair directly
+                      under the buttons (no separate override card).
+                      For a CUSTOMER_USER on the same step the
+                      buttons stay direct (no `is_override` flag, no
+                      reason prompt). */}
                   {(() => {
+                    // STAFF on a completion-evidence-required step
+                    // needs a note OR an image attachment before we
+                    // enable any transition button. Frontend mirror
+                    // of the backend `completion_evidence_required`
+                    // 400 check.
+                    const evidenceMissing =
+                      staffCompletionEvidenceRequired &&
+                      !statusNote.trim() &&
+                      !hasImageAttachment;
                     const renderTransitionButton = (
                       status: TicketStatus,
                       variant: "primary" | "secondary",
@@ -2372,7 +2416,12 @@ export function TicketDetailPage() {
                             ? "status-btn"
                             : "status-btn status-btn-secondary"
                         }
-                        disabled={statusBusy !== null}
+                        disabled={statusBusy !== null || evidenceMissing}
+                        data-testid={
+                          variant === "primary"
+                            ? `workflow-move-${status}`
+                            : undefined
+                        }
                         onClick={() => changeStatus(status)}
                       >
                         {statusBusy === status ? (
@@ -2385,16 +2434,145 @@ export function TicketDetailPage() {
                         )}
                       </button>
                     );
+                    // Sprint 30 Batch 30.1.3 — drop the plain
+                    // APPROVED/REJECTED button targets when the
+                    // actor is a provider on WCA. They re-render in
+                    // the override-arming block below so the click
+                    // never POSTs without an `override_reason` (the
+                    // backend returns 400 `override_reason_required`
+                    // on the empty-reason path).
+                    const primaryForRender = providerActsAsOverride
+                      ? primaryNextStatuses.filter(
+                          (s) => s !== "APPROVED" && s !== "REJECTED",
+                        )
+                      : primaryNextStatuses;
+                    const secondaryForRender = providerActsAsOverride
+                      ? secondaryNextStatuses.filter(
+                          (s) => s !== "APPROVED" && s !== "REJECTED",
+                        )
+                      : secondaryNextStatuses;
+                    // Override-arming targets — only the WCA decision
+                    // targets the actor is actually allowed to drive.
+                    const overrideTargets: TicketStatus[] =
+                      providerActsAsOverride
+                        ? (PRIMARY_TRANSITIONS["WAITING_CUSTOMER_APPROVAL"]
+                            .filter((s) => visibleNextStatuses.includes(s))) as TicketStatus[]
+                        : [];
+                    const renderOverrideButton = (status: TicketStatus) => {
+                      const isArmed = overrideDecision === status;
+                      return (
+                        <div
+                          key={status}
+                          className="workflow-override-target"
+                          data-testid={`workflow-override-${status}`}
+                        >
+                          <button
+                            type="button"
+                            className="status-btn"
+                            disabled={statusBusy !== null || overrideBusy}
+                            onClick={() => changeStatus(status)}
+                            data-testid={`workflow-move-${status}`}
+                            aria-expanded={isArmed}
+                          >
+                            <>
+                              {t("workflow_move_to", { status: tStatus(status) })}
+                              <span className="status-btn-arrow">→</span>
+                            </>
+                          </button>
+                          {isArmed && (
+                            <div
+                              className="workflow-override-inline"
+                              data-testid="ticket-override-modal"
+                            >
+                              <form onSubmit={submitOverride}>
+                                <p
+                                  className="muted small"
+                                  style={{ margin: "0 0 6px" }}
+                                >
+                                  {t("override_inline_helper")}
+                                </p>
+                                <div className="field">
+                                  <label
+                                    className="field-label"
+                                    htmlFor="ticket-override-reason"
+                                  >
+                                    {t("override_modal_reason_label")}
+                                  </label>
+                                  <textarea
+                                    id="ticket-override-reason"
+                                    data-testid="ticket-override-reason"
+                                    className="field-textarea"
+                                    rows={3}
+                                    value={overrideReason}
+                                    onChange={(event) =>
+                                      setOverrideReason(event.target.value)
+                                    }
+                                    required
+                                  />
+                                </div>
+                                {overrideError && (
+                                  <div
+                                    className="alert-error"
+                                    role="alert"
+                                    data-testid="ticket-override-error"
+                                    style={{ marginTop: 6 }}
+                                  >
+                                    {overrideError}
+                                  </div>
+                                )}
+                                <div className="override-card-footer">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={cancelOverride}
+                                    disabled={overrideBusy}
+                                    data-testid="ticket-override-cancel"
+                                  >
+                                    {t("override_modal_cancel")}
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="btn btn-primary btn-sm"
+                                    disabled={
+                                      overrideBusy ||
+                                      !overrideReason.trim()
+                                    }
+                                    data-testid="ticket-override-submit"
+                                  >
+                                    {overrideBusy
+                                      ? t("updating")
+                                      : overrideModalSubmitLabel(status)}
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
                     return (
                       <>
-                        {primaryNextStatuses.length > 0 && (
+                        {(overrideTargets.length > 0 ||
+                          primaryForRender.length > 0) && (
                           <div className="status-actions">
-                            {primaryNextStatuses.map((status) =>
+                            {overrideTargets.map((status) =>
+                              renderOverrideButton(status),
+                            )}
+                            {primaryForRender.map((status) =>
                               renderTransitionButton(status, "primary"),
                             )}
                           </div>
                         )}
-                        {secondaryNextStatuses.length > 0 &&
+                        {evidenceMissing && (
+                          <p
+                            className="muted small"
+                            data-testid="workflow-completion-evidence-required"
+                            style={{ marginTop: 4 }}
+                          >
+                            {t("workflow_completion_evidence_required")}
+                          </p>
+                        )}
+                        {secondaryForRender.length > 0 &&
                           !shouldDefaultOpenSecondary && (
                             <button
                               type="button"
@@ -2410,12 +2588,12 @@ export function TicketDetailPage() {
                                 : t("show_more_actions")}
                             </button>
                           )}
-                        {secondaryNextStatuses.length > 0 && isSecondaryOpen && (
+                        {secondaryForRender.length > 0 && isSecondaryOpen && (
                           <div
                             className="workflow-secondary-list"
                             data-testid="workflow-secondary-list"
                           >
-                            {secondaryNextStatuses.map((status) =>
+                            {secondaryForRender.map((status) =>
                               renderTransitionButton(status, "secondary"),
                             )}
                           </div>
@@ -2428,101 +2606,14 @@ export function TicketDetailPage() {
             </div>
           </div>
 
-          {/* Sprint 27F-F1 — provider customer-decision override modal.
-              Mirrors the ExtraWorkDetailPage shape: opens when the
-              operator clicks "Override → Customer approved" /
-              "Override → Customer rejected", requires a mandatory
-              reason, and posts {is_override:true, override_reason} so
-              the new TicketStatusHistory row carries the override flag
-              + the typed reason. CUSTOMER_USER never triggers this
-              path — `isAdminCustomerDecisionOverride` filters by role. */}
-          {overrideDecision && (
-            <div className="card" data-testid="ticket-override-modal">
-              <div className="section-head">
-                <div
-                  className="section-head-title"
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 800,
-                    letterSpacing: "0.12em",
-                    textTransform: "uppercase",
-                    color: "var(--text-faint)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <AlertTriangle size={14} strokeWidth={2.2} />
-                  {t("override_modal_title")}
-                </div>
-              </div>
-              <form
-                onSubmit={submitOverride}
-                style={{ padding: "12px 18px 16px" }}
-              >
-                <div className="alert-warning" style={{ marginBottom: 12 }}>
-                  {t("override_modal_prompt")}
-                </div>
-                <div className="field">
-                  <label
-                    className="field-label"
-                    htmlFor="ticket-override-reason"
-                  >
-                    {t("override_modal_reason_label")}
-                  </label>
-                  <textarea
-                    id="ticket-override-reason"
-                    data-testid="ticket-override-reason"
-                    className="field-textarea"
-                    rows={3}
-                    value={overrideReason}
-                    onChange={(event) =>
-                      setOverrideReason(event.target.value)
-                    }
-                    required
-                  />
-                </div>
-                {overrideError && (
-                  <div
-                    className="alert-error"
-                    role="alert"
-                    data-testid="ticket-override-error"
-                    style={{ marginTop: 8 }}
-                  >
-                    {overrideError}
-                  </div>
-                )}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 12,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={cancelOverride}
-                    disabled={overrideBusy}
-                    data-testid="ticket-override-cancel"
-                  >
-                    {t("override_modal_cancel")}
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm"
-                    disabled={overrideBusy}
-                    data-testid="ticket-override-submit"
-                  >
-                    {overrideBusy
-                      ? t("updating")
-                      : overrideModalSubmitLabel(overrideDecision)}
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
+          {/* Sprint 30 Batch 30.1.3 — the standalone provider override
+              card has been folded INTO the workflow card. The
+              previously-locked 27F testids (`ticket-override-modal`,
+              `ticket-override-reason`, `ticket-override-submit`,
+              `ticket-override-cancel`, `ticket-override-error`) now
+              live on the inline arming block under each Approve /
+              Reject button. The two-press confirmation and mandatory
+              `override_reason` audit contract are unchanged. */}
 
           {/* Sprint 28 Batch 11 — STAFF completion modal. Inline card
               shape (matches the override modal above rather than a
@@ -2574,7 +2665,10 @@ export function TicketDetailPage() {
                     className="field-label"
                     htmlFor="ticket-staff-complete-note"
                   >
-                    {t("common:ticket_staff_complete.note_label")}
+                    {/* Sprint 30 Batch 30.1.3 — STAFF completion gate
+                        is note OR photo; relax the label so the user
+                        knows either satisfies the audit requirement. */}
+                    {t("common:ticket_staff_complete.note_label_or_photo")}
                   </label>
                   <textarea
                     id="ticket-staff-complete-note"
@@ -2586,14 +2680,15 @@ export function TicketDetailPage() {
                     placeholder={t(
                       "common:ticket_staff_complete.note_placeholder",
                     )}
-                    required
                   />
                   <p className="muted small" style={{ marginTop: 4 }}>
-                    {t("common:ticket_staff_complete.note_required_hint")}
+                    {t("common:ticket_staff_complete.note_or_photo_hint")}
                   </p>
                 </div>
                 <p className="muted small" style={{ marginTop: 4 }}>
-                  {t("common:ticket_staff_complete.attachment_hint")}
+                  {hasImageAttachment
+                    ? t("common:ticket_staff_complete.attachment_hint_satisfied")
+                    : t("common:ticket_staff_complete.attachment_hint")}
                 </p>
                 {completeError && (
                   <div
@@ -2629,7 +2724,11 @@ export function TicketDetailPage() {
                       completeBusy ||
                       completeRouteLoading ||
                       !completeRoute ||
-                      !completeNote.trim()
+                      // Sprint 30 Batch 30.1.3 — STAFF can submit with
+                      // a note OR an image attachment (mirrors the
+                      // backend `completion_evidence_required` rule
+                      // for STAFF on IN_PROGRESS → completion routes).
+                      (!completeNote.trim() && !hasImageAttachment)
                     }
                     data-testid="ticket-staff-complete-submit"
                   >

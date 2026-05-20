@@ -34,7 +34,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, FileSearch, FileText } from "lucide-react";
+import { FileSearch, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -1429,110 +1429,143 @@ export function ExtraWorkDetailPage() {
             </div>
           )}
 
-          {/* Provider override card */}
+          {/* Sprint 30 Batch 30.1.3 — provider customer-decision card.
+              Replaces the standalone "Provider override" card. Mirrors
+              the customer's decision card above but ARMS inline on
+              first press: the Approve/Reject button expands a reason
+              textarea + Confirm/Cancel pair. Second press posts
+              {is_override:true, override_reason} per the EW state
+              machine contract.
+
+              This surface ONLY renders on the customer-decision step
+              (PRICING_PROPOSED). Forward provider moves (Under review,
+              propose pricing, Cancelled) stay as plain buttons in the
+              Provider workflow card above. */}
           {providerOverrideAvailable && (
             <div className="card">
               <div className="form-section">
                 <div className="ew-detail-actions-section-title">
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <AlertTriangle size={14} strokeWidth={2.2} />
-                    {t("detail.actions_override_title")}
-                  </span>
+                  {t("detail.actions_decision_title")}
                 </div>
-                <div className="alert-warning" style={{ marginBottom: 12 }}>
-                  <strong>{t("detail.override_warning_title")}</strong>{" "}
-                  {t("detail.override_warning_body")}
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.override_inline_helper")}
+                </p>
+                <div
+                  className="status-actions"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {(["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
+                    .filter((target) => allowed.includes(target))
+                    .map((target) => {
+                      const isArmed = overrideDecision === target;
+                      return (
+                        <div
+                          key={target}
+                          className="workflow-override-target"
+                          data-testid={`extra-work-override-${target}`}
+                        >
+                          <button
+                            type="button"
+                            className={
+                              target === "CUSTOMER_APPROVED"
+                                ? "btn btn-primary btn-sm"
+                                : "btn btn-secondary btn-sm"
+                            }
+                            onClick={() => {
+                              setOverrideDecision(target);
+                              setOverrideError("");
+                            }}
+                            data-testid={`extra-work-provider-${
+                              target === "CUSTOMER_APPROVED"
+                                ? "approve"
+                                : "reject"
+                            }`}
+                            aria-expanded={isArmed}
+                            disabled={overrideBusy}
+                          >
+                            {target === "CUSTOMER_APPROVED"
+                              ? t("detail.workflow_approve_button")
+                              : t("detail.workflow_reject_button")}
+                          </button>
+                          {isArmed && (
+                            <div
+                              className="workflow-override-inline"
+                              data-testid="extra-work-override-modal"
+                            >
+                              <form onSubmit={handleOverrideSubmit}>
+                                <div className="field">
+                                  <label
+                                    className="field-label"
+                                    htmlFor="override-reason"
+                                  >
+                                    {t("detail.override_reason_label")}
+                                  </label>
+                                  <textarea
+                                    id="override-reason"
+                                    data-testid="extra-work-override-reason"
+                                    className="field-textarea"
+                                    rows={3}
+                                    value={overrideReason}
+                                    onChange={(event) =>
+                                      setOverrideReason(event.target.value)
+                                    }
+                                    placeholder={t(
+                                      "detail.override_reason_placeholder",
+                                    )}
+                                    required
+                                  />
+                                </div>
+                                {overrideError && (
+                                  <div
+                                    className="alert-error"
+                                    role="alert"
+                                    data-testid="extra-work-override-error"
+                                    style={{ marginTop: 6 }}
+                                  >
+                                    {overrideError}
+                                  </div>
+                                )}
+                                <div className="override-card-footer">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => {
+                                      setOverrideDecision(null);
+                                      setOverrideReason("");
+                                      setOverrideError("");
+                                    }}
+                                    disabled={overrideBusy}
+                                    data-testid="extra-work-override-cancel"
+                                  >
+                                    {t("detail.override_cancel")}
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="btn btn-primary btn-sm"
+                                    disabled={
+                                      overrideBusy ||
+                                      !overrideReason.trim()
+                                    }
+                                    data-testid="extra-work-override-submit"
+                                  >
+                                    {overrideBusy
+                                      ? t("detail.override_submitting")
+                                      : t("detail.override_confirm", {
+                                          label: t(STATUS_I18N_KEY[target]),
+                                        })}
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
-
-                {overrideDecision === null ? (
-                  <div
-                    style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                  >
-                    {allowed.includes("CUSTOMER_APPROVED") && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setOverrideDecision("CUSTOMER_APPROVED")}
-                      >
-                        {t("detail.override_choose_approve")}
-                      </button>
-                    )}
-                    {allowed.includes("CUSTOMER_REJECTED") && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setOverrideDecision("CUSTOMER_REJECTED")}
-                      >
-                        {t("detail.override_choose_reject")}
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <form onSubmit={handleOverrideSubmit}>
-                    <div className="field">
-                      <label
-                        className="field-label"
-                        htmlFor="override-reason"
-                      >
-                        {t("detail.override_reason_label")}
-                      </label>
-                      <textarea
-                        id="override-reason"
-                        className="field-textarea"
-                        rows={3}
-                        value={overrideReason}
-                        onChange={(event) =>
-                          setOverrideReason(event.target.value)
-                        }
-                        placeholder={t("detail.override_reason_placeholder")}
-                        required
-                      />
-                    </div>
-                    {overrideError && (
-                      <div className="alert-error" role="alert">
-                        {overrideError}
-                      </div>
-                    )}
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "flex-end",
-                        gap: 8,
-                        marginTop: 8,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => {
-                          setOverrideDecision(null);
-                          setOverrideReason("");
-                          setOverrideError("");
-                        }}
-                      >
-                        {t("detail.override_cancel")}
-                      </button>
-                      <button
-                        type="submit"
-                        className="btn btn-primary btn-sm"
-                        disabled={overrideBusy}
-                      >
-                        {overrideBusy
-                          ? t("detail.override_submitting")
-                          : t("detail.override_confirm", {
-                              label: t(STATUS_I18N_KEY[overrideDecision]),
-                            })}
-                      </button>
-                    </div>
-                  </form>
-                )}
               </div>
             </div>
           )}

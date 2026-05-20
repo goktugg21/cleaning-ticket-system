@@ -147,6 +147,7 @@
   "detail.override_section_title": "Aanbieder-override",
   "detail.override_warning_title": "Override de klantbeslissing.",
   "detail.override_warning_body": "Gebruik dit alleen wanneer de klant via telefoon, e-mail of een ander kanaal heeft ingestemd. Elke override wordt vastgelegd in de statusgeschiedenis met uw naam, de gekozen uitkomst en de reden die u hieronder invoert.",
+  "detail.override_inline_helper": "Dit overschrijft de beslissing van de klant en wordt vastgelegd in de statusgeschiedenis.",
   "detail.override_choose_approve": "Override → Klant goedgekeurd",
   "detail.override_choose_reject": "Override → Klant afgewezen",
   "detail.override_reason_label": "Reden voor de override (verplicht)",

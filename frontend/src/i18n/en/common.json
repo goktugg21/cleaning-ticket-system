@@ -534,7 +534,8 @@
   "api_error.network": "We can't reach the server. Check your connection and try again.",
   "api_error.unexpected": "Something unexpected happened. Please try again.",
 
-  "tickets.assigned_team_anonymous": "Assigned to the OSIUS team",
+  "tickets.assigned_team_anonymous": "Assigned to the {{companyName}} team",
+  "tickets.assigned_team_anonymous_unknown": "Assigned to the field-staff team",
   "tickets.assigned_to_you": "Assigned to you",
 
   "nav.staff_requests": "Staff requests",
@@ -544,7 +545,7 @@
   "staff_requests.subtitle_loading": "Loading requests…",
   "staff_requests.count_one": "{{count}} request",
   "staff_requests.count_other": "{{count}} requests",
-  "staff_requests.intro": "Staff request assignment to a ticket they are eligible to work on. Building managers and OSIUS admins review the queue here.",
+  "staff_requests.intro": "Staff request assignment to a ticket they are eligible to work on. Building managers and provider admins review the queue here.",
   "staff_requests.col_when": "Requested",
   "staff_requests.col_staff": "Staff",
   "staff_requests.col_ticket": "Ticket",
@@ -579,7 +580,8 @@
   "staff_requests.banner_rejected": "Rejected {{staff}}'s request for {{ticket}}.",
 
   "customer_form.contact_visibility_title": "Assigned-staff visibility for this customer",
-  "customer_form.contact_visibility_helper": "Choose what the customer’s users see about the OSIUS field staff assigned to their tickets. Switching everything off shows a generic “Assigned to the OSIUS team” label instead.",
+  "customer_form.contact_visibility_helper": "Choose what the customer’s users see about the {{companyName}} field staff assigned to their tickets. Switching everything off shows a generic “Assigned to the {{companyName}} team” label instead.",
+  "customer_form.contact_visibility_helper_unknown": "Choose what the customer’s users see about the field staff assigned to their tickets. Switching everything off shows a generic “Assigned to the field-staff team” label instead.",
   "customer_form.show_assigned_staff_name": "Show staff name",
   "customer_form.show_assigned_staff_email": "Show staff email",
   "customer_form.show_assigned_staff_phone": "Show staff phone",
@@ -744,8 +746,10 @@
   "ticket_staff_complete.button_label": "Complete work",
   "ticket_staff_complete.modal_title": "Mark work as completed",
   "ticket_staff_complete.note_label": "Completion note",
+  "ticket_staff_complete.note_label_or_photo": "Add a completion note or attach a photo of the completed work (required)",
   "ticket_staff_complete.note_placeholder": "Describe what was done…",
   "ticket_staff_complete.note_required_hint": "A completion note or photo attachment is required.",
+  "ticket_staff_complete.note_or_photo_hint": "Either a typed note OR an attached photo of the completed work satisfies this.",
   "ticket_staff_complete.route_loading": "Resolving destination…",
   "ticket_staff_complete.route_manager_review": "This will go to your manager for review.",
   "ticket_staff_complete.route_customer_approval": "This will be sent to the customer for approval.",
@@ -755,6 +759,7 @@
   "ticket_staff_complete.error_evidence_required": "Please add a note or attach a photo before sending.",
   "ticket_staff_complete.error_route_mismatch": "The routing changed. Please refresh and try again.",
   "ticket_staff_complete.attachment_hint": "If you have a photo, upload it from the Attachments card on this page before sending.",
+  "ticket_staff_complete.attachment_hint_satisfied": "A photo is already attached — you can submit without typing a note.",
 
   "manager_review.label_sent_at": "Sent for manager review at",
 

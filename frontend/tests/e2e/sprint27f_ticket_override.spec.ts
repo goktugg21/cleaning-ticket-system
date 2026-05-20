@@ -2,6 +2,10 @@ import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
+import {
+  DEMO_TICKET_TITLES,
+  resolveDemoTicketId,
+} from "./fixtures/tickets";
 
 /**
  * Sprint 27F-F1 — ticket override modal + timeline override badge.
@@ -13,20 +17,25 @@ import { loginAs } from "./fixtures/login";
  * POST /tickets/{id}/status/ when SUPER_ADMIN / COMPANY_ADMIN drive
  * WAITING_CUSTOMER_APPROVAL → APPROVED|REJECTED.
  *
- * Reference fixture ticket: "Pantry zeepdispenser" (B3 Amsterdam,
- * Osius Demo), seeded in `WAITING_CUSTOMER_APPROVAL` by
- * `seed_demo_data`. Two non-mutating tests (empty-reason validation
- * + CUSTOMER_USER button visibility) run FIRST so the third
- * (mutating override-to-APPROVED) does not strand the ticket out of
- * WCA for the earlier specs.
+ * Reference fixture ticket: "[DEMO] Pantry zeepdispenser"
+ * (B3 Amsterdam, Osius Demo), seeded in WAITING_CUSTOMER_APPROVAL
+ * by `seed_demo_data`. Two non-mutating tests (empty-reason
+ * validation + CUSTOMER_USER button visibility) run FIRST so the
+ * third (mutating override-to-APPROVED) does not strand the ticket
+ * out of WCA for the earlier specs.
  *
  * Note: Playwright tests in this repo run serially (workers=1) and
  * file order is alphabetical. This spec mutates the WCA fixture in
- * the third test; reseeding (`python manage.py seed_demo_data`) is
- * the standard reset before re-running the e2e suite.
+ * the third test; reseeding (`python manage.py seed_demo_data
+ * --reset-tickets`) is the standard reset before re-running the
+ * e2e suite.
+ *
+ * Sprint 30 Batch 30.1.2 Phase F — migrated off the dashboard nav
+ * (.data-table tbody tr → a.td-id) onto direct `/tickets/{id}` goto
+ * calls. The ID is resolved at the start of each test by calling
+ * `/api/tickets/?search=<title>` so the spec stays robust under
+ * `--reset-tickets` autoincrement churn.
  */
-
-const PANTRY_TICKET_SUBSTRING = "Pantry zeepdispenser";
 
 test("COMPANY_ADMIN — empty reason blocks override submission", async ({
   page,
@@ -34,14 +43,21 @@ test("COMPANY_ADMIN — empty reason blocks override submission", async ({
   // Ramazan (Osius COMPANY_ADMIN) sees the override buttons on
   // Pantry zeepdispenser because it is in WAITING_CUSTOMER_APPROVAL
   // and his role triggers `isAdminCustomerDecisionOverride`.
+  //
+  // Sprint 30 Batch 30.1.3 — override is folded INTO the workflow
+  // card. Clicking Approve arms an INLINE block under the button
+  // (the `ticket-override-modal` testid was relocated from the old
+  // standalone card onto the new inline container, so this spec
+  // still resolves it). Confirm is disabled until a non-empty
+  // reason is typed; the empty-reason contract is enforced via
+  // the disabled state (no possible POST) rather than via a
+  // post-click inline error. No backend round-trip path changed.
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.waitForLoadState("networkidle");
-
-  const row = page
-    .locator(".data-table tbody tr", { hasText: PANTRY_TICKET_SUBSTRING })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
   // Click the first override-target status button. Both APPROVED
@@ -53,14 +69,13 @@ test("COMPANY_ADMIN — empty reason blocks override submission", async ({
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
 
-  // The modal should open with the textarea + submit + cancel.
+  // The inline arming block appears with the textarea + submit + cancel.
   const modal = page.locator("[data-testid='ticket-override-modal']");
   await expect(modal).toBeVisible({ timeout: 5_000 });
 
-  // No network call should fire when we submit with an empty
-  // reason — the client-side check returns before the POST. We
-  // spy on /api/tickets/<id>/status/ requests and assert it stays
-  // at 0 across the click.
+  // No network call should fire while the reason is empty — the
+  // Confirm button stays disabled and any clicks are dropped. Spy
+  // on /api/tickets/<id>/status/ to assert zero POSTs.
   let statusPostCount = 0;
   page.on("request", (req) => {
     if (
@@ -71,22 +86,22 @@ test("COMPANY_ADMIN — empty reason blocks override submission", async ({
     }
   });
 
-  // Leave the textarea empty and click submit.
-  await page
-    .locator("[data-testid='ticket-override-submit']")
-    .click();
-
-  // Inline error appears.
-  await expect(
-    page.locator("[data-testid='ticket-override-error']"),
-  ).toBeVisible({ timeout: 5_000 });
+  // Confirm button is disabled while the reason textarea is empty.
+  const submitButton = page.locator(
+    "[data-testid='ticket-override-submit']",
+  );
+  await expect(submitButton).toBeDisabled({ timeout: 5_000 });
+  // Force-click is a no-op against a disabled button in browser
+  // terms but Playwright will execute the event with force:true.
+  // Verify no POST results either way.
+  await submitButton.click({ force: true });
 
   // Allow a tick for any (mistakenly issued) network call to fly.
   await page.waitForTimeout(500);
   expect(statusPostCount).toBe(0);
 
-  // Cancel cleans up the modal so we leave the page in a sane
-  // state for the next test.
+  // Cancel cleans up the inline arming block so the next test
+  // sees the workflow card back at rest.
   await page
     .locator("[data-testid='ticket-override-cancel']")
     .click();
@@ -104,13 +119,11 @@ test("CUSTOMER_USER — Approve/Reject buttons do not open the override modal", 
   // and returns false for CUSTOMER_USER, so clicking either does
   // NOT open the override modal.
   await loginAs(page, DEMO_USERS.customerB3);
-  await page.waitForLoadState("networkidle");
-
-  const row = page
-    .locator(".data-table tbody tr", { hasText: PANTRY_TICKET_SUBSTRING })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
   const buttons = page.locator(".status-actions .status-btn");
@@ -153,13 +166,11 @@ test("COMPANY_ADMIN — typed reason confirms override and tags the timeline", a
   // the override path. Runs last in this file so the previous two
   // specs still see the ticket in WCA on a fresh seed.
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.waitForLoadState("networkidle");
-
-  const row = page
-    .locator(".data-table tbody tr", { hasText: PANTRY_TICKET_SUBSTRING })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
   const approveButton = page

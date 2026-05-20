@@ -1,7 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
-import { loginAs, logoutFromTopbar } from "./fixtures/login";
+import { loginAs } from "./fixtures/login";
+import {
+  DEMO_TICKET_TITLES,
+  resolveDemoTicketId,
+} from "./fixtures/tickets";
 
 /**
  * Sprint 16 — workflow buttons match backend.allowed_next_statuses.
@@ -14,19 +18,30 @@ import { loginAs, logoutFromTopbar } from "./fixtures/login";
  *     sees Approve / Reject buttons.
  *   - Iris (B1+B2) on the same B3 ticket cannot reach the page
  *     (queryset gate fires before render).
+ *
+ * Sprint 30 Batch 30.1.2 Phase F — migrated off the dashboard nav
+ * (.data-table tbody tr → a.td-id) onto direct `/tickets/{id}` goto
+ * calls. The ID is resolved at the start of each test by calling
+ * `/api/tickets/?search=<title>` so the spec stays robust under
+ * `--reset-tickets` autoincrement churn. Dashboard nav was incidental
+ * to every test in this file; the dedicated dashboard table specs
+ * still cover the table-row click-through.
  */
 
 test("Amanda sees Approve/Reject on the B3 waiting ticket", async ({
   page,
 }) => {
+  // "[DEMO] Pantry zeepdispenser" (B3 Amsterdam,
+  // WAITING_CUSTOMER_APPROVAL). Amanda is the B3 CUSTOMER_USER that
+  // owns this ticket so allowed_next_statuses on a WCA row includes
+  // both APPROVED and REJECTED for her.
   await loginAs(page, DEMO_USERS.customerB3);
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
-
-  const waitingRow = page.locator(".data-table tbody tr", {
-    hasText: "Pantry zeepdispenser",
-  });
-  expect(await waitingRow.count()).toBeGreaterThan(0);
-  await waitingRow.first().locator("a.td-id").click();
 
   // Status-action buttons are rendered from ticket.allowed_next_statuses;
   // the labels are i18n'd ("Move to Approved" / "Move to Rejected").
@@ -42,21 +57,18 @@ test("Amanda sees Approve/Reject on the B3 waiting ticket", async ({
 test("Iris cannot reach Amanda's B3 waiting ticket", async ({ page }) => {
   // Sprint 23A tightened plain CUSTOMER_USER scope to view_own; Tom
   // (used previously to discover the B3 ticket id) no longer sees
-  // tickets created by other customer users. Fetch the id from
-  // Amanda's view instead — she created the ticket and can always
-  // see her own row. Iris's negative-visibility check is unchanged.
-  await loginAs(page, DEMO_USERS.customerB3);
-  await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: "Pantry zeepdispenser" })
-    .first();
-  const href = await row.locator("a.td-id").getAttribute("href");
-  expect(href).toBeTruthy();
+  // tickets created by other customer users. We discover the id
+  // through the SUPER_ADMIN API (Iris cannot list it herself) and
+  // then probe whether her browser can reach the detail page.
+  await loginAs(page, DEMO_USERS.super);
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
 
-  // Logout, log in as Iris (B1 + B2 only), and navigate directly.
-  await logoutFromTopbar(page);
+  // Log out the super-admin session and switch to Iris.
   await loginAs(page, DEMO_USERS.customerB1B2);
-  await page.goto(href!);
+  await page.goto(`/tickets/${ticketId}`);
 
   // The detail page renders the not-found / scope-error path. We
   // assert the absence of the workflow buttons rather than HTTP code,
@@ -83,12 +95,11 @@ test("Building manager sees no Approve/Reject on a WAITING_CUSTOMER_APPROVAL tic
   // (with admin override available to staff). The button list should
   // therefore not contain APPROVED or REJECTED, only no-ops or none.
   await loginAs(page, DEMO_USERS.managerAll);
-  await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: "Pantry zeepdispenser" })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.pantry_wca,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   await page.waitForLoadState("networkidle");
 
   const labels = (
@@ -112,12 +123,11 @@ test("ticket detail timeline does NOT leak seed_demo_data internal note", async 
   // the [DEMO] Closed kitchen tap ticket — it walks through 4
   // transitions, so every history row's note is populated.
   await loginAs(page, DEMO_USERS.companyAdmin);
-  await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: "kitchen tap" })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.kitchen_closed,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   const timeline = page.locator(".timeline").first();
   await expect(timeline).toBeVisible({ timeout: 10_000 });
   const text = (await timeline.textContent()) ?? "";
@@ -127,13 +137,15 @@ test("ticket detail timeline does NOT leak seed_demo_data internal note", async 
 test("Super admin sees REOPENED_BY_ADMIN button on a CLOSED ticket", async ({
   page,
 }) => {
+  // "[DEMO] Closed kitchen tap" (B1 Amsterdam, CLOSED).
+  // Super admin's allowed_next_statuses for CLOSED includes every
+  // other status, so at least one button mentions REOPENED.
   await loginAs(page, DEMO_USERS.super);
-  await page.waitForLoadState("networkidle");
-  const row = page
-    .locator(".data-table tbody tr", { hasText: "Closed kitchen tap" })
-    .first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.locator("a.td-id").click();
+  const ticketId = await resolveDemoTicketId(
+    page,
+    DEMO_TICKET_TITLES.kitchen_closed,
+  );
+  await page.goto(`/tickets/${ticketId}`);
   // Wait until the workflow card finishes rendering. networkidle
   // alone is not enough — the page does several Promise.all sets and
   // the buttons appear only after `loadTicket` resolves and the

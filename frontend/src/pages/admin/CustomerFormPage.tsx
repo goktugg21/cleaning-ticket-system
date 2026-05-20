@@ -555,6 +555,17 @@ export function CustomerFormPage() {
   );
   const buildingLocked = !isCreate;
 
+  // Sprint 30 Batch 30.1.2 — multi-tenant fix for the contact-visibility
+  // helper text. Resolve the selected provider company's name from the
+  // already-fetched `companies` list so we can interpolate it. Falls back
+  // to `null` (the helper renders its `_unknown` variant) when no
+  // company is selected yet or the lookup misses.
+  const selectedCompanyName = useMemo(() => {
+    if (company === "") return null;
+    const match = companies.find((c) => c.id === company);
+    return match?.name ?? null;
+  }, [company, companies]);
+
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
     setActionBusy(true);
@@ -824,7 +835,11 @@ export function CustomerFormPage() {
               {t("customer_form.contact_visibility_title")}
             </div>
             <div className="form-section-helper">
-              {t("customer_form.contact_visibility_helper")}
+              {selectedCompanyName
+                ? t("customer_form.contact_visibility_helper", {
+                    companyName: selectedCompanyName,
+                  })
+                : t("customer_form.contact_visibility_helper_unknown")}
             </div>
             <div className="field">
               <label

@@ -73,6 +73,7 @@
   "workflow_no_transitions": "Geen statusovergangen beschikbaar voor uw rol.",
   "workflow_no_transitions_available": "Er zijn op dit moment geen verdere statusovergangen beschikbaar.",
   "workflow_status_note_label": "Statusnotitie (optioneel)",
+  "workflow_status_note_label_staff_required": "Voeg een afrondingsnotitie toe of bevestig met een foto van het uitgevoerde werk (verplicht)",
   "workflow_rejection_reason_label": "Afwijzingsreden (verplicht bij afwijzen)",
   "workflow_status_note_placeholder": "Voeg een korte notitie toe voor het auditspoor",
   "workflow_rejection_reason_placeholder": "Leg uit waarom u dit ticket afwijst",
@@ -132,6 +133,7 @@
 
   "override_modal_title": "Klantbeslissing overschrijven",
   "override_modal_prompt": "Waarom overschrijf je de beslissing van de klant? Dit wordt vastgelegd in het auditlog.",
+  "override_inline_helper": "Dit overschrijft de beslissing van de klant en wordt vastgelegd in de statusgeschiedenis.",
   "override_modal_reason_label": "Reden",
   "override_modal_reason_required": "Een reden is verplicht.",
   "override_modal_submit_approve": "Bevestig overschrijven → Klant goedgekeurd",

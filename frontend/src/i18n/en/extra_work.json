@@ -147,6 +147,7 @@
   "detail.override_section_title": "Provider override",
   "detail.override_warning_title": "Override the customer decision.",
   "detail.override_warning_body": "Use only when the customer has agreed by phone, email, or another out-of-band channel. Every override is recorded in the status history with your name, the chosen outcome, and the reason you type below.",
+  "detail.override_inline_helper": "This overrides the customer's decision and is recorded in the status history.",
   "detail.override_choose_approve": "Override → Customer approved",
   "detail.override_choose_reject": "Override → Customer rejected",
   "detail.override_reason_label": "Reason for the override (required)",

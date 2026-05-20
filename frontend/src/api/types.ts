@@ -104,6 +104,11 @@ export interface TicketList {
   priority: string;
   status: TicketStatus;
   company: number;
+  // Sprint 30 Batch 30.1.2 — provider company display name. The
+  // backend exposes this on BOTH list + detail serializers via
+  // `source="company.name"`. Nullable on the wire to guard against
+  // legacy tickets whose company row was hard-deleted in a fixture.
+  company_name: string | null;
   building: number;
   building_name: string;
   customer: number;

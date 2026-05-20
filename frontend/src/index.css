@@ -5539,5 +5539,42 @@ table.data-table {
   color: var(--text-muted);
 }
 
+/* Sprint 30 Batch 30.1.2 Phase E — provider customer-decision
+   override footer. Cancel anchors left, Confirm anchors right.
+   Repurposed in Batch 30.1.3 onto the inline arming block under each
+   Approve / Reject button (the standalone override card was removed). */
+.override-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  gap: 12px;
+}
+.override-card-footer .btn-ghost {
+  color: var(--text-muted);
+}
+
+/* Sprint 30 Batch 30.1.3 — inline override arming under a primary
+   workflow button. Visually minimal: a compact reason textarea +
+   Confirm / Cancel pair anchored to the pressed button, NOT a full
+   card or yellow warning. The decision-step affordance is the button
+   itself; clicking it twice (once to arm, once to confirm with reason)
+   commits the override transition. */
+.workflow-override-target {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.workflow-override-inline {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2, var(--bg-soft));
+}
+.workflow-override-inline .field-textarea {
+  width: 100%;
+}
+
 
 

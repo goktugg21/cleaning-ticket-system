@@ -73,6 +73,7 @@
   "workflow_no_transitions": "No status transitions available for your role.",
   "workflow_no_transitions_available": "No further status transitions are available right now.",
   "workflow_status_note_label": "Status note (optional)",
+  "workflow_status_note_label_staff_required": "Add a completion note or attach a photo of the completed work (required)",
   "workflow_rejection_reason_label": "Rejection reason (required if rejecting)",
   "workflow_status_note_placeholder": "Add a short note for the audit trail",
   "workflow_rejection_reason_placeholder": "Explain why you reject this ticket",
@@ -132,6 +133,7 @@
 
   "override_modal_title": "Override customer decision",
   "override_modal_prompt": "Why are you overriding the customer's decision? This will be recorded in the audit log.",
+  "override_inline_helper": "This overrides the customer's decision and is recorded in the status history.",
   "override_modal_reason_label": "Reason",
   "override_modal_reason_required": "A reason is required.",
   "override_modal_submit_approve": "Confirm override → Customer approved",

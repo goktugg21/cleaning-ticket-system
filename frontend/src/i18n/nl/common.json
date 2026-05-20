@@ -534,7 +534,8 @@
   "api_error.network": "We kunnen de server niet bereiken. Controleer uw verbinding en probeer het opnieuw.",
   "api_error.unexpected": "Er is iets onverwachts gebeurd. Probeer het opnieuw.",
 
-  "tickets.assigned_team_anonymous": "Toegewezen aan het OSIUS-team",
+  "tickets.assigned_team_anonymous": "Toegewezen aan het {{companyName}}-team",
+  "tickets.assigned_team_anonymous_unknown": "Toegewezen aan het veldteam",
   "tickets.assigned_to_you": "Toegewezen aan jou",
 
   "nav.staff_requests": "Medewerker-aanvragen",
@@ -544,7 +545,7 @@
   "staff_requests.subtitle_loading": "Aanvragen laden…",
   "staff_requests.count_one": "{{count}} aanvraag",
   "staff_requests.count_other": "{{count}} aanvragen",
-  "staff_requests.intro": "Medewerkers vragen toewijzing aan voor tickets waarvoor ze in aanmerking komen. Gebouwbeheerders en OSIUS-admins bekijken de wachtrij hier.",
+  "staff_requests.intro": "Medewerkers vragen toewijzing aan voor tickets waarvoor ze in aanmerking komen. Gebouwbeheerders en leveranciersbeheerders bekijken de wachtrij hier.",
   "staff_requests.col_when": "Aangevraagd",
   "staff_requests.col_staff": "Medewerker",
   "staff_requests.col_ticket": "Ticket",
@@ -579,7 +580,8 @@
   "staff_requests.banner_rejected": "Aanvraag van {{staff}} voor {{ticket}} afgewezen.",
 
   "customer_form.contact_visibility_title": "Zichtbaarheid van toegewezen medewerker voor deze klant",
-  "customer_form.contact_visibility_helper": "Kies wat de gebruikers van de klant zien van de OSIUS-veldmedewerker die aan hun tickets is toegewezen. Als alles uit staat, wordt een generiek label 'Toegewezen aan het OSIUS-team' getoond.",
+  "customer_form.contact_visibility_helper": "Kies wat de gebruikers van de klant zien van de {{companyName}}-veldmedewerker die aan hun tickets is toegewezen. Als alles uit staat, wordt een generiek label 'Toegewezen aan het {{companyName}}-team' getoond.",
+  "customer_form.contact_visibility_helper_unknown": "Kies wat de gebruikers van de klant zien van de veldmedewerker die aan hun tickets is toegewezen. Als alles uit staat, wordt een generiek label 'Toegewezen aan het veldteam' getoond.",
   "customer_form.show_assigned_staff_name": "Naam medewerker tonen",
   "customer_form.show_assigned_staff_email": "E-mail medewerker tonen",
   "customer_form.show_assigned_staff_phone": "Telefoonnummer medewerker tonen",
@@ -744,8 +746,10 @@
   "ticket_staff_complete.button_label": "Werk voltooien",
   "ticket_staff_complete.modal_title": "Werk markeren als voltooid",
   "ticket_staff_complete.note_label": "Voltooiingsnotitie",
+  "ticket_staff_complete.note_label_or_photo": "Voeg een afrondingsnotitie toe of bevestig met een foto van het uitgevoerde werk (verplicht)",
   "ticket_staff_complete.note_placeholder": "Beschrijf wat is gedaan…",
   "ticket_staff_complete.note_required_hint": "Een voltooiingsnotitie of fotobijlage is vereist.",
+  "ticket_staff_complete.note_or_photo_hint": "Een getypte notitie OF een bijgevoegde foto van het uitgevoerde werk voldoet aan deze eis.",
   "ticket_staff_complete.route_loading": "Bestemming bepalen…",
   "ticket_staff_complete.route_manager_review": "Dit gaat naar je manager voor review.",
   "ticket_staff_complete.route_customer_approval": "Dit wordt verstuurd naar de klant voor goedkeuring.",
@@ -755,6 +759,7 @@
   "ticket_staff_complete.error_evidence_required": "Voeg een notitie of foto toe voordat je verstuurt.",
   "ticket_staff_complete.error_route_mismatch": "De routering is gewijzigd. Vernieuw de pagina en probeer opnieuw.",
   "ticket_staff_complete.attachment_hint": "Als je een foto hebt, upload deze dan via de bijlagenkaart op deze pagina voordat je verstuurt.",
+  "ticket_staff_complete.attachment_hint_satisfied": "Er is al een foto bijgevoegd — je kunt versturen zonder een notitie te typen.",
 
   "manager_review.label_sent_at": "Verstuurd voor manager-review op",
 
