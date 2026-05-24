@@ -8,16 +8,25 @@ Provider-side scope is identical to tickets (company / building /
 super-admin gates) since the operational tenancy hierarchy is the
 same.
 
-Sprint 29 Batch 29.8 — STAFF visibility now reuses the ticket
-scope. A STAFF user sees every Extra Work request whose spawned
-tickets they can see (via either the cart-item path
-`ExtraWorkRequestItem.spawned_tickets` or the proposal-line path
-`ProposalLine.spawned_tickets_for_proposal_line`). No new
-permission key is introduced — the gate is the existing
-`scope_tickets_for(STAFF)` which composes TicketStaffAssignment
-plus BuildingStaffVisibility (BUILDING_READ / BUILDING_READ_AND_ASSIGN).
-EW rows without any spawned ticket the STAFF can see remain
-invisible, preserving H-1 / H-4 by construction.
+STAFF visibility on `ExtraWorkRequest` is INTENTIONALLY EMPTY. Per
+the 2026-05-20 business-logic decision (A4): STAFF must not list or
+open parent Extra Work records through `/api/extra-work/`. STAFF
+only sees operational work AFTER it has become an assigned ticket;
+the parent EW remains commercial workflow that STAFF must not
+reach. The Ticket detail surface carries an
+`extra_work_origin` field which exposes a safe subset (parent id,
+title, status, item id, service name) so STAFF can see "this
+ticket came from EW #N" without ever touching the EW endpoints.
+
+NOTE: Sprint 29 Batch 29.8 briefly widened STAFF scope here to
+"any EW whose spawned ticket the staff can see". That widening was
+reverted in the P0 staff-privacy patch (post-2026-05-20 audit) once
+it was confirmed every EW + Proposal serializer gated only on
+`_is_customer(user)` and therefore leaked provider-only fields
+(`internal_cost_note`, `manager_note`, `override_*`, ProposalLine
+`internal_note`, ProposalTimelineEvent `metadata`) to STAFF. The
+chosen fix is "STAFF never reaches these endpoints" — narrower than
+field stripping and removes a whole class of future drift bugs.
 """
 from __future__ import annotations
 
@@ -69,44 +78,12 @@ def scope_extra_work_for(user):
         )
 
     if user.role == UserRole.STAFF:
-        # Sprint 29 Batch 29.8 — STAFF visibility is derived from the
-        # tickets they can already see. An EW is visible to STAFF iff
-        # AT LEAST ONE of its spawned tickets is in their
-        # `scope_tickets_for` queryset. Two spawn paths exist:
-        #   1) Cart-item path  -- Ticket.extra_work_request_item ->
-        #      ExtraWorkRequestItem.extra_work_request_id (the FK is
-        #      named `extra_work_request`, not `extra_work`).
-        #   2) Proposal-line path -- Ticket.proposal_line ->
-        #      ProposalLine.proposal -> Proposal.extra_work_request_id.
-        # The two visible-EW id sets are unioned; the EW row is then
-        # fetched (filtering soft-deleted out).
-        from tickets.models import Ticket
-        from accounts.scoping import scope_tickets_for
-
-        visible_ticket_ids = scope_tickets_for(user).values_list(
-            "id", flat=True
-        )
-        ew_ids_from_line_items = Ticket.objects.filter(
-            id__in=visible_ticket_ids,
-            extra_work_request_item__isnull=False,
-        ).values_list(
-            "extra_work_request_item__extra_work_request_id", flat=True
-        )
-        ew_ids_from_proposal_lines = Ticket.objects.filter(
-            id__in=visible_ticket_ids,
-            proposal_line__isnull=False,
-        ).values_list(
-            "proposal_line__proposal__extra_work_request_id", flat=True
-        )
-        visible_ew_ids = set(ew_ids_from_line_items) | set(
-            ew_ids_from_proposal_lines
-        )
-        if not visible_ew_ids:
-            return ExtraWorkRequest.objects.none()
-        return ExtraWorkRequest.objects.filter(
-            deleted_at__isnull=True,
-            id__in=visible_ew_ids,
-        )
+        # P0 staff-privacy fix (post-2026-05-20): STAFF must not reach
+        # any parent Extra Work record. See module docstring above.
+        # Operational visibility for STAFF lives on the spawned Ticket;
+        # `Ticket.extra_work_origin` surfaces the small, safe metadata
+        # subset.
+        return ExtraWorkRequest.objects.none()
 
     if user.role == UserRole.CUSTOMER_USER:
         # Mirrors the Sprint 23A CUSTOMER_USER ticket scope but

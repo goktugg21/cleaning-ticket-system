@@ -487,19 +487,27 @@ class AutoSyncFailSafeTests(_OperationalFixtureMixin, TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 6. STAFF scope reuses scope_tickets_for via spawned-ticket join (positive).
+# 6. STAFF scope: parent EW is always invisible — P0 staff-privacy decision
+#    (2026-05-20 A4). The original Sprint 29 Batch 29.8 widening (STAFF sees
+#    every EW whose spawned ticket they can see) was reverted once it was
+#    proven the EW + Proposal serializers leaked provider-only fields to
+#    STAFF. Operational visibility for STAFF lives on the spawned Ticket
+#    via `Ticket.extra_work_origin` instead — that field carries a safe
+#    subset (id / title / status / item_id / service_name) and never the
+#    pricing or internal-note fields. Regression coverage of all EW +
+#    Proposal endpoints returning 404 to STAFF lives in
+#    `test_staff_privacy_p0.py`.
 # ---------------------------------------------------------------------------
-class StaffScopePositiveTests(_OperationalFixtureMixin, TestCase):
+class StaffScopeAlwaysEmptyTests(_OperationalFixtureMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls._setup_fixture(suffix="29-8-stafftrue")
 
-    def test_staff_sees_ew_when_spawned_ticket_is_in_their_scope(self):
-        # STAFF has BSV(BUILDING_READ) on the seeded building so the
-        # spawned ticket is in their `scope_tickets_for` queryset; the
-        # EW becomes visible via the cart-item join.
-        ews = list(scope_extra_work_for(self.staff))
-        self.assertIn(self.ew, ews)
+    def test_staff_never_sees_parent_ew_even_with_spawned_ticket_in_scope(self):
+        # STAFF holds BSV(BUILDING_READ) on the seeded building so the
+        # spawned ticket IS in their `scope_tickets_for` queryset. Pre-fix
+        # this leaked the parent EW; post-fix STAFF sees zero EWs.
+        self.assertFalse(scope_extra_work_for(self.staff).exists())
 
 
 # ---------------------------------------------------------------------------

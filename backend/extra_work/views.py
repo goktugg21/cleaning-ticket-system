@@ -309,8 +309,9 @@ class ExtraWorkRequestViewSet(
           }
 
         STAFF naturally gets all-zeros because `scope_extra_work_for`
-        returns `.none()` for STAFF (MVP — no staff-execution surface
-        on Extra Work yet).
+        returns `.none()` for STAFF — operational visibility for STAFF
+        lives on the spawned Ticket, not the parent EW (P0 staff-
+        privacy decision, 2026-05-20 A4).
         """
         scoped = scope_extra_work_for(request.user)
 
