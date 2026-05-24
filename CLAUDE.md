@@ -164,7 +164,11 @@ particular attention to:
 
 ## 2A. Product context (2026-05-15 stakeholder meeting)
 
-Authoritative source: [docs/product/meeting-2026-05-15-system-requirements.md](docs/product/meeting-2026-05-15-system-requirements.md).
+Authoritative sources (both at the same priority as the RBAC matrix):
+
+- [docs/product/system-business-logic-and-workflows.md](docs/product/system-business-logic-and-workflows.md) — canonical plain-English business logic, roles, permissions, ticket + Extra Work workflows, note-visibility taxonomy, audit rules, privacy floor.
+- [docs/product/meeting-2026-05-15-system-requirements.md](docs/product/meeting-2026-05-15-system-requirements.md) — the stakeholder meeting that seeded the model decisions referenced below.
+
 Headline rules every Claude session must respect:
 
 1. **Contacts vs Users are distinct entities.**
@@ -360,7 +364,8 @@ Highlights:
 
 - [README.md](README.md) — top-level project intro
 - [docs/architecture/sprint-27-rbac-matrix.md](docs/architecture/sprint-27-rbac-matrix.md) — canonical RBAC + role model
-- [docs/product/meeting-2026-05-15-system-requirements.md](docs/product/meeting-2026-05-15-system-requirements.md) — authoritative product behaviour (Contacts vs Users, modular permissions, view-first UI, Extra Work cart, pricing model, proposal builder, override audit, future hooks)
+- [docs/product/system-business-logic-and-workflows.md](docs/product/system-business-logic-and-workflows.md) — canonical business logic, roles, permissions, ticket + Extra Work workflows, note-visibility taxonomy, audit rules, privacy floor
+- [docs/product/meeting-2026-05-15-system-requirements.md](docs/product/meeting-2026-05-15-system-requirements.md) — stakeholder meeting source (Contacts vs Users, modular permissions, view-first UI, Extra Work cart, pricing model, proposal builder, override audit, future hooks)
 - [docs/GAP_ANALYSIS_2026-05.md](docs/GAP_ANALYSIS_2026-05.md) — standing P0/P1/P2 list (load-bearing through Sprint 27)
 - [docs/RELEASE_STATUS.md](docs/RELEASE_STATUS.md) — what's shipped
 - [docs/CLAUDE_CODE_OPERATIONAL_NOTES.md](docs/CLAUDE_CODE_OPERATIONAL_NOTES.md) — WSL / shell / container gotchas
