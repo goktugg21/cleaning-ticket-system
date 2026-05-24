@@ -104,6 +104,32 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        # B1 (system-business-logic-and-workflows.md §7 + §13) — when a
+        # CUSTOMER_USER reads the timeline, redact `note` and
+        # `override_reason` on rows authored by a provider-side actor.
+        # The free-text `note` field is shared by provider operators and
+        # customers; a provider operator can write provider-internal
+        # context there (cost notes, internal coordination, override
+        # reasoning beyond the structured `override_reason`). Customers
+        # must never see it. Rows whose `changed_by` is None (system
+        # transitions) or a CUSTOMER_USER (the customer themself, e.g.
+        # their own reject reason) keep `note` visible. Provider readers
+        # see everything unchanged.
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        if (
+            viewer is not None
+            and getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+        ):
+            changed_by = getattr(instance, "changed_by", None)
+            author_role = getattr(changed_by, "role", None)
+            if author_role is not None and author_role != UserRole.CUSTOMER_USER:
+                data["note"] = ""
+                data["override_reason"] = ""
+        return data
+
 
 class TicketListSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)

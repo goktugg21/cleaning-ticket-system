@@ -244,8 +244,15 @@ class ProposalStatusHistoryView(views.APIView):
     def get(self, request, ew_id: int, pid: int):
         _, proposal = _resolve_proposal_or_404(request, ew_id, pid)
         rows = ProposalStatusHistory.objects.filter(proposal=proposal)
+        # B1 — pass request context so the serializer's customer-side
+        # note + override_reason redaction (see
+        # ProposalStatusHistorySerializer.get_note / .get_override_reason)
+        # can fire. Without context the serializer cannot tell the
+        # caller's role and would surface every field unfiltered.
         return Response(
-            ProposalStatusHistorySerializer(rows, many=True).data
+            ProposalStatusHistorySerializer(
+                rows, many=True, context={"request": request}
+            ).data
         )
 
 

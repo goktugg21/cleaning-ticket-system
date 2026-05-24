@@ -116,12 +116,53 @@ class TicketStateMachineTests(TenantFixtureMixin, APITestCase):
 
         self.assertEqual(ctx.exception.code, "forbidden_transition")
 
-    def test_building_manager_still_cannot_approve(self):
+    def test_building_manager_can_approve_with_override_reason(self):
+        # B1 (system-business-logic-and-workflows.md §4.3 + §6) — BM
+        # may approve on behalf of the customer for tickets in an
+        # assigned building, BUT only with an override_reason. Without
+        # a reason apply_transition coerces is_override=True and
+        # raises `override_reason_required` (NOT the pre-B1
+        # `forbidden_transition`).
         ticket = self.move_ticket_to_customer_approval()
 
         with self.assertRaises(TransitionError) as ctx:
             apply_transition(ticket, self.manager, TicketStatus.APPROVED)
+        self.assertEqual(ctx.exception.code, "override_reason_required")
 
+        # Same call with a reason succeeds and the history row is
+        # marked as a workflow override.
+        updated = apply_transition(
+            ticket,
+            self.manager,
+            TicketStatus.APPROVED,
+            override_reason="Customer approved verbally on a site visit.",
+        )
+        self.assertEqual(updated.status, TicketStatus.APPROVED)
+        history_row = TicketStatusHistory.objects.get(
+            ticket=ticket,
+            old_status=TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            new_status=TicketStatus.APPROVED,
+            changed_by=self.manager,
+        )
+        self.assertTrue(history_row.is_override)
+        self.assertEqual(
+            history_row.override_reason,
+            "Customer approved verbally on a site visit.",
+        )
+
+    def test_building_manager_outside_assigned_building_still_forbidden(self):
+        # B1 narrows BM access to assigned buildings — `other_manager`
+        # has no assignment for `self.ticket.building` and stays
+        # `forbidden_transition` regardless of override_reason.
+        ticket = self.move_ticket_to_customer_approval()
+
+        with self.assertRaises(TransitionError) as ctx:
+            apply_transition(
+                ticket,
+                self.other_manager,
+                TicketStatus.APPROVED,
+                override_reason="should not be sufficient",
+            )
         self.assertEqual(ctx.exception.code, "forbidden_transition")
 
     def test_reapproval_overwrites_resolved_at(self):

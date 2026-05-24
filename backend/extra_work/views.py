@@ -179,8 +179,14 @@ class ExtraWorkRequestViewSet(
     def status_history(self, request, pk=None):
         extra_work = self.get_object()  # 404 if out-of-scope
         rows = ExtraWorkStatusHistory.objects.filter(extra_work=extra_work)
+        # B1 — pass request context so the serializer's customer-side
+        # note redaction (see ExtraWorkStatusHistorySerializer.get_note)
+        # can fire. Without context the serializer cannot tell the
+        # caller's role and would surface every note unfiltered.
         return Response(
-            ExtraWorkStatusHistorySerializer(rows, many=True).data
+            ExtraWorkStatusHistorySerializer(
+                rows, many=True, context={"request": request}
+            ).data
         )
 
     @action(detail=True, methods=["post"], url_path="spawn")

@@ -14,10 +14,12 @@ from .models import Ticket, TicketStatus, TicketStatusHistory
 logger = logging.getLogger(__name__)
 
 
-# Sprint 25C — OSIUS staff completion-evidence rule.
+# Sprint 25C — staff completion-evidence rule.
 #
-# When a ticket moves from IN_PROGRESS to WAITING_CUSTOMER_APPROVAL,
-# at least one of the following MUST be true on the ticket:
+# When a STAFF user moves a ticket from IN_PROGRESS to
+# WAITING_CUSTOMER_APPROVAL (or to WAITING_MANAGER_REVIEW via the
+# Sprint 28 Batch 11 route), at least one of the following MUST be
+# true on the ticket:
 #   1. The transition carries a non-empty note (note.strip()), or
 #   2. The ticket already has ≥1 visible attachment, where "visible"
 #      mirrors the existing customer-side attachment filter in
@@ -27,9 +29,14 @@ logger = logging.getLogger(__name__)
 #
 # Photos are strongly encouraged in the UI but the rule treats them
 # as equivalent to a note: empty completion (no note + no visible
-# attachment) is the only forbidden case. This matches the OSIUS
-# product brief: "note only, photo only, note + photo all OK; no
-# note + no photo rejected."
+# attachment) is the only forbidden case for STAFF.
+#
+# B1 (system-business-logic-and-workflows.md §4.4): the rule applies
+# ONLY when the actor is STAFF. Managers and admins driving the same
+# transition (e.g. a BM completing a job on behalf of the staff
+# member, or a SUPER_ADMIN closing out a stuck ticket) bypass the
+# evidence gate. Sprint 25C's earlier "applies independently of
+# role/scope" stance was wrong per the canonical business doc.
 COMPLETION_EVIDENCE_TRANSITIONS = {
     (TicketStatus.IN_PROGRESS, TicketStatus.WAITING_CUSTOMER_APPROVAL),
     # Sprint 28 Batch 11 — STAFF default-route completion (sends the
@@ -112,11 +119,20 @@ ALLOWED_TRANSITIONS = {
     (TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.APPROVED): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
         UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        # B1 (system-business-logic-and-workflows.md §4.3 + §6 + §7.2):
+        # Building Manager may approve on behalf of the customer for
+        # tickets in their assigned building. This is a provider-side
+        # override and apply_transition coerces is_override=True +
+        # demands override_reason for BM drivers — see the
+        # `provider_driven_customer_decision` block below.
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
         UserRole.CUSTOMER_USER: SCOPE_CUSTOMER_LINKED,
     },
     (TicketStatus.WAITING_CUSTOMER_APPROVAL, TicketStatus.REJECTED): {
         UserRole.SUPER_ADMIN: SCOPE_ANY,
         UserRole.COMPANY_ADMIN: SCOPE_COMPANY_MEMBER,
+        # B1 mirror: BM reject-on-behalf, same override + reason gate.
+        UserRole.BUILDING_MANAGER: SCOPE_BUILDING_ASSIGNED,
         UserRole.CUSTOMER_USER: SCOPE_CUSTOMER_LINKED,
     },
     (TicketStatus.REJECTED, TicketStatus.IN_PROGRESS): {
@@ -239,16 +255,24 @@ def apply_transition(
             code="forbidden_transition",
         )
 
-    # Sprint 27F-B1 — provider-driven customer-decision transition is
-    # ALWAYS an override. Mirrors `extra_work/state_machine.py:250-265`.
-    # If a SUPER_ADMIN or COMPANY_ADMIN drives WAITING_CUSTOMER_APPROVAL
-    # -> APPROVED / REJECTED, that is by definition a workflow override
-    # of the customer's decision, even when the client forgot the flag.
-    # We coerce here BEFORE the override-reason gate so the reason
-    # requirement still fires.
+    # Sprint 27F-B1 + B1 (system-business-logic-and-workflows.md §4.3
+    # + §6) — provider-driven customer-decision transition is ALWAYS an
+    # override. Mirrors `extra_work/state_machine.py` coercion. If a
+    # SUPER_ADMIN, COMPANY_ADMIN, or BUILDING_MANAGER drives
+    # WAITING_CUSTOMER_APPROVAL -> APPROVED / REJECTED, that is by
+    # definition a workflow override of the customer's decision, even
+    # when the client forgot the flag. We coerce here BEFORE the
+    # override-reason gate so the reason requirement still fires.
+    # B1 added BUILDING_MANAGER to this coercion set because the
+    # business doc explicitly admits BM to act on behalf of the
+    # customer (typical case: customer approves verbally / by phone).
     provider_driven_customer_decision = (
         getattr(user, "role", None)
-        in {UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN}
+        in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }
         and str(ticket.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
         and str(to_status)
         in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
@@ -313,16 +337,23 @@ def apply_transition(
             code="rejection_note_required",
         )
 
-    # Sprint 25C — OSIUS staff-completion evidence rule. The role +
-    # scope checks above already ran, so a 400 here is only ever
-    # returned to an actor who would otherwise have been permitted
-    # to perform the transition. Internal/hidden artefacts do not
-    # satisfy the rule — they can't be shown to the customer, so
-    # they are not "evidence the work happened" from the customer's
-    # standpoint.
-    if (str(ticket.status), str(to_status)) in {
-        (str(a), str(b)) for (a, b) in COMPLETION_EVIDENCE_TRANSITIONS
-    }:
+    # Sprint 25C + B1 — staff-completion evidence rule. The role + scope
+    # checks above already ran, so a 400 here is only ever returned to
+    # an actor who would otherwise have been permitted to perform the
+    # transition. Internal/hidden artefacts do not satisfy the rule —
+    # they can't be shown to the customer, so they are not "evidence
+    # the work happened" from the customer's standpoint.
+    #
+    # B1 (system-business-logic-and-workflows.md §4.4): the gate fires
+    # ONLY for STAFF actors. Managers and admins driving the same
+    # completion transition (BM closing out a job on behalf of an
+    # absent staff member, SUPER_ADMIN unblocking a stuck ticket)
+    # bypass the rule.
+    if (
+        getattr(user, "role", None) == UserRole.STAFF
+        and (str(ticket.status), str(to_status))
+        in {(str(a), str(b)) for (a, b) in COMPLETION_EVIDENCE_TRANSITIONS}
+    ):
         if not (note and note.strip()) and not _ticket_has_visible_attachment(ticket):
             raise TransitionError(
                 "Please leave a completion note or attach a photo of the "

@@ -591,12 +591,31 @@ class ExtraWorkStatusHistorySerializer(serializers.Serializer):
     old_status = serializers.CharField(read_only=True)
     new_status = serializers.CharField(read_only=True)
     changed_by_email = serializers.SerializerMethodField()
-    note = serializers.CharField(read_only=True)
+    note = serializers.SerializerMethodField()
     is_override = serializers.BooleanField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
     def get_changed_by_email(self, obj):
         return obj.changed_by.email if obj.changed_by else None
+
+    def get_note(self, obj):
+        # B1 (system-business-logic-and-workflows.md §7 + §13) — when a
+        # CUSTOMER_USER reads the timeline, redact provider-authored
+        # notes. The free-text `note` field is shared by provider
+        # operators (who may write internal coordination, internal cost
+        # context, or any provider-side commentary into a transition
+        # note) and customers (their own reject reason). Customers must
+        # see only customer-authored or system-authored notes.
+        request = self.context.get("request") if self.context else None
+        viewer = getattr(request, "user", None) if request else None
+        if (
+            viewer is not None
+            and getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+        ):
+            author = obj.changed_by
+            if author is not None and getattr(author, "role", None) != UserRole.CUSTOMER_USER:
+                return ""
+        return obj.note or ""
 
 
 # ---------------------------------------------------------------------------
@@ -953,13 +972,44 @@ class ProposalStatusHistorySerializer(serializers.Serializer):
     old_status = serializers.CharField(read_only=True)
     new_status = serializers.CharField(read_only=True)
     changed_by_email = serializers.SerializerMethodField()
-    note = serializers.CharField(read_only=True)
+    note = serializers.SerializerMethodField()
     is_override = serializers.BooleanField(read_only=True)
-    override_reason = serializers.CharField(read_only=True)
+    override_reason = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(read_only=True)
 
     def get_changed_by_email(self, obj):
         return obj.changed_by.email if obj.changed_by else None
+
+    def _viewer_is_customer(self):
+        # B1 — shared helper for the note + override_reason redaction.
+        request = self.context.get("request") if self.context else None
+        viewer = getattr(request, "user", None) if request else None
+        return (
+            viewer is not None
+            and getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+        )
+
+    def _author_is_provider(self, obj):
+        author = obj.changed_by
+        return author is not None and getattr(author, "role", None) != UserRole.CUSTOMER_USER
+
+    def get_note(self, obj):
+        # B1 (system-business-logic-and-workflows.md §7 + §13) — customer
+        # readers see only customer-authored or system-authored notes.
+        if self._viewer_is_customer() and self._author_is_provider(obj):
+            return ""
+        return obj.note or ""
+
+    def get_override_reason(self, obj):
+        # B1 — `override_reason` is provider-only context by definition.
+        # Always redacted for customer readers, regardless of authorship.
+        # (Provider-driven customer-decision overrides are the only
+        # transitions that populate this field, so the row will always
+        # have a provider author too — but we redact unconditionally to
+        # make the contract obvious.)
+        if self._viewer_is_customer():
+            return ""
+        return obj.override_reason or ""
 
 
 class ProposalTimelineEventAdminSerializer(serializers.ModelSerializer):
