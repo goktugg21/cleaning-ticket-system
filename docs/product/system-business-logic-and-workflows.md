@@ -215,42 +215,41 @@ Provider Company Admin should not silently act as the customer. If they approve 
 
 ## 4.3 Building Manager
 
-A Building Manager is a provider-side operational manager assigned to one or more buildings.
+A Building Manager belongs to the provider side and is assigned to one or more buildings.
 
-A Building Manager should only see buildings they are assigned to, unless they have extra permission.
+Inside their assigned buildings, a Building Manager can by default move operational work forward and can also record a customer decision on the customer's behalf when needed.
 
-Default Building Manager behavior:
+When a Building Manager approves or rejects something that normally belongs to the customer, that is an **override**, not a normal customer approval.
 
-- Can see assigned buildings
-- Can see tickets in assigned buildings
-- Can manage operational status for work in assigned buildings
-- Can create or manage Extra Work for assigned buildings
-- Can prepare proposals for assigned buildings by default
-- Can approve or reject on behalf of a customer by default, if the business process allows it
-- Can see provider-side operational notes for assigned buildings
-- Can see staff instructions related to assigned work
+Default Building Manager behavior (inside assigned buildings):
 
-Important correction:
+- Can see assigned buildings.
+- Can see tickets in assigned buildings.
+- Can manage operational status for work in assigned buildings.
+- Can create or manage Extra Work for assigned buildings.
+- Can prepare proposals for assigned buildings.
+- **Can override a customer approval / rejection on the customer's behalf, by default.** This is not a normal customer approval — it is a provider-side override of a customer decision.
+- Can see provider-side operational notes for assigned buildings.
+- Can see staff instructions related to assigned work.
 
-By default, a Building Manager may be allowed to approve or reject on behalf of a customer when the customer gave approval outside the system, for example by phone. This must not be silent.
+Override rules (when a Building Manager — or any provider-side user — records a customer-side decision on the customer's behalf):
 
-When a Building Manager approves or rejects on behalf of a customer:
+- The acting user **must** enter an override reason.
+- The system **must** record who did it, when, what decision they made, and the reason.
+- The frontend must show a clear warning / confirmation before the action is committed.
+- The backend **must** reject the action if the override reason is missing or blank.
+- The audit / history row for the decision must clearly mark it as a provider-side override of a customer decision — never as if the customer clicked the button themselves.
+- This default override capability **can be removed** for a specific Building Manager (or any provider-side user) by an explicit permission revoke. Removing it leaves the rest of the role's defaults intact.
 
-- The UI must show a clear warning.
-- The user must confirm intentionally, ideally with a second confirmation.
-- The system must store that the decision was made by the Building Manager on behalf of the customer.
-- The system should store a reason or note.
-- The audit/history must make it clear this was not the customer clicking approve themselves.
-
-Permissions can remove this ability from a Building Manager.
-
-A Building Manager should not:
+A Building Manager still cannot, by default:
 
 - See buildings they are not assigned to.
-- Manage customer user permissions by default.
+- Manage customer user permissions.
 - Change provider-company-wide settings.
-- See provider-level financial/internal notes unless explicitly allowed.
-- See customer-company areas outside assigned building scope.
+- See provider-level financial / commercial internal notes unless explicitly allowed.
+- See customer-company areas outside their assigned building scope.
+
+Each of the items above can be granted by an explicit permission to a specific Building Manager when needed — the rule above only states the default.
 
 ---
 
@@ -280,13 +279,17 @@ Staff should not see:
 
 Staff can see:
 
-- Assigned work
-- Building/location where they need to work
-- Work description
-- Operational instructions
-- Staff-visible notes
-- Attachments needed for the job
-- Status actions needed for their assignment, such as start, complete, report issue, or add operational update
+- Assigned work.
+- Building / location where they need to work.
+- Work description.
+- Operational instructions.
+- Staff-visible notes (the staff-instruction / operational note category in §9).
+- Attachments needed for the job.
+- Status actions needed for their assignment, such as start, complete, report issue, or add operational update.
+
+Staff completion evidence:
+
+When a Staff user moves their assigned work onward (e.g. marks it ready for manager review or customer approval), they must attach completion evidence — either a non-empty staff completion note or at least one visible attachment (a photo of the work). This requirement applies to Staff actors only; provider admins and Building Managers do not have this gate. See the "Staff completion note" category in §9 and the Rule-4 wording in §4 of this document.
 
 Staff should not approve customer decisions.
 
@@ -332,11 +335,17 @@ Customer Company Admin should not:
 - Change provider settings
 - Manage provider permissions
 
-Important correction:
+Important correction (who creates / promotes Customer Company Admins):
 
-Customer Company Admin should not be able to create another Customer Company Admin by default.
+A Customer Company Admin must **not** be able to create or promote another Customer Company Admin themselves.
 
-If the business wants customer admins to manage lower-level users, that can be allowed, but creating another top-level customer admin should remain controlled by Provider Admin or Super Admin.
+Power to create or promote a Customer Company Admin sits on the platform / provider side, not the customer side:
+
+- Super Admin can always create or promote a Customer Company Admin.
+- Provider Company Admin can, by default, manage customer-side users for customers under their provider company, **including assigning the Customer Company Admin access role**, unless Super Admin has restricted that specific Provider Admin through permissions.
+- Super Admin can restrict / revoke this provider-admin capability per-Provider-Admin (or globally) when the situation requires it.
+
+If a Customer Company Admin needs to manage lower-level customer users (Customer Location Manager, Customer User) within their own customer scope, that can be granted by an explicit permission. The "create another Customer Company Admin" path is **always** provider-side; it never sits inside a customer organisation's own admin.
 
 ---
 
@@ -441,22 +450,19 @@ Simple rule for the current one-provider setup:
 
 Super Admin can grant or remove anything.
 
-Provider Company Admin can manage customer-specific permissions by default.
+Provider Company Admin can manage customer-specific permissions by default. This includes:
 
-Super Admin can control whether Provider Company Admin is allowed to manage those permissions.
+- Which customer users can create tickets.
+- Which customer users can approve proposals.
+- Which customer users can request Extra Work.
+- Which Customer Location Managers can manage which buildings.
+- Which Building Managers can approve/reject on behalf of customers (this is the override default; see §4.3).
+- Which Building Managers can prepare proposals.
+- **Assigning or revoking the Customer Company Admin access role on a customer-side user.** This is a provider-side power by default — Super Admin can restrict an individual Provider Admin from doing it, but no customer-side user has it.
 
-Provider Admin can grant customer-specific permissions, for example:
+Super Admin can control whether a Provider Company Admin is allowed to manage these permissions. The toggle is per-Provider-Admin (or by company-level policy) and is the only switch that narrows the provider-admin defaults.
 
-- Which customer users can create tickets
-- Which customer users can approve proposals
-- Which customer users can request Extra Work
-- Which Customer Location Managers can manage which buildings
-- Which Building Managers can approve/reject on behalf of customers
-- Which Building Managers can prepare proposals
-
-Customer Company Admin should have limited permission management only if Provider Admin or Super Admin allows it.
-
-Customer Company Admin must not create another Customer Company Admin by default.
+Customer Company Admin should have limited permission management only if Provider Admin or Super Admin allows it. A Customer Company Admin must never be able to create / promote another Customer Company Admin (see §4.5).
 
 Customer Location Manager should not manage permissions unless explicitly allowed.
 
@@ -577,6 +583,21 @@ The canonical rules are:
 7. **Staff sees the operational work only after the request / proposal has been approved** and the work has been spawned into one operational ticket / task per cart line. The ticket carries safe operational metadata (parent request id, title, status, service name) but never the pricing or commercial notes.
 
 The cart-first design is permanent: changes that collapse Extra Work back into a single-line concept (or that strip the proposal of its contract-priced lines) violate this section and must be rejected.
+
+Concrete cart example (the canonical mental model — every Extra Work request must support this shape):
+
+A customer submits one Extra Work request with three lines:
+
+- 50 m² window cleaning
+- 20 m² grass cutting
+- 3 hours deep cleaning
+
+Each line is independently classified by the resolver:
+
+- If **every** line resolves to a customer-specific contract price → the request is routed to the instant / direct-order path: the system computes the total automatically, the customer places it like an order from a food-delivery app, and it immediately enters the provider's operational queue.
+- If **even one** line has no contract price for that customer → the whole request goes into the proposal flow. The contract-priced lines stay in the cart at their known prices; the provider prices the missing / custom line(s) and sends a proposal back to the customer; the customer approves or rejects the whole proposal; on approval the request enters the operational queue.
+
+Frontend hint for later (not a backend rule): when the frontend displays the cart it should render the line items as compact single rows rather than large stacked cards. This is a layout preference, not a business-logic constraint — the backend always treats the cart as a list of N lines regardless of how the UI lays them out.
 
 ---
 
@@ -759,74 +780,72 @@ The customer-specific pricing must be clear enough that the frontend can show:
 
 ## 9. Notes and visibility
 
-The system needs different types of notes.
+The system needs different types of notes. Do not treat every internal note as the same thing.
 
-Do not treat every internal note as the same thing.
+The canonical model has **four** note categories. Every note in the system (on a ticket, on an Extra Work request, on a proposal, on a proposal line, on a status-history row) belongs to exactly one of these categories, and the category determines who can read it.
 
-### Customer-visible comment
+### 9.1 Customer-visible note
 
-Visible to customer and provider.
+Visible to: customer and provider.
 
-Used for normal communication.
+Used for normal customer-facing communication.
 
-Example:
+Examples:
 
-"The work is planned for Friday."
+- "The work is planned for Friday."
+- "We will be on site between 09:00 and 11:00."
 
-### Provider-only internal note
+### 9.2 Provider internal note
 
-Visible only to provider-side management roles that are allowed to see it.
+Visible to: provider admin and Building Manager (subject to permissions).
 
-Not visible to customers.
+Not visible to: customer, staff (by default).
 
-Usually not visible to staff if it contains financial or management information.
+Used for commercial / internal / provider-side comments such as cost, margin, negotiation, pricing strategy, and internal commercial decisions.
 
-Example:
+Examples:
 
-"Our cost is EUR 120."
-"Margin is low."
-"Customer is difficult with payments."
+- "Our cost is EUR 120."
+- "Margin is low — flag if approved."
+- "Customer is difficult with payments — require pre-payment next time."
+- "Do not discount this request."
+- "Discuss pricing with Ramazan first."
 
-### Staff-visible operational note
+### 9.3 Staff instruction / operational note
 
-Visible to staff and provider-side operations.
+Visible to: provider and staff.
 
-Not visible to customers.
+Not visible to: customer.
 
-Can be visible to Building Manager.
+Used for operational instructions that the field-staff team needs to actually do the work. This is the operational hand-off note — it must never contain commercial / pricing / margin context.
 
-Example:
+Examples:
 
-"Bring stronger cleaning material."
-"Use the back entrance."
-"Windows are very dirty."
-"Bring ladder."
+- "Bring stronger cleaning material."
+- "These windows are very dirty — schedule extra time."
+- "Use the back entrance — security has been notified."
+- "Bring a ladder."
 
-### Provider management note excluding staff
+### 9.4 Staff completion note
 
-Visible to Super Admin, Provider Admin, maybe Building Manager if allowed.
+Written by: staff, when they are completing their assigned work or sending it onward (to manager review or customer approval).
 
-Not visible to staff.
+Used as completion evidence — together with or instead of a photo attachment.
 
-Not visible to customer.
+Required for Staff when they move a piece of work onward. Optional for managers / admins driving the same transition on behalf of a staff member.
 
-Example:
+Examples:
 
-"Do not discount this request."
-"Discuss pricing with Ramazan first."
+- "Completed at 14:30 — all windows polished, no damage observed."
+- "Cabinet front replaced, see attached photo."
 
 ### Suggested product rule
 
-Notes should have a visibility/type field, not just one generic internal_note.
+Notes should have an explicit visibility / type field, not just one generic "internal_note" boolean.
 
-At minimum:
+The four categories above (customer-visible, provider internal, staff instruction / operational, staff completion) are the canonical taxonomy. They should be implemented as a typed note-category field on tickets / proposals / messages rather than as a free-text field plus a permission checkbox.
 
-- Public/customer-visible
-- Provider-only management
-- Staff-visible operational
-- Provider-only excluding staff
-
-This can be implemented as ticket/proposal/message note type rather than only as a permission checkbox.
+Today the backend has a two-tier model (PUBLIC vs INTERNAL) and the staff-completion evidence rule lives in the ticket state machine. The four-tier taxonomy is a deliberate future schema change — it will be a focused migration batch in its own right.
 
 ---
 
