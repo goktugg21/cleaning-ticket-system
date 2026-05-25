@@ -515,13 +515,30 @@ def compute_effective_actions(
     )
 
     # ----- customer-side admin actions -----
-    # B4 future: CCA-callable customer-user management is not wired
-    # today. Right now only SA + COMPANY_ADMIN can manage. We return
-    # current backend truth.
-    actions["can_manage_customer_users"] = is_super or is_company_admin_in
+    # B4 — Customer Company Admin (and any customer-side actor whose
+    # row resolves `customer.users.manage`) can manage lower customer
+    # users (Customer User / Customer Location Manager) inside their
+    # own customer scope. The endpoint-level admit is enforced by
+    # `accounts.permissions.CanManageCustomerSideUsers`; here we
+    # surface the derived fact so the frontend permission-overview
+    # UIs can render it. Customer-level scope (building_id=None) on
+    # the resolver — the action describes whether the user can manage
+    # lower users in this customer, not at a specific building.
+    actions["can_manage_customer_users"] = (
+        is_super
+        or is_company_admin_in
+        or (
+            is_customer
+            and _customer_can(target, customer, None, "customer.users.manage")
+        )
+    )
     # B5 future: SA-controlled toggle to disable Provider Admin's
     # ability to manage customer permissions. Today the COMPANY_ADMIN
-    # default is unconditional. Returning current backend truth.
+    # default is unconditional and CCA does NOT have a permission
+    # management surface (B4 only opens user management, not policy
+    # / permission-override management for OTHER users — CCA editing
+    # their own overrides is not exposed via the customer-side admit
+    # set). Returning current backend truth.
     actions["can_manage_customer_permissions"] = is_super or is_company_admin_in
 
     # ----- note visibility -----
@@ -592,10 +609,13 @@ def compute_endpoint_notes(target, customer: Customer, building) -> list[str]:
     if target.role == UserRole.CUSTOMER_USER:
         notes.append(
             "Customer Company Admin must never create or promote "
-            "another Customer Company Admin. Future B4 will add a "
-            "CCA-callable endpoint for managing lower customer users "
-            "(Customer Location Manager / Customer User) when the "
-            "`customer.users.manage` permission resolves True; today "
-            "only Super Admin and Provider Company Admin can manage."
+            "another Customer Company Admin. B4 added a CCA-callable "
+            "path that admits a CCA to the membership + access "
+            "management endpoints inside their own customer when the "
+            "`customer.users.manage` permission resolves True. CCA can "
+            "only manage lower customer users (Customer User and "
+            "Customer Location Manager); the H-7 grant gate continues "
+            "to block any non-Super-Admin actor from setting "
+            "`access_role=CUSTOMER_COMPANY_ADMIN`."
         )
     return notes

@@ -4,7 +4,10 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 
 from accounts.models import User, UserRole
-from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
+from accounts.permissions import (
+    CanManageCustomerSideUsers,
+    IsSuperAdminOrCompanyAdminForCompany,
+)
 from buildings.models import Building
 from config.pagination import UnboundedPagination
 
@@ -15,6 +18,7 @@ from .models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from .permissions import user_can
 from .serializers_memberships import (
     CustomerBuildingMembershipSerializer,
     CustomerCompanyPolicySerializer,
@@ -24,8 +28,54 @@ from .serializers_memberships import (
 )
 
 
+# ---------------------------------------------------------------------------
+# B4 — shared CCA-guard helpers used by the four user-management endpoints
+# below. CCA admit logic lives on the DRF permission class
+# (`CanManageCustomerSideUsers`); these helpers add the per-action guards
+# the spec requires:
+#   * CCA cannot touch a target user who currently holds a CCA access row
+#     under this customer (membership delete + access PATCH/DELETE).
+#   * CCA per-building manage check (CCA may grant / edit / revoke access
+#     only at buildings where their `customer.users.manage` resolves true).
+# ---------------------------------------------------------------------------
+def _target_has_cca_access(customer, user_id) -> bool:
+    """B4 — True if the (user_id, customer) target carries at least one
+    active `CustomerUserBuildingAccess` row at `access_role=
+    CUSTOMER_COMPANY_ADMIN`. A CCA actor must never touch another CCA's
+    rows or membership; this helper centralises the check.
+    """
+    return CustomerUserBuildingAccess.objects.filter(
+        membership__customer=customer,
+        membership__user_id=user_id,
+        access_role=(
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+        ),
+    ).exists()
+
+
+def _cca_actor(request) -> bool:
+    """True iff the request actor is a CUSTOMER_USER role user (i.e. a
+    CCA admitted by `CanManageCustomerSideUsers`). SA / COMPANY_ADMIN
+    return False — they have their own paths and are NOT subject to the
+    CCA-only B4 guards."""
+    return request.user.role == UserRole.CUSTOMER_USER
+
+
+def _cca_has_building_manage(actor, customer_id: int, building_id: int) -> bool:
+    """B4 — True iff a CCA actor holds `customer.users.manage` at the
+    specific (customer, building) pair via `user_can`. Called by the
+    CUBA create / patch / delete views before the row is touched.
+    """
+    return user_can(
+        actor, customer_id, building_id, "customer.users.manage"
+    )
+
+
 class CustomerUserListCreateView(generics.ListCreateAPIView):
-    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    # B4 — admits SA, COMPANY_ADMIN, and CCA-with-`customer.users.manage`.
+    # CCA's customer-level admit is verified by `CanManageCustomerSideUsers`;
+    # per-action guards (no CCA-on-CCA, etc.) live inline below.
+    permission_classes = [CanManageCustomerSideUsers]
     serializer_class = CustomerUserMembershipSerializer
     pagination_class = UnboundedPagination
 
@@ -58,6 +108,34 @@ class CustomerUserListCreateView(generics.ListCreateAPIView):
                 {"user_id": "User must have the customer-user role."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # B4 CCA self-link guard — a CCA must not link themselves as a
+        # new customer-user under their own customer (defence in depth;
+        # the H-7 grant gate already prevents elevating self to CCA via
+        # access_role, but a CCA could otherwise add a fresh membership
+        # row at the default CUSTOMER_USER tier on themselves).
+        if _cca_actor(request) and request.user.id == user.id:
+            return Response(
+                {"detail": "You cannot manage your own membership."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # B4 CCA cannot-touch-another-CCA guard. A target who already
+        # carries a CCA access row under this customer is off-limits to
+        # a CCA actor — only SUPER_ADMIN (and COMPANY_ADMIN, today)
+        # can manage CCA-tier targets.
+        if _cca_actor(request) and _target_has_cca_access(customer, user.id):
+            return Response(
+                {
+                    "detail": (
+                        "Customer Company Admin cannot manage another "
+                        "Customer Company Admin."
+                    ),
+                    "code": "cca_cannot_manage_cca",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         membership, created = CustomerUserMembership.objects.get_or_create(
             customer=customer, user=user
         )
@@ -68,11 +146,32 @@ class CustomerUserListCreateView(generics.ListCreateAPIView):
 
 
 class CustomerUserDeleteView(generics.GenericAPIView):
-    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    # B4 — admits SA, COMPANY_ADMIN, and CCA-with-`customer.users.manage`.
+    permission_classes = [CanManageCustomerSideUsers]
 
     def delete(self, request, customer_id, user_id):
         customer = get_object_or_404(Customer, pk=customer_id)
         self.check_object_permissions(request, customer)
+
+        # B4 CCA cannot delete themselves nor any other CCA membership.
+        if _cca_actor(request):
+            if request.user.id == int(user_id):
+                return Response(
+                    {"detail": "You cannot remove your own membership."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if _target_has_cca_access(customer, user_id):
+                return Response(
+                    {
+                        "detail": (
+                            "Customer Company Admin cannot remove another "
+                            "Customer Company Admin."
+                        ),
+                        "code": "cca_cannot_manage_cca",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         # Sprint 14: deleting the parent membership cascades to all of
         # this user's per-building access rows under this customer
         # (CustomerUserBuildingAccess has on_delete=CASCADE on its
@@ -192,7 +291,10 @@ class CustomerUserAccessListCreateView(generics.ListCreateAPIView):
     POST /api/customers/<customer_id>/users/<user_id>/access/  {building_id}
     """
 
-    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    # B4 — admits SA, COMPANY_ADMIN, and CCA-with-`customer.users.manage`.
+    # CCA per-building manage check + CCA-cannot-touch-CCA-target check are
+    # done inline in `create()`.
+    permission_classes = [CanManageCustomerSideUsers]
     serializer_class = CustomerUserBuildingAccessSerializer
     pagination_class = UnboundedPagination
 
@@ -242,6 +344,41 @@ class CustomerUserAccessListCreateView(generics.ListCreateAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # B4 — CCA self / CCA-target / per-building manage guards. CCA
+        # cannot touch their own access rows nor another CCA's rows,
+        # AND CCA cannot grant access at a building where their
+        # `customer.users.manage` does not resolve to True.
+        if _cca_actor(request):
+            if request.user.id == membership.user_id:
+                return Response(
+                    {"detail": "You cannot manage your own access row."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if _target_has_cca_access(membership.customer, membership.user_id):
+                return Response(
+                    {
+                        "detail": (
+                            "Customer Company Admin cannot manage another "
+                            "Customer Company Admin's access."
+                        ),
+                        "code": "cca_cannot_manage_cca",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if not _cca_has_building_manage(
+                request.user, membership.customer_id, building.id
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            "Customer Company Admin does not have "
+                            "`customer.users.manage` at this building."
+                        ),
+                        "code": "cca_lacks_building_manage",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         access, created = CustomerUserBuildingAccess.objects.get_or_create(
             membership=membership, building=building
         )
@@ -270,7 +407,10 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
     (Sprint 23A), so this view does not write AuditLog rows itself.
     """
 
-    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    # B4 — admits SA, COMPANY_ADMIN, and CCA-with-`customer.users.manage`.
+    # CCA-cannot-touch-CCA-target + per-building manage check live inline
+    # in `patch()` and `delete()`.
+    permission_classes = [CanManageCustomerSideUsers]
 
     def _get_access(self, request, customer_id, user_id, building_id):
         customer = get_object_or_404(Customer, pk=customer_id)
@@ -282,6 +422,49 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
             building_id=building_id,
         )
         return access
+
+    def _cca_guard_for_existing_access(self, request, access) -> Response | None:
+        """B4 — pre-mutation guard for CCA actors on an existing
+        access row. Returns a 403 Response when the actor is a CCA
+        and one of these is true:
+
+          * the row's current `access_role` is `CUSTOMER_COMPANY_ADMIN`
+            (CCA cannot edit / remove another CCA),
+          * the actor does not hold `customer.users.manage` at the
+            row's specific building.
+
+        Returns None to indicate "proceed" — SA / COMPANY_ADMIN actors
+        always proceed here; their gates ran earlier.
+        """
+        if not _cca_actor(request):
+            return None
+        if access.access_role == (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Customer Company Admin cannot edit or remove "
+                        "another Customer Company Admin's access row."
+                    ),
+                    "code": "cca_cannot_manage_cca",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not _cca_has_building_manage(
+            request.user, access.membership.customer_id, access.building_id
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Customer Company Admin does not have "
+                        "`customer.users.manage` at this building."
+                    ),
+                    "code": "cca_lacks_building_manage",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
 
     def patch(self, request, customer_id, user_id, building_id):
         # Sprint 27C self-edit guard: nobody can edit their own
@@ -298,10 +481,19 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
             )
 
         access = self._get_access(request, customer_id, user_id, building_id)
+        # B4 CCA guards (no-op for SA / COMPANY_ADMIN actors).
+        guard = self._cca_guard_for_existing_access(request, access)
+        if guard is not None:
+            return guard
+
         # Sprint 27A — pass request through so the
         # CustomerUserBuildingAccessUpdateSerializer.validate_access_role
         # guard can read actor.role from context. Without this the
         # guard would reject every PATCH (actor would be None).
+        # The same serializer's H-7 guard ALSO blocks a CCA actor from
+        # setting access_role=CUSTOMER_COMPANY_ADMIN in the payload
+        # (only SA may do that), so payload-based CCA escalation is
+        # blocked at the serializer layer.
         serializer = CustomerUserBuildingAccessUpdateSerializer(
             access,
             data=request.data,
@@ -320,15 +512,33 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
         )
 
     def delete(self, request, customer_id, user_id, building_id):
+        # B4 — block CCA self-delete on access rows. SA / COMPANY_ADMIN
+        # may still delete arbitrarily (existing behaviour preserved).
+        if _cca_actor(request) and request.user.id == int(user_id):
+            return Response(
+                {"detail": "You cannot remove your own customer access row."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         customer = get_object_or_404(Customer, pk=customer_id)
         self.check_object_permissions(request, customer)
-        deleted, _ = CustomerUserBuildingAccess.objects.filter(
+
+        # B4 CCA guards on an EXISTING row: resolve the row first,
+        # then apply CCA-cannot-manage-CCA + per-building manage
+        # guards. Existing SA / COMPANY_ADMIN behaviour unchanged.
+        existing = CustomerUserBuildingAccess.objects.filter(
             membership__customer=customer,
             membership__user_id=user_id,
             building_id=building_id,
-        ).delete()
-        if deleted == 0:
+        ).select_related("membership", "building").first()
+        if existing is None:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        guard = self._cca_guard_for_existing_access(request, existing)
+        if guard is not None:
+            return guard
+
+        existing.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

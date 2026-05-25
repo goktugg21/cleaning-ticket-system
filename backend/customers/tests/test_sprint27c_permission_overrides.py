@@ -407,14 +407,27 @@ class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
 # ---------------------------------------------------------------------------
 # Customer-side users still cannot reach the endpoint
 # ---------------------------------------------------------------------------
-class CustomerSideCannotReachEndpointTests(TenantFixtureMixin, APITestCase):
+class CustomerSideEndpointReachTests(TenantFixtureMixin, APITestCase):
+    """B4 — the pre-B4 invariant "customer-side users cannot reach
+    this endpoint" was deliberately lifted for Customer Company Admin
+    actors holding `customer.users.manage`. Tests below pin the new
+    truth:
+
+      * A CCA actor (access_role=CCA) holding the default
+        `customer.users.manage` permission CAN edit a peer's
+        `permission_overrides` on a lower (Customer User) row → 200.
+      * A plain Customer User actor (no manage key) is STILL blocked
+        at the class-level admit gate → 403.
+
+    H-7 still holds — see `SprintTwentyASevenGuardStillHoldsTests`
+    above. CCA can edit lower users' OVERRIDES; CCA still cannot grant
+    the CCA access_role itself.
+    """
+
     def setUp(self):
         super().setUp()
-        # Promote self.customer_user to CUSTOMER_COMPANY_ADMIN access
-        # role on (self.customer, self.building) so the actor below
-        # has the strongest customer-side authority and the test still
-        # expects a 403 — locking that the class-level gate looks at
-        # User.role, not access_role.
+        # Promote self.customer_user to CCA access_role so they
+        # acquire `customer.users.manage` (B4 default for CCA).
         access = CustomerUserBuildingAccess.objects.get(
             membership__user=self.customer_user,
             membership__customer=self.customer,
@@ -423,7 +436,7 @@ class CustomerSideCannotReachEndpointTests(TenantFixtureMixin, APITestCase):
         access.access_role = CUSTOMER_COMPANY_ADMIN
         access.save(update_fields=["access_role"])
 
-        # A peer to attempt to edit.
+        # A peer to edit.
         User = get_user_model()
         self.peer = User.objects.create_user(
             email="peer-customer@example.com",
@@ -440,10 +453,55 @@ class CustomerSideCannotReachEndpointTests(TenantFixtureMixin, APITestCase):
             access_role=CUSTOMER_USER,
         )
 
-    def test_customer_company_admin_still_cannot_edit_peer_permission_overrides(
+        # A SECOND customer-side actor that stays at access_role=
+        # CUSTOMER_USER (no manage key) — used to assert the "still
+        # blocked" branch.
+        self.plain_cu = User.objects.create_user(
+            email="plain-cu@example.com",
+            password=self.password,
+            role=UserRole.CUSTOMER_USER,
+            full_name="Plain CU",
+        )
+        plain_membership = CustomerUserMembership.objects.create(
+            customer=self.customer, user=self.plain_cu
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=plain_membership,
+            building=self.building,
+            access_role=CUSTOMER_USER,
+        )
+
+    def test_customer_company_admin_can_now_edit_peer_overrides_post_B4(
         self,
     ):
+        """B4 — CCA with default `customer.users.manage` CAN edit a
+        lower user's overrides. Pre-B4 this returned 403."""
         self.authenticate(self.customer_user)
+        response = self.client.patch(
+            _access_url(self.customer.id, self.peer.id, self.building.id),
+            {"permission_overrides": {"customer.ticket.create": False}},
+            format="json",
+        )
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+            f"got {response.status_code}: {response.content!r}",
+        )
+        peer_access = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.peer,
+            membership__customer=self.customer,
+            building=self.building,
+        )
+        self.assertEqual(
+            peer_access.permission_overrides,
+            {"customer.ticket.create": False},
+        )
+
+    def test_plain_customer_user_still_cannot_edit_peer_overrides(self):
+        """B4 — plain Customer User (no `customer.users.manage` key)
+        is STILL refused by `CanManageCustomerSideUsers` at the
+        object-permission gate."""
+        self.authenticate(self.plain_cu)
         response = self.client.patch(
             _access_url(self.customer.id, self.peer.id, self.building.id),
             {"permission_overrides": {"customer.ticket.create": False}},

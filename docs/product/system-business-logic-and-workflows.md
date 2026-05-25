@@ -347,6 +347,26 @@ Power to create or promote a Customer Company Admin sits on the platform / provi
 
 If a Customer Company Admin needs to manage lower-level customer users (Customer Location Manager, Customer User) within their own customer scope, that can be granted by an explicit permission. The "create another Customer Company Admin" path is **always** provider-side; it never sits inside a customer organisation's own admin.
 
+Lower-user management capability (B4):
+
+The backend now exposes the four customer-user-management endpoints to a Customer Company Admin actor whose access row resolves the existing `customer.users.manage` permission to True:
+
+- `GET / POST /api/customers/<id>/users/` — list / link a Customer User to the CCA's own customer.
+- `DELETE /api/customers/<id>/users/<user_id>/` — unlink a lower customer user.
+- `GET / POST /api/customers/<id>/users/<user_id>/access/` — list / grant per-building access at a building where the CCA holds `customer.users.manage`.
+- `PATCH / DELETE /api/customers/<id>/users/<user_id>/access/<building_id>/` — edit / revoke a lower user's per-building access (subject to the per-building manage check).
+
+CCA hard constraints, enforced server-side:
+
+- CCA can manage only **Customer User** and **Customer Location Manager** targets. CCA cannot edit, remove, or grant new access on a target who currently holds a `CUSTOMER_COMPANY_ADMIN` access row under the same customer (HTTP 403, stable code `cca_cannot_manage_cca`).
+- CCA cannot set `access_role=CUSTOMER_COMPANY_ADMIN` via any PATCH payload — the existing H-7 serializer guard rejects with HTTP 400.
+- CCA cannot operate at a building where their own access row does not resolve `customer.users.manage` (HTTP 403, stable code `cca_lacks_building_manage`).
+- CCA cannot self-manage their own membership or access rows.
+- CCA cannot reach customer-policy or customer↔building-link endpoints; those stay Provider Admin / Super Admin only.
+- Cross-customer URL typing returns HTTP 403 / 404 via the same guard that blocks cross-company COMPANY_ADMIN access.
+
+Future B5 will add a Super Admin-controlled policy/toggle for whether Provider Admin may manage Customer Company Admin permissions. B4 does not implement that toggle; current behaviour remains provider-admin-allowed by default.
+
 ---
 
 ## 4.6 Customer Location Manager

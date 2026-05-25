@@ -198,9 +198,18 @@ class CustomerCompanyAdminCannotPromotePeerTests(
         )
 
     def test_customer_company_admin_cannot_promote_peer_to_company_admin(self):
-        """T-3: customer-side COMPANY_ADMIN (access_role) tries to
-        promote a peer — 403 from the class permission before the
-        serializer guard even runs. Locks invariant H-6.
+        """T-3: customer-side CCA (access_role) tries to promote a peer
+        to CCA — must be blocked. Locks invariant H-6 / H-7: only
+        Super Admin may set `access_role=CUSTOMER_COMPANY_ADMIN`.
+
+        Refusal layer changed in B4: pre-B4 the CCA actor was rejected
+        at the endpoint's class-level permission (403, "can't even
+        reach"). B4 opened the customer-user management endpoints to
+        CCA for managing lower users; the H-7 grant gate is now the
+        load-bearing layer that rejects the CCA-grant attempt — it
+        raises a serializer ValidationError → HTTP 400. The intent
+        (peer cannot be promoted) is unchanged; only the response
+        code shifted from 403 to 400.
         """
         self.authenticate(self.cust_company_admin)
         response = self.client.patch(
@@ -210,10 +219,10 @@ class CustomerCompanyAdminCannotPromotePeerTests(
         )
         self.assertEqual(
             response.status_code,
-            status.HTTP_403_FORBIDDEN,
-            f"A customer-side user (even at COMPANY_ADMIN access_role) "
-            f"must not reach the access-role-PATCH endpoint. Got "
-            f"{response.status_code}: {response.content!r}",
+            status.HTTP_400_BAD_REQUEST,
+            f"A customer-side CCA actor must not be able to promote a "
+            f"peer to CCA — H-7 serializer guard must reject with 400. "
+            f"Got {response.status_code}: {response.content!r}",
         )
         # And the peer's access_role stays untouched.
         peer_access = CustomerUserBuildingAccess.objects.get(

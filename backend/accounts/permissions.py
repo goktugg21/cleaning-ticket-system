@@ -233,6 +233,80 @@ class CanManageStaffMember(IsAuthenticatedAndActive):
         return _user_in_actor_company(actor, obj)
 
 
+class CanManageCustomerSideUsers(IsAuthenticatedAndActive):
+    """
+    B4 — gate for the customer-user management endpoints that admits a
+    Customer Company Admin (a CUSTOMER_USER role user holding an active
+    `CustomerUserBuildingAccess` row with `access_role=
+    CUSTOMER_COMPANY_ADMIN` AND whose row resolves
+    `customer.users.manage` to True for the URL-bound customer) in
+    addition to the existing SUPER_ADMIN / COMPANY_ADMIN admit set.
+
+    has_permission:
+      - SUPER_ADMIN passes.
+      - COMPANY_ADMIN passes (object check narrows to own provider company).
+      - CUSTOMER_USER passes (object check narrows to "is a CCA with
+        customer.users.manage in scope on the URL-bound customer").
+      - other roles 403.
+
+    has_object_permission(obj=Customer):
+      - SUPER_ADMIN -> True.
+      - COMPANY_ADMIN -> CompanyUserMembership in `customer.company_id`.
+      - CUSTOMER_USER -> at least one active `CustomerUserBuildingAccess`
+        row under this customer whose `access_has_permission` resolves
+        `customer.users.manage` to True (i.e. customer-level scope).
+      - other roles -> False.
+
+    Per-building scope (e.g. when CCA grants access for a specific
+    building) is enforced by the view layer in addition to this gate.
+    No new permission key is introduced — the gate re-uses the
+    existing `customer.users.manage` key from
+    `customers.permissions.CUSTOMER_PERMISSION_KEYS`.
+    """
+
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        return request.user.role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.CUSTOMER_USER,
+        )
+
+    def has_object_permission(self, request, view, obj):
+        from companies.models import CompanyUserMembership
+        from customers.models import Customer, CustomerUserBuildingAccess
+        from customers.permissions import access_has_permission
+
+        actor = request.user
+        if actor.role == UserRole.SUPER_ADMIN:
+            return True
+        if not isinstance(obj, Customer):
+            return False
+
+        if actor.role == UserRole.COMPANY_ADMIN:
+            return CompanyUserMembership.objects.filter(
+                user=actor, company_id=obj.company_id
+            ).exists()
+
+        if actor.role == UserRole.CUSTOMER_USER:
+            # B4 CCA admit. Must hold at least one active CUBA row
+            # under THIS customer that resolves `customer.users.manage`
+            # to True (default for `access_role=CUSTOMER_COMPANY_ADMIN`,
+            # or any access_role whose `permission_overrides` grant
+            # the key explicitly).
+            for access in CustomerUserBuildingAccess.objects.filter(
+                membership__user=actor,
+                membership__customer=obj,
+                is_active=True,
+            ).select_related("membership"):
+                if access_has_permission(access, "customer.users.manage"):
+                    return True
+            return False
+
+        return False
+
+
 class CanManageUser(IsAuthenticatedAndActive):
     """
     Permission for User write operations.
