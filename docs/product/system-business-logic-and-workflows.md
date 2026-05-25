@@ -481,6 +481,33 @@ The same saved permissions should be visible in multiple useful places:
 
 The user profile page should first display the user's access rights clearly. Editing should be possible, but viewing should come first.
 
+### Effective-permissions endpoint (backend source of truth)
+
+The backend exposes a read-only endpoint that answers, for a target user in a given (customer, building) context, "what can this user actually do?":
+
+```
+GET /api/users/<id>/effective-permissions/?customer_id=<id>&building_id=<id optional>
+```
+
+Authorization (caller):
+
+- Super Admin can query anyone.
+- Provider Company Admin can query users inside their own provider company AND only when the supplied `customer_id` is in their own provider company. Cross-company queries return 403.
+- Building Manager, Staff, and Customer User cannot call this endpoint (they get 403).
+
+The response carries:
+
+- `user` — id, email, role, is_active of the queried user.
+- `context` — the customer_id, building_id, and the inferred company_id.
+- `scope` — `in_scope: bool` + human-readable `reason` (whether the target has reach into this customer/building).
+- `role_defaults` — the access_role and its default permission keys (for customer-side users with an access row).
+- `overrides` — the target's active `CustomerUserBuildingAccess` rows for this customer (each carries `building_id`, `access_role`, `is_active`, and the raw `permission_overrides` JSON).
+- `effective_permissions` — `{key: bool}` for every known permission key (provider + customer side), computed by the existing composer.
+- `effective_actions` — derived business booleans (e.g. `can_view_tickets`, `can_create_extra_work`, `can_use_contract_price_direct_order`, `can_override_customer_decision`, `can_view_provider_internal_notes`, `can_view_staff_operational_notes`, etc.). These are read-only derived facts, not new permission keys. They are the single source of truth for the Customer Permissions page, the Customer Users tab, and the User profile page — frontend code must not re-derive them.
+- `notes` — plain-text caveats. Future-feature gaps (CCA-callable lower-user management, Super-Admin toggle to disable Provider-Admin customer-permission writes, BM-revocation keys, four-tier note taxonomy) are listed here when relevant; the action booleans reflect current backend truth, not a forecast.
+
+Future B5 will add a Super Admin-controlled policy/toggle for whether Provider Admin may manage Customer Company Admin permissions. Current behaviour remains provider-admin-allowed by default — see §4.5.
+
 ---
 
 ## 6. Ticket workflow
