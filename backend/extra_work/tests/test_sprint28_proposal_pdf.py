@@ -173,10 +173,14 @@ class ProposalPdfFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=status,
         )
+        # B2 (system-business-logic-and-workflows.md §7.0) — cart-line
+        # quantity must match the proposal-line quantity in
+        # `_line_payload` ("2.00") so the SEND coverage gate passes.
+        # No PDF test asserts cart quantity directly.
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
             service=self.service,
-            quantity=Decimal("1.00"),
+            quantity=Decimal("2.00"),
             unit_type=ExtraWorkPricingUnitType.HOURS,
             requested_date=date(2026, 6, 15),
             customer_note="",
@@ -397,7 +401,11 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
         ProposalLine.objects.create(
             proposal=proposal,
             service=self.service,
-            quantity=Decimal("1.00"),
+            # B2 — quantity must match the cart item created by
+            # `_make_ew` (2.00) so apply_proposal_transition's SEND
+            # coverage gate passes. Unit price kept at 50.00; the
+            # totals are not asserted in this unicode-render test.
+            quantity=Decimal("2.00"),
             unit_type=ExtraWorkPricingUnitType.HOURS,
             unit_price=Decimal("50.00"),
             vat_pct=Decimal("21.00"),

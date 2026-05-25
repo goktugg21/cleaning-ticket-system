@@ -769,9 +769,36 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
     (DRAFT or SENT) already exists — the partial UniqueConstraint
     enforces the same invariant at the DB level, but pre-checking
     here gives a clean ValidationError instead of an IntegrityError.
+
+    B2 (system-business-logic-and-workflows.md §7.0) — Extra Work is
+    always a cart of line items. When the caller omits the `lines`
+    array (or sends `lines=[]`), the serializer auto-seeds one
+    `ProposalLine` per `ExtraWorkRequestItem` on the parent EW. For
+    each seeded line, the contract resolver
+    (`extra_work.pricing.resolve_price`) is consulted with the cart
+    item's own `requested_date`; when a contract row is returned,
+    `unit_price` and `vat_pct` are pre-filled from it. For cart
+    lines without a contract row, both fields default to `0.00`
+    and the operator is expected to fill them in before SEND. No
+    metadata marker is written on the line (per the B2 spec —
+    `customer_explanation` is customer-visible business text, not
+    an internal flag; "is this line contract-priced" is derived
+    by re-calling `resolve_price` at validation / read time).
+
+    When the caller sends explicit `lines`, the original behaviour
+    is preserved: the serializer creates exactly the rows the
+    client described. SEND-time validation (see
+    `proposal_state_machine.apply_proposal_transition`) is the
+    safety net that catches a mismatch between proposal lines and
+    cart items regardless of whether the lines were auto-seeded
+    or hand-built.
     """
 
-    lines = ProposalLineAdminSerializer(many=True)
+    # B2 — `lines` is no longer required on the wire. When omitted
+    # or empty, the serializer reads the parent EW's cart and seeds
+    # one ProposalLine per ExtraWorkRequestItem. See the create()
+    # method below.
+    lines = ProposalLineAdminSerializer(many=True, required=False)
 
     class Meta:
         model = Proposal
@@ -831,21 +858,61 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
                 status=ProposalStatus.DRAFT,
                 created_by=actor,
             )
-            for line in lines_data:
-                ProposalLine.objects.create(
-                    proposal=proposal,
-                    service=line.get("service"),
-                    description=line.get("description", ""),
-                    quantity=line["quantity"],
-                    unit_type=line["unit_type"],
-                    unit_price=line["unit_price"],
-                    vat_pct=line.get("vat_pct", Decimal("21.00")),
-                    customer_explanation=line.get("customer_explanation", ""),
-                    internal_note=line.get("internal_note", ""),
-                    is_approved_for_spawn=line.get(
-                        "is_approved_for_spawn", True
-                    ),
+
+            # B2 — auto-seed from cart items when the caller omits or
+            # sends an empty `lines` array. The cart drives the
+            # proposal shape; the operator only edits prices /
+            # explanations afterwards.
+            if not lines_data:
+                customer = extra_work_request.customer
+                cart_items = list(
+                    extra_work_request.line_items.all().order_by("id")
                 )
+                for item in cart_items:
+                    contract = resolve_price(
+                        item.service,
+                        customer,
+                        on=item.requested_date,
+                    )
+                    if contract is not None:
+                        unit_price = contract.unit_price
+                        vat_pct = contract.vat_pct
+                    else:
+                        # Custom line — operator must set the price
+                        # before SEND. The SEND-time gate refuses
+                        # unit_price=0 without a customer_explanation.
+                        unit_price = Decimal("0.00")
+                        vat_pct = Decimal("21.00")
+                    ProposalLine.objects.create(
+                        proposal=proposal,
+                        service=item.service,
+                        description="",
+                        quantity=item.quantity,
+                        unit_type=item.unit_type,
+                        unit_price=unit_price,
+                        vat_pct=vat_pct,
+                        customer_explanation="",
+                        internal_note="",
+                        is_approved_for_spawn=True,
+                    )
+            else:
+                for line in lines_data:
+                    ProposalLine.objects.create(
+                        proposal=proposal,
+                        service=line.get("service"),
+                        description=line.get("description", ""),
+                        quantity=line["quantity"],
+                        unit_type=line["unit_type"],
+                        unit_price=line["unit_price"],
+                        vat_pct=line.get("vat_pct", Decimal("21.00")),
+                        customer_explanation=line.get(
+                            "customer_explanation", ""
+                        ),
+                        internal_note=line.get("internal_note", ""),
+                        is_approved_for_spawn=line.get(
+                            "is_approved_for_spawn", True
+                        ),
+                    )
             proposal.recompute_totals()
             # Refresh from DB so the totals computed by recompute_totals
             # are reflected on the instance returned to the caller.

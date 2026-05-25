@@ -558,6 +558,28 @@ Extra Work must support two different paths.
 
 ---
 
+## 7.0 Extra Work is always a cart with line items
+
+Extra Work is **always** a cart-like object at the business-logic level. The frontend may later display the cart compactly (e.g. as a one-line summary), but the backend must always represent it as one request containing **one or more line items**. There is no "single-line Extra Work request"; the single-item case is just a cart of length one.
+
+The canonical rules are:
+
+1. A customer creates **one** Extra Work request (the cart).
+2. The cart contains **one or more** line items. Each line carries: a Service reference, a unit type, a quantity, a requested date, and optionally a customer note.
+3. Each line item is independently classified as either:
+   - **Contract-priced for this specific customer** — there is an active `CustomerServicePrice` row for `(this customer, this service, this requested date)` — or
+   - **Custom / non-contract** — the resolver returns no contract row for that pair.
+4. **Routing rule (whole-cart):** the routing decision is computed once at submission time across the whole cart.
+   - If **every** line in the cart resolves to a contract price, the request is routed to the **instant path**: no proposal is required, the customer sees the calculated prices, the customer submits it like an order, and the request enters the operational workflow directly.
+   - If **at least one** line in the cart does **not** resolve to a contract price, the whole cart is routed to the **proposal path** — even if the other lines are contract-priced.
+5. **In the proposal path**, the contract-priced lines remain represented in the resulting proposal as already-priced lines (their contract price flows through), and provider-side actors add prices and customer-visible explanations for the custom / non-contract lines only. The customer reviews the entire proposal (contract + custom together) and approves or rejects the whole proposal — there is no per-line approve / reject loop at the cart level.
+6. **Staff must not see proposal pricing**, provider commercial notes, customer approval controls, or any internal commercial decision data. This applies to both paths.
+7. **Staff sees the operational work only after the request / proposal has been approved** and the work has been spawned into one operational ticket / task per cart line. The ticket carries safe operational metadata (parent request id, title, status, service name) but never the pricing or commercial notes.
+
+The cart-first design is permanent: changes that collapse Extra Work back into a single-line concept (or that strip the proposal of its contract-priced lines) violate this section and must be rejected.
+
+---
+
 ## 7.1 Path A: Contract-priced Extra Work
 
 This is like buying something from a shopping cart.

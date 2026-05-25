@@ -54,6 +54,7 @@ from customers.permissions import user_can
 
 from .models import (
     ExtraWorkRequest,
+    ExtraWorkRequestItem,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
     Proposal,
@@ -63,6 +64,7 @@ from .models import (
     ProposalTimelineEvent,
     ProposalTimelineEventType,
 )
+from .pricing import resolve_price
 
 
 ALLOWED_TRANSITIONS: set[tuple[str, str]] = {
@@ -282,6 +284,147 @@ def _advance_parent_on_customer_decision(
     )
 
 
+def _validate_proposal_covers_cart(proposal: Proposal) -> None:
+    """
+    B2 SEND-time gate (system-business-logic-and-workflows.md §7.0).
+
+    A Proposal is the customer's quote for the **submitted cart**, so
+    at SEND time the proposal lines must cover the cart exactly:
+
+      * Each cart item must be represented by exactly one proposal
+        line with the same `(service_id, unit_type, quantity)` multi-
+        set key.
+      * Each proposal line must correspond to a cart item — surprise
+        lines (provider-added charges that the customer did not put
+        in the cart) are rejected. A future surface for travel /
+        material / admin fees would introduce a deliberate separate
+        line type; until then, SEND refuses extras.
+
+    For every matched proposal line, the helper re-runs
+    `extra_work.pricing.resolve_price` against the matched cart
+    item's `requested_date` and enforces:
+
+      * **Contract-price floor.** When the resolver returns a row,
+        the proposal line's `unit_price` and `vat_pct` MUST equal the
+        contract row's. The contract is the only commercial truth
+        for that customer/service/date. Operators that need to quote
+        a different number must adjust the contract row itself —
+        which is auditable — not the per-proposal price field.
+      * **Non-contract lines must be priced.** When the resolver
+        returns `None` (custom / non-contract line), the proposal
+        line's `unit_price` MUST be strictly greater than zero. There
+        is no `customer_explanation`-rescues-zero loophole — free /
+        promo / compensation lines are a deliberate future feature
+        and will be a separate line type, not a price-of-zero with a
+        free-text justification.
+
+    Match algorithm (multiset, no FK):
+      The current schema does NOT include a `requested_date` column
+      on `ProposalLine` (cart→proposal linkage is stored only on the
+      parent EW). To keep B2 migration-free, the match key is
+      `(service_id, unit_type, quantity)`, and ambiguous matches
+      (cart items with identical 3-tuples but different
+      `requested_date`s) are resolved by stable iteration order
+      (cart-item id ascending). In practice carts rarely contain
+      identical-3-tuple-different-date duplicates because each cart
+      item is the customer's deliberate per-date pick. If production
+      surfaces such ambiguity at scale, the next iteration adds a
+      `ProposalLine.extra_work_request_item` FK (one migration) —
+      until then the multiset comparison is the spec floor.
+
+    Raises:
+      TransitionError with one of:
+        - "proposal_has_extra_line"
+        - "proposal_does_not_cover_cart"
+        - "proposal_contract_price_drift"
+        - "proposal_custom_line_missing_price"
+    """
+    extra_work_request = proposal.extra_work_request
+    customer = extra_work_request.customer
+
+    cart_items = list(
+        ExtraWorkRequestItem.objects.filter(
+            extra_work_request=extra_work_request
+        ).order_by("id")
+    )
+    proposal_lines = list(
+        ProposalLine.objects.filter(proposal=proposal).order_by("id")
+    )
+
+    # First pass: match each proposal line to a cart item by the
+    # (service_id, unit_type, quantity) multiset key. Each cart item
+    # is consumed at most once.
+    unmatched_cart = list(cart_items)
+    matches: list[tuple[ProposalLine, ExtraWorkRequestItem]] = []
+    for line in proposal_lines:
+        line_key = (
+            line.service_id,
+            line.unit_type,
+            line.quantity,
+        )
+        match_idx = None
+        for idx, item in enumerate(unmatched_cart):
+            if (
+                item.service_id,
+                item.unit_type,
+                item.quantity,
+            ) == line_key:
+                match_idx = idx
+                break
+        if match_idx is None:
+            raise TransitionError(
+                "Proposal contains a line that does not correspond to "
+                "any item in the customer's submitted cart. Add the "
+                "matching cart item or remove the proposal line.",
+                code="proposal_has_extra_line",
+            )
+        matches.append((line, unmatched_cart.pop(match_idx)))
+
+    if unmatched_cart:
+        raise TransitionError(
+            "Proposal does not cover every item in the customer's "
+            "submitted cart. Add a proposal line for each remaining "
+            "cart item before sending.",
+            code="proposal_does_not_cover_cart",
+        )
+
+    # Second pass: contract-price floor + zero-price-with-explanation.
+    for line, cart_item in matches:
+        contract = resolve_price(
+            line.service, customer, on=cart_item.requested_date
+        )
+        if contract is not None:
+            # Contract-priced cart line — proposal must mirror it
+            # exactly (price AND VAT). Zero is acceptable iff the
+            # contract row itself is zero.
+            if (
+                line.unit_price != contract.unit_price
+                or line.vat_pct != contract.vat_pct
+            ):
+                raise TransitionError(
+                    "Proposal line price does not match the customer's "
+                    "contract price for this service. Either match the "
+                    "contract or adjust the contract row.",
+                    code="proposal_contract_price_drift",
+                )
+        else:
+            # Custom / non-contract line — the provider must enter a
+            # real unit price before SEND. `customer_explanation` is
+            # customer-visible business text, never a flag, so the B2
+            # rule deliberately rejects unit_price=0 regardless of the
+            # explanation field. Free / promo / compensation lines
+            # are a future deliberate line-type feature; encoding
+            # them through a zero-with-text-justification was rejected
+            # in the 2026-05-24 clarification.
+            if line.unit_price <= 0:
+                raise TransitionError(
+                    "Non-contract proposal line is missing a price. "
+                    "The provider must enter a unit price greater "
+                    "than zero before the proposal can be sent.",
+                    code="proposal_custom_line_missing_price",
+                )
+
+
 @transaction.atomic
 def apply_proposal_transition(
     proposal: Proposal,
@@ -355,6 +498,25 @@ def apply_proposal_transition(
                 "before a proposal can be sent.",
                 code="proposal_send_requires_under_review",
             )
+
+    # B2 (system-business-logic-and-workflows.md §7.0) SEND-time gates:
+    #
+    #   (a) Cart-coverage: the proposal must cover the whole cart and
+    #       carry no extra lines. Match is multiset by
+    #       (service_id, unit_type, quantity).
+    #   (b) Contract-price floor: for every proposal line that resolves
+    #       to a contract row at the matched cart item's
+    #       requested_date, the proposal's unit_price and vat_pct MUST
+    #       equal the contract row's. Operators cannot silently quote
+    #       below or above the agreed contract.
+    #   (c) Zero-price guard: a non-contract proposal line may carry
+    #       unit_price=0 only when customer_explanation is non-blank.
+    #       A bare zero-price line on a non-contract item is rejected.
+    #
+    # All three gates are checked inside `_validate_proposal_covers_cart`
+    # before the row is locked for the status transition.
+    if to_status == ProposalStatus.SENT:
+        _validate_proposal_covers_cart(proposal)
 
     # Provider-driven customer-decision coercion: ALWAYS an override.
     provider_driven_customer_decision = (

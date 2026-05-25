@@ -159,15 +159,45 @@ class ProposalFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=status,
         )
+        # B2 (system-business-logic-and-workflows.md §7.0) — the SEND
+        # gate validates that proposal lines cover the cart's
+        # (service, unit_type, quantity) multiset. The legacy
+        # Sprint 28 line payload (`_line_payload`) carries
+        # quantity="2.00", so the cart item below must also be 2.00
+        # for the existing Sprint 28 happy-path tests to pass the
+        # new SEND validation. No test in this file asserts cart
+        # quantity directly, so the bump is safe.
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
             service=self.service,
-            quantity=Decimal("1.00"),
+            quantity=Decimal("2.00"),
             unit_type=ExtraWorkPricingUnitType.HOURS,
             requested_date=date(2026, 6, 15),
             customer_note="",
         )
         return ew
+
+    def _add_cart_item(
+        self,
+        ew: ExtraWorkRequest,
+        *,
+        quantity: Decimal,
+        unit_type: str = ExtraWorkPricingUnitType.HOURS,
+        requested_date=date(2026, 6, 15),
+    ) -> ExtraWorkRequestItem:
+        """B2 helper — extend the cart so the proposal can carry an
+        additional line that still passes the SEND coverage check.
+        Each test that adds a second ProposalLine via the lines
+        endpoint must also add a matching cart item.
+        """
+        return ExtraWorkRequestItem.objects.create(
+            extra_work_request=ew,
+            service=self.service,
+            quantity=quantity,
+            unit_type=unit_type,
+            requested_date=requested_date,
+            customer_note="",
+        )
 
     def _proposals_url(self, ew_id: int) -> str:
         return f"/api/extra-work/{ew_id}/proposals/"
@@ -437,6 +467,10 @@ class CustomerApproveSpawnTests(ProposalFixtureMixin, TestCase):
 
     def test_customer_approve_spawns_one_ticket_per_line(self):
         ew = self._make_ew()
+        # B2 — extend the cart so the second proposal line below has
+        # a matching cart item; otherwise the SEND coverage gate
+        # `proposal_has_extra_line` would fire.
+        self._add_cart_item(ew, quantity=Decimal("1.00"))
         proposal = self._create_proposal(ew)
         # Add a second line.
         response = self._api(self.admin).post(
@@ -578,6 +612,9 @@ class AtomicityTests(ProposalFixtureMixin, TestCase):
 
     def test_atomicity_rollback_when_ticket_creation_fails_mid_loop(self):
         ew = self._make_ew()
+        # B2 — second cart item so SEND coverage permits the second
+        # proposal line that drives the multi-iteration spawn loop.
+        self._add_cart_item(ew, quantity=Decimal("1.00"))
         proposal = self._create_proposal(ew)
         # Add a second line so the spawn loop has more than one
         # iteration to bail on.
@@ -678,6 +715,9 @@ class IdempotencyTests(ProposalFixtureMixin, TestCase):
 
     def test_lines_with_is_approved_for_spawn_false_do_not_spawn_tickets(self):
         ew = self._make_ew()
+        # B2 — second cart item so SEND coverage permits the second
+        # proposal line below.
+        self._add_cart_item(ew, quantity=Decimal("1.00"))
         proposal = self._create_proposal(ew)
         # Add a second line and flip is_approved_for_spawn on it.
         response = self._api(self.admin).post(
