@@ -332,6 +332,8 @@ class ResponseShapeTests(_B3Fixture):
         "can_view_proposal_prices",
         "can_manage_customer_users",
         "can_manage_customer_permissions",
+        # B5 — derived from the provider Company's policy toggle.
+        "can_manage_customer_company_admins",
         "can_view_provider_internal_notes",
         "can_view_staff_operational_notes",
     }

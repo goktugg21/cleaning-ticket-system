@@ -376,11 +376,38 @@ class SelfEditGuardTests(TenantFixtureMixin, APITestCase):
 
 
 # ---------------------------------------------------------------------------
-# Sprint 27A guard preserved (regression net)
+# Sprint 27A guard preserved (regression net) — B5 narrowed: COMPANY_ADMIN
+# may now also grant CCA when the provider Company's policy toggle
+# `provider_admin_may_manage_customer_company_admins` is True (its default). When
+# the toggle is False, only SUPER_ADMIN may grant CCA, matching the
+# pre-B5 invariant.
 # ---------------------------------------------------------------------------
 class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
-    def test_only_super_admin_can_still_grant_customer_company_admin(self):
-        # company_admin attempts → 400 (Sprint 27A guard)
+    def test_company_admin_can_grant_cca_when_policy_default_true(self):
+        # B5 default behaviour: COMPANY_ADMIN may grant CCA. The
+        # `provider_admin_may_manage_customer_company_admins` field defaults
+        # to True on the Company model — confirm and exercise the
+        # default path.
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.provider_admin_may_manage_customer_company_admins)
+        self.authenticate(self.company_admin)
+        response = self.client.patch(
+            _access_url(
+                self.customer.id, self.customer_user.id, self.building.id
+            ),
+            {"access_role": CUSTOMER_COMPANY_ADMIN},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+    def test_company_admin_cannot_grant_cca_when_policy_disabled(self):
+        # B5 — SA disables the toggle on the provider company. Then
+        # the H-7 leg rejects COMPANY_ADMIN's CCA-grant attempt with
+        # the pre-B5 invariant shape (400).
+        self.company.provider_admin_may_manage_customer_company_admins = False
+        self.company.save(
+            update_fields=["provider_admin_may_manage_customer_company_admins"]
+        )
         self.authenticate(self.company_admin)
         response = self.client.patch(
             _access_url(
@@ -392,16 +419,40 @@ class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             response.status_code, status.HTTP_400_BAD_REQUEST, response.data
         )
-        # super_admin attempts → 200
-        self.authenticate(self.super_admin)
-        response = self.client.patch(
-            _access_url(
-                self.customer.id, self.customer_user.id, self.building.id
-            ),
-            {"access_role": CUSTOMER_COMPANY_ADMIN},
-            format="json",
-        )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+    def test_super_admin_always_grants_cca_regardless_of_policy(self):
+        # SUPER_ADMIN bypasses the policy toggle in both directions.
+        for policy_value in (True, False):
+            self.company.provider_admin_may_manage_customer_company_admins = (
+                policy_value
+            )
+            self.company.save(
+                update_fields=["provider_admin_may_manage_customer_company_admins"]
+            )
+            # Reset target to CUSTOMER_USER between iterations.
+            access = CustomerUserBuildingAccess.objects.get(
+                membership__user=self.customer_user,
+                membership__customer=self.customer,
+                building=self.building,
+            )
+            access.access_role = (
+                CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER
+            )
+            access.save(update_fields=["access_role"])
+
+            self.authenticate(self.super_admin)
+            response = self.client.patch(
+                _access_url(
+                    self.customer.id, self.customer_user.id, self.building.id
+                ),
+                {"access_role": CUSTOMER_COMPANY_ADMIN},
+                format="json",
+            )
+            self.assertEqual(
+                response.status_code,
+                status.HTTP_200_OK,
+                f"SA grant blocked while policy={policy_value}: {response.content!r}",
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -147,22 +147,60 @@ class CustomerUserBuildingAccessUpdateSerializer(serializers.ModelSerializer):
         fields = ["access_role", "permission_overrides", "is_active"]
 
     def validate_access_role(self, value):
-        """Sprint 27A guard (H-7 in
-        docs/architecture/sprint-27-rbac-matrix.md): only
-        SUPER_ADMIN may grant `CUSTOMER_COMPANY_ADMIN`. Provider
-        COMPANY_ADMIN can still grant the two narrower customer-
-        side roles — the endpoint's class-level permission already
-        excludes everyone else.
+        """Sprint 27A + B5 — CCA-grant gate.
+
+        Sprint 27A established H-7: only SUPER_ADMIN may grant
+        `CUSTOMER_COMPANY_ADMIN`. B5 narrows this: a Provider Company
+        Admin (COMPANY_ADMIN role) may ALSO grant CCA, but only when
+        the provider Company's `provider_admin_may_manage_customer_company_admins`
+        policy is True (the default). When the Super Admin has
+        toggled the policy to False on a specific provider company,
+        only SUPER_ADMIN can grant CCA on that company's customers.
+
+        Everyone else (BUILDING_MANAGER / STAFF / CUSTOMER_USER —
+        including a CCA actor) is always blocked from setting
+        `access_role=CUSTOMER_COMPANY_ADMIN`. The endpoint's
+        class-level permission already excludes BM and STAFF; CCA is
+        admitted to the endpoint by `CanManageCustomerSideUsers` (B4)
+        but is still blocked here.
         """
-        if value == CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN:
-            request = self.context.get("request")
-            actor = getattr(request, "user", None)
-            if getattr(actor, "role", None) != UserRole.SUPER_ADMIN:
+        if value != CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN:
+            return value
+
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        actor_role = getattr(actor, "role", None)
+
+        if actor_role == UserRole.SUPER_ADMIN:
+            return value
+
+        if actor_role == UserRole.COMPANY_ADMIN:
+            # B5 — consult the provider Company's toggle. The
+            # serializer's `self.instance` is the existing CUBA row
+            # being PATCHed; walk to the customer's provider Company
+            # and read the policy field.
+            instance = getattr(self, "instance", None)
+            if instance is None:
                 raise serializers.ValidationError(
-                    "Only a Super Admin may grant the Customer Company "
-                    "Admin access role.",
+                    "Cannot validate CCA grant: target access row not "
+                    "found in serializer context.",
                 )
-        return value
+            company = instance.membership.customer.company
+            if not company.provider_admin_may_manage_customer_company_admins:
+                raise serializers.ValidationError(
+                    "Super Admin has disabled Provider Admin's ability "
+                    "to grant the Customer Company Admin access role "
+                    "on this provider company. Only a Super Admin may "
+                    "do so."
+                )
+            return value
+
+        # CCA / CLM / CUSTOMER_USER / BM / STAFF — never.
+        raise serializers.ValidationError(
+            "Only a Super Admin (or a Provider Company Admin when the "
+            "policy allows) may grant the Customer Company Admin "
+            "access role.",
+        )
 
     def validate_permission_overrides(self, value):
         """Sprint 27C: allow-list + boolean-only validation."""

@@ -53,23 +53,59 @@ def _access_url(customer_id: int, user_id: int, building_id: int) -> str:
 
 class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
     """
-    T-1, T-2: only SUPER_ADMIN may set access_role=CUSTOMER_COMPANY_ADMIN.
+    T-1, T-2: CUSTOMER_COMPANY_ADMIN access-role grant authority.
+
+    Sprint 27A's original invariant said "only SUPER_ADMIN may set
+    access_role=CUSTOMER_COMPANY_ADMIN." B5 narrowed this: a Provider
+    Company Admin (COMPANY_ADMIN role) may ALSO grant CCA when the
+    provider Company's policy field
+    `provider_admin_may_manage_customer_company_admins` is True (the default).
+    When the Super Admin has disabled the toggle on a given provider
+    company, only SUPER_ADMIN may grant CCA on that company's customers
+    — matching the pre-B5 invariant shape.
 
     The PATCH /access/<bid>/ endpoint is class-gated by
-    `IsSuperAdminOrCompanyAdminForCompany`, so a provider
-    COMPANY_ADMIN reaches the serializer. Without the Sprint 27A
-    guard, a COMPANY_ADMIN can silently promote any user under
-    their company's customers to CUSTOMER_COMPANY_ADMIN — Section
-    H-7 of the RBAC matrix forbids this.
+    `CanManageCustomerSideUsers` (B4-widened admit set including CCA
+    actors), so a provider COMPANY_ADMIN reaches the serializer. The
+    serializer-layer H-7 leg in `validate_access_role` is the
+    load-bearing gate that rejects the grant when the policy is False
+    (or when the actor is not SA/COMPANY_ADMIN).
     """
 
-    def test_company_admin_cannot_grant_customer_company_admin_access_role(self):
-        """T-1: provider COMPANY_ADMIN PATCH → CUSTOMER_COMPANY_ADMIN must fail.
-
-        Without the Sprint 27A serializer guard this returns 200 and
-        promotes the user. With the guard it returns 400 and the
-        access row's role stays CUSTOMER_USER.
+    def test_company_admin_can_grant_cca_when_policy_default_true(self):
+        """B5 default behaviour: COMPANY_ADMIN may grant CCA when the
+        provider Company's policy toggle is True (the default).
         """
+        self.assertTrue(self.company.provider_admin_may_manage_customer_company_admins)
+        self.authenticate(self.company_admin)
+        response = self.client.patch(
+            _access_url(
+                self.customer.id, self.customer_user.id, self.building.id
+            ),
+            {"access_role": CUSTOMER_COMPANY_ADMIN},
+            format="json",
+        )
+        self.assertEqual(
+            response.status_code, status.HTTP_200_OK, response.content
+        )
+        access = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.customer_user,
+            membership__customer=self.customer,
+            building=self.building,
+        )
+        self.assertEqual(access.access_role, CUSTOMER_COMPANY_ADMIN)
+
+    def test_company_admin_cannot_grant_cca_when_policy_disabled(self):
+        """B5 — SA disables the toggle on the provider company. The
+        H-7 leg of `validate_access_role` then rejects with the
+        pre-B5 invariant shape (HTTP 400) and the access row stays
+        unchanged. Matches the canonical doc §5: 'Super Admin can
+        restrict / revoke this provider-admin capability'.
+        """
+        self.company.provider_admin_may_manage_customer_company_admins = False
+        self.company.save(
+            update_fields=["provider_admin_may_manage_customer_company_admins"]
+        )
         self.authenticate(self.company_admin)
         response = self.client.patch(
             _access_url(
@@ -81,9 +117,9 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_400_BAD_REQUEST,
-            f"Provider COMPANY_ADMIN must not be able to grant "
-            f"CUSTOMER_COMPANY_ADMIN. Got {response.status_code}: "
-            f"{response.content!r}",
+            f"With policy disabled, Provider COMPANY_ADMIN must not be "
+            f"able to grant CUSTOMER_COMPANY_ADMIN. Got "
+            f"{response.status_code}: {response.content!r}",
         )
         access = CustomerUserBuildingAccess.objects.get(
             membership__user=self.customer_user,
@@ -93,14 +129,15 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             access.access_role,
             CUSTOMER_USER,
-            "Access role was unexpectedly mutated by a non-SUPER_ADMIN.",
+            "Access role was unexpectedly mutated despite disabled policy.",
         )
 
     def test_super_admin_can_grant_customer_company_admin_access_role(self):
-        """T-2: SUPER_ADMIN PATCH → CUSTOMER_COMPANY_ADMIN must succeed.
+        """T-2: SUPER_ADMIN PATCH → CUSTOMER_COMPANY_ADMIN must
+        succeed regardless of the B5 policy toggle state.
 
         Locks the positive half of the H-7 invariant: someone has to
-        be able to grant the role; that someone is SUPER_ADMIN only.
+        be able to grant the role; SUPER_ADMIN can always do it.
         """
         self.authenticate(self.super_admin)
         response = self.client.patch(

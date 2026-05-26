@@ -365,7 +365,40 @@ CCA hard constraints, enforced server-side:
 - CCA cannot reach customer-policy or customer↔building-link endpoints; those stay Provider Admin / Super Admin only.
 - Cross-customer URL typing returns HTTP 403 / 404 via the same guard that blocks cross-company COMPANY_ADMIN access.
 
-Future B5 will add a Super Admin-controlled policy/toggle for whether Provider Admin may manage Customer Company Admin permissions. B4 does not implement that toggle; current behaviour remains provider-admin-allowed by default.
+B5 (now implemented) — Super Admin-controlled policy toggle for whether Provider Company Admin may manage Customer Company Admin users/permissions on customers under their provider company.
+
+The toggle lives on the provider company: `companies.Company.provider_admin_may_manage_customer_company_admins` (BooleanField, default True; migration `companies/0002_b5_provider_admin_may_manage_customer_company_admins.py`). The boolean is audited automatically through the existing full-CRUD `Company` audit handler — flipping it lands one `AuditLog` UPDATE row with the before/after diff (matrix H-10).
+
+- **Default (True):** Provider Company Admin retains every CCA-management capability they had after B4: create, grant, promote, edit, demote, and revoke the CUSTOMER_COMPANY_ADMIN access role on any customer under their provider company. This preserves operational behaviour for the current one-provider deployment.
+- **Disabled (False):** Provider Company Admin cannot create, grant, promote, edit, demote, revoke, or otherwise manage any CCA-tier user/access for customers under that provider company. Only Super Admin may do so. Provider Admin's ability to manage lower customer users (Customer User / Customer Location Manager + their `permission_overrides` / `is_active`) is **not** affected by this toggle.
+
+Backend enforcement when policy=False (Provider Admin actor):
+
+- `PATCH /api/customers/<cid>/users/<uid>/access/<bid>/` on a row whose current `access_role` is CCA — blocked at the view layer with HTTP 403 + stable code `cca_policy_disabled`. Covers `access_role` flips (demote), `permission_overrides` edits, and `is_active=False` revoke.
+- `DELETE /api/customers/<cid>/users/<uid>/access/<bid>/` on a CCA-tier row — blocked with HTTP 403 + `cca_policy_disabled`.
+- `DELETE /api/customers/<cid>/users/<uid>/` on a target that holds any CCA access under this customer — blocked with HTTP 403 + `cca_policy_disabled` (a membership delete cascades to all access rows including CCA-tier ones).
+- `POST /api/customers/<cid>/users/<uid>/access/` extending a CCA target's reach to a new building — blocked with HTTP 403 + `cca_policy_disabled` (the new row would default to `CUSTOMER_USER` tier, but it still extends a CCA user's reach).
+- `PATCH /api/customers/<cid>/users/<uid>/access/<bid>/` setting `access_role=CCA` on a non-CCA target (the grant path) — blocked at the serializer layer (`validate_access_role`) with HTTP 400 (pre-B5 invariant shape; this is the original H-7 rejection code).
+
+Out of scope for the toggle (not blocked):
+
+- `PATCH /api/customers/<cid>/policy/` (CustomerCompanyPolicy) — affects all customer-side users, not specifically CCAs. Stays open to Provider Admin.
+- `DELETE /api/customers/<cid>/buildings/<bid>/` (customer↔building link) — a building-level operation, not a per-CCA-user operation. Stays open to Provider Admin.
+- Editing a CCA user's lower-tier access row on a different building (e.g. user is CCA on building A and CUSTOMER_USER on building B; Provider Admin edits building B's row). The row-level check fires only when the row itself is CCA, mirroring the B4 CCA-actor guard shape.
+
+Toggle write authority:
+
+- Only Super Admin may flip the policy. The write surface is the existing `PATCH /api/companies/<id>/` endpoint; the field is exposed on the `CompanySerializer` with a field validator that rejects writes from any actor whose role is not SUPER_ADMIN (HTTP 400).
+- Provider Company Admin retains PATCH access to other Company fields (name, slug, default_language) but cannot change the toggle itself.
+- Customer Company Admin still cannot create another Customer Company Admin under any policy state — the H-7 leg of `validate_access_role` rejects every non-SA / non-COMPANY_ADMIN actor unconditionally.
+
+Effective-permissions endpoint:
+
+- New derived action `can_manage_customer_company_admins` reflects the live policy. True for Super Admin always; True for Company Admin in scope only when the toggle is True; False otherwise (including for Building Manager, Staff, Customer Company Admin, and lower customer users).
+- `can_manage_customer_permissions` for Provider Admin **remains True** regardless of the toggle — B5 narrows only CCA-tier management, not the broader lower-user permission management codified in B4.
+- The `notes` block surfaces the live policy state when the target is a Company Admin (both the enabled and the disabled wording call out that lower-user management is unaffected).
+
+B5 does not change Staff extra-work privacy, cart-first Extra Work pricing/proposal workflow, BM defaults, or the ticket/customer override workflow. B6 and B7 remain future work.
 
 ---
 

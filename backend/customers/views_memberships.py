@@ -71,6 +71,96 @@ def _cca_has_building_manage(actor, customer_id: int, building_id: int) -> bool:
     )
 
 
+# ---------------------------------------------------------------------------
+# B5 — Super Admin-controlled policy gate that disables Provider Company
+# Admin's authority to manage Customer Company Admin users/permissions.
+#
+# Two helpers, mirroring the B4 shape:
+#
+#   * `_company_admin_cca_policy_blocks_target` — target-level. Used by
+#     endpoints that operate on a (customer, user) tuple rather than a
+#     specific access row: membership delete + access create. If the
+#     target user holds any CCA access row under this customer AND the
+#     policy is disabled, COMPANY_ADMIN is blocked with 403.
+#
+#   * `_company_admin_cca_policy_blocks_access_row` — row-level. Used by
+#     the per-access PATCH and DELETE endpoints. If the access row's
+#     current `access_role` is CUSTOMER_COMPANY_ADMIN AND the policy is
+#     disabled, COMPANY_ADMIN is blocked with 403. This catches
+#     edit / demote / revoke of an existing CCA row even though those
+#     operations do not pass `access_role=CCA` in the payload (so the
+#     serializer-layer grant gate would not otherwise fire).
+#
+# SUPER_ADMIN always bypasses both helpers — they remain the single role
+# authorised to manage CCA-tier users when the policy is off. Other roles
+# (BM / STAFF / CUSTOMER_USER) are rejected earlier by the class-level
+# `CanManageCustomerSideUsers` admit (CCA actors are admitted but the B4
+# CCA-cannot-manage-CCA guards reject them separately).
+#
+# The grant gate on `CustomerUserBuildingAccessUpdateSerializer.
+# validate_access_role` still owns the "set access_role=CCA" rejection
+# (returns 400). The view-layer helpers below are NEW surface — they
+# cover edit / demote / revoke / extend-reach of CCA targets, which the
+# serializer-layer grant gate alone does not reach.
+# ---------------------------------------------------------------------------
+def _company_admin_cca_policy_blocks_target(request, customer, user_id):
+    """B5 — return a 403 Response when COMPANY_ADMIN tries to operate on
+    a user who currently holds any CCA access row under this customer
+    while `provider_admin_may_manage_customer_company_admins` is False. Returns
+    None to indicate the actor may proceed (SA always, COMPANY_ADMIN
+    when policy=True, non-CCA targets, non-COMPANY_ADMIN actors).
+    """
+    actor = request.user
+    if actor.role != UserRole.COMPANY_ADMIN:
+        return None
+    if not _target_has_cca_access(customer, user_id):
+        return None
+    if customer.company.provider_admin_may_manage_customer_company_admins:
+        return None
+    return Response(
+        {
+            "detail": (
+                "Super Admin has disabled Provider Company Admin's "
+                "ability to manage Customer Company Admin users on "
+                "this provider company. Only a Super Admin may operate "
+                "on this user's membership or access rows."
+            ),
+            "code": "cca_policy_disabled",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def _company_admin_cca_policy_blocks_access_row(request, access):
+    """B5 — return a 403 Response when COMPANY_ADMIN tries to mutate or
+    delete a CCA-tier access row while
+    `provider_admin_may_manage_customer_company_admins` is False. Returns None
+    when the actor may proceed.
+    """
+    actor = request.user
+    if actor.role != UserRole.COMPANY_ADMIN:
+        return None
+    if access.access_role != (
+        CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+    ):
+        return None
+    company = access.membership.customer.company
+    if company.provider_admin_may_manage_customer_company_admins:
+        return None
+    return Response(
+        {
+            "detail": (
+                "Super Admin has disabled Provider Company Admin's "
+                "ability to manage Customer Company Admin access rows "
+                "on this provider company. Only a Super Admin may "
+                "edit, demote, or revoke this access."
+            ),
+            "code": "cca_policy_disabled",
+        },
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
 class CustomerUserListCreateView(generics.ListCreateAPIView):
     # B4 — admits SA, COMPANY_ADMIN, and CCA-with-`customer.users.manage`.
     # CCA's customer-level admit is verified by `CanManageCustomerSideUsers`;
@@ -152,6 +242,16 @@ class CustomerUserDeleteView(generics.GenericAPIView):
     def delete(self, request, customer_id, user_id):
         customer = get_object_or_404(Customer, pk=customer_id)
         self.check_object_permissions(request, customer)
+
+        # B5 — COMPANY_ADMIN policy gate. When the provider Company's
+        # `provider_admin_may_manage_customer_company_admins` is False,
+        # COMPANY_ADMIN cannot delete a CCA-tier user's membership.
+        # SA always passes; non-CCA targets always pass.
+        blocked = _company_admin_cca_policy_blocks_target(
+            request, customer, user_id
+        )
+        if blocked is not None:
+            return blocked
 
         # B4 CCA cannot delete themselves nor any other CCA membership.
         if _cca_actor(request):
@@ -318,6 +418,39 @@ class CustomerUserAccessListCreateView(generics.ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
         membership = self._get_membership()
+
+        # B5 defense-in-depth — POST cannot be used as a CCA-grant
+        # smuggle path. The create endpoint historically ignores
+        # `access_role` in the request body (the row is materialised
+        # at the model default), but we explicitly reject the payload
+        # when a COMPANY_ADMIN actor passes `access_role=CCA` and the
+        # provider Company's policy toggle is False. SA bypasses;
+        # non-COMPANY_ADMIN actors fall through to the existing
+        # "silently ignore body's access_role" behaviour (the
+        # serializer-layer H-7 guard still owns the PATCH grant path).
+        payload_access_role = request.data.get("access_role")
+        if (
+            payload_access_role == (
+                CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+            )
+            and request.user.role == UserRole.COMPANY_ADMIN
+            and not (
+                membership.customer.company
+                .provider_admin_may_manage_customer_company_admins
+            )
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Super Admin has disabled Provider Company "
+                        "Admin's ability to grant the Customer Company "
+                        "Admin access role on this provider company."
+                    ),
+                    "code": "cca_policy_disabled",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         building_id = request.data.get("building_id")
         if not building_id:
             return Response(
@@ -343,6 +476,17 @@ class CustomerUserAccessListCreateView(generics.ListCreateAPIView):
                 {"building_id": "Building is inactive."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # B5 — COMPANY_ADMIN policy gate. Extending a CCA target's
+        # building reach (even at the default CUSTOMER_USER tier on a
+        # new building) counts as "managing CCA permissions/access"
+        # under the disabled-toggle reading. SA always passes;
+        # non-CCA targets always pass.
+        blocked = _company_admin_cca_policy_blocks_target(
+            request, membership.customer, membership.user_id
+        )
+        if blocked is not None:
+            return blocked
 
         # B4 — CCA self / CCA-target / per-building manage guards. CCA
         # cannot touch their own access rows nor another CCA's rows,
@@ -486,6 +630,17 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
         if guard is not None:
             return guard
 
+        # B5 — COMPANY_ADMIN policy gate. When the provider Company's
+        # toggle is False, COMPANY_ADMIN cannot edit, demote, or
+        # otherwise mutate a CCA-tier access row. The serializer-layer
+        # H-7 grant gate only fires when the payload sets
+        # `access_role=CCA`; this view-layer gate is what catches the
+        # demote (set access_role=lower) + `permission_overrides` edit
+        # + `is_active=False` revoke paths on an existing CCA row.
+        blocked = _company_admin_cca_policy_blocks_access_row(request, access)
+        if blocked is not None:
+            return blocked
+
         # Sprint 27A — pass request through so the
         # CustomerUserBuildingAccessUpdateSerializer.validate_access_role
         # guard can read actor.role from context. Without this the
@@ -537,6 +692,12 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
         guard = self._cca_guard_for_existing_access(request, existing)
         if guard is not None:
             return guard
+
+        # B5 — COMPANY_ADMIN policy gate. When the toggle is False,
+        # COMPANY_ADMIN cannot revoke (DELETE) a CCA-tier access row.
+        blocked = _company_admin_cca_policy_blocks_access_row(request, existing)
+        if blocked is not None:
+            return blocked
 
         existing.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

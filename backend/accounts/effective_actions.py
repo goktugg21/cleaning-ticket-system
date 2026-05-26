@@ -532,14 +532,28 @@ def compute_effective_actions(
             and _customer_can(target, customer, None, "customer.users.manage")
         )
     )
-    # B5 future: SA-controlled toggle to disable Provider Admin's
-    # ability to manage customer permissions. Today the COMPANY_ADMIN
-    # default is unconditional and CCA does NOT have a permission
-    # management surface (B4 only opens user management, not policy
-    # / permission-override management for OTHER users — CCA editing
-    # their own overrides is not exposed via the customer-side admit
-    # set). Returning current backend truth.
+    # `can_manage_customer_permissions` is the broad action — "can
+    # edit lower customer users' permission_overrides and is_active
+    # in this customer." This stays True for COMPANY_ADMIN in scope
+    # regardless of the B5 policy: B5 toggles only CCA-grant
+    # authority, NOT the broader lower-user-permission management
+    # that B4 codified. CCA itself does not get this action because
+    # CCA's reach into permission management runs through the same
+    # endpoints with B4 admit logic; the derived action label here
+    # is conservative.
     actions["can_manage_customer_permissions"] = is_super or is_company_admin_in
+
+    # B5 — derived "can this user manage Customer Company Admin
+    # users/permissions for customers under this provider company?"
+    # Covers create / grant / promote / edit / demote / revoke of
+    # CCA-tier rows. SUPER_ADMIN always; COMPANY_ADMIN in scope only
+    # when the provider Company's `provider_admin_may_manage_customer_company_admins`
+    # policy is True. Everyone else False (BM / STAFF / Customer users /
+    # CCA holders all return False).
+    actions["can_manage_customer_company_admins"] = is_super or (
+        is_company_admin_in
+        and customer.company.provider_admin_may_manage_customer_company_admins
+    )
 
     # ----- note visibility -----
     # Per canonical doc §9.2: Provider internal notes (cost / margin
@@ -589,14 +603,36 @@ def compute_endpoint_notes(target, customer: Customer, building) -> list[str]:
             "future schema change (B7)."
         )
     if target.role == UserRole.COMPANY_ADMIN:
-        notes.append(
-            "Provider Company Admin can manage customer-side users "
-            "and customer-side permissions for customers under their "
-            "provider company by default. Future B5 will add a Super "
-            "Admin-controlled policy/toggle to disable this on a "
-            "per-Provider-Admin basis; current behaviour remains "
-            "provider-admin-allowed by default."
+        # B5 — surface the live policy state of the provider company
+        # carrying this customer. The toggle controls CCA-grant
+        # authority only; lower-user permission management (B4) is
+        # unaffected.
+        policy_on = bool(
+            customer.company.provider_admin_may_manage_customer_company_admins
         )
+        if policy_on:
+            notes.append(
+                "Provider Company Admin can manage customer-side users "
+                "and customer-side permissions for customers under "
+                "their provider company by default, including create / "
+                "grant / promote / edit / demote / revoke of the "
+                "Customer Company Admin access role on this provider "
+                "company (B5 policy "
+                "`provider_admin_may_manage_customer_company_admins` = True)."
+            )
+        else:
+            notes.append(
+                "Super Admin has disabled Provider Company Admin's "
+                "ability to manage Customer Company Admin users on this "
+                "provider company (B5 policy "
+                "`provider_admin_may_manage_customer_company_admins` = False). "
+                "Provider Admin can no longer create, grant, promote, "
+                "edit, demote, or revoke CCA-tier access on any "
+                "customer of this provider company; only Super Admin "
+                "can. Provider Admin's ability to manage lower customer "
+                "users (Customer User / Customer Location Manager) is "
+                "unaffected."
+            )
     if target.role == UserRole.BUILDING_MANAGER:
         notes.append(
             "BM defaults include preparing proposals and overriding "
