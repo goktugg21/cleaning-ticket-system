@@ -395,6 +395,20 @@ def apply_transition(
         }
     )
     if provider_driven_customer_decision:
+        # B6 — BM customer-decision override on Extra Work requests is
+        # revocable per-(BM, building) via `osius.building_manager.
+        # override_customer_decision`. SA and COMPANY_ADMIN bypass.
+        if user_role == UserRole.BUILDING_MANAGER:
+            if not user_has_osius_permission(
+                user,
+                "osius.building_manager.override_customer_decision",
+                building_id=extra_work.building_id,
+            ):
+                raise TransitionError(
+                    "Building Manager's customer-decision override "
+                    "has been disabled for this building.",
+                    code="bm_override_disabled",
+                )
         is_override = True
 
     # Sprint 29 Batch 29.8 — operational-segment override pairs that

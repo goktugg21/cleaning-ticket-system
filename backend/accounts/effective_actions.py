@@ -452,13 +452,38 @@ def compute_effective_actions(
     actions["can_change_ticket_status"] = (
         is_super or is_company_admin_in or is_bm_in or is_staff_in
     )
-    # B1 — provider-side override of customer approval/rejection on
-    # tickets. SA / COMPANY_ADMIN in scope / BM in assigned building.
-    # STAFF / CUSTOMER_USER never (CUSTOMER_USER drives their own
-    # approval, not an override).
-    actions["can_override_customer_decision"] = (
-        is_super or is_company_admin_in or is_bm_in
-    )
+    # B1 + B6 — provider-side override of customer approval/rejection
+    # on tickets and Extra Work proposals.
+    #
+    #   SA: always True.
+    #   COMPANY_ADMIN in scope: always True (key is not revocable for
+    #     COMPANY_ADMIN — the role default returns True at the
+    #     resolver).
+    #   BM in assigned building: True by default; False when the
+    #     `BuildingManagerAssignment.permission_overrides` row for
+    #     this (BM, building) sets
+    #     `osius.building_manager.override_customer_decision = False`.
+    #   STAFF / CUSTOMER_USER: always False.
+    #
+    # Calling the resolver uniformly keeps the answer in lockstep with
+    # the live backend gate (`tickets.state_machine.apply_transition`
+    # + `extra_work.state_machine.apply_transition` + the proposal
+    # state machine), so the action mirrors what the user can actually
+    # do at the endpoints.
+    if is_super or is_company_admin_in:
+        actions["can_override_customer_decision"] = True
+    elif is_bm_in:
+        from .permissions_v2 import user_has_osius_permission
+
+        actions["can_override_customer_decision"] = (
+            user_has_osius_permission(
+                target,
+                "osius.building_manager.override_customer_decision",
+                building_id=(building.id if building is not None else None),
+            )
+        )
+    else:
+        actions["can_override_customer_decision"] = False
 
     # ----- extra work -----
     # STAFF cannot reach any EW or Proposal endpoint (P0 staff-privacy
@@ -497,9 +522,26 @@ def compute_effective_actions(
     # chooses the proposal flow at submission.
     actions["can_request_non_contract_extra_work"] = actions["can_create_extra_work"]
     # Proposal preparation is provider-side. STAFF / CUSTOMER_USER never.
-    actions["can_prepare_extra_work_proposal"] = (
-        is_super or is_company_admin_in or is_bm_in
-    )
+    #
+    # B6 narrows BM: True by default; False when the
+    # `BuildingManagerAssignment.permission_overrides` row for this
+    # (BM, building) sets
+    # `osius.building_manager.prepare_extra_work_proposal = False`.
+    # SA / COMPANY_ADMIN are not revocable through this surface.
+    if is_super or is_company_admin_in:
+        actions["can_prepare_extra_work_proposal"] = True
+    elif is_bm_in:
+        from .permissions_v2 import user_has_osius_permission
+
+        actions["can_prepare_extra_work_proposal"] = (
+            user_has_osius_permission(
+                target,
+                "osius.building_manager.prepare_extra_work_proposal",
+                building_id=(building.id if building is not None else None),
+            )
+        )
+    else:
+        actions["can_prepare_extra_work_proposal"] = False
     # Customer sees customer-visible prices on SENT proposals when
     # their access row resolves any extra_work approve_* key (because
     # only an approver-eligible role meaningfully needs the price).
@@ -635,12 +677,18 @@ def compute_endpoint_notes(target, customer: Customer, building) -> list[str]:
             )
     if target.role == UserRole.BUILDING_MANAGER:
         notes.append(
-            "BM defaults include preparing proposals and overriding "
-            "customer decisions inside assigned buildings; future B6 "
-            "will add revocable permission keys so individual BMs can "
-            "have those defaults removed without losing operational "
-            "ticket access. Current behaviour cannot revoke them "
-            "selectively."
+            "BM defaults include preparing extra-work proposals and "
+            "overriding customer decisions inside assigned buildings. "
+            "B6 added two revocable keys "
+            "(`osius.building_manager.override_customer_decision`, "
+            "`osius.building_manager.prepare_extra_work_proposal`) "
+            "stored on `BuildingManagerAssignment.permission_overrides` "
+            "so Super Admin / Provider Company Admin can selectively "
+            "revoke either default per-(BM, building) without removing "
+            "the BM's operational ticket access. The two derived "
+            "actions `can_override_customer_decision` and "
+            "`can_prepare_extra_work_proposal` reflect the live key "
+            "state for this target+building pair."
         )
     if target.role == UserRole.CUSTOMER_USER:
         notes.append(

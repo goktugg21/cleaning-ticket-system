@@ -42,6 +42,41 @@ class BuildingManagerAssignment(models.Model):
 
     assigned_at = models.DateTimeField(auto_now_add=True)
 
+    # B6 — per-(BM, building) override map for BM-revocable osius.* keys.
+    #
+    # The two B6 keys
+    # `osius.building_manager.override_customer_decision` and
+    # `osius.building_manager.prepare_extra_work_proposal` resolve True
+    # by default for every BM assigned to this building. Setting
+    # `permission_overrides[<key>] = False` on this row narrows that
+    # default to False — used to selectively revoke a single BM's
+    # customer-decision override or proposal-preparation authority
+    # without removing the building assignment itself. Only `False`
+    # values have semantic effect (a `True` value or a missing key
+    # both resolve to the role default).
+    #
+    # The resolver
+    # `accounts.permissions_v2.user_has_osius_permission` is the
+    # single read site. The PATCH write surface
+    # (`buildings.views_memberships.BuildingManagerAssignmentUpdateView`)
+    # validates the allow-list — only the two B6 keys are writable
+    # through it, so other osius.* keys cannot leak in via the
+    # override map. A dedicated audit handler emits one AuditLog row
+    # per change with the before/after diff.
+    permission_overrides = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "B6 — per-(BM, building) override map for the two BM-"
+            "revocable osius.* keys "
+            "(`osius.building_manager.override_customer_decision`, "
+            "`osius.building_manager.prepare_extra_work_proposal`). "
+            "Setting a key to False narrows the BM's default for "
+            "this building. Only Super Admin and Provider Company "
+            "Admin may edit this map."
+        ),
+    )
+
     class Meta:
         unique_together = [("building", "user")]
 

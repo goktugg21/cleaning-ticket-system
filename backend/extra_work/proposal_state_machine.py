@@ -477,6 +477,60 @@ def apply_proposal_transition(
             code="forbidden_transition",
         )
 
+    # B6 — BM-specific revocable gates. Two separate keys cover the
+    # two flavours of provider-driven proposal transitions:
+    #
+    #   * Proposal-preparation (DRAFT->SENT, DRAFT->CANCELLED,
+    #     SENT->CANCELLED): requires
+    #     `osius.building_manager.prepare_extra_work_proposal`.
+    #   * Customer-decision override (SENT->CUSTOMER_APPROVED /
+    #     CUSTOMER_REJECTED): requires
+    #     `osius.building_manager.override_customer_decision`.
+    #
+    # SA and COMPANY_ADMIN bypass — the keys default True for both.
+    # Both keys default True for any BM assigned to the building;
+    # `BuildingManagerAssignment.permission_overrides[key] = False`
+    # narrows the default. Customer-driven SENT -> CUSTOMER_* never
+    # reaches this block (the role check on `_is_provider_operator`
+    # filters it out at the dispatch site below).
+    if user is not None and user.role == UserRole.BUILDING_MANAGER:
+        extra_work = proposal.extra_work_request
+        is_proposal_prep = (
+            to_status in {ProposalStatus.SENT, ProposalStatus.CANCELLED}
+            and proposal.status in {ProposalStatus.DRAFT, ProposalStatus.SENT}
+            and to_status not in {
+                ProposalStatus.CUSTOMER_APPROVED,
+                ProposalStatus.CUSTOMER_REJECTED,
+            }
+        )
+        is_customer_decision_override = (
+            proposal.status == ProposalStatus.SENT
+            and to_status in {
+                ProposalStatus.CUSTOMER_APPROVED,
+                ProposalStatus.CUSTOMER_REJECTED,
+            }
+        )
+        if is_proposal_prep and not user_has_osius_permission(
+            user,
+            "osius.building_manager.prepare_extra_work_proposal",
+            building_id=extra_work.building_id,
+        ):
+            raise TransitionError(
+                "Building Manager's extra-work proposal preparation "
+                "has been disabled for this building.",
+                code="bm_proposal_preparation_disabled",
+            )
+        if is_customer_decision_override and not user_has_osius_permission(
+            user,
+            "osius.building_manager.override_customer_decision",
+            building_id=extra_work.building_id,
+        ):
+            raise TransitionError(
+                "Building Manager's customer-decision override has "
+                "been disabled for this building.",
+                code="bm_override_disabled",
+            )
+
     # SEND-time precondition: at least one ProposalLine exists.
     if to_status == ProposalStatus.SENT:
         if not ProposalLine.objects.filter(proposal=proposal).exists():

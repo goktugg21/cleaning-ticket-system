@@ -278,6 +278,28 @@ def apply_transition(
         in {str(TicketStatus.APPROVED), str(TicketStatus.REJECTED)}
     )
     if provider_driven_customer_decision:
+        # B6 — BM customer-decision override is revocable per-(BM,
+        # building) via the new `osius.building_manager.
+        # override_customer_decision` key. The resolver checks the
+        # BM's BuildingManagerAssignment row's `permission_overrides`;
+        # when the key is explicitly `False`, the BM can no longer
+        # approve / reject on behalf of the customer on this building.
+        # SA and COMPANY_ADMIN always resolve True (their power is not
+        # revocable through this surface).
+        if getattr(user, "role", None) == UserRole.BUILDING_MANAGER:
+            from accounts.permissions_v2 import user_has_osius_permission
+
+            if not user_has_osius_permission(
+                user,
+                "osius.building_manager.override_customer_decision",
+                building_id=ticket.building_id,
+            ):
+                raise TransitionError(
+                    "Building Manager's customer-decision override "
+                    "has been disabled for this building. Contact a "
+                    "Provider Admin to re-enable it.",
+                    code="bm_override_disabled",
+                )
         is_override = True
 
     if is_override and not override_reason.strip():

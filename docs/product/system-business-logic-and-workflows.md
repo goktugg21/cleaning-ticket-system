@@ -398,7 +398,47 @@ Effective-permissions endpoint:
 - `can_manage_customer_permissions` for Provider Admin **remains True** regardless of the toggle — B5 narrows only CCA-tier management, not the broader lower-user permission management codified in B4.
 - The `notes` block surfaces the live policy state when the target is a Company Admin (both the enabled and the disabled wording call out that lower-user management is unaffected).
 
-B5 does not change Staff extra-work privacy, cart-first Extra Work pricing/proposal workflow, BM defaults, or the ticket/customer override workflow. B6 and B7 remain future work.
+B5 does not change Staff extra-work privacy, cart-first Extra Work pricing/proposal workflow, BM defaults, or the ticket/customer override workflow.
+
+B6 (now implemented) — Building Manager defaults are now selectively revocable per-(BM, building) through the existing `osius.*` permission system.
+
+Two new permission keys, both default `True` for any BM assigned to a building:
+
+- `osius.building_manager.override_customer_decision` — controls whether the BM may approve / reject on behalf of the customer on tickets (`WAITING_CUSTOMER_APPROVAL → APPROVED|REJECTED`), Extra Work requests (`PRICING_PROPOSED → CUSTOMER_APPROVED|CUSTOMER_REJECTED`), and proposals (`SENT → CUSTOMER_APPROVED|CUSTOMER_REJECTED`).
+- `osius.building_manager.prepare_extra_work_proposal` — controls whether the BM may create, edit, send, or cancel extra-work proposals at the building (proposal POST, line POST/PATCH/DELETE, proposal transitions `DRAFT → SENT`, `DRAFT → CANCELLED`, `SENT → CANCELLED`).
+
+Storage: per-(BM, building) overrides live on the new `BuildingManagerAssignment.permission_overrides` JSONField (migration `buildings/0005_*`). An explicit `False` entry for either key narrows the BM's default for that one (BM, building) pair to `False`; a missing entry or any non-`False` value (including `True`) means "use the default" — which today resolves `True`. Only `False` values have semantic effect, so toggling a key back to `True` is equivalent to clearing it.
+
+Backend enforcement when a key resolves False for a BM actor:
+
+- `POST /api/tickets/<id>/status/` driving `WAITING_CUSTOMER_APPROVAL → APPROVED|REJECTED` — `TransitionError` with stable code `bm_override_disabled` (HTTP 400). No state mutation, no `TicketStatusHistory` row.
+- `POST /api/extra-work/<ew_id>/transition/` driving `PRICING_PROPOSED → CUSTOMER_APPROVED|CUSTOMER_REJECTED` — same code, same shape.
+- `POST /api/extra-work/<ew_id>/proposals/<pid>/transition/` driving `SENT → CUSTOMER_APPROVED|CUSTOMER_REJECTED` — same code, same shape.
+- `POST /api/extra-work/<ew_id>/proposals/` (proposal create) — HTTP 403 with stable code `bm_proposal_preparation_disabled`. No proposal row materialises.
+- `POST/PATCH/DELETE /api/extra-work/<ew_id>/proposals/<pid>/lines/[<lid>/]` — HTTP 403 with stable code `bm_proposal_preparation_disabled`.
+- `POST /api/extra-work/<ew_id>/proposals/<pid>/transition/` driving `DRAFT → SENT`, `DRAFT → CANCELLED`, or `SENT → CANCELLED` (provider-driven proposal-prep transitions) — `TransitionError` with stable code `bm_proposal_preparation_disabled` (HTTP 400). No state mutation, no `ProposalStatusHistory` row.
+
+Super Admin and Provider Company Admin are not revocable through this surface — both keys resolve `True` for SA always and for COMPANY_ADMIN by their existing role-default branch in `accounts.permissions_v2.user_has_osius_permission`. Customer approval / rejection of SENT proposals stays open to the customer — only the BM provider-override leg is affected. STAFF remains entirely locked out of every Proposal and EW commercial endpoint (P0 staff-privacy posture preserved).
+
+Write authority for the override map:
+
+- Existing `PATCH /api/buildings/<building_id>/managers/<user_id>/` endpoint accepts `{"permission_overrides": {...}}`. The new `BuildingManagerAssignmentUpdateSerializer` allow-lists exactly the two B6 keys and rejects every other key (other `osius.*`, `customer.*`, unknown strings) with HTTP 400 to prevent scope-bleed via the override map.
+- Values must be real Python booleans — ints (0/1), strings (`"true"`/`"false"`), `None`, lists, and dicts are rejected. Full-replacement semantics: the PATCH body's `permission_overrides` overwrites the previous dict entirely.
+- The class-level `IsSuperAdminOrCompanyAdminForCompany` permission gate admits Super Admin and Provider Company Admin of the building's company; BM cannot flip their own row (403), STAFF / CUSTOMER_USER cannot reach the endpoint (403).
+- Every flip writes a single `AuditLog` UPDATE row with the before/after diff via the new `_on_building_manager_assignment_post_save_update` handler (matrix H-10).
+
+B6 narrows **write** authority. Read visibility is not affected — the same provider-operator scope rules apply as before. In particular, the proposal PDF endpoint (`GET /api/extra-work/<ew_id>/proposals/<pid>/pdf/`) and the proposal detail / status-history / timeline / lines GET endpoints stay open to a BM in scope even when `prepare_extra_work_proposal=False`. STAFF remains entirely excluded from every proposal endpoint via the existing `scope_extra_work_for` floor (P0 staff-privacy). The canonical doc's §4.3 + §9.2 note that a BM's default view of provider-level commercial / financial information is broader than ideal — tightening it is deliberately deferred to B7 (four-tier note taxonomy), which will introduce a dedicated read-visibility surface for commercial notes and may add a paired view-side BM key with its own override map.
+
+The proposal detail endpoint (`/api/extra-work/<ew_id>/proposals/<pid>/`) currently exposes only `GET` — there is no PATCH / PUT / DELETE verb on the detail surface, so B6 only needs to gate the writable surfaces enumerated above. A regression test asserts the missing verbs return HTTP 405 so a future refactor adding a writable detail endpoint must explicitly wire the B6 gate or the test will fail.
+
+B6 does not give BM cross-building access — the per-(BM, building) override map is read at the same site as the existing `BuildingManagerAssignment` scope check, so revoking a key on building A has no effect on the BM's authority at building B (separate assignment row, separate overrides). It also does not give BM any customer-user permission-management rights or any cross-provider reach.
+
+Effective-permissions endpoint:
+
+- `can_override_customer_decision` and `can_prepare_extra_work_proposal` now consult the live resolver for BM targets at the request's (customer, building) pair. True by default; False when the corresponding key is set to `False` on the BM's assignment row. SA / COMPANY_ADMIN always True. STAFF / CUSTOMER_USER always False.
+- BM `notes` block now describes the two revocable keys and where they're stored, replacing the old "future B6" placeholder.
+
+B6 does not change Staff extra-work privacy, cart-first Extra Work pricing rules, the B5 Provider Admin / CCA policy, or B4 CCA lower-user management. B7 (four-tier note taxonomy) remains future work.
 
 ---
 

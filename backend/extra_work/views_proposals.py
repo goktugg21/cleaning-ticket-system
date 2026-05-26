@@ -102,7 +102,18 @@ def _resolve_proposal_or_404(request, ew_id: int, pid: int):
 def _require_provider_in_scope(request, extra_work):
     """Provider-side scope guard for write actions. SUPER_ADMIN
     bypasses; COMPANY_ADMIN / BUILDING_MANAGER must resolve
-    `osius.ticket.view_building`. CUSTOMER_USER / STAFF get 403."""
+    `osius.ticket.view_building`. CUSTOMER_USER / STAFF get 403.
+
+    B6 — for BUILDING_MANAGER this guard additionally checks
+    `osius.building_manager.prepare_extra_work_proposal`. The proposal
+    create / line CRUD endpoints below all call this helper before
+    mutating the proposal row, so a BM whose
+    `BuildingManagerAssignment.permission_overrides` revokes the
+    proposal-preparation default is blocked at every write surface
+    that does not already flow through the proposal state machine
+    (the state machine has its own B6 gate for transitions).
+    SA / COMPANY_ADMIN bypass the prep key (it defaults True for them).
+    """
     if not _is_provider_operator(request.user):
         return Response(
             {"detail": "Provider-side action only."},
@@ -119,6 +130,23 @@ def _require_provider_in_scope(request, extra_work):
             {"detail": "Not in scope for this building."},
             status=status.HTTP_403_FORBIDDEN,
         )
+    if request.user.role == UserRole.BUILDING_MANAGER:
+        if not user_has_osius_permission(
+            request.user,
+            "osius.building_manager.prepare_extra_work_proposal",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Building Manager's extra-work proposal "
+                        "preparation has been disabled for this "
+                        "building."
+                    ),
+                    "code": "bm_proposal_preparation_disabled",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
     return None
 
 

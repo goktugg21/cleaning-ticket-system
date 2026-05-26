@@ -40,6 +40,30 @@ OSIUS_PERMISSION_KEYS: frozenset[str] = frozenset(
         "osius.staff.manage",
         "osius.building.manage",
         "osius.customer_company.manage",
+        # B6 — Building Manager defaults that the operator can revoke
+        # per-(BM, building) via `BuildingManagerAssignment.
+        # permission_overrides`. Both default to True for any BM assigned
+        # to a building; an explicit False entry in the overrides map
+        # narrows the default to False for that specific (BM, building)
+        # pair. SUPER_ADMIN and COMPANY_ADMIN always resolve True for
+        # these keys — they have the same powers by virtue of their
+        # higher role. The two keys are write-allowed via the new
+        # `PATCH /api/buildings/<bid>/managers/<uid>/` endpoint
+        # (SA/COMPANY_ADMIN only).
+        "osius.building_manager.override_customer_decision",
+        "osius.building_manager.prepare_extra_work_proposal",
+    }
+)
+
+
+# B6 — the subset of `OSIUS_PERMISSION_KEYS` that is editable through
+# `BuildingManagerAssignment.permission_overrides`. The write surface
+# (`BuildingManagerAssignmentUpdateSerializer.validate_permission_overrides`)
+# rejects every other key to prevent scope-bleed via the override map.
+BM_REVOCABLE_PERMISSION_KEYS: frozenset[str] = frozenset(
+    {
+        "osius.building_manager.override_customer_decision",
+        "osius.building_manager.prepare_extra_work_proposal",
     }
 )
 
@@ -142,6 +166,31 @@ def user_has_osius_permission(
             return BuildingManagerAssignment.objects.filter(
                 user=user, building_id=building_id
             ).exists()
+        # B6 — BM-revocable defaults. Default is True iff BM is assigned
+        # to the building; an explicit `False` in the assignment's
+        # `permission_overrides[key]` narrows the default. Missing key
+        # or non-False value (including `True`) means "use the default".
+        if permission_key in BM_REVOCABLE_PERMISSION_KEYS:
+            qs = BuildingManagerAssignment.objects.filter(user=user)
+            if building_id is not None:
+                assignment = qs.filter(building_id=building_id).first()
+                if assignment is None:
+                    return False
+                override_value = (
+                    assignment.permission_overrides or {}
+                ).get(permission_key)
+                if override_value is False:
+                    return False
+                return True
+            # No building_id: True iff at least one assigned building
+            # resolves the key True. Iterate so per-row overrides apply.
+            for assignment in qs:
+                override_value = (
+                    assignment.permission_overrides or {}
+                ).get(permission_key)
+                if override_value is not False:
+                    return True
+            return False
         return False
 
     if user.role == UserRole.STAFF:

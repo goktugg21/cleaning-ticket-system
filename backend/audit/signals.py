@@ -250,7 +250,17 @@ def _on_membership_post_save(sender, instance, created, **kwargs):
         # emits. Skip the fallback for that model so we don't write two
         # AuditLog rows per UPDATE. CREATE and DELETE on BSV still go
         # through the membership shape — only UPDATE is delegated.
-        if sender.__name__ == "BuildingStaffVisibility":
+        #
+        # B6: `BuildingManagerAssignment` now also has a dedicated
+        # UPDATE-diff handler
+        # (`_on_building_manager_assignment_post_save_update`) for its
+        # new `permission_overrides` JSONField. Skip the same way so
+        # an override flip lands as exactly one AuditLog UPDATE row,
+        # not two.
+        if sender.__name__ in {
+            "BuildingStaffVisibility",
+            "BuildingManagerAssignment",
+        }:
             return
 
         # Other membership rows have no editable fields; an UPDATE would
@@ -480,6 +490,74 @@ _BSV_TRACKED_FIELDS = (
 )
 
 
+# B6 — `BuildingManagerAssignment.permission_overrides` is the per-(BM,
+# building) override map for the two BM-revocable osius.* keys
+# (`osius.building_manager.override_customer_decision`,
+# `osius.building_manager.prepare_extra_work_proposal`). The model is
+# already on the membership-style CREATE / DELETE handlers above; the
+# pair below adds the UPDATE-diff coverage for the new field so each
+# override flip lands as a single AuditLog row with before/after JSON.
+# Mirrors the BSV UPDATE-only pattern.
+_BMA_TRACKED_FIELDS = ("permission_overrides",)
+
+
+def _bma_snapshot_for_pre_save(instance):
+    """Snapshot the B6 editable field on BuildingManagerAssignment."""
+    if instance.pk is None:
+        return None
+    from buildings.models import BuildingManagerAssignment
+
+    try:
+        previous = BuildingManagerAssignment.objects.get(pk=instance.pk)
+    except BuildingManagerAssignment.DoesNotExist:
+        return None
+    return {field: getattr(previous, field) for field in _BMA_TRACKED_FIELDS}
+
+
+def _on_building_manager_assignment_pre_save(sender, instance, **kwargs):
+    """Snapshot the pre-update state so post_save can diff it."""
+    try:
+        snapshot = _bma_snapshot_for_pre_save(instance)
+        _state_map()[
+            ("buildings.BuildingManagerAssignment", instance.pk)
+        ] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: BuildingManagerAssignment pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_building_manager_assignment_post_save_update(
+    sender, instance, created, **kwargs
+):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of
+    the tracked field. CREATE is intentionally a no-op here — the
+    membership handler already emits the rich CREATE payload."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("buildings.BuildingManagerAssignment", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _BMA_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = getattr(instance, field)
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: BuildingManagerAssignment post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _bsv_snapshot_for_pre_save(instance):
     """Snapshot the Sprint 27B editable field on BuildingStaffVisibility."""
     if instance.pk is None:
@@ -682,6 +760,24 @@ def _connect():
         sender=BuildingStaffVisibility,
         weak=False,
         dispatch_uid="audit:bsv:post_update:BuildingStaffVisibility",
+    )
+
+    # B6: UPDATE-diff handler for the new `permission_overrides`
+    # JSONField on BuildingManagerAssignment. CREATE/DELETE shape stays
+    # on the existing membership handlers registered above; this pair
+    # adds the missing UPDATE coverage so each override flip lands on
+    # the audit feed.
+    pre_save.connect(
+        _on_building_manager_assignment_pre_save,
+        sender=BuildingManagerAssignment,
+        weak=False,
+        dispatch_uid="audit:bma:pre:BuildingManagerAssignment",
+    )
+    post_save.connect(
+        _on_building_manager_assignment_post_save_update,
+        sender=BuildingManagerAssignment,
+        weak=False,
+        dispatch_uid="audit:bma:post_update:BuildingManagerAssignment",
     )
 
 
