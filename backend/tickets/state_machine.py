@@ -52,12 +52,21 @@ def _ticket_has_visible_attachment(ticket):
     True iff the ticket has at least one TicketAttachment that a
     customer user would see. Imported locally to avoid a circular
     import between state_machine.py and models.py.
+
+    B7 — the four-tier `TicketMessageType` taxonomy narrows the
+    customer-visible set to PUBLIC_REPLY + STAFF_COMPLETION. The
+    other two tiers (INTERNAL_NOTE = PROVIDER_INTERNAL and
+    STAFF_OPERATIONAL) are not customer-visible; an attachment
+    living on such a message is therefore NOT customer-visible
+    evidence and does not satisfy the staff-completion evidence
+    rule.
     """
     from .models import TicketAttachment, TicketMessageType
 
     qs = TicketAttachment.objects.filter(ticket=ticket, is_hidden=False)
     qs = qs.exclude(message__is_hidden=True)
     qs = qs.exclude(message__message_type=TicketMessageType.INTERNAL_NOTE)
+    qs = qs.exclude(message__message_type=TicketMessageType.STAFF_OPERATIONAL)
     return qs.exists()
 
 

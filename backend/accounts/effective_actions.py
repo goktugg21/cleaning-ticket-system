@@ -23,11 +23,10 @@ Hard rules followed by this module:
   * No new permission keys are introduced — every "can_X" boolean is
     computed from existing keys + role / scope helpers.
   * No workflow side effects — purely read-only computation.
-  * Future-feature gaps (B4 CCA-lower-user management, B5 SA toggle to
-    disable Provider Admin's customer-permission writes, B6 BM-revocation
-    keys, B7 four-tier note taxonomy) are documented in the returned
-    `notes` list. The action booleans return current backend truth, not
-    a forecast of the post-B7 model.
+  * The note-visibility actions reflect the live B7 four-tier taxonomy
+    on `TicketMessage` plus the by-purpose classification on
+    Extra Work / Proposal text fields documented in §9 of the
+    canonical doc.
 
 Surface-narrowing assumption: where one action name maps to multiple
 backend surfaces with different visibility today (e.g. ticket
@@ -598,19 +597,23 @@ def compute_effective_actions(
     )
 
     # ----- note visibility -----
-    # Per canonical doc §9.2: Provider internal notes (cost / margin
-    # / negotiation / commercial decisions) are visible to provider
-    # admin and Building Manager; never to customer or staff. The
-    # current backend has a two-tier ticket-message model (PUBLIC vs
-    # INTERNAL) where STAFF can see ticket-level INTERNAL_NOTE
-    # messages — this is a known gap that B7 (four-tier taxonomy) will
-    # close. The action below follows the canonical-doc intent. The
-    # endpoint's `notes` list documents the today-vs-canonical gap.
+    # B7 implemented the four-tier note taxonomy on `TicketMessage`
+    # and tightened the queryset filter + write validation accordingly.
+    # The four tiers (§9 of the canonical doc) are:
+    #
+    #   * PUBLIC_REPLY            — CUSTOMER_VISIBLE
+    #   * INTERNAL_NOTE           — PROVIDER_INTERNAL
+    #   * STAFF_OPERATIONAL       — STAFF_OPERATIONAL
+    #   * STAFF_COMPLETION        — STAFF_COMPLETION
+    #
+    # Both action booleans below now correspond to the live resolver
+    # truth: STAFF is excluded from PROVIDER_INTERNAL; everyone in
+    # scope (provider + STAFF) sees STAFF_OPERATIONAL on the safe
+    # operational surface; customer-side sees PUBLIC_REPLY +
+    # STAFF_COMPLETION only.
     actions["can_view_provider_internal_notes"] = (
         is_super or is_company_admin_in or is_bm_in
     )
-    # Per canonical doc §9.3: Staff instruction / operational notes
-    # visible to provider + staff; never to customer.
     actions["can_view_staff_operational_notes"] = (
         is_super or is_company_admin_in or is_bm_in or is_staff_in
     )
@@ -638,11 +641,12 @@ def compute_endpoint_notes(target, customer: Customer, building) -> list[str]:
             "(staff-privacy P0)."
         )
         notes.append(
-            "Today STAFF can see ticket-level INTERNAL_NOTE messages "
-            "(two-tier model). The four-tier note taxonomy from §9 of "
-            "the canonical doc — Customer-visible / Provider internal "
-            "/ Staff instruction / Staff completion — is a deliberate "
-            "future schema change (B7)."
+            "B7 — STAFF can no longer see PROVIDER_INTERNAL ticket "
+            "messages (INTERNAL_NOTE), their attachments, or "
+            "PROVIDER_INTERNAL status-history override commentary. "
+            "STAFF still sees PUBLIC_REPLY, STAFF_OPERATIONAL, and "
+            "STAFF_COMPLETION messages and their attachments per the "
+            "four-tier taxonomy in §9 of the canonical doc."
         )
     if target.role == UserRole.COMPANY_ADMIN:
         # B5 — surface the live policy state of the provider company

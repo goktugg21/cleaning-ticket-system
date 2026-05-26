@@ -5,7 +5,10 @@ from pathlib import Path as FilePath
 from rest_framework import serializers
 
 from accounts.models import User, UserRole
-from accounts.permissions import is_staff_role
+from accounts.permissions import (
+    is_provider_management_role,
+    is_staff_role,
+)
 from buildings.models import Building, BuildingManagerAssignment
 from customers.models import (
     Customer,
@@ -114,18 +117,46 @@ class TicketStatusHistorySerializer(serializers.ModelSerializer):
         # reasoning beyond the structured `override_reason`). Customers
         # must never see it. Rows whose `changed_by` is None (system
         # transitions) or a CUSTOMER_USER (the customer themself, e.g.
-        # their own reject reason) keep `note` visible. Provider readers
-        # see everything unchanged.
+        # their own reject reason) keep `note` visible.
+        #
+        # B7 — the same `note` and `override_reason` redaction also
+        # applies to STAFF when the row is a provider-management
+        # customer-decision override (`is_override=True` with the
+        # author being a provider management role). Per §9.2 of the
+        # canonical doc, STAFF must not see PROVIDER_INTERNAL notes;
+        # override-row commentary on a customer-decision transition is
+        # PROVIDER_INTERNAL by purpose (commercial reasoning, manager
+        # rationale). STAFF still sees the non-override `note` field
+        # (operational handoff context) and any STAFF-authored
+        # completion notes — those are STAFF_COMPLETION /
+        # STAFF_OPERATIONAL by purpose.
         data = super().to_representation(instance)
         request = self.context.get("request")
         viewer = getattr(request, "user", None) if request else None
-        if (
-            viewer is not None
-            and getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
-        ):
-            changed_by = getattr(instance, "changed_by", None)
-            author_role = getattr(changed_by, "role", None)
+        viewer_role = getattr(viewer, "role", None)
+        changed_by = getattr(instance, "changed_by", None)
+        author_role = getattr(changed_by, "role", None)
+
+        if viewer_role == UserRole.CUSTOMER_USER:
             if author_role is not None and author_role != UserRole.CUSTOMER_USER:
+                data["note"] = ""
+                data["override_reason"] = ""
+
+        elif viewer_role == UserRole.STAFF:
+            # Redact PROVIDER_INTERNAL override commentary for STAFF.
+            # The structured `override_reason` is always PROVIDER_INTERNAL
+            # by purpose (only populated on provider-driven overrides);
+            # the free-text `note` on an override row carries the same
+            # provider-internal context and must be redacted alongside.
+            is_provider_override = (
+                getattr(instance, "is_override", False)
+                and author_role in {
+                    UserRole.SUPER_ADMIN,
+                    UserRole.COMPANY_ADMIN,
+                    UserRole.BUILDING_MANAGER,
+                }
+            )
+            if is_provider_override:
                 data["note"] = ""
                 data["override_reason"] = ""
         return data
@@ -559,8 +590,29 @@ class TicketMessageSerializer(serializers.ModelSerializer):
     def validate_message_type(self, value):
         request = self.context.get("request")
         user = request.user if request else None
-        if value == TicketMessageType.INTERNAL_NOTE and not is_staff_role(user):
-            raise serializers.ValidationError("Customer users cannot post internal notes.")
+        # B7 — INTERNAL_NOTE (PROVIDER_INTERNAL) is provider-management
+        # only. STAFF cannot author it. Customer-side users cannot
+        # author it. The two staff-facing tiers (STAFF_OPERATIONAL,
+        # STAFF_COMPLETION) require any provider-side actor; the
+        # view's perform_create forces non-provider-side authors to
+        # PUBLIC_REPLY before this validator fires so a customer
+        # cannot smuggle a STAFF_* tier through the wire.
+        if value == TicketMessageType.INTERNAL_NOTE and not (
+            is_provider_management_role(user)
+        ):
+            raise serializers.ValidationError(
+                "Only provider management roles "
+                "(Super Admin / Provider Company Admin / Building "
+                "Manager) may post internal (provider-internal) notes."
+            )
+        if value in {
+            TicketMessageType.STAFF_OPERATIONAL,
+            TicketMessageType.STAFF_COMPLETION,
+        } and not is_staff_role(user):
+            raise serializers.ValidationError(
+                "Only provider-side actors may post staff "
+                "operational / completion notes."
+            )
         return value
 
     def validate(self, attrs):
@@ -640,9 +692,15 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = request.user if request else None
 
-        if value and not is_staff_role(user):
+        # B7 — `is_hidden=True` is the PROVIDER_INTERNAL moderation
+        # flag; only provider management roles may set it. STAFF must
+        # not be able to hide an attachment because hidden attachments
+        # are filtered out of STAFF's own queryset (see
+        # `TicketAttachmentListCreateView.get_queryset`).
+        if value and not is_provider_management_role(user):
             raise serializers.ValidationError(
-                "Customer users cannot upload hidden/internal attachments."
+                "Only provider management roles may upload "
+                "hidden/internal attachments."
             )
 
         return value
@@ -660,13 +718,41 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
                 {"message": "Attachment message must belong to this ticket."}
             )
 
+        # B7 — disallow attaching to hidden / PROVIDER_INTERNAL
+        # messages unless the actor is provider management. STAFF was
+        # previously admitted by `is_staff_role`; the four-tier model
+        # narrows that to provider management roles only, mirroring
+        # the visibility queryset above.
+        if (
+            message
+            and not is_provider_management_role(user)
+            and (
+                message.is_hidden
+                or message.message_type == TicketMessageType.INTERNAL_NOTE
+            )
+        ):
+            raise serializers.ValidationError(
+                {
+                    "message": (
+                        "Only provider management roles may attach "
+                        "files to hidden / provider-internal messages."
+                    )
+                }
+            )
+        # B7 — disallow customer-side actors from attaching to a
+        # STAFF_OPERATIONAL message (those are not customer-visible).
         if (
             message
             and not is_staff_role(user)
-            and (message.is_hidden or message.message_type == TicketMessageType.INTERNAL_NOTE)
+            and message.message_type == TicketMessageType.STAFF_OPERATIONAL
         ):
             raise serializers.ValidationError(
-                {"message": "Customer users cannot attach files to hidden/internal messages."}
+                {
+                    "message": (
+                        "Customer users cannot attach files to "
+                        "staff-operational messages."
+                    )
+                }
             )
 
         return attrs

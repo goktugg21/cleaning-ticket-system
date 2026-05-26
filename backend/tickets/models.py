@@ -38,8 +38,33 @@ class TicketStatus(models.TextChoices):
 
 
 class TicketMessageType(models.TextChoices):
+    """
+    B7 — four-tier note taxonomy (`docs/product/system-business-logic-
+    and-workflows.md` §9). Each `TicketMessage` carries one value; the
+    enum value IS the canonical visibility classification.
+
+      * `PUBLIC_REPLY` — CUSTOMER_VISIBLE. Visible to customer-side
+        users in scope and to every provider-side role.
+      * `INTERNAL_NOTE` — PROVIDER_INTERNAL. Visible only to provider
+        management roles in scope (Super Admin, Company Admin,
+        Building Manager). NOT visible to STAFF or any customer-side
+        role. The literal `"INTERNAL_NOTE"` is preserved so legacy
+        rows keep their semantic without a data migration; the value
+        itself is the PROVIDER_INTERNAL tier.
+      * `STAFF_OPERATIONAL` — STAFF_OPERATIONAL. Visible to every
+        provider-side role including STAFF in scope. NOT visible to
+        customer. Used for operational instructions field staff need
+        to do the job (e.g. "bring a ladder", "use the back entrance").
+      * `STAFF_COMPLETION` — STAFF_COMPLETION / evidence. Written by
+        STAFF as completion evidence; visible to provider-side users
+        in scope; customer-visible per the existing staff-completion
+        evidence rule (P0/B1).
+    """
+
     PUBLIC_REPLY = "PUBLIC_REPLY", "Public Reply"
-    INTERNAL_NOTE = "INTERNAL_NOTE", "Internal Note"
+    INTERNAL_NOTE = "INTERNAL_NOTE", "Internal Note (provider-internal)"
+    STAFF_OPERATIONAL = "STAFF_OPERATIONAL", "Staff Operational Note"
+    STAFF_COMPLETION = "STAFF_COMPLETION", "Staff Completion Note"
 
 
 def ticket_attachment_upload_path(instance, filename):

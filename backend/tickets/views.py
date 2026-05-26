@@ -10,7 +10,11 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.models import UserRole
-from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
+from accounts.permissions import (
+    IsAuthenticatedAndActive,
+    is_provider_management_role,
+    is_staff_role,
+)
 from accounts.scoping import scope_tickets_for
 from audit.models import AuditAction, AuditLog
 from audit import context as audit_context
@@ -502,9 +506,28 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         ticket = self._get_ticket()
         qs = TicketMessage.objects.filter(ticket=ticket).select_related("author")
         user = self.request.user
-        if not is_staff_role(user):
+        # B7 — four-tier note visibility. The three tiers below each
+        # exclude a specific subset of `message_type` values:
+        #
+        #   * Provider management (SA/COMPANY_ADMIN/BM): sees every
+        #     tier including INTERNAL_NOTE (PROVIDER_INTERNAL).
+        #   * STAFF: sees PUBLIC_REPLY + STAFF_OPERATIONAL +
+        #     STAFF_COMPLETION. Hidden from INTERNAL_NOTE
+        #     (PROVIDER_INTERNAL) — STAFF must never see commercial /
+        #     management notes per §9.2 of the canonical doc.
+        #   * Customer-side: sees PUBLIC_REPLY + STAFF_COMPLETION.
+        #     Hidden from INTERNAL_NOTE and STAFF_OPERATIONAL.
+        #
+        # `is_hidden=True` is a moderation flag; only provider
+        # management retains visibility on hidden rows.
+        if not is_provider_management_role(user):
             qs = qs.filter(is_hidden=False)
             qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
+            if not is_staff_role(user):
+                # Customer-side: also exclude STAFF_OPERATIONAL.
+                qs = qs.exclude(
+                    message_type=TicketMessageType.STAFF_OPERATIONAL
+                )
         return qs.order_by("created_at")
 
     def get_serializer_context(self):
@@ -519,6 +542,14 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         message_type = serializer.validated_data.get(
             "message_type", TicketMessageType.PUBLIC_REPLY
         )
+        # CUSTOMER_USER and any non-provider-side actor is force-
+        # normalised to PUBLIC_REPLY (defence in depth — the
+        # serializer's `validate_message_type` already rejects
+        # PROVIDER_INTERNAL / STAFF_OPERATIONAL / STAFF_COMPLETION
+        # from non-provider-side actors). Provider-side actors
+        # (provider management + STAFF) keep the validated value
+        # so STAFF can author STAFF_OPERATIONAL / STAFF_COMPLETION
+        # and provider management can author INTERNAL_NOTE.
         if not is_staff_role(user):
             message_type = TicketMessageType.PUBLIC_REPLY
 
@@ -526,6 +557,10 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
             ticket=ticket,
             author=user,
             message_type=message_type,
+            # B7 — only PROVIDER_INTERNAL (INTERNAL_NOTE) is auto-
+            # hidden. STAFF_OPERATIONAL and STAFF_COMPLETION remain
+            # visible to their respective audiences via the queryset
+            # filter, not via `is_hidden`.
             is_hidden=(message_type == TicketMessageType.INTERNAL_NOTE),
         )
 
@@ -560,10 +595,21 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         )
 
         user = self.request.user
-        if not is_staff_role(user):
+        # B7 — mirror the message queryset's four-tier filter. Provider
+        # management sees every attachment; STAFF sees PUBLIC_REPLY +
+        # STAFF_OPERATIONAL + STAFF_COMPLETION attachments;
+        # customer-side sees PUBLIC_REPLY + STAFF_COMPLETION
+        # attachments only.
+        if not is_provider_management_role(user):
             qs = qs.filter(is_hidden=False)
             qs = qs.exclude(message__is_hidden=True)
-            qs = qs.exclude(message__message_type=TicketMessageType.INTERNAL_NOTE)
+            qs = qs.exclude(
+                message__message_type=TicketMessageType.INTERNAL_NOTE
+            )
+            if not is_staff_role(user):
+                qs = qs.exclude(
+                    message__message_type=TicketMessageType.STAFF_OPERATIONAL
+                )
 
         return qs.order_by("-created_at")
 
@@ -604,15 +650,40 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
             ticket=ticket,
         )
 
-        hidden_by_message = (
+        # B7 — derive the attachment's visibility tier from the parent
+        # message and apply the four-tier rule:
+        #
+        #   * INTERNAL_NOTE (PROVIDER_INTERNAL) — provider management only.
+        #   * STAFF_OPERATIONAL — provider management + STAFF only.
+        #   * Hidden flag — moderation; provider management only.
+        #   * Other (PUBLIC_REPLY / STAFF_COMPLETION / no parent message)
+        #     — everyone in scope; existing handler applies.
+        message_internal = (
             attachment.message_id
-            and (
-                attachment.message.is_hidden
-                or attachment.message.message_type == TicketMessageType.INTERNAL_NOTE
-            )
+            and attachment.message.message_type
+            == TicketMessageType.INTERNAL_NOTE
         )
-        if (attachment.is_hidden or hidden_by_message) and not is_staff_role(request.user):
-            self.permission_denied(request, message="Attachment not found in your scope.")
+        message_hidden = (
+            attachment.message_id and attachment.message.is_hidden
+        )
+        message_staff_operational = (
+            attachment.message_id
+            and attachment.message.message_type
+            == TicketMessageType.STAFF_OPERATIONAL
+        )
+        provider_management_only = (
+            attachment.is_hidden or message_internal or message_hidden
+        )
+        if provider_management_only and not is_provider_management_role(
+            request.user
+        ):
+            self.permission_denied(
+                request, message="Attachment not found in your scope."
+            )
+        if message_staff_operational and not is_staff_role(request.user):
+            self.permission_denied(
+                request, message="Attachment not found in your scope."
+            )
 
         if not attachment.file:
             raise Http404("File not found.")

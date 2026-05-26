@@ -51,12 +51,47 @@ def is_staff_role(user):
     site — they would not be able to post internal notes, would
     not stamp first_response_at, and would be blocked from the
     staff branch of the status-change gate.
+
+    B7 narrows the PROVIDER_INTERNAL note visibility path to
+    `is_provider_management_role` (excludes STAFF). The remaining
+    `is_staff_role` call sites in tickets/ are the operational
+    completion-evidence / first-response gates where STAFF should
+    continue to be admitted as a provider-side actor.
     """
     return getattr(user, "role", None) in (
         UserRole.SUPER_ADMIN,
         UserRole.COMPANY_ADMIN,
         UserRole.BUILDING_MANAGER,
         UserRole.STAFF,
+    )
+
+
+def is_provider_management_role(user):
+    """
+    B7 — True iff `user` is a provider-side **management** role.
+
+    The three roles that may see and author `TicketMessageType.
+    INTERNAL_NOTE` (i.e. the PROVIDER_INTERNAL tier from the
+    canonical four-tier note taxonomy in §9 of
+    `docs/product/system-business-logic-and-workflows.md`):
+
+      * SUPER_ADMIN  — global.
+      * COMPANY_ADMIN — provider company scope.
+      * BUILDING_MANAGER — assigned building scope.
+
+    STAFF is deliberately excluded: a STAFF user (field worker) is a
+    provider-side actor for operational purposes (`is_staff_role`)
+    but must NOT see PROVIDER_INTERNAL commercial / management
+    notes (per §9.2). The two staff-facing note tiers
+    (STAFF_OPERATIONAL, STAFF_COMPLETION) are governed separately
+    and remain reachable by STAFF.
+
+    CUSTOMER_USER and unauthenticated users always return False.
+    """
+    return getattr(user, "role", None) in (
+        UserRole.SUPER_ADMIN,
+        UserRole.COMPANY_ADMIN,
+        UserRole.BUILDING_MANAGER,
     )
 
 

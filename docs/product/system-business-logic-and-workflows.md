@@ -959,13 +959,34 @@ Examples:
 - "Completed at 14:30 — all windows polished, no damage observed."
 - "Cabinet front replaced, see attached photo."
 
-### Suggested product rule
+### Implementation status (B7)
 
-Notes should have an explicit visibility / type field, not just one generic "internal_note" boolean.
+B7 (now implemented) — the four-tier taxonomy is the live shape of `tickets.models.TicketMessageType`:
 
-The four categories above (customer-visible, provider internal, staff instruction / operational, staff completion) are the canonical taxonomy. They should be implemented as a typed note-category field on tickets / proposals / messages rather than as a free-text field plus a permission checkbox.
+- `PUBLIC_REPLY` → CUSTOMER_VISIBLE
+- `INTERNAL_NOTE` → PROVIDER_INTERNAL (literal kept for backwards compatibility; legacy rows keep their semantic without a data migration)
+- `STAFF_OPERATIONAL` → STAFF_OPERATIONAL
+- `STAFF_COMPLETION` → STAFF_COMPLETION
 
-Today the backend has a two-tier model (PUBLIC vs INTERNAL) and the staff-completion evidence rule lives in the ticket state machine. The four-tier taxonomy is a deliberate future schema change — it will be a focused migration batch in its own right.
+Backend enforcement:
+
+- `TicketMessageListCreateView` queryset filter narrows by viewer role: provider management (SA / Provider Company Admin / BM) sees every tier including hidden moderation rows; STAFF sees PUBLIC_REPLY + STAFF_OPERATIONAL + STAFF_COMPLETION; customer-side sees PUBLIC_REPLY + STAFF_COMPLETION only.
+- `TicketAttachmentListCreateView` queryset + `TicketAttachmentDownloadView` mirror the same four-tier filter on the parent message's `message_type`. Hidden attachments are provider-management-only.
+- `TicketMessageSerializer.validate_message_type` rejects: STAFF or customer-side authoring `INTERNAL_NOTE`; customer-side authoring any STAFF_* tier. The view also force-normalises non-provider-side authors to `PUBLIC_REPLY` before the validator fires (defence in depth).
+- `TicketAttachmentSerializer.validate_is_hidden` rejects `is_hidden=True` from any actor that is not provider management.
+- `TicketStatusHistorySerializer.to_representation` extends the B1 customer redaction: STAFF readers also do not see `note` or `override_reason` on rows where the author was a provider management role AND `is_override=True` (PROVIDER_INTERNAL override commentary).
+- `tickets.state_machine._ticket_has_visible_attachment` now also excludes attachments whose parent message is `STAFF_OPERATIONAL` — only PUBLIC_REPLY and STAFF_COMPLETION attachments count as customer-visible completion evidence.
+- A new role helper `accounts.permissions.is_provider_management_role` carries the new gate; `is_staff_role` is preserved for the operational completion-evidence / first-response branches that still admit STAFF.
+
+Extra Work and Proposal note classification:
+
+- Every text/note/metadata field on `ExtraWorkRequest`, `ExtraWorkRequestItem`, `ExtraWorkStatusHistory`, `Proposal`, `ProposalLine`, `ProposalStatusHistory`, and `ProposalTimelineEvent` is classified-by-purpose and already enforced at the serializer/scoping layer (no new column needed):
+  - PROVIDER_INTERNAL by purpose: `ExtraWorkRequest.manager_note`, `ExtraWorkRequest.internal_cost_note`, `ExtraWorkRequest.override_reason`, `ProposalLine.internal_note`, `ProposalStatusHistory.override_reason`, `ProposalTimelineEvent.metadata`. Stripped via `_PROVIDER_ONLY_FIELDS` or omitted from the customer serializer entirely.
+  - CUSTOMER_VISIBLE by purpose: `ExtraWorkRequest.description` / `customer_visible_note` / `pricing_note`, `ExtraWorkRequestItem.customer_note`, `ProposalLine.customer_explanation`. Included in customer serializers.
+  - STAFF never reaches any Extra Work or Proposal endpoint — `scope_extra_work_for` returns `.none()` for STAFF (P0 staff-privacy floor preserved).
+- The free-text `note` field on `ExtraWorkStatusHistory` / `ProposalStatusHistory` carries B1-style customer redaction: rows authored by a provider-side actor have `note` blanked for CUSTOMER_USER readers.
+
+The four-tier classification is enforced at the data-shape level on `TicketMessage` (the only model that historically allowed a single field to carry every tier) and at the serializer-by-purpose level for every other model where the field name + serializer-strip logic already encodes the classification. A typed `note_type` column on every other model was deliberately not added in B7 to avoid a large data-model rewrite when classification-by-purpose already meets the visibility floor.
 
 ---
 
