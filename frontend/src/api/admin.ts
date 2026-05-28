@@ -373,6 +373,33 @@ export async function removeBuildingManager(
   await api.delete(`/buildings/${buildingId}/managers/${userId}/`);
 }
 
+// Sprint 31 — PATCH the per-(BM, building) permission_overrides map.
+// Backend route:
+//   PATCH /api/buildings/<building_id>/managers/<user_id>/
+// Backend semantics (see
+// `buildings/views_memberships.py::BuildingManagerDeleteView.patch` +
+// `BuildingManagerAssignmentUpdateSerializer`):
+//   * SUPER_ADMIN or the building's company COMPANY_ADMIN only;
+//     anyone else gets 403,
+//   * `permission_overrides` is the only writable field,
+//   * full-replacement semantics — the supplied dict overwrites the
+//     stored one in its entirety (clear by sending `{}`),
+//   * each key must be in BM_REVOCABLE_PERMISSION_KEYS; values must
+//     be real booleans (ints / strings / null rejected with 400).
+// Returns the updated `BuildingManagerMembership` so the caller can
+// refresh state without re-listing.
+export async function updateBuildingManager(
+  buildingId: number,
+  userId: number,
+  payload: { permission_overrides: Record<string, boolean> },
+): Promise<BuildingManagerMembership> {
+  const response = await api.patch<BuildingManagerMembership>(
+    `/buildings/${buildingId}/managers/${userId}/`,
+    payload,
+  );
+  return response.data;
+}
+
 export async function listCustomerUsers(
   customerId: number,
 ): Promise<PaginatedResponse<CustomerUserMembership>> {

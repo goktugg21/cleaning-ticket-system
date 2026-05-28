@@ -9,11 +9,18 @@ import {
   getCompany,
   getCustomer,
   getUser,
+  listBuildingManagers,
   listCustomerUserAccess,
   reactivateUser,
+  updateBuildingManager,
 } from "../../api/admin";
+import {
+  BM_REVOCABLE_PERMISSION_KEYS,
+  type BmRevocablePermissionKey,
+} from "../../api/types";
 import type {
   BuildingAdmin,
+  BuildingManagerMembership,
   CompanyAdmin,
   CustomerAdmin,
   CustomerUserBuildingAccess,
@@ -103,6 +110,30 @@ export function UserDetailPage() {
     null,
   );
 
+  // Sprint 31 — BM membership permission_overrides editor.
+  // bmMembershipsByBuildingId is keyed by building.id and resolves to:
+  //   * a `BuildingManagerMembership` row (carries the
+  //     `permission_overrides` dict the editor edits),
+  //   * null when the GET 403'd (caller has no read access to that
+  //     building's manager list) or returned no row for this user.
+  // bmDraftOverridesByBuildingId is the per-row dirty buffer; absent
+  // when no edit is in progress. bmSaveBusyId is the building id
+  // currently being PATCHed (one at a time). bmSavedBuildingId is the
+  // last successfully-saved row (for the inline "Saved." banner).
+  // bmErrorByBuildingId surfaces a per-row error from the PATCH.
+  const [bmMembershipsByBuildingId, setBmMembershipsByBuildingId] = useState<
+    Record<number, BuildingManagerMembership | null>
+  >({});
+  const [bmDraftOverridesByBuildingId, setBmDraftOverridesByBuildingId] =
+    useState<Record<number, Record<string, boolean>>>({});
+  const [bmSaveBusyId, setBmSaveBusyId] = useState<number | null>(null);
+  const [bmSavedBuildingId, setBmSavedBuildingId] = useState<number | null>(
+    null,
+  );
+  const [bmErrorByBuildingId, setBmErrorByBuildingId] = useState<
+    Record<number, string>
+  >({});
+
   useEffect(() => {
     let cancelled = false;
     if (numericId === null) {
@@ -113,7 +144,7 @@ export function UserDetailPage() {
         cancelled = true;
       };
     }
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
+    setLoading(true);
     setError("");
     // Tier 1: fetch the user.
     getUser(numericId)
@@ -189,6 +220,205 @@ export function UserDetailPage() {
       cancelled = true;
     };
   }, [numericId, t]);
+
+  // Sprint 31 — fetch BM memberships per building. Only the GET-allowed
+  // roles (SUPER_ADMIN / COMPANY_ADMIN) attempt the fetch at all — the
+  // `IsSuperAdminOrCompanyAdminForCompany` permission on the list view
+  // 403s everyone else, and we don't want to spam the network with
+  // doomed calls. A 403 on a single building (CA outside their own
+  // company) is caught defensively so other buildings still resolve.
+  // The new section renders iff at least one building resolved a row
+  // for THIS user.
+  const userIdForBmFetch = user?.id ?? null;
+  const buildingIdsForBmFetch = useMemo(
+    () => buildings.map((b) => b.id),
+    [buildings],
+  );
+  const viewerCanReadBmMemberships =
+    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      !viewerCanReadBmMemberships ||
+      userIdForBmFetch === null ||
+      buildingIdsForBmFetch.length === 0
+    ) {
+      queueMicrotask(() => {
+        if (!cancelled) setBmMembershipsByBuildingId({});
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    Promise.all(
+      buildingIdsForBmFetch.map(async (bid) => {
+        try {
+          const response = await listBuildingManagers(bid);
+          const row = response.results.find(
+            (m) => m.user_id === userIdForBmFetch,
+          );
+          return [bid, row ?? null] as [number, BuildingManagerMembership | null];
+        } catch {
+          return [bid, null] as [number, BuildingManagerMembership | null];
+        }
+      }),
+    ).then((entries) => {
+      if (!cancelled) {
+        setBmMembershipsByBuildingId(Object.fromEntries(entries));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    viewerCanReadBmMemberships,
+    userIdForBmFetch,
+    buildingIdsForBmFetch,
+  ]);
+
+  // Editability gate per building — SUPER_ADMIN always; COMPANY_ADMIN
+  // only when the building's company is in their `me.company_ids`
+  // (mirrors the backend `IsSuperAdminOrCompanyAdminForCompany` rule
+  // on the PATCH endpoint, defence in depth). Drives the toggle
+  // disabled state + the read-only notice.
+  function canEditBmOverridesForBuilding(building: BuildingAdmin): boolean {
+    if (!me) return false;
+    if (me.role === "SUPER_ADMIN") return true;
+    if (me.role === "COMPANY_ADMIN") {
+      return me.company_ids.includes(building.company);
+    }
+    return false;
+  }
+
+  // True when the named key is currently effective for this building.
+  // Backend default is True for a BM in scope; the stored
+  // `permission_overrides[key]` only NARROWS that default to False.
+  // So a missing key OR an explicit `true` reads as "granted"; only
+  // an explicit `false` reads as "revoked".
+  function isKeyGranted(
+    overrides: Record<string, boolean>,
+    key: BmRevocablePermissionKey,
+  ): boolean {
+    return overrides[key] !== false;
+  }
+
+  // Diff a draft against the persisted membership row to decide if
+  // the Save button enables. Compares the two BM-revocable keys only;
+  // any other key the backend would 400 anyway.
+  function bmDraftIsDirty(
+    membership: BuildingManagerMembership,
+    draft: Record<string, boolean>,
+  ): boolean {
+    for (const key of BM_REVOCABLE_PERMISSION_KEYS) {
+      const stored = isKeyGranted(membership.permission_overrides, key);
+      const next = isKeyGranted(draft, key);
+      if (stored !== next) return true;
+    }
+    return false;
+  }
+
+  function toggleBmDraft(
+    buildingId: number,
+    key: BmRevocablePermissionKey,
+    nextGranted: boolean,
+  ) {
+    setBmErrorByBuildingId((prev) => {
+      if (prev[buildingId] === undefined) return prev;
+      const next = { ...prev };
+      delete next[buildingId];
+      return next;
+    });
+    setBmSavedBuildingId((prev) =>
+      prev === buildingId ? null : prev,
+    );
+    setBmDraftOverridesByBuildingId((prev) => {
+      const membership = bmMembershipsByBuildingId[buildingId];
+      const base =
+        prev[buildingId] ?? membership?.permission_overrides ?? {};
+      const next = { ...base };
+      // Granted (default) = drop the key; revoked = explicit false.
+      // Mirrors the backend "absent = default True" semantics so the
+      // stored dict stays minimal.
+      if (nextGranted) {
+        delete next[key];
+      } else {
+        next[key] = false;
+      }
+      return { ...prev, [buildingId]: next };
+    });
+  }
+
+  function resetBmDraft(buildingId: number) {
+    setBmErrorByBuildingId((prev) => {
+      if (prev[buildingId] === undefined) return prev;
+      const next = { ...prev };
+      delete next[buildingId];
+      return next;
+    });
+    setBmSavedBuildingId((prev) =>
+      prev === buildingId ? null : prev,
+    );
+    setBmDraftOverridesByBuildingId((prev) => {
+      if (prev[buildingId] === undefined) return prev;
+      const next = { ...prev };
+      delete next[buildingId];
+      return next;
+    });
+  }
+
+  async function saveBmOverrides(building: BuildingAdmin) {
+    const membership = bmMembershipsByBuildingId[building.id];
+    if (!membership) return;
+    const draft =
+      bmDraftOverridesByBuildingId[building.id] ??
+      membership.permission_overrides;
+    if (!bmDraftIsDirty(membership, draft)) return;
+    if (userIdForBmFetch === null) return;
+    setBmSaveBusyId(building.id);
+    setBmErrorByBuildingId((prev) => {
+      if (prev[building.id] === undefined) return prev;
+      const next = { ...prev };
+      delete next[building.id];
+      return next;
+    });
+    try {
+      const updated = await updateBuildingManager(
+        building.id,
+        userIdForBmFetch,
+        { permission_overrides: draft },
+      );
+      setBmMembershipsByBuildingId((prev) => ({
+        ...prev,
+        [building.id]: updated,
+      }));
+      setBmDraftOverridesByBuildingId((prev) => {
+        if (prev[building.id] === undefined) return prev;
+        const next = { ...prev };
+        delete next[building.id];
+        return next;
+      });
+      setBmSavedBuildingId(building.id);
+    } catch (err) {
+      setBmErrorByBuildingId((prev) => ({
+        ...prev,
+        [building.id]: getApiError(err),
+      }));
+    } finally {
+      setBmSaveBusyId(null);
+    }
+  }
+
+  // Buildings that actually resolved a BM row for this user. The
+  // section header renders even when the list is empty (so a viewer
+  // who CAN read but the user has zero BM assignments still sees an
+  // empty-state hint), but we only render the table body when at
+  // least one membership exists.
+  const buildingsWithBmRow = useMemo(() => {
+    return buildings.filter((b) => bmMembershipsByBuildingId[b.id] != null);
+  }, [buildings, bmMembershipsByBuildingId]);
+  const hasAnyBmRow = buildingsWithBmRow.length > 0;
+  const shouldRenderBmSection =
+    viewerCanReadBmMemberships && hasAnyBmRow;
 
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
@@ -481,6 +711,236 @@ export function UserDetailPage() {
               </>
             )}
           </section>
+
+          {/* Sprint 31 — Building manager per-(BM, building)
+              permission_overrides editor. The card renders only when
+              the viewer can READ the underlying GET
+              (`IsSuperAdminOrCompanyAdminForCompany` on the manager
+              list endpoint) AND the target user has at least one BM
+              membership row. The two BM-revocable osius.* keys are
+              the only fields the backend PATCH accepts; any other key
+              is rejected with 400 server-side and we never offer one
+              client-side. Editability per row is gated on whether
+              the viewer can act on the building's company. */}
+          {shouldRenderBmSection && (
+            <section
+              className="card"
+              data-testid="user-detail-bm-permissions-card"
+              style={{ padding: "20px 22px", marginBottom: 16 }}
+            >
+              <div className="section-head" style={{ marginBottom: 8 }}>
+                <div>
+                  <div className="section-head-title">
+                    {t("user_detail.bm_permissions.title")}
+                  </div>
+                  <div className="section-head-sub">
+                    {t("user_detail.bm_permissions.desc")}
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("user_detail.bm_permissions.col_building")}</th>
+                      <th>
+                        {t("user_detail.bm_permissions.col_prepare")}
+                      </th>
+                      <th>
+                        {t("user_detail.bm_permissions.col_override")}
+                      </th>
+                      <th
+                        aria-label={t("user_detail.bm_permissions.col_actions")}
+                      />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buildingsWithBmRow.map((building) => {
+                      const membership =
+                        bmMembershipsByBuildingId[building.id];
+                      if (!membership) return null;
+                      const draft =
+                        bmDraftOverridesByBuildingId[building.id] ??
+                        membership.permission_overrides;
+                      const canEdit =
+                        canEditBmOverridesForBuilding(building);
+                      const dirty = bmDraftIsDirty(membership, draft);
+                      const busy = bmSaveBusyId === building.id;
+                      const error = bmErrorByBuildingId[building.id];
+                      const justSaved =
+                        bmSavedBuildingId === building.id && !dirty;
+                      const prepareKey =
+                        "osius.building_manager.prepare_extra_work_proposal" as const;
+                      const overrideKey =
+                        "osius.building_manager.override_customer_decision" as const;
+                      const preparedGranted = isKeyGranted(draft, prepareKey);
+                      const overrideGranted = isKeyGranted(draft, overrideKey);
+                      const rowTestId = `user-detail-bm-permissions-row-${building.id}`;
+                      return (
+                        <tr key={building.id} data-testid={rowTestId}>
+                          <td className="td-subject">
+                            <Link to={`/admin/buildings/${building.id}`}>
+                              {building.name}
+                            </Link>
+                          </td>
+                          <td>
+                            {canEdit ? (
+                              <label
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  cursor: busy ? "wait" : "pointer",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={preparedGranted}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    toggleBmDraft(
+                                      building.id,
+                                      prepareKey,
+                                      event.target.checked,
+                                    )
+                                  }
+                                  data-testid={`${rowTestId}-prepare-toggle`}
+                                />
+                                <span>
+                                  {preparedGranted
+                                    ? t("user_detail.bm_permissions.granted")
+                                    : t("user_detail.bm_permissions.revoked")}
+                                </span>
+                              </label>
+                            ) : (
+                              <span
+                                className={`cell-tag cell-tag-${preparedGranted ? "open" : "closed"}`}
+                                data-testid={`${rowTestId}-prepare-readonly`}
+                              >
+                                <i />
+                                {preparedGranted
+                                  ? t("user_detail.bm_permissions.granted")
+                                  : t("user_detail.bm_permissions.revoked")}
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {canEdit ? (
+                              <label
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  cursor: busy ? "wait" : "pointer",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={overrideGranted}
+                                  disabled={busy}
+                                  onChange={(event) =>
+                                    toggleBmDraft(
+                                      building.id,
+                                      overrideKey,
+                                      event.target.checked,
+                                    )
+                                  }
+                                  data-testid={`${rowTestId}-override-toggle`}
+                                />
+                                <span>
+                                  {overrideGranted
+                                    ? t("user_detail.bm_permissions.granted")
+                                    : t("user_detail.bm_permissions.revoked")}
+                                </span>
+                              </label>
+                            ) : (
+                              <span
+                                className={`cell-tag cell-tag-${overrideGranted ? "open" : "closed"}`}
+                                data-testid={`${rowTestId}-override-readonly`}
+                              >
+                                <i />
+                                {overrideGranted
+                                  ? t("user_detail.bm_permissions.granted")
+                                  : t("user_detail.bm_permissions.revoked")}
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {canEdit ? (
+                              <div
+                                className="card-actions-cluster"
+                                style={{
+                                  display: "flex",
+                                  gap: 8,
+                                  justifyContent: "flex-end",
+                                }}
+                              >
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => resetBmDraft(building.id)}
+                                  disabled={!dirty || busy}
+                                  data-testid={`${rowTestId}-reset`}
+                                >
+                                  {t("user_detail.bm_permissions.reset")}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  onClick={() => {
+                                    void saveBmOverrides(building);
+                                  }}
+                                  disabled={!dirty || busy}
+                                  data-testid={`${rowTestId}-save`}
+                                >
+                                  {busy
+                                    ? t("user_detail.bm_permissions.saving")
+                                    : t("user_detail.bm_permissions.save")}
+                                </button>
+                              </div>
+                            ) : (
+                              <span
+                                className="muted small"
+                                data-testid={`${rowTestId}-read-only-notice`}
+                              >
+                                {t(
+                                  "user_detail.bm_permissions.read_only_notice",
+                                )}
+                              </span>
+                            )}
+                            {error && (
+                              <div
+                                className="alert-error"
+                                role="alert"
+                                style={{ marginTop: 6 }}
+                                data-testid={`${rowTestId}-error`}
+                              >
+                                {t(
+                                  "user_detail.bm_permissions.error_prefix",
+                                  { detail: error },
+                                )}
+                              </div>
+                            )}
+                            {justSaved && !error && (
+                              <div
+                                className="muted small"
+                                role="status"
+                                style={{ marginTop: 6 }}
+                                data-testid={`${rowTestId}-saved`}
+                              >
+                                {t("user_detail.bm_permissions.saved")}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           {/* Sprint 29 Batch 29.7 placeholder — per-customer access row
               with a "View permissions" deep-link that lands on

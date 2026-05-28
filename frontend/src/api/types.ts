@@ -1044,7 +1044,30 @@ export interface BuildingManagerMembership {
   user_full_name: string;
   user_role: Role;
   assigned_at: string;
+  // B6 — per-(BM, building) override map for the two BM-revocable
+  // osius.* keys (`osius.building_manager.override_customer_decision`,
+  // `osius.building_manager.prepare_extra_work_proposal`). Absent key
+  // = backend default (True for BM in scope); explicit `false` narrows
+  // the default for this building. Source of truth: backend
+  // `buildings/serializers_memberships.py`
+  // (BuildingManagerAssignmentSerializer.fields).
+  permission_overrides: Record<string, boolean>;
 }
+
+// Sprint 31 — frontend mirror of backend
+// `accounts.permissions_v2.BM_REVOCABLE_PERMISSION_KEYS`. The PATCH
+// surface
+// (`buildings/serializers_memberships.py::BuildingManagerAssignmentUpdateSerializer`)
+// rejects any other key with a 400 to prevent scope-bleed via the
+// override map, so this list is the closed set the UI may toggle.
+// Keep in lockstep with the backend frozenset; adding a key here
+// without updating the backend will simply 400.
+export const BM_REVOCABLE_PERMISSION_KEYS = [
+  "osius.building_manager.prepare_extra_work_proposal",
+  "osius.building_manager.override_customer_decision",
+] as const;
+export type BmRevocablePermissionKey =
+  (typeof BM_REVOCABLE_PERMISSION_KEYS)[number];
 
 export interface CustomerUserMembership {
   id: number;
