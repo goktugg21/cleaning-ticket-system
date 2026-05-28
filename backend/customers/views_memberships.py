@@ -230,7 +230,9 @@ class CustomerUserListCreateView(generics.ListCreateAPIView):
             customer=customer, user=user
         )
         return Response(
-            CustomerUserMembershipSerializer(membership).data,
+            CustomerUserMembershipSerializer(
+                membership, context={"request": request}
+            ).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 

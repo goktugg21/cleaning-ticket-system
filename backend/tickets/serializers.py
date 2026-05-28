@@ -9,6 +9,7 @@ from accounts.permissions import (
     is_provider_management_role,
     is_staff_role,
 )
+from accounts.permissions_v2 import user_has_osius_permission
 from buildings.models import Building, BuildingManagerAssignment
 from customers.models import (
     Customer,
@@ -214,6 +215,13 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     assigned_to_email = serializers.CharField(source="assigned_to.email", read_only=True, default=None)
     status_history = TicketStatusHistorySerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
+    # Per-record per-current-user actions block. Lets BM / STAFF /
+    # CUSTOMER_USER (who cannot self-introspect via the admin-only
+    # `/api/users/<id>/effective-permissions/` endpoint) learn what they
+    # can do on THIS specific ticket. Composed from the live resolvers
+    # so the frontend never re-implements gates and cannot drift. See
+    # `get_actions` below for the field-by-field rationale.
+    actions = serializers.SerializerMethodField()
     sla_is_paused = serializers.SerializerMethodField()
     sla_remaining_business_seconds = serializers.SerializerMethodField()
     sla_display_state = serializers.SerializerMethodField()
@@ -273,6 +281,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "closed_at",
             "status_history",
             "allowed_next_statuses",
+            "actions",
             "sla_status",
             "sla_due_at",
             "sla_started_at",
@@ -287,11 +296,137 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
-    def get_allowed_next_statuses(self, obj):
+    def _resolve_allowed_next_statuses(self, obj):
+        """Single computation shared by the top-level
+        `allowed_next_statuses` field and the `actions` block. We cache
+        on the serializer instance keyed by the ticket id so the two
+        callers cannot drift; the same call inside one render also
+        avoids a redundant queryset scan in `_user_passes_scope`.
+        """
+        cache = getattr(self, "_allowed_next_cache", None)
+        if cache is not None and cache[0] == obj.id:
+            return cache[1]
         request = self.context.get("request")
         if not request or not request.user.is_authenticated:
-            return []
-        return allowed_next_statuses(request.user, obj)
+            result = []
+        else:
+            result = allowed_next_statuses(request.user, obj)
+        self._allowed_next_cache = (obj.id, result)
+        return result
+
+    def get_allowed_next_statuses(self, obj):
+        return self._resolve_allowed_next_statuses(obj)
+
+    def get_actions(self, obj):
+        """Per-current-user, per-ticket capability block.
+
+        Every boolean mirrors a live backend gate (state machine, write
+        validator, attachment gate) so the frontend never re-derives a
+        rule and the answer cannot drift from what the user actually
+        gets when they POST. See the brief for the field contract.
+
+        Anonymous (or any non-authenticated) callers get an empty
+        statuses list + every boolean False — the serializer is
+        normally only reached behind the authenticated TicketViewSet
+        gate, but defence in depth here covers any future read path
+        that drops the `request` context.
+        """
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        if user is None or not user.is_authenticated:
+            allowed = []
+            blank: dict = {
+                "allowed_next_statuses": [],
+                "can_override_customer_decision": False,
+                "can_post_provider_internal_note": False,
+                "can_post_staff_operational_note": False,
+                "can_post_staff_completion_note": False,
+                "can_upload_hidden_attachment": False,
+                "status_transitions": {
+                    str(status): False for status, _label in TicketStatus.choices
+                },
+            }
+            return blank
+
+        allowed = self._resolve_allowed_next_statuses(obj)
+        # `status_transitions` is the same data as `allowed_next_statuses`
+        # reshaped as an O(1) lookup dict. The frontend renders one
+        # button per status and reads `actions.status_transitions[s]`
+        # to decide enabled/disabled.
+        allowed_set = {str(s) for s in allowed}
+        status_transitions = {
+            str(status): (str(status) in allowed_set)
+            for status, _label in TicketStatus.choices
+        }
+
+        role = getattr(user, "role", None)
+        # `can_override_customer_decision` mirrors the
+        # `provider_driven_customer_decision` coercion block in
+        # `tickets.state_machine.apply_transition`: SA / CA in scope /
+        # BM in assigned building (gated by the B6 revocable key) —
+        # the per-record answer is precise to THIS ticket's building.
+        has_override_authority = False
+        if role == UserRole.SUPER_ADMIN:
+            has_override_authority = True
+        elif role == UserRole.COMPANY_ADMIN:
+            from companies.models import CompanyUserMembership
+            has_override_authority = CompanyUserMembership.objects.filter(
+                user=user, company_id=obj.company_id
+            ).exists()
+        elif role == UserRole.BUILDING_MANAGER:
+            assigned = BuildingManagerAssignment.objects.filter(
+                user=user, building_id=obj.building_id
+            ).exists()
+            has_override_authority = assigned and user_has_osius_permission(
+                user,
+                "osius.building_manager.override_customer_decision",
+                building_id=obj.building_id,
+            )
+        # Tightened so the answer reflects CURRENT record state, not
+        # just authority: the override is only meaningful at the
+        # customer-decision step (WAITING_CUSTOMER_APPROVAL with
+        # APPROVED or REJECTED reachable in the live state machine).
+        in_decision_phase = (
+            str(obj.status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
+            and (
+                str(TicketStatus.APPROVED) in allowed_set
+                or str(TicketStatus.REJECTED) in allowed_set
+            )
+        )
+        can_override_customer_decision = (
+            has_override_authority and in_decision_phase
+        )
+
+        # Note booleans mirror `TicketMessageSerializer.validate_message_type`
+        # exactly (which the view's `perform_create` defers to). The
+        # four-tier taxonomy lives in `TicketMessageType` (B7); each
+        # boolean below corresponds to a non-trivial tier:
+        #
+        #   * INTERNAL_NOTE (PROVIDER_INTERNAL) — provider mgmt only.
+        #   * STAFF_OPERATIONAL — any provider-side actor (incl. STAFF).
+        #   * STAFF_COMPLETION — any provider-side actor (incl. STAFF).
+        #
+        # `PUBLIC_REPLY` is omitted because every authenticated viewer
+        # in scope on the ticket can author it; the frontend doesn't
+        # need a boolean for "always-allowed" tiers.
+        can_post_provider_internal_note = is_provider_management_role(user)
+        can_post_staff_operational_note = is_staff_role(user)
+        can_post_staff_completion_note = is_staff_role(user)
+        # Mirrors `TicketAttachmentSerializer.validate_is_hidden`. Only
+        # provider management may upload an `is_hidden=True` attachment
+        # (the moderation flag that strips visibility from STAFF and
+        # customer-side queries).
+        can_upload_hidden_attachment = is_provider_management_role(user)
+
+        return {
+            "allowed_next_statuses": list(allowed),
+            "can_override_customer_decision": can_override_customer_decision,
+            "can_post_provider_internal_note": can_post_provider_internal_note,
+            "can_post_staff_operational_note": can_post_staff_operational_note,
+            "can_post_staff_completion_note": can_post_staff_completion_note,
+            "can_upload_hidden_attachment": can_upload_hidden_attachment,
+            "status_transitions": status_transitions,
+        }
 
     def get_sla_is_paused(self, obj):
         return obj.sla_paused_at is not None

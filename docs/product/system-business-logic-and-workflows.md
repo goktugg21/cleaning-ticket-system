@@ -429,6 +429,8 @@ Write authority for the override map:
 
 B6 narrows **write** authority. Read visibility is not affected — the same provider-operator scope rules apply as before. In particular, the proposal PDF endpoint (`GET /api/extra-work/<ew_id>/proposals/<pid>/pdf/`) and the proposal detail / status-history / timeline / lines GET endpoints stay open to a BM in scope even when `prepare_extra_work_proposal=False`. STAFF remains entirely excluded from every proposal endpoint via the existing `scope_extra_work_for` floor (P0 staff-privacy). The canonical doc's §4.3 + §9.2 note that a BM's default view of provider-level commercial / financial information is broader than ideal — tightening it is deliberately deferred to B7 (four-tier note taxonomy), which will introduce a dedicated read-visibility surface for commercial notes and may add a paired view-side BM key with its own override map.
 
+**Invariant — BM pricing / PDF visibility survives the prep revoke.** An assigned Building Manager whose `osius.building_manager.prepare_extra_work_proposal` resolves False at a building MUST still see proposal pricing AND the proposal PDF for any proposal under that building. This is the canonical product rule and is the contract behind two action-block booleans the frontend reads from `GET /api/extra-work/<ew_id>/proposals/<pid>/`: `actions.can_view_proposal_pricing` and `actions.can_view_proposal_pdf` both stay `True` for an in-scope BM even when the prep key is revoked. Only the **write** action booleans on the same record (`can_edit_lines`, `can_send`, `can_cancel`, `can_direct_publish`) flip `False` when the prep key is revoked. See §5 "Per-record actions blocks (runtime gating)" for the full action-block contract.
+
 The proposal detail endpoint (`/api/extra-work/<ew_id>/proposals/<pid>/`) currently exposes only `GET` — there is no PATCH / PUT / DELETE verb on the detail surface, so B6 only needs to gate the writable surfaces enumerated above. A regression test asserts the missing verbs return HTTP 405 so a future refactor adding a writable detail endpoint must explicitly wire the B6 gate or the test will fail.
 
 B6 does not give BM cross-building access — the per-(BM, building) override map is read at the same site as the existing `BuildingManagerAssignment` scope check, so revoking a key on building A has no effect on the BM's authority at building B (separate assignment row, separate overrides). It also does not give BM any customer-user permission-management rights or any cross-provider reach.
@@ -600,6 +602,118 @@ The response carries:
 - `notes` — plain-text caveats. Future-feature gaps (CCA-callable lower-user management, Super-Admin toggle to disable Provider-Admin customer-permission writes, BM-revocation keys, four-tier note taxonomy) are listed here when relevant; the action booleans reflect current backend truth, not a forecast.
 
 Future B5 will add a Super Admin-controlled policy/toggle for whether Provider Admin may manage Customer Company Admin permissions. Current behaviour remains provider-admin-allowed by default — see §4.5.
+
+### Per-record actions blocks (runtime gating)
+
+The frontend must NOT call the effective-permissions endpoint above to gate buttons or modals at runtime. That endpoint is for **admin permission-overview screens only** (the Customer Permissions page, the Customer Users tab, the User detail page) — its caller gate is `CanManageUser` (Super Admin / Provider Company Admin only), so it cannot answer "what can THIS user — the one currently signed in — do here?" for a Building Manager, a Staff user, or a Customer User. None of them can call the endpoint at all.
+
+Runtime per-button / per-modal frontend gating MUST instead read the per-record `actions` object on each detail serializer. The backend computes each boolean against the live resolvers + state machine for the requesting user, on the specific record being displayed, so the answer the UI shows is always exactly the answer the user gets when they POST. The frontend never re-derives a permission rule — it inspects `actions.<key>` on the record it just fetched.
+
+The four surfaces that emit a per-record `actions` block:
+
+#### Ticket detail (`GET /api/tickets/<id>/`)
+
+```json
+"actions": {
+  "allowed_next_statuses": ["..."],
+  "can_override_customer_decision": true,
+  "can_post_provider_internal_note": true,
+  "can_post_staff_operational_note": true,
+  "can_post_staff_completion_note": true,
+  "can_upload_hidden_attachment": true,
+  "status_transitions": { "OPEN": false, "IN_PROGRESS": true, "...": false }
+}
+```
+
+Field meanings:
+- `allowed_next_statuses` — the list of TicketStatus values the requesting user may drive THIS ticket to right now. Same data as the top-level `allowed_next_statuses` field; both come from the same cached `allowed_next_statuses(user, ticket)` call so they cannot drift.
+- `status_transitions` — the same answer reshaped as a `{ <every TicketStatus value>: bool }` map so the UI can do an O(1) lookup per status button instead of re-scanning the list.
+- `can_override_customer_decision` — True only when the viewer holds override authority AND the ticket is at the customer-decision step RIGHT NOW. Authority gate: Super Admin, OR Company Admin in the ticket's provider company, OR Building Manager assigned to the ticket's building with `osius.building_manager.override_customer_decision` resolving True. Current-record gate: the ticket's status is `WAITING_CUSTOMER_APPROVAL` AND `APPROVED` or `REJECTED` is in `allowed_next_statuses`. Outside the customer-decision step (e.g. an `OPEN`, `IN_PROGRESS`, or already-`APPROVED` ticket) the answer is False even for an SA, because the underlying state-machine transition would 400 the click. Mirrors the `provider_driven_customer_decision` coercion block in `tickets.state_machine.apply_transition`.
+- `can_post_provider_internal_note` — True iff the requesting user is provider management (SA / Provider Company Admin / Building Manager). Mirrors the §9.2 PROVIDER_INTERNAL gate enforced by `TicketMessageSerializer.validate_message_type` on `message_type=INTERNAL_NOTE`.
+- `can_post_staff_operational_note` — True iff the requesting user is provider-side (SA / Company Admin / BM / STAFF). The §9.3 STAFF_OPERATIONAL tier.
+- `can_post_staff_completion_note` — True iff the requesting user is provider-side. The §9.4 STAFF_COMPLETION tier.
+- `can_upload_hidden_attachment` — True iff the requesting user is provider management. Mirrors `TicketAttachmentSerializer.validate_is_hidden` (which rejects `is_hidden=True` from STAFF or customer-side authors).
+
+There is intentionally no `can_post_public_reply` boolean — every authenticated viewer in scope on the ticket may author a PUBLIC_REPLY, so the frontend doesn't need a per-record answer.
+
+#### Extra Work detail (`GET /api/extra-work/<id>/`)
+
+```json
+"actions": {
+  "allowed_next_statuses": ["..."],
+  "can_prepare_extra_work_proposal": true,
+  "can_override_customer_decision": true,
+  "can_view_pricing": true,
+  "can_view_proposal_pdf": true,
+  "can_approve": false,
+  "can_reject": false
+}
+```
+
+Field meanings:
+- `allowed_next_statuses` — same shape / same cache as the ticket case.
+- `can_prepare_extra_work_proposal` — True for SA always; True for Company Admin in scope always; True for BM in the assigned building gated by `osius.building_manager.prepare_extra_work_proposal`; False for STAFF and Customer User.
+- `can_override_customer_decision` — same shape as the ticket analog: viewer holds override authority (SA / CA in scope / BM in assigned building + B6 override key) AND the EW is at the customer-decision step RIGHT NOW (`status == PRICING_PROPOSED`). Outside `PRICING_PROPOSED` (e.g. `REQUESTED`, `UNDER_REVIEW`, `CUSTOMER_APPROVED`, `IN_PROGRESS`, `COMPLETED`) the answer is False even for an SA, because the underlying state-machine transition would 400 the click.
+- `can_view_pricing` — True for any provider operator in scope (SA / Company Admin in scope / BM in scope — the BM prep-key revoke does NOT remove pricing visibility, see §4.3 invariant). True for Customer User iff they hold any `customer.extra_work.approve_*` key.
+- `can_view_proposal_pdf` — mirrors `can_view_pricing` exactly today; kept as a separate boolean so the backend can split them later without a wire-shape break.
+- `can_approve` / `can_reject` — True only when the EW status is `PRICING_PROPOSED` AND the requesting user is either a Customer User with the right `customer.extra_work.approve_*` key (`approve_location` at the pair, OR creator-of-this-request AND `approve_own`) OR a provider operator who could legally override the customer decision. False otherwise.
+
+STAFF never reaches this serializer at all — `extra_work.scoping.scope_extra_work_for` returns `.none()` for STAFF (P0 staff-privacy floor). The action booleans intentionally do not branch on the STAFF role; the resolver helpers return False for STAFF anyway and the endpoint gate makes the question moot.
+
+#### Proposal detail (`GET /api/extra-work/<ew_id>/proposals/<pid>/`)
+
+```json
+"actions": {
+  "allowed_next_statuses": ["..."],
+  "can_view_proposal_pricing": true,
+  "can_view_proposal_pdf": true,
+  "can_edit_lines": true,
+  "can_send": true,
+  "can_cancel": true,
+  "can_approve": false,
+  "can_reject": false,
+  "can_direct_publish": true
+}
+```
+
+Field meanings:
+- `allowed_next_statuses` — proposal-specific next-status list (`allowed_next_proposal_statuses`).
+- `can_view_proposal_pricing` — True for any provider operator in scope (SA / Company Admin in scope / BM in scope). **The BM prep-key revoke does NOT remove pricing visibility** — only mutation is locked. True for Customer User iff they hold any `customer.extra_work.approve_*` key.
+- `can_view_proposal_pdf` — mirrors `can_view_proposal_pricing` exactly today (see §4.3 invariant).
+- `can_edit_lines` — provider operator in scope AND proposal is DRAFT. For BM, additionally requires `osius.building_manager.prepare_extra_work_proposal`.
+- `can_send` — provider operator in scope AND proposal is DRAFT AND parent EW is `UNDER_REVIEW`. For BM, additionally requires the prep key. Cart-coverage / contract-price validations still run at POST time; the action boolean only checks the cheap gates so the Send button doesn't render against a parent in the wrong status.
+- `can_cancel` — provider operator in scope AND proposal is DRAFT or SENT. For BM, additionally requires the prep key. (SENT cancel is coerced to `is_override=True` + reason required by `apply_proposal_transition` — the boolean only reports the role gate.)
+- `can_approve` / `can_reject` — True only when proposal is SENT AND the requesting user is either a Customer User with the right approve key (`approve_location` at the pair, OR creator-of-the-parent-EW AND `approve_own`) OR a provider operator who could legally override the customer decision. For BM that means BOTH `osius.building_manager.prepare_extra_work_proposal` AND `osius.building_manager.override_customer_decision` resolve True.
+- `can_direct_publish` — True only when `can_send` is True (i.e. all the cheap send preconditions hold — DRAFT proposal + parent EW `UNDER_REVIEW` + provider mutation / prep gate) AND the viewer holds override authority for BM (override authority is implicit for SA / Company Admin in scope). Derived from `can_send` in the serializer so the two cannot drift — when `can_send` is False (parent EW in any status other than `UNDER_REVIEW`, proposal not DRAFT, BM with prep key revoked), `can_direct_publish` is also False regardless of who's looking. False for Customer User and STAFF unconditionally. See §7.2.1 for the endpoint contract.
+
+#### Customer detail + customer-user-membership rows
+
+`GET /api/customers/<id>/` AND every row of `GET /api/customers/<id>/users/` carry:
+
+```json
+"actions": {
+  "can_manage_customer_users": true,
+  "can_manage_customer_company_admins": true,
+  "allowed_target_customer_access_roles": ["CUSTOMER_USER", "CUSTOMER_LOCATION_MANAGER", "CUSTOMER_COMPANY_ADMIN"]
+}
+```
+
+Field meanings:
+- `can_manage_customer_users` — True for SA always; True for Company Admin in the customer's provider company; True for Customer User whose customer-level `customer.users.manage` resolves True (the CCA default). Mirrors the B4 admit shape.
+- `can_manage_customer_company_admins` — True for SA always; True for Company Admin in scope ONLY when `companies.Company.provider_admin_may_manage_customer_company_admins` is True (the B5 policy toggle); False otherwise. The CCA tier is NEVER manageable from a customer-side actor (H-7).
+- `allowed_target_customer_access_roles` — the list of `CustomerUserBuildingAccess.AccessRole` values the requesting user may SET on a target customer-side user under this customer. The frontend renders the role dropdown directly from this list:
+  - SA: all three (`CUSTOMER_USER`, `CUSTOMER_LOCATION_MANAGER`, `CUSTOMER_COMPANY_ADMIN`).
+  - Company Admin in scope: all three iff the B5 policy is True; otherwise only `CUSTOMER_USER` + `CUSTOMER_LOCATION_MANAGER`.
+  - CCA in scope (admitted by `customer.users.manage`): only `CUSTOMER_USER` + `CUSTOMER_LOCATION_MANAGER` — H-7 blocks CCA from promoting to CCA.
+  - Any other role / out-of-scope actor: empty list.
+
+The membership row's `actions` block is computed against the row's parent customer + the requesting user, so a single membership-list response carries one `actions` object per row reflecting that exact (viewer, customer) pair. Duplicating the block per row is intentional: the list is bounded (one customer at a time), and the alternative — overriding the view to wrap an envelope — would break the existing `{count, next, previous, results}` pagination shape that the typed frontend client already consumes.
+
+#### What `actions` is NOT for
+
+- Not for cross-record "what could this user do on a record they have not loaded?" questions — for that, the admin caller uses the effective-permissions endpoint above.
+- Not for proxying as the current user's permission inventory — there is no "list every key this signed-in user has". The frontend reads only the per-record answers; if it needs the answer for record X, it fetches record X.
+- Not a substitute for the backend gate — the gate IS the resolver, and the resolver IS what fills the `actions` block. The frontend can disable a button when `actions.can_x === false`, but the POST that bypasses the disabled state still gets the same 400/403 from the resolver.
 
 ---
 
@@ -855,6 +969,57 @@ When provider-side users approve/reject on behalf of a customer, the same warnin
 
 Staff cannot approve/reject proposals.
 
+### 7.2.1 Direct-publish (provider override of the customer-approval step)
+
+When a provider operator already knows the customer's decision out-of-band (the customer phoned in, signed off in person, sent an email) and wants to skip the customer-facing approval step entirely on a DRAFT proposal, they POST to a dedicated direct-publish endpoint instead of walking the proposal through DRAFT → SENT → CUSTOMER_APPROVED in two HTTP calls. This is the proposal-side analog of the §6 ticket workflow override.
+
+**Endpoint:**
+
+```
+POST /api/extra-work/<ew_id>/proposals/<pid>/direct-publish/
+```
+
+**Payload:**
+
+```json
+{
+  "note": "optional free-text note (plumbed through to the DRAFT->SENT status-history row)",
+  "override_reason": "operator-typed reason — REQUIRED, non-blank"
+}
+```
+
+**Permission gate:**
+
+- Provider operator in scope on the parent EW's customer + building. SA: always; Provider Company Admin: in the building's company; Building Manager: assigned to the building.
+- BM additionally MUST hold BOTH `osius.building_manager.prepare_extra_work_proposal` AND `osius.building_manager.override_customer_decision` at the building. Either revoked → HTTP 403 with stable code `bm_proposal_preparation_disabled` or `bm_override_disabled` respectively.
+- STAFF and CUSTOMER_USER are blocked. The exact code depends on which gate fires first: STAFF reaches a 404 because `scope_extra_work_for(STAFF)` is `.none()` (the parent EW is invisible to them) before the view's role guard runs; CUSTOMER_USER reaches a 404 because `_resolve_proposal_or_404` treats DRAFT proposals as invisible to customer-side readers. If either reaches the role guard (e.g. on a hypothetical non-DRAFT proposal), the response is HTTP 403 `Provider-side action only.`. The 200 outcome is unreachable for both roles regardless of which gate handles the rejection.
+
+**Preconditions:**
+
+- Proposal status MUST be `DRAFT` → HTTP 400 with stable code `direct_publish_requires_draft` otherwise.
+- Parent EW must satisfy the same preconditions as the normal SEND path (UNDER_REVIEW status, etc.).
+- Proposal must pass the same SEND-time validations: at least one line, cart-coverage exact (no extra lines, no missing cart items), contract-priced lines match the active `CustomerServicePrice`, non-contract lines have a positive unit price. Failures surface the same stable codes the normal SEND path emits (`proposal_lines_required`, `proposal_send_requires_under_review`, `proposal_has_extra_line`, `proposal_does_not_cover_cart`, `proposal_contract_price_drift`, `proposal_custom_line_missing_price`).
+- `override_reason` MUST be non-blank after `.strip()` → HTTP 400 with stable code `override_reason_required` otherwise. The endpoint does NOT silently default the reason; the codebase-wide override-reason convention (Sprint 27F-B1 tickets, `apply_proposal_transition`, EW state machine) is "operator MUST type a reason", and this endpoint matches.
+
+**Behaviour (atomic two-step):**
+
+The handler runs both legs inside one `transaction.atomic()`:
+
+1. DRAFT → SENT (normal send-time validation).
+2. SENT → CUSTOMER_APPROVED as a provider override (`is_override=True` + `override_reason=<payload>`).
+3. The parent EW transitions to CUSTOMER_APPROVED via the existing proposal-approval hook.
+4. Operational tickets spawn from the approved proposal lines via the existing post-approval auto-spawn hook.
+
+If step 2 (or anything beyond) raises, step 1's status mutation + `ProposalStatusHistory` row + parent-EW advance + timeline event all roll back together. `apply_proposal_transition` is itself `@transaction.atomic`-wrapped; Django nested atomics use savepoints, so the outer block correctly encompasses both legs.
+
+**Audit:**
+
+The override fact is recorded on the SENT → CUSTOMER_APPROVED `ProposalStatusHistory` row (`is_override=True` + `override_reason=<payload>`). The `Proposal` row's `override_by` / `override_reason` / `override_at` fields fire generic `AuditLog` rows via the existing audit signal. NO new audit log table or signal is introduced — the override history row IS the audit trail for the workflow override (matrix H-11), exactly as for the Extra Work and ticket overrides.
+
+**Response (200):** `ProposalDetailSerializer(proposal).data` including the new `actions` block. Proposal status is now `CUSTOMER_APPROVED`; the operational tickets spawned by the parent-EW approval hook are not part of this response (the caller fetches them through the ticket endpoints).
+
+**Existing `transition/` endpoint is unchanged.** The normal DRAFT → SENT → customer-clicks-approve / customer-clicks-reject path still works for cases where the customer will actually decide in the app. The direct-publish endpoint is additive — it is the *only* way to bypass the customer-facing SENT phase in one atomic call.
+
 ---
 
 ## 8. Pricing and Services
@@ -895,6 +1060,30 @@ The customer-specific pricing must be clear enough that the frontend can show:
 - The unit type
 - Whether approval/proposal is needed
 - Whether the price is active
+
+### 8.1 `CustomerServicePrice` is the only commercial source of truth for direct orders
+
+`Service.default_unit_price` is **NOT** the commercial source of truth for direct (contract-priced) orders. It is a reference value used for catalog display and as a fallback default the operator can copy from when seeding a proposal; it never drives the routing decision and never substitutes for a missing customer-specific contract row.
+
+`CustomerServicePrice` is the only authoritative customer-specific contract price. The same `Service` may carry different `CustomerServicePrice` rows for different customers (Customer A may have a contract price for window cleaning at EUR 5/m²; Customer B may have a different contract price for the same service, or no contract row at all). The resolver `extra_work.pricing.resolve_price(service, customer, on=date)` returns the customer-specific row (if any active row exists at the requested date) or `None`.
+
+### 8.2 Cart routing decision
+
+The routing decision is computed at submission time across the whole cart, using the rule already stated in §7.0 rule 4:
+
+- **All cart lines** map to an active `CustomerServicePrice` for the customer → `routing_decision = INSTANT`. The proposal phase is skipped; operational tickets spawn immediately from the cart line items (one ticket per line, anchored to the parent `ExtraWorkRequest`). The customer's submission IS the approval.
+- **At least one cart line** lacks an active `CustomerServicePrice` → `routing_decision = PROPOSAL`. The whole cart goes through the provider-side proposal phase, even if other lines are contract-priced.
+
+`Service.default_unit_price` does NOT count toward the INSTANT routing condition. Only an active `CustomerServicePrice` for the (customer, service, requested_date) triple does.
+
+### 8.3 Proposal lines seeded from a cart
+
+When a proposal is created on a PROPOSAL-routed cart with no explicit `lines` payload (the auto-seed path in `ProposalCreateSerializer.create`), the serializer reads the parent EW's cart items and seeds one `ProposalLine` per `ExtraWorkRequestItem`:
+
+- For each cart line the resolver is called again with the cart item's own `requested_date`. If a contract row is returned, the seeded proposal line's `unit_price` and `vat_pct` are pre-filled from the contract row — contract-priced lines preserve their contract pricing into the proposal.
+- For cart lines without a contract row, `unit_price` defaults to `0.00` and `vat_pct` defaults to 21%. The operator MUST set a positive price before SEND — the SEND-time validator rejects custom lines whose `unit_price <= 0` with stable code `proposal_custom_line_missing_price`.
+
+When the caller sends explicit `lines` on proposal create, the serializer creates exactly those rows. SEND-time validation (`apply_proposal_transition`) is the safety net for the cart-coverage / contract-price-drift / custom-line-priced contract regardless of whether the lines were auto-seeded or hand-built.
 
 ---
 

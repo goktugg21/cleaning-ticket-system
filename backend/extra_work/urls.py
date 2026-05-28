@@ -8,6 +8,7 @@ from .views import (
 )
 from .views_proposals import (
     ProposalDetailView,
+    ProposalDirectPublishView,
     ProposalLineDetailView,
     ProposalLineListCreateView,
     ProposalListCreateView,
@@ -74,5 +75,13 @@ urlpatterns = [
         "<int:ew_id>/proposals/<int:pid>/pdf/",
         ProposalPdfView.as_view(),
         name="extra-work-proposal-pdf",
+    ),
+    # Provider override path — skip the customer-approval step on a
+    # DRAFT proposal. Atomic DRAFT -> SENT -> CUSTOMER_APPROVED in
+    # one request. Existing `transition/` endpoint is unchanged.
+    path(
+        "<int:ew_id>/proposals/<int:pid>/direct-publish/",
+        ProposalDirectPublishView.as_view(),
+        name="extra-work-proposal-direct-publish",
     ),
 ]

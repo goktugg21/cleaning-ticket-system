@@ -3,12 +3,14 @@ from rest_framework import serializers
 from accounts.models import UserRole
 
 from .models import (
+    Customer,
     CustomerBuildingMembership,
     CustomerCompanyPolicy,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
 from .permissions import CUSTOMER_PERMISSION_KEYS
+from .serializers import compute_customer_actions
 
 
 _POLICY_BOOLEAN_FIELDS = (
@@ -27,6 +29,15 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
     user_email = serializers.CharField(source="user.email", read_only=True)
     user_full_name = serializers.CharField(source="user.full_name", read_only=True)
     user_role = serializers.CharField(source="user.role", read_only=True)
+    # Per-current-user per-customer actions block. Duplicated per row
+    # is acceptable: the membership list is bounded (one customer at
+    # a time), and the alternative — overriding the view's `list()`
+    # to wrap an envelope — breaks the existing
+    # `{count, next, previous, results}` pagination shape that the
+    # typed frontend client already consumes. Same content as the
+    # `actions` block on `CustomerSerializer`, computed against
+    # `request.user` + the membership's parent customer.
+    actions = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerUserMembership
@@ -38,8 +49,14 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
             "user_full_name",
             "user_role",
             "created_at",
+            "actions",
         ]
         read_only_fields = fields
+
+    def get_actions(self, obj: CustomerUserMembership) -> dict:
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+        return compute_customer_actions(user, obj.customer)
 
 
 class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):

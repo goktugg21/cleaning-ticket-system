@@ -22,9 +22,10 @@ line CRUD endpoints.
 """
 from __future__ import annotations
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from rest_framework import serializers as drf_serializers
 from rest_framework import status, views
 from rest_framework.response import Response
 
@@ -430,3 +431,197 @@ class ProposalPdfView(views.APIView):
             f'inline; filename="proposal-{proposal.pk}.pdf"'
         )
         return response
+
+
+# ---------------------------------------------------------------------------
+# Proposal direct-publish (provider override of customer approval step)
+# ---------------------------------------------------------------------------
+class ProposalDirectPublishSerializer(drf_serializers.Serializer):
+    """Payload for the direct-publish endpoint.
+
+    `override_reason` is documented as optional on the wire (matches
+    the brief's payload shape) but the endpoint REQUIRES a non-empty
+    reason on the SENT->CUSTOMER_APPROVED leg. We do not silently
+    default — the override-reason convention across the codebase
+    (Sprint 27F-B1 tickets, `apply_proposal_transition`, EW state
+    machine) is "operator MUST type a reason" with stable code
+    `override_reason_required`. A blank or whitespace-only string
+    therefore produces an HTTP 400. The `note` field is plumbed
+    through to the DRAFT->SENT status history note (the customer
+    never sees the SENT row because the same atomic block advances
+    the proposal to CUSTOMER_APPROVED before any read happens).
+    """
+
+    note = drf_serializers.CharField(required=False, allow_blank=True, default="")
+    override_reason = drf_serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+
+class ProposalDirectPublishView(views.APIView):
+    """
+    POST /api/extra-work/<ew_id>/proposals/<pid>/direct-publish/
+
+    Single-shot atomic "skip the customer step" path for provider
+    operators. Drives the proposal from DRAFT straight through
+    SENT -> CUSTOMER_APPROVED in one HTTP call, recording the
+    override metadata on the SENT->CUSTOMER_APPROVED status-history
+    row (`is_override=True`, `override_reason=<payload>`). The
+    parent EW + spawn-tickets side effects fire from the existing
+    approval path inside `apply_proposal_transition`.
+
+    Permission gate:
+      * Provider operator in scope on the parent EW's customer /
+        building (SA / CA via `osius.ticket.view_building` / BM in
+        assigned building).
+      * BUILDING_MANAGER additionally must hold BOTH
+        `osius.building_manager.prepare_extra_work_proposal` AND
+        `osius.building_manager.override_customer_decision` at the
+        EW's building. Either revoked -> 403.
+      * CUSTOMER_USER / STAFF -> 403.
+
+    Other preconditions:
+      * Proposal MUST be in DRAFT -> 400 with code
+        `direct_publish_requires_draft` otherwise.
+      * `override_reason` MUST be non-blank in the payload -> 400
+        with code `override_reason_required` otherwise. The endpoint
+        does NOT silently default the reason: the codebase
+        convention (Sprint 27F-B1 + `apply_proposal_transition`) is
+        that any provider-driven customer-decision transition
+        requires an operator-typed reason.
+      * SEND-time validations (at least one line, cart-coverage,
+        contract-price floor, non-contract priced) inherited from
+        `apply_proposal_transition(... to_status=SENT)`. Any
+        failure surfaces the same stable code the normal SEND path
+        does, with the whole atomic block rolled back.
+
+    Atomicity:
+      Both legs (DRAFT->SENT then SENT->CUSTOMER_APPROVED) run
+      inside a single `transaction.atomic()` block. If the second
+      transition raises, the first is rolled back. The
+      `apply_proposal_transition` call itself is already
+      `@transaction.atomic`-wrapped — Django nested atomics use
+      savepoints, so this stacking is correct.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def post(self, request, ew_id: int, pid: int):
+        extra_work, proposal = _resolve_proposal_or_404(
+            request, ew_id, pid
+        )
+
+        # Role / scope gate. We reuse the existing
+        # `_require_provider_in_scope` helper which already enforces:
+        #   * Provider operator role,
+        #   * `osius.ticket.view_building` for CA / BM,
+        #   * `osius.building_manager.prepare_extra_work_proposal` for BM.
+        guard = _require_provider_in_scope(request, extra_work)
+        if guard is not None:
+            return guard
+
+        # BM additional gate: the direct-publish path crosses the
+        # SENT->CUSTOMER_APPROVED leg too, which the proposal state
+        # machine treats as a customer-decision override. BM must
+        # therefore also hold `osius.building_manager.override_customer_decision`.
+        # SA / COMPANY_ADMIN bypass (the resolver returns True for them).
+        if request.user.role == UserRole.BUILDING_MANAGER:
+            if not user_has_osius_permission(
+                request.user,
+                "osius.building_manager.override_customer_decision",
+                building_id=extra_work.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            "Building Manager's customer-decision "
+                            "override has been disabled for this "
+                            "building."
+                        ),
+                        "code": "bm_override_disabled",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # DRAFT-only precondition. Catching it explicitly here lets
+        # the frontend distinguish "not DRAFT" from a generic
+        # `forbidden_transition` raised inside the state machine.
+        if proposal.status != ProposalStatus.DRAFT:
+            return Response(
+                {
+                    "detail": (
+                        "Direct-publish requires the proposal to be in "
+                        "DRAFT."
+                    ),
+                    "code": "direct_publish_requires_draft",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = ProposalDirectPublishSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        note = data.get("note", "")
+        override_reason = (data.get("override_reason", "") or "").strip()
+
+        # Pre-flight reason gate. The proposal state machine would
+        # raise the same stable code on the SENT->CUSTOMER_APPROVED
+        # leg, but checking up front avoids the half-transition
+        # (DRAFT->SENT executes, then SENT->CUSTOMER_APPROVED fails
+        # for a reason every caller could have known up front).
+        # The outer atomic block would roll it back, but doing the
+        # cheap pre-check is the cleaner contract.
+        if not override_reason:
+            return Response(
+                {
+                    "detail": (
+                        "Override reason is required when a provider "
+                        "operator directly publishes a proposal without "
+                        "customer approval."
+                    ),
+                    "code": "override_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Atomic two-step: DRAFT -> SENT, then SENT -> CUSTOMER_APPROVED.
+        # `apply_proposal_transition` is itself @transaction.atomic-wrapped;
+        # Django nested atomics use savepoints so this outer block
+        # encompasses both legs correctly. If the second leg raises,
+        # the first leg's status mutation + ProposalStatusHistory row +
+        # parent-EW advance + timeline event all roll back together.
+        try:
+            with transaction.atomic():
+                apply_proposal_transition(
+                    proposal,
+                    request.user,
+                    ProposalStatus.SENT,
+                    note=note,
+                )
+                # Re-fetch so the in-memory `status` reflects the SENT
+                # mutation; `apply_proposal_transition` does a
+                # `select_for_update` + `save(update_fields=...)`
+                # internally on its own locked clone, so our `proposal`
+                # variable's `status` is stale. Refresh from DB.
+                proposal.refresh_from_db()
+
+                updated = apply_proposal_transition(
+                    proposal,
+                    request.user,
+                    ProposalStatus.CUSTOMER_APPROVED,
+                    note=note,
+                    is_override=True,
+                    override_reason=override_reason,
+                )
+        except TransitionError as exc:
+            return Response(
+                {"detail": str(exc), "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            ProposalDetailSerializer(
+                updated, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
+        )

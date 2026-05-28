@@ -101,6 +101,104 @@ Sprint 27A T-6 locks this conceptual separation by asserting that
 toggling a permission override does NOT touch any workflow-override
 field, and vice versa.
 
+### 4.1 Per-record actions blocks are the runtime gating surface
+
+The frontend MUST NOT call the admin `effective-permissions` endpoint
+(see §3 / §5 admin RBAC surface and `accounts/views_effective_permissions.py`)
+to gate per-button / per-modal runtime decisions. That endpoint is
+admin-only (`CanManageUser` — SA / Provider Company Admin only) and
+exists to power admin permission-overview screens; a Building
+Manager, Staff user, or Customer User cannot call it at all.
+
+Runtime per-button / per-modal gating comes from per-record `actions`
+objects emitted by the detail serializers, computed against the live
+resolvers + state machine for the requesting user on the specific
+record being returned. Four surfaces emit a per-record `actions`
+block today:
+
+| Surface | Endpoint | Action keys |
+|---|---|---|
+| Ticket detail | `GET /api/tickets/<id>/` | `allowed_next_statuses`, `status_transitions` (per-status O(1) map), `can_override_customer_decision`, `can_post_provider_internal_note`, `can_post_staff_operational_note`, `can_post_staff_completion_note`, `can_upload_hidden_attachment` |
+| Extra Work detail | `GET /api/extra-work/<id>/` | `allowed_next_statuses`, `can_prepare_extra_work_proposal`, `can_override_customer_decision`, `can_view_pricing`, `can_view_proposal_pdf`, `can_approve`, `can_reject` |
+| Proposal detail | `GET /api/extra-work/<ew_id>/proposals/<pid>/` | `allowed_next_statuses`, `can_view_proposal_pricing`, `can_view_proposal_pdf`, `can_edit_lines`, `can_send`, `can_cancel`, `can_approve`, `can_reject`, `can_direct_publish` |
+| Customer detail + each customer-user-membership row | `GET /api/customers/<id>/`, `GET /api/customers/<id>/users/` | `can_manage_customer_users`, `can_manage_customer_company_admins`, `allowed_target_customer_access_roles` |
+
+The full per-key meaning + the exact rules each boolean encodes are
+canonicalised in [`docs/product/system-business-logic-and-workflows.md`
+§5 "Per-record actions blocks (runtime gating)"](../product/system-business-logic-and-workflows.md#per-record-actions-blocks-runtime-gating)
+— treat that section as the authoritative wire contract; the table
+above is the index.
+
+Current-record gating (authority alone is not enough). Action booleans
+that drive an override or a state transition combine the authority
+gate with the live record state, so the answer reflects "can this
+viewer click this button on THIS record RIGHT NOW", not "does this
+viewer hold the relevant permission in the abstract":
+
+- `Ticket.actions.can_override_customer_decision` — override authority
+  AND ticket status is `WAITING_CUSTOMER_APPROVAL` with `APPROVED` or
+  `REJECTED` reachable in `allowed_next_statuses`.
+- `ExtraWork.actions.can_override_customer_decision` — override
+  authority AND EW status is `PRICING_PROPOSED`.
+- `Proposal.actions.can_direct_publish` — derived from `can_send`
+  (so it includes DRAFT proposal + parent EW `UNDER_REVIEW` + the
+  provider mutation / prep gate) AND, for BM, the override key.
+  When `can_send` is False, `can_direct_publish` is False regardless
+  of authority.
+
+The per-record `actions` block is read-only metadata; the backend
+gate is still the resolver + state machine. The frontend can disable
+a button when `actions.can_x === false`, but a POST that bypasses the
+disabled state still gets the same 400/403 from the resolver — the
+action booleans cannot lie about what the user is actually allowed
+to do because they are computed by the same code that gates the POST.
+
+### 4.2 B6 BM revocable keys + the pricing/PDF invariant
+
+The two revocable Building Manager defaults shipped in B6
+(documented in [`docs/product/system-business-logic-and-workflows.md`
+§4.3](../product/system-business-logic-and-workflows.md#43-building-manager))
+are:
+
+| Key | Default | Controls |
+|---|---|---|
+| `osius.building_manager.prepare_extra_work_proposal` | True for any BM assigned to a building | Proposal create / edit / send / cancel / direct-publish / line CRUD at the building |
+| `osius.building_manager.override_customer_decision` | True for any BM assigned to a building | Provider-side approve/reject on customer-decision transitions on tickets (`WAITING_CUSTOMER_APPROVAL → APPROVED|REJECTED`), Extra Work requests (`PRICING_PROPOSED → CUSTOMER_APPROVED|CUSTOMER_REJECTED`), and proposals (`SENT → CUSTOMER_APPROVED|CUSTOMER_REJECTED`). Required (in addition to the prep key) for BM direct-publish. |
+
+Both keys are stored on `BuildingManagerAssignment.permission_overrides`
+(JSONField added by migration `buildings/0005_*`). Only an explicit
+`False` entry has semantic effect; missing or `True` falls through to
+the default-True resolver branch.
+
+The "Controls" column above is the authority reach of each key at the
+state-machine layer — it answers "does this BM, in the abstract, hold
+the right to drive transition X at this building". The per-record
+`actions` blocks under §4.1 add a current-record gate on top of that
+authority answer (the action boolean is True only when the record is
+in the right status for the transition AND the authority gate would
+admit the caller). Revoking either key still narrows what the BM may
+do; the action boolean is the AND of authority and current state.
+
+**Invariant — pricing / PDF visibility is NOT gated by the prep key.**
+An assigned BM whose `prepare_extra_work_proposal` resolves False at
+a building MUST still see proposal pricing AND the proposal PDF for
+proposals at that building. This is reflected on the per-record
+actions blocks:
+
+- `GET /api/extra-work/<id>/`: `actions.can_view_pricing` and
+  `actions.can_view_proposal_pdf` stay True for an in-scope BM with
+  prep revoked.
+- `GET /api/extra-work/<ew_id>/proposals/<pid>/`:
+  `actions.can_view_proposal_pricing` and
+  `actions.can_view_proposal_pdf` stay True; only the write booleans
+  (`can_edit_lines`, `can_send`, `can_cancel`, `can_direct_publish`)
+  flip False when prep is revoked.
+
+This invariant is the canonical product rule (§4.3 of the business
+logic doc). Tightening BM read visibility on commercial / financial
+data is deliberately deferred to B7 (four-tier note taxonomy) — see
+the G-B7 row in §7.
+
 ## 5. Current backend enforcement points
 
 | Concern | File:line |
@@ -461,3 +559,134 @@ Production change summary:
     — the existing UPDATE-only handler covers the new field for free.
   * No new `osius.*` permission key — model field + state-machine
     scope check are sufficient (consistent with Sprint 28 Batch 10).
+
+## 16. Test footprint (per-record actions + proposal direct-publish delta)
+
+Closes the "frontend has no runtime-gating source of truth for a BM /
+STAFF / CUSTOMER_USER caller" gap. Pairs with §4.1 above (the
+per-record `actions` block surface) and the new direct-publish
+endpoint described in `docs/product/system-business-logic-and-workflows.md`
+§7.2.1.
+
+### Per-record `actions` block — ticket
+[`backend/tickets/tests/test_per_record_actions.py`](../../backend/tickets/tests/test_per_record_actions.py).
+Locks the action-key contract on `GET /api/tickets/<id>/`: the seven
+keys (`allowed_next_statuses`, `status_transitions`, the four
+`can_post_*_note` booleans, `can_override_customer_decision`,
+`can_upload_hidden_attachment`) match the live resolvers for SA / CA
+in scope / CA cross-provider / BM with and without
+`osius.building_manager.override_customer_decision` /
+STAFF / CUSTOMER_USER. `status_transitions` is asserted to cover
+every `TicketStatus` value as a key.
+
+### Per-record `actions` block — Extra Work
+[`backend/extra_work/tests/test_per_record_actions_customer_pricing.py`](../../backend/extra_work/tests/test_per_record_actions_customer_pricing.py).
+Locks `GET /api/extra-work/<id>/`: the seven keys
+(`allowed_next_statuses`, `can_prepare_extra_work_proposal`,
+`can_override_customer_decision`, `can_view_pricing`,
+`can_view_proposal_pdf`, `can_approve`, `can_reject`) reflect the
+live resolvers + state machine including the BM B6 revoke flips.
+STAFF is asserted not to reach the endpoint at all (404 via
+`scope_extra_work_for(STAFF) == .none()`).
+
+### Per-record `actions` block — proposal (incl. B6 pricing/PDF invariant)
+[`backend/extra_work/tests/test_per_record_actions_proposal.py`](../../backend/extra_work/tests/test_per_record_actions_proposal.py).
+Locks `GET /api/extra-work/<ew_id>/proposals/<pid>/`: the nine keys
+(`allowed_next_statuses`, `can_view_proposal_pricing`,
+`can_view_proposal_pdf`, `can_edit_lines`, `can_send`, `can_cancel`,
+`can_approve`, `can_reject`, `can_direct_publish`) match the
+resolver + state machine across DRAFT / SENT / CUSTOMER_APPROVED for
+SA / CA in scope / BM with B6 keys in all four
+({prep=T,F} × {override=T,F}) combinations / STAFF / CUSTOMER_USER.
+**Critical assertion**: a BM whose `prepare_extra_work_proposal=False`
+STILL has `can_view_proposal_pricing=True` and
+`can_view_proposal_pdf=True` while every write boolean
+(`can_edit_lines`, `can_send`, `can_cancel`, `can_direct_publish`)
+flips False — locks the §4.2 invariant.
+
+### Per-record `actions` block — customer + memberships
+[`backend/customers/tests/test_per_record_actions.py`](../../backend/customers/tests/test_per_record_actions.py).
+Locks `GET /api/customers/<id>/` and
+`GET /api/customers/<id>/users/` rows: `can_manage_customer_users`,
+`can_manage_customer_company_admins`, and the three-tier
+`allowed_target_customer_access_roles` list react correctly to
+viewer role (SA / CA in scope / CCA in scope / CLM / CUSTOMER_USER /
+BM / STAFF) and to the B5 toggle
+(`Company.provider_admin_may_manage_customer_company_admins`). The
+membership-list `actions` block is asserted to be present on every
+row in the paginated response so the typed frontend client doesn't
+need an envelope wrapper.
+
+### Proposal direct-publish endpoint
+[`backend/extra_work/tests/test_proposal_direct_publish.py`](../../backend/extra_work/tests/test_proposal_direct_publish.py).
+Locks the new
+`POST /api/extra-work/<ew_id>/proposals/<pid>/direct-publish/`
+endpoint shipped in
+[`backend/extra_work/views_proposals.py`](../../backend/extra_work/views_proposals.py).
+Asserted contract:
+
+- 200 happy path: SA (and CA in scope, and BM in scope with BOTH
+  B6 keys) with a non-blank `override_reason` drives DRAFT →
+  CUSTOMER_APPROVED atomically; the SENT → CUSTOMER_APPROVED
+  `ProposalStatusHistory` row carries `is_override=True` +
+  `override_reason=<payload>`; the parent EW advances to
+  CUSTOMER_APPROVED; operational tickets spawn via the existing
+  proposal-approval hook.
+- 400 `direct_publish_requires_draft` when proposal is not DRAFT.
+- 400 `override_reason_required` when `override_reason` is blank
+  or whitespace-only (no silent default).
+- 400 stable codes (`proposal_lines_required`,
+  `proposal_send_requires_under_review`, `proposal_has_extra_line`,
+  `proposal_does_not_cover_cart`, `proposal_contract_price_drift`,
+  `proposal_custom_line_missing_price`) when the SEND-time
+  validations fail — the atomic block rolls back, no
+  `ProposalStatusHistory` row written, proposal status unchanged.
+- STAFF and CUSTOMER_USER: 403 `Provider-side action only.` if they reach the view's role guard, but in practice both hit a 404 first (STAFF via `scope_extra_work_for(STAFF)==.none()`, CUSTOMER_USER via `_resolve_proposal_or_404`'s DRAFT-invisible rule). 200 is unreachable.
+- 403 `Not in scope for this building.` for CA / BM cross-provider.
+- 403 `bm_proposal_preparation_disabled` for BM with
+  `prepare_extra_work_proposal=False`.
+- 403 `bm_override_disabled` for BM with
+  `override_customer_decision=False` (even when prep is True).
+- 404 when the proposal is not visible to the requesting user.
+- Existing `transition/` endpoint is untouched — the normal
+  DRAFT → SENT → customer-approve/reject path still passes its
+  own existing test footprint (`test_extra_work_proposals.py`).
+- Audit: the override fact is on the `ProposalStatusHistory` row
+  (matrix H-11), and the `Proposal` row's
+  `override_by`/`override_reason`/`override_at` fields fire generic
+  `AuditLog` rows via the existing `Proposal` audit signal — no
+  new audit table, no new signal, no
+  `ProposalStatusHistory`/`ExtraWorkStatusHistory` generic-AuditLog
+  registration.
+
+Production change summary:
+  * `backend/tickets/serializers.py` — `TicketDetailSerializer`
+    `actions` field + internal `_resolve_allowed_next_statuses`
+    cache shared with the top-level `allowed_next_statuses` field.
+  * `backend/extra_work/serializers.py` —
+    `ExtraWorkRequestDetailSerializer.actions` +
+    `ProposalDetailSerializer.actions`. Both reuse a similar
+    cached allowed-next-statuses helper. BM B6 pricing/PDF
+    invariant encoded directly in `get_actions`.
+  * `backend/extra_work/views_proposals.py` —
+    `ProposalDirectPublishSerializer` +
+    `ProposalDirectPublishView` (the atomic two-step path). Reuses
+    the existing `_require_provider_in_scope` helper for the
+    role + scope + BM-prep-key check; adds the BM-override-key
+    check inline; emits the `override_reason_required` 400
+    pre-flight before opening the atomic block.
+  * `backend/extra_work/urls.py` — registers the new endpoint at
+    `proposals/<pid>/direct-publish/`.
+  * `backend/customers/serializers.py` — adds
+    `compute_customer_actions(user, customer)` helper +
+    `CustomerSerializer.actions` field.
+  * `backend/customers/serializers_memberships.py` —
+    `CustomerUserMembershipSerializer.actions` field (delegates to
+    the same helper).
+  * `backend/customers/views_memberships.py` — passes
+    `context={"request": request}` to the membership-create
+    response so the `actions` block on the created row is
+    computed against the requesting actor.
+  * No model fields added → no migration. No audit-signal change
+    → no `_*_TRACKED_FIELDS` edit. No new permission key in
+    `OSIUS_PERMISSION_KEYS` or `CUSTOMER_PERMISSION_KEYS`.

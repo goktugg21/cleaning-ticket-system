@@ -258,6 +258,15 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     pricing_line_items = serializers.SerializerMethodField()
     line_items = ExtraWorkRequestItemSerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
+    # Per-current-user actions block. Lets BM / CUSTOMER_USER (who
+    # cannot self-introspect via the admin-only
+    # `/api/users/<id>/effective-permissions/` endpoint) learn what they
+    # can do on THIS specific Extra Work request. Note: STAFF never
+    # reaches this serializer (the scoping helper returns `.none()` for
+    # STAFF) so the action booleans intentionally do not branch on the
+    # STAFF role; the resolver-side helpers return False for STAFF
+    # anyway, but we document the precondition explicitly.
+    actions = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -304,6 +313,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "customer_decided_at",
             "pricing_line_items",
             "allowed_next_statuses",
+            "actions",
         ]
         read_only_fields = [
             "id",
@@ -343,11 +353,169 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             return ExtraWorkPricingLineItemCustomerSerializer(qs, many=True).data
         return ExtraWorkPricingLineItemSerializer(qs, many=True).data
 
-    def get_allowed_next_statuses(self, obj):
-        user = self.context.get("request").user if self.context.get("request") else None
+    def _resolve_allowed_next_statuses(self, obj):
+        """Cached single computation shared by the top-level
+        `allowed_next_statuses` field and the `actions` block. Keyed by
+        the EW id on the serializer instance — both callers fire on the
+        same render and must not drift.
+        """
+        cache = getattr(self, "_allowed_next_cache", None)
+        if cache is not None and cache[0] == obj.id:
+            return cache[1]
+        user = (
+            self.context.get("request").user
+            if self.context.get("request")
+            else None
+        )
         if user is None or not user.is_authenticated:
-            return []
-        return list(allowed_next_statuses(user, obj))
+            result: list = []
+        else:
+            result = list(allowed_next_statuses(user, obj))
+        self._allowed_next_cache = (obj.id, result)
+        return result
+
+    def get_allowed_next_statuses(self, obj):
+        return self._resolve_allowed_next_statuses(obj)
+
+    def get_actions(self, obj):
+        """Per-current-user, per-EW capability block.
+
+        Booleans are computed against `request.user` and THIS EW's
+        (customer, building). Mirrors the resolver shape used by
+        `accounts.effective_actions.compute_effective_actions` so the
+        per-record answer agrees with the admin endpoint when SA/CA
+        call both — but is also reachable to BM / CUSTOMER_USER who
+        cannot call the admin endpoint at all.
+
+        STAFF never reaches an EW detail endpoint
+        (`extra_work.scoping.scope_extra_work_for` returns `.none()`).
+        The action booleans intentionally do not branch on the STAFF
+        role; the underlying resolvers return False for STAFF and the
+        endpoint gate makes the question moot.
+        """
+        from accounts.effective_actions import (
+            _any_customer_approve_key,
+            _customer_can,
+            _target_provider_in_scope,
+        )
+
+        from .models import ExtraWorkStatus
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+
+        if user is None or not user.is_authenticated:
+            return {
+                "allowed_next_statuses": [],
+                "can_prepare_extra_work_proposal": False,
+                "can_override_customer_decision": False,
+                "can_view_pricing": False,
+                "can_view_proposal_pdf": False,
+                "can_approve": False,
+                "can_reject": False,
+            }
+
+        allowed = self._resolve_allowed_next_statuses(obj)
+        role = getattr(user, "role", None)
+        customer = obj.customer
+        building = obj.building
+        in_provider_scope = _target_provider_in_scope(user, customer, building)
+
+        is_super = role == UserRole.SUPER_ADMIN
+        is_ca_in = role == UserRole.COMPANY_ADMIN and in_provider_scope
+        is_bm_in = role == UserRole.BUILDING_MANAGER and in_provider_scope
+        is_customer = role == UserRole.CUSTOMER_USER
+
+        # Proposal preparation — provider-side. SA / CA in scope always;
+        # BM in assigned building is gated by the B6 revocable key.
+        # STAFF / CUSTOMER_USER always False.
+        if is_super or is_ca_in:
+            can_prepare_extra_work_proposal = True
+        elif is_bm_in:
+            from accounts.permissions_v2 import user_has_osius_permission
+            can_prepare_extra_work_proposal = user_has_osius_permission(
+                user,
+                "osius.building_manager.prepare_extra_work_proposal",
+                building_id=building.id,
+            )
+        else:
+            can_prepare_extra_work_proposal = False
+
+        # Customer-decision override — same shape as ticket analog.
+        # Compute authority first, then tighten so the answer reflects
+        # CURRENT record state, not just authority — the override is
+        # only meaningful at the customer-decision step (PRICING_PROPOSED).
+        if is_super or is_ca_in:
+            has_override_authority = True
+        elif is_bm_in:
+            from accounts.permissions_v2 import user_has_osius_permission
+            has_override_authority = user_has_osius_permission(
+                user,
+                "osius.building_manager.override_customer_decision",
+                building_id=building.id,
+            )
+        else:
+            has_override_authority = False
+        can_override_customer_decision = (
+            has_override_authority
+            and obj.status == ExtraWorkStatus.PRICING_PROPOSED
+        )
+
+        # Pricing visibility. Provider operators in scope see prices
+        # regardless of the B6 prep override (B6 only revokes the
+        # ability to SEND a proposal, not to view prices). Customer
+        # sees pricing iff they hold any extra_work approve_* key
+        # (`_any_customer_approve_key` mirrors the resolver in
+        # effective_actions.compute_effective_actions).
+        if is_super or is_ca_in or is_bm_in:
+            can_view_pricing = True
+        elif is_customer:
+            can_view_pricing = _any_customer_approve_key(
+                user, customer, building, "extra_work"
+            )
+        else:
+            can_view_pricing = False
+        # PDF access mirrors pricing visibility — viewing pricing
+        # implies the right to render the printable proposal. Kept as
+        # a separate boolean in case backend later splits them.
+        can_view_proposal_pdf = can_view_pricing
+
+        # Approve / Reject depend on the EW's status. The EW
+        # customer-decision phase is `PRICING_PROPOSED`. Customer with
+        # any approve_* key may decide; a provider with
+        # `can_override_customer_decision` may also drive
+        # (apply_transition coerces is_override + requires reason).
+        # When the EW is NOT in PRICING_PROPOSED, every actor gets
+        # False — locking the action booleans to the live state machine.
+        in_decision_phase = obj.status == ExtraWorkStatus.PRICING_PROPOSED
+        if not in_decision_phase:
+            can_approve = False
+            can_reject = False
+        elif is_customer:
+            customer_can_decide = (
+                _any_customer_approve_key(user, customer, building, "extra_work")
+                or (
+                    obj.created_by_id == user.id
+                    and _customer_can(
+                        user, customer, building, "customer.extra_work.approve_own"
+                    )
+                )
+            )
+            can_approve = customer_can_decide
+            can_reject = customer_can_decide
+        else:
+            can_approve = can_override_customer_decision
+            can_reject = can_override_customer_decision
+
+        return {
+            "allowed_next_statuses": list(allowed),
+            "can_prepare_extra_work_proposal": can_prepare_extra_work_proposal,
+            "can_override_customer_decision": can_override_customer_decision,
+            "can_view_pricing": can_view_pricing,
+            "can_view_proposal_pdf": can_view_proposal_pdf,
+            "can_approve": can_approve,
+            "can_reject": can_reject,
+        }
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -956,6 +1124,13 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
 
     lines = serializers.SerializerMethodField()
     allowed_next_statuses = serializers.SerializerMethodField()
+    # Per-current-user actions block. Surfaces buttons the viewer is
+    # actually allowed to click on THIS proposal in its current state.
+    # Critical product-rule: BM with the prep key revoked must still
+    # see `can_view_proposal_pricing=True` + `can_view_proposal_pdf=True`
+    # — the revocation only removes the ability to MUTATE / SEND, not
+    # to read pricing.
+    actions = serializers.SerializerMethodField()
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
@@ -980,6 +1155,7 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "allowed_next_statuses",
+            "actions",
         ]
         read_only_fields = fields
 
@@ -1000,15 +1176,203 @@ class ProposalDetailSerializer(serializers.ModelSerializer):
             return ProposalLineCustomerSerializer(qs, many=True).data
         return ProposalLineAdminSerializer(qs, many=True).data
 
-    def get_allowed_next_statuses(self, obj):
+    def _resolve_allowed_next_statuses(self, obj):
+        """Cached single computation shared by the top-level
+        `allowed_next_statuses` field and the `actions` block."""
+        cache = getattr(self, "_allowed_next_cache", None)
+        if cache is not None and cache[0] == obj.id:
+            return cache[1]
         user = (
             self.context.get("request").user
             if self.context.get("request")
             else None
         )
         if user is None or not user.is_authenticated:
-            return []
-        return list(allowed_next_proposal_statuses(user, obj))
+            result: list = []
+        else:
+            result = list(allowed_next_proposal_statuses(user, obj))
+        self._allowed_next_cache = (obj.id, result)
+        return result
+
+    def get_allowed_next_statuses(self, obj):
+        return self._resolve_allowed_next_statuses(obj)
+
+    def get_actions(self, obj):
+        """Per-current-user, per-proposal capability block.
+
+        Rules:
+          * Pricing + PDF visibility = "anyone who could meaningfully
+            consume the prices". Provider operators in scope always;
+            BM in scope NEVER loses pricing access even when the prep
+            key is revoked (product rule — only mutation is locked).
+            Customer iff they hold any extra_work approve_* key.
+          * Mutating actions (edit_lines / send / cancel / direct_publish)
+            require provider operator in scope, and for BM additionally
+            the prep key. They also require the proposal to be in the
+            right status (DRAFT for edit/send/direct_publish; DRAFT or
+            SENT for cancel).
+          * Approve / Reject only when proposal is SENT and the actor
+            is either a customer with approve_* OR a provider with
+            override authority.
+        """
+        from accounts.effective_actions import (
+            _any_customer_approve_key,
+            _target_provider_in_scope,
+        )
+        from accounts.permissions_v2 import user_has_osius_permission
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request else None
+
+        if user is None or not user.is_authenticated:
+            return {
+                "allowed_next_statuses": [],
+                "can_view_proposal_pricing": False,
+                "can_view_proposal_pdf": False,
+                "can_edit_lines": False,
+                "can_send": False,
+                "can_cancel": False,
+                "can_approve": False,
+                "can_reject": False,
+                "can_direct_publish": False,
+            }
+
+        allowed = self._resolve_allowed_next_statuses(obj)
+        role = getattr(user, "role", None)
+        extra_work = obj.extra_work_request
+        customer = extra_work.customer
+        building = extra_work.building
+        in_provider_scope = _target_provider_in_scope(user, customer, building)
+
+        is_super = role == UserRole.SUPER_ADMIN
+        is_ca_in = role == UserRole.COMPANY_ADMIN and in_provider_scope
+        is_bm_in = role == UserRole.BUILDING_MANAGER and in_provider_scope
+        is_customer = role == UserRole.CUSTOMER_USER
+
+        # Pricing visibility — provider operators in scope ALWAYS see
+        # prices; the BM prep-key revocation does NOT remove pricing
+        # visibility (only the ability to mutate / SEND). This is the
+        # critical product-rule the brief flags. Customer sees pricing
+        # iff they could meaningfully decide on it.
+        if is_super or is_ca_in or is_bm_in:
+            can_view_proposal_pricing = True
+        elif is_customer:
+            can_view_proposal_pricing = _any_customer_approve_key(
+                user, customer, building, "extra_work"
+            )
+        else:
+            can_view_proposal_pricing = False
+        can_view_proposal_pdf = can_view_proposal_pricing
+
+        # BM prep key — gates every mutation provider-side. SA / CA
+        # bypass (the key defaults True for them at the resolver).
+        if is_bm_in:
+            bm_has_prep = user_has_osius_permission(
+                user,
+                "osius.building_manager.prepare_extra_work_proposal",
+                building_id=building.id,
+            )
+            bm_has_override = user_has_osius_permission(
+                user,
+                "osius.building_manager.override_customer_decision",
+                building_id=building.id,
+            )
+        else:
+            bm_has_prep = False
+            bm_has_override = False
+
+        provider_can_mutate = is_super or is_ca_in or (is_bm_in and bm_has_prep)
+
+        # Lines may only be edited while DRAFT (mirrors the
+        # `proposal_not_draft` view-level guard in views_proposals.py).
+        can_edit_lines = bool(
+            provider_can_mutate and obj.status == ProposalStatus.DRAFT
+        )
+
+        # SEND requires DRAFT + parent EW in UNDER_REVIEW + the cart-
+        # coverage / contract-price validations (the state-machine
+        # gate). We surface True when the *role gate* would pass — the
+        # cart validations can still fail at POST time and the
+        # frontend should display the error from the transition
+        # endpoint. The parent-status guard is cheap and accurate, so
+        # we DO include it here so the frontend doesn't render a Send
+        # button against a REQUESTED parent (which would always 400).
+        can_send = bool(
+            provider_can_mutate
+            and obj.status == ProposalStatus.DRAFT
+            and extra_work.status == ExtraWorkStatus.UNDER_REVIEW
+        )
+
+        # Cancel is allowed from DRAFT or SENT. SENT cancellation is
+        # coerced to is_override + requires reason (mirrors the
+        # `provider_driven_sent_cancel` block in
+        # apply_proposal_transition); the action boolean only reports
+        # the role gate, not the reason requirement.
+        can_cancel = bool(
+            provider_can_mutate
+            and obj.status in {ProposalStatus.DRAFT, ProposalStatus.SENT}
+        )
+
+        # Approve / Reject — SENT proposal only. Customer with
+        # approve_* OR provider with override authority.
+        in_sent = obj.status == ProposalStatus.SENT
+        if not in_sent:
+            can_approve = False
+            can_reject = False
+        elif is_customer:
+            # Mirrors `_user_can_drive_proposal_transition`'s customer
+            # branch: approve_location at the pair, OR (creator AND
+            # approve_own at the pair).
+            from customers.permissions import user_can
+            customer_can_decide = user_can(
+                user, customer.id, building.id, "customer.extra_work.approve_location"
+            ) or (
+                extra_work.created_by_id == user.id
+                and user_can(
+                    user, customer.id, building.id, "customer.extra_work.approve_own"
+                )
+            )
+            can_approve = customer_can_decide
+            can_reject = customer_can_decide
+        else:
+            # Provider override path. SA / CA always; BM if both prep
+            # AND override keys granted (the proposal state machine
+            # rejects with `bm_override_disabled` otherwise).
+            if is_super or is_ca_in:
+                provider_can_decide = True
+            elif is_bm_in:
+                provider_can_decide = bm_has_prep and bm_has_override
+            else:
+                provider_can_decide = False
+            can_approve = provider_can_decide
+            can_reject = provider_can_decide
+
+        # Direct-publish: tightened so the answer reflects CURRENT
+        # record state, not just authority — derive from the already-
+        # computed `can_send` so the two cannot drift (direct-publish
+        # internally does DRAFT->SENT first, so every send precondition
+        # must hold). SA / CA in scope: True iff can_send. BM in scope:
+        # True iff can_send AND the override key is granted (direct-
+        # publish then does the SENT->CUSTOMER_APPROVED override leg).
+        # Customer / STAFF: always False.
+        if is_super or is_ca_in:
+            can_direct_publish = can_send
+        elif is_bm_in:
+            can_direct_publish = can_send and bm_has_override
+        else:
+            can_direct_publish = False
+
+        return {
+            "allowed_next_statuses": list(allowed),
+            "can_view_proposal_pricing": can_view_proposal_pricing,
+            "can_view_proposal_pdf": can_view_proposal_pdf,
+            "can_edit_lines": can_edit_lines,
+            "can_send": can_send,
+            "can_cancel": can_cancel,
+            "can_approve": can_approve,
+            "can_reject": can_reject,
+            "can_direct_publish": can_direct_publish,
+        }
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
