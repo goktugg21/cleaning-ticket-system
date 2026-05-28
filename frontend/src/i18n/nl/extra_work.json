@@ -98,7 +98,7 @@
   "detail.field_internal_cost_note": "Interne kostenopmerking (alleen aanbieder)",
   "detail.override_applied": "Aanbieder-override toegepast.",
 
-  "detail.line_items_section_title": "Winkelmand-regels",
+  "detail.line_items_section_title": "Aangevraagde diensten",
   "detail.line_items_empty": "Geen regels.",
   "detail.line_column_service": "Dienst",
   "detail.line_column_quantity": "Aantal",

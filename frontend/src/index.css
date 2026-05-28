@@ -5604,6 +5604,12 @@ table.data-table {
 .invoice-line-row-service-label {
   word-break: break-word;
 }
+.invoice-line-row-service-sub {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
 /* Source tag — small inline chip that visually distinguishes the
    three labelling states. Reuses the existing `.cell-tag` vocabulary

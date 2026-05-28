@@ -98,7 +98,7 @@
   "detail.field_internal_cost_note": "Internal cost note (provider only)",
   "detail.override_applied": "Provider override applied.",
 
-  "detail.line_items_section_title": "Cart line items",
+  "detail.line_items_section_title": "Requested services",
   "detail.line_items_empty": "No line items.",
   "detail.line_column_service": "Service",
   "detail.line_column_quantity": "Quantity",

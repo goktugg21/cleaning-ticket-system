@@ -69,12 +69,17 @@ import type {
 } from "../api/types";
 import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
+import {
+  InvoiceLineRow,
+  InvoiceLineTotalsRow,
+} from "../components/InvoiceLineRow";
+import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { PageHeader } from "../components/PageHeader";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import { formatDate, formatDateTime } from "../lib/intl";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
 // any of these is considered "done" for the cancel-warning gate; only
@@ -974,36 +979,35 @@ export function ExtraWorkDetailPage() {
                   {t("detail.line_items_empty")}
                 </div>
               ) : (
-                <table className="data-table">
+                <table className="data-table ew-pricing-table">
                   <thead>
                     <tr>
-                      <th>{t("detail.line_column_service")}</th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.line_column_quantity")}
-                      </th>
-                      <th>{t("detail.line_column_unit")}</th>
-                      <th>{t("detail.line_column_requested_date")}</th>
-                      <th>{t("detail.line_column_note")}</th>
+                      {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                        <th key={key}>{t(key)}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {ew.line_items.map((item) => (
-                      <tr
+                      <InvoiceLineRow
                         key={item.id}
-                        data-testid="extra-work-detail-line-item-row"
-                      >
-                        <td>{item.service_name}</td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.quantity)}
-                        </td>
-                        <td>
-                          {t(
-                            UNIT_TYPE_I18N_KEY[item.unit_type] ?? item.unit_type,
-                          )}
-                        </td>
-                        <td>{formatDate(item.requested_date)}</td>
-                        <td>{item.customer_note || t("detail.empty_dash")}</td>
-                      </tr>
+                        lineKind="cart"
+                        line={item}
+                        editable={false}
+                        rowTestId="extra-work-detail-line-item-row"
+                        subLabel={
+                          <>
+                            <span className="muted small">
+                              {formatDate(item.requested_date)}
+                            </span>
+                            {item.customer_note && (
+                              <span className="muted small">
+                                {item.customer_note}
+                              </span>
+                            )}
+                          </>
+                        }
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -1024,109 +1028,50 @@ export function ExtraWorkDetailPage() {
                 <table className="data-table ew-pricing-table">
                   <thead>
                     <tr>
-                      <th>{t("detail.pricing_column_description")}</th>
-                      <th>{t("detail.pricing_column_unit")}</th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.pricing_column_qty")}
-                      </th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.pricing_column_unit_price")}
-                      </th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.pricing_column_vat_pct")}
-                      </th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.pricing_column_subtotal")}
-                      </th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.pricing_column_vat")}
-                      </th>
-                      <th style={{ textAlign: "right" }}>
-                        {t("detail.pricing_column_total")}
-                      </th>
-                      {canPrepareProposal && <th />}
+                      {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                        <th key={key}>{t(key)}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {ew.pricing_line_items.map((item) => (
-                      <tr key={item.id}>
-                        <td>
-                          <div>{item.description}</div>
-                          {item.customer_visible_note && (
-                            <div className="muted small">
-                              {item.customer_visible_note}
-                            </div>
-                          )}
-                          {isProvider && item.internal_cost_note && (
-                            <div
-                              className="muted small"
-                              style={{ fontStyle: "italic" }}
-                            >
-                              internal: {item.internal_cost_note}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          {t(
-                            UNIT_TYPE_I18N_KEY[item.unit_type] ?? item.unit_type,
-                          )}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.quantity)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.unit_price)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.vat_rate)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.subtotal)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.vat_amount)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMoney(item.total)}
-                        </td>
-                        {canPrepareProposal && (
-                          <td style={{ textAlign: "right" }}>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => handleDeletePricingItem(item.id)}
-                            >
-                              {t("detail.pricing_remove_button")}
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                    <tr className="ew-pricing-totals-row">
-                      <td colSpan={4} />
-                      <td
-                        style={{
-                          textAlign: "right",
-                          fontWeight: 700,
-                          textTransform: "uppercase",
-                          letterSpacing: "0.06em",
-                          fontSize: 11,
-                          color: "var(--text-muted)",
-                        }}
-                      >
-                        {t("detail.pricing_totals_label")}
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>
-                        {formatMoney(ew.subtotal_amount)}
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>
-                        {formatMoney(ew.vat_amount)}
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 700 }}>
-                        {formatMoney(ew.total_amount)}
-                      </td>
-                      {canPrepareProposal && <td />}
-                    </tr>
+                    {ew.pricing_line_items.map((item) => {
+                      const showInternalNote =
+                        isProvider && !!item.internal_cost_note;
+                      const showCustomerNote = !!item.customer_visible_note;
+                      return (
+                        <InvoiceLineRow
+                          key={item.id}
+                          lineKind="pricing"
+                          line={item}
+                          editable={canPrepareProposal}
+                          onRemove={() => handleDeletePricingItem(item.id)}
+                          subLabel={
+                            showCustomerNote || showInternalNote ? (
+                              <>
+                                {showCustomerNote && (
+                                  <span className="muted small">
+                                    {item.customer_visible_note}
+                                  </span>
+                                )}
+                                {showInternalNote && (
+                                  <span
+                                    className="muted small"
+                                    style={{ fontStyle: "italic" }}
+                                  >
+                                    internal: {item.internal_cost_note}
+                                  </span>
+                                )}
+                              </>
+                            ) : undefined
+                          }
+                        />
+                      );
+                    })}
+                    <InvoiceLineTotalsRow
+                      subtotal={ew.subtotal_amount}
+                      vatAmount={ew.vat_amount}
+                      total={ew.total_amount}
+                    />
                   </tbody>
                 </table>
               )}

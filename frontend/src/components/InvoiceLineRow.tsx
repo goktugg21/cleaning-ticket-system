@@ -31,6 +31,7 @@
 // not a permission check. Backend per-record `actions` decide what the
 // caller is ALLOWED to do; this prop only decides what the caller wants
 // to RENDER. Do not bake role/permission logic into this file.
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import type {
@@ -55,28 +56,35 @@ const UNIT_TYPE_I18N_KEY: Record<ExtraWorkUnitType | ServiceUnitType, string> =
     OTHER: "unit_type.other",
   };
 
+// Shared presentational hints accepted by every variant. `rowTestId`
+// overrides the default `<tr data-testid="invoice-line-row">` so a
+// consumer with a legacy locked testid (e.g. the EW detail screen's
+// `extra-work-detail-line-item-row`) can keep its Playwright contract.
+// `subLabel` renders as additional content inside the Service cell,
+// below the main label — used for per-line meta (cart: requested date
+// + customer note; pricing: customer-visible / internal cost notes).
+// Both are pure render hints; no role/permission logic lives here.
+interface InvoiceLineRowSharedProps {
+  editable?: boolean;
+  onEdit?: () => void;
+  onRemove?: () => void;
+  rowTestId?: string;
+  subLabel?: ReactNode;
+}
+
 export type InvoiceLineRowProps =
-  | {
+  | ({
       lineKind: "cart";
       line: ExtraWorkRequestItem;
-      editable?: boolean;
-      onEdit?: () => void;
-      onRemove?: () => void;
-    }
-  | {
+    } & InvoiceLineRowSharedProps)
+  | ({
       lineKind: "proposal";
       line: ProposalLine;
-      editable?: boolean;
-      onEdit?: () => void;
-      onRemove?: () => void;
-    }
-  | {
+    } & InvoiceLineRowSharedProps)
+  | ({
       lineKind: "pricing";
       line: ExtraWorkPricingLineItem;
-      editable?: boolean;
-      onEdit?: () => void;
-      onRemove?: () => void;
-    };
+    } & InvoiceLineRowSharedProps);
 
 interface NormalizedLine {
   // Service / description column display.
@@ -217,12 +225,15 @@ export function InvoiceLineRow(props: InvoiceLineRowProps) {
   return (
     <tr
       className="invoice-line-row"
-      data-testid="invoice-line-row"
+      data-testid={props.rowTestId ?? "invoice-line-row"}
       data-line-kind={props.lineKind}
       data-price-source={normalized.priceSource}
     >
       <td className="invoice-line-row-service">
         <div className="invoice-line-row-service-label">{normalized.label}</div>
+        {props.subLabel != null && (
+          <div className="invoice-line-row-service-sub">{props.subLabel}</div>
+        )}
       </td>
       <td className="invoice-line-row-source">
         <span
