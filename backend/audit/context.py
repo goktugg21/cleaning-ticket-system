@@ -31,6 +31,13 @@ def set_request(request) -> None:
 def clear_request() -> None:
     if hasattr(_state, "request"):
         del _state.request
+    # Sprint 27F-B2: also clear the per-request reason + actor scope so
+    # a worker thread that served request A cannot leak its operator
+    # intent / scope snapshot into request B's audit rows.
+    if hasattr(_state, "reason"):
+        del _state.reason
+    if hasattr(_state, "actor_scope"):
+        del _state.actor_scope
 
 
 def _get_request():
@@ -83,3 +90,97 @@ def get_current_request_id() -> Optional[str]:
     if request_id:
         return str(request_id)[:128]
     return None
+
+
+# ---------------------------------------------------------------------------
+# Sprint 27F-B2 (closes G-B6) — `reason` + `actor_scope` thread-local helpers.
+#
+# `reason` is set by the calling view BEFORE the audited mutation fires, so
+# the signal handler can pick it up when it writes the AuditLog row. Default
+# is the empty string — legacy / unannotated writes get `reason=""`.
+#
+# `actor_scope` is set by the middleware (for every authenticated request,
+# via `snapshot_actor_scope(request.user)`) so EVERY audit row carries a
+# snapshot of what the actor could see at the moment of the write. Views
+# that need to record a stronger anchor (e.g. "this write happened in the
+# context of building X") may call `set_current_actor_scope` again with an
+# enriched dict — the snapshot is intentionally a flat JSON-serialisable
+# dict so an operator can read it without instantiating Django models.
+#
+# Both default to the empty value (str / dict) so signal handlers can call
+# the getters unconditionally — no None to guard against on write.
+# ---------------------------------------------------------------------------
+
+
+def set_current_reason(reason: str) -> None:
+    """Store the operator-supplied reason for the current request."""
+    _state.reason = str(reason) if reason is not None else ""
+
+
+def get_current_reason() -> str:
+    """Return the reason set for the current request, or ''."""
+    return getattr(_state, "reason", "") or ""
+
+
+def set_current_actor_scope(scope: dict) -> None:
+    """Store the actor-scope snapshot for the current request."""
+    _state.actor_scope = scope if isinstance(scope, dict) else {}
+
+
+def get_current_actor_scope() -> dict:
+    """Return the actor-scope snapshot set for the current request, or {}."""
+    value = getattr(_state, "actor_scope", None)
+    return value if isinstance(value, dict) else {}
+
+
+def snapshot_actor_scope(user) -> dict:
+    """
+    Build a flat, JSON-serialisable snapshot of an actor's role +
+    scope anchors. Read directly from the user's memberships — does
+    NOT consult the wider scope helpers (no transitive resolution),
+    so the snapshot is cheap and side-effect free.
+
+    Shape:
+        {
+          "role": <UserRole string>,
+          "user_id": <int>,
+          "company_ids": [<CompanyUserMembership.company_id>...],
+          "customer_id": <int | None>,    # from CustomerUserMembership
+          "building_id": None,            # caller-supplied via
+                                          # set_current_actor_scope; the
+                                          # snapshot defaults to None
+        }
+
+    For anonymous / unauthenticated users, returns {}.
+    """
+    if user is None:
+        return {}
+    if not getattr(user, "is_authenticated", False):
+        return {}
+    try:
+        # Late imports so this helper does not pull membership tables
+        # at module-load time (audit.context is imported very early).
+        from companies.models import CompanyUserMembership
+        from customers.models import CustomerUserMembership
+
+        company_ids = list(
+            CompanyUserMembership.objects.filter(user=user).values_list(
+                "company_id", flat=True
+            )
+        )
+        customer_id = (
+            CustomerUserMembership.objects.filter(user=user)
+            .values_list("customer_id", flat=True)
+            .first()
+        )
+    except Exception:  # pragma: no cover — defensive
+        company_ids = []
+        customer_id = None
+
+    return {
+        "role": getattr(user, "role", None),
+        "user_id": getattr(user, "id", None),
+        "company_ids": company_ids,
+        "customer_id": customer_id,
+        "building_id": None,
+    }

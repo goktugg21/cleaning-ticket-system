@@ -7,7 +7,10 @@ from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
 from config.pagination import UnboundedPagination
 
 from .models import Building, BuildingManagerAssignment
-from .serializers_memberships import BuildingManagerAssignmentSerializer
+from .serializers_memberships import (
+    BuildingManagerAssignmentSerializer,
+    BuildingManagerAssignmentUpdateSerializer,
+)
 
 
 class BuildingManagerListCreateView(generics.ListCreateAPIView):
@@ -54,6 +57,24 @@ class BuildingManagerListCreateView(generics.ListCreateAPIView):
 
 
 class BuildingManagerDeleteView(generics.GenericAPIView):
+    """
+    DELETE /api/buildings/<building_id>/managers/<user_id>/
+    PATCH  /api/buildings/<building_id>/managers/<user_id>/
+
+    Sprint 14 — DELETE removes the BM↔building assignment.
+    B6 — PATCH accepts `{"permission_overrides": { ... }}` so SA /
+    Provider Company Admin can revoke specific BM defaults
+    (`osius.building_manager.override_customer_decision`,
+    `osius.building_manager.prepare_extra_work_proposal`) per-(BM,
+    building) without removing the assignment itself. The
+    `BuildingManagerAssignmentUpdateSerializer` validates the
+    allow-list + boolean shape; only the two B6 keys are accepted.
+
+    Audit coverage: the new `permission_overrides` field is tracked
+    by the dedicated UPDATE-diff handler in `audit/signals.py`, so
+    each PATCH writes one AuditLog row with the before/after diff.
+    """
+
     permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
 
     def delete(self, request, building_id, user_id):
@@ -65,3 +86,24 @@ class BuildingManagerDeleteView(generics.GenericAPIView):
         if deleted == 0:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def patch(self, request, building_id, user_id):
+        building = get_object_or_404(Building, pk=building_id)
+        self.check_object_permissions(request, building)
+        assignment = BuildingManagerAssignment.objects.filter(
+            building=building, user_id=user_id
+        ).first()
+        if assignment is None:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = BuildingManagerAssignmentUpdateSerializer(
+            assignment, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        assignment.refresh_from_db()
+        return Response(
+            BuildingManagerAssignmentSerializer(assignment).data,
+            status=status.HTTP_200_OK,
+        )

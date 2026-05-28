@@ -23,6 +23,13 @@ class TicketPriority(models.TextChoices):
 class TicketStatus(models.TextChoices):
     OPEN = "OPEN", "Open"
     IN_PROGRESS = "IN_PROGRESS", "In Progress"
+    # Sprint 28 Batch 11 — STAFF default completion route. When a STAFF
+    # user marks their work done, the ticket lands here for BM review.
+    # BM accepts -> WAITING_CUSTOMER_APPROVAL, or rejects -> IN_PROGRESS.
+    # The per-(staff, building) `BuildingStaffVisibility
+    # .staff_completion_routes_to_customer` flag can opt a staff out of
+    # this default and route directly to WAITING_CUSTOMER_APPROVAL.
+    WAITING_MANAGER_REVIEW = "WAITING_MANAGER_REVIEW", "Waiting Manager Review"
     WAITING_CUSTOMER_APPROVAL = "WAITING_CUSTOMER_APPROVAL", "Waiting Customer Approval"
     REJECTED = "REJECTED", "Rejected"
     APPROVED = "APPROVED", "Approved"
@@ -31,8 +38,33 @@ class TicketStatus(models.TextChoices):
 
 
 class TicketMessageType(models.TextChoices):
+    """
+    B7 — four-tier note taxonomy (`docs/product/system-business-logic-
+    and-workflows.md` §9). Each `TicketMessage` carries one value; the
+    enum value IS the canonical visibility classification.
+
+      * `PUBLIC_REPLY` — CUSTOMER_VISIBLE. Visible to customer-side
+        users in scope and to every provider-side role.
+      * `INTERNAL_NOTE` — PROVIDER_INTERNAL. Visible only to provider
+        management roles in scope (Super Admin, Company Admin,
+        Building Manager). NOT visible to STAFF or any customer-side
+        role. The literal `"INTERNAL_NOTE"` is preserved so legacy
+        rows keep their semantic without a data migration; the value
+        itself is the PROVIDER_INTERNAL tier.
+      * `STAFF_OPERATIONAL` — STAFF_OPERATIONAL. Visible to every
+        provider-side role including STAFF in scope. NOT visible to
+        customer. Used for operational instructions field staff need
+        to do the job (e.g. "bring a ladder", "use the back entrance").
+      * `STAFF_COMPLETION` — STAFF_COMPLETION / evidence. Written by
+        STAFF as completion evidence; visible to provider-side users
+        in scope; customer-visible per the existing staff-completion
+        evidence rule (P0/B1).
+    """
+
     PUBLIC_REPLY = "PUBLIC_REPLY", "Public Reply"
-    INTERNAL_NOTE = "INTERNAL_NOTE", "Internal Note"
+    INTERNAL_NOTE = "INTERNAL_NOTE", "Internal Note (provider-internal)"
+    STAFF_OPERATIONAL = "STAFF_OPERATIONAL", "Staff Operational Note"
+    STAFF_COMPLETION = "STAFF_COMPLETION", "Staff Completion Note"
 
 
 def ticket_attachment_upload_path(instance, filename):
@@ -112,10 +144,46 @@ class Ticket(models.Model):
 
     first_response_at = models.DateTimeField(null=True, blank=True)
     sent_for_approval_at = models.DateTimeField(null=True, blank=True)
+    # Sprint 28 Batch 11 — stamped when the ticket enters
+    # WAITING_MANAGER_REVIEW (the STAFF default completion route).
+    # Loop semantics mirror the rest of the timestamp cluster: a BM
+    # rejection back to IN_PROGRESS followed by another STAFF completion
+    # overwrites the value.
+    manager_review_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     rejected_at = models.DateTimeField(null=True, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+
+    # Sprint 28 Batch 7 — link back to the ExtraWorkRequestItem this
+    # Ticket was spawned from. NULL for tickets created by any other
+    # path (legacy creation, direct API submission, etc.). SET_NULL on
+    # the EW side's delete so a Ticket survives if the cart line is
+    # later removed — the operational job has already been scheduled
+    # / executed and dropping it would lose audit history.
+    extra_work_request_item = models.ForeignKey(
+        "extra_work.ExtraWorkRequestItem",
+        on_delete=models.SET_NULL,
+        related_name="spawned_tickets",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    # Sprint 28 Batch 8 — link back to the ProposalLine this Ticket
+    # was spawned from. NULL on tickets that came through the instant
+    # route (Batch 7), the legacy ticket-create path, or any other
+    # surface. SET_NULL so a Ticket survives if the proposal / line
+    # is later deleted — the operational job has audit history we
+    # don't want to lose.
+    proposal_line = models.ForeignKey(
+        "extra_work.ProposalLine",
+        on_delete=models.SET_NULL,
+        related_name="spawned_tickets_for_proposal_line",
+        null=True,
+        blank=True,
+        default=None,
+    )
 
     # SLA tracking. Engine lives in backend/sla/. sla_first_breached_at is a
     # permanent marker that survives reopens; the rest are recomputed by the
@@ -251,6 +319,16 @@ class TicketStatusHistory(models.Model):
         related_name="ticket_status_changes",
     )
     note = models.TextField(blank=True)
+    # Sprint 27F-B1 — workflow override flag. Mirrors
+    # `ExtraWorkStatusHistory.is_override` / `override_reason`. Set
+    # when a provider operator drives a customer-decision transition
+    # (WAITING_CUSTOMER_APPROVAL -> APPROVED/REJECTED) — the reason
+    # is the operator's audit-trail explanation. Distinct from
+    # `note` (which is a generic transition note that may be empty
+    # on non-override transitions). H-11 invariant: workflow
+    # override is separate from permission override.
+    is_override = models.BooleanField(default=False)
+    override_reason = models.TextField(blank=True, default="")
 
     created_at = models.DateTimeField(auto_now_add=True)
 

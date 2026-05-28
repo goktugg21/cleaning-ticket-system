@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { DEMO_USERS } from "./fixtures/demoUsers";
-import { loginAs } from "./fixtures/login";
+import { loginAs, logoutFromTopbar } from "./fixtures/login";
 
 /**
  * Sprint 16 — visibility scope smoke.
@@ -59,7 +59,7 @@ test("Amanda gets 404 when navigating directly to a B1 ticket URL", async ({
   // Now switch to Amanda. Logout via the topbar Sign-out button is
   // the cleanest path — no token cleanup race because the AuthContext
   // wipes localStorage before re-redirecting to /login.
-  await page.locator(".topbar-right .btn").click();
+  await logoutFromTopbar(page);
   await loginAs(page, DEMO_USERS.customerB3);
   await page.goto(href!);
   // The detail page surfaces an error / not-found banner. We assert

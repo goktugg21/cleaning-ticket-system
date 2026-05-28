@@ -7,16 +7,43 @@ export type Role =
   | "STAFF"
   | "CUSTOMER_USER";
 
+// Sprint 28 Batch 11 — new ticket status for the staff-completion
+// default route: STAFF marks done -> here -> BM accepts (forward to
+// WAITING_CUSTOMER_APPROVAL) or rejects (back to IN_PROGRESS). The
+// optional per-building "routes_to_customer" flag bypasses this
+// status entirely (STAFF completion goes straight to
+// WAITING_CUSTOMER_APPROVAL). Placed chronologically between
+// IN_PROGRESS and WAITING_CUSTOMER_APPROVAL.
 export type TicketStatus =
   | "OPEN"
   | "IN_PROGRESS"
+  | "WAITING_MANAGER_REVIEW"
   | "WAITING_CUSTOMER_APPROVAL"
   | "APPROVED"
   | "REJECTED"
   | "CLOSED"
   | "REOPENED_BY_ADMIN";
 
-export type TicketMessageType = "PUBLIC_REPLY" | "INTERNAL_NOTE";
+// B7 four-tier note taxonomy. Source of truth:
+// backend/tickets/models.py::TicketMessageType.
+//
+//   PUBLIC_REPLY       — customer-visible reply.
+//   INTERNAL_NOTE      — provider-internal (PROVIDER_INTERNAL in §9 of
+//                        the canonical doc). Provider management only;
+//                        STAFF and customer-side never see it.
+//   STAFF_OPERATIONAL  — provider-side + STAFF; NOT customer-side.
+//   STAFF_COMPLETION   — provider-side + STAFF; ALSO customer-visible as
+//                        completion evidence.
+//
+// Backend filters at the queryset level — the SPA renders whatever the
+// API returns. The frontend's job is to render the correct badge / bubble
+// class per tier and to gate the composer to tiers the viewer may write.
+// Tier-create predicates live in frontend/src/auth/permissions.ts.
+export type TicketMessageType =
+  | "PUBLIC_REPLY"
+  | "INTERNAL_NOTE"
+  | "STAFF_OPERATIONAL"
+  | "STAFF_COMPLETION";
 
 export interface PaginatedResponse<T> {
   count: number;
@@ -58,6 +85,18 @@ export interface Building {
   is_active: boolean;
 }
 
+// Mirrors backend `customers/serializers.py::compute_customer_actions`.
+// Used by both `CustomerSerializer.actions` (detail responses) and
+// every row of `CustomerUserMembershipSerializer.actions` (per-customer
+// user-membership listings). The frontend renders writable role
+// dropdowns directly from `allowed_target_customer_access_roles` and
+// gates management surfaces on the two booleans.
+export interface CustomerActions {
+  can_manage_customer_users: boolean;
+  can_manage_customer_company_admins: boolean;
+  allowed_target_customer_access_roles: CustomerAccessRole[];
+}
+
 export interface Customer {
   id: number;
   company: number;
@@ -77,6 +116,9 @@ export interface Customer {
   phone: string;
   language: string;
   is_active: boolean;
+  // Per-current-user, per-customer capability block. Optional so
+  // older /me / non-customer-scoped responses don't break typing.
+  actions?: CustomerActions;
 }
 
 export type SLAStatus =
@@ -96,6 +138,11 @@ export interface TicketList {
   priority: string;
   status: TicketStatus;
   company: number;
+  // Sprint 30 Batch 30.1.2 — provider company display name. The
+  // backend exposes this on BOTH list + detail serializers via
+  // `source="company.name"`. Nullable on the wire to guard against
+  // legacy tickets whose company row was hard-deleted in a fixture.
+  company_name: string | null;
   building: number;
   building_name: string;
   customer: number;
@@ -116,7 +163,27 @@ export interface TicketStatusHistory {
   changed_by: number;
   changed_by_email: string;
   note: string;
+  // Sprint 27F-B1 — workflow override columns. Required on the
+  // wire because the backend always emits them (`is_override`
+  // defaults to `false`, `override_reason` defaults to `""`).
+  is_override: boolean;
+  override_reason: string;
   created_at: string;
+}
+
+// Sprint 27F-F1 — request body for POST /tickets/{id}/status/.
+// `is_override` + `override_reason` are optional because non-
+// override transitions omit them; the backend still coerces
+// SUPER_ADMIN / COMPANY_ADMIN driving WAITING_CUSTOMER_APPROVAL
+// → APPROVED|REJECTED to `is_override=true` regardless. The
+// reason is still required when override=true and the backend
+// rejects an empty/whitespace string with the stable code
+// `override_reason_required`.
+export interface TicketStatusChangePayload {
+  to_status: TicketStatus;
+  note?: string;
+  is_override?: boolean;
+  override_reason?: string;
 }
 
 // Sprint 23B — list of staff currently assigned to a ticket via
@@ -135,6 +202,22 @@ export type AssignedStaffEntry =
     }
   | { anonymous: true; label_key: string };
 
+// Sprint 28 Batch 15.4 — ticket "spawned from extra work" anchor.
+// Mirrors backend `TicketDetailSerializer.extra_work_origin`. Non-
+// null only for tickets created from an ExtraWorkRequest. The
+// `origin` value mirrors `RoutingDecision`: "INSTANT" tickets came
+// from a cart line that resolved to an active CustomerServicePrice
+// (no proposal phase), "PROPOSAL" tickets came from an accepted
+// proposal line.
+export interface TicketExtraWorkOrigin {
+  extra_work_request_id: number;
+  extra_work_request_title: string;
+  extra_work_request_status: ExtraWorkStatus;
+  extra_work_request_item_id: number;
+  service_name: string | null;
+  origin: "INSTANT" | "PROPOSAL";
+}
+
 export interface TicketDetail extends TicketList {
   description: string;
   room_label: string;
@@ -146,6 +229,15 @@ export interface TicketDetail extends TicketList {
   rejected_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  // Sprint 28 Batch 15.4 — non-null when this ticket was spawned by
+  // an ExtraWorkRequest line. The frontend renders a "Spawned from"
+  // panel in the ticket detail header that links back to the EW.
+  extra_work_origin: TicketExtraWorkOrigin | null;
+  // Sprint 28 Batch 11 — timestamp the ticket entered
+  // WAITING_MANAGER_REVIEW (null until STAFF marks the work as
+  // completed on the manager-review default route). Mirrored from
+  // the backend `Ticket.manager_review_at` column.
+  manager_review_at: string | null;
   status_history: TicketStatusHistory[];
   allowed_next_statuses: TicketStatus[];
   sla_status: SLAStatus;
@@ -160,6 +252,36 @@ export interface TicketDetail extends TicketList {
   // single-assignee `assigned_to` is the legacy "primary
   // assignee" and remains the field the assign-dropdown writes).
   assigned_staff: AssignedStaffEntry[];
+  // Sprint 28 Batch 11 — true when the viewer (request.user) is in
+  // the ticket's TicketStaffAssignment set. Used by the frontend
+  // to render the "Complete work" button only when the viewer is
+  // actually assigned (and is STAFF). Backend enforces the same
+  // gate on the status transition — this is purely a UX hint.
+  is_assigned_staff: boolean;
+  // Per-current-user, per-ticket capability block — backend
+  // `TicketDetailSerializer.get_actions`. Optional so older list
+  // serializers / pre-cherry-pick caches don't break typing; treat
+  // an absent `actions` as all-false (hide every action-gated control).
+  actions?: TicketDetailActions;
+}
+
+// Mirrors backend `tickets/serializers.py::TicketDetailSerializer.get_actions`.
+// `allowed_next_statuses` is the same list as `TicketDetail.allowed_next_statuses`
+// (the backend caches the computation between the two fields so they
+// cannot drift). `status_transitions` is the same data reshaped as an
+// O(1) lookup keyed by every TicketStatus value.
+// `can_override_customer_decision` is TIGHTENED to current-record:
+// True only when the viewer holds override authority AND the ticket
+// is at WAITING_CUSTOMER_APPROVAL AND APPROVED/REJECTED is in the
+// allowed-next list.
+export interface TicketDetailActions {
+  allowed_next_statuses: TicketStatus[];
+  can_override_customer_decision: boolean;
+  can_post_provider_internal_note: boolean;
+  can_post_staff_operational_note: boolean;
+  can_post_staff_completion_note: boolean;
+  can_upload_hidden_attachment: boolean;
+  status_transitions: Record<TicketStatus, boolean>;
 }
 
 // Sprint 23B — Staff-initiated "I want to do this work" request.
@@ -238,6 +360,47 @@ export interface TicketStatsByBuildingRow {
 
 export type TicketStatsByBuildingResponse = TicketStatsByBuildingRow[];
 
+// Sprint 28 Batch 9 — Extra Work dashboard aggregates.
+//
+// Mirrors backend/extra_work/views.py — `stats` and
+// `stats/by-building` endpoints. The aliases reuse the existing
+// `ExtraWorkStatus` / `ExtraWorkUrgency` / `RoutingDecision`
+// nominal types (defined later in this file) so the wire-side
+// vocabulary is enforced by the type system rather than being
+// duplicated.
+//
+// `by_status` / `by_routing` / `by_urgency` are `Partial<Record<...>>`
+// because the backend omits zero buckets. The KPI fields (`active`,
+// `awaiting_pricing`, `awaiting_customer_approval`, `urgent`) are
+// always present — they default to 0 when out-of-scope (e.g. STAFF,
+// whose `scope_extra_work_for` returns `.none()`).
+export type ExtraWorkStatusValue = ExtraWorkStatus;
+export type ExtraWorkRoutingValue = RoutingDecision;
+export type ExtraWorkUrgencyValue = ExtraWorkUrgency;
+
+export interface ExtraWorkStats {
+  total: number;
+  by_status: Partial<Record<ExtraWorkStatusValue, number>>;
+  by_routing: Partial<Record<ExtraWorkRoutingValue, number>>;
+  by_urgency: Partial<Record<ExtraWorkUrgencyValue, number>>;
+  active: number;
+  awaiting_pricing: number;
+  awaiting_customer_approval: number;
+  urgent: number;
+}
+
+export interface ExtraWorkStatsByBuildingRow {
+  building_id: number;
+  building_name: string;
+  total: number;
+  active: number;
+  awaiting_pricing: number;
+  awaiting_customer_approval: number;
+  urgent: number;
+}
+
+export type ExtraWorkStatsByBuildingResponse = ExtraWorkStatsByBuildingRow[];
+
 export type InvitationStatus =
   | "PENDING"
   | "ACCEPTED"
@@ -299,6 +462,9 @@ export interface CustomerAdmin {
   show_assigned_staff_phone: boolean;
   created_at: string;
   updated_at: string;
+  // Per-current-user, per-customer capability block from the
+  // CustomerSerializer.actions field. Optional for older list payloads.
+  actions?: CustomerActions;
 }
 
 // Sprint 14 — Customer ↔ Building (M:N) link.
@@ -377,6 +543,19 @@ export interface CustomerCompanyPolicyAdmin {
   customer_users_can_approve_extra_work_pricing: boolean;
 }
 
+// Sprint 28 Batch 15.5 — user-list scope summary surfaced as a single
+// chip per row on the Users admin page. Backend contract:
+//   - SUPER_ADMIN  →  { label: "all", count: -1 }  (sentinel: all companies)
+//   - COMPANY_ADMIN / BUILDING_MANAGER / STAFF / CUSTOMER_USER →
+//     a real count keyed by the dominant scope axis for that role
+//     (companies for provider admins, buildings for managers/staff,
+//     customers for customer users). Backend resolver lives in
+//     accounts/serializers_users.py::UserAdminListSerializer.
+export interface UserScopeSummary {
+  label: "all" | "companies" | "buildings" | "customers";
+  count: number;
+}
+
 export interface UserAdmin {
   id: number;
   email: string;
@@ -385,6 +564,11 @@ export interface UserAdmin {
   language: string;
   is_active: boolean;
   deleted_at: string | null;
+  // Sprint 28 Batch 15.5 — added by the user-list serializer. The
+  // field is required on the wire; if the backend ever returns a
+  // payload without it the type-check here flags it at the call
+  // site rather than silently rendering an empty chip.
+  scope_summary: UserScopeSummary;
 }
 
 export interface UserAdminDetail extends UserAdmin {
@@ -420,9 +604,33 @@ export interface StaffProfileAdmin {
   updated_at: string;
 }
 
+// Sprint 28 Batch 10 — per-row visibility level on BuildingStaffVisibility.
+// Mirrors backend `BuildingStaffVisibility.VisibilityLevel`:
+//   - "ASSIGNED_ONLY"            — STAFF recognised as a direct-assign
+//                                   target for tickets in this building
+//                                   but does NOT see other tickets.
+//   - "BUILDING_READ"            — sees every ticket in the building
+//                                   (legacy Sprint 24–28 behaviour;
+//                                   default value on existing rows).
+//   - "BUILDING_READ_AND_ASSIGN" — building-read PLUS may call
+//                                   POST /tickets/<id>/assign/ (B3).
+// The vocabulary is owned by the backend model field; the frontend
+// must NEVER pre-filter the building dropdown by level — every BSV
+// row (regardless of level) keeps the STAFF user reachable as an
+// assign target. The selector below is purely a write surface.
+export type StaffVisibilityLevel =
+  | "ASSIGNED_ONLY"
+  | "BUILDING_READ"
+  | "BUILDING_READ_AND_ASSIGN";
+
 // Sprint 24A — admin read/write shape for a single BuildingStaffVisibility
 // row keyed on (user, building). Editing happens via PATCH on the
-// detail URL; the only editable field is `can_request_assignment`.
+// detail URL; writable fields are `can_request_assignment` (Sprint 24A),
+// `visibility_level` (Sprint 28 Batch 10), and
+// `staff_completion_routes_to_customer` (Sprint 28 Batch 11). When the
+// completion-routes flag is true, STAFF marking a ticket in this
+// building as completed sends it straight to WAITING_CUSTOMER_APPROVAL
+// (skipping the WAITING_MANAGER_REVIEW gate). Default false.
 export interface BuildingStaffVisibilityAdmin {
   id: number;
   user_id: number;
@@ -431,7 +639,18 @@ export interface BuildingStaffVisibilityAdmin {
   building_name: string;
   building_company_id: number;
   can_request_assignment: boolean;
+  visibility_level: StaffVisibilityLevel;
+  staff_completion_routes_to_customer: boolean;
   created_at: string;
+}
+
+// Sprint 28 Batch 11 — staff-completion routing helper. Returned by
+// GET /api/tickets/<id>/staff-completion-route/. "manager_review" is
+// the default (STAFF -> BM gate); "customer_approval" is the
+// configured-bypass route from BuildingStaffVisibility.
+export type StaffCompletionRoute = "manager_review" | "customer_approval";
+export interface StaffCompletionRouteResponse {
+  route: StaffCompletionRoute;
 }
 
 export type NotificationEventType =
@@ -469,6 +688,13 @@ export interface AuditLog {
   created_at: string;
   request_ip: string | null;
   request_id: string | null;
+  // Sprint 27F-B2 — operator-supplied free text explaining a privileged
+  // mutation. Default empty for legacy / system writes.
+  reason: string;
+  // Sprint 27F-B2 — snapshot of the actor's role + scope anchors at write
+  // time. Shape: { role, user_id, company_ids, customer_id, building_id }.
+  // Empty dict for anonymous / system writes.
+  actor_scope: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +718,14 @@ export type ExtraWorkStatus =
   | "UNDER_REVIEW"
   | "PRICING_PROPOSED"
   | "CUSTOMER_APPROVED"
+  // Sprint 29 Batch 29.8 — operational segment. CUSTOMER_APPROVED is
+  // no longer terminal; the request progresses through IN_PROGRESS
+  // (driven either by the auto-sync hook on the first spawned-ticket
+  // IN_PROGRESS transition, or by a provider manual transition) into
+  // COMPLETED (auto when all spawned tickets are terminal, or
+  // provider manual).
+  | "IN_PROGRESS"
+  | "COMPLETED"
   | "CUSTOMER_REJECTED"
   | "CANCELLED";
 
@@ -524,10 +758,30 @@ export interface ExtraWorkRequestList {
   updated_at: string;
   pricing_proposed_at: string | null;
   customer_decided_at: string | null;
+  // Sprint 28 Batch 15.4 — backend now emits routing_decision on
+  // every list row so the EW list can render an at-a-glance
+  // Instant/Proposal badge per row without a per-row detail fetch.
+  routing_decision: RoutingDecision;
 }
 
 // Provider-side pricing line item — full shape with internal note.
 // Customer-side reads come back with internal_cost_note omitted.
+// Backend per-line pricing-source taxonomy emitted by every line-shape
+// serializer under extra_work (cart line, proposal line, ad-hoc pricing
+// line). Source of truth:
+// backend/extra_work/serializers.py — PRICE_SOURCE_* constants + the
+// `_classify_proposal_line_source()` helper + each get_price_source().
+//
+// Per-line-kind runtime narrowing (the backend never returns values
+// outside the listed sets for a given line kind):
+//   * ExtraWorkRequestItem (cart line)        -> "CONTRACT" | "NEEDS_PROPOSAL"
+//   * ProposalLine (proposal line, persisted) -> "CONTRACT" | "CUSTOM"
+//   * ExtraWorkPricingLineItem (free-form)    -> "CUSTOM" only
+//
+// The union type below carries all three values; the InvoiceLineRow
+// component enforces the per-kind subset via its lineKind prop.
+export type PriceSource = "CONTRACT" | "CUSTOM" | "NEEDS_PROPOSAL";
+
 export interface ExtraWorkPricingLineItem {
   id: number;
   description: string;
@@ -540,6 +794,87 @@ export interface ExtraWorkPricingLineItem {
   total: string;
   customer_visible_note: string;
   internal_cost_note?: string;
+  // Backend serializer emits these on every line shape. For free-form
+  // pricing lines (no service FK by construction) `price_source` is
+  // always "CUSTOM" and the contract fields are always null. Quoted by
+  // backend/extra_work/serializers.py — get_price_source / get_contract_*
+  // return PRICE_SOURCE_CUSTOM / None / None unconditionally.
+  price_source: PriceSource;
+  contract_unit_price: string | null;
+  contract_vat_pct: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Sprint 28 Batch 6 — routing decision returned alongside an
+// Extra Work create response. `"INSTANT"` means every cart line
+// resolved to an active CustomerServicePrice — the proposal phase
+// was skipped and operational tickets will be spawned (Batch 7).
+// `"PROPOSAL"` means at least one line had no agreed price, so
+// the request needs provider review before tickets are created.
+export type RoutingDecision = "INSTANT" | "PROPOSAL";
+
+// Sprint 28 Batch 6 — cart line item on an Extra Work request.
+// One row per service in the customer's submitted cart.
+// `service` is nullable only for legacy backfilled rows from the
+// pre-Batch-6 single-line shape; new requests always have a non-
+// null service FK. `unit_type` is denormalised from the Service
+// at create time so the line stays renderable even if the catalog
+// row is later deleted.
+export interface ExtraWorkRequestItem {
+  id: number;
+  service: number | null;
+  service_name: string;
+  // DRF serialises Decimal as a string to preserve precision.
+  quantity: string;
+  unit_type: ServiceUnitType;
+  requested_date: string;
+  customer_note: string;
+  // Per-line pricing-source fields. Cart lines have no persisted
+  // unit_price of their own; the backend live-resolves the customer's
+  // contract row at READ time. Runtime value set for cart lines is
+  // strictly {"CONTRACT", "NEEDS_PROPOSAL"} — see
+  // backend/extra_work/serializers.py::ExtraWorkRequestItemSerializer
+  // .get_price_source.
+  price_source: PriceSource;
+  contract_unit_price: string | null;
+  contract_vat_pct: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Mirrors backend `extra_work/serializers.py::ProposalLineAdminSerializer`
+// field-list at L1041-1064 verbatim. Persisted line on a Proposal.
+// `unit_price` + `vat_pct` are the operator-typed snapshot (NEVER mutated
+// on serializer read; see backend module docblock on snapshot rule).
+// `line_subtotal` / `line_vat` / `line_total` are backend-computed.
+// `price_source` runtime set for proposal lines is strictly
+// {"CONTRACT", "CUSTOM"}; classifier at L971-1020 returns those two
+// values only.
+export interface ProposalLine {
+  id: number;
+  proposal: number;
+  service: number | null;
+  service_name: string | null;
+  description: string;
+  quantity: string;
+  unit_type: ExtraWorkUnitType;
+  unit_price: string;
+  vat_pct: string;
+  customer_explanation: string;
+  // Provider-only. Customer-side ProposalLine reads omit this field
+  // (ProposalLineCustomerSerializer drops it). Optional here so a
+  // single type works for both reads; consumers MUST NOT rely on
+  // truthiness for the visibility decision — backend gating is the
+  // source of truth.
+  internal_note?: string;
+  is_approved_for_spawn: boolean;
+  line_subtotal: string;
+  line_vat: string;
+  line_total: string;
+  price_source: PriceSource;
+  contract_unit_price: string | null;
+  contract_vat_pct: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -560,7 +895,125 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   override_reason?: string;
   override_at?: string | null;
   pricing_line_items: ExtraWorkPricingLineItem[];
+  // Sprint 28 Batch 6 — cart line items + routing decision.
+  // `line_items` is always present on responses (empty array for
+  // legacy single-line requests that pre-date the cart shape).
+  // `routing_decision` is computed by the backend on every detail
+  // read.
+  line_items: ExtraWorkRequestItem[];
+  routing_decision: RoutingDecision;
   allowed_next_statuses: ExtraWorkStatus[];
+  // Per-current-user, per-EW capability block — backend
+  // `ExtraWorkRequestDetailSerializer.get_actions`. Optional so older
+  // list responses don't break typing; treat absent as all-false.
+  actions?: ExtraWorkActions;
+}
+
+// Mirrors backend `extra_work/serializers.py::ExtraWorkRequestDetailSerializer.get_actions`.
+// `can_view_pricing` is the EW-level pricing-visibility key (Proposal
+// uses the parallel `can_view_proposal_pricing` — different spelling
+// because they're separate read concerns on different resources).
+// `can_override_customer_decision` is tightened to current-record:
+// True only when authority holds AND status == PRICING_PROPOSED.
+export interface ExtraWorkActions {
+  allowed_next_statuses: ExtraWorkStatus[];
+  can_prepare_extra_work_proposal: boolean;
+  can_override_customer_decision: boolean;
+  can_view_pricing: boolean;
+  can_view_proposal_pdf: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
+}
+
+// Sprint 28 Batch 6 — cart-shaped POST payload for /extra-work/.
+// Replaces the single-line CreateExtraWorkPayload shape on the
+// client side. The backend keeps the existing parent fields and
+// adds `line_items` as the authoritative cart.
+export interface ExtraWorkRequestCartCreatePayload {
+  title: string;
+  description: string;
+  building: number;
+  customer: number;
+  category: string;
+  category_other_text?: string;
+  urgency: string;
+  preferred_date?: string | null;
+  line_items: Array<{
+    service: number;
+    // Decimal as string per DRF convention.
+    quantity: string;
+    requested_date: string;
+    customer_note?: string;
+  }>;
+}
+
+// Sprint 28 Batch 15.4 — minimal frontend shape for a Proposal row.
+// Mirrors `extra_work.serializers.ProposalListSerializer`. The full
+// admin-facing builder UI (line items, transitions, timeline) is a
+// future deliverable; the detail page only needs enough shape to
+// pick the active proposal for the PDF-download button.
+// Source of truth: backend/extra_work/models.py::ProposalStatus.
+// Backend uses CUSTOMER_APPROVED / CUSTOMER_REJECTED (not the shorter
+// ACCEPTED / REJECTED that earlier drafts of this file carried).
+export type ProposalStatus =
+  | "DRAFT"
+  | "SENT"
+  | "CUSTOMER_APPROVED"
+  | "CUSTOMER_REJECTED"
+  | "CANCELLED";
+
+export interface Proposal {
+  id: number;
+  extra_work_request: number;
+  status: ProposalStatus;
+  subtotal_amount: string;
+  vat_amount: string;
+  total_amount: string;
+  sent_at: string | null;
+  customer_decided_at: string | null;
+  created_at: string;
+  // Per-current-user, per-proposal capability block — backend
+  // `ProposalDetailSerializer.get_actions`. Optional because the list
+  // serializer omits it; detail responses always carry it.
+  actions?: ProposalActions;
+}
+
+// Detail shape — extends the lean `Proposal` (which mirrors the LIST
+// serializer) with the nested `lines` array surfaced by
+// `extra_work.serializers.ProposalDetailSerializer.get_lines`. The
+// detail response is role-aware: provider operators receive
+// ProposalLineAdminSerializer rows (carry `internal_note`), customers
+// receive ProposalLineCustomerSerializer rows (omit `internal_note`).
+// The optional `internal_note` on ProposalLine reflects this — its
+// presence on the typed object is the role discriminator, not a
+// truthiness check on the value.
+//
+// Other detail-only fields (override_by/override_reason/override_at,
+// allowed_next_statuses, created_by/_email) are present on the wire
+// but not consumed by the frontend yet; left out so the type honestly
+// reflects what we use.
+export interface ProposalDetail extends Proposal {
+  lines: ProposalLine[];
+}
+
+// Mirrors backend `extra_work/serializers.py::ProposalDetailSerializer.get_actions`.
+// `can_view_proposal_pricing` (and the parallel `can_view_proposal_pdf`)
+// remain TRUE for an assigned BM whose
+// `osius.building_manager.prepare_extra_work_proposal` is revoked —
+// only mutation actions flip False.
+export interface ProposalActions {
+  allowed_next_statuses: ProposalStatus[];
+  can_view_proposal_pricing: boolean;
+  can_view_proposal_pdf: boolean;
+  can_edit_lines: boolean;
+  can_send: boolean;
+  can_cancel: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
+  // Direct-publish (DRAFT proposal → SENT → CUSTOMER_APPROVED) is
+  // tightened to include all cheap send preconditions PLUS, for BM,
+  // the override key. See backend/extra_work/views_proposals.py.
+  can_direct_publish: boolean;
 }
 
 export interface ExtraWorkStatusHistoryEntry {
@@ -591,7 +1044,30 @@ export interface BuildingManagerMembership {
   user_full_name: string;
   user_role: Role;
   assigned_at: string;
+  // B6 — per-(BM, building) override map for the two BM-revocable
+  // osius.* keys (`osius.building_manager.override_customer_decision`,
+  // `osius.building_manager.prepare_extra_work_proposal`). Absent key
+  // = backend default (True for BM in scope); explicit `false` narrows
+  // the default for this building. Source of truth: backend
+  // `buildings/serializers_memberships.py`
+  // (BuildingManagerAssignmentSerializer.fields).
+  permission_overrides: Record<string, boolean>;
 }
+
+// Sprint 31 — frontend mirror of backend
+// `accounts.permissions_v2.BM_REVOCABLE_PERMISSION_KEYS`. The PATCH
+// surface
+// (`buildings/serializers_memberships.py::BuildingManagerAssignmentUpdateSerializer`)
+// rejects any other key with a 400 to prevent scope-bleed via the
+// override map, so this list is the closed set the UI may toggle.
+// Keep in lockstep with the backend frozenset; adding a key here
+// without updating the backend will simply 400.
+export const BM_REVOCABLE_PERMISSION_KEYS = [
+  "osius.building_manager.prepare_extra_work_proposal",
+  "osius.building_manager.override_customer_decision",
+] as const;
+export type BmRevocablePermissionKey =
+  (typeof BM_REVOCABLE_PERMISSION_KEYS)[number];
 
 export interface CustomerUserMembership {
   id: number;
@@ -601,4 +1077,156 @@ export interface CustomerUserMembership {
   user_full_name: string;
   user_role: Role;
   created_at: string;
+  // Per-row capability block — same shape as `Customer.actions`,
+  // computed against `request.user` + this membership's parent
+  // customer. Surfacing it per-row keeps the existing paginated
+  // {count, next, previous, results} envelope unchanged.
+  actions?: CustomerActions;
 }
+
+// Sprint 28 Batch 4 — Contact phone-book entries.
+//
+// A Contact is a communication-only person attached to a Customer
+// (optionally narrowed to a single Building). It is NOT a User:
+//   - no password, no login
+//   - no UserRole enum
+//   - no scope memberships or permission overrides
+//   - no last_login / is_active fields
+// See `docs/product/meeting-2026-05-15-system-requirements.md` §1
+// (Contacts vs Users are distinct entities). Promoting a Contact
+// into a User is an explicit, separate flow (parked).
+//
+// Backend serializer: `customers/serializers_contacts.py` (ContactSerializer).
+// Backend permission: SUPER_ADMIN or COMPANY_ADMIN for the customer's provider.
+export interface Contact {
+  id: number;
+  customer: number;
+  building: number | null;
+  full_name: string;
+  email: string;
+  phone: string;
+  role_label: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactCreatePayload {
+  building?: number | null;
+  full_name: string;
+  email?: string;
+  phone?: string;
+  role_label?: string;
+  notes?: string;
+}
+
+// PATCH semantics — every field optional.
+export type ContactUpdatePayload = Partial<ContactCreatePayload>;
+
+// ---------------------------------------------------------------------------
+// Sprint 28 Batch 5 — Service catalog (provider-wide) + per-customer pricing
+// ---------------------------------------------------------------------------
+//
+// A `ServiceCategory` groups related `Service` rows (e.g. "Deep cleaning",
+// "Window cleaning"). A `Service` is the catalog entry the provider offers,
+// with a *reference* default price/VAT used for display only. The instant-
+// ticket gate consults `CustomerServicePrice` rows exclusively — the
+// `default_unit_price` on Service is NOT the resolver fallback.
+//
+// Pricing resolver order (decided by the master plan, frontend just renders):
+//   1. Active CustomerServicePrice for (customer, service) → use it.
+//   2. Otherwise → no agreed price; proposal phase required.
+//
+// Backend serializers live under `backend/services/serializers*.py` and
+// `backend/customers/serializers_pricing.py`. Permission gate on every
+// catalog + pricing endpoint: SUPER_ADMIN or COMPANY_ADMIN of the customer's
+// provider company. CUSTOMER_USER, STAFF, BUILDING_MANAGER never reach them.
+
+// Unit type vocabulary mirrors the backend `ExtraWorkPricingUnitType`
+// enum already used by Extra Work proposal line items. The 2026-05-15
+// meeting (§5) uses the labels HOURLY / PER_SQM / FIXED / PER_ITEM —
+// those map onto the storage values HOURS / SQUARE_METERS / FIXED / ITEM.
+// OTHER is the historical catch-all and is kept for parity with
+// `ExtraWorkUnitType`.
+export type ServiceUnitType =
+  | "HOURS"
+  | "SQUARE_METERS"
+  | "FIXED"
+  | "ITEM"
+  | "OTHER";
+
+export interface ServiceCategory {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceCategoryCreatePayload {
+  name: string;
+  description?: string;
+  is_active?: boolean;
+}
+
+export type ServiceCategoryUpdatePayload = Partial<ServiceCategoryCreatePayload>;
+
+export interface Service {
+  id: number;
+  category: number;
+  category_name: string;
+  name: string;
+  description: string;
+  unit_type: ServiceUnitType;
+  // DRF serializes Decimal as a string to preserve precision; the form
+  // converts to/from number locally and re-emits as a string on submit.
+  default_unit_price: string;
+  default_vat_pct: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServiceCreatePayload {
+  category: number;
+  name: string;
+  description?: string;
+  unit_type: ServiceUnitType;
+  default_unit_price: string;
+  default_vat_pct: string;
+  is_active?: boolean;
+}
+
+export type ServiceUpdatePayload = Partial<ServiceCreatePayload>;
+
+// Per-customer contract price. Only an active row triggers the instant-
+// ticket path (Batch 7); absence means the request must go through the
+// proposal phase. `valid_to` null means open-ended.
+export interface CustomerServicePrice {
+  id: number;
+  customer: number;
+  service: number;
+  service_name: string;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerServicePriceCreatePayload {
+  service: number;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to?: string | null;
+  is_active?: boolean;
+}
+
+export type CustomerServicePriceUpdatePayload =
+  Partial<CustomerServicePriceCreatePayload>;
+
+

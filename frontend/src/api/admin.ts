@@ -6,17 +6,30 @@ import type {
   BuildingStaffVisibilityAdmin,
   CompanyAdmin,
   CompanyAdminMembership,
+  Contact,
+  ContactCreatePayload,
+  ContactUpdatePayload,
   CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
+  CustomerServicePrice,
+  CustomerServicePriceCreatePayload,
+  CustomerServicePriceUpdatePayload,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
   InvitationAdmin,
   PaginatedResponse,
   Role,
+  Service,
+  ServiceCategory,
+  ServiceCategoryCreatePayload,
+  ServiceCategoryUpdatePayload,
+  ServiceCreatePayload,
+  ServiceUpdatePayload,
   StaffAssignmentRequest,
   StaffAssignmentRequestStatus,
+  StaffCompletionRouteResponse,
   StaffProfileAdmin,
   UserAdmin,
   UserAdminDetail,
@@ -360,6 +373,33 @@ export async function removeBuildingManager(
   await api.delete(`/buildings/${buildingId}/managers/${userId}/`);
 }
 
+// Sprint 31 — PATCH the per-(BM, building) permission_overrides map.
+// Backend route:
+//   PATCH /api/buildings/<building_id>/managers/<user_id>/
+// Backend semantics (see
+// `buildings/views_memberships.py::BuildingManagerDeleteView.patch` +
+// `BuildingManagerAssignmentUpdateSerializer`):
+//   * SUPER_ADMIN or the building's company COMPANY_ADMIN only;
+//     anyone else gets 403,
+//   * `permission_overrides` is the only writable field,
+//   * full-replacement semantics — the supplied dict overwrites the
+//     stored one in its entirety (clear by sending `{}`),
+//   * each key must be in BM_REVOCABLE_PERMISSION_KEYS; values must
+//     be real booleans (ints / strings / null rejected with 400).
+// Returns the updated `BuildingManagerMembership` so the caller can
+// refresh state without re-listing.
+export async function updateBuildingManager(
+  buildingId: number,
+  userId: number,
+  payload: { permission_overrides: Record<string, boolean> },
+): Promise<BuildingManagerMembership> {
+  const response = await api.patch<BuildingManagerMembership>(
+    `/buildings/${buildingId}/managers/${userId}/`,
+    payload,
+  );
+  return response.data;
+}
+
 export async function listCustomerUsers(
   customerId: number,
 ): Promise<PaginatedResponse<CustomerUserMembership>> {
@@ -566,6 +606,74 @@ export async function updateCustomerPolicy(
   return response.data;
 }
 
+// ---- Sprint 28 Batch 4 — Customer contacts (phone book) -------------
+//
+// `/api/customers/<customer_id>/contacts/` — list + create.
+// `/api/customers/<customer_id>/contacts/<contact_id>/` — detail / update /
+// delete.
+//
+// Backend permission gate (both URLs): SUPER_ADMIN or COMPANY_ADMIN of the
+// customer's provider company. BUILDING_MANAGER / STAFF / CUSTOMER_USER are
+// rejected before the view body runs. Cross-customer contact id smuggling
+// is blocked by the detail view (404 on customer mismatch).
+//
+// Contacts are phone-book entries — they are NOT Users. The serializer
+// deliberately omits password / role / scope / is_active fields. Promoting
+// a Contact into a User is an explicit, separate flow (parked).
+
+export async function listCustomerContacts(
+  customerId: number,
+): Promise<Contact[]> {
+  // UnboundedPagination on the backend returns the standard
+  // {count, next, previous, results} envelope. Callers want the flat
+  // list — we unwrap it here so every page can treat the helper as a
+  // plain `Contact[]`.
+  const response = await api.get<PaginatedResponse<Contact>>(
+    `/customers/${customerId}/contacts/`,
+  );
+  return response.data.results;
+}
+
+export async function createCustomerContact(
+  customerId: number,
+  payload: ContactCreatePayload,
+): Promise<Contact> {
+  const response = await api.post<Contact>(
+    `/customers/${customerId}/contacts/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function getCustomerContact(
+  customerId: number,
+  contactId: number,
+): Promise<Contact> {
+  const response = await api.get<Contact>(
+    `/customers/${customerId}/contacts/${contactId}/`,
+  );
+  return response.data;
+}
+
+export async function updateCustomerContact(
+  customerId: number,
+  contactId: number,
+  payload: ContactUpdatePayload,
+): Promise<Contact> {
+  const response = await api.patch<Contact>(
+    `/customers/${customerId}/contacts/${contactId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteCustomerContact(
+  customerId: number,
+  contactId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/contacts/${contactId}/`);
+}
+
 // ---- Sprint 24A — Staff profile + building visibility admin -----------
 
 // `/api/users/<id>/staff-profile/` — GET returns the profile (auto-
@@ -626,14 +734,29 @@ export async function addStaffVisibility(
   return response.data;
 }
 
+// Sprint 28 Batch 10 — `visibility_level` joins `can_request_assignment`
+// as a writable field on the BSV PATCH endpoint. Both fields are
+// optional on the payload so a caller can update one without
+// resending the other; today's UI sends both for convenience.
+//
+// Sprint 28 Batch 11 — `staff_completion_routes_to_customer` joins
+// the patch surface. When true, STAFF marking a ticket in this
+// building as completed routes straight to WAITING_CUSTOMER_APPROVAL
+// (skipping the WAITING_MANAGER_REVIEW gate). Default false.
+export interface StaffVisibilityPatch {
+  can_request_assignment?: boolean;
+  visibility_level?: import("./types").StaffVisibilityLevel;
+  staff_completion_routes_to_customer?: boolean;
+}
+
 export async function updateStaffVisibility(
   userId: number,
   buildingId: number,
-  canRequestAssignment: boolean,
+  patch: StaffVisibilityPatch,
 ): Promise<BuildingStaffVisibilityAdmin> {
   const response = await api.patch<BuildingStaffVisibilityAdmin>(
     `/users/${userId}/staff-visibility/${buildingId}/`,
-    { can_request_assignment: canRequestAssignment },
+    patch,
   );
   return response.data;
 }
@@ -778,4 +901,203 @@ export async function removeTicketStaffAssignment(
   userId: number,
 ): Promise<void> {
   await api.delete(`/tickets/${ticketId}/staff-assignments/${userId}/`);
+}
+
+// ---- Sprint 28 Batch 11 — Staff completion routing helper -------------
+//
+// `GET /api/tickets/<id>/staff-completion-route/` — returns the
+// resolved destination for STAFF marking this ticket as completed.
+// STAFF must have an active TicketStaffAssignment row; the backend
+// 404s otherwise. Provider operators get the conservative
+// "manager_review" default without `?staff_id=<id>`. CUSTOMER_USER
+// never reaches this endpoint (404 by scope).
+
+export async function getStaffCompletionRoute(
+  ticketId: number,
+): Promise<StaffCompletionRouteResponse> {
+  const response = await api.get<StaffCompletionRouteResponse>(
+    `/tickets/${ticketId}/staff-completion-route/`,
+  );
+  return response.data;
+}
+
+// ---- Sprint 28 Batch 5 — Service catalog (provider-wide) ----------------
+//
+// `/api/services/categories/` and `/api/services/` — list + create.
+// `/api/services/categories/<id>/` and `/api/services/<id>/` — detail /
+// update / delete.
+//
+// Backend permission gate: SUPER_ADMIN or COMPANY_ADMIN of ANY company.
+// CUSTOMER_USER / BUILDING_MANAGER / STAFF never reach these views.
+// List endpoints accept `?category=<id>` (services only) and
+// `?is_active=true|false` filters. Lists return the standard
+// {count, next, previous, results} envelope; we unwrap to a flat array
+// for the consuming page (the catalog page renders the full list in
+// one go — pagination is not a UX concern at this batch's row count).
+
+export interface ServiceCategoryListParams {
+  is_active?: boolean;
+}
+
+export async function listServiceCategories(
+  params: ServiceCategoryListParams = {},
+): Promise<ServiceCategory[]> {
+  const query: Record<string, string> = {};
+  if (params.is_active !== undefined) {
+    query.is_active = params.is_active ? "true" : "false";
+  }
+  const response = await api.get<PaginatedResponse<ServiceCategory>>(
+    "/services/categories/",
+    { params: query },
+  );
+  return response.data.results;
+}
+
+export async function createServiceCategory(
+  payload: ServiceCategoryCreatePayload,
+): Promise<ServiceCategory> {
+  const response = await api.post<ServiceCategory>(
+    "/services/categories/",
+    payload,
+  );
+  return response.data;
+}
+
+export async function getServiceCategory(id: number): Promise<ServiceCategory> {
+  const response = await api.get<ServiceCategory>(`/services/categories/${id}/`);
+  return response.data;
+}
+
+export async function updateServiceCategory(
+  id: number,
+  payload: ServiceCategoryUpdatePayload,
+): Promise<ServiceCategory> {
+  const response = await api.patch<ServiceCategory>(
+    `/services/categories/${id}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteServiceCategory(id: number): Promise<void> {
+  await api.delete(`/services/categories/${id}/`);
+}
+
+export interface ServiceListParams {
+  category?: number;
+  is_active?: boolean;
+}
+
+export async function listServices(
+  params: ServiceListParams = {},
+): Promise<Service[]> {
+  const query: Record<string, string | number> = {};
+  if (params.category !== undefined) {
+    query.category = params.category;
+  }
+  if (params.is_active !== undefined) {
+    query.is_active = params.is_active ? "true" : "false";
+  }
+  const response = await api.get<PaginatedResponse<Service>>("/services/", {
+    params: query,
+  });
+  return response.data.results;
+}
+
+export async function createService(
+  payload: ServiceCreatePayload,
+): Promise<Service> {
+  const response = await api.post<Service>("/services/", payload);
+  return response.data;
+}
+
+export async function getService(id: number): Promise<Service> {
+  const response = await api.get<Service>(`/services/${id}/`);
+  return response.data;
+}
+
+export async function updateService(
+  id: number,
+  payload: ServiceUpdatePayload,
+): Promise<Service> {
+  const response = await api.patch<Service>(`/services/${id}/`, payload);
+  return response.data;
+}
+
+export async function deleteService(id: number): Promise<void> {
+  await api.delete(`/services/${id}/`);
+}
+
+// ---- Sprint 28 Batch 5 — Per-customer pricing ---------------------------
+//
+// `/api/customers/<customer_id>/pricing/` — list + create.
+// `/api/customers/<customer_id>/pricing/<price_id>/` — detail / update /
+// delete.
+//
+// Backend permission gate: SUPER_ADMIN or COMPANY_ADMIN of the customer's
+// provider company. Cross-provider COMPANY_ADMIN attempts return 403.
+// Cross-customer price id smuggling is blocked by the detail view (404
+// when the price's customer does not match the URL).
+//
+// List filter `?service=<id>` narrows the rows to one service. Default
+// backend ordering is most-recent active row first, so a fresh PATCH
+// floats to the top of the list without explicit re-sort.
+
+export interface CustomerServicePriceListParams {
+  service?: number;
+}
+
+export async function listCustomerPrices(
+  customerId: number,
+  params: CustomerServicePriceListParams = {},
+): Promise<CustomerServicePrice[]> {
+  const query: Record<string, string | number> = {};
+  if (params.service !== undefined) {
+    query.service = params.service;
+  }
+  const response = await api.get<PaginatedResponse<CustomerServicePrice>>(
+    `/customers/${customerId}/pricing/`,
+    { params: query },
+  );
+  return response.data.results;
+}
+
+export async function createCustomerPrice(
+  customerId: number,
+  payload: CustomerServicePriceCreatePayload,
+): Promise<CustomerServicePrice> {
+  const response = await api.post<CustomerServicePrice>(
+    `/customers/${customerId}/pricing/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function getCustomerPrice(
+  customerId: number,
+  priceId: number,
+): Promise<CustomerServicePrice> {
+  const response = await api.get<CustomerServicePrice>(
+    `/customers/${customerId}/pricing/${priceId}/`,
+  );
+  return response.data;
+}
+
+export async function updateCustomerPrice(
+  customerId: number,
+  priceId: number,
+  payload: CustomerServicePriceUpdatePayload,
+): Promise<CustomerServicePrice> {
+  const response = await api.patch<CustomerServicePrice>(
+    `/customers/${customerId}/pricing/${priceId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteCustomerPrice(
+  customerId: number,
+  priceId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/pricing/${priceId}/`);
 }

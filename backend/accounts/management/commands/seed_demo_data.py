@@ -440,6 +440,14 @@ class Command(BaseCommand):
                 User, super_admin, company_spec, reset_tickets=options["reset_tickets"]
             )
 
+        # Sprint 29 Batch 29.8.5 — provider-global service catalog +
+        # one demo Extra Work request that's already operational so
+        # the 29.8 frontend surfaces (spawned-tickets panel, IN_PROGRESS
+        # auto-trigger, cancel-with-warning) have data to demo against.
+        # Both helpers are idempotent.
+        self._seed_service_catalog()
+        self._seed_demo_extra_work(User, super_admin)
+
         self._print_summary(prune_summary=prune_summary)
 
     # -----------------------------------------------------------------
@@ -877,14 +885,325 @@ class Command(BaseCommand):
             TicketStatus.CLOSED,
         ]
         for stop in path:
+            # Sprint 27F-B1 — provider-driven customer-decision transitions
+            # (WAITING_CUSTOMER_APPROVAL → APPROVED/REJECTED) are now coerced
+            # to is_override=True with a mandatory reason. The seed walks
+            # tickets through APPROVED as super_admin to build fixtures, so
+            # pass a fixture-marker reason on every hop (no-op on hops the
+            # coercion doesn't touch).
             ticket = apply_transition(
                 ticket,
                 super_admin,
                 stop,
                 note=f"seed_demo_data → {stop}",
+                override_reason="seed_demo_data fixture walk",
             )
             if str(stop) == str(target_status):
                 return
+
+    # -----------------------------------------------------------------
+    # Sprint 29 Batch 29.8.5 — provider-global service catalog
+    # -----------------------------------------------------------------
+    def _seed_service_catalog(self):
+        """
+        Idempotently upsert a small but realistic provider-side service
+        catalog (4 categories, 14 services). The catalog is provider-
+        wide reference data: it is NOT scoped per-company, so we seed
+        it once per `handle()` invocation rather than per company.
+
+        Imported here (not at module top) to keep the seed command's
+        boot time fast for stacks that don't run extra_work, and to
+        match the lazy-import style used for `accounts.StaffProfile`
+        in `_seed_company`.
+        """
+        from decimal import Decimal
+
+        from extra_work.models import (
+            ExtraWorkPricingUnitType,
+            Service,
+            ServiceCategory,
+        )
+
+        catalog = [
+            (
+                "Cleaning",
+                "Regular cleaning services across customer premises.",
+                [
+                    ("Standard cleaning shift", ExtraWorkPricingUnitType.HOURS, Decimal("32.50")),
+                    ("Deep cleaning", ExtraWorkPricingUnitType.HOURS, Decimal("42.00")),
+                    ("Carpet shampoo", ExtraWorkPricingUnitType.SQUARE_METERS, Decimal("4.75")),
+                    ("Floor strip and seal", ExtraWorkPricingUnitType.SQUARE_METERS, Decimal("7.25")),
+                ],
+            ),
+            (
+                "Windows & Glass",
+                "Window, glass and façade cleaning.",
+                [
+                    ("Interior window cleaning", ExtraWorkPricingUnitType.SQUARE_METERS, Decimal("3.50")),
+                    ("Exterior window cleaning", ExtraWorkPricingUnitType.SQUARE_METERS, Decimal("5.50")),
+                    ("Glass partition polish", ExtraWorkPricingUnitType.HOURS, Decimal("36.00")),
+                ],
+            ),
+            (
+                "Sanitary & Consumables",
+                "Sanitary maintenance and consumable refills.",
+                [
+                    ("Sanitary deep clean", ExtraWorkPricingUnitType.HOURS, Decimal("38.00")),
+                    ("Consumables refill — standard", ExtraWorkPricingUnitType.FIXED, Decimal("85.00")),
+                    ("Soap dispenser replacement", ExtraWorkPricingUnitType.ITEM, Decimal("45.00")),
+                    ("Hand-towel dispenser swap", ExtraWorkPricingUnitType.ITEM, Decimal("55.00")),
+                ],
+            ),
+            (
+                "Specialty",
+                "Specialty and one-off services.",
+                [
+                    ("Event setup cleaning", ExtraWorkPricingUnitType.HOURS, Decimal("45.00")),
+                    ("Waste removal — small van", ExtraWorkPricingUnitType.FIXED, Decimal("125.00")),
+                    ("Emergency call-out", ExtraWorkPricingUnitType.HOURS, Decimal("75.00")),
+                ],
+            ),
+        ]
+
+        cat_count = 0
+        svc_count = 0
+        for cat_name, cat_description, services in catalog:
+            category, _ = ServiceCategory.objects.update_or_create(
+                name=cat_name,
+                defaults={"description": cat_description, "is_active": True},
+            )
+            cat_count += 1
+            for svc_name, unit_type, default_price in services:
+                Service.objects.update_or_create(
+                    category=category,
+                    name=svc_name,
+                    defaults={
+                        "unit_type": unit_type,
+                        "default_unit_price": default_price,
+                        "default_vat_pct": Decimal("21.00"),
+                        "is_active": True,
+                    },
+                )
+                svc_count += 1
+
+        self._service_catalog_counts = {
+            "categories": cat_count,
+            "services": svc_count,
+        }
+
+    # -----------------------------------------------------------------
+    # Sprint 29 Batch 29.8.5 — demo Extra Work request with spawned tickets
+    # -----------------------------------------------------------------
+    def _seed_demo_extra_work(self, User, super_admin):
+        """
+        Create one demo Extra Work request that's already operational
+        (CUSTOMER_APPROVED with spawned tickets, then driven to
+        IN_PROGRESS via a ticket transition). This is the fixture the
+        Sprint 29 Batch 29.8 frontend surfaces need to demo:
+          * the operational-segment status badge (IN_PROGRESS),
+          * the "Spawned tickets" panel,
+          * the cancel-with-warning UX,
+          * the auto-trigger that lifts the parent EW into IN_PROGRESS
+            when its first spawned ticket enters IN_PROGRESS.
+
+        Uses the INSTANT routing path:
+          1. Seed a `CustomerServicePrice` row for the B Amsterdam
+             customer on a Cleaning catalog service.
+          2. Create the request directly in `CUSTOMER_APPROVED` state
+             with one `ExtraWorkRequestItem` line pointing at that
+             service.
+          3. Call `spawn_tickets_for_request` to create the operational
+             tickets attached to the line item.
+          4. Drive one of the spawned tickets to IN_PROGRESS via
+             `tickets.state_machine.apply_transition`. The
+             29.8 auto-sync hook then lifts the parent EW to
+             IN_PROGRESS automatically.
+
+        We bypass the serializer path (which would re-run the price
+        resolver) because the seed needs deterministic state — the
+        INSTANT route requires `routing_decision=INSTANT` which the
+        serializer computes from the resolver. By writing the rows
+        directly we sidestep the timing dependency on `date.today()`
+        falling inside the contract window.
+
+        Idempotency guard: a marker title ensures a re-run does not
+        create duplicates. If the lookup for any required actor or
+        building fails, the helper logs a warning and returns without
+        crashing the seed.
+        """
+        # Lazy imports — same rationale as `_seed_service_catalog`.
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        from extra_work.instant_tickets import spawn_tickets_for_request
+        from extra_work.models import (
+            CustomerServicePrice,
+            ExtraWorkCategory,
+            ExtraWorkRequest,
+            ExtraWorkRequestItem,
+            ExtraWorkRoutingDecision,
+            ExtraWorkStatus,
+            Service,
+        )
+        from tickets.models import Ticket, TicketStatus
+        from tickets.state_machine import apply_transition as ticket_apply
+
+        demo_marker = "[DEMO] Lobby strip and seal (29.8.5)"
+
+        # Resolve the Osius demo company by slug — keeps the lookup
+        # decoupled from any rename of `COMPANIES` in this file.
+        company = Company.objects.filter(slug="osius-demo").first()
+        if company is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping demo Extra Work — osius-demo "
+                "company not found."
+            ))
+            return
+
+        building = Building.objects.filter(
+            company=company, name="B1 Amsterdam"
+        ).first()
+        if building is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping demo Extra Work — B1 Amsterdam "
+                "building not found."
+            ))
+            return
+
+        customer = Customer.objects.filter(
+            company=company, name="B Amsterdam"
+        ).first()
+        if customer is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping demo Extra Work — B Amsterdam "
+                "customer not found."
+            ))
+            return
+
+        creator = User.objects.filter(
+            email="tom-customer-b-amsterdam@b-amsterdam.demo"
+        ).first()
+        if creator is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping demo Extra Work — Tom (creator) "
+                "not found."
+            ))
+            return
+
+        # Pick a service from the catalog seeded by
+        # `_seed_service_catalog` above. Use "Floor strip and seal" to
+        # match the demo marker title; fall back to the first Cleaning
+        # service if it's missing (e.g. an operator renamed it).
+        service = (
+            Service.objects.filter(name="Floor strip and seal").first()
+            or Service.objects.filter(category__name="Cleaning").first()
+        )
+        if service is None:
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping demo Extra Work — no catalog "
+                "service available (run _seed_service_catalog first)."
+            ))
+            return
+
+        # Idempotency: skip if the demo EW already exists.
+        if ExtraWorkRequest.objects.filter(
+            company=company, title=demo_marker
+        ).exists():
+            self._demo_extra_work_summary = {
+                "skipped": True,
+                "title": demo_marker,
+            }
+            return
+
+        # Contract-price row valid from yesterday onward so the
+        # `resolve_price` call at spawn time succeeds regardless of
+        # the seed's calendar day. The 29.8.5 demo EW uses a fixed
+        # requested date one day in the future (well within the
+        # open-ended contract window).
+        today = date.today()
+        CustomerServicePrice.objects.update_or_create(
+            service=service,
+            customer=customer,
+            valid_from=today - timedelta(days=1),
+            defaults={
+                "unit_price": Decimal("7.25"),
+                "vat_pct": Decimal("21.00"),
+                "valid_to": None,
+                "is_active": True,
+            },
+        )
+
+        # Create the parent EW directly in CUSTOMER_APPROVED state.
+        # The serializer path would compute routing_decision via
+        # resolve_price; for the seed we write it explicitly so the
+        # downstream spawn helper accepts the row regardless of date
+        # drift in CI / dev environments.
+        ew = ExtraWorkRequest.objects.create(
+            company=company,
+            building=building,
+            customer=customer,
+            created_by=creator,
+            title=demo_marker,
+            description=(
+                "Lobby floor strip-and-seal job. Auto-approved via "
+                "customer-specific contract price. Seeded by "
+                "seed_demo_data (Sprint 29 Batch 29.8.5) so the "
+                "operational-segment UI has demoable data."
+            ),
+            category=ExtraWorkCategory.DEEP_CLEANING,
+            status=ExtraWorkStatus.REQUESTED,
+            routing_decision=ExtraWorkRoutingDecision.INSTANT,
+        )
+
+        requested_date = today + timedelta(days=1)
+        line = ExtraWorkRequestItem.objects.create(
+            extra_work_request=ew,
+            service=service,
+            quantity=Decimal("120.00"),
+            unit_type=service.unit_type,
+            requested_date=requested_date,
+            customer_note="Lobby floor — full strip + double seal coat.",
+        )
+
+        # Spawn operational tickets. The helper drives REQUESTED ->
+        # CUSTOMER_APPROVED on success (writing the parent status +
+        # history row directly, mirroring the production INSTANT path).
+        # MUST be wrapped in an atomic block per the helper's contract;
+        # we already run inside the seed's @transaction.atomic, so the
+        # call is safe.
+        spawned = spawn_tickets_for_request(ew, actor=creator)
+
+        spawned_count = len(spawned)
+        ew.refresh_from_db()
+
+        # Drive one spawned ticket to IN_PROGRESS so the 29.8 auto-sync
+        # hook lifts the parent EW into IN_PROGRESS. Pick the first
+        # ticket and walk OPEN -> IN_PROGRESS. The super_admin actor
+        # bypasses scope checks.
+        ticket_statuses: list[tuple[int, str]] = []
+        if spawned:
+            first = spawned[0]
+            ticket_apply(
+                first,
+                super_admin,
+                TicketStatus.IN_PROGRESS,
+                note="seed_demo_data — demo IN_PROGRESS for 29.8 UI",
+            )
+            ew.refresh_from_db()
+
+            for t in Ticket.objects.filter(
+                extra_work_request_item=line
+            ).order_by("id"):
+                ticket_statuses.append((t.id, t.status))
+
+        self._demo_extra_work_summary = {
+            "skipped": False,
+            "ew_id": ew.id,
+            "title": demo_marker,
+            "status": ew.status,
+            "spawned_count": spawned_count,
+            "ticket_statuses": ticket_statuses,
+        }
 
     # -----------------------------------------------------------------
     # Output
@@ -892,6 +1211,30 @@ class Command(BaseCommand):
     def _print_summary(self, *, prune_summary=None):
         out = self.stdout.write
         out(self.style.SUCCESS("seed_demo_data: done."))
+        catalog = getattr(self, "_service_catalog_counts", None)
+        if catalog:
+            out("")
+            out(
+                f"Service catalog: {catalog['categories']} categories, "
+                f"{catalog['services']} services."
+            )
+        demo_ew = getattr(self, "_demo_extra_work_summary", None)
+        if demo_ew:
+            out("")
+            if demo_ew.get("skipped"):
+                out(
+                    f"Demo Extra Work already present (title='{demo_ew['title']}') "
+                    "— left untouched."
+                )
+            else:
+                ticket_repr = ", ".join(
+                    f"#{tid}={tstatus}" for tid, tstatus in demo_ew["ticket_statuses"]
+                ) or "(none)"
+                out(
+                    f"Demo Extra Work created: id={demo_ew['ew_id']} "
+                    f"status={demo_ew['status']} spawned={demo_ew['spawned_count']} "
+                    f"tickets=[{ticket_repr}]"
+                )
         if prune_summary and prune_summary["users"] > 0:
             out("")
             out(

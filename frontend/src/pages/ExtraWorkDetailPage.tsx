@@ -1,67 +1,143 @@
 // Sprint 26C — Extra Work detail page.
+// Sprint 28 Batch 6 — translated through the `extra_work` i18n
+// namespace; renders the cart `line_items` array and the
+// `routing_decision` badge. The pricing-proposal panel, workflow
+// transitions, and provider override block were functionally
+// unchanged.
+// Sprint 28 Batch 15.4 — two-column rebuild. The page now uses
+// `<PageHeader>` with a `meta` slot for status/route/category/urgency,
+// a 60/40 grid on desktop (left = read-only data, right = sticky
+// action stack), `formatMoney`/`formatDate` from `lib/intl`, the new
+// `<RejectReasonDialog>` for customer rejection (the backend now
+// requires `customer_reject_reason` on CUSTOMER_USER -> CUSTOMER_REJECTED),
+// and a proposal PDF download button when an active proposal exists.
+// All locked testids from prior sprints (extra-work-detail-page,
+// extra-work-detail-routing-decision, extra-work-customer-contacts-*,
+// extra-work-detail-line-items*, extra-work-detail-line-item-row)
+// MUST keep resolving.
 //
 // Role-aware view:
 //   * CUSTOMER_USER: details, pricing line items (without
-//     internal_cost_note), totals, and the customer approve/reject
-//     CTAs when status === PRICING_PROPOSED and the backend's
-//     allowed_next_statuses include the corresponding transition.
+//     internal_cost_note), totals, customer approve/reject CTAs when
+//     status === PRICING_PROPOSED and backend allows the transition.
+//     Reject opens RejectReasonDialog which threads the typed reason
+//     as `customer_reject_reason` on the transition payload.
 //   * Provider operators (SUPER_ADMIN / COMPANY_ADMIN /
-//     BUILDING_MANAGER): all of the above PLUS the pricing-line-
-//     item create form, transition CTAs (UNDER_REVIEW,
-//     PRICING_PROPOSED, CANCELLED), and a customer-override block
-//     with mandatory reason.
+//     BUILDING_MANAGER): all of the above PLUS the pricing-line-item
+//     create form, transition CTAs (UNDER_REVIEW, PRICING_PROPOSED,
+//     CANCELLED), the customer-override block with mandatory reason,
+//     and (when applicable) the proposal-PDF download button.
 //
 // The backend computes pricing totals and gates all transitions.
 // The frontend is defense-in-depth only — it renders only what the
 // backend's allowed_next_statuses field says.
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, ChevronLeft } from "lucide-react";
+import { FileSearch, FileText } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
+import axios from "axios";
+
+import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
 import {
   createExtraWorkPricingItem,
   deleteExtraWorkPricingItem,
+  directPublishProposal,
+  fetchProposalPdf,
+  getProposalDetail,
   getExtraWork,
+  listProposalsForEw,
+  listSpawnedTickets,
+  retrySpawnTicketsForExtraWork,
   transitionExtraWork,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import type {
+  Contact,
+  ExtraWorkCategory,
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
   ExtraWorkUnitType,
+  ExtraWorkUrgency,
+  Proposal,
+  ProposalDetail,
   Role,
+  ServiceUnitType,
+  TicketList,
+  TicketStatus,
 } from "../api/types";
+import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
+import { EmptyState } from "../components/EmptyState";
+import {
+  InvoiceLineRow,
+  InvoiceLineTotalsRow,
+} from "../components/InvoiceLineRow";
+import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
+import { PageHeader } from "../components/PageHeader";
+import { RejectReasonDialog } from "../components/RejectReasonDialog";
+import { RouteBadge } from "../components/RouteBadge";
+import { StatusBadge } from "../components/StatusBadge";
+import { useToast } from "../components/ToastProvider";
+import { formatDate, formatDateTime } from "../lib/intl";
+
+// Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
+// any of these is considered "done" for the cancel-warning gate; only
+// non-terminal spawned tickets trigger the dialog warning panel.
+const TERMINAL_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<TicketStatus>([
+  "APPROVED",
+  "CLOSED",
+  "REJECTED",
+]);
 
 
-const STATUS_LABELS: Record<ExtraWorkStatus, string> = {
-  REQUESTED: "Requested",
-  UNDER_REVIEW: "Under review",
-  PRICING_PROPOSED: "Pricing proposed",
-  CUSTOMER_APPROVED: "Customer approved",
-  CUSTOMER_REJECTED: "Customer rejected",
-  CANCELLED: "Cancelled",
+const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
+  REQUESTED: "status.requested",
+  UNDER_REVIEW: "status.under_review",
+  PRICING_PROPOSED: "status.pricing_proposed",
+  CUSTOMER_APPROVED: "status.customer_approved",
+  // Sprint 29 Batch 29.8 — operational segment status labels.
+  IN_PROGRESS: "status.in_progress",
+  COMPLETED: "status.completed",
+  CUSTOMER_REJECTED: "status.customer_rejected",
+  CANCELLED: "status.cancelled",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  DEEP_CLEANING: "Deep cleaning",
-  WINDOW_CLEANING: "Window cleaning",
-  FLOOR_MAINTENANCE: "Floor maintenance",
-  SANITARY_SERVICE: "Sanitary service",
-  WASTE_REMOVAL: "Waste removal",
-  FURNITURE_MOVING: "Furniture moving",
-  EVENT_CLEANING: "Event cleaning",
-  EMERGENCY_CLEANING: "Emergency cleaning",
-  OTHER: "Other",
+const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
+  DEEP_CLEANING: "category.deep_cleaning",
+  WINDOW_CLEANING: "category.window_cleaning",
+  FLOOR_MAINTENANCE: "category.floor_maintenance",
+  SANITARY_SERVICE: "category.sanitary_service",
+  WASTE_REMOVAL: "category.waste_removal",
+  FURNITURE_MOVING: "category.furniture_moving",
+  EVENT_CLEANING: "category.event_cleaning",
+  EMERGENCY_CLEANING: "category.emergency_cleaning",
+  OTHER: "category.other",
 };
 
-const UNIT_TYPES: { value: ExtraWorkUnitType; label: string }[] = [
-  { value: "HOURS", label: "Hours" },
-  { value: "SQUARE_METERS", label: "m²" },
-  { value: "FIXED", label: "Fixed price" },
-  { value: "ITEM", label: "Per item" },
-  { value: "OTHER", label: "Other" },
+const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
+  NORMAL: "urgency.normal",
+  HIGH: "urgency.high",
+  URGENT: "urgency.urgent",
+};
+
+// Sprint 26C ExtraWorkUnitType and Sprint 28 B5 ServiceUnitType
+// share the same storage values; one i18n map covers both.
+const UNIT_TYPE_I18N_KEY: Record<ExtraWorkUnitType | ServiceUnitType, string> = {
+  HOURS: "unit_type.hours",
+  SQUARE_METERS: "unit_type.square_meters",
+  FIXED: "unit_type.fixed",
+  ITEM: "unit_type.item",
+  OTHER: "unit_type.other",
+};
+
+const UNIT_TYPE_VALUES: ExtraWorkUnitType[] = [
+  "HOURS",
+  "SQUARE_METERS",
+  "FIXED",
+  "ITEM",
+  "OTHER",
 ];
 
 const PROVIDER_ROLES: Set<Role> = new Set([
@@ -70,37 +146,68 @@ const PROVIDER_ROLES: Set<Role> = new Set([
   "BUILDING_MANAGER",
 ]);
 
+// Sprint 30 Batch 30.1 — roles allowed to call POST /extra-work/<id>/spawn/.
+// The backend gate is intentionally narrower than the broader provider set
+// (BUILDING_MANAGER is excluded — this is a corrective admin action). The
+// UI must mirror that gate exactly so the button never renders for a role
+// the API will refuse anyway.
+const RETRY_SPAWN_ROLES: Set<Role> = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
-function fmtDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString(undefined, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return value;
+// Sprint 30 Batch 30.1 — map the backend's stable `code` field on the
+// retry-spawn endpoint to a localized toast title. Any other / missing
+// code falls back to the generic message.
+type RetrySpawnErrorCode =
+  | "spawn_wrong_status"
+  | "spawn_already_done"
+  | "spawn_forbidden_role"
+  | "spawn_forbidden_scope"
+  | "spawn_generic";
+
+const RETRY_SPAWN_ERROR_I18N_KEY: Record<RetrySpawnErrorCode, string> = {
+  spawn_wrong_status: "detail.retry_spawn_error_wrong_status",
+  spawn_already_done: "detail.retry_spawn_error_already_done",
+  spawn_forbidden_role: "detail.retry_spawn_error_forbidden",
+  spawn_forbidden_scope: "detail.retry_spawn_error_forbidden",
+  spawn_generic: "detail.retry_spawn_error_generic",
+};
+
+function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data;
+    if (data && typeof data === "object") {
+      const code = (data as Record<string, unknown>).code;
+      if (typeof code === "string") {
+        switch (code) {
+          case "spawn_wrong_status":
+          case "spawn_already_done":
+          case "spawn_forbidden_role":
+          case "spawn_forbidden_scope":
+            return code;
+        }
+      }
+    }
   }
-}
-
-function fmtMoney(value: string | null | undefined): string {
-  if (!value) return "—";
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toFixed(2);
+  return "spawn_generic";
 }
 
 
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
   const { me } = useAuth();
+  const { t } = useTranslation(["extra_work", "common"]);
+  const { push: pushToast } = useToast();
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Sprint 28 Batch 4 — read-only Customer Contacts panel. Backend
+  // `IsSuperAdminOrCompanyAdminForCompany` gate on the contacts list
+  // rejects everyone else with 403; mirror the gate here so
+  // BUILDING_MANAGER / CUSTOMER_USER never emit the call.
+  const canSeeCustomerContacts =
+    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
+  const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
 
   // Pricing-line-item form (provider only).
   const [pricingForm, setPricingForm] = useState({
@@ -129,6 +236,39 @@ export function ExtraWorkDetailPage() {
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideError, setOverrideError] = useState("");
 
+  // Sprint 28 Batch 15.4 — customer reject-reason dialog state.
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+
+  // Sprint 28 Batch 15.4 — proposals list (used only to pick the
+  // active proposal for the PDF download button).
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  // Per-record proposal actions for the DRAFT proposal — needed to
+  // gate the new direct-publish button AND the read-only proposal-
+  // lines section. The list endpoint above returns the lean
+  // serializer (no `actions`, no `lines`); we fetch the detail
+  // separately for the draft when one exists.
+  const [draftProposalDetail, setDraftProposalDetail] =
+    useState<ProposalDetail | null>(null);
+  // Direct-publish flow state.
+  const [directPublishOpen, setDirectPublishOpen] = useState(false);
+  const [directPublishReason, setDirectPublishReason] = useState("");
+  const [directPublishBusy, setDirectPublishBusy] = useState(false);
+  const [directPublishError, setDirectPublishError] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  // Sprint 30 Batch 30.1 — spawned tickets fetched via the new
+  // server-side `extra_work_request` filter. Drives both the
+  // read-only panel (between line items and actions) and the
+  // cancel-confirmation warning.
+  const [spawnedTickets, setSpawnedTickets] = useState<TicketList[]>([]);
+  // Sprint 30 Batch 30.1 — retry-spawn button busy flag.
+  const [retrySpawnBusy, setRetrySpawnBusy] = useState(false);
+  // Sprint 29 Batch 29.8 — cancel-confirmation dialog. Wraps the
+  // existing CANCELLED transition path so the warning about lingering
+  // spawned tickets renders before the destructive action fires.
+  const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+
   // ----- load -----
   useEffect(() => {
     if (!id) return;
@@ -152,8 +292,122 @@ export function ExtraWorkDetailPage() {
 
   const isProvider = useMemo(
     () => !!me?.role && PROVIDER_ROLES.has(me.role),
-    [me?.role],
+    [me],
   );
+
+  // Sprint 28 Batch 4 — fetch contacts when the request loads, but
+  // only for admin viewers (mirrors backend gate). Failures collapse
+  // silently to the empty-state panel.
+  const ewCustomerId = ew?.customer ?? null;
+  useEffect(() => {
+    const cancelled = { current: false };
+    const customerId =
+      canSeeCustomerContacts && ewCustomerId ? ewCustomerId : null;
+    if (customerId === null) {
+      queueMicrotask(() => {
+        if (!cancelled.current) setCustomerContacts([]);
+      });
+    } else {
+      listCustomerContacts(customerId)
+        .then((list) => {
+          if (!cancelled.current) setCustomerContacts(list);
+        })
+        .catch(() => {
+          if (!cancelled.current) setCustomerContacts([]);
+        });
+    }
+    return () => {
+      cancelled.current = true;
+    };
+  }, [canSeeCustomerContacts, ewCustomerId]);
+
+  // Sprint 28 Batch 15.4 — proposals fetch. Failures collapse to an
+  // empty list so the PDF card simply does not render. The endpoint
+  // is open to both provider operators and the EW's customer-side
+  // viewers, but the backend filters out DRAFT for customers.
+  const ewId = ew?.id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (ewId === null) {
+      // Defer setState to avoid the react-hooks/set-state-in-effect
+      // cascading-renders warning while still emitting the reset.
+      queueMicrotask(() => {
+        if (!cancelled) setProposals([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listProposalsForEw(ewId)
+      .then((list) => {
+        if (!cancelled) setProposals(list);
+      })
+      .catch(() => {
+        if (!cancelled) setProposals([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId]);
+
+  // When a DRAFT proposal exists, fetch its detail so we have
+  // `actions.can_direct_publish` for the direct-publish button. The
+  // list serializer omits `actions`; the detail endpoint is the only
+  // wire shape that carries it. Silently collapses to `null` on 403/
+  // not-found (e.g. customer-side caller cannot see DRAFT proposals).
+  const draftProposal = proposals.find((p) => p.status === "DRAFT") ?? null;
+  const draftProposalId = draftProposal?.id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (ewId === null || draftProposalId === null) {
+      queueMicrotask(() => {
+        if (!cancelled) setDraftProposalDetail(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    getProposalDetail(ewId, draftProposalId)
+      .then((detail) => {
+        if (!cancelled) setDraftProposalDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setDraftProposalDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, draftProposalId]);
+
+  // Sprint 30 Batch 30.1 — spawned tickets fetch using the new
+  // server-side `extra_work_request` filter (walks both the cart-item
+  // FK chain and the proposal-line FK chain). Replaces the Sprint 29
+  // Batch 29.8 client-side N+1 walk.
+  //
+  // Failures collapse silently to an empty list so the panel simply
+  // does not render. Scope is still enforced server-side via
+  // `scope_tickets_for`.
+  useEffect(() => {
+    let cancelled = false;
+    if (ewId === null) {
+      queueMicrotask(() => {
+        if (!cancelled) setSpawnedTickets([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listSpawnedTickets(ewId)
+      .then((list) => {
+        if (!cancelled) setSpawnedTickets(list);
+      })
+      .catch(() => {
+        if (!cancelled) setSpawnedTickets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId]);
 
   if (loading) {
     return (
@@ -168,44 +422,85 @@ export function ExtraWorkDetailPage() {
   if (error || !ew) {
     return (
       <div>
-        <div className="page-header">
-          <div>
-            <Link to="/extra-work" className="link-back">
-              <ChevronLeft size={14} strokeWidth={2.5} />
-              Back to Extra Work
-            </Link>
-            <h2 className="page-title">Extra Work not found</h2>
-          </div>
-        </div>
-        {error && (
-          <div className="alert-error" role="alert">
-            {error}
-          </div>
-        )}
+        <PageHeader
+          backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+          title={t("detail.not_found")}
+        />
+        <EmptyState
+          icon={FileSearch}
+          title={t("detail.not_found")}
+          description={error || undefined}
+        />
       </div>
     );
   }
 
   const allowed = ew.allowed_next_statuses;
-  const canApproveAsCustomer =
-    ew.status === "PRICING_PROPOSED" &&
-    allowed.includes("CUSTOMER_APPROVED") &&
-    !isProvider;
-  const canRejectAsCustomer =
-    ew.status === "PRICING_PROPOSED" &&
-    allowed.includes("CUSTOMER_REJECTED") &&
-    !isProvider;
+  // Per-record actions drive the decision UI. `ew.actions.can_approve`
+  // covers both customer-direct approve and provider-override approve
+  // (the backend tightens it to PRICING_PROPOSED). We split the UI
+  // surface by `!isProvider` vs `providerOverrideAvailable` so the
+  // customer sees plain Approve/Reject and the provider sees the
+  // override-arming flow. Absent `actions` falls through to false.
+  const ewActions = ew.actions;
+  const canApproveAsCustomer = !isProvider && ewActions?.can_approve === true;
+  const canRejectAsCustomer = !isProvider && ewActions?.can_reject === true;
   const providerOverrideAvailable =
-    isProvider &&
-    ew.status === "PRICING_PROPOSED" &&
-    (allowed.includes("CUSTOMER_APPROVED") ||
-      allowed.includes("CUSTOMER_REJECTED"));
+    ewActions?.can_override_customer_decision === true;
+  // Pricing visibility + PDF read are now action-driven so a customer
+  // without approve rights doesn't see pricing rows AND a BM with the
+  // prep key revoked STILL sees pricing + PDF (backend invariant).
+  // Absent `actions` (older response) falls back to the prior
+  // is-provider check so the page doesn't go blank.
+  const canViewEwPricing = ewActions
+    ? ewActions.can_view_pricing
+    : isProvider;
+  const canViewProposalPdf = ewActions
+    ? ewActions.can_view_proposal_pdf
+    : isProvider;
+  // Proposal-preparation entry points (line-item add/edit/remove
+  // form) — BM with prep revoked must lose these. Absent `actions`
+  // falls back to is-provider (pre-cherry-pick behavior).
+  const canPrepareProposal = ewActions
+    ? ewActions.can_prepare_extra_work_proposal
+    : isProvider;
 
   // Provider workflow buttons exclude the override targets — those
   // route through the dedicated override block below.
   const providerWorkflowTargets = allowed.filter(
     (s) => s !== "CUSTOMER_APPROVED" && s !== "CUSTOMER_REJECTED",
   );
+
+  // Sprint 29 Batch 29.8 — non-terminal spawned tickets that will
+  // outlive a CANCELLED transition (the EW cancel does not propagate
+  // to its operational tickets — see brief Phase I). Drives the
+  // cancel-confirmation dialog warning panel.
+  const activeSpawnedTickets = spawnedTickets.filter(
+    (ticket) => !TERMINAL_TICKET_STATUSES.has(ticket.status),
+  );
+
+  // Sprint 30 Batch 30.1 — retry-spawn button is the recovery path
+  // for EWs that landed in CUSTOMER_APPROVED with zero spawned
+  // tickets (legacy data from before the auto-spawn fix shipped). The
+  // backend gate matches: SUPER_ADMIN / COMPANY_ADMIN only, status
+  // must be CUSTOMER_APPROVED, no tickets yet.
+  const canRetrySpawn =
+    !!me?.role &&
+    RETRY_SPAWN_ROLES.has(me.role) &&
+    ew.status === "CUSTOMER_APPROVED" &&
+    spawnedTickets.length === 0;
+
+  // Pick the currently-active proposal for PDF download. SENT and
+  // CUSTOMER_APPROVED are the two "live" states; DRAFT is provider-
+  // private and not downloadable until sent, CUSTOMER_REJECTED /
+  // CANCELLED proposals stay accessible via the timeline but are not
+  // the headline document anyone wants to grab right now. (The
+  // earlier "ACCEPTED" sentinel was a stale alias — backend emits
+  // CUSTOMER_APPROVED per `extra_work.models.ProposalStatus`.)
+  const activeProposal = proposals.find(
+    (p) => p.status === "SENT" || p.status === "CUSTOMER_APPROVED",
+  );
+  const hasActiveProposal = !!activeProposal;
 
   async function refresh() {
     if (!id) return;
@@ -233,13 +528,33 @@ export function ExtraWorkDetailPage() {
 
   async function handleCustomerDecision(
     target: "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED",
+    rejectReason?: string,
   ) {
     if (!id) return;
     setError("");
     setTransitionBusy(target);
     try {
-      const updated = await transitionExtraWork(id, { to_status: target });
+      const updated = await transitionExtraWork(id, {
+        to_status: target,
+        // Backend requires customer_reject_reason on CUSTOMER_USER ->
+        // CUSTOMER_REJECTED; always thread it when set so the wire
+        // shape matches the validator regardless of target.
+        ...(rejectReason !== undefined
+          ? { customer_reject_reason: rejectReason }
+          : {}),
+      });
       setEw(updated);
+      // Sprint 30 Batch 30.1 — customer-side approve confirmation toast.
+      // The backend auto-spawns tickets on this transition (when every
+      // line resolves to an agreed price); the toast tells the customer
+      // the provider will schedule the work shortly so they don't sit
+      // staring at a screen wondering whether their click landed.
+      if (target === "CUSTOMER_APPROVED") {
+        pushToast({
+          variant: "success",
+          title: t("detail.customer_decision_approve_success"),
+        });
+      }
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -247,11 +562,49 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  // Sprint 30 Batch 30.1 — provider-only retry of the legacy spawn
+  // helper. Renders when the EW is stuck in CUSTOMER_APPROVED with
+  // zero spawned tickets (legacy data from before the auto-spawn
+  // fix shipped). The backend still re-validates role + status +
+  // emptiness; this handler maps the stable `code` field to a
+  // localized toast on failure.
+  async function handleRetrySpawn() {
+    if (!ew) return;
+    setRetrySpawnBusy(true);
+    try {
+      const result = await retrySpawnTicketsForExtraWork(ew.id);
+      // i18next plural — picks `_one` / `_other` from the `count`.
+      pushToast({
+        variant: "success",
+        title: t("detail.retry_spawn_success", { count: result.count }),
+      });
+      // Refresh the EW + spawned tickets so the panel renders the
+      // new rows and the retry button gates itself off.
+      await refresh();
+      try {
+        const list = await listSpawnedTickets(ew.id);
+        setSpawnedTickets(list);
+      } catch {
+        // Non-fatal — the panel just won't update until the user
+        // refreshes the page.
+      }
+    } catch (err) {
+      const code = retrySpawnErrorCode(err);
+      const titleKey = RETRY_SPAWN_ERROR_I18N_KEY[code];
+      pushToast({
+        variant: "error",
+        title: t(titleKey),
+      });
+    } finally {
+      setRetrySpawnBusy(false);
+    }
+  }
+
   async function handleOverrideSubmit(event: FormEvent) {
     event.preventDefault();
     if (!id || !overrideDecision) return;
     if (!overrideReason.trim()) {
-      setOverrideError("Override reason is required.");
+      setOverrideError(t("detail.override_reason_required"));
       return;
     }
     setOverrideError("");
@@ -276,7 +629,7 @@ export function ExtraWorkDetailPage() {
     event.preventDefault();
     if (!id) return;
     if (!pricingForm.description.trim()) {
-      setPricingError("Description is required.");
+      setPricingError(t("detail.pricing_error_description_required"));
       return;
     }
     setPricingError("");
@@ -319,25 +672,106 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  // Direct-publish a DRAFT proposal. Endpoint is atomic on the backend:
+  // it runs DRAFT->SENT, then SENT->CUSTOMER_APPROVED as a provider
+  // override, then spawns operational tickets — all in one transaction
+  // that rolls back if any step fails. Bypasses customer approval, so
+  // the UI must collect a non-empty override_reason and warn the
+  // operator explicitly before submitting.
+  async function handleDirectPublish() {
+    if (!id || !draftProposal || !draftProposal.id) return;
+    const reason = directPublishReason.trim();
+    if (!reason) {
+      setDirectPublishError(t("detail.direct_publish_reason_required"));
+      return;
+    }
+    setDirectPublishError("");
+    setDirectPublishBusy(true);
+    try {
+      await directPublishProposal(id, draftProposal.id, {
+        override_reason: reason,
+      });
+      // Reload EW + proposal list so the new CUSTOMER_APPROVED state
+      // + spawned tickets reflect. Do NOT optimistically mutate
+      // anything — defer to the refreshed wire response.
+      await refresh();
+      const refreshedProposals = await listProposalsForEw(id);
+      setProposals(refreshedProposals);
+      setDirectPublishOpen(false);
+      setDirectPublishReason("");
+      pushToast({
+        variant: "success",
+        title: t("detail.direct_publish_success"),
+      });
+    } catch (err) {
+      setDirectPublishError(getApiError(err));
+    } finally {
+      setDirectPublishBusy(false);
+    }
+  }
+
+  // Sprint 29 Batch 29.8 — cancel-confirmation handler. Fires the
+  // standard CANCELLED transition once the operator confirms in the
+  // dialog. The backend still gates the transition itself; this is
+  // only the UI safety net (warn about spawned tickets that will
+  // outlive the cancel).
+  async function handleConfirmCancel() {
+    if (!id) return;
+    setCancelBusy(true);
+    try {
+      const updated = await transitionExtraWork(id, {
+        to_status: "CANCELLED",
+      });
+      setEw(updated);
+      cancelDialogRef.current?.close();
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (!ew || !activeProposal) return;
+    setPdfBusy(true);
+    try {
+      const blob = await fetchProposalPdf(ew.id, activeProposal.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `proposal-${activeProposal.id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <Link to="/extra-work" className="link-back">
-            <ChevronLeft size={14} strokeWidth={2.5} />
-            Back to Extra Work
-          </Link>
-          <h2 className="page-title">{ew.title}</h2>
-          <p className="page-sub">
-            {STATUS_LABELS[ew.status]} ·{" "}
-            {CATEGORY_LABELS[ew.category] ?? ew.category}
-            {ew.category === "OTHER" && ew.category_other_text
-              ? ` — ${ew.category_other_text}`
-              : ""}{" "}
-            · {ew.urgency}
-          </p>
-        </div>
-      </div>
+    <div data-testid="extra-work-detail-page">
+      <PageHeader
+        backLink={{ to: "/extra-work", label: t("back_to_extra_work") }}
+        title={ew.title}
+        meta={
+          <div className="ew-detail-header-meta">
+            <StatusBadge status={{ kind: "extra-work", value: ew.status }} />
+            <RouteBadge value={ew.routing_decision} />
+            <span className="muted small">
+              {t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}
+              {ew.category === "OTHER" && ew.category_other_text
+                ? ` — ${ew.category_other_text}`
+                : ""}
+            </span>
+            <span className="muted small">
+              · {t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}
+            </span>
+          </div>
+        }
+      />
 
       {error && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
@@ -345,542 +779,1155 @@ export function ExtraWorkDetailPage() {
         </div>
       )}
 
-      {/* ----- Core details ----- */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="form-section">
-          <div className="form-section-title">Details</div>
-          <div className="form-2col">
-            <div>
-              <div className="muted small">Building</div>
-              <div>{ew.building_name}</div>
-            </div>
-            <div>
-              <div className="muted small">Customer</div>
-              <div>{ew.customer_name}</div>
-            </div>
-          </div>
-          <div className="form-2col">
-            <div>
-              <div className="muted small">Requested at</div>
-              <div>{fmtDate(ew.requested_at)}</div>
-            </div>
-            <div>
-              <div className="muted small">Preferred date</div>
-              <div>{ew.preferred_date ?? "—"}</div>
-            </div>
-          </div>
-          <div className="field">
-            <div className="muted small">Description</div>
-            <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
-          </div>
-          {ew.customer_visible_note && (
-            <div className="field">
-              <div className="muted small">Note from provider</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>
-                {ew.customer_visible_note}
+      <div className="ew-detail-grid">
+        {/* ============================================================
+             LEFT COLUMN — read-only data
+            ============================================================ */}
+        <div className="ew-detail-main">
+          {/* ----- Core details ----- */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("detail.details_section_title")}
               </div>
-            </div>
-          )}
-          {ew.pricing_note && (
-            <div className="field">
-              <div className="muted small">Pricing note</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>{ew.pricing_note}</div>
-            </div>
-          )}
-          {/* Provider-internal fields — never present on customer
-              responses, so the conditional check is a no-op for
-              customer users. */}
-          {isProvider && ew.manager_note && (
-            <div className="field">
-              <div className="muted small">Internal manager note (provider only)</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>{ew.manager_note}</div>
-            </div>
-          )}
-          {isProvider && ew.internal_cost_note && (
-            <div className="field">
-              <div className="muted small">Internal cost note (provider only)</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>
-                {ew.internal_cost_note}
+              <div className="form-2col">
+                <div>
+                  <div className="muted small">{t("detail.field_building")}</div>
+                  <div>{ew.building_name}</div>
+                </div>
+                <div>
+                  <div className="muted small">{t("detail.field_customer")}</div>
+                  <div>{ew.customer_name}</div>
+                </div>
               </div>
-            </div>
-          )}
-          {isProvider && ew.override_at && (
-            <div className="alert-warning" style={{ marginTop: 12 }}>
-              <strong>Provider override applied.</strong>
-              {ew.override_reason && (
-                <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>
-                  {ew.override_reason}
+              <div className="form-2col">
+                <div>
+                  <div className="muted small">
+                    {t("detail.field_requested_at")}
+                  </div>
+                  <div>{formatDateTime(ew.requested_at)}</div>
+                </div>
+                <div>
+                  <div className="muted small">
+                    {t("detail.field_preferred_date")}
+                  </div>
+                  <div>
+                    {ew.preferred_date
+                      ? formatDate(ew.preferred_date)
+                      : t("detail.empty_dash")}
+                  </div>
+                </div>
+              </div>
+              <div className="field">
+                <div className="muted small">{t("detail.field_description")}</div>
+                <div style={{ whiteSpace: "pre-wrap" }}>{ew.description}</div>
+              </div>
+              {ew.customer_visible_note && (
+                <div className="field">
+                  <div className="muted small">
+                    {t("detail.field_customer_visible_note")}
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>
+                    {ew.customer_visible_note}
+                  </div>
                 </div>
               )}
-              <div className="muted small" style={{ marginTop: 4 }}>
-                {fmtDate(ew.override_at)}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ----- Pricing line items ----- */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="form-section">
-          <div className="form-section-title">Pricing proposal</div>
-          {ew.pricing_line_items.length === 0 && (
-            <div className="muted small">
-              No pricing line items yet.
-            </div>
-          )}
-          {ew.pricing_line_items.length > 0 && (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th>Unit</th>
-                  <th style={{ textAlign: "right" }}>Qty</th>
-                  <th style={{ textAlign: "right" }}>Unit price</th>
-                  <th style={{ textAlign: "right" }}>VAT %</th>
-                  <th style={{ textAlign: "right" }}>Subtotal</th>
-                  <th style={{ textAlign: "right" }}>VAT</th>
-                  <th style={{ textAlign: "right" }}>Total</th>
-                  {isProvider && <th />}
-                </tr>
-              </thead>
-              <tbody>
-                {ew.pricing_line_items.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <div>{item.description}</div>
-                      {item.customer_visible_note && (
-                        <div className="muted small">
-                          {item.customer_visible_note}
-                        </div>
-                      )}
-                      {isProvider && item.internal_cost_note && (
-                        <div
-                          className="muted small"
-                          style={{ fontStyle: "italic" }}
-                        >
-                          internal: {item.internal_cost_note}
-                        </div>
-                      )}
-                    </td>
-                    <td>{item.unit_type}</td>
-                    <td style={{ textAlign: "right" }}>
-                      {fmtMoney(item.quantity)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {fmtMoney(item.unit_price)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {fmtMoney(item.vat_rate)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {fmtMoney(item.subtotal)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {fmtMoney(item.vat_amount)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {fmtMoney(item.total)}
-                    </td>
-                    {isProvider && (
-                      <td style={{ textAlign: "right" }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => handleDeletePricingItem(item.id)}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-                <tr>
-                  <td colSpan={isProvider ? 5 : 5} />
-                  <td style={{ textAlign: "right", fontWeight: 600 }}>
-                    {fmtMoney(ew.subtotal_amount)}
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 600 }}>
-                    {fmtMoney(ew.vat_amount)}
-                  </td>
-                  <td style={{ textAlign: "right", fontWeight: 700 }}>
-                    {fmtMoney(ew.total_amount)}
-                  </td>
-                  {isProvider && <td />}
-                </tr>
-              </tbody>
-            </table>
-          )}
-
-          {isProvider && (
-            <>
-              {pricingError && (
-                <div className="alert-error" style={{ marginTop: 12 }} role="alert">
-                  {pricingError}
+              {ew.pricing_note && (
+                <div className="field">
+                  <div className="muted small">
+                    {t("detail.field_pricing_note")}
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{ew.pricing_note}</div>
                 </div>
               )}
-              <form
-                onSubmit={handleAddPricingItem}
-                style={{ marginTop: 12 }}
-              >
-                <div className="form-2col">
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor="pricing-description"
-                    >
-                      Description
-                    </label>
-                    <input
-                      id="pricing-description"
-                      className="field-input"
-                      type="text"
-                      value={pricingForm.description}
-                      onChange={(event) =>
-                        setPricingForm((c) => ({
-                          ...c,
-                          description: event.target.value,
-                        }))
-                      }
-                      placeholder="e.g. Crew time on Saturday"
-                      required
-                    />
-                  </div>
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor="pricing-unit-type"
-                    >
-                      Unit
-                    </label>
-                    <select
-                      id="pricing-unit-type"
-                      className="field-select"
-                      value={pricingForm.unit_type}
-                      onChange={(event) =>
-                        setPricingForm((c) => ({
-                          ...c,
-                          unit_type: event.target.value as ExtraWorkUnitType,
-                        }))
-                      }
-                    >
-                      {UNIT_TYPES.map((u) => (
-                        <option key={u.value} value={u.value}>
-                          {u.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-2col">
-                  <div className="field">
-                    <label className="field-label" htmlFor="pricing-qty">
-                      Quantity
-                    </label>
-                    <input
-                      id="pricing-qty"
-                      className="field-input"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={pricingForm.quantity}
-                      onChange={(event) =>
-                        setPricingForm((c) => ({
-                          ...c,
-                          quantity: event.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </div>
-                  <div className="field">
-                    <label className="field-label" htmlFor="pricing-unit-price">
-                      Unit price
-                    </label>
-                    <input
-                      id="pricing-unit-price"
-                      className="field-input"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={pricingForm.unit_price}
-                      onChange={(event) =>
-                        setPricingForm((c) => ({
-                          ...c,
-                          unit_price: event.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="form-2col">
-                  <div className="field">
-                    <label className="field-label" htmlFor="pricing-vat">
-                      VAT %
-                    </label>
-                    <input
-                      id="pricing-vat"
-                      className="field-input"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={pricingForm.vat_rate}
-                      onChange={(event) =>
-                        setPricingForm((c) => ({
-                          ...c,
-                          vat_rate: event.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </div>
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor="pricing-customer-note"
-                    >
-                      Customer-visible explanation
-                    </label>
-                    <input
-                      id="pricing-customer-note"
-                      className="field-input"
-                      type="text"
-                      value={pricingForm.customer_visible_note}
-                      onChange={(event) =>
-                        setPricingForm((c) => ({
-                          ...c,
-                          customer_visible_note: event.target.value,
-                        }))
-                      }
-                      placeholder="Shown to the customer alongside this line"
-                    />
-                  </div>
-                </div>
+              {/* Provider-internal fields — never present on customer
+                  responses, so the conditional check is a no-op for
+                  customer users. */}
+              {isProvider && ew.manager_note && (
                 <div className="field">
-                  <label
-                    className="field-label"
-                    htmlFor="pricing-internal-note"
-                  >
-                    Internal cost note (provider-only)
-                  </label>
-                  <input
-                    id="pricing-internal-note"
-                    className="field-input"
-                    type="text"
-                    value={pricingForm.internal_cost_note}
-                    onChange={(event) =>
-                      setPricingForm((c) => ({
-                        ...c,
-                        internal_cost_note: event.target.value,
-                      }))
-                    }
-                    placeholder="Never shown to the customer"
-                  />
+                  <div className="muted small">
+                    {t("detail.field_manager_note")}
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{ew.manager_note}</div>
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    marginTop: 8,
-                  }}
-                >
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm"
-                    disabled={pricingBusy}
-                  >
-                    {pricingBusy ? "Adding…" : "Add pricing line"}
-                  </button>
+              )}
+              {isProvider && ew.internal_cost_note && (
+                <div className="field">
+                  <div className="muted small">
+                    {t("detail.field_internal_cost_note")}
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>
+                    {ew.internal_cost_note}
+                  </div>
                 </div>
-              </form>
-            </>
-          )}
-        </div>
-      </div>
+              )}
+              {isProvider && ew.override_at && (
+                <div className="alert-warning" style={{ marginTop: 12 }}>
+                  <strong>{t("detail.override_applied")}</strong>
+                  {ew.override_reason && (
+                    <div style={{ marginTop: 4, whiteSpace: "pre-wrap" }}>
+                      {ew.override_reason}
+                    </div>
+                  )}
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {formatDateTime(ew.override_at)}
+                  </div>
+                </div>
+              )}
 
-      {/* ----- Workflow / transitions ----- */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="form-section">
-          <div className="form-section-title">Workflow</div>
-
-          {/* Customer approve / reject — only when allowed by backend
-              and the actor is a customer-side user. Override path
-              is below. */}
-          {(canApproveAsCustomer || canRejectAsCustomer) && (
-            <div style={{ marginBottom: 8 }}>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                The provider has proposed pricing. Please review the
-                lines above and approve or reject.
-              </p>
-              <div className="status-actions" style={{ display: "flex", gap: 8 }}>
-                {canApproveAsCustomer && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    disabled={transitionBusy !== null}
-                    onClick={() => handleCustomerDecision("CUSTOMER_APPROVED")}
-                  >
-                    {transitionBusy === "CUSTOMER_APPROVED"
-                      ? "Approving…"
-                      : "Approve pricing"}
-                  </button>
-                )}
-                {canRejectAsCustomer && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    disabled={transitionBusy !== null}
-                    onClick={() => handleCustomerDecision("CUSTOMER_REJECTED")}
-                  >
-                    {transitionBusy === "CUSTOMER_REJECTED"
-                      ? "Rejecting…"
-                      : "Reject pricing"}
-                  </button>
-                )}
+              {/* Sprint 28 Batch 6 — routing decision text+testid (the
+                  badge itself is now in the page header). Kept as a
+                  named field so the locked testid keeps resolving. */}
+              <div className="field">
+                <div className="muted small">
+                  {t("detail.routing_decision_label")}
+                </div>
+                <div data-testid="extra-work-detail-routing-decision">
+                  {ew.routing_decision === "INSTANT"
+                    ? t("detail.routing_decision_instant")
+                    : t("detail.routing_decision_proposal")}
+                </div>
               </div>
             </div>
-          )}
+          </div>
 
-          {/* Provider-side workflow buttons (non-override transitions). */}
-          {isProvider && providerWorkflowTargets.length > 0 && (
-            <div className="status-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {providerWorkflowTargets.map((target) => (
-                <button
-                  key={target}
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  disabled={transitionBusy !== null}
-                  onClick={() => handleTransition(target)}
-                >
-                  {transitionBusy === target
-                    ? "Working…"
-                    : `Move to ${STATUS_LABELS[target]}`}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {!canApproveAsCustomer &&
-            !canRejectAsCustomer &&
-            providerWorkflowTargets.length === 0 && (
-              <p className="muted small" style={{ margin: 0 }}>
-                No further transitions are available to you in this status.
-              </p>
-            )}
-        </div>
-      </div>
-
-      {/* ----- Provider override block ----- */}
-      {providerOverrideAvailable && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="form-section">
-            <div className="form-section-title">
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <AlertTriangle size={16} strokeWidth={2.2} />
-                Provider override
-              </span>
-            </div>
-            <div className="alert-warning" style={{ marginBottom: 12 }}>
-              <strong>Override the customer decision.</strong> Use only
-              when the customer has agreed by phone, email, or another
-              out-of-band channel. Every override is recorded in the
-              status history with your name, the chosen outcome, and
-              the reason you type below.
-            </div>
-
-            {overrideDecision === null ? (
-              <div style={{ display: "flex", gap: 8 }}>
-                {allowed.includes("CUSTOMER_APPROVED") && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setOverrideDecision("CUSTOMER_APPROVED")}
-                  >
-                    Override → Customer approved
-                  </button>
-                )}
-                {allowed.includes("CUSTOMER_REJECTED") && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setOverrideDecision("CUSTOMER_REJECTED")}
-                  >
-                    Override → Customer rejected
-                  </button>
-                )}
-              </div>
-            ) : (
-              <form onSubmit={handleOverrideSubmit}>
-                <div className="field">
-                  <label
-                    className="field-label"
-                    htmlFor="override-reason"
-                  >
-                    Reason for the override (required)
-                  </label>
-                  <textarea
-                    id="override-reason"
-                    className="field-textarea"
-                    rows={3}
-                    value={overrideReason}
-                    onChange={(event) => setOverrideReason(event.target.value)}
-                    placeholder="e.g. Customer confirmed by phone on 2026-05-15 at 14:00. Their email follow-up is in the ticket thread."
-                    required
-                  />
+          {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
+              Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
+              backend gate; other roles never see this card). Pure
+              informational — full management lives on
+              /admin/customers/:id/contacts. */}
+          {canSeeCustomerContacts && (
+            <div
+              className="card"
+              data-testid="extra-work-customer-contacts-panel"
+              style={{ marginBottom: 16 }}
+            >
+              <div className="form-section">
+                <div className="form-section-title">
+                  {t("customer_contacts.panel_title", { ns: "common" })}
                 </div>
-                {overrideError && (
-                  <div className="alert-error" role="alert">
-                    {overrideError}
+                {customerContacts.length === 0 ? (
+                  <div
+                    className="muted small"
+                    data-testid="extra-work-customer-contacts-empty"
+                  >
+                    {t("customer_contacts.panel_empty", { ns: "common" })}
                   </div>
-                )}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 8,
-                    marginTop: 8,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => {
-                      setOverrideDecision(null);
-                      setOverrideReason("");
-                      setOverrideError("");
+                ) : (
+                  <ul
+                    style={{
+                      listStyle: "none",
+                      margin: 0,
+                      padding: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
                     }}
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm"
-                    disabled={overrideBusy}
-                  >
-                    {overrideBusy
-                      ? "Submitting…"
-                      : `Confirm override → ${STATUS_LABELS[overrideDecision]}`}
-                  </button>
+                    {customerContacts.map((contact) => (
+                      <li
+                        key={contact.id}
+                        data-testid="extra-work-customer-contact-row"
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>
+                          {contact.full_name}
+                        </span>
+                        {contact.role_label && (
+                          <span className="muted small">
+                            {contact.role_label}
+                          </span>
+                        )}
+                        {(contact.email || contact.phone) && (
+                          <span
+                            className="muted small"
+                            style={{
+                              display: "flex",
+                              gap: 12,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {contact.email && <span>{contact.email}</span>}
+                            {contact.phone && <span>{contact.phone}</span>}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ----- Cart line items (Sprint 28 Batch 6) ----- */}
+          <div
+            className="card"
+            style={{ marginBottom: 16 }}
+            data-testid="extra-work-detail-line-items"
+          >
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("detail.line_items_section_title")}
+              </div>
+              {ew.line_items.length === 0 ? (
+                <div
+                  className="muted small"
+                  data-testid="extra-work-detail-line-items-empty"
+                >
+                  {t("detail.line_items_empty")}
                 </div>
-              </form>
+              ) : (
+                <table className="data-table ew-pricing-table">
+                  <thead>
+                    <tr>
+                      {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                        <th key={key}>{t(key)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ew.line_items.map((item) => (
+                      <InvoiceLineRow
+                        key={item.id}
+                        lineKind="cart"
+                        line={item}
+                        editable={false}
+                        rowTestId="extra-work-detail-line-item-row"
+                        subLabel={
+                          <>
+                            <span className="muted small">
+                              {formatDate(item.requested_date)}
+                            </span>
+                            {item.customer_note && (
+                              <span className="muted small">
+                                {item.customer_note}
+                              </span>
+                            )}
+                          </>
+                        }
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* ----- Pricing line items ----- */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("detail.pricing_section_title")}
+              </div>
+              {canViewEwPricing && ew.pricing_line_items.length === 0 && (
+                <div className="muted small">{t("detail.pricing_empty")}</div>
+              )}
+              {canViewEwPricing && ew.pricing_line_items.length > 0 && (
+                <table className="data-table ew-pricing-table">
+                  <thead>
+                    <tr>
+                      {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                        <th key={key}>{t(key)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ew.pricing_line_items.map((item) => {
+                      const showInternalNote =
+                        isProvider && !!item.internal_cost_note;
+                      const showCustomerNote = !!item.customer_visible_note;
+                      return (
+                        <InvoiceLineRow
+                          key={item.id}
+                          lineKind="pricing"
+                          line={item}
+                          editable={canPrepareProposal}
+                          onRemove={() => handleDeletePricingItem(item.id)}
+                          subLabel={
+                            showCustomerNote || showInternalNote ? (
+                              <>
+                                {showCustomerNote && (
+                                  <span className="muted small">
+                                    {item.customer_visible_note}
+                                  </span>
+                                )}
+                                {showInternalNote && (
+                                  <span
+                                    className="muted small"
+                                    style={{ fontStyle: "italic" }}
+                                  >
+                                    internal: {item.internal_cost_note}
+                                  </span>
+                                )}
+                              </>
+                            ) : undefined
+                          }
+                        />
+                      );
+                    })}
+                    <InvoiceLineTotalsRow
+                      subtotal={ew.subtotal_amount}
+                      vatAmount={ew.vat_amount}
+                      total={ew.total_amount}
+                    />
+                  </tbody>
+                </table>
+              )}
+
+              {canPrepareProposal && (
+                <>
+                  {pricingError && (
+                    <div
+                      className="alert-error"
+                      style={{ marginTop: 12 }}
+                      role="alert"
+                    >
+                      {pricingError}
+                    </div>
+                  )}
+                  <form
+                    onSubmit={handleAddPricingItem}
+                    className="ew-pricing-add-form"
+                    style={{ marginTop: 12 }}
+                  >
+                    {/* Tier 1 — Description, full width. */}
+                    <div className="field">
+                      <label
+                        className="field-label"
+                        htmlFor="pricing-description"
+                      >
+                        {t("detail.pricing_form_description")}
+                      </label>
+                      <input
+                        id="pricing-description"
+                        className="field-input"
+                        type="text"
+                        value={pricingForm.description}
+                        onChange={(event) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            description: event.target.value,
+                          }))
+                        }
+                        placeholder={t(
+                          "detail.pricing_form_description_placeholder",
+                        )}
+                        required
+                      />
+                    </div>
+                    {/* Tier 2 — Unit | Quantity | Unit price | VAT %. */}
+                    <div className="ew-line-row">
+                      <div className="field">
+                        <label
+                          className="field-label"
+                          htmlFor="pricing-unit-type"
+                        >
+                          {t("detail.pricing_form_unit")}
+                        </label>
+                        <select
+                          id="pricing-unit-type"
+                          className="field-select"
+                          value={pricingForm.unit_type}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              unit_type: event.target
+                                .value as ExtraWorkUnitType,
+                            }))
+                          }
+                        >
+                          {UNIT_TYPE_VALUES.map((value) => (
+                            <option key={value} value={value}>
+                              {t(UNIT_TYPE_I18N_KEY[value])}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field ew-line-field-compact">
+                        <label className="field-label" htmlFor="pricing-qty">
+                          {t("detail.pricing_form_quantity")}
+                        </label>
+                        <input
+                          id="pricing-qty"
+                          className="field-input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={pricingForm.quantity}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              quantity: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                      <div className="field">
+                        <label
+                          className="field-label"
+                          htmlFor="pricing-unit-price"
+                        >
+                          {t("detail.pricing_form_unit_price")}
+                        </label>
+                        <input
+                          id="pricing-unit-price"
+                          className="field-input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={pricingForm.unit_price}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              unit_price: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                      <div className="field ew-line-field-compact">
+                        <label className="field-label" htmlFor="pricing-vat">
+                          {t("detail.pricing_form_vat")}
+                        </label>
+                        <input
+                          id="pricing-vat"
+                          className="field-input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={pricingForm.vat_rate}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              vat_rate: event.target.value,
+                            }))
+                          }
+                          required
+                        />
+                      </div>
+                    </div>
+                    {/* Tier 3 — Customer-visible explanation |
+                        Internal cost note. */}
+                    <div className="ew-line-row">
+                      <div className="field ew-line-field-grow">
+                        <label
+                          className="field-label"
+                          htmlFor="pricing-customer-note"
+                        >
+                          {t("detail.pricing_form_customer_note")}
+                        </label>
+                        <input
+                          id="pricing-customer-note"
+                          className="field-input"
+                          type="text"
+                          value={pricingForm.customer_visible_note}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              customer_visible_note: event.target.value,
+                            }))
+                          }
+                          placeholder={t(
+                            "detail.pricing_form_customer_note_placeholder",
+                          )}
+                        />
+                      </div>
+                      <div className="field ew-line-field-grow">
+                        <label
+                          className="field-label"
+                          htmlFor="pricing-internal-note"
+                        >
+                          {t("detail.pricing_form_internal_note")}
+                        </label>
+                        <input
+                          id="pricing-internal-note"
+                          className="field-input"
+                          type="text"
+                          value={pricingForm.internal_cost_note}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              internal_cost_note: event.target.value,
+                            }))
+                          }
+                          placeholder={t(
+                            "detail.pricing_form_internal_note_placeholder",
+                          )}
+                        />
+                      </div>
+                    </div>
+                    {/* Tier 4 — Add-pricing-line button, right-aligned. */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "flex-end",
+                        marginTop: 8,
+                      }}
+                    >
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-sm"
+                        disabled={pricingBusy}
+                      >
+                        {pricingBusy
+                          ? t("detail.pricing_form_submitting")
+                          : t("detail.pricing_form_submit")}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Draft proposal lines — read-only display of the DRAFT
+              proposal's nested `lines` array. Gated on the per-record
+              `can_view_proposal_pricing` action so a viewer who cannot
+              meaningfully consume prices never sees the section. The
+              direct-publish button (right aside) is the only mutation
+              surface near this card; line editing / Send / Cancel /
+              Approve / Reject UI is deferred. The customer-vs-admin
+              `internal_note` distinction is driven by serializer
+              absence: ProposalLineCustomerSerializer omits the field,
+              so `"internal_note" in line` is the visibility signal,
+              NOT a truthiness check on the value. */}
+          {draftProposalDetail !== null &&
+            draftProposalDetail.actions?.can_view_proposal_pricing ===
+              true &&
+            draftProposalDetail.lines.length > 0 && (
+              <div
+                className="card"
+                style={{ marginBottom: 16 }}
+                data-testid="extra-work-proposal-lines-section"
+              >
+                <div className="form-section">
+                  <div className="form-section-title">
+                    {t("detail.proposal_lines_section_title")}
+                  </div>
+                  <table className="data-table ew-pricing-table">
+                    <thead>
+                      <tr>
+                        {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                          <th key={key}>{t(key)}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draftProposalDetail.lines.map((line) => {
+                        // Presence (not truthiness) is the role
+                        // discriminator: the customer serializer omits
+                        // `internal_note` entirely, so the key being
+                        // absent means we're on a customer payload and
+                        // must not render the field. When the key IS
+                        // present we still skip rendering when the
+                        // string is empty (cosmetic — an "internal: "
+                        // label with no content reads as broken).
+                        const adminPayload =
+                          Object.prototype.hasOwnProperty.call(
+                            line,
+                            "internal_note",
+                          );
+                        const internalNoteText = adminPayload
+                          ? line.internal_note ?? ""
+                          : "";
+                        const showInternalNote =
+                          adminPayload &&
+                          internalNoteText.trim().length > 0;
+                        const showExplanation =
+                          line.customer_explanation.trim().length > 0;
+                        return (
+                          <InvoiceLineRow
+                            key={line.id}
+                            lineKind="proposal"
+                            line={line}
+                            editable={false}
+                            rowTestId="extra-work-proposal-line-row"
+                            subLabel={
+                              showExplanation || showInternalNote ? (
+                                <>
+                                  {showExplanation && (
+                                    <span className="muted small">
+                                      {line.customer_explanation}
+                                    </span>
+                                  )}
+                                  {showInternalNote && (
+                                    <span
+                                      className="muted small"
+                                      style={{ fontStyle: "italic" }}
+                                    >
+                                      internal: {internalNoteText}
+                                    </span>
+                                  )}
+                                </>
+                              ) : undefined
+                            }
+                          />
+                        );
+                      })}
+                      <InvoiceLineTotalsRow
+                        subtotal={draftProposalDetail.subtotal_amount}
+                        vatAmount={draftProposalDetail.vat_amount}
+                        total={draftProposalDetail.total_amount}
+                      />
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
+
+          {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders
+              read-only when the EW has at least one ticket spawned
+              from a cart line (INSTANT route) or a proposal line
+              (PROPOSAL route). The list is reachable to anyone who
+              can see the EW; per-row link visibility is gated on
+              the linked ticket by `scope_tickets_for` server-side. */}
+          {spawnedTickets.length > 0 && (
+            <section
+              className="card"
+              data-testid="extra-work-spawned-tickets-panel"
+              style={{ marginBottom: 16 }}
+            >
+              <div className="form-section">
+                <div className="form-section-title">
+                  {t("detail.spawned_tickets_title")}
+                </div>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.spawned_tickets_desc")}
+                </p>
+                <ul className="ew-spawned-tickets-list">
+                  {spawnedTickets.map((ticket) => (
+                    <li
+                      key={ticket.id}
+                      className="ew-spawned-ticket-row"
+                      data-testid={`extra-work-spawned-ticket-row-${ticket.id}`}
+                    >
+                      <Link
+                        to={`/tickets/${ticket.id}`}
+                        className="ew-spawned-ticket-link"
+                      >
+                        #{ticket.id} {ticket.title}
+                      </Link>
+                      <StatusBadge
+                        status={{ kind: "ticket", value: ticket.status }}
+                        variant="cell"
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </section>
+          )}
+
+          <div
+            className="muted small"
+            style={{ textAlign: "right", marginTop: 8 }}
+          >
+            {t("detail.updated_at", { date: formatDateTime(ew.updated_at) })}
+          </div>
+        </div>
+
+        {/* ============================================================
+             RIGHT COLUMN — actions (sticky on desktop)
+            ============================================================ */}
+        <aside
+          className="ew-detail-aside"
+          data-testid="extra-work-detail-actions"
+          aria-label={t("detail.actions_aria_label")}
+        >
+          {/* Customer decision card — only when allowed by backend
+              and the actor is a customer-side user. */}
+          {(canApproveAsCustomer || canRejectAsCustomer) && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.actions_decision_title")}
+                </div>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.workflow_customer_decision_helper")}
+                </p>
+                <div
+                  className="status-actions"
+                  style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                >
+                  {canApproveAsCustomer && (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={transitionBusy !== null}
+                      onClick={() =>
+                        handleCustomerDecision("CUSTOMER_APPROVED")
+                      }
+                      data-testid="extra-work-customer-approve"
+                    >
+                      {transitionBusy === "CUSTOMER_APPROVED"
+                        ? t("detail.workflow_approving")
+                        : t("detail.workflow_approve_button")}
+                    </button>
+                  )}
+                  {canRejectAsCustomer && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={transitionBusy !== null}
+                      onClick={() => setRejectDialogOpen(true)}
+                      data-testid="extra-work-customer-reject"
+                    >
+                      {transitionBusy === "CUSTOMER_REJECTED"
+                        ? t("detail.workflow_rejecting")
+                        : t("detail.workflow_reject_button")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Provider workflow card */}
+          {isProvider && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.actions_workflow_title")}
+                </div>
+                {providerWorkflowTargets.length > 0 ? (
+                  <div
+                    className="status-actions"
+                    style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                  >
+                    {providerWorkflowTargets.map((target) => (
+                      <button
+                        key={target}
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={transitionBusy !== null}
+                        onClick={() => {
+                          // Sprint 29 Batch 29.8 — route CANCELLED
+                          // through the confirmation dialog so the
+                          // spawned-tickets warning renders before
+                          // the destructive transition fires. Every
+                          // other target goes straight through.
+                          if (target === "CANCELLED") {
+                            cancelDialogRef.current?.open();
+                            return;
+                          }
+                          void handleTransition(target);
+                        }}
+                        data-testid={
+                          target === "CANCELLED"
+                            ? "extra-work-cancel-button"
+                            : undefined
+                        }
+                      >
+                        {transitionBusy === target
+                          ? t("detail.workflow_working")
+                          : t("detail.workflow_move_to", {
+                              label: t(STATUS_I18N_KEY[target]),
+                            })}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="muted small" style={{ margin: 0 }}>
+                    {t("detail.workflow_no_transitions")}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Sprint 30 Batch 30.1 — retry-spawn card. Surfaces only
+              when the EW is stuck in CUSTOMER_APPROVED with zero
+              spawned tickets AND the actor is SUPER_ADMIN /
+              COMPANY_ADMIN. Recovers legacy EWs that landed in
+              CUSTOMER_APPROVED before the auto-spawn fix shipped. */}
+          {canRetrySpawn && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.actions_retry_spawn_title")}
+                </div>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.retry_spawn_helper")}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={retrySpawnBusy}
+                  onClick={() => {
+                    void handleRetrySpawn();
+                  }}
+                  data-testid="extra-work-retry-spawn"
+                >
+                  {retrySpawnBusy
+                    ? t("detail.retry_spawn_busy")
+                    : t("detail.retry_spawn")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Sprint 30 Batch 30.1.3 — provider customer-decision card.
+              Replaces the standalone "Provider override" card. Mirrors
+              the customer's decision card above but ARMS inline on
+              first press: the Approve/Reject button expands a reason
+              textarea + Confirm/Cancel pair. Second press posts
+              {is_override:true, override_reason} per the EW state
+              machine contract.
+
+              This surface ONLY renders on the customer-decision step
+              (PRICING_PROPOSED). Forward provider moves (Under review,
+              propose pricing, Cancelled) stay as plain buttons in the
+              Provider workflow card above. */}
+          {providerOverrideAvailable && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.actions_decision_title")}
+                </div>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  {t("detail.override_inline_helper")}
+                </p>
+                <div
+                  className="status-actions"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                  }}
+                >
+                  {(["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
+                    .filter((target) => allowed.includes(target))
+                    .map((target) => {
+                      const isArmed = overrideDecision === target;
+                      return (
+                        <div
+                          key={target}
+                          className="workflow-override-target"
+                          data-testid={`extra-work-override-${target}`}
+                        >
+                          <button
+                            type="button"
+                            className={
+                              target === "CUSTOMER_APPROVED"
+                                ? "btn btn-primary btn-sm"
+                                : "btn btn-secondary btn-sm"
+                            }
+                            onClick={() => {
+                              setOverrideDecision(target);
+                              setOverrideError("");
+                            }}
+                            data-testid={`extra-work-provider-${
+                              target === "CUSTOMER_APPROVED"
+                                ? "approve"
+                                : "reject"
+                            }`}
+                            aria-expanded={isArmed}
+                            disabled={overrideBusy}
+                          >
+                            {target === "CUSTOMER_APPROVED"
+                              ? t("detail.workflow_approve_button")
+                              : t("detail.workflow_reject_button")}
+                          </button>
+                          {isArmed && (
+                            <div
+                              className="workflow-override-inline"
+                              data-testid="extra-work-override-modal"
+                            >
+                              <form onSubmit={handleOverrideSubmit}>
+                                <div className="field">
+                                  <label
+                                    className="field-label"
+                                    htmlFor="override-reason"
+                                  >
+                                    {t("detail.override_reason_label")}
+                                  </label>
+                                  <textarea
+                                    id="override-reason"
+                                    data-testid="extra-work-override-reason"
+                                    className="field-textarea"
+                                    rows={3}
+                                    value={overrideReason}
+                                    onChange={(event) =>
+                                      setOverrideReason(event.target.value)
+                                    }
+                                    placeholder={t(
+                                      "detail.override_reason_placeholder",
+                                    )}
+                                    required
+                                  />
+                                </div>
+                                {overrideError && (
+                                  <div
+                                    className="alert-error"
+                                    role="alert"
+                                    data-testid="extra-work-override-error"
+                                    style={{ marginTop: 6 }}
+                                  >
+                                    {overrideError}
+                                  </div>
+                                )}
+                                <div className="override-card-footer card-actions-cluster">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => {
+                                      setOverrideDecision(null);
+                                      setOverrideReason("");
+                                      setOverrideError("");
+                                    }}
+                                    disabled={overrideBusy}
+                                    data-testid="extra-work-override-cancel"
+                                  >
+                                    {t("detail.override_cancel")}
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    className="btn btn-primary btn-sm"
+                                    disabled={
+                                      overrideBusy ||
+                                      !overrideReason.trim()
+                                    }
+                                    data-testid="extra-work-override-submit"
+                                  >
+                                    {overrideBusy
+                                      ? t("detail.override_submitting")
+                                      : t("detail.override_confirm", {
+                                          label: t(STATUS_I18N_KEY[target]),
+                                        })}
+                                  </button>
+                                </div>
+                              </form>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Direct-publish (DRAFT proposal -> CUSTOMER_APPROVED in
+              one atomic call). Gated on the per-record proposal action
+              `can_direct_publish` (backend tightens this to include the
+              same cheap send preconditions plus, for BM, the override
+              key — so the button never renders when the request would
+              be 400'd at parent-EW state, nor when prep/override is
+              revoked). */}
+          {draftProposalDetail?.actions?.can_direct_publish === true && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.direct_publish_section_title")}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setDirectPublishError("");
+                    setDirectPublishReason("");
+                    setDirectPublishOpen(true);
+                  }}
+                  data-testid="extra-work-detail-direct-publish-button"
+                >
+                  {t("detail.direct_publish_button")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Proposal PDF download — gated on per-record
+              `can_view_proposal_pdf` so an assigned BM with the prep
+              key revoked KEEPS PDF access (backend invariant: prep
+              revoke removes mutation, not read). */}
+          {hasActiveProposal && canViewProposalPdf && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <FileText size={14} strokeWidth={2.2} />
+                    {t("detail.actions_pdf_title")}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    void handleDownloadPdf();
+                  }}
+                  disabled={pdfBusy}
+                  data-testid="extra-work-detail-pdf-download"
+                >
+                  {pdfBusy
+                    ? t("detail.pdf_download_busy")
+                    : t("detail.pdf_download_button")}
+                </button>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {/* Sprint 28 Batch 15.4 — customer-side reject dialog. Captures
+          the mandatory `customer_reject_reason` the backend now
+          requires on CUSTOMER_USER -> CUSTOMER_REJECTED transitions. */}
+      <RejectReasonDialog
+        open={rejectDialogOpen}
+        onCancel={() => setRejectDialogOpen(false)}
+        onConfirm={(reason) => {
+          setRejectDialogOpen(false);
+          void handleCustomerDecision("CUSTOMER_REJECTED", reason);
+        }}
+      />
+
+      {/* Direct-publish confirmation. Renders a prominent warning
+          ("bypasses customer approval, opens tickets immediately") plus
+          a mandatory override-reason textarea. The confirm button stays
+          disabled until the reason is non-empty (the backend rejects
+          with stable code `override_reason_required` otherwise; this
+          is the matching client-side guard). */}
+      {directPublishOpen && (
+        <div
+          className="reject-modal-backdrop"
+          data-testid="extra-work-direct-publish-dialog"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="reject-modal">
+            <h3 className="reject-modal-title">
+              {t("detail.direct_publish_dialog_title")}
+            </h3>
+            <div
+              className="alert-warning"
+              style={{ marginBottom: 12 }}
+              data-testid="extra-work-direct-publish-warning"
+            >
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                {t("detail.direct_publish_dialog_warning_title")}
+              </div>
+              <div>{t("detail.direct_publish_dialog_warning_desc")}</div>
+            </div>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+              htmlFor="extra-work-direct-publish-reason"
+            >
+              {t("detail.direct_publish_reason_label")}
+            </label>
+            <textarea
+              id="extra-work-direct-publish-reason"
+              data-testid="extra-work-direct-publish-reason-textarea"
+              className="field-textarea reject-modal-textarea"
+              value={directPublishReason}
+              onChange={(e) => setDirectPublishReason(e.target.value)}
+              placeholder={t("detail.direct_publish_reason_placeholder")}
+              rows={4}
+              autoFocus
+              disabled={directPublishBusy}
+            />
+            {directPublishError && (
+              <div
+                className="alert-error"
+                style={{ marginTop: 8 }}
+                role="alert"
+                data-testid="extra-work-direct-publish-error"
+              >
+                {directPublishError}
+              </div>
+            )}
+            <div className="reject-modal-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setDirectPublishOpen(false);
+                  setDirectPublishReason("");
+                  setDirectPublishError("");
+                }}
+                disabled={directPublishBusy}
+                data-testid="extra-work-direct-publish-cancel"
+              >
+                {t("detail.direct_publish_cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm reject-modal-confirm"
+                onClick={() => void handleDirectPublish()}
+                disabled={
+                  directPublishBusy || directPublishReason.trim().length === 0
+                }
+                data-testid="extra-work-direct-publish-confirm"
+              >
+                {directPublishBusy
+                  ? t("detail.direct_publish_busy")
+                  : t("detail.direct_publish_confirm")}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <div
-        className="muted small"
-        style={{ textAlign: "right", marginTop: 8 }}
-      >
-        Updated {fmtDate(ew.updated_at)}
-      </div>
+      {/* Sprint 29 Batch 29.8 — cancel-confirmation dialog. Warns when
+          spawned tickets are still active so the operator is aware
+          they will NOT be auto-cancelled. The transition itself is
+          unchanged; this is a UI-only safety net. */}
+      <ConfirmDialog
+        ref={cancelDialogRef}
+        title={t("detail.cancel_dialog_title")}
+        body={
+          <div>
+            {activeSpawnedTickets.length > 0 && (
+              <div
+                className="alert-warning"
+                data-testid="extra-work-cancel-spawned-tickets-warning"
+                style={{ marginBottom: 12 }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                  {t("detail.cancel_dialog_spawned_warning_title", {
+                    count: activeSpawnedTickets.length,
+                  })}
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {activeSpawnedTickets.map((ticket) => (
+                    <li key={ticket.id}>
+                      #{ticket.id} — {ticket.title} ({ticket.status})
+                    </li>
+                  ))}
+                </ul>
+                <p style={{ marginTop: 8, marginBottom: 0 }}>
+                  {t("detail.cancel_dialog_spawned_warning_desc")}
+                </p>
+              </div>
+            )}
+            <p style={{ margin: 0 }}>{t("detail.cancel_dialog_body")}</p>
+          </div>
+        }
+        confirmLabel={t("detail.cancel_dialog_confirm")}
+        cancelLabel={t("detail.cancel_dialog_keep")}
+        onConfirm={handleConfirmCancel}
+        busy={cancelBusy}
+        destructive
+      />
     </div>
   );
 }
+
+
+
+
+

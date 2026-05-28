@@ -38,8 +38,11 @@ from customers.models import (
 from extra_work.models import (
     ExtraWorkCategory,
     ExtraWorkPricingLineItem,
+    ExtraWorkPricingUnitType,
     ExtraWorkRequest,
     ExtraWorkStatus,
+    Service,
+    ServiceCategory,
 )
 
 
@@ -373,6 +376,21 @@ class CreateTests(ExtraWorkFixtureMixin, TestCase):
     @classmethod
     def setUpTestData(cls):
         cls._setup_fixture()
+        # Sprint 28 Batch 6: every cart submission now requires at
+        # least one `line_items` row referencing an active Service.
+        # The original Sprint 26B tests below only care that the
+        # parent record creation path still works — they don't drive
+        # routing decision behaviour (that's covered by the dedicated
+        # Batch 6 test module). A single shared Service fixture lets
+        # the existing assertions stand as-is once we add the new
+        # line_items field to the create payload.
+        cls.service_cat = ServiceCategory.objects.create(name="Standard")
+        cls.service = Service.objects.create(
+            category=cls.service_cat,
+            name="Window cleaning",
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            default_unit_price=Decimal("50.00"),
+        )
 
     def _create_payload(self, customer, building, **extra):
         payload = {
@@ -381,6 +399,19 @@ class CreateTests(ExtraWorkFixtureMixin, TestCase):
             "title": "Window cleaning needed",
             "description": "All 3rd-floor windows.",
             "category": ExtraWorkCategory.WINDOW_CLEANING,
+            # Sprint 28 Batch 6: line_items is now required. No
+            # CustomerServicePrice row exists for these tests, so
+            # the resolver returns None and routing_decision lands
+            # on PROPOSAL — that's fine, the Batch-6-specific tests
+            # cover INSTANT separately.
+            "line_items": [
+                {
+                    "service": self.service.id,
+                    "quantity": "1.00",
+                    "requested_date": "2026-06-01",
+                    "customer_note": "",
+                }
+            ],
         }
         payload.update(extra)
         return payload

@@ -282,3 +282,59 @@ class CustomerCompanyPolicy(models.Model):
 
     def __str__(self):
         return f"Policy for {self.customer}"
+
+
+class Contact(models.Model):
+    """
+    Sprint 28 Batch 4 — customer-side phone-book entry.
+
+    Distinct from Users (spec docs/product/meeting-2026-05-15-system-requirements.md §1):
+
+      * Contact = a person listed only for communication (name, phone,
+        email, free-text role label, notes). It is NOT an authenticated
+        principal — there is no `user` FK, no password, no UserRole,
+        no scope rows and no permission overrides. Promoting a Contact
+        to a User is an explicit future-sprint flow, never a side-effect
+        of editing a Contact.
+      * Customer.contact_email (see Customer above) is the single
+        *primary* email for the customer organisation as a whole. The
+        Contact rows here are the full phone book of people you may
+        want to contact at that customer (operations lead, building
+        super, facility receptionist, etc.). The two live in parallel;
+        Sprint 28 Batch 4 does not collapse `Customer.contact_email`.
+
+    `building` is optional and, when provided, MUST refer to a building
+    the customer is linked to via `CustomerBuildingMembership` (the
+    serializer enforces this). The FK is `SET_NULL` on building
+    deletion so the contact row survives a building soft-delete /
+    decommission, but `CASCADE` on customer deletion because a
+    contact is owned by its customer.
+    """
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name="contacts",
+    )
+    building = models.ForeignKey(
+        "buildings.Building",
+        on_delete=models.SET_NULL,
+        related_name="customer_contacts",
+        null=True,
+        blank=True,
+    )
+
+    full_name = models.CharField(max_length=255)
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=64, blank=True, default="")
+    role_label = models.CharField(max_length=128, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["full_name", "id"]
+
+    def __str__(self):
+        return self.full_name

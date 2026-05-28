@@ -1,7 +1,7 @@
 """
-Sprint 26B — Extra Work state machine (MVP customer-pricing loop).
+Extra Work state machine.
 
-Allowed transitions:
+Allowed transitions (customer-pricing loop — Sprint 26B):
 
   REQUESTED         -> UNDER_REVIEW         (provider operator)
   REQUESTED         -> CANCELLED            (creator-only, no provider review yet)
@@ -13,11 +13,42 @@ Allowed transitions:
   PRICING_PROPOSED  -> CANCELLED            (provider operator OR creator)
   CUSTOMER_REJECTED -> UNDER_REVIEW         (provider can revise after rejection)
   CUSTOMER_APPROVED -> CANCELLED            (provider override — needs reason)
+  REQUESTED         -> CUSTOMER_APPROVED    (SYSTEM-ONLY — Sprint 28 Batch 7
+                                             instant-ticket spawn; never
+                                             reachable via the user-facing
+                                             transition endpoint)
 
-Operational-execution statuses (ASSIGNED / IN_PROGRESS /
-WAITING_MANAGER_REVIEW / WAITING_CUSTOMER_APPROVAL / COMPLETED) are
-NOT covered here per the Sprint 26B brief. They land with the
-staff-execution sprint that follows.
+Operational segment (Sprint 29 Batch 29.8):
+
+  CUSTOMER_APPROVED -> IN_PROGRESS          (SYSTEM auto when first spawned
+                                             ticket goes IN_PROGRESS; or
+                                             provider manual override)
+  IN_PROGRESS       -> COMPLETED            (SYSTEM auto when all spawned
+                                             tickets are terminal; or
+                                             provider manual)
+  IN_PROGRESS       -> CANCELLED            (provider override — needs reason)
+  COMPLETED         -> IN_PROGRESS          (edge-recovery, provider-only,
+                                             needs reason)
+
+The CUSTOMER_APPROVED -> IN_PROGRESS and IN_PROGRESS -> COMPLETED
+pairs are also listed in `SYSTEM_AUTO_TRANSITIONS` so the auto-sync
+hook in `tickets.state_machine.apply_transition` can drive them
+with `user=None` without tripping the role gate.
+
+Commercial-execution statuses (FULFILLED / BILLED) remain
+deferred to a follow-up sprint.
+
+Sprint 28 Batch 7 system-only transition
+----------------------------------------
+The `(REQUESTED, CUSTOMER_APPROVED)` pair is the instant-route auto-
+approval written by `extra_work.instant_tickets.spawn_tickets_for_request`.
+It is intentionally NOT reachable via the user-facing
+`POST /api/extra-work/<id>/transition/` endpoint: customers must not be
+able to skip the proposal phase by hand-rolling a transition payload,
+and providers must not be able to drive it without writing the override
+reason on the existing PRICING_PROPOSED path. `_user_can_drive_transition`
+returns False for this pair regardless of actor role; the spawn service
+writes the status + history row directly, bypassing `apply_transition`.
 """
 from __future__ import annotations
 
@@ -50,6 +81,45 @@ ALLOWED_TRANSITIONS: set[tuple[str, str]] = {
     (ExtraWorkStatus.PRICING_PROPOSED, ExtraWorkStatus.CANCELLED),
     (ExtraWorkStatus.CUSTOMER_REJECTED, ExtraWorkStatus.UNDER_REVIEW),
     (ExtraWorkStatus.CUSTOMER_APPROVED, ExtraWorkStatus.CANCELLED),
+    # Sprint 28 Batch 7 — instant-route auto-approval. System-only:
+    # `_user_can_drive_transition` returns False for this pair, so the
+    # public `/transition/` endpoint cannot reach it. The spawn service
+    # writes the status + history row directly (see
+    # `extra_work.instant_tickets.spawn_tickets_for_request`).
+    (ExtraWorkStatus.REQUESTED, ExtraWorkStatus.CUSTOMER_APPROVED),
+    # Sprint 29 Batch 29.8 — operational segment. The first two pairs
+    # are also driven automatically by the auto-sync hook in
+    # `tickets.state_machine.apply_transition` (see
+    # `SYSTEM_AUTO_TRANSITIONS` below).
+    (ExtraWorkStatus.CUSTOMER_APPROVED, ExtraWorkStatus.IN_PROGRESS),
+    (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.COMPLETED),
+    (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.CANCELLED),
+    # Edge-recovery: a provider can reopen a wrongly-COMPLETED EW. Provider-
+    # only and requires an override_reason (see `_user_can_drive_transition`
+    # + `apply_transition` reason gate).
+    (ExtraWorkStatus.COMPLETED, ExtraWorkStatus.IN_PROGRESS),
+}
+
+
+# Sprint 28 Batch 7 — pairs that must never be reachable via the public
+# transition endpoint. `_user_can_drive_transition` short-circuits on
+# any pair in this set so no role / scope combination can drive them
+# via the API. The `extra_work.instant_tickets` spawn service writes
+# these transitions directly, bypassing `apply_transition`.
+SYSTEM_ONLY_TRANSITIONS: set[tuple[str, str]] = {
+    (ExtraWorkStatus.REQUESTED, ExtraWorkStatus.CUSTOMER_APPROVED),
+}
+
+
+# Sprint 29 Batch 29.8 — operational-segment transitions that the
+# `tickets.state_machine.apply_transition` auto-sync hook drives with
+# `user=None`. `_user_can_drive_transition` admits a `None` actor only
+# for pairs in this set; the same pairs remain available to qualified
+# providers as manual transitions (the gate also returns True for
+# SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER with the right scope).
+SYSTEM_AUTO_TRANSITIONS: set[tuple[str, str]] = {
+    (ExtraWorkStatus.CUSTOMER_APPROVED, ExtraWorkStatus.IN_PROGRESS),
+    (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.COMPLETED),
 }
 
 
@@ -99,8 +169,35 @@ def _user_can_drive_transition(
     Creator-self CANCEL on REQUESTED is allowed even without
     approval rights (you can always cancel something you haven't
     yet asked the provider to price).
+
+    Sprint 29 Batch 29.8 — operational-segment transitions:
+      * CUSTOMER_APPROVED -> IN_PROGRESS: SUPER_ADMIN / COMPANY_ADMIN
+        (of EW's company) / BUILDING_MANAGER (of EW's building).
+        STAFF and customer roles cannot drive manually. Also
+        admitted with `user=None` (system auto-sync hook).
+      * IN_PROGRESS -> COMPLETED: same provider roles as above.
+        Also admitted with `user=None`.
+      * IN_PROGRESS -> CANCELLED: same provider roles. Caller must
+        supply override_reason (enforced in `apply_transition`).
+      * COMPLETED -> IN_PROGRESS: SUPER_ADMIN / COMPANY_ADMIN only
+        (edge-recovery). Requires override_reason.
     """
     from_status = extra_work.status
+
+    # Sprint 28 Batch 7 — system-only transitions (e.g. the
+    # instant-route REQUESTED -> CUSTOMER_APPROVED auto-approval) are
+    # never reachable via the user-facing transition endpoint. The
+    # spawn service writes them directly, bypassing apply_transition.
+    if (from_status, to_status) in SYSTEM_ONLY_TRANSITIONS:
+        return False
+
+    # Sprint 29 Batch 29.8 — system-auto transitions driven by the
+    # `tickets.state_machine.apply_transition` hook with `user=None`.
+    # Admitted only for pairs in `SYSTEM_AUTO_TRANSITIONS`; provider
+    # operators with the right scope still fall through to the role
+    # branches below for the same pair.
+    if user is None:
+        return (from_status, to_status) in SYSTEM_AUTO_TRANSITIONS
 
     if user.role == UserRole.SUPER_ADMIN:
         # Super admin can drive any allowed transition globally.
@@ -143,6 +240,37 @@ def _user_can_drive_transition(
                     building_id=extra_work.building_id,
                 )
             if user.role == UserRole.BUILDING_MANAGER:
+                return user_has_osius_permission(
+                    user,
+                    "osius.ticket.view_building",
+                    building_id=extra_work.building_id,
+                )
+
+        # Sprint 29 Batch 29.8 — operational segment manual transitions.
+        # CUSTOMER_APPROVED -> IN_PROGRESS, IN_PROGRESS -> COMPLETED,
+        # IN_PROGRESS -> CANCELLED: SUPER_ADMIN / COMPANY_ADMIN / BM with
+        # building scope.
+        if (from_status, to_status) in {
+            (ExtraWorkStatus.CUSTOMER_APPROVED, ExtraWorkStatus.IN_PROGRESS),
+            (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.COMPLETED),
+            (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.CANCELLED),
+        }:
+            if user.role in {UserRole.COMPANY_ADMIN, UserRole.BUILDING_MANAGER}:
+                return user_has_osius_permission(
+                    user,
+                    "osius.ticket.view_building",
+                    building_id=extra_work.building_id,
+                )
+
+        # Sprint 29 Batch 29.8 — edge-recovery COMPLETED -> IN_PROGRESS.
+        # SUPER_ADMIN already returned True at the top. COMPANY_ADMIN with
+        # building scope may also drive it; BUILDING_MANAGER may NOT (the
+        # corrective intent here is intentionally limited to admins).
+        if (
+            from_status == ExtraWorkStatus.COMPLETED
+            and to_status == ExtraWorkStatus.IN_PROGRESS
+        ):
+            if user.role == UserRole.COMPANY_ADMIN:
                 return user_has_osius_permission(
                     user,
                     "osius.ticket.view_building",
@@ -247,8 +375,13 @@ def apply_transition(
     # the client forgot to send is_override=true. This closes the
     # unsafe path where a provider could approve/reject a customer
     # pricing proposal without a written reason.
+    #
+    # When `user is None` (Sprint 29 Batch 29.8 system auto-sync hook)
+    # the override-coercion below is skipped — system-driven
+    # transitions are never customer-decision overrides.
+    user_role = getattr(user, "role", None)
     provider_driven_customer_decision = (
-        user.role
+        user_role
         in {
             UserRole.SUPER_ADMIN,
             UserRole.COMPANY_ADMIN,
@@ -262,6 +395,37 @@ def apply_transition(
         }
     )
     if provider_driven_customer_decision:
+        # B6 — BM customer-decision override on Extra Work requests is
+        # revocable per-(BM, building) via `osius.building_manager.
+        # override_customer_decision`. SA and COMPANY_ADMIN bypass.
+        if user_role == UserRole.BUILDING_MANAGER:
+            if not user_has_osius_permission(
+                user,
+                "osius.building_manager.override_customer_decision",
+                building_id=extra_work.building_id,
+            ):
+                raise TransitionError(
+                    "Building Manager's customer-decision override "
+                    "has been disabled for this building.",
+                    code="bm_override_disabled",
+                )
+        is_override = True
+
+    # Sprint 29 Batch 29.8 — operational-segment override pairs that
+    # always require an override_reason regardless of whether the
+    # client sent `is_override=True`:
+    #   IN_PROGRESS -> CANCELLED  (corrective cancel of in-flight work)
+    #   COMPLETED  -> IN_PROGRESS (edge-recovery reopen)
+    # System-driven transitions (`user is None`) are never these pairs;
+    # `SYSTEM_AUTO_TRANSITIONS` only contains the two forward pairs.
+    operational_provider_override = user is not None and (
+        extra_work.status,
+        to_status,
+    ) in {
+        (ExtraWorkStatus.IN_PROGRESS, ExtraWorkStatus.CANCELLED),
+        (ExtraWorkStatus.COMPLETED, ExtraWorkStatus.IN_PROGRESS),
+    }
+    if operational_provider_override:
         is_override = True
 
     if is_override:
@@ -310,6 +474,33 @@ def apply_transition(
         note=note or "",
         is_override=is_override,
     )
+
+    # Sprint 30 Batch 30.1 — legacy pricing-flow ticket spawn.
+    # When an EW lands in CUSTOMER_APPROVED via the legacy pricing path
+    # (PRICING_PROPOSED -> CUSTOMER_APPROVED, customer-driven OR
+    # provider-overridden), spawn one operational Ticket per cart line
+    # so the operational dashboard / scope filters surface the work
+    # immediately. The new Proposal flow bypasses apply_transition and
+    # owns its own spawn via `proposal_state_machine.
+    # apply_proposal_transition`; this hook only fires on the legacy
+    # path. Idempotency on `extra_work_request_item` guarantees a
+    # no-op if proposal-flow tickets already exist (unusual but
+    # defensive).
+    #
+    # Error propagation: any failure here bubbles up — the spawn IS
+    # part of the customer-approval contract. The surrounding atomic
+    # block rolls back the EW status + history row together.
+    if (
+        old_status == ExtraWorkStatus.PRICING_PROPOSED
+        and to_status == ExtraWorkStatus.CUSTOMER_APPROVED
+    ):
+        # Lazy import to avoid a load-time cycle:
+        # proposal_tickets imports proposal_state_machine which
+        # imports models which imports state_machine.
+        from .proposal_tickets import spawn_tickets_for_extra_work_request
+
+        spawn_tickets_for_extra_work_request(locked, actor=user)
+
     return locked
 
 

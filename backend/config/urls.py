@@ -34,6 +34,10 @@ urlpatterns = [
     path("api/customers/", include("customers.urls")),
     path("api/tickets/", include("tickets.urls")),
     path("api/extra-work/", include("extra_work.urls")),
+    # Sprint 28 Batch 5 — provider service catalog (ServiceCategory +
+    # Service CRUD). Per-customer pricing rows are under
+    # /api/customers/<id>/pricing/ — see customers/urls.py.
+    path("api/services/", include("extra_work.urls_catalog")),
     path("api/reports/", include("reports.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),

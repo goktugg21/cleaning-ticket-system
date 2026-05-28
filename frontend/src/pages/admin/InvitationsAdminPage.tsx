@@ -21,19 +21,12 @@ import type {
   Role,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { roleLabelKeyNs } from "../../auth/permissions";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type StatusTab = "PENDING" | "ACCEPTED" | "EXPIRED" | "ALL";
-
-const ROLE_KEYS: Record<Role, string> = {
-  SUPER_ADMIN: "common:roles.super_admin",
-  COMPANY_ADMIN: "common:roles.company_admin",
-  BUILDING_MANAGER: "common:roles.building_manager",
-  STAFF: "common:roles.staff",
-  CUSTOMER_USER: "common:roles.customer_user",
-};
 
 function statusPillClass(status: InvitationAdmin["status"]): string {
   return `status-pill status-pill--${status.toLowerCase()}`;
@@ -458,7 +451,7 @@ export function InvitationsAdminPage() {
                   >
                     {availableRoles.map((role) => (
                       <option key={role} value={role}>
-                        {t(ROLE_KEYS[role])}
+                        {t(roleLabelKeyNs(role))}
                       </option>
                     ))}
                   </select>
@@ -744,7 +737,7 @@ export function InvitationsAdminPage() {
                         </div>
                       </td>
                       <td data-label={t("invitations.col_role")}>
-                        {t(ROLE_KEYS[invitation.role] ?? "common:roles.fallback")}
+                        {t(roleLabelKeyNs(invitation.role))}
                       </td>
                       <td data-label={t("invitations.col_status")}>
                         <span className={statusPillClass(invitation.status)}>

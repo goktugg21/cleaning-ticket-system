@@ -296,8 +296,13 @@ class SeedDemoDataIsolationTests(TestCase):
             b_ticket_qs.filter(company=self.company_a).count() == 0,
             "Company B admin must not see Company A tickets",
         )
-        # And both actually see *something* — the seed put 4 in A, 2 in B.
-        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 4)
+        # And both actually see *something* — the seed put 4 named demo
+        # tickets in A and 2 in B, PLUS one ticket spawned by the
+        # Sprint 29 Batch 29.8.5 demo Extra Work fixture in Company A
+        # (an INSTANT-routed EW that auto-spawns one operational
+        # ticket on B1 Amsterdam). Cross-company isolation is the
+        # actual signal; the absolute counts are a sanity check.
+        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 5)
         self.assertEqual(b_ticket_qs.filter(company=self.company_b).count(), 2)
 
     def test_cross_company_customer_visibility_is_blocked(self):

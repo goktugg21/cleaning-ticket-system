@@ -1,11 +1,12 @@
 """
-Sprint 25C — staff completion-evidence rule.
+Sprint 25C + B1 — staff completion-evidence rule.
 
-OSIUS domain rule: moving a ticket from IN_PROGRESS to
-WAITING_CUSTOMER_APPROVAL must be accompanied by EITHER a
-non-empty completion note OR at least one VISIBLE attachment
-already on the ticket. Empty completion (no note + no visible
-photo) is rejected with HTTP 400 and a stable error code
+Domain rule: when a STAFF user moves a ticket from IN_PROGRESS to
+WAITING_CUSTOMER_APPROVAL (or to WAITING_MANAGER_REVIEW via the
+Sprint 28 Batch 11 route), the transition must be accompanied by
+EITHER a non-empty completion note OR at least one VISIBLE
+attachment already on the ticket. Empty completion (no note + no
+visible photo) is rejected with HTTP 400 and a stable error code
 `completion_evidence_required`.
 
 "Visible" mirrors the customer-facing attachment filter:
@@ -13,10 +14,18 @@ photo) is rejected with HTTP 400 and a stable error code
   * the parent TicketMessage (if any) is neither is_hidden=True
     nor message_type=INTERNAL_NOTE.
 
-The rule applies independently of role/scope — the role/scope
-gates run first, so an unauthorised actor (e.g. a CUSTOMER_USER
-attempting to drive an OSIUS-side transition) still 403s with
-`forbidden_transition`, never reaching the evidence check.
+B1 (system-business-logic-and-workflows.md §4.4) — the gate fires
+ONLY for STAFF actors. Managers and admins driving the same
+completion transition (BM closing out a job on behalf of an absent
+staff member; SUPER_ADMIN unblocking a stuck ticket) bypass the
+rule. The pre-B1 "applies independently of role/scope" stance was
+wrong per the canonical business doc. See the
+`AdminAndManagerBypassCompletionEvidenceTests` class below.
+
+The role/scope gates run BEFORE the evidence check, so an
+unauthorised actor (e.g. a CUSTOMER_USER attempting to drive an
+OSIUS-side transition) still 403s with `forbidden_transition`,
+never reaching the evidence check.
 """
 import tempfile
 
@@ -25,11 +34,14 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from accounts.models import StaffProfile, UserRole
+from buildings.models import BuildingStaffVisibility
 from test_utils import TenantFixtureMixin
 from tickets.models import (
     TicketAttachment,
     TicketMessage,
     TicketMessageType,
+    TicketStaffAssignment,
     TicketStatus,
 )
 from tickets.state_machine import TransitionError, apply_transition
@@ -46,8 +58,47 @@ _TMP_MEDIA = tempfile.mkdtemp(prefix="sprint25c-media-")
 def _move_to_in_progress(ticket, manager):
     """Drive OPEN -> IN_PROGRESS via the state machine (no evidence
     rule applies to this hop) so subsequent tests start from a state
-    where the rule under test can actually fire."""
+    where the rule under test can actually fire. The manager arg is
+    BUILDING_MANAGER-scoped — only BM/admins can drive OPEN ->
+    IN_PROGRESS per ALLOWED_TRANSITIONS."""
     return apply_transition(ticket, manager, TicketStatus.IN_PROGRESS)
+
+
+def _wire_staff_actor(test_case, ticket):
+    """
+    B1 — set up a STAFF actor on `test_case` that is allowed to drive
+    `IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL` on `ticket`:
+
+      * STAFF user + active StaffProfile,
+      * BuildingStaffVisibility on the ticket's building, with
+        `staff_completion_routes_to_customer=True` so the route flag
+        check in apply_transition admits WAITING_CUSTOMER_APPROVAL as
+        the target,
+      * TicketStaffAssignment so SCOPE_STAFF_ASSIGNED returns True.
+
+    Stored as `test_case.staff_user` so the rule-fires tests below
+    can drive the transition as STAFF and exercise the gate the
+    business doc says applies to field staff only.
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    staff = User.objects.create_user(
+        email=f"staff-25c-{ticket.id}@example.com",
+        password=test_case.password,
+        role=UserRole.STAFF,
+        full_name="Staff 25C",
+    )
+    StaffProfile.objects.create(user=staff, is_active=True)
+    BuildingStaffVisibility.objects.create(
+        user=staff,
+        building=ticket.building,
+        visibility_level=BuildingStaffVisibility.VisibilityLevel.BUILDING_READ,
+        staff_completion_routes_to_customer=True,
+    )
+    TicketStaffAssignment.objects.create(ticket=ticket, user=staff)
+    test_case.staff_user = staff
+    return staff
 
 
 def _make_attachment(ticket, uploader, *, is_hidden=False, message=None):
@@ -66,16 +117,29 @@ def _make_attachment(ticket, uploader, *, is_hidden=False, message=None):
 
 
 # ===========================================================================
-# Unit-level (apply_transition) coverage
+# Unit-level (apply_transition) coverage — STAFF actor
+#
+# B1: the completion-evidence rule fires for STAFF only. These tests now
+# drive the IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL hop as a STAFF user
+# (wired via `_wire_staff_actor`). The setup hop OPEN -> IN_PROGRESS
+# stays on `self.manager` because only BM/admins can drive that hop.
 # ===========================================================================
 @override_settings(MEDIA_ROOT=_TMP_MEDIA)
 class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        # The setUp on TenantFixtureMixin already creates self.ticket /
+        # self.manager / self.customer. Add a STAFF actor assigned to
+        # this ticket so the rule-fires assertions exercise the
+        # STAFF-actor path the gate now targets.
+        _wire_staff_actor(self, self.ticket)
+
     def test_transition_with_note_passes(self):
         """A non-empty note alone satisfies the evidence rule."""
         ticket = _move_to_in_progress(self.ticket, self.manager)
         result = apply_transition(
             ticket,
-            self.manager,
+            self.staff_user,
             TicketStatus.WAITING_CUSTOMER_APPROVAL,
             note="Cleaned and polished, ready for customer review.",
         )
@@ -86,11 +150,11 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
         """A visible (non-hidden, non-internal-message) attachment
         alone satisfies the rule even with no note."""
         ticket = _move_to_in_progress(self.ticket, self.manager)
-        _make_attachment(ticket, self.manager, is_hidden=False, message=None)
+        _make_attachment(ticket, self.staff_user, is_hidden=False, message=None)
 
         result = apply_transition(
             ticket,
-            self.manager,
+            self.staff_user,
             TicketStatus.WAITING_CUSTOMER_APPROVAL,
             note="",
         )
@@ -104,7 +168,7 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
         with self.assertRaises(TransitionError) as ctx:
             apply_transition(
                 ticket,
-                self.manager,
+                self.staff_user,
                 TicketStatus.WAITING_CUSTOMER_APPROVAL,
                 note="",
             )
@@ -121,7 +185,7 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
         with self.assertRaises(TransitionError) as ctx:
             apply_transition(
                 ticket,
-                self.manager,
+                self.staff_user,
                 TicketStatus.WAITING_CUSTOMER_APPROVAL,
                 note="   \t\n  ",
             )
@@ -131,12 +195,12 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
         """An attachment with is_hidden=True is invisible to the
         customer and therefore does NOT count as completion evidence."""
         ticket = _move_to_in_progress(self.ticket, self.manager)
-        _make_attachment(ticket, self.manager, is_hidden=True, message=None)
+        _make_attachment(ticket, self.staff_user, is_hidden=True, message=None)
 
         with self.assertRaises(TransitionError) as ctx:
             apply_transition(
                 ticket,
-                self.manager,
+                self.staff_user,
                 TicketStatus.WAITING_CUSTOMER_APPROVAL,
                 note="",
             )
@@ -154,13 +218,13 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
             is_hidden=True,
         )
         _make_attachment(
-            ticket, self.manager, is_hidden=False, message=internal_msg
+            ticket, self.staff_user, is_hidden=False, message=internal_msg
         )
 
         with self.assertRaises(TransitionError) as ctx:
             apply_transition(
                 ticket,
-                self.manager,
+                self.staff_user,
                 TicketStatus.WAITING_CUSTOMER_APPROVAL,
                 note="",
             )
@@ -179,13 +243,13 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
             is_hidden=True,
         )
         _make_attachment(
-            ticket, self.manager, is_hidden=False, message=hidden_msg
+            ticket, self.staff_user, is_hidden=False, message=hidden_msg
         )
 
         with self.assertRaises(TransitionError) as ctx:
             apply_transition(
                 ticket,
-                self.manager,
+                self.staff_user,
                 TicketStatus.WAITING_CUSTOMER_APPROVAL,
                 note="",
             )
@@ -195,13 +259,55 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
         """Belt-and-braces: both forms of evidence together are fine
         — no double-counting, no special-case interaction."""
         ticket = _move_to_in_progress(self.ticket, self.manager)
-        _make_attachment(ticket, self.manager, is_hidden=False, message=None)
+        _make_attachment(ticket, self.staff_user, is_hidden=False, message=None)
 
+        result = apply_transition(
+            ticket,
+            self.staff_user,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="See attached photo.",
+        )
+        self.assertEqual(result.status, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+
+
+# ===========================================================================
+# B1 — Admin / manager bypass coverage.
+#
+# Per system-business-logic-and-workflows.md §4.4 the evidence rule
+# applies to STAFF only. Managers and admins driving the same completion
+# transition (e.g. BM closing a job on behalf of an absent staff member,
+# SUPER_ADMIN unblocking a stuck ticket) must NOT trip the gate even
+# with empty note + no visible attachment.
+# ===========================================================================
+@override_settings(MEDIA_ROOT=_TMP_MEDIA)
+class AdminAndManagerBypassCompletionEvidenceTests(TenantFixtureMixin, APITestCase):
+    def test_building_manager_bypasses_evidence_rule(self):
+        ticket = _move_to_in_progress(self.ticket, self.manager)
         result = apply_transition(
             ticket,
             self.manager,
             TicketStatus.WAITING_CUSTOMER_APPROVAL,
-            note="See attached photo.",
+            note="",
+        )
+        self.assertEqual(result.status, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+
+    def test_company_admin_bypasses_evidence_rule(self):
+        ticket = _move_to_in_progress(self.ticket, self.manager)
+        result = apply_transition(
+            ticket,
+            self.company_admin,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="",
+        )
+        self.assertEqual(result.status, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+
+    def test_super_admin_bypasses_evidence_rule(self):
+        ticket = _move_to_in_progress(self.ticket, self.manager)
+        result = apply_transition(
+            ticket,
+            self.super_admin,
+            TicketStatus.WAITING_CUSTOMER_APPROVAL,
+            note="",
         )
         self.assertEqual(result.status, TicketStatus.WAITING_CUSTOMER_APPROVAL)
 
@@ -212,12 +318,19 @@ class CompletionEvidenceUnitTests(TenantFixtureMixin, APITestCase):
 # ===========================================================================
 @override_settings(MEDIA_ROOT=_TMP_MEDIA)
 class CompletionEvidenceAPITests(TenantFixtureMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        # B1 — the evidence-required path now fires only for STAFF.
+        # Wire a STAFF actor against self.ticket so the API-level
+        # assertions exercise the gate via the role it applies to.
+        _wire_staff_actor(self, self.ticket)
+
     def _drive_to_in_progress(self):
         return _move_to_in_progress(self.ticket, self.manager)
 
     def test_api_returns_400_with_stable_code_when_evidence_missing(self):
         in_progress = self._drive_to_in_progress()
-        self.authenticate(self.manager)
+        self.authenticate(self.staff_user)
         response = self.client.post(
             f"/api/tickets/{in_progress.id}/status/",
             {"to_status": TicketStatus.WAITING_CUSTOMER_APPROVAL},
@@ -246,7 +359,7 @@ class CompletionEvidenceAPITests(TenantFixtureMixin, APITestCase):
 
     def test_api_passes_with_note(self):
         in_progress = self._drive_to_in_progress()
-        self.authenticate(self.manager)
+        self.authenticate(self.staff_user)
         response = self.client.post(
             f"/api/tickets/{in_progress.id}/status/",
             {
@@ -256,6 +369,18 @@ class CompletionEvidenceAPITests(TenantFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_api_admin_bypasses_evidence_rule(self):
+        # B1 — same endpoint, COMPANY_ADMIN actor, empty payload. The
+        # gate must NOT fire; the transition succeeds.
+        in_progress = self._drive_to_in_progress()
+        self.authenticate(self.company_admin)
+        response = self.client.post(
+            f"/api/tickets/{in_progress.id}/status/",
+            {"to_status": TicketStatus.WAITING_CUSTOMER_APPROVAL},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.content)
 
     def test_customer_user_blocked_by_auth_gate_not_evidence_gate(self):
         """A CUSTOMER_USER never has the OSIUS-side transition right

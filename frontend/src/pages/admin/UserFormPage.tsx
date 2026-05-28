@@ -1,19 +1,17 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addStaffVisibility,
-  deactivateUser,
   getStaffProfile,
   getUser,
   listBuildings,
   listCompanies,
   listCustomers,
   listStaffVisibility,
-  reactivateUser,
   removeStaffVisibility,
   updateStaffProfile,
   updateStaffVisibility,
@@ -24,9 +22,11 @@ import type {
   BuildingStaffVisibilityAdmin,
   Role,
   StaffProfileAdmin,
+  StaffVisibilityLevel,
   UserAdminDetail,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { roleLabelKeyNs } from "../../auth/permissions";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
@@ -38,20 +38,13 @@ interface UserUpdatePayload {
   role: Role;
 }
 
-const ROLE_KEYS: Record<Role, string> = {
-  SUPER_ADMIN: "common:roles.super_admin",
-  COMPANY_ADMIN: "common:roles.company_admin",
-  BUILDING_MANAGER: "common:roles.building_manager",
-  STAFF: "common:roles.staff",
-  CUSTOMER_USER: "common:roles.customer_user",
-};
 
 // Sprint 23B — STAFF deliberately left OUT of ALL_ROLES. STAFF users
 // are created via the Sprint 23A `StaffProfile` admin path; the
 // generic user form keeps its pre-23B options to avoid letting an
 // operator type-promote an existing user into STAFF without also
 // creating the matching profile and visibility rows. Display of an
-// already-STAFF user still works because ROLE_KEYS covers it above.
+// already-STAFF user still works because roleLabelKeyNs covers it.
 const ALL_ROLES: Role[] = [
   "SUPER_ADMIN",
   "COMPANY_ADMIN",
@@ -60,8 +53,8 @@ const ALL_ROLES: Role[] = [
 ];
 
 export function UserFormPage() {
-  const navigate = useNavigate();
   const { id } = useParams();
+  const isCreate = id === undefined;
   const { t } = useTranslation("common");
 
   const { me } = useAuth();
@@ -106,10 +99,6 @@ export function UserFormPage() {
   });
   const user = form.entity;
   const numericId = form.numericId ?? Number.NaN;
-
-  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [actionBusy, setActionBusy] = useState(false);
 
   const isSelf = me?.id === numericId;
   const roleDisabled =
@@ -184,43 +173,22 @@ export function UserFormPage() {
     };
   }, [user]);
 
-  async function handleConfirmDeactivate() {
-    if (!user) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await deactivateUser(numericId);
-      deactivateDialogRef.current?.close();
-      navigate("/admin/users?deactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      deactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleConfirmReactivate() {
-    if (!user) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await reactivateUser(numericId);
-      reactivateDialogRef.current?.close();
-      navigate("/admin/users?reactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      reactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
+  // Sprint 29 Batch 29.6 — when editing, the back link returns to the
+  // read-only detail page (which is now the canonical "home" of a
+  // user). When creating, it still goes to the list.
+  const backHref =
+    isCreate || form.numericId === null
+      ? "/admin/users"
+      : `/admin/users/${form.numericId}`;
+  const backLabel = isCreate
+    ? t("user_form.back")
+    : t("user_form.back_to_detail");
 
   return (
     <div>
-      <Link to="/admin/users" className="link-back">
+      <Link to={backHref} className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("user_form.back")}
+        {backLabel}
       </Link>
 
       <div className="page-header">
@@ -232,7 +200,7 @@ export function UserFormPage() {
           <p className="page-sub" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span className="cell-tag cell-tag-open">
               <i />
-              {t(ROLE_KEYS[role] ?? "common:roles.fallback")}
+              {t(roleLabelKeyNs(role))}
             </span>
             {user && !user.is_active && (
               <span className="cell-tag cell-tag-closed">
@@ -243,18 +211,6 @@ export function UserFormPage() {
             {isSelf && <span className="muted small">{t("user_form.this_is_you")}</span>}
           </p>
         </div>
-        {user && !user.is_active && isSuperAdmin && (
-          <div className="page-header-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              data-testid="reactivate-button"
-              onClick={() => reactivateDialogRef.current?.open()}
-            >
-              {t("admin_form.reactivate")}
-            </button>
-          </div>
-        )}
       </div>
 
       {savedBanner && (
@@ -349,12 +305,12 @@ export function UserFormPage() {
                   {/* Always include the current role so a disabled select still shows it. */}
                   {!availableRoleOptions.includes(role) && (
                     <option value={role}>
-                      {t(ROLE_KEYS[role] ?? "common:roles.fallback")}
+                      {t(roleLabelKeyNs(role))}
                     </option>
                   )}
                   {availableRoleOptions.map((option) => (
                     <option key={option} value={option}>
-                      {t(ROLE_KEYS[option])}
+                      {t(roleLabelKeyNs(option))}
                     </option>
                   ))}
                 </select>
@@ -380,15 +336,14 @@ export function UserFormPage() {
 
             </div>
             <div className="form-actions">
-              {user.is_active && !isSelf && (
-                <button
-                  type="button"
+              {!isCreate && form.numericId !== null && (
+                <Link
+                  to={`/admin/users/${form.numericId}`}
                   className="btn btn-ghost"
-                  data-testid="deactivate-button"
-                  onClick={() => deactivateDialogRef.current?.open()}
+                  data-testid="user-edit-cancel"
                 >
-                  {t("admin_form.deactivate")}
-                </button>
+                  {t("admin_form.cancel")}
+                </Link>
               )}
               <button type="submit" className="btn btn-primary" disabled={form.submitting}>
                 {form.submitting ? t("admin_form.saving") : t("admin_form.save_changes")}
@@ -461,27 +416,6 @@ export function UserFormPage() {
         </>
       )}
 
-      <ConfirmDialog
-        ref={deactivateDialogRef}
-        title={t("user_form.dialog_deactivate_title", {
-          email: user?.email ?? "",
-        })}
-        body={t("user_form.dialog_deactivate_body")}
-        confirmLabel={t("admin_form.deactivate")}
-        onConfirm={handleConfirmDeactivate}
-        busy={actionBusy}
-      />
-
-      <ConfirmDialog
-        ref={reactivateDialogRef}
-        title={t("user_form.dialog_reactivate_title", {
-          email: user?.email ?? "",
-        })}
-        body={t("user_form.dialog_reactivate_body")}
-        confirmLabel={t("admin_form.reactivate")}
-        onConfirm={handleConfirmReactivate}
-        busy={actionBusy}
-      />
     </div>
   );
 }
@@ -669,7 +603,58 @@ function StaffDetailsSection({
     setVisibilityBusyKey(`toggle-${row.building_id}`);
     setVisibilityError("");
     try {
-      await updateStaffVisibility(userId, row.building_id, next);
+      await updateStaffVisibility(userId, row.building_id, {
+        can_request_assignment: next,
+      });
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
+  // Sprint 28 Batch 10 — visibility-level write surface. Uses the same
+  // PATCH endpoint as the can-request toggle; the backend accepts
+  // `visibility_level` alongside the existing `can_request_assignment`
+  // field. We send only the level so unrelated rows / concurrent edits
+  // on the can-request flag are not clobbered.
+  async function handleChangeVisibilityLevel(
+    row: BuildingStaffVisibilityAdmin,
+    next: StaffVisibilityLevel,
+  ) {
+    setVisibilityBusyKey(`level-${row.building_id}`);
+    setVisibilityError("");
+    try {
+      await updateStaffVisibility(userId, row.building_id, {
+        visibility_level: next,
+      });
+      await reloadVisibility();
+      setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
+    } catch (err) {
+      setVisibilityError(getApiError(err));
+    } finally {
+      setVisibilityBusyKey(null);
+    }
+  }
+
+  // Sprint 28 Batch 11 — STAFF completion routing override. When
+  // true, STAFF marking a ticket in this building as completed sends
+  // it straight to WAITING_CUSTOMER_APPROVAL (skipping the
+  // WAITING_MANAGER_REVIEW gate). Default false. Same PATCH endpoint
+  // as the other BSV fields; we send only the new flag so unrelated
+  // fields are not clobbered.
+  async function handleToggleRoutesToCustomer(
+    row: BuildingStaffVisibilityAdmin,
+    next: boolean,
+  ) {
+    setVisibilityBusyKey(`routes-${row.building_id}`);
+    setVisibilityError("");
+    try {
+      await updateStaffVisibility(userId, row.building_id, {
+        staff_completion_routes_to_customer: next,
+      });
       await reloadVisibility();
       setVisibilityBanner(t("staff_admin.banner_visibility_saved"));
     } catch (err) {
@@ -868,6 +853,7 @@ function StaffDetailsSection({
                 <thead>
                   <tr>
                     <th>{t("staff_admin.col_building")}</th>
+                    <th>{t("staff_admin.level_label")}</th>
                     <th>{t("staff_admin.col_can_request")}</th>
                     <th aria-label={t("staff_admin.col_actions")} />
                   </tr>
@@ -876,6 +862,10 @@ function StaffDetailsSection({
                   {visibility.map((row) => {
                     const toggleBusy =
                       visibilityBusyKey === `toggle-${row.building_id}`;
+                    const levelBusy =
+                      visibilityBusyKey === `level-${row.building_id}`;
+                    const routesBusy =
+                      visibilityBusyKey === `routes-${row.building_id}`;
                     const removeBusy =
                       visibilityBusyKey === `remove-${row.building_id}`;
                     return (
@@ -885,6 +875,33 @@ function StaffDetailsSection({
                         data-building-id={row.building_id}
                       >
                         <td className="td-subject">{row.building_name}</td>
+                        <td>
+                          <select
+                            className="field-select"
+                            value={row.visibility_level}
+                            onChange={(event) =>
+                              handleChangeVisibilityLevel(
+                                row,
+                                event.target.value as StaffVisibilityLevel,
+                              )
+                            }
+                            disabled={!canEdit || levelBusy}
+                            aria-label={t("staff_admin.level_label")}
+                            data-testid={`staff-visibility-level-select-${row.building_id}`}
+                          >
+                            <option value="ASSIGNED_ONLY">
+                              {t("staff_admin.level.assigned_only")}
+                            </option>
+                            <option value="BUILDING_READ">
+                              {t("staff_admin.level.building_read")}
+                            </option>
+                            <option value="BUILDING_READ_AND_ASSIGN">
+                              {t(
+                                "staff_admin.level.building_read_and_assign",
+                              )}
+                            </option>
+                          </select>
+                        </td>
                         <td>
                           <label
                             style={{
@@ -910,6 +927,39 @@ function StaffDetailsSection({
                               {t(
                                 "staff_admin.visibility_can_request_label",
                               )}
+                            </span>
+                          </label>
+                          {/* Sprint 28 Batch 11 — completion-routing
+                              checkbox. Stacked below the can-request
+                              toggle to avoid adding a fourth column
+                              (the table already has 4 columns; adding
+                              another widens the layout past the
+                              admin-list-wrap breakpoint). */}
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              cursor: canEdit ? "pointer" : "default",
+                              marginTop: 6,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                row.staff_completion_routes_to_customer
+                              }
+                              onChange={(event) =>
+                                handleToggleRoutesToCustomer(
+                                  row,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={!canEdit || routesBusy}
+                              data-testid={`staff-completion-routes-to-customer-${row.building_id}`}
+                            />
+                            <span className="muted small">
+                              {t("staff_admin.routes_to_customer_label")}
                             </span>
                           </label>
                         </td>
@@ -941,6 +991,10 @@ function StaffDetailsSection({
               {visibility.map((row) => {
                 const toggleBusy =
                   visibilityBusyKey === `toggle-${row.building_id}`;
+                const levelBusy =
+                  visibilityBusyKey === `level-${row.building_id}`;
+                const routesBusy =
+                  visibilityBusyKey === `routes-${row.building_id}`;
                 const removeBusy =
                   visibilityBusyKey === `remove-${row.building_id}`;
                 return (
@@ -958,6 +1012,42 @@ function StaffDetailsSection({
                         <span className="admin-card-title">
                           {row.building_name}
                         </span>
+                      </div>
+                      <div
+                        className="admin-card-meta-row"
+                        style={{ marginTop: 6 }}
+                      >
+                        <label
+                          className="field-label"
+                          style={{ display: "block", marginBottom: 4 }}
+                        >
+                          {t("staff_admin.level_label")}
+                        </label>
+                        <select
+                          className="field-select"
+                          value={row.visibility_level}
+                          onChange={(event) =>
+                            handleChangeVisibilityLevel(
+                              row,
+                              event.target.value as StaffVisibilityLevel,
+                            )
+                          }
+                          disabled={!canEdit || levelBusy}
+                          aria-label={t("staff_admin.level_label")}
+                          data-testid={`staff-visibility-level-select-mobile-${row.building_id}`}
+                        >
+                          <option value="ASSIGNED_ONLY">
+                            {t("staff_admin.level.assigned_only")}
+                          </option>
+                          <option value="BUILDING_READ">
+                            {t("staff_admin.level.building_read")}
+                          </option>
+                          <option value="BUILDING_READ_AND_ASSIGN">
+                            {t(
+                              "staff_admin.level.building_read_and_assign",
+                            )}
+                          </option>
+                        </select>
                       </div>
                       <div
                         className="admin-card-meta-row"
@@ -985,6 +1075,41 @@ function StaffDetailsSection({
                           />
                           <span className="muted small">
                             {t("staff_admin.visibility_can_request_label")}
+                          </span>
+                        </label>
+                      </div>
+                      {/* Sprint 28 Batch 11 — mobile mirror of the
+                          completion-routing checkbox. Same testid
+                          stem so a Playwright spec can target the
+                          row regardless of viewport (the regex
+                          `/^staff-completion-routes-to-customer-/`
+                          will match both desktop and mobile). */}
+                      <div
+                        className="admin-card-meta-row"
+                        style={{ marginTop: 6 }}
+                      >
+                        <label
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            cursor: canEdit ? "pointer" : "default",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={row.staff_completion_routes_to_customer}
+                            onChange={(event) =>
+                              handleToggleRoutesToCustomer(
+                                row,
+                                event.target.checked,
+                              )
+                            }
+                            disabled={!canEdit || routesBusy}
+                            data-testid={`staff-completion-routes-to-customer-mobile-${row.building_id}`}
+                          />
+                          <span className="muted small">
+                            {t("staff_admin.routes_to_customer_label")}
                           </span>
                         </label>
                       </div>
@@ -1089,3 +1214,4 @@ function StaffDetailsSection({
     </section>
   );
 }
+

@@ -181,7 +181,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { me, login } = useAuth();
-  const { t } = useTranslation("login");
+  const { t } = useTranslation(["login", "common"]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -276,7 +276,7 @@ export function LoginPage() {
             <div className="login-brand-row-icon">
               <Building2 size={20} strokeWidth={2} />
             </div>
-            <div className="login-brand-row-name">CleanOps</div>
+            <div className="login-brand-row-name">{t("common:brand.name")}</div>
           </div>
 
           <div className="login-welcome">
@@ -506,3 +506,4 @@ export function LoginPage() {
     </main>
   );
 }
+

@@ -10,7 +10,11 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounts.models import UserRole
-from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
+from accounts.permissions import (
+    IsAuthenticatedAndActive,
+    is_provider_management_role,
+    is_staff_role,
+)
 from accounts.scoping import scope_tickets_for
 from audit.models import AuditAction, AuditLog
 from audit import context as audit_context
@@ -167,8 +171,21 @@ class TicketViewSet(
         ticket.save(update_fields=["deleted_at", "deleted_by", "updated_at"])
 
         try:
+            # Sprint 27F-B2 (G-B6): pass `reason` + `actor_scope` explicitly
+            # so the audit contract stays visible at every call site. The
+            # soft-delete endpoint has no reason capture today (no modal),
+            # so `reason` falls through to the empty string. The
+            # `actor_scope` falls through to the lazy middleware-seeded
+            # snapshot (resolved by `_create_log` in audit/signals.py),
+            # but here we resolve it directly off the JWT-authenticated
+            # request.user so the snapshot is anchored even when the
+            # middleware ran with AnonymousUser.
+            _actor = audit_context.get_current_actor()
+            _scope = audit_context.get_current_actor_scope() or {}
+            if not _scope and _actor is not None:
+                _scope = audit_context.snapshot_actor_scope(_actor) or {}
             AuditLog.objects.create(
-                actor=audit_context.get_current_actor(),
+                actor=_actor,
                 action=AuditAction.DELETE,
                 target_model="tickets.Ticket",
                 target_id=ticket.id,
@@ -183,6 +200,8 @@ class TicketViewSet(
                 },
                 request_ip=audit_context.get_current_request_ip(),
                 request_id=audit_context.get_current_request_id(),
+                reason=audit_context.get_current_reason(),
+                actor_scope=_scope,
             )
         except Exception:  # pragma: no cover — audit must not block delete
             _audit_logger.exception(
@@ -232,10 +251,41 @@ class TicketViewSet(
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
-        if not is_staff_role(request.user):
+        # Sprint 28 Batch 2: `is_staff_role` returns True for STAFF (Sprint
+        # 23A widened it so STAFF inherits internal-note / hidden-attachment
+        # visibility), but the BM-assign endpoint is reserved for the
+        # provider-admin / building-manager triad. Gate explicitly on the
+        # allowed role set. Audit row 26 + master plan Batch 2.
+        #
+        # Sprint 28 Batch 10: STAFF passes the BM-assign gate only when
+        # the actor holds a BuildingStaffVisibility row at level
+        # `BUILDING_READ_AND_ASSIGN` for the ticket's building. STAFF
+        # without an explicit B3 row stays 403 (preserves the Batch 2
+        # block). The multi-staff endpoint at
+        # `/api/tickets/<id>/staff-assignments/` stays admin-only via
+        # `views_staff_assignments.py::_gate_actor` — Batch 10 only
+        # touches the single-target `assigned_to` field on Ticket.
+        user = request.user
+        if user.role == UserRole.STAFF:
+            from buildings.models import BuildingStaffVisibility
+
+            if not BuildingStaffVisibility.objects.filter(
+                user=user,
+                building_id=ticket.building_id,
+                visibility_level=BuildingStaffVisibility.VisibilityLevel.BUILDING_READ_AND_ASSIGN,
+            ).exists():
+                self.permission_denied(
+                    request,
+                    message="STAFF without BUILDING_READ_AND_ASSIGN cannot assign tickets.",
+                )
+        elif user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        ):
             self.permission_denied(
                 request,
-                message="Customer users cannot assign tickets.",
+                message="This role cannot assign tickets.",
             )
         old_assigned_to = ticket.assigned_to
         serializer = TicketAssignSerializer(
@@ -355,6 +405,74 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["get"], url_path="staff-completion-route")
+    def staff_completion_route(self, request, pk=None):
+        """
+        Sprint 28 Batch 11 — read-only helper for the frontend completion
+        modal. Returns the resolved routing destination for STAFF on this
+        ticket: "manager_review" (default) or "customer_approval"
+        (configured per BuildingStaffVisibility.staff_completion_routes_to_customer).
+
+        Authorization: STAFF must have a TicketStaffAssignment row for
+        the ticket. Provider operators in scope (SUPER_ADMIN,
+        COMPANY_ADMIN, BUILDING_MANAGER for the ticket's building) get
+        the route a hypothetical STAFF on this ticket would see; pass
+        `?staff_id=<id>` to ask about a specific STAFF user (useful for
+        on-behalf flows). Without `staff_id` a provider operator gets
+        the conservative "manager_review" default. Out-of-scope -> 404
+        (not 403, to avoid leaking ticket existence).
+        """
+        from buildings.models import BuildingStaffVisibility
+        from .models import TicketStaffAssignment
+
+        ticket = self.get_object()  # 404 if out of scope per scope_tickets_for
+        user = request.user
+
+        if user.role == UserRole.STAFF:
+            if not TicketStaffAssignment.objects.filter(
+                ticket=ticket, user=user
+            ).exists():
+                raise Http404
+            staff_user = user
+        elif user.role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        ):
+            staff_id = request.query_params.get("staff_id")
+            if staff_id is None:
+                return Response({"route": "manager_review"})
+            from accounts.models import User
+
+            try:
+                staff_user = User.objects.get(
+                    pk=staff_id, role=UserRole.STAFF, is_active=True
+                )
+            except (User.DoesNotExist, ValueError, TypeError):
+                raise Http404
+            if not TicketStaffAssignment.objects.filter(
+                ticket=ticket, user=staff_user
+            ).exists():
+                raise Http404
+        else:
+            raise Http404
+
+        bsv = BuildingStaffVisibility.objects.filter(
+            user=staff_user, building_id=ticket.building_id
+        ).first()
+        routes_to_customer = bool(
+            bsv and bsv.staff_completion_routes_to_customer
+        )
+        return Response(
+            {
+                "route": (
+                    "customer_approval"
+                    if routes_to_customer
+                    else "manager_review"
+                )
+            }
+        )
+
     @action(detail=True, methods=["get"], url_path="assignable-staff")
     def assignable_staff(self, request, pk=None):
         """
@@ -388,9 +506,28 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         ticket = self._get_ticket()
         qs = TicketMessage.objects.filter(ticket=ticket).select_related("author")
         user = self.request.user
-        if not is_staff_role(user):
+        # B7 — four-tier note visibility. The three tiers below each
+        # exclude a specific subset of `message_type` values:
+        #
+        #   * Provider management (SA/COMPANY_ADMIN/BM): sees every
+        #     tier including INTERNAL_NOTE (PROVIDER_INTERNAL).
+        #   * STAFF: sees PUBLIC_REPLY + STAFF_OPERATIONAL +
+        #     STAFF_COMPLETION. Hidden from INTERNAL_NOTE
+        #     (PROVIDER_INTERNAL) — STAFF must never see commercial /
+        #     management notes per §9.2 of the canonical doc.
+        #   * Customer-side: sees PUBLIC_REPLY + STAFF_COMPLETION.
+        #     Hidden from INTERNAL_NOTE and STAFF_OPERATIONAL.
+        #
+        # `is_hidden=True` is a moderation flag; only provider
+        # management retains visibility on hidden rows.
+        if not is_provider_management_role(user):
             qs = qs.filter(is_hidden=False)
             qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
+            if not is_staff_role(user):
+                # Customer-side: also exclude STAFF_OPERATIONAL.
+                qs = qs.exclude(
+                    message_type=TicketMessageType.STAFF_OPERATIONAL
+                )
         return qs.order_by("created_at")
 
     def get_serializer_context(self):
@@ -405,6 +542,14 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         message_type = serializer.validated_data.get(
             "message_type", TicketMessageType.PUBLIC_REPLY
         )
+        # CUSTOMER_USER and any non-provider-side actor is force-
+        # normalised to PUBLIC_REPLY (defence in depth — the
+        # serializer's `validate_message_type` already rejects
+        # PROVIDER_INTERNAL / STAFF_OPERATIONAL / STAFF_COMPLETION
+        # from non-provider-side actors). Provider-side actors
+        # (provider management + STAFF) keep the validated value
+        # so STAFF can author STAFF_OPERATIONAL / STAFF_COMPLETION
+        # and provider management can author INTERNAL_NOTE.
         if not is_staff_role(user):
             message_type = TicketMessageType.PUBLIC_REPLY
 
@@ -412,6 +557,10 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
             ticket=ticket,
             author=user,
             message_type=message_type,
+            # B7 — only PROVIDER_INTERNAL (INTERNAL_NOTE) is auto-
+            # hidden. STAFF_OPERATIONAL and STAFF_COMPLETION remain
+            # visible to their respective audiences via the queryset
+            # filter, not via `is_hidden`.
             is_hidden=(message_type == TicketMessageType.INTERNAL_NOTE),
         )
 
@@ -446,10 +595,21 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         )
 
         user = self.request.user
-        if not is_staff_role(user):
+        # B7 — mirror the message queryset's four-tier filter. Provider
+        # management sees every attachment; STAFF sees PUBLIC_REPLY +
+        # STAFF_OPERATIONAL + STAFF_COMPLETION attachments;
+        # customer-side sees PUBLIC_REPLY + STAFF_COMPLETION
+        # attachments only.
+        if not is_provider_management_role(user):
             qs = qs.filter(is_hidden=False)
             qs = qs.exclude(message__is_hidden=True)
-            qs = qs.exclude(message__message_type=TicketMessageType.INTERNAL_NOTE)
+            qs = qs.exclude(
+                message__message_type=TicketMessageType.INTERNAL_NOTE
+            )
+            if not is_staff_role(user):
+                qs = qs.exclude(
+                    message__message_type=TicketMessageType.STAFF_OPERATIONAL
+                )
 
         return qs.order_by("-created_at")
 
@@ -490,15 +650,40 @@ class TicketAttachmentDownloadView(generics.GenericAPIView):
             ticket=ticket,
         )
 
-        hidden_by_message = (
+        # B7 — derive the attachment's visibility tier from the parent
+        # message and apply the four-tier rule:
+        #
+        #   * INTERNAL_NOTE (PROVIDER_INTERNAL) — provider management only.
+        #   * STAFF_OPERATIONAL — provider management + STAFF only.
+        #   * Hidden flag — moderation; provider management only.
+        #   * Other (PUBLIC_REPLY / STAFF_COMPLETION / no parent message)
+        #     — everyone in scope; existing handler applies.
+        message_internal = (
             attachment.message_id
-            and (
-                attachment.message.is_hidden
-                or attachment.message.message_type == TicketMessageType.INTERNAL_NOTE
-            )
+            and attachment.message.message_type
+            == TicketMessageType.INTERNAL_NOTE
         )
-        if (attachment.is_hidden or hidden_by_message) and not is_staff_role(request.user):
-            self.permission_denied(request, message="Attachment not found in your scope.")
+        message_hidden = (
+            attachment.message_id and attachment.message.is_hidden
+        )
+        message_staff_operational = (
+            attachment.message_id
+            and attachment.message.message_type
+            == TicketMessageType.STAFF_OPERATIONAL
+        )
+        provider_management_only = (
+            attachment.is_hidden or message_internal or message_hidden
+        )
+        if provider_management_only and not is_provider_management_role(
+            request.user
+        ):
+            self.permission_denied(
+                request, message="Attachment not found in your scope."
+            )
+        if message_staff_operational and not is_staff_role(request.user):
+            self.permission_denied(
+                request, message="Attachment not found in your scope."
+            )
 
         if not attachment.file:
             raise Http404("File not found.")

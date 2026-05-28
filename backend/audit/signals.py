@@ -42,11 +42,20 @@ from buildings.models import (
 )
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
+    Contact,
     Customer,
     CustomerBuildingMembership,
     CustomerCompanyPolicy,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
+)
+from extra_work.models import (
+    CustomerServicePrice,
+    ExtraWorkRequestItem,
+    Proposal,
+    ProposalLine,
+    Service,
+    ServiceCategory,
 )
 from tickets.models import StaffAssignmentRequest, TicketStaffAssignment
 
@@ -90,14 +99,27 @@ def _label(instance) -> str:
 def _create_log(instance, action: str, changes: dict) -> None:
     """Write one AuditLog row. Swallows all exceptions."""
     try:
+        # Sprint 27F-B2 (G-B6): every audit row records the operator-supplied
+        # reason (default "") + a JSON snapshot of the actor's role + scope
+        # anchors at write time (default {}). Reason is opt-in per-view via
+        # `audit.context.set_current_reason`; actor_scope is seeded by the
+        # middleware but resolved lazily here against the live request.user
+        # because DRF JWT auth populates request.user at the VIEW layer
+        # (after middleware fired with AnonymousUser).
+        actor = context.get_current_actor()
+        actor_scope = context.get_current_actor_scope() or {}
+        if not actor_scope and actor is not None:
+            actor_scope = context.snapshot_actor_scope(actor) or {}
         AuditLog.objects.create(
-            actor=context.get_current_actor(),
+            actor=actor,
             action=action,
             target_model=_label(instance),
             target_id=instance.pk,
             changes=changes or {},
             request_ip=context.get_current_request_ip(),
             request_id=context.get_current_request_id(),
+            reason=context.get_current_reason(),
+            actor_scope=actor_scope,
         )
     except Exception:  # pragma: no cover — defensive; never fail the caller
         logger.exception(
@@ -228,7 +250,17 @@ def _on_membership_post_save(sender, instance, created, **kwargs):
         # emits. Skip the fallback for that model so we don't write two
         # AuditLog rows per UPDATE. CREATE and DELETE on BSV still go
         # through the membership shape — only UPDATE is delegated.
-        if sender.__name__ == "BuildingStaffVisibility":
+        #
+        # B6: `BuildingManagerAssignment` now also has a dedicated
+        # UPDATE-diff handler
+        # (`_on_building_manager_assignment_post_save_update`) for its
+        # new `permission_overrides` JSONField. Skip the same way so
+        # an override flip lands as exactly one AuditLog UPDATE row,
+        # not two.
+        if sender.__name__ in {
+            "BuildingStaffVisibility",
+            "BuildingManagerAssignment",
+        }:
             return
 
         # Other membership rows have no editable fields; an UPDATE would
@@ -444,7 +476,86 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
 # pre_save snapshot of just the tracked field, plus a post_save handler
 # that fires UPDATE-only (CREATE is left to the existing membership
 # handler so the rich payload doesn't get duplicated).
-_BSV_TRACKED_FIELDS = ("can_request_assignment",)
+# Sprint 28 Batch 10 adds `visibility_level` to the tracked tuple — the
+# UPDATE-only handler below iterates this tuple and emits a single
+# AuditLog row covering whichever fields changed.
+# Sprint 28 Batch 11 adds `staff_completion_routes_to_customer` — the
+# per-staff-per-building routing flag for STAFF completions. Same
+# handler iterates the tuple, so the flip lands as a one-row UPDATE
+# diff alongside any other tracked-field change in the same PATCH.
+_BSV_TRACKED_FIELDS = (
+    "can_request_assignment",
+    "visibility_level",
+    "staff_completion_routes_to_customer",
+)
+
+
+# B6 — `BuildingManagerAssignment.permission_overrides` is the per-(BM,
+# building) override map for the two BM-revocable osius.* keys
+# (`osius.building_manager.override_customer_decision`,
+# `osius.building_manager.prepare_extra_work_proposal`). The model is
+# already on the membership-style CREATE / DELETE handlers above; the
+# pair below adds the UPDATE-diff coverage for the new field so each
+# override flip lands as a single AuditLog row with before/after JSON.
+# Mirrors the BSV UPDATE-only pattern.
+_BMA_TRACKED_FIELDS = ("permission_overrides",)
+
+
+def _bma_snapshot_for_pre_save(instance):
+    """Snapshot the B6 editable field on BuildingManagerAssignment."""
+    if instance.pk is None:
+        return None
+    from buildings.models import BuildingManagerAssignment
+
+    try:
+        previous = BuildingManagerAssignment.objects.get(pk=instance.pk)
+    except BuildingManagerAssignment.DoesNotExist:
+        return None
+    return {field: getattr(previous, field) for field in _BMA_TRACKED_FIELDS}
+
+
+def _on_building_manager_assignment_pre_save(sender, instance, **kwargs):
+    """Snapshot the pre-update state so post_save can diff it."""
+    try:
+        snapshot = _bma_snapshot_for_pre_save(instance)
+        _state_map()[
+            ("buildings.BuildingManagerAssignment", instance.pk)
+        ] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: BuildingManagerAssignment pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_building_manager_assignment_post_save_update(
+    sender, instance, created, **kwargs
+):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of
+    the tracked field. CREATE is intentionally a no-op here — the
+    membership handler already emits the rich CREATE payload."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("buildings.BuildingManagerAssignment", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _BMA_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = getattr(instance, field)
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: BuildingManagerAssignment post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
 
 
 def _bsv_snapshot_for_pre_save(instance):
@@ -526,6 +637,44 @@ def _connect():
         CustomerCompanyPolicy,
         StaffProfile,
         StaffAssignmentRequest,
+        # Sprint 28 Batch 4 — customer-side phone-book Contact rows.
+        # Editable fields (full_name / email / phone / role_label /
+        # notes / building) produce meaningful UPDATE diffs, so the
+        # full CRUD trio is the right shape.
+        Contact,
+        # Sprint 28 Batch 5 — provider service catalog
+        # (ServiceCategory + Service) and per-customer contract
+        # prices (CustomerServicePrice). All three carry editable
+        # fields (e.g. is_active toggles, price / VAT updates,
+        # validity-window changes) that need full CRUD audit.
+        ServiceCategory,
+        Service,
+        CustomerServicePrice,
+        # Sprint 28 Batch 6 — cart line items on ExtraWorkRequest.
+        # Each row has editable fields (quantity, requested_date,
+        # customer_note) so the full CRUD trio is the right shape:
+        # CREATE / UPDATE / DELETE all produce meaningful diffs.
+        # NB: parent `ExtraWorkRequest` is intentionally NOT registered
+        # in Batch 6 — adding it (in particular tracking the new
+        # `routing_decision` field) is scope creep for this batch and
+        # is left to a follow-up that designs the right shape (full
+        # CRUD vs targeted-field UPDATE diff) for the request itself.
+        ExtraWorkRequestItem,
+        # Sprint 28 Batch 8 — provider-built proposal flow. Both the
+        # parent `Proposal` row (status, totals, override_*) and the
+        # `ProposalLine` rows (quantity, prices, dual-note fields,
+        # is_approved_for_spawn) carry editable fields that produce
+        # meaningful diffs.
+        #
+        # NB: `ProposalStatusHistory` and `ProposalTimelineEvent` are
+        # intentionally NOT registered here — those history rows ARE
+        # the workflow-override audit trail per H-11 (the status row
+        # carries `is_override` + `override_reason` itself). Adding
+        # them to the generic AuditLog would double-write the same
+        # fact and break the H-11 separation between permission
+        # changes and workflow transitions.
+        Proposal,
+        ProposalLine,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -611,6 +760,24 @@ def _connect():
         sender=BuildingStaffVisibility,
         weak=False,
         dispatch_uid="audit:bsv:post_update:BuildingStaffVisibility",
+    )
+
+    # B6: UPDATE-diff handler for the new `permission_overrides`
+    # JSONField on BuildingManagerAssignment. CREATE/DELETE shape stays
+    # on the existing membership handlers registered above; this pair
+    # adds the missing UPDATE coverage so each override flip lands on
+    # the audit feed.
+    pre_save.connect(
+        _on_building_manager_assignment_pre_save,
+        sender=BuildingManagerAssignment,
+        weak=False,
+        dispatch_uid="audit:bma:pre:BuildingManagerAssignment",
+    )
+    post_save.connect(
+        _on_building_manager_assignment_post_save_update,
+        sender=BuildingManagerAssignment,
+        weak=False,
+        dispatch_uid="audit:bma:post_update:BuildingManagerAssignment",
     )
 
 

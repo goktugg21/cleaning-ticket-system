@@ -56,6 +56,8 @@ from tickets.models import (
     AssignmentRequestStatus,
     StaffAssignmentRequest,
     Ticket,
+    TicketMessage,
+    TicketMessageType,
     TicketStaffAssignment,
 )
 
@@ -523,17 +525,25 @@ class Sprint23AFoundationTests(TestCase):
 
     # ---- 18-21. is_staff_role() must include the new STAFF role. ----
 
-    def test_18_staff_can_post_internal_note_and_customer_cannot_see_it(self):
+    def test_18_staff_cannot_post_internal_note_b7(self):
         """
-        STAFF must be treated as service-provider-side in
-        tickets/serializers.py + tickets/views.py. Internal notes
-        should be:
-          - creatable by a STAFF actor.
-          - hidden from a CUSTOMER_USER reading the same ticket.
-        Without is_staff_role() including STAFF, the serializer's
-        message_type=INTERNAL_NOTE validation 403s the STAFF user
-        and the message list view re-tags the message as PUBLIC
-        for them.
+        Sprint 23A admitted STAFF to `is_staff_role` so the field-
+        worker role was treated as service-provider-side for
+        operational behaviour (first-response stamping, completion-
+        evidence rule, etc.).
+
+        B7 narrows the PROVIDER_INTERNAL note tier (the literal
+        `INTERNAL_NOTE` value of `TicketMessageType`) to provider
+        management roles only — Super Admin, Provider Company
+        Admin, and Building Manager. STAFF is now rejected at the
+        serializer's `validate_message_type` gate with HTTP 400.
+        STAFF retains write access to the new STAFF_OPERATIONAL and
+        STAFF_COMPLETION tiers and to PUBLIC_REPLY.
+
+        This test pins the B7 narrowing while keeping the original
+        cross-customer redaction guarantee: a PROVIDER_INTERNAL
+        note authored by provider management is never visible to a
+        CUSTOMER_USER reading the same ticket.
         """
         # Assign the staff user so they can post on the ticket.
         TicketStaffAssignment.objects.create(
@@ -541,6 +551,7 @@ class Sprint23AFoundationTests(TestCase):
         )
         client = APIClient()
         client.force_authenticate(user=self.staff_visible_b1)
+        # B7 — STAFF posting INTERNAL_NOTE is rejected.
         post = client.post(
             f"/api/tickets/{self.t_a_b1.id}/messages/",
             {
@@ -549,10 +560,30 @@ class Sprint23AFoundationTests(TestCase):
             },
             format="json",
         )
-        self.assertEqual(post.status_code, 201, post.data)
-        self.assertEqual(post.data["message_type"], "INTERNAL_NOTE")
+        self.assertEqual(post.status_code, 400, post.data)
+        self.assertFalse(
+            TicketMessage.objects.filter(
+                ticket=self.t_a_b1,
+                author=self.staff_visible_b1,
+                message_type=TicketMessageType.INTERNAL_NOTE,
+            ).exists()
+        )
 
-        # Customer A's user on B1 must NOT see this note.
+        # Provider management (BM here) CAN post the internal note.
+        client.force_authenticate(user=self.manager_b1)
+        bm_post = client.post(
+            f"/api/tickets/{self.t_a_b1.id}/messages/",
+            {
+                "message": "Internal: customer phoned — quote ready",
+                "message_type": "INTERNAL_NOTE",
+            },
+            format="json",
+        )
+        self.assertEqual(bm_post.status_code, 201, bm_post.data)
+        self.assertEqual(bm_post.data["message_type"], "INTERNAL_NOTE")
+
+        # Customer A's user on B1 must NOT see this note (existing
+        # cross-customer redaction guarantee, unchanged by B7).
         client.force_authenticate(user=self.cust_user_a)
         listing = client.get(f"/api/tickets/{self.t_a_b1.id}/messages/")
         self.assertEqual(listing.status_code, 200, listing.data)
@@ -563,18 +594,30 @@ class Sprint23AFoundationTests(TestCase):
             f"Customer leaked internal note: {bodies}",
         )
 
-    def test_19_staff_can_access_hidden_attachment_only_when_in_scope(self):
+    def test_19_hidden_attachment_visibility_post_b7(self):
         """
-        Hidden attachments (or attachments tied to an internal-note
-        message) must be downloadable only by service-provider-side
-        users. STAFF must be on that side AND still respect the
-        scope helper — a STAFF user without visibility / assignment
-        on a ticket cannot reach its attachments.
+        B7 narrows hidden / PROVIDER_INTERNAL attachment visibility
+        to provider management roles only (Super Admin, Provider
+        Company Admin, Building Manager). STAFF is now excluded from
+        this tier — `is_hidden=True` is the moderation flag for the
+        PROVIDER_INTERNAL audience, and STAFF must not see commercial
+        / management material (canonical doc §9.2).
+
+        Pre-B7 this test asserted "STAFF in scope CAN see the hidden
+        attachment". The Sprint 23A admit of STAFF to `is_staff_role`
+        for operational behaviour is preserved (first-response
+        stamping, completion-evidence rule, status-change gate);
+        only the PROVIDER_INTERNAL surface has been narrowed.
+
+        Pinned behaviour:
+          * BM in scope CAN list / download the hidden attachment.
+          * STAFF in scope CANNOT list / download the hidden
+            attachment (B7 narrowing).
+          * STAFF out of scope still 404s at the ticket-level scope
+            check (unchanged).
+          * Customer-side user in scope still cannot see the hidden
+            attachment (unchanged from B1).
         """
-        # Build a hidden attachment on the B1 ticket. The file is
-        # required (FieldFile is not nullable on the model); a 1-byte
-        # placeholder is enough — the view never opens it during a
-        # list request.
         from django.core.files.uploadedfile import SimpleUploadedFile
         from tickets.models import TicketAttachment
 
@@ -593,17 +636,35 @@ class Sprint23AFoundationTests(TestCase):
         )
 
         client = APIClient()
-        # staff_visible_b1 has BuildingStaffVisibility on B1 →
-        # scope_tickets_for returns t_a_b1 → request enters the
-        # hidden-attachment branch with is_staff_role=True → allowed.
-        client.force_authenticate(user=self.staff_visible_b1)
-        list_resp = client.get(
+        # Provider management (BM in scope) — sees the hidden
+        # attachment in the list response.
+        client.force_authenticate(user=self.manager_b1)
+        bm_resp = client.get(
             f"/api/tickets/{self.t_a_b1.id}/attachments/"
         )
-        self.assertEqual(list_resp.status_code, 200, list_resp.data)
-        rows = list_resp.data.get("results", list_resp.data)
-        ids = [a["id"] for a in rows]
-        self.assertIn(attachment.id, ids)
+        self.assertEqual(bm_resp.status_code, 200, bm_resp.data)
+        bm_rows = bm_resp.data.get("results", bm_resp.data)
+        bm_ids = [a["id"] for a in bm_rows]
+        self.assertIn(attachment.id, bm_ids)
+
+        # STAFF in scope — B7 narrowing — does NOT see the hidden
+        # attachment. The ticket is reachable, but the attachment
+        # queryset filter excludes the PROVIDER_INTERNAL row.
+        client.force_authenticate(user=self.staff_visible_b1)
+        staff_list = client.get(
+            f"/api/tickets/{self.t_a_b1.id}/attachments/"
+        )
+        self.assertEqual(staff_list.status_code, 200, staff_list.data)
+        staff_rows = staff_list.data.get("results", staff_list.data)
+        staff_ids = [a["id"] for a in staff_rows]
+        self.assertNotIn(attachment.id, staff_ids)
+
+        # STAFF in scope direct download also 403s (B7).
+        staff_dl = client.get(
+            f"/api/tickets/{self.t_a_b1.id}/attachments/"
+            f"{attachment.id}/download/"
+        )
+        self.assertEqual(staff_dl.status_code, 403)
 
         # staff_no_visibility has no scope on B1 → 404 at the
         # ticket-level scope check (_get_ticket raises Http404).
@@ -614,8 +675,7 @@ class Sprint23AFoundationTests(TestCase):
         self.assertEqual(list_resp2.status_code, 404)
 
         # Customer A's user on B1 cannot see the hidden attachment
-        # (already covered by other tests but we re-assert here
-        # because the regression target overlaps).
+        # (existing B1 guarantee preserved by B7).
         client.force_authenticate(user=self.cust_user_a)
         list_resp3 = client.get(
             f"/api/tickets/{self.t_a_b1.id}/attachments/"

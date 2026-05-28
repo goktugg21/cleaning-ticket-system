@@ -42,7 +42,7 @@ function extractFieldErrors(error: unknown): FieldErrors {
 }
 
 export function ResetPasswordConfirmPage() {
-  const { t } = useTranslation("login");
+  const { t } = useTranslation(["login", "common"]);
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const uid = params.get("uid") ?? "";
@@ -104,7 +104,7 @@ export function ResetPasswordConfirmPage() {
           <div className="login-brand-row-icon">
             <Building2 size={20} strokeWidth={2} />
           </div>
-          <div className="login-brand-row-name">CleanOps</div>
+          <div className="login-brand-row-name">{t("common:brand.name")}</div>
         </div>
 
         <div className="login-welcome">
@@ -234,3 +234,4 @@ export function ResetPasswordConfirmPage() {
     </main>
   );
 }
+

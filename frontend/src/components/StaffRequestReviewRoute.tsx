@@ -1,20 +1,18 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { canAccessStaffRequestReview } from "../auth/permissions";
 import { AppShell } from "../layout/AppShell";
 
 /**
- * Sprint 23B — guard for `/admin/staff-assignment-requests`.
+ * Guard for `/admin/staff-assignment-requests`.
  *
- * Mirrors `AdminRoute` but ALSO allows `BUILDING_MANAGER`.
- * Building managers need this single admin queue to approve /
- * reject requests for their assigned buildings; they do not see
- * the rest of the admin nav group. STAFF and CUSTOMER_USER are
- * redirected to the dashboard — STAFF requests assignment via
- * the ticket-detail button instead.
+ * Admits SUPER_ADMIN, COMPANY_ADMIN, AND BUILDING_MANAGER. BM gets
+ * this one queue (their own buildings only — backend queryset gate)
+ * even though they do not see the rest of the admin nav group.
+ * STAFF and CUSTOMER_USER are bounced — STAFF requests assignment
+ * via the ticket-detail button instead.
  */
-const REVIEWERS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "BUILDING_MANAGER"]);
-
 export function StaffRequestReviewRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
 
@@ -30,7 +28,7 @@ export function StaffRequestReviewRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!REVIEWERS.has(me.role)) {
+  if (!canAccessStaffRequestReview(me.role)) {
     return <Navigate to="/?admin_required=ok" replace />;
   }
 

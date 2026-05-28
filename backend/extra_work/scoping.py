@@ -1,5 +1,5 @@
 """
-Sprint 26B — Extra Work scoping.
+Extra Work scoping.
 
 Mirrors `accounts.scoping.scope_tickets_for` but for the
 `ExtraWorkRequest` queryset. Customer-side keys are
@@ -8,12 +8,25 @@ Provider-side scope is identical to tickets (company / building /
 super-admin gates) since the operational tenancy hierarchy is the
 same.
 
-STAFF visibility is intentionally MISSING in this MVP: the Sprint
-26B brief defers the staff-execution surface (ASSIGNED /
-IN_PROGRESS / WAITING_MANAGER_REVIEW / WAITING_CUSTOMER_APPROVAL /
-COMPLETED statuses) to a follow-up sprint. Until those statuses
-land, STAFF receives an empty queryset — the customer-pricing
-loop never reaches STAFF eyes.
+STAFF visibility on `ExtraWorkRequest` is INTENTIONALLY EMPTY. Per
+the 2026-05-20 business-logic decision (A4): STAFF must not list or
+open parent Extra Work records through `/api/extra-work/`. STAFF
+only sees operational work AFTER it has become an assigned ticket;
+the parent EW remains commercial workflow that STAFF must not
+reach. The Ticket detail surface carries an
+`extra_work_origin` field which exposes a safe subset (parent id,
+title, status, item id, service name) so STAFF can see "this
+ticket came from EW #N" without ever touching the EW endpoints.
+
+NOTE: Sprint 29 Batch 29.8 briefly widened STAFF scope here to
+"any EW whose spawned ticket the staff can see". That widening was
+reverted in the P0 staff-privacy patch (post-2026-05-20 audit) once
+it was confirmed every EW + Proposal serializer gated only on
+`_is_customer(user)` and therefore leaked provider-only fields
+(`internal_cost_note`, `manager_note`, `override_*`, ProposalLine
+`internal_note`, ProposalTimelineEvent `metadata`) to STAFF. The
+chosen fix is "STAFF never reaches these endpoints" — narrower than
+field stripping and removes a whole class of future drift bugs.
 """
 from __future__ import annotations
 
@@ -65,9 +78,11 @@ def scope_extra_work_for(user):
         )
 
     if user.role == UserRole.STAFF:
-        # MVP: no staff-execution surface yet. STAFF cannot see any
-        # Extra Work request. Will be revisited when ASSIGNED /
-        # IN_PROGRESS statuses are added in the follow-up sprint.
+        # P0 staff-privacy fix (post-2026-05-20): STAFF must not reach
+        # any parent Extra Work record. See module docstring above.
+        # Operational visibility for STAFF lives on the spawned Ticket;
+        # `Ticket.extra_work_origin` surfaces the small, safe metadata
+        # subset.
         return ExtraWorkRequest.objects.none()
 
     if user.role == UserRole.CUSTOMER_USER:

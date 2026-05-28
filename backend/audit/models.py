@@ -49,6 +49,37 @@ class AuditLog(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     request_ip = models.GenericIPAddressField(null=True, blank=True)
     request_id = models.CharField(max_length=128, null=True, blank=True)
+    # Sprint 27F-B2 (closes G-B6): operator-supplied free text explaining
+    # a privileged mutation. Optional — default empty for legacy/system
+    # writes that have no operator intent attached. Populated via the
+    # `audit.context.set_current_reason()` helper from a view that
+    # captures the reason (e.g. a workflow override modal) and then
+    # triggers the audited write.
+    reason = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Operator-supplied free text explaining a privileged mutation. "
+            "Empty for legacy / system writes. Set via "
+            "audit.context.set_current_reason() in the calling view."
+        ),
+    )
+    # Sprint 27F-B2 (closes G-B6): snapshot of the actor's role + active
+    # scope anchors at write time. Lets audit-log consumers answer
+    # "at time of write, what did the actor have access to?" without
+    # having to re-resolve today's scope (which may have shifted since).
+    # Shape: {"role": <UserRole>, "user_id": <int>, "company_ids": [...],
+    #         "customer_id": <int|None>, "building_id": <int|None>}.
+    # Empty dict for anonymous / system writes.
+    actor_scope = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Snapshot of the actor's role + scope anchors at write time. "
+            "Shape: role / user_id / company_ids / customer_id / building_id. "
+            "Empty dict for anonymous or system writes."
+        ),
+    )
 
     class Meta:
         ordering = ["-created_at"]

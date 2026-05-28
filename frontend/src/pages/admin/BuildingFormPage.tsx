@@ -1,18 +1,16 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addBuildingManager,
   createBuilding,
-  deactivateBuilding,
   getBuilding,
   listBuildingManagers,
   listCompanies,
   listUsers,
-  reactivateBuilding,
   removeBuildingManager,
   updateBuilding,
 } from "../../api/admin";
@@ -23,20 +21,15 @@ import type {
   CompanyAdmin,
   UserAdmin,
 } from "../../api/types";
-import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 export function BuildingFormPage() {
-  const navigate = useNavigate();
   const { id } = useParams();
   const isCreate = id === undefined;
   const { t, i18n } = useTranslation("common");
-
-  const { me } = useAuth();
-  const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
   const [savedBanner, setSavedBanner] = useSavedBanner({
     saved: t("buildings.banner_saved"),
@@ -85,10 +78,6 @@ export function BuildingFormPage() {
   });
   const building = form.entity;
   const numericId = form.numericId;
-
-  const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [actionBusy, setActionBusy] = useState(false);
 
   // Membership section state.
   const [members, setMembers] = useState<BuildingManagerMembership[]>([]);
@@ -184,46 +173,25 @@ export function BuildingFormPage() {
   // only sees one company (the COMPANY_ADMIN-with-one-company case).
   const companyLocked = !isCreate || (companiesLoaded && companies.length <= 1);
 
-  async function handleConfirmDeactivate() {
-    if (numericId === null) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await deactivateBuilding(numericId);
-      deactivateDialogRef.current?.close();
-      navigate("/admin/buildings?deactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      deactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleConfirmReactivate() {
-    if (numericId === null) return;
-    setActionBusy(true);
-    form.setGeneralError("");
-    try {
-      await reactivateBuilding(numericId);
-      reactivateDialogRef.current?.close();
-      navigate("/admin/buildings?reactivated=ok", { replace: true });
-    } catch (err) {
-      form.setGeneralError(getApiError(err));
-      reactivateDialogRef.current?.close();
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
   const buildingName = building?.name ?? t("building_form.fallback");
 
+  // Sprint 29 Batch 29.4 — back link points at the detail page when
+  // editing (so Cancel and the back chevron land in the same place);
+  // the create flow keeps the back-to-list shortcut.
+  const backHref =
+    isCreate || numericId === null
+      ? "/admin/buildings"
+      : `/admin/buildings/${numericId}`;
+  const backLabel = isCreate
+    ? t("building_form.back")
+    : t("building_form.back_to_detail");
+
   return (
     <div>
-      <Link to="/admin/buildings" className="link-back">
+      <Link to={backHref} className="link-back">
         <ChevronLeft size={14} strokeWidth={2.5} />
-        {t("building_form.back")}
+        {backLabel}
       </Link>
 
       <div className="page-header">
@@ -245,18 +213,6 @@ export function BuildingFormPage() {
             </p>
           )}
         </div>
-        {!isCreate && building && !building.is_active && isSuperAdmin && (
-          <div className="page-header-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              data-testid="reactivate-button"
-              onClick={() => reactivateDialogRef.current?.open()}
-            >
-              {t("admin_form.reactivate")}
-            </button>
-          </div>
-        )}
       </div>
 
       {savedBanner && (
@@ -390,15 +346,14 @@ export function BuildingFormPage() {
 
           </div>
           <div className="form-actions">
-            {!isCreate && building && building.is_active && (
-              <button
-                type="button"
+            {!isCreate && numericId !== null && (
+              <Link
+                to={`/admin/buildings/${numericId}`}
                 className="btn btn-ghost"
-                data-testid="deactivate-button"
-                onClick={() => deactivateDialogRef.current?.open()}
+                data-testid="building-edit-cancel"
               >
-                {t("admin_form.deactivate")}
-              </button>
+                {t("admin_form.cancel")}
+              </Link>
             )}
             <button type="submit" className="btn btn-primary" disabled={form.submitting || !name.trim()}>
               {form.submitting
@@ -508,24 +463,6 @@ export function BuildingFormPage() {
           </form>
         </section>
       )}
-
-      <ConfirmDialog
-        ref={deactivateDialogRef}
-        title={t("building_form.dialog_deactivate_title", { name: buildingName })}
-        body={t("building_form.dialog_deactivate_body")}
-        confirmLabel={t("admin_form.deactivate")}
-        onConfirm={handleConfirmDeactivate}
-        busy={actionBusy}
-      />
-
-      <ConfirmDialog
-        ref={reactivateDialogRef}
-        title={t("building_form.dialog_reactivate_title", { name: buildingName })}
-        body={t("building_form.dialog_reactivate_body")}
-        confirmLabel={t("admin_form.reactivate")}
-        onConfirm={handleConfirmReactivate}
-        busy={actionBusy}
-      />
 
       <ConfirmDialog
         ref={removeDialogRef}

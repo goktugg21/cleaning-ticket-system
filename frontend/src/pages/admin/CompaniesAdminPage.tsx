@@ -206,25 +206,26 @@ export function CompaniesAdminPage() {
             </thead>
             <tbody>
               {companies.map((company) => {
-                const editPath = `/admin/companies/${company.id}`;
-                const openEdit = () => navigate(editPath);
+                const detailPath = `/admin/companies/${company.id}`;
+                const editPath = `${detailPath}/edit`;
+                const openDetail = () => navigate(detailPath);
                 return (
                   <tr
                     key={company.id}
                     className="admin-row-clickable"
                     role="link"
                     tabIndex={0}
-                    aria-label={t("admin.edit") + ": " + company.name}
-                    onClick={openEdit}
+                    aria-label={t("admin.view") + ": " + company.name}
+                    onClick={openDetail}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        openEdit();
+                        openDetail();
                       }
                     }}
                   >
                     <td className="td-subject">
-                      <Link to={editPath}>{company.name}</Link>
+                      <Link to={detailPath}>{company.name}</Link>
                     </td>
                     <td>{company.slug}</td>
                     <td>{company.default_language}</td>
@@ -243,6 +244,7 @@ export function CompaniesAdminPage() {
                       <Link
                         className="btn btn-ghost btn-sm"
                         to={editPath}
+                        onClick={(event) => event.stopPropagation()}
                       >
                         {t("admin.edit")}
                       </Link>
@@ -264,11 +266,11 @@ export function CompaniesAdminPage() {
           aria-label={t("nav.companies")}
         >
           {companies.map((company) => {
-            const editPath = `/admin/companies/${company.id}`;
+            const detailPath = `/admin/companies/${company.id}`;
             return (
               <li key={company.id} className="admin-card">
                 <Link
-                  to={editPath}
+                  to={detailPath}
                   className="admin-card-link"
                   aria-label={`${t("admin.edit")}: ${company.name}`}
                 >
@@ -360,3 +362,4 @@ export function CompaniesAdminPage() {
     </div>
   );
 }
+

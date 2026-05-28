@@ -4,12 +4,28 @@ from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
+from buildings.models import (
+    Building,
+    BuildingManagerAssignment,
+    BuildingStaffVisibility,
+)
 from companies.models import CompanyUserMembership
-from customers.models import CustomerUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserMembership,
+)
 
+from .effective_actions import (
+    compute_effective_actions,
+    compute_endpoint_notes,
+    compute_overrides,
+    compute_role_defaults,
+    compute_scope,
+)
 from .models import User, UserRole
 from .permissions import CanManageUser, IsSuperAdmin
+from .permissions_effective import effective_permissions as compose_effective_permissions
 from .serializers_users import (
     UserDetailSerializer,
     UserListSerializer,
@@ -86,6 +102,20 @@ class UserViewSet(viewsets.ModelViewSet):
         if role_filter:
             roles = [r.strip() for r in role_filter.split(",") if r.strip()]
             base = base.filter(role__in=roles)
+
+        # Sprint 28 Batch 15.5 — prefetch the four scope tables the list
+        # serializer's `scope_summary` counts against, so a list of N
+        # users does not fire 4*N extra SELECTs. Scoped to the list
+        # action because the detail / update / reactivate paths read
+        # the membership rows through their own helpers and would just
+        # pay the prefetch cost for nothing.
+        if self.action == "list":
+            base = base.prefetch_related(
+                "company_memberships",
+                "building_assignments",
+                "building_visibility",
+                "customer_memberships",
+            )
         return base.order_by(*self.ordering)
 
     def get_serializer_class(self):
@@ -112,3 +142,161 @@ class UserViewSet(viewsets.ModelViewSet):
         user.deleted_by = None
         user.save(update_fields=["is_active", "deleted_at", "deleted_by"])
         return Response(UserDetailSerializer(user).data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="effective-permissions",
+        permission_classes=[CanManageUser],
+    )
+    def effective_permissions(self, request, pk=None):
+        """
+        B3 — "Given this user, this customer, and optionally this
+        building, what can this user actually do?"
+
+        Single source of truth for frontend permission-overview
+        screens (Customer Permissions page, Customer Users tab, User
+        detail page, future premium permission UIs). Read-only. No
+        side effects. No new permission keys.
+
+        Caller authorization (re-uses `CanManageUser`):
+
+          * SUPER_ADMIN can query anyone.
+          * COMPANY_ADMIN can query users whose role is NOT
+            SUPER_ADMIN / COMPANY_ADMIN, AND who are in the actor's
+            own provider company. COMPANY_ADMIN can also GET their
+            own row (the `obj.id == actor.id` branch of CanManageUser).
+          * BUILDING_MANAGER / STAFF / CUSTOMER_USER → 403 at
+            `has_permission` (they are not in
+            `IsSuperAdminOrCompanyAdmin`'s admit set).
+
+        Additional inline customer-scope check: a COMPANY_ADMIN
+        querying a customer whose company is NOT the actor's own
+        provider company gets 403. This guards against URL-typed
+        cross-company customer access on an otherwise valid target
+        user.
+
+        Required query params:
+          * customer_id (int) — the customer context for capability
+            computation.
+
+        Optional query params:
+          * building_id (int) — narrows the context to a specific
+            building. When omitted, capabilities are computed at the
+            customer level.
+        """
+        target = self.get_object()  # CanManageUser; 403/404 on caller out of scope.
+
+        # ---- query-param validation ----------------------------------
+        customer_id_raw = request.query_params.get("customer_id")
+        if not customer_id_raw:
+            return Response(
+                {
+                    "detail": "customer_id is required.",
+                    "code": "customer_id_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            customer_id = int(customer_id_raw)
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    "detail": "customer_id must be an integer.",
+                    "code": "customer_id_invalid",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        building_id_raw = request.query_params.get("building_id")
+        building_id = None
+        if building_id_raw not in (None, ""):
+            try:
+                building_id = int(building_id_raw)
+            except (TypeError, ValueError):
+                return Response(
+                    {
+                        "detail": "building_id must be an integer.",
+                        "code": "building_id_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # ---- fetch customer + COMPANY_ADMIN scope guard ---------------
+        customer = get_object_or_404(Customer, pk=customer_id)
+        if request.user.role == UserRole.COMPANY_ADMIN:
+            if not CompanyUserMembership.objects.filter(
+                user=request.user, company_id=customer.company_id
+            ).exists():
+                # Cross-company customer access. Match the project
+                # convention of `IsSuperAdminOrCompanyAdminForCompany`
+                # (403, not 404 — the customer's existence is implied
+                # by reaching this point, but only an actor with at
+                # least one CompanyUserMembership has done so).
+                self.permission_denied(
+                    request,
+                    message="Customer is outside your provider company.",
+                )
+
+        # ---- fetch + validate building --------------------------------
+        building = None
+        if building_id is not None:
+            building = get_object_or_404(Building, pk=building_id)
+            if building.company_id != customer.company_id:
+                return Response(
+                    {
+                        "detail": (
+                            "Building does not belong to the customer's "
+                            "provider company."
+                        ),
+                        "code": "customer_building_mismatch",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if not CustomerBuildingMembership.objects.filter(
+                customer=customer, building=building
+            ).exists():
+                return Response(
+                    {
+                        "detail": (
+                            "Building is not linked to this customer."
+                        ),
+                        "code": "customer_building_not_linked",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # ---- compute the response -------------------------------------
+        scope_block = compute_scope(target, customer, building)
+        role_defaults_block = compute_role_defaults(target, customer, building)
+        overrides_block = compute_overrides(target, customer, building)
+        effective_permissions_dict = compose_effective_permissions(
+            target,
+            customer_id=customer.id,
+            building_id=building.id if building is not None else None,
+        )
+        effective_actions = compute_effective_actions(target, customer, building)
+        notes = compute_endpoint_notes(target, customer, building)
+
+        return Response(
+            {
+                "user": {
+                    "id": target.id,
+                    "email": target.email,
+                    "role": target.role,
+                    "is_active": target.is_active,
+                },
+                "context": {
+                    "customer_id": customer.id,
+                    "building_id": building.id if building is not None else None,
+                    "company_id": customer.company_id,
+                },
+                "scope": scope_block,
+                "role_defaults": role_defaults_block,
+                "overrides": overrides_block,
+                "effective_permissions": effective_permissions_dict,
+                "effective_actions": effective_actions,
+                "notes": notes,
+            },
+            status=status.HTTP_200_OK,
+        )

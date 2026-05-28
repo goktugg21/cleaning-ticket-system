@@ -19,6 +19,7 @@ Provider users CAN additionally manage pricing line items.
 """
 from __future__ import annotations
 
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -29,6 +30,7 @@ from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 
+from .filters import ExtraWorkRequestFilter
 from .models import (
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
@@ -55,6 +57,24 @@ PROVIDER_ROLES = {
 }
 
 
+# Sprint 28 Batch 9 — bucket definitions for the Extra Work stats
+# endpoints. Kept as module-level constants so the `stats` /
+# `stats/by-building` actions share a single source of truth.
+#
+# String literals (not `ExtraWorkStatus.X.value`) match the style of
+# `tickets.views.stats` and keep the Q-filter call sites readable.
+# Sprint 29 Batch 29.8 — CUSTOMER_APPROVED is no longer terminal:
+# it is the entry point of the operational segment (IN_PROGRESS /
+# COMPLETED). The dashboard "active EW" count now includes
+# customer-approved rows, matching what operators see in the field.
+EXTRA_WORK_TERMINAL_STATUSES = (
+    "COMPLETED",
+    "CUSTOMER_REJECTED",
+    "CANCELLED",
+)
+EXTRA_WORK_AWAITING_PRICING_STATUSES = ("REQUESTED", "UNDER_REVIEW")
+
+
 def _is_provider_operator(user) -> bool:
     return user.role in PROVIDER_ROLES
 
@@ -66,6 +86,13 @@ class ExtraWorkRequestViewSet(
     viewsets.GenericViewSet,
 ):
     permission_classes = [IsAuthenticatedAndActive]
+    # `filterset_class` runs AFTER `get_queryset`, so the scope helper
+    # narrows the queryset first and the filter can only narrow further.
+    # A CUSTOMER_USER passing `?customer=<id>` for a customer they have
+    # no access to gets zero rows (scope removed them before the filter
+    # ran). Non-integer values are rejected with HTTP 400 by django-
+    # filter's NumberFilter.
+    filterset_class = ExtraWorkRequestFilter
 
     def get_queryset(self):
         return scope_extra_work_for(self.request.user).select_related(
@@ -98,13 +125,51 @@ class ExtraWorkRequestViewSet(
         payload = ExtraWorkTransitionSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
+
+        to_status = data["to_status"]
+        is_override = data.get("is_override", False)
+        note = data.get("note", "")
+        customer_reject_reason = data.get(
+            "customer_reject_reason", ""
+        ).strip()
+
+        # Sprint 28 Batch 15.4 — a customer-driven PRICING_PROPOSED ->
+        # CUSTOMER_REJECTED transition MUST carry a non-blank reason.
+        # The provider override path bypasses this rule because it has
+        # its own mandatory `override_reason` (state-machine layer
+        # raises `override_reason_required` when missing).
+        if (
+            to_status == ExtraWorkStatus.CUSTOMER_REJECTED
+            and not is_override
+            and request.user.role == UserRole.CUSTOMER_USER
+            and not customer_reject_reason
+        ):
+            return Response(
+                {
+                    "customer_reject_reason": (
+                        "A reject reason is required."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Thread the customer reason into the status-history note so it
+        # surfaces on the existing timeline UI. If the client also sent
+        # a free-text `note`, prefix the reject reason so both pieces
+        # are visible.
+        if customer_reject_reason:
+            if note:
+                note = f"[Reject reason] {customer_reject_reason}\n\n{note}"
+            else:
+                note = f"[Reject reason] {customer_reject_reason}"
+
         try:
             updated = apply_transition(
                 extra_work,
                 request.user,
-                data["to_status"],
-                note=data.get("note", ""),
-                is_override=data.get("is_override", False),
+                to_status,
+                note=note,
+                is_override=is_override,
                 override_reason=data.get("override_reason", ""),
             )
         except TransitionError as exc:
@@ -122,8 +187,243 @@ class ExtraWorkRequestViewSet(
     def status_history(self, request, pk=None):
         extra_work = self.get_object()  # 404 if out-of-scope
         rows = ExtraWorkStatusHistory.objects.filter(extra_work=extra_work)
+        # B1 — pass request context so the serializer's customer-side
+        # note redaction (see ExtraWorkStatusHistorySerializer.get_note)
+        # can fire. Without context the serializer cannot tell the
+        # caller's role and would surface every note unfiltered.
         return Response(
-            ExtraWorkStatusHistorySerializer(rows, many=True).data
+            ExtraWorkStatusHistorySerializer(
+                rows, many=True, context={"request": request}
+            ).data
+        )
+
+    @action(detail=True, methods=["post"], url_path="spawn")
+    def spawn(self, request, pk=None):
+        """
+        Sprint 30 Batch 30.1 — provider-only retry of the legacy
+        pricing-flow ticket spawn.
+
+        Recovers an EW that landed in CUSTOMER_APPROVED before this
+        fix shipped (no tickets spawned at approval time) by firing
+        the spawn helper manually. Not customer-callable.
+
+        Preconditions:
+          * Actor MUST be SUPER_ADMIN or COMPANY_ADMIN (the broader
+            BUILDING_MANAGER scope is intentionally NOT admitted —
+            this is a corrective admin action).
+          * EW MUST be in CUSTOMER_APPROVED.
+          * EW MUST have zero spawned tickets across BOTH spawn
+            paths (cart-item FK + proposal-line FK chain).
+        """
+        extra_work = self.get_object()  # 404 if out-of-scope
+
+        if request.user.role not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+        }:
+            return Response(
+                {
+                    "detail": (
+                        "Only SUPER_ADMIN or COMPANY_ADMIN may retry "
+                        "Extra Work ticket spawn."
+                    ),
+                    "code": "spawn_forbidden_role",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # COMPANY_ADMIN must own the EW's company (mirrors the
+        # provider-scope rule the rest of the EW endpoints use).
+        if request.user.role == UserRole.COMPANY_ADMIN:
+            if not user_has_osius_permission(
+                request.user,
+                "osius.ticket.view_building",
+                building_id=extra_work.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": "Not in scope for this Extra Work request.",
+                        "code": "spawn_forbidden_scope",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        if extra_work.status != ExtraWorkStatus.CUSTOMER_APPROVED:
+            return Response(
+                {
+                    "detail": (
+                        "Retry spawn requires the Extra Work request "
+                        "to be in CUSTOMER_APPROVED "
+                        f"(current={extra_work.status})."
+                    ),
+                    "code": "spawn_wrong_status",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.db.models import Q
+        from tickets.models import Ticket
+
+        existing_count = (
+            Ticket.objects.filter(
+                Q(extra_work_request_item__extra_work_request_id=extra_work.id)
+                | Q(
+                    proposal_line__proposal__extra_work_request_id=extra_work.id
+                )
+            )
+            .distinct()
+            .count()
+        )
+        if existing_count > 0:
+            return Response(
+                {
+                    "detail": (
+                        "Extra Work request already has spawned tickets "
+                        f"(count={existing_count}); refusing to spawn again."
+                    ),
+                    "code": "spawn_already_done",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Lazy import to keep view-module import cheap and avoid
+        # the proposal_tickets <-> state_machine cycle at load time.
+        from .proposal_tickets import spawn_tickets_for_extra_work_request
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            tickets = spawn_tickets_for_extra_work_request(
+                extra_work, actor=request.user
+            )
+
+        return Response(
+            {
+                "spawned_ticket_ids": [t.id for t in tickets],
+                "count": len(tickets),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """
+        Sprint 28 Batch 9 — aggregate Extra Work stats scoped per role.
+
+        Shape:
+          {
+            "total": int,
+            "by_status": {status: count, ...},
+            "by_routing": {"INSTANT": int, "PROPOSAL": int},
+            "by_urgency": {"NORMAL": int, "HIGH": int, "URGENT": int},
+            "active": int,                      # NOT in terminal set
+            "awaiting_pricing": int,            # routing=PROPOSAL + REQUESTED/UNDER_REVIEW
+            "awaiting_customer_approval": int,  # status == PRICING_PROPOSED
+            "urgent": int,                      # URGENT urgency, not in terminal set
+          }
+
+        STAFF naturally gets all-zeros because `scope_extra_work_for`
+        returns `.none()` for STAFF — operational visibility for STAFF
+        lives on the spawned Ticket, not the parent EW (P0 staff-
+        privacy decision, 2026-05-20 A4).
+        """
+        scoped = scope_extra_work_for(request.user)
+
+        status_counts = {
+            row["status"]: row["c"]
+            for row in scoped.values("status").annotate(c=Count("id"))
+        }
+        routing_counts = {
+            row["routing_decision"]: row["c"]
+            for row in scoped.values("routing_decision").annotate(c=Count("id"))
+        }
+        urgency_counts = {
+            row["urgency"]: row["c"]
+            for row in scoped.values("urgency").annotate(c=Count("id"))
+        }
+
+        terminal_states = set(EXTRA_WORK_TERMINAL_STATUSES)
+        active = sum(
+            c for s, c in status_counts.items() if s not in terminal_states
+        )
+        awaiting_pricing = scoped.filter(
+            routing_decision="PROPOSAL",
+            status__in=list(EXTRA_WORK_AWAITING_PRICING_STATUSES),
+        ).count()
+        awaiting_customer_approval = status_counts.get("PRICING_PROPOSED", 0)
+        urgent = (
+            scoped.filter(urgency="URGENT")
+            .exclude(status__in=list(EXTRA_WORK_TERMINAL_STATUSES))
+            .count()
+        )
+        total = sum(status_counts.values())
+
+        return Response(
+            {
+                "total": total,
+                "by_status": status_counts,
+                "by_routing": routing_counts,
+                "by_urgency": urgency_counts,
+                "active": active,
+                "awaiting_pricing": awaiting_pricing,
+                "awaiting_customer_approval": awaiting_customer_approval,
+                "urgent": urgent,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats/by-building")
+    def stats_by_building(self, request):
+        """
+        Sprint 28 Batch 9 — per-building Extra Work breakdown scoped
+        per role.
+
+        Returns a list ordered by building name. Buildings with no
+        Extra Work rows in scope are skipped naturally by the GROUP BY
+        (no padding rows). STAFF gets `[]` for the same reason `stats`
+        zeroes out for them.
+        """
+        scoped = scope_extra_work_for(request.user)
+        terminal = list(EXTRA_WORK_TERMINAL_STATUSES)
+        awaiting_pricing_statuses = list(EXTRA_WORK_AWAITING_PRICING_STATUSES)
+
+        rows = (
+            scoped.values("building_id", "building__name")
+            .annotate(
+                total=Count("id"),
+                active=Count("id", filter=~Q(status__in=terminal)),
+                awaiting_pricing=Count(
+                    "id",
+                    filter=Q(routing_decision="PROPOSAL")
+                    & Q(status__in=awaiting_pricing_statuses),
+                ),
+                awaiting_customer_approval=Count(
+                    "id", filter=Q(status="PRICING_PROPOSED")
+                ),
+                urgent=Count(
+                    "id",
+                    filter=Q(urgency="URGENT") & ~Q(status__in=terminal),
+                ),
+            )
+            .order_by("building__name")
+        )
+
+        return Response(
+            [
+                {
+                    "building_id": row["building_id"],
+                    "building_name": row["building__name"],
+                    "total": row["total"],
+                    "active": row["active"],
+                    "awaiting_pricing": row["awaiting_pricing"],
+                    "awaiting_customer_approval": row[
+                        "awaiting_customer_approval"
+                    ],
+                    "urgent": row["urgent"],
+                }
+                for row in rows
+            ],
+            status=status.HTTP_200_OK,
         )
 
 

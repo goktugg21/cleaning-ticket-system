@@ -1,5 +1,5 @@
 /* ====================================================================
-   CleanOps / FacilityPro — design tokens & base
+   CleanOps — design tokens & base
    Ported from docs/frontend-design/claude-design-reference.html
    ==================================================================== */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap');
@@ -1168,6 +1168,11 @@ p { line-height: 1.6; }
   .ops-stat { border-left: none; padding: 0; }
 }
 
+/* Sprint 28 Batch 13 rework: `.dashboard-two-col` was removed in
+   favour of the unified `.operations-dashboard` family further below.
+   The CSS rules were deleted because no other consumer references
+   them. */
+
 /* Filter bar */
 .filter-bar {
   display: grid;
@@ -1387,18 +1392,24 @@ table.data-table {
    reading width on wide monitors. */
 .page-form-narrow { max-width: 720px; }
 
-/* Settings page two-column layout: account-overview info card on the
-   left (340px), settings cards stacked on the right. Collapses to a
-   single column below 960px. align-items: start prevents the left
-   card from stretching to match the right column's height. */
+/* Sprint 29 Batch 29.1 — Settings layout rebalance.
+   Account-overview info card on the left (380px), settings cards
+   stacked on the right (1fr). Centred under a 1400px clamp so the
+   page stops looking lonely on ultra-wide monitors. Collapses to a
+   single column at typical laptop widths (<= 1280px); align-items:
+   start prevents the left card from stretching to match the right
+   column's height. */
 .settings-layout {
   display: grid;
-  grid-template-columns: 340px 1fr;
-  gap: 28px;
+  grid-template-columns: 380px 1fr;
+  gap: 32px;
   align-items: start;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
 }
 .settings-main { display: flex; flex-direction: column; gap: 16px; }
-@media (max-width: 960px) {
+@media (max-width: 1280px) {
   .settings-layout { grid-template-columns: 1fr; }
 }
 
@@ -3339,3 +3350,2770 @@ table.data-table {
     margin-top: 6px;
   }
 }
+
+/* Sprint 28 Batch 13 (rework) — unified operations dashboard composition.
+   Replaces the prior `.work-view-toggle*` family. The dashboard is one
+   coherent column (operations-dashboard) with three bands stacked
+   vertically: the 5-card KPI strip, the work-strip segmented control,
+   and the work-layout grid (1fr main + 340px side). */
+.operations-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.operations-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+}
+
+.operations-kpi-grid .kpi-card {
+  min-height: 110px;
+}
+
+@media (max-width: 1280px) {
+  .operations-kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .operations-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.work-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.work-strip-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-right: 4px;
+}
+
+.work-strip-toggle {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.work-strip-toggle .btn {
+  font-weight: 600;
+}
+
+.work-strip-toggle .btn[aria-pressed="true"] {
+  background: var(--green-faint, var(--surface-2));
+  color: var(--green-2, var(--text));
+  border-color: var(--green-2, var(--border));
+  font-weight: 700;
+}
+
+.work-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .work-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.work-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.work-type-pill-ticket {
+  background: var(--green-faint, rgba(95,212,153,0.12));
+  color: var(--green-2, var(--text));
+  border: 1px solid rgba(95,212,153,0.25);
+}
+
+.work-type-pill-extra-work {
+  background: rgba(95,141,212,0.10);
+  color: #3a5a8a;
+  border: 1px solid rgba(95,141,212,0.25);
+}
+
+.recent-ops-extra-work-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.recent-ops-extra-work-row a { font-weight: 600; }
+
+/* Sprint 28 Batch 13 (rework) — customer overview building blocks. */
+.section-explainer {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+  padding: 14px 18px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+
+.section-explainer strong { color: var(--text); font-weight: 600; }
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 1100px) {
+  .summary-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .summary-grid { grid-template-columns: 1fr; }
+}
+
+.summary-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.summary-stat:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--green-2, var(--border));
+}
+
+.summary-stat-label {
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.summary-stat-value {
+  font-family: var(--f-head);
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.summary-stat-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.quicklink-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .quicklink-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .quicklink-grid { grid-template-columns: 1fr; }
+}
+
+.quicklink-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.quicklink-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--green-2, var(--border));
+}
+
+.quicklink-card-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.quicklink-card-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.customer-user-access-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.customer-user-access-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.customer-user-access-pill.inactive { opacity: 0.55; }
+
+
+/* ====================================================================
+   SPRINT 28 BATCH 15.1 — DESIGN SYSTEM EXTENSIONS
+
+   New primitives:
+     - PageHeader   (.page-title-row, .page-title-pill, breadcrumb tweaks)
+     - EmptyState   (.empty-state-v2)
+     - StatusBadge  (uses existing .badge / .cell-tag classes — no new CSS)
+     - RoleBadge    (.role-badge with provider/customer side variants)
+     - Toast        (.toast-stack, .toast)
+
+   Layout fixes:
+     - Topbar context (.topbar-context)
+     - Responsive table-to-card consistency helpers
+   ==================================================================== */
+
+/* ----- PageHeader extension ----- */
+.page-header-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.page-title-pill {
+  display: inline-flex;
+  align-items: center;
+}
+.breadcrumb-item { display: inline-flex; align-items: center; gap: 6px; }
+.breadcrumb-item a {
+  color: var(--text-muted);
+  transition: color 0.14s;
+}
+.breadcrumb-item a:hover { color: var(--green); }
+
+/* ----- EmptyState v2 ----- */
+.empty-state-v2 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  gap: 10px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+.empty-state-v2-compact {
+  padding: 22px 16px;
+  gap: 6px;
+}
+.empty-state-v2-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--green-faint);
+  color: var(--green);
+  margin-bottom: 4px;
+}
+.empty-state-v2-compact .empty-state-v2-icon {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 0;
+}
+.empty-state-v2-title {
+  font-family: var(--f-head);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.empty-state-v2-compact .empty-state-v2-title { font-size: 13.5px; }
+.empty-state-v2-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 440px;
+  margin: 0;
+}
+.empty-state-v2-compact .empty-state-v2-desc { font-size: 12.5px; }
+.empty-state-v2-action { margin-top: 8px; }
+
+/* ----- RoleBadge ----- */
+.role-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 5px 10px;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  line-height: 1.15;
+  max-width: 100%;
+}
+.role-badge-label {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+}
+.role-badge-side {
+  font-family: var(--f-head);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.role-badge-provider {
+  background: var(--green-faint);
+  border-color: rgba(11, 107, 66, 0.18);
+}
+.role-badge-provider .role-badge-label { color: var(--green); }
+.role-badge-provider .role-badge-side { color: var(--green-2); }
+.role-badge-customer {
+  background: var(--teal-soft);
+  border-color: rgba(15, 107, 94, 0.18);
+}
+.role-badge-customer .role-badge-label { color: var(--teal); }
+.role-badge-customer .role-badge-side { color: var(--teal); }
+.role-badge-fallback {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.role-badge-fallback .role-badge-label { color: var(--text-muted); }
+.role-badge-compact {
+  flex-direction: row;
+  align-items: center;
+  padding: 3px 8px;
+  height: 22px;
+}
+.role-badge-compact .role-badge-label { font-size: 11px; }
+.role-badge-compact .role-badge-side { display: none; }
+
+/* ----- Toast ----- */
+.toast-stack {
+  position: fixed;
+  top: 76px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 1000;
+  max-width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+  animation: toast-in 0.16s ease-out both;
+}
+@keyframes toast-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.toast-icon {
+  display: inline-flex;
+  align-items: flex-start;
+  padding-top: 1px;
+}
+.toast-text { min-width: 0; }
+.toast-title {
+  font-family: var(--f-head);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+}
+.toast-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+.toast-close {
+  align-self: flex-start;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  transition: background 0.14s, color 0.14s;
+}
+.toast-close:hover { background: var(--surface-2); color: var(--text); }
+.toast-success .toast-icon { color: var(--green); }
+.toast-success { border-left: 3px solid var(--green); }
+.toast-error .toast-icon { color: var(--red); }
+.toast-error { border-left: 3px solid var(--red); }
+.toast-warning .toast-icon { color: var(--amber); }
+.toast-warning { border-left: 3px solid var(--amber); }
+.toast-info .toast-icon { color: var(--teal); }
+.toast-info { border-left: 3px solid var(--teal); }
+
+@media (max-width: 640px) {
+  .toast-stack {
+    top: auto;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+}
+
+/* ----- Topbar redesign (Batch 15.1) -----
+   Replaces the meaningless "TICKET MANAGEMENT / Facility service desk"
+   eyebrow+title in the topbar with a useful brand+identity layout.
+*/
+.topbar-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.topbar-context-icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--green-faint);
+  color: var(--green);
+  flex-shrink: 0;
+}
+.topbar-context-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.topbar-context-eyebrow {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  line-height: 1;
+}
+.topbar-context-name {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  margin-top: 3px;
+}
+
+@media (max-width: 640px) {
+  .topbar-context-text { display: none; }
+}
+
+/* ----- Responsive table-to-card consistency -----
+   Several admin list pages have a parallel `.admin-card-list` for
+   the mobile width. The CSS toggle below makes the pattern
+   consistent everywhere the helper class is set on the table wrap.
+*/
+.responsive-table-wrap { width: 100%; }
+@media (max-width: 720px) {
+  .responsive-table-wrap > .data-table { display: none; }
+  .responsive-table-wrap > .admin-card-list { display: flex; }
+}
+@media (min-width: 721px) {
+  .responsive-table-wrap > .admin-card-list { display: none; }
+}
+
+/* ----- Provider-only zone marker -----
+   Used on detail pages where a card/section is visible only to
+   provider operators (e.g. internal_cost_note, manager_note,
+   override audit). Subtle stripe + caption so the operator
+   immediately knows the data is not customer-visible.
+*/
+.provider-only-zone {
+  position: relative;
+  border-left: 3px solid var(--green-2);
+  background: linear-gradient(90deg, var(--green-faint) 0%, transparent 30%);
+  padding-left: 14px;
+}
+.provider-only-zone::before {
+  content: attr(data-zone-label);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2);
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.1 — additional foundation primitives
+   ChangeDiff / UserMenu / StickySaveBar / ClickableRow
+   ==================================================================== */
+
+/* ----- ChangeDiff (human-readable AuditLog) ----- */
+.change-diff {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--f-body);
+  font-size: 13px;
+  color: var(--text);
+}
+.change-diff-empty-block {
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.change-diff-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.change-diff-field {
+  font-weight: 700;
+  color: var(--text-2);
+  font-family: var(--f-head);
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+  margin: 0;
+  align-self: center;
+}
+.change-diff-values {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.change-diff-before,
+.change-diff-after {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+}
+.change-diff-before { color: var(--text-muted); }
+.change-diff-after { color: var(--text); font-weight: 600; }
+.change-diff-arrow {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.change-diff-empty {
+  color: var(--text-faint);
+}
+.change-diff-details {
+  display: inline-block;
+  font-family: var(--f-body);
+  font-size: 12px;
+}
+.change-diff-details summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.change-diff-details pre {
+  margin: 6px 0 0;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+@media (max-width: 720px) {
+  .change-diff-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
+/* ----- UserMenu (topbar avatar + dropdown) ----- */
+.user-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.user-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--f-head);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.user-menu-trigger:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.user-menu-trigger:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.user-menu-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--shell-mid);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 800;
+  font-family: var(--f-head);
+  letter-spacing: -0.005em;
+}
+.user-menu-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 30px rgba(15, 32, 25, 0.12),
+    0 2px 6px rgba(15, 32, 25, 0.06);
+  padding: 8px 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+}
+.user-menu-header {
+  padding: 8px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.user-menu-name {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-menu-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-menu-role {
+  margin-top: 4px;
+}
+.user-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+.user-menu-section {
+  padding: 4px 14px 8px;
+}
+.user-menu-section-label {
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.user-menu-lang-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px;
+  background: var(--surface-2);
+}
+.user-menu-lang-option {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 3px 12px;
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.user-menu-lang-option:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.user-menu-lang-option-active {
+  background: var(--shell);
+  color: #fff;
+}
+.user-menu-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  font-family: var(--f-body);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.user-menu-item:hover { background: var(--surface-2); }
+.user-menu-item:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.user-menu-item-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.user-menu-item-danger { color: var(--danger, #B0413E); }
+.user-menu-item-danger .user-menu-item-icon { color: var(--danger, #B0413E); }
+
+@media (max-width: 720px) {
+  .user-menu-panel {
+    right: -8px;
+    min-width: 240px;
+  }
+}
+
+/* ----- StickySaveBar ----- */
+.sticky-save-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  margin: 16px -24px -24px;
+  padding: 12px 24px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -6px 16px rgba(15, 32, 25, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 30;
+  flex-wrap: wrap;
+}
+.sticky-save-bar-message {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.sticky-save-bar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .sticky-save-bar {
+    margin: 16px -16px -16px;
+    padding: 10px 16px;
+  }
+}
+
+/* ----- ClickableRow ----- */
+.clickable-row {
+  cursor: pointer;
+}
+.clickable-row:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.clickable-row:hover {
+  background: var(--surface-2);
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.2 — Customer Permissions page rebuild
+   Zone headers, policy toggle grid, user access cards, override drawer
+   ==================================================================== */
+
+/* ----- Zone scaffolding (shared) ----- */
+.permissions-zone {
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+.permissions-zone-header {
+  margin-bottom: 14px;
+}
+.permissions-zone-title {
+  margin: 0 0 4px;
+  font-family: var(--f-head);
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.permissions-zone-helper {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 640px;
+}
+
+/* ----- Zone 1 — Policy toggle grid ----- */
+.policy-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.policy-toggle-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--green-faint);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.policy-toggle-card:hover {
+  background: var(--surface-2);
+}
+.policy-toggle-card-warning {
+  border-left-color: var(--warn, #C97A23);
+  background: var(--surface);
+}
+.policy-toggle-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--green);
+  flex-shrink: 0;
+}
+.policy-toggle-card-warning .policy-toggle-card-icon {
+  background: var(--surface-2);
+  color: var(--warn, #C97A23);
+}
+.policy-toggle-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.policy-toggle-card-title {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.policy-toggle-card-helper {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.policy-toggle-card-affects {
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.policy-toggle-card-warning-text {
+  margin-top: 4px;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn, #C97A23);
+}
+.policy-toggle-card-switch {
+  align-self: center;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .policy-toggle-grid { grid-template-columns: 1fr; }
+}
+
+/* ----- Zone 2 — User access cards ----- */
+.permissions-user-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.user-access-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.user-access-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.user-access-card-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--shell-mid);
+  color: #fff;
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: -0.005em;
+}
+.user-access-card-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.user-access-card-name {
+  font-family: var(--f-head);
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.user-access-card-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-access-card-body {
+  padding: 14px 18px;
+}
+.user-access-card-footer {
+  border-top: 1px dashed var(--border);
+  padding: 12px 18px;
+  background: var(--surface-2);
+}
+
+/* ----- Access chip (per-building row) ----- */
+.access-chip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.access-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.access-chip-inactive {
+  opacity: 0.7;
+  background: var(--surface-2);
+}
+.access-chip-building {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.access-chip-building-name {
+  font-family: var(--f-head);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.access-chip-you {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--green-faint);
+  color: var(--green);
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.access-chip-inactive-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: var(--f-head);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.access-chip-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.access-chip-role {
+  display: inline-flex;
+  align-items: center;
+}
+.access-chip-role-select {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.access-chip-role-select:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.access-chip-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.access-chip-active input {
+  margin: 0;
+}
+.access-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.access-chip-remove:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--danger, #B0413E);
+}
+.access-chip-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ----- Custom permissions pill ----- */
+.custom-permissions-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.custom-permissions-pill:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border-strong, var(--border));
+}
+.custom-permissions-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.custom-permissions-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.custom-permissions-pill-some {
+  border-color: var(--green);
+  background: var(--green-faint);
+  color: var(--green);
+}
+.custom-permissions-pill-some .custom-permissions-pill-dot {
+  background: var(--green);
+}
+
+/* ----- Add-building-access row ----- */
+.add-building-access-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+.add-building-access-row > svg {
+  color: var(--green);
+}
+.add-building-access-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  font-family: var(--f-head);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.add-building-access-select {
+  flex: 1;
+  height: 28px;
+  font-size: 12.5px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ----- Sprint 31 Phase 6 — Permissions matrix + modal editor -----
+   Replaces the right-side override drawer. The matrix is the primary
+   view; the modal is the per-row tri-state editor. Permission TRUTH
+   stays in `effectiveResolver`; these styles are visual only. */
+
+/* Glyph bubble for the matrix. The CIRCLE is the chrome; the GLYPH
+   inside (check / cross / lock) is the primary signal. Three
+   variants, each visually distinct so the operator can tell
+   "granted" from "denied" from "blocked by company policy" without
+   opening the modal.
+
+   Modal compatibility note: the tri-state Inherit/Allow/Deny radios
+   in `TriStateBubbleRadio` reuse `.permission-bubble` as the BASE
+   class (size + border + radius) but apply their own
+   `.tri-state-bubble-option-*` + `.tri-state-bubble-selected`
+   modifiers, NEVER `.permission-bubble-granted/-denied/-policy-blocked`.
+   So changing the matrix variants below does not change the modal. */
+.permission-bubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  vertical-align: middle;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.permission-bubble-granted {
+  background: var(--green-faint);
+  border-color: var(--green);
+  color: var(--green);
+}
+.permission-bubble-denied {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+.permission-bubble-policy-blocked {
+  background: var(--surface-2);
+  border-color: var(--text-faint);
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+/* Inline hint colors reused by the modal. */
+.effective-hint-allow { color: var(--green); }
+.effective-hint-deny  { color: var(--danger, #B0413E); }
+
+/* ----- Permissions matrix (primary view of Zone 2) -----
+   Column order:
+     User | Actions | Role | Tickets(6) | Extra Work(6) | Users(4)
+   The grid is intentionally WIDER than the viewport — 16 plain-
+   horizontal permission columns don't fit a sub-page width and we
+   accept that. The wrapper scrolls horizontally; the User | Actions
+   | Role identity columns are `position: sticky` so they stay PINNED
+   while only the permission columns scroll under them (Excel-style
+   frozen pane). A right-edge shadow on the Role column marks the
+   freeze line so the scroll boundary reads as intentional, not
+   broken. */
+.permissions-matrix {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.permissions-matrix-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 10px;
+  /* Right-side breathing room INSIDE the wrapper so the rightmost
+     rotated label ("manage permissions" / "locatie goedkeuren")
+     can extend past its column's right edge without poking out of
+     the rounded frame and without triggering horizontal scroll.
+     The label's horizontal projection at -45deg is ~70px from its
+     pivot at column centre; with column widths in the 60-90px
+     range the overflow past the column right edge is ~25-45px,
+     comfortably inside this 60px buffer. */
+  padding-right: 60px;
+}
+.permissions-matrix-table {
+  /* `width: 100%` + `table-layout: fixed` makes the table fill the
+     wrapper's content area and distribute remaining horizontal
+     space equally among the 16 permission columns (the three frozen
+     identity columns keep their fixed 120 / 100 / 160 widths via
+     the sticky-* rules below). Each permission column = (wrapper
+     content width - 60px padding-right - 380px frozen) / 16,
+     typically 55-95px depending on viewport. No horizontal scroll
+     because the table is sized to fit the container, not to its
+     content. */
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.permissions-matrix-table th,
+.permissions-matrix-table td {
+  /* Opaque background is REQUIRED so sticky columns do not let the
+     scrolling permission cells bleed through behind them. */
+  background: var(--surface);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+.permissions-matrix-table thead th {
+  font-family: var(--f-head);
+  font-weight: 700;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.permissions-matrix-group-header {
+  text-align: center;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.permissions-matrix-group-tickets    { color: var(--green); }
+.permissions-matrix-group-extra_work { color: var(--orange, var(--green-2)); }
+.permissions-matrix-group-users      { color: var(--text-2); }
+
+/* 45°-angled column-header treatment over wide, table-layout-fixed
+   columns. The 16 permission cells in the angled-key row have no
+   explicit width, so `table-layout: fixed` on `.permissions-matrix-
+   table` distributes the available horizontal space (table_width −
+   380px for the three frozen identity columns) equally among them.
+   Each cell positions a rotated label span anchored at the column's
+   bottom-centre and rotates it -45deg so it reads up-and-right from
+   that anchor — the BOTTOM of the label sits directly over the
+   column it labels.
+
+   The cell is forced to `position: relative; z-index: auto` to
+   OVERRIDE the base `.permissions-matrix-table thead th { position:
+   sticky; z-index: 1 }`. `position: sticky` always forms a stacking
+   context regardless of z-index, and a stacking context on the cell
+   would TRAP the absolutely-positioned label inside it — sibling
+   cells' opaque var(--surface-2) backgrounds would then composite
+   on top of the previous cell's rotated overflow (visible result:
+   every label except the rightmost gets clipped at its own cell's
+   right edge). Swapping to `position: relative; z-index: auto`
+   breaks the cell's stacking context so the label's own
+   `z-index: 2` applies in the table's ancestor stacking context —
+   labels render above sibling cells (which paint at step 6 with
+   z-auto) and below the frozen-sticky cells (z: 3), which keeps
+   horizontal scroll behaviour intact. */
+.permissions-matrix-key-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.permissions-matrix-table thead th.permissions-matrix-key-header-angled {
+  padding: 0;
+  position: relative;
+  z-index: auto;
+}
+.permissions-matrix-key-header-angled {
+  vertical-align: bottom;
+  overflow: visible;
+}
+/* Forces the angled-row cells to 100px tall — enough to fit the
+   longest label ("manage permissions" / "locatie goedkeuren",
+   18 chars × ~5.5px sans ≈ 99px text width → ~70px vertical
+   projection at -45deg) plus the 8px bottom offset, with headroom
+   above. Absolutely-positioned children do not contribute to flow
+   height, so a block-level pseudo with explicit height is required
+   to give the cell its height. */
+.permissions-matrix-key-header-angled::before {
+  content: "";
+  display: block;
+  height: 100px;
+}
+.permissions-matrix-key-short {
+  display: inline-block;
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: rotate(-45deg);
+  transform-origin: bottom left;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  z-index: 2;
+}
+
+/* Frozen identity columns: User | Actions | Role.
+   Each cell carries `position: sticky` with a left offset equal to
+   the running sum of widths to its left, so the three sit flush with
+   no gap, no overlap. The rules apply to BOTH thead and tbody cells
+   in those columns (the `position: sticky` on tbody cells comes from
+   these selectors; the thead row's `top: 0` sticky comes from the
+   `thead th` rule above, so frozen header cells are sticky on BOTH
+   axes — left-frozen during horizontal scroll, top-frozen during
+   page scroll).
+
+   Z-index layering (highest first):
+     z=3  frozen thead cells   (top + left, must sit above body
+                                cells AND non-frozen header cells)
+     z=2  frozen tbody cells   (left only, above scrolling body cells)
+     z=1  non-frozen thead     (top only, set by the `thead th` rule
+                                above)
+     z=0  scrolling tbody      (default) */
+.permissions-matrix-sticky-user {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 120px;
+  width: 120px;
+  text-align: left;
+}
+.permissions-matrix-sticky-actions {
+  position: sticky;
+  left: 120px;
+  z-index: 2;
+  min-width: 100px;
+  width: 100px;
+}
+.permissions-matrix-sticky-role {
+  position: sticky;
+  left: 220px;
+  z-index: 2;
+  min-width: 160px;
+  width: 160px;
+  /* The freeze-line seam: a subtle right-edge shadow that stays put
+     on Role's right side as the permission grid scrolls under it.
+     Negative spread keeps the shadow off the top + bottom edges, so
+     it looks like a vertical hairline glow rather than a square
+     drop-shadow. */
+  box-shadow: 6px 0 6px -4px rgba(15, 32, 25, 0.18);
+}
+.permissions-matrix-table thead .permissions-matrix-sticky-user,
+.permissions-matrix-table thead .permissions-matrix-sticky-actions,
+.permissions-matrix-table thead .permissions-matrix-sticky-role {
+  z-index: 3;
+  background: var(--surface-2);
+}
+
+.permissions-matrix-user-name {
+  font-family: var(--f-head);
+  font-weight: 700;
+  color: var(--text);
+  font-size: 13px;
+}
+.permissions-matrix-user-building {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.permissions-matrix-self-pill,
+.permissions-matrix-inactive-pill {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.permissions-matrix-self-pill {
+  background: var(--green-faint);
+  color: var(--green);
+}
+.permissions-matrix-inactive-pill {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.permissions-matrix-role-select {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.permissions-matrix-cell-perm {
+  text-align: center;
+  padding: 6px 2px;
+  /* Width is set by `table-layout: fixed` on the table: each of the
+     16 permission columns shares (table_width − 380px frozen) / 16
+     equally, matching the angled-row header above. */
+}
+.permissions-matrix-cell-actions {
+  /* Sized via the sticky modifier above (100px) — just enough for
+     the active-toggle checkbox + the pen-icon edit button + the X
+     remove button at flex-start, so the X sits close to the role
+     cell's left edge. */
+}
+.permissions-matrix-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+.permissions-matrix-edit-button {
+  padding: 4px 8px;
+  font-size: 12px;
+  gap: 4px;
+}
+.permissions-matrix-remove-button {
+  padding: 4px 6px;
+}
+.permissions-matrix-active input[type="checkbox"] {
+  vertical-align: middle;
+}
+.permissions-matrix-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+/* ----- Modal editor — replaces the right drawer ----- */
+.permission-editor-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.permission-editor-modal {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-soft, #e5e7eb);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - 32px);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.permission-editor-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.permission-editor-modal-header-text { min-width: 0; }
+.permission-editor-modal-title {
+  margin: 0;
+  font-family: var(--f-head);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.005em;
+  color: var(--text);
+}
+.permission-editor-modal-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.permission-editor-modal-role-caption {
+  margin: 2px 0 0;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.permission-editor-modal-close {
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.permission-editor-modal-close:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.permission-editor-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px 20px;
+}
+.permission-editor-modal-warning { margin-bottom: 12px; }
+.permission-editor-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.permission-editor-modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.permission-editor-modal-table .permission-editor-modal-group th {
+  padding: 14px 0 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.permission-editor-modal-table .permission-editor-modal-group:first-child th {
+  padding-top: 4px;
+}
+.permission-editor-modal-group-title {
+  display: inline-block;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2, var(--green));
+}
+.permission-editor-modal-row td {
+  vertical-align: top;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.permission-editor-modal-row-policy-blocked td {
+  opacity: 0.7;
+}
+.permission-editor-modal-row-info { padding-right: 14px; }
+.permission-editor-modal-row-label {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.permission-editor-modal-row-description {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.permission-editor-modal-row-effective {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.permission-editor-modal-row-policy-text {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.permission-editor-modal-row-radios {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* ----- Tri-state optical-bubble radio (modal per-row control) ----- */
+.tri-state-bubble-radio {
+  display: inline-flex;
+  gap: 8px;
+}
+.tri-state-bubble-option {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.tri-state-bubble-option:hover:not(.tri-state-bubble-option-disabled) {
+  background: var(--surface-2);
+}
+.tri-state-bubble-option-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.tri-state-bubble-option-selected {
+  color: var(--text);
+}
+.tri-state-bubble {
+  width: 18px;
+  height: 18px;
+}
+.tri-state-bubble-selected.permission-bubble {
+  border-color: var(--text-muted);
+}
+.tri-state-bubble-option-inherit .tri-state-bubble-selected {
+  background: var(--text-muted);
+  border-color: var(--text-muted);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+.tri-state-bubble-option-allow .tri-state-bubble-selected {
+  background: var(--green);
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+.tri-state-bubble-option-deny .tri-state-bubble-selected {
+  background: var(--danger, #B0413E);
+  border-color: var(--danger, #B0413E);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+.tri-state-bubble-empty.permission-bubble {
+  background: transparent;
+}
+.tri-state-bubble-label {
+  display: inline-block;
+}
+
+@media (max-width: 760px) {
+  .permission-editor-modal { max-width: 100%; }
+  /* Drop sticky on the three identity/control columns at narrow
+     widths — keeping them frozen would consume ~380px of the
+     viewport, leaving no room for the permission cells. Mobile
+     scrolls the whole table cleanly instead. The Role column's
+     freeze-line shadow also drops here so the "boundary marker"
+     does not show without a real boundary behind it. */
+  .permissions-matrix-sticky-user,
+  .permissions-matrix-sticky-actions,
+  .permissions-matrix-sticky-role {
+    position: static;
+    min-width: 0;
+    width: auto;
+  }
+  .permissions-matrix-sticky-role {
+    box-shadow: none;
+  }
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.3 — Extra Work list KPI strip + filters
+                          Users page group headers
+   ==================================================================== */
+
+/* ----- EW list KPI strip ----- */
+.ew-list-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.ew-kpi-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.ew-kpi-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--green-faint);
+  color: var(--green);
+  flex-shrink: 0;
+}
+.ew-kpi-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ew-kpi-card-label {
+  font-family: var(--f-head);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.ew-kpi-card-value {
+  font-family: var(--f-head);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.1;
+}
+.ew-kpi-card-meta {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 960px) {
+  .ew-list-kpi-row { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 520px) {
+  .ew-list-kpi-row { grid-template-columns: 1fr; }
+}
+
+/* ----- EW list filter bar ----- */
+.ew-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.ew-list-filters .filter-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Sprint 28 Batch 15.5 — keep the search icon inline-left of the
+   input on wide screens. The previous rule inherited `flex-wrap`
+   from the parent and the icon could wrap above the field at
+   >=1200px. Pinning the field to inline-flex with an explicit gap
+   anchors the icon and lets the input flex to fill the remaining
+   row width without ever flipping to two visual rows. */
+.ew-list-filters .filter-field.search {
+  flex: 1;
+  min-width: 200px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+.ew-list-filters .filter-field.search > svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.ew-list-filters .filter-field.search > .filter-control {
+  flex: 1;
+  min-width: 0;
+}
+.ew-list-filters .filter-control {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+/* ----- Users page group headers (inside the table body) ----- */
+.users-group-header td {
+  padding: 12px 14px 6px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.users-group-header-label {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2, var(--green));
+}
+.users-group-header-count {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.4 — Extra Work detail two-column layout
+   ==================================================================== */
+.ew-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 1024px) {
+  .ew-detail-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    align-items: start;
+  }
+}
+.ew-detail-main {
+  min-width: 0;
+}
+.ew-detail-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (min-width: 1024px) {
+  .ew-detail-aside {
+    position: sticky;
+    top: 16px;
+  }
+}
+.ew-detail-aside .card {
+  margin-bottom: 0;
+}
+.ew-detail-actions-section-title {
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green-2, var(--green));
+  margin-bottom: 8px;
+}
+.ew-detail-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+/* PageHeader: optional meta strip rendered under the title row. */
+.page-header-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* RouteBadge — uses the existing badge-* tone classes for the
+   coloured pill; this rule only adds the optional sizing tweak so
+   it sits neatly alongside the StatusBadge in headers and rows. */
+.route-badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* Sprint 28 Batch 15.4 — Ticket detail spawned-from-EW anchor.
+   Sits below the description paragraph in the ticket header. */
+.ticket-extra-work-origin {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ====================================================================
+   Sprint 28 Batch 15.4 — RejectReasonDialog modal
+   Lightweight CSS-only modal (no existing .modal primitive in the
+   codebase today). Confined to the namespace `.reject-modal-*` so it
+   never collides with future generic modal styles.
+   ==================================================================== */
+.reject-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.reject-modal {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-soft, #e5e7eb);
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.reject-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.reject-modal-desc {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.reject-modal-textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+}
+.reject-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.reject-modal-confirm[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* =========================================================================
+   Sprint 28 Batch 15.5
+   ========================================================================= */
+
+/* ----- RouteBadge colour overrides -----------------------------------------
+   The PROPOSAL badge must be visibly amber so it doesn't read as the
+   same colour as the green "approved" status badge that often sits in
+   the next column. The INSTANT badge stays green but with its own
+   explicit palette so it doesn't depend on the status-badge tone
+   classes (which carry status-bar semantic). */
+.route-badge.route-badge-proposal {
+  background: var(--amber-soft, #FEF3C7);
+  color: var(--amber-deep, #92400E);
+  border: 1px solid var(--amber-border, #FDE68A);
+}
+.route-badge.route-badge-instant {
+  background: var(--green-soft, #DCFCE7);
+  color: var(--green-deep, #166534);
+  border: 1px solid var(--green-border, #BBF7D0);
+}
+
+/* ----- Users page: un-compact RoleBadge in a tight row --------------------
+   The Users admin table dropped the `compact` prop in Batch 15.5 so the
+   PROVIDER / CUSTOMER side caption stays visible. Tighten the line
+   height + side font-size inside the admin list wrapper so the badge
+   doesn't push every row taller than the existing rhythm. */
+.admin-list-wrap .role-badge,
+.admin-card-list .role-badge {
+  line-height: 1.1;
+}
+.admin-list-wrap .role-badge-side,
+.admin-card-list .role-badge-side {
+  font-size: 9.5px;
+}
+
+/* ----- Sidebar customer-context chip -------------------------------------- */
+.sidebar-customer-chip {
+  margin: 0 12px 12px 12px;
+  padding: 10px 12px;
+  background: var(--shell-mid, #0A3D2A);
+  border: 1px solid var(--shell-accent, #5FD499);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-customer-chip-eyebrow {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--shell-accent, #5FD499);
+}
+.sidebar-customer-chip-name {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: #FFFFFF;
+  line-height: 1.1;
+}
+.sidebar-customer-chip-company {
+  font-size: 11px;
+  color: var(--shell-muted, rgba(218, 240, 228, 0.52));
+}
+
+/* ----- Users page: per-row scope chip ------------------------------------- */
+.users-scope-chip {
+  font-size: 12px;
+  white-space: nowrap;
+  font-weight: 600;
+}
+/* Sprint 29 Batch 29.1 — chip is now a single text node with the
+   number inlined by i18next pluralization. The legacy <strong>
+   selector stays as a no-op so older snapshots don't break. */
+.users-scope-chip strong {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+/* ----- Extra Work pricing table: breathable cells + totals row --- */
+/* Sprint 29 Batch 29.1 — the EW pricing table now carries the
+   class `.ew-pricing-table` (in addition to `.data-table`) so we
+   can dial padding up here without affecting other tables on the
+   page. The `.ew-pricing-totals-row` carries a stronger top border
+   and extra vertical padding so the subtotal/VAT/total line reads
+   as a summary rather than yet another data row. */
+.ew-pricing-table th,
+.ew-pricing-table td {
+  padding: 12px 14px;
+}
+.ew-pricing-table .ew-pricing-totals-row td {
+  padding-top: 16px;
+  padding-bottom: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ----- Extra Work pricing add-form spacing (Sprint 29 Batch 29.2) - */
+/* The add-pricing-item form stacks three .form-2col rows + a single
+   internal-note .field row + an action row. The default tight column
+   spacing left the rows feeling squashed; this block bumps inter-row
+   margins without touching the rest of the .form-2col call sites. */
+.ew-pricing-add-form .field {
+  gap: 8px;
+}
+.ew-pricing-add-form .form-2col + .form-2col,
+.ew-pricing-add-form .form-2col + .field,
+.ew-pricing-add-form .field + .form-2col,
+.ew-pricing-add-form .field + .field,
+.ew-pricing-add-form .ew-line-row + .ew-line-row,
+.ew-pricing-add-form .ew-line-row + .field,
+.ew-pricing-add-form .field + .ew-line-row {
+  margin-top: 14px;
+}
+
+/* ----- Horizontal compose-line row (Phase 1) ---------------------- */
+/* Shared pattern for INPUT form-line rows used by:
+     * CreateExtraWorkPage cart line composer (per-line card),
+     * ExtraWorkDetailPage `.ew-pricing-add-form` provider proposal
+       composer (three tiers — Description, Unit/Qty/Price/VAT,
+       Notes).
+   Fields keep their existing `.field` / `.field-label` /
+   `.field-input` / `.field-select` markup; this class only
+   arranges them as a single horizontal row on desktop that wraps
+   to a single-column stack on mobile (<= 760px). The grow /
+   medium / compact modifiers control which fields get extra space
+   (Service, Note, Description) versus which stay narrow
+   (Quantity, Unit, VAT %). The action slot (Remove / Add button)
+   hugs its content and aligns to the input baseline. This is a
+   layout overlay — field bindings, validation, and submit payload
+   shapes are untouched. */
+.ew-line-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.ew-line-row > .field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.ew-line-row > .field.ew-line-field-grow {
+  flex: 2 1 200px;
+}
+.ew-line-row > .field.ew-line-field-medium {
+  flex: 0 1 170px;
+}
+.ew-line-row > .field.ew-line-field-compact {
+  flex: 0 1 120px;
+}
+.ew-line-row > .ew-line-row-actions {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  padding-bottom: 2px;
+}
+@media (max-width: 760px) {
+  .ew-line-row > .field,
+  .ew-line-row > .field.ew-line-field-grow,
+  .ew-line-row > .field.ew-line-field-medium,
+  .ew-line-row > .field.ew-line-field-compact,
+  .ew-line-row > .ew-line-row-actions {
+    flex: 1 1 100%;
+  }
+}
+/* Cart-line wrapper retains the existing per-line soft card look. */
+.ew-line-row-card {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  padding: 12px;
+  background: transparent;
+}
+.ew-line-row-card + .ew-line-row-card {
+  margin-top: 10px;
+}
+
+/* ----- "Show technical keys" toggle (Permissions page) ------------ */
+/* Sprint 29 Batch 29.1 — scoped to the PolicyToggleGrid's affects-
+   line render. Default-off; persists via localStorage; does NOT
+   appear in the OverrideDrawer (keys are the primary identifier
+   there). */
+.tech-keys-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.tech-keys-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+/* Sprint 29 Batch 29.3 — read-only field display on detail pages.
+   Used by the new view-first detail surfaces (CompanyDetailPage first;
+   29.4 / 29.5 will reuse). Falls back to the existing --border-soft
+   token when the optional --border-faint token isn't defined. */
+.detail-field-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-faint, var(--border-soft));
+}
+.detail-field-row:last-child { border-bottom: none; }
+.detail-field-label {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.detail-field-value {
+  font-size: 14px;
+  color: var(--text);
+}
+.detail-field-value.muted-empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* Sprint 29 Batch 29.6 — User detail memberships + customer access lists.
+   The membership card renders up to three labelled groups (Companies /
+   Buildings / Customers); each group is a small heading + a vertical
+   list of links. The customer access card uses a row layout with
+   `justify-content: space-between` so 29.7 can drop a permission-
+   override rollup chip on the right side without re-wiring the page. */
+.user-detail-membership-group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-faint, var(--border-soft));
+}
+.user-detail-membership-group:last-child { border-bottom: none; }
+.user-detail-membership-group-title {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.user-detail-membership-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.user-detail-membership-list li { font-size: 14px; }
+.user-detail-customer-access-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.user-detail-customer-access-row {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  background: var(--surface-soft, var(--surface-2, #F8FAF8));
+  border-radius: 6px;
+}
+.user-detail-customer-access-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.user-detail-customer-access-name { font-size: 14px; }
+
+/* Sprint 29 Batch 29.7 — permissions rollup chip */
+.permissions-rollup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--f-head);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.permissions-rollup-chip-default {
+  background: var(--surface-soft, #F1F4F1);
+  color: var(--text-muted);
+  border-color: var(--border-faint, #E4E8E4);
+}
+.permissions-rollup-chip-default:hover {
+  background: var(--surface-soft-hover, #E8ECE8);
+}
+.permissions-rollup-chip-custom {
+  background: var(--accent-soft, #E8F0E5);
+  color: var(--accent-strong, #2F5D2A);
+  border-color: var(--accent-soft-border, #C8D8C0);
+}
+.permissions-rollup-chip-custom:hover {
+  background: var(--accent-soft-hover, #DCE8D8);
+}
+
+/* Sprint 29 Batch 29.8 — EW detail spawned tickets panel.
+   Reuses the existing .card chrome (handled by the wrapping element)
+   and only adds spacing rules for the list-of-rows layout. */
+.ew-spawned-tickets-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-spawned-ticket-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-soft, #F8FAF8);
+  border-radius: 6px;
+  border: 1px solid var(--border-faint, #EEF1EE);
+}
+.ew-spawned-ticket-link {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  text-decoration: none;
+}
+.ew-spawned-ticket-link:hover {
+  text-decoration: underline;
+}
+
+/* Sprint 29 Batch 29.8.5 — inline AccessPermissionsPanel under each
+   custom-permissions pill. Toggle-style read-only view of the 16
+   effective permission rows for a single access. */
+.access-chip-panel-wrap {
+  flex-basis: 100%;
+  margin-top: 10px;
+}
+.access-permissions-panel {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-soft, #fafbfc);
+  padding: 14px 16px;
+}
+.access-permissions-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.access-permissions-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.access-permissions-panel-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.access-permissions-group {
+  margin-bottom: 10px;
+}
+.access-permissions-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+  margin-bottom: 4px;
+}
+.access-permissions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.access-permission-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.access-permission-row.granted {
+  color: var(--text);
+}
+.access-permission-row.granted .access-permission-row-indicator {
+  color: var(--green, #15803d);
+}
+.access-permission-row.denied {
+  color: var(--muted, #6b7280);
+}
+.access-permission-row.denied .access-permission-row-indicator {
+  color: var(--red, #b91c1c);
+}
+.access-permission-row-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.access-permission-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.access-permission-row-label {
+  font-weight: 500;
+}
+.access-permission-row-description {
+  font-size: 12px;
+}
+.access-permission-row-reason {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Sprint 29 Batch 29.8.5 — inline rollup summary panel that the
+   <PermissionsRollupChip> now toggles in place of the old deep-link
+   navigation. */
+.permissions-rollup-summary {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--surface-soft, #fafbfc);
+  padding: 14px 16px;
+  margin-top: 8px;
+}
+.permissions-rollup-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.permissions-rollup-summary-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.permissions-rollup-summary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.permissions-rollup-summary-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+}
+.permissions-rollup-summary-row-building {
+  font-weight: 500;
+  color: var(--text);
+}
+.permissions-rollup-summary-row-role {
+  font-size: 12px;
+  color: var(--muted, #6b7280);
+}
+.permissions-rollup-summary-row-edit {
+  font-size: 12px;
+}
+.permissions-rollup-summary-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.permissions-rollup-summary-empty {
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+  padding: 6px 0;
+}
+.permissions-rollup-summary-loading {
+  font-size: 13px;
+  color: var(--muted, #6b7280);
+  padding: 6px 0;
+}
+.user-access-card-summary {
+  padding: 0 16px 12px;
+}
+
+/* Sprint 30 Batch 30.1.1.5 — progressive workflow disclosure.
+   The "More actions" toggle is a borderless ghost-link sitting
+   between the primary action group and the secondary list. The
+   secondary list itself is visually softer (smaller font, faint
+   top divider) so the eye lands on the primary actions first. */
+.workflow-more-actions-toggle {
+  align-self: flex-start;
+  margin-top: 8px;
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.workflow-more-actions-toggle:hover { color: var(--text); }
+.workflow-secondary-list {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.workflow-secondary-list .status-btn,
+.status-btn-secondary {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Sprint 30 Batch 30.1.2 Phase E — provider customer-decision
+   override footer. Cancel anchors left, Confirm anchors right.
+   Repurposed in Batch 30.1.3 onto the inline arming block under each
+   Approve / Reject button (the standalone override card was removed). */
+.override-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  gap: 12px;
+}
+.override-card-footer .btn-ghost {
+  color: var(--text-muted);
+}
+
+/* Card-action cluster — generalisation of the invoice-row
+   `.invoice-line-row-actions-cluster` wrap discipline for any action-
+   button row that lives inside a card / sticky aside / narrow column.
+   Applied alongside a semantic class (e.g. `.override-card-footer`)
+   so it inherits the semantic layout (justify-content, gap, margin)
+   from that class and overlays only the wrap-discipline overrides:
+     * row wrap so the cluster never exceeds its container,
+     * `max-width: 100%` ceiling,
+     * per-button shrink + label wrap so a long computed label such
+       as "Confirm override → Customer approved" cannot push past the
+       card edge in a 360px aside.
+   `.btn`'s default `white-space: nowrap` + fixed `height: 36px` are
+   lifted *only inside this cluster*, with a `min-height: 30px`
+   matching the `.btn-sm` baseline so single-line buttons render
+   unchanged. */
+.card-actions-cluster {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.card-actions-cluster .btn {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  min-height: 30px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  line-height: 1.3;
+}
+
+/* Sprint 30 Batch 30.1.3 — inline override arming under a primary
+   workflow button. Visually minimal: a compact reason textarea +
+   Confirm / Cancel pair anchored to the pressed button, NOT a full
+   card or yellow warning. The decision-step affordance is the button
+   itself; clicking it twice (once to arm, once to confirm with reason)
+   commits the override transition. */
+.workflow-override-target {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.workflow-override-inline {
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2, var(--bg-soft));
+}
+.workflow-override-inline .field-textarea {
+  width: 100%;
+}
+
+/* ----- Invoice-row foundation (P0-1) ----------------------------- */
+/* Shared <tr> rendered by `InvoiceLineRow`. Layered on top of the
+   existing `.data-table` / `.ew-pricing-table` cell padding — those
+   classes still apply to the parent <table>, so this block only adds
+   alignment, the source-tag treatment, and the action-cluster wrap
+   discipline. Money + numeric columns get the right-align here so the
+   component doesn't have to inline `style={{ textAlign: "right" }}` on
+   every cell. */
+
+.invoice-line-row-num,
+.invoice-line-totals-row .invoice-line-row-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.invoice-line-row-money {
+  white-space: nowrap;
+}
+.invoice-line-row-total {
+  font-weight: 600;
+}
+.invoice-line-row-service,
+.invoice-line-row-source,
+.invoice-line-row-unit {
+  text-align: left;
+}
+.invoice-line-row-service-label {
+  word-break: break-word;
+}
+.invoice-line-row-service-sub {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Source tag — small inline chip that visually distinguishes the
+   three labelling states. Reuses the existing `.cell-tag` vocabulary
+   only where the colour fits; otherwise stays neutral. */
+.invoice-line-row-source-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.invoice-line-row-source-tag.invoice-line-row-source-contract {
+  background: var(--green-faint, var(--surface-2));
+  color: var(--text);
+  border-color: var(--border);
+}
+.invoice-line-row-source-tag.invoke-line-row-source-needs_proposal,
+.invoice-line-row-source-tag.invoice-line-row-source-needs_proposal {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* Actions cluster — buttons must wrap within the cell, never overflow
+   it. Same discipline as the override-button fix called out in P0-5.
+   On narrow viewports the table cell shrinks, the buttons wrap onto
+   the next line; the row grows in height rather than the buttons
+   bleeding into adjacent cells. */
+.invoice-line-row-actions-cluster {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.invoice-line-row-actions-cluster .btn {
+  min-width: 0;
+  max-width: 100%;
+}
+.invoice-line-row-actions {
+  text-align: right;
+  vertical-align: top;
+  white-space: normal;
+}
+
+/* Totals row reuses the existing `.ew-pricing-totals-row` border /
+   padding (still on the component tr); this block only emphasises the
+   "Subtotal" label cell so it reads as a summary anchor. */
+.invoice-line-totals-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Responsive — at narrow viewports we let the parent .table-wrap (or
+   .responsive-table-wrap) provide horizontal scroll rather than
+   forcing the row to stack. Stacking a 10-column invoice row into a
+   labeled block would lose the visual alignment the operator relies
+   on for spot-checking totals; readable horizontal scroll wins. The
+   parent table should wrap with `.table-wrap` (already used by every
+   admin table) so this scroll surface is consistent. */
+
+/* --- End invoice-row foundation -------------------------------- */
