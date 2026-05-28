@@ -34,11 +34,11 @@ import { useToast } from "../../../components/ToastProvider";
 import { useTechnicalKeysToggle } from "../../../hooks/useTechnicalKeysToggle";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
-import { OverrideDrawer } from "./permissions/OverrideDrawer";
-import type { OverrideDraft } from "./permissions/OverrideDrawer";
+import { PermissionEditorModal } from "./permissions/PermissionEditorModal";
+import type { OverrideDraft } from "./permissions/PermissionEditorModal";
+import { PermissionsMatrix } from "./permissions/PermissionsMatrix";
 import { PolicyToggleGrid } from "./permissions/PolicyToggleGrid";
 import type { PolicyDraft } from "./permissions/PolicyToggleGrid";
-import { UserAccessCard } from "./permissions/UserAccessCard";
 import { ZoneHeader } from "./permissions/ZoneHeader";
 import {
   buildOverridesPayload,
@@ -646,7 +646,7 @@ export function CustomerPermissionsPage() {
             )}
           </section>
 
-          {/* ------------------- Zone 2 — Users ---------------------- */}
+          {/* ------------------- Zone 2 — Permissions matrix --------- */}
           <section
             className="card permissions-zone permissions-zone-users"
             data-testid="section-customer-users"
@@ -665,42 +665,35 @@ export function CustomerPermissionsPage() {
                 })}
               />
             ) : (
-              <div className="permissions-user-cards">
-                {members.map((membership) => (
-                  <UserAccessCard
-                    key={membership.id}
-                    customerId={customer.id}
-                    customerName={customerName}
-                    membership={membership}
-                    accesses={accessByUserId[membership.user_id] ?? []}
-                    linkedBuildings={linkedBuildings}
-                    policy={policy}
-                    meId={me?.id}
-                    canGrantCustomerCompanyAdmin={canGrantCustomerCompanyAdmin}
-                    busy={accessBusyUserId === membership.user_id}
-                    onRoleChange={(access, newRole) =>
-                      handleAccessRoleChange(membership, access, newRole)
-                    }
-                    onActiveToggle={(access, nextActive) =>
-                      handleToggleAccessActive(membership, access, nextActive)
-                    }
-                    onOpenOverrides={(access) =>
-                      openOverrideEditor(membership, access)
-                    }
-                    onRemoveAccess={(access) =>
-                      openRevokeAccessDialog(membership, access)
-                    }
-                    onAddBuilding={(buildingId) =>
-                      handleAddAccess(membership, buildingId)
-                    }
-                  />
-                ))}
-              </div>
+              <PermissionsMatrix
+                members={members}
+                accessByUserId={accessByUserId}
+                linkedBuildings={linkedBuildings}
+                policy={policy}
+                meId={me?.id}
+                canGrantCustomerCompanyAdmin={canGrantCustomerCompanyAdmin}
+                isUserBusy={(userId) => accessBusyUserId === userId}
+                onRoleChange={(membership, access, newRole) =>
+                  handleAccessRoleChange(membership, access, newRole)
+                }
+                onActiveToggle={(membership, access, nextActive) =>
+                  handleToggleAccessActive(membership, access, nextActive)
+                }
+                onEditPermissions={(membership, access) =>
+                  openOverrideEditor(membership, access)
+                }
+                onRemoveAccess={(membership, access) =>
+                  openRevokeAccessDialog(membership, access)
+                }
+                onAddBuilding={(membership, buildingId) =>
+                  handleAddAccess(membership, buildingId)
+                }
+              />
             )}
           </section>
 
-          {/* ------------------- Zone 3 — Override drawer ------------ */}
-          <OverrideDrawer
+          {/* ------------------- Zone 3 — Permission editor modal ---- */}
+          <PermissionEditorModal
             open={editingOverrideFor !== null}
             membership={editingMembership}
             access={editingAccess}

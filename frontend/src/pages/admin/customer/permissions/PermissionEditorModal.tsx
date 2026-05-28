@@ -18,35 +18,47 @@ import {
 import {
   PERMISSION_GROUP_LABEL_KEY,
   PERMISSION_KEY_ROWS,
+  type PermissionGroup,
   type PermissionKeyRow,
 } from "./permissionKeyLabels";
+import { TriStateBubbleRadio } from "./TriStateBubbleRadio";
 
 /**
- * Sprint 28 Batch 15.2 — Right-side drawer that replaces the inline
- * overrides section. Renders the 16 customer permission keys
- * grouped by domain (Tickets / Extra Work / Users) with a tri-state
- * Inherit/Allow/Deny radio set per key and an inline "Effective:
- * ..." hint computed by the display-only resolver.
+ * Sprint 31 Phase 6 — REPLACES `OverrideDrawer` with a centered modal.
  *
- * Locked testids preserved:
- *   - section-customer-overrides-editor (on the drawer wrapper)
- *   - customer-overrides-table
- *   - customer-overrides-row (one per key)
- *   - customer-overrides-radio (3 per row; value = inherit|allow|deny)
- *   - customer-overrides-close
- *   - customer-overrides-save
+ * Tri-state Inherit / Allow / Deny optical-bubble radios for the 16
+ * customer.* permission keys, grouped by Tickets / Extra Work /
+ * Users. Permission TRUTH stays in `effectiveResolver`:
+ *   - the inline "Effective: …" hint comes from `resolveEffective` +
+ *     `effectiveLabelKey`,
+ *   - the policy-blocked decision comes from
+ *     `resolveEffective(...).reason === "policy"`,
+ *   - the save payload is built by the caller using the existing
+ *     `buildOverridesPayload` helper against the unchanged PATCH
+ *     `/api/customers/<id>/users/<uid>/access/<bid>/` endpoint.
  *
- * Sprint 29 Batch 29.8.5 — the (key, group) table + per-group i18n
- * pointer moved to `./permissionKeyLabels` so the new inline
- * AccessPermissionsPanel can reuse the exact same shape without
- * duplicating the list.
+ * Policy-blocked semantics (mirrors the OverrideDrawer behaviour the
+ * 27E spec locks): when the company policy currently denies a key's
+ * family, the modal disables the row's tri-state and shows an
+ * explicit "Blocked by customer company policy" hint. The DRAFT
+ * value is still preserved in state — policy blocks effect, not
+ * storage — so flipping the company policy back ON restores the
+ * operator's intent without re-typing.
+ *
+ * Locked testids relocated from the drawer (Sprint 27E / 28 Batch
+ * 15.2 specs assert these):
+ *   - `section-customer-overrides-editor` (modal root)
+ *   - `customer-overrides-table`
+ *   - `customer-overrides-row` + `data-permission-key`
+ *   - `customer-overrides-radio` + `value="inherit|allow|deny"`
+ *     (rendered inside `TriStateBubbleRadio`)
+ *   - `customer-overrides-close`
+ *   - `customer-overrides-save`
  */
-
-type KeyRow = PermissionKeyRow;
 
 export type OverrideDraft = Record<CustomerPermissionKey, OverrideDraftValue>;
 
-export interface OverrideDrawerProps {
+export interface PermissionEditorModalProps {
   open: boolean;
   membership: CustomerUserMembership | null;
   access: CustomerUserBuildingAccess | null;
@@ -60,7 +72,7 @@ export interface OverrideDrawerProps {
   isSelf: boolean;
 }
 
-export function OverrideDrawer({
+export function PermissionEditorModal({
   open,
   membership,
   access,
@@ -71,21 +83,20 @@ export function OverrideDrawer({
   onSave,
   saving,
   isSelf,
-}: OverrideDrawerProps) {
+}: PermissionEditorModalProps) {
   const { t } = useTranslation("common");
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const drawerRef = useRef<HTMLDivElement | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
   // Stash the trigger element so focus returns there on close.
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Capture the focused element when the drawer opens; restore on close.
+  // Capture the focused element when the modal opens; restore on close.
   useEffect(() => {
     if (open) {
       previousFocusRef.current =
         document.activeElement instanceof HTMLElement
           ? document.activeElement
           : null;
-      // Defer focus by one frame so the drawer is mounted before focus shifts.
       requestAnimationFrame(() => {
         closeButtonRef.current?.focus();
       });
@@ -95,7 +106,7 @@ export function OverrideDrawer({
     }
   }, [open]);
 
-  // Escape closes the drawer.
+  // Escape closes.
   useEffect(() => {
     if (!open) return;
     function handleKey(event: KeyboardEvent) {
@@ -108,12 +119,12 @@ export function OverrideDrawer({
     return () => document.removeEventListener("keydown", handleKey);
   }, [open, onClose]);
 
-  // Focus trap — keep Tab cycling inside the drawer.
+  // Focus trap — keep Tab cycling inside the modal.
   useEffect(() => {
     if (!open) return;
     function handleTab(event: KeyboardEvent) {
       if (event.key !== "Tab") return;
-      const root = drawerRef.current;
+      const root = modalRef.current;
       if (!root) return;
       const focusables = root.querySelectorAll<HTMLElement>(
         'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -139,7 +150,7 @@ export function OverrideDrawer({
   }, [open]);
 
   const groupedRows = useMemo(() => {
-    const grouped: Record<KeyRow["group"], KeyRow[]> = {
+    const grouped: Record<PermissionGroup, PermissionKeyRow[]> = {
       tickets: [],
       extra_work: [],
       users: [],
@@ -162,35 +173,35 @@ export function OverrideDrawer({
   const userName = membership.user_full_name?.trim() || membership.user_email;
 
   return (
-    <>
+    <div
+      className="permission-editor-modal-backdrop"
+      role="presentation"
+      onClick={onClose}
+    >
       <div
-        className="override-drawer-backdrop"
-        aria-hidden="true"
-        onClick={onClose}
-      />
-      <aside
-        ref={drawerRef}
-        className="override-drawer"
+        ref={modalRef}
+        className="permission-editor-modal"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="override-drawer-title"
+        aria-labelledby="permission-editor-modal-title"
         data-testid="section-customer-overrides-editor"
+        onClick={(event) => event.stopPropagation()}
       >
-        <header className="override-drawer-header">
-          <div className="override-drawer-header-text">
+        <header className="permission-editor-modal-header">
+          <div className="permission-editor-modal-header-text">
             <h3
-              id="override-drawer-title"
-              className="override-drawer-title"
+              id="permission-editor-modal-title"
+              className="permission-editor-modal-title"
             >
               {t("customer_permissions.overrides_drawer.title")}
             </h3>
-            <p className="override-drawer-subtitle">
+            <p className="permission-editor-modal-subtitle">
               {t("customer_permissions.overrides_drawer.subtitle", {
                 user: userName,
                 building: access.building_name,
               })}
             </p>
-            <p className="override-drawer-role-caption">
+            <p className="permission-editor-modal-role-caption">
               {t("customer_permissions.overrides_drawer.role_caption", {
                 role: t(accessRoleLabelKey(access.access_role)),
               })}
@@ -199,7 +210,7 @@ export function OverrideDrawer({
           <button
             ref={closeButtonRef}
             type="button"
-            className="override-drawer-close"
+            className="permission-editor-modal-close"
             data-testid="customer-overrides-close"
             onClick={onClose}
             aria-label={t("customer_permissions.overrides_drawer.close")}
@@ -208,25 +219,25 @@ export function OverrideDrawer({
           </button>
         </header>
 
-        <div className="override-drawer-body">
+        <div className="permission-editor-modal-body">
           {isSelf && (
-            <div className="alert-warn override-drawer-warning" role="alert">
+            <div className="alert-warn permission-editor-modal-warning" role="alert">
               {t("customer_permissions.overrides_drawer.self_warning")}
             </div>
           )}
           {access.is_active === false && (
-            <div className="alert-warn override-drawer-warning" role="alert">
+            <div className="alert-warn permission-editor-modal-warning" role="alert">
               {t("customer_permissions.overrides_drawer.inactive_warning")}
             </div>
           )}
 
           <table
-            className="override-drawer-table"
+            className="permission-editor-modal-table"
             data-testid="customer-overrides-table"
           >
             <tbody>
               {(["tickets", "extra_work", "users"] as const).map((group) => (
-                <OverrideGroup
+                <ModalGroup
                   key={group}
                   groupLabel={t(PERMISSION_GROUP_LABEL_KEY[group])}
                   rows={groupedRows[group]}
@@ -242,7 +253,7 @@ export function OverrideDrawer({
           </table>
         </div>
 
-        <footer className="override-drawer-footer">
+        <footer className="permission-editor-modal-footer">
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -261,14 +272,14 @@ export function OverrideDrawer({
             {t("customer_permissions.overrides_drawer.save")}
           </button>
         </footer>
-      </aside>
-    </>
+      </div>
+    </div>
   );
 }
 
-interface OverrideGroupProps {
+interface ModalGroupProps {
   groupLabel: string;
-  rows: KeyRow[];
+  rows: PermissionKeyRow[];
   draft: OverrideDraft;
   policy: CustomerCompanyPolicyAdmin | null;
   access: CustomerUserBuildingAccess;
@@ -277,7 +288,7 @@ interface OverrideGroupProps {
   onChange: (key: CustomerPermissionKey, value: OverrideDraftValue) => void;
 }
 
-function OverrideGroup({
+function ModalGroup({
   groupLabel,
   rows,
   draft,
@@ -286,13 +297,13 @@ function OverrideGroup({
   saving,
   isSelf,
   onChange,
-}: OverrideGroupProps) {
+}: ModalGroupProps) {
   const { t } = useTranslation("common");
   return (
     <>
-      <tr className="override-drawer-group">
+      <tr className="permission-editor-modal-group">
         <th colSpan={2}>
-          <span className="override-drawer-group-title">{groupLabel}</span>
+          <span className="permission-editor-modal-group-title">{groupLabel}</span>
         </th>
       </tr>
       {rows.map((row) => {
@@ -304,65 +315,55 @@ function OverrideGroup({
           policy,
           accessRole: access.access_role,
         });
+        // Policy-blocked branch: the resolver returns reason === "policy"
+        // when CustomerCompanyPolicy currently denies this key's family.
+        // We disable the tri-state in this case AND show explicit copy,
+        // but the underlying draft VALUE is preserved (storage is not
+        // erased; policy only blocks effect — matches the resolver's
+        // single source of truth).
+        const policyBlocked =
+          effective.effective === "deny" && effective.reason === "policy";
         const radioGroupName = `overrides-${access.user_id}-${access.building_id}-${row.key}`;
+        const disabled = saving || isSelf || policyBlocked;
         return (
           <tr
             key={row.key}
-            className="override-row"
+            className={`permission-editor-modal-row${
+              policyBlocked ? " permission-editor-modal-row-policy-blocked" : ""
+            }`}
             data-testid="customer-overrides-row"
             data-permission-key={row.key}
           >
-            <td className="override-row-info">
-              <div className="override-row-label">
-                {t(
-                  `customer_permissions.permission_keys.${row.key}.label`,
-                )}
+            <td className="permission-editor-modal-row-info">
+              <div className="permission-editor-modal-row-label">
+                {t(`customer_permissions.permission_keys.${row.key}.label`)}
               </div>
-              <div className="override-row-description">
-                {t(
-                  `customer_permissions.permission_keys.${row.key}.description`,
-                )}
+              <div className="permission-editor-modal-row-description">
+                {t(`customer_permissions.permission_keys.${row.key}.description`)}
               </div>
-              <div
-                className={`override-row-effective effective-hint-${
-                  effective.effective
-                }`}
-              >
-                {t(effectiveLabelKey(effective))}
-              </div>
+              {policyBlocked ? (
+                <div
+                  className="permission-editor-modal-row-policy-text"
+                  data-testid="permission-editor-row-policy-blocked"
+                >
+                  {t("customer_permissions.matrix.policy_blocked")}
+                </div>
+              ) : (
+                <div
+                  className={`permission-editor-modal-row-effective effective-hint-${effective.effective}`}
+                >
+                  {t(effectiveLabelKey(effective))}
+                </div>
+              )}
             </td>
-            <td className="override-row-radios">
-              <fieldset
-                className="override-row-radio-group"
-                disabled={saving || isSelf}
-              >
-                <legend className="visually-hidden">
-                  {t(
-                    `customer_permissions.permission_keys.${row.key}.label`,
-                  )}
-                </legend>
-                {(["inherit", "allow", "deny"] as const).map((opt) => (
-                  <label
-                    key={opt}
-                    className={`override-radio-option${
-                      draftValue === opt ? " override-radio-option-active" : ""
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name={radioGroupName}
-                      value={opt}
-                      data-testid="customer-overrides-radio"
-                      data-permission-key={row.key}
-                      checked={draftValue === opt}
-                      onChange={() => onChange(row.key, opt)}
-                    />
-                    <span>
-                      {t(`customer_permissions.overrides_drawer.${opt}`)}
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
+            <td className="permission-editor-modal-row-radios">
+              <TriStateBubbleRadio
+                name={radioGroupName}
+                permissionKey={row.key}
+                value={draftValue}
+                onChange={(next) => onChange(row.key, next)}
+                disabled={disabled}
+              />
             </td>
           </tr>
         );
@@ -370,4 +371,3 @@ function OverrideGroup({
     </>
   );
 }
-

@@ -13,12 +13,14 @@ import { loginAs } from "./fixtures/login";
  * a different page with no glance-level view of WHO can do WHAT. Batch
  * 29.8.5 turns both into in-place toggles:
  *
- *   - On the Permissions page the per-building "N custom permissions"
- *     pill toggles an inline `<AccessPermissionsPanel>` that lists all
- *     16 effective customer-permission rows with grant/deny indicators
- *     and a reason annotation. An explicit "Edit overrides" button
- *     inside the panel opens the legacy OverrideDrawer when the
- *     operator actually wants to mutate.
+ *   - On the Permissions page the per-access inline panel is replaced
+ *     in Sprint 31 Phase 6 by an Excel-style matrix: one row per
+ *     access with 16 `permissions-matrix-cell` cells (one per
+ *     customer-permission key) showing effective state via
+ *     `data-effective` + `data-policy-blocked` discriminators. The
+ *     pill testid `customer-access-overrides-button` is preserved on
+ *     the row's "Edit permissions" button; clicking it opens the
+ *     PermissionEditorModal directly — no intermediate panel.
  *
  *   - The per-customer rollup chip (Permissions page user-card header,
  *     Customer Users tab row, AND User detail customer-access card)
@@ -28,9 +30,8 @@ import { loginAs } from "./fixtures/login";
  *
  * Locked testid contract (verified against the in-place
  * implementation):
- *   - `access-permissions-panel-<accessId>`         (panel root)
- *   - `access-permissions-edit-<accessId>`          (Edit button)
- *   - `access-permission-row-<accessId>-<key>`      (16 grant/deny rows)
+ *   - `permissions-matrix-row` + data-user-id + data-building-id    (matrix row)
+ *   - `permissions-matrix-cell` + data-permission-key + data-effective + data-policy-blocked
  *   - `permissions-rollup-summary-<userId>-<customerId>`            (summary root)
  *   - `permissions-rollup-summary-collapse-<userId>-<customerId>`   (collapse button)
  *   - `permissions-rollup-summary-open-full-<userId>-<customerId>`  (deep-link)
@@ -40,9 +41,9 @@ import { loginAs } from "./fixtures/login";
  * Preserved from earlier sprints (29.6 / 29.7 locks):
  *   - `permissions-rollup-chip-<userId>`               (chip root)
  *   - `user-detail-permissions-link-<customerId>`      (chip on user detail)
- *   - `customer-access-overrides-button`               (the per-building pill)
- *   - `section-customer-overrides-editor`              (drawer root)
- *   - `customer-overrides-close`                       (drawer close)
+ *   - `customer-access-overrides-button`               (row Edit button)
+ *   - `section-customer-overrides-editor`              (modal root, was drawer)
+ *   - `customer-overrides-close`                       (modal close)
  */
 
 type AccessRow = {
@@ -161,17 +162,22 @@ async function patchOverrides(
  * `data-user-id` and `data-building-id` discriminators (multiple
  * users on the Permissions page can share the same building id).
  */
-async function openPanelForAccess(
+// Sprint 31 Phase 6 — the per-access pill that used to toggle the
+// inline AccessPermissionsPanel is now the matrix row's "Edit
+// permissions" button. The testid + data-* discriminators are
+// preserved verbatim, and a click now opens the PermissionEditorModal
+// directly (no intermediate panel step).
+async function openModalForAccess(
   page: Page,
   userId: number,
   buildingId: number,
 ): Promise<void> {
-  const pill = page.locator(
+  const button = page.locator(
     `[data-testid="customer-access-overrides-button"][data-user-id="${userId}"][data-building-id="${buildingId}"]`,
   );
-  await expect(pill).toBeVisible({ timeout: 10_000 });
-  await pill.scrollIntoViewIfNeeded();
-  await pill.click();
+  await expect(button).toBeVisible({ timeout: 10_000 });
+  await button.scrollIntoViewIfNeeded();
+  await button.click();
 }
 
 test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () => {
@@ -244,9 +250,14 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
     }
   });
 
-  test("Per-building inline panel opens on the Permissions page with all 16 rows", async ({
+  test("Permissions matrix renders 16 cells per access row with effective state", async ({
     page,
   }) => {
+    // Sprint 31 Phase 6 — replaces the per-access inline panel with a
+    // matrix row. Each matrix row carries 16 `permissions-matrix-cell`
+    // cells (one per customer-permission key); cells expose
+    // `data-effective="granted|denied"` + `data-policy-blocked` so a
+    // spec can assert state structurally without parsing class names.
     test.skip(
       overrideTarget === null,
       "no access row with permission_overrides + seeding fallback failed",
@@ -256,38 +267,33 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${t.customerId}/permissions`);
 
-    await openPanelForAccess(page, t.userId, t.buildingId);
-
-    const panel = page.locator(
-      `[data-testid="access-permissions-panel-${t.accessId}"]`,
+    const row = page.locator(
+      `[data-testid="permissions-matrix-row"][data-user-id="${t.userId}"][data-building-id="${t.buildingId}"]`,
     );
-    await expect(panel).toBeVisible({ timeout: 10_000 });
+    await expect(row).toBeVisible({ timeout: 10_000 });
 
-    // 16 customer-permission keys must each render a row inside the
-    // panel — same count contract as the OverrideDrawer table.
-    const rows = panel.locator(
-      `[data-testid^="access-permission-row-${t.accessId}-"]`,
+    // 16 customer-permission keys -> 16 cells per row, same contract
+    // the panel used to provide.
+    const cells = row.locator('[data-testid="permissions-matrix-cell"]');
+    await expect(cells).toHaveCount(16);
+
+    // At least one cell should be granted (the seeded
+    // "customer.ticket.create" override above, or whatever non-empty
+    // overrides the seed shipped). Assert via the structural
+    // `data-effective` discriminator.
+    const grantedCells = row.locator(
+      '[data-testid="permissions-matrix-cell"][data-effective="granted"]',
     );
-    await expect(rows).toHaveCount(16);
-
-    // At least one row should be granted (the seeded "customer.ticket.create"
-    // override above, or whatever non-empty overrides the seed
-    // shipped). We assert via the `data-granted="true"` discriminator
-    // rather than a class-name match to keep the contract structural.
-    const grantedRows = panel.locator(
-      `[data-testid^="access-permission-row-${t.accessId}-"][data-granted="true"]`,
-    );
-    expect(await grantedRows.count()).toBeGreaterThan(0);
-
-    // Collapse via the inline panel's own Collapse button — panel
-    // disappears.
-    await panel.getByRole("button", { name: /collapse|inklappen/i }).click();
-    await expect(panel).toHaveCount(0);
+    expect(await grantedCells.count()).toBeGreaterThan(0);
   });
 
-  test("Edit overrides button on the inline panel opens the override drawer", async ({
+  test("Edit permissions button on the matrix row opens the modal", async ({
     page,
   }) => {
+    // Sprint 31 Phase 6 — the Edit permissions button on each matrix
+    // row (locked testid `customer-access-overrides-button` preserved
+    // verbatim with `data-user-id` + `data-building-id`) opens the
+    // PermissionEditorModal directly; no intermediate panel step.
     test.skip(
       overrideTarget === null,
       "no access row with permission_overrides + seeding fallback failed",
@@ -297,28 +303,16 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${t.customerId}/permissions`);
 
-    await openPanelForAccess(page, t.userId, t.buildingId);
+    await openModalForAccess(page, t.userId, t.buildingId);
 
-    const panel = page.locator(
-      `[data-testid="access-permissions-panel-${t.accessId}"]`,
-    );
-    await expect(panel).toBeVisible({ timeout: 10_000 });
-
-    // The inline panel's "Edit overrides" button opens the legacy
-    // OverrideDrawer for the same access row. Clicking it implicitly
-    // collapses the panel (per UserAccessCard.onEditClick).
-    await page
-      .locator(`[data-testid="access-permissions-edit-${t.accessId}"]`)
-      .click();
-
-    const drawer = page.locator(
+    const modal = page.locator(
       '[data-testid="section-customer-overrides-editor"]',
     );
-    await expect(drawer).toBeVisible({ timeout: 10_000 });
+    await expect(modal).toBeVisible({ timeout: 10_000 });
 
-    // Close via the locked close button — drawer disappears.
+    // Close via the locked close button — modal disappears.
     await page.locator('[data-testid="customer-overrides-close"]').click();
-    await expect(drawer).toHaveCount(0);
+    await expect(modal).toHaveCount(0);
   });
 
   test("User detail rollup chip toggles the inline summary panel", async ({

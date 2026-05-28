@@ -126,13 +126,14 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await expect(saveBar).toHaveCount(0);
   });
 
-  test("custom-permissions pill toggles inline panel; Edit opens drawer with 16 override rows", async ({
+  test("Edit permissions button opens modal with 16 override rows", async ({
     page,
   }) => {
-    // Sprint 29 Batch 29.8.5 — the pill now toggles the inline
-    // AccessPermissionsPanel; the drawer opens behind an explicit
-    // "Edit overrides" button inside the panel. The pill's locked
-    // testid is preserved.
+    // Sprint 31 Phase 6 — the per-user inline AccessPermissionsPanel
+    // is gone. The pill (now an "Edit permissions" button on each
+    // matrix row) opens the modal directly. The pill's locked testid
+    // `customer-access-overrides-button` is preserved on the matrix
+    // row's Edit button so this spec's first locator still resolves.
     const sa = await apiAs(DEMO_USERS.super.email);
     const id = await resolveFirstCustomerId(sa);
     await sa.dispose();
@@ -146,16 +147,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await expect(firstOverridesButton).toBeVisible({ timeout: 10_000 });
     await firstOverridesButton.click();
 
-    // 29.8.5 — inline panel opens (drawer does NOT auto-open).
-    const panel = page
-      .locator('[data-testid^="access-permissions-panel-"]')
-      .first();
-    await expect(panel).toBeVisible();
-
-    // Click the panel's Edit button -> drawer opens.
-    await panel
-      .locator('[data-testid^="access-permissions-edit-"]')
-      .click();
+    // Modal opens directly; no intermediate panel.
     await expect(
       page.locator('[data-testid="section-customer-overrides-editor"]'),
     ).toBeVisible();
@@ -181,13 +173,9 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
 
-    // 29.8.5 — toggle inline panel then click Edit to reach the drawer.
+    // Sprint 31 Phase 6 — pill click opens the modal directly.
     await page
       .locator('[data-testid="customer-access-overrides-button"]')
-      .first()
-      .click();
-    await page
-      .locator('[data-testid^="access-permissions-edit-"]')
       .first()
       .click();
 
@@ -205,7 +193,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     ).toBeVisible();
   });
 
-  test("no raw permission keys appear as labels in the drawer", async ({
+  test("no raw permission keys appear as labels in the modal", async ({
     page,
   }) => {
     const sa = await apiAs(DEMO_USERS.super.email);
@@ -215,35 +203,32 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
 
-    // 29.8.5 — toggle inline panel then click Edit to reach the drawer.
+    // Sprint 31 Phase 6 — pill click opens the modal directly.
     await page
       .locator('[data-testid="customer-access-overrides-button"]')
       .first()
       .click();
-    await page
-      .locator('[data-testid^="access-permissions-edit-"]')
-      .first()
-      .click();
 
-    // The drawer's label cells (override-row-label) must not show the
-    // raw `customer.ticket.*` enum strings — they should be the
+    // The modal's label cells (.permission-editor-modal-row-label,
+    // replacing the legacy .override-row-label) must not show the raw
+    // `customer.ticket.*` enum strings — they should be the
     // translated labels.
     const labelTexts = await page
-      .locator(".override-row-label")
+      .locator(".permission-editor-modal-row-label")
       .allTextContents();
     expect(labelTexts.length).toBe(16);
     for (const txt of labelTexts) {
       expect(
         txt,
-        "drawer label should not contain raw permission key",
+        "modal label should not contain raw permission key",
       ).not.toContain("customer.ticket.");
       expect(
         txt,
-        "drawer label should not contain raw permission key",
+        "modal label should not contain raw permission key",
       ).not.toContain("customer.extra_work.");
       expect(
         txt,
-        "drawer label should not contain raw permission key",
+        "modal label should not contain raw permission key",
       ).not.toContain("customer.users.");
     }
   });

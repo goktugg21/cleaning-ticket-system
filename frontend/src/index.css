@@ -4606,36 +4606,355 @@ table.data-table {
   border: 0;
 }
 
-/* ----- Zone 3 — Override drawer ----- */
-.override-drawer-backdrop {
+/* ----- Sprint 31 Phase 6 — Permissions matrix + modal editor -----
+   Replaces the right-side override drawer. The matrix is the primary
+   view; the modal is the per-row tri-state editor. Permission TRUTH
+   stays in `effectiveResolver`; these styles are visual only. */
+
+/* Glyph bubble for the matrix. The CIRCLE is the chrome; the GLYPH
+   inside (check / cross / lock) is the primary signal. Three
+   variants, each visually distinct so the operator can tell
+   "granted" from "denied" from "blocked by company policy" without
+   opening the modal.
+
+   Modal compatibility note: the tri-state Inherit/Allow/Deny radios
+   in `TriStateBubbleRadio` reuse `.permission-bubble` as the BASE
+   class (size + border + radius) but apply their own
+   `.tri-state-bubble-option-*` + `.tri-state-bubble-selected`
+   modifiers, NEVER `.permission-bubble-granted/-denied/-policy-blocked`.
+   So changing the matrix variants below does not change the modal. */
+.permission-bubble {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  vertical-align: middle;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.permission-bubble-granted {
+  background: var(--green-faint);
+  border-color: var(--green);
+  color: var(--green);
+}
+.permission-bubble-denied {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+.permission-bubble-policy-blocked {
+  background: var(--surface-2);
+  border-color: var(--text-faint);
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+/* Inline hint colors reused by the modal. */
+.effective-hint-allow { color: var(--green); }
+.effective-hint-deny  { color: var(--danger, #B0413E); }
+
+/* ----- Permissions matrix (primary view of Zone 2) -----
+   Column order:
+     User | Actions | Role | Tickets(6) | Extra Work(6) | Users(4)
+   The grid is intentionally WIDER than the viewport — 16 plain-
+   horizontal permission columns don't fit a sub-page width and we
+   accept that. The wrapper scrolls horizontally; the User | Actions
+   | Role identity columns are `position: sticky` so they stay PINNED
+   while only the permission columns scroll under them (Excel-style
+   frozen pane). A right-edge shadow on the Role column marks the
+   freeze line so the scroll boundary reads as intentional, not
+   broken. */
+.permissions-matrix {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.permissions-matrix-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 10px;
+  /* Right-side breathing room INSIDE the wrapper so the rightmost
+     rotated label ("manage permissions" / "locatie goedkeuren")
+     can extend past its column's right edge without poking out of
+     the rounded frame and without triggering horizontal scroll.
+     The label's horizontal projection at -45deg is ~70px from its
+     pivot at column centre; with column widths in the 60-90px
+     range the overflow past the column right edge is ~25-45px,
+     comfortably inside this 60px buffer. */
+  padding-right: 60px;
+}
+.permissions-matrix-table {
+  /* `width: 100%` + `table-layout: fixed` makes the table fill the
+     wrapper's content area and distribute remaining horizontal
+     space equally among the 16 permission columns (the three frozen
+     identity columns keep their fixed 120 / 100 / 160 widths via
+     the sticky-* rules below). Each permission column = (wrapper
+     content width - 60px padding-right - 380px frozen) / 16,
+     typically 55-95px depending on viewport. No horizontal scroll
+     because the table is sized to fit the container, not to its
+     content. */
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.permissions-matrix-table th,
+.permissions-matrix-table td {
+  /* Opaque background is REQUIRED so sticky columns do not let the
+     scrolling permission cells bleed through behind them. */
+  background: var(--surface);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: middle;
+}
+.permissions-matrix-table thead th {
+  font-family: var(--f-head);
+  font-weight: 700;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.permissions-matrix-group-header {
+  text-align: center;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.permissions-matrix-group-tickets    { color: var(--green); }
+.permissions-matrix-group-extra_work { color: var(--orange, var(--green-2)); }
+.permissions-matrix-group-users      { color: var(--text-2); }
+
+/* 45°-angled column-header treatment over wide, table-layout-fixed
+   columns. The 16 permission cells in the angled-key row have no
+   explicit width, so `table-layout: fixed` on `.permissions-matrix-
+   table` distributes the available horizontal space (table_width −
+   380px for the three frozen identity columns) equally among them.
+   Each cell positions a rotated label span anchored at the column's
+   bottom-centre and rotates it -45deg so it reads up-and-right from
+   that anchor — the BOTTOM of the label sits directly over the
+   column it labels.
+
+   The cell is forced to `position: relative; z-index: auto` to
+   OVERRIDE the base `.permissions-matrix-table thead th { position:
+   sticky; z-index: 1 }`. `position: sticky` always forms a stacking
+   context regardless of z-index, and a stacking context on the cell
+   would TRAP the absolutely-positioned label inside it — sibling
+   cells' opaque var(--surface-2) backgrounds would then composite
+   on top of the previous cell's rotated overflow (visible result:
+   every label except the rightmost gets clipped at its own cell's
+   right edge). Swapping to `position: relative; z-index: auto`
+   breaks the cell's stacking context so the label's own
+   `z-index: 2` applies in the table's ancestor stacking context —
+   labels render above sibling cells (which paint at step 6 with
+   z-auto) and below the frozen-sticky cells (z: 3), which keeps
+   horizontal scroll behaviour intact. */
+.permissions-matrix-key-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.permissions-matrix-table thead th.permissions-matrix-key-header-angled {
+  padding: 0;
+  position: relative;
+  z-index: auto;
+}
+.permissions-matrix-key-header-angled {
+  vertical-align: bottom;
+  overflow: visible;
+}
+/* Forces the angled-row cells to 100px tall — enough to fit the
+   longest label ("manage permissions" / "locatie goedkeuren",
+   18 chars × ~5.5px sans ≈ 99px text width → ~70px vertical
+   projection at -45deg) plus the 8px bottom offset, with headroom
+   above. Absolutely-positioned children do not contribute to flow
+   height, so a block-level pseudo with explicit height is required
+   to give the cell its height. */
+.permissions-matrix-key-header-angled::before {
+  content: "";
+  display: block;
+  height: 100px;
+}
+.permissions-matrix-key-short {
+  display: inline-block;
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: rotate(-45deg);
+  transform-origin: bottom left;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  z-index: 2;
+}
+
+/* Frozen identity columns: User | Actions | Role.
+   Each cell carries `position: sticky` with a left offset equal to
+   the running sum of widths to its left, so the three sit flush with
+   no gap, no overlap. The rules apply to BOTH thead and tbody cells
+   in those columns (the `position: sticky` on tbody cells comes from
+   these selectors; the thead row's `top: 0` sticky comes from the
+   `thead th` rule above, so frozen header cells are sticky on BOTH
+   axes — left-frozen during horizontal scroll, top-frozen during
+   page scroll).
+
+   Z-index layering (highest first):
+     z=3  frozen thead cells   (top + left, must sit above body
+                                cells AND non-frozen header cells)
+     z=2  frozen tbody cells   (left only, above scrolling body cells)
+     z=1  non-frozen thead     (top only, set by the `thead th` rule
+                                above)
+     z=0  scrolling tbody      (default) */
+.permissions-matrix-sticky-user {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 120px;
+  width: 120px;
+  text-align: left;
+}
+.permissions-matrix-sticky-actions {
+  position: sticky;
+  left: 120px;
+  z-index: 2;
+  min-width: 100px;
+  width: 100px;
+}
+.permissions-matrix-sticky-role {
+  position: sticky;
+  left: 220px;
+  z-index: 2;
+  min-width: 160px;
+  width: 160px;
+  /* The freeze-line seam: a subtle right-edge shadow that stays put
+     on Role's right side as the permission grid scrolls under it.
+     Negative spread keeps the shadow off the top + bottom edges, so
+     it looks like a vertical hairline glow rather than a square
+     drop-shadow. */
+  box-shadow: 6px 0 6px -4px rgba(15, 32, 25, 0.18);
+}
+.permissions-matrix-table thead .permissions-matrix-sticky-user,
+.permissions-matrix-table thead .permissions-matrix-sticky-actions,
+.permissions-matrix-table thead .permissions-matrix-sticky-role {
+  z-index: 3;
+  background: var(--surface-2);
+}
+
+.permissions-matrix-user-name {
+  font-family: var(--f-head);
+  font-weight: 700;
+  color: var(--text);
+  font-size: 13px;
+}
+.permissions-matrix-user-building {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.permissions-matrix-self-pill,
+.permissions-matrix-inactive-pill {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.permissions-matrix-self-pill {
+  background: var(--green-faint);
+  color: var(--green);
+}
+.permissions-matrix-inactive-pill {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.permissions-matrix-role-select {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.permissions-matrix-cell-perm {
+  text-align: center;
+  padding: 6px 2px;
+  /* Width is set by `table-layout: fixed` on the table: each of the
+     16 permission columns shares (table_width − 380px frozen) / 16
+     equally, matching the angled-row header above. */
+}
+.permissions-matrix-cell-actions {
+  /* Sized via the sticky modifier above (100px) — just enough for
+     the active-toggle checkbox + the pen-icon edit button + the X
+     remove button at flex-start, so the X sits close to the role
+     cell's left edge. */
+}
+.permissions-matrix-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+.permissions-matrix-edit-button {
+  padding: 4px 8px;
+  font-size: 12px;
+  gap: 4px;
+}
+.permissions-matrix-remove-button {
+  padding: 4px 6px;
+}
+.permissions-matrix-active input[type="checkbox"] {
+  vertical-align: middle;
+}
+.permissions-matrix-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+/* ----- Modal editor — replaces the right drawer ----- */
+.permission-editor-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 32, 25, 0.32);
-  z-index: 90;
-  animation: override-drawer-fade 240ms ease-out;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
 }
-.override-drawer {
-  position: fixed;
-  inset: 0 0 0 auto;
-  width: min(480px, 100vw);
-  background: var(--surface);
-  border-left: 1px solid var(--border);
-  box-shadow: -16px 0 40px rgba(15, 32, 25, 0.18);
-  z-index: 91;
+.permission-editor-modal {
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-soft, #e5e7eb);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - 32px);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
   display: flex;
   flex-direction: column;
-  transform: translateX(0);
-  animation: override-drawer-slide 240ms ease-out;
+  overflow: hidden;
 }
-@keyframes override-drawer-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes override-drawer-slide {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
-}
-.override-drawer-header {
+.permission-editor-modal-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -4643,10 +4962,8 @@ table.data-table {
   padding: 16px 20px 12px;
   border-bottom: 1px solid var(--border);
 }
-.override-drawer-header-text {
-  min-width: 0;
-}
-.override-drawer-title {
+.permission-editor-modal-header-text { min-width: 0; }
+.permission-editor-modal-title {
   margin: 0;
   font-family: var(--f-head);
   font-size: 16px;
@@ -4654,12 +4971,12 @@ table.data-table {
   letter-spacing: -0.005em;
   color: var(--text);
 }
-.override-drawer-subtitle {
+.permission-editor-modal-subtitle {
   margin: 4px 0 0;
   font-size: 13px;
   color: var(--text-muted);
 }
-.override-drawer-role-caption {
+.permission-editor-modal-role-caption {
   margin: 2px 0 0;
   font-family: var(--f-head);
   font-size: 11px;
@@ -4668,7 +4985,7 @@ table.data-table {
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.override-drawer-close {
+.permission-editor-modal-close {
   appearance: none;
   width: 30px;
   height: 30px;
@@ -4681,19 +4998,17 @@ table.data-table {
   align-items: center;
   justify-content: center;
 }
-.override-drawer-close:hover {
+.permission-editor-modal-close:hover {
   background: var(--surface-2);
   color: var(--text);
 }
-.override-drawer-body {
+.permission-editor-modal-body {
   flex: 1;
   overflow-y: auto;
   padding: 12px 20px 20px;
 }
-.override-drawer-warning {
-  margin-bottom: 12px;
-}
-.override-drawer-footer {
+.permission-editor-modal-warning { margin-bottom: 12px; }
+.permission-editor-modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -4701,22 +5016,20 @@ table.data-table {
   border-top: 1px solid var(--border);
   background: var(--surface);
 }
-
-/* ----- Override table ----- */
-.override-drawer-table {
+.permission-editor-modal-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
-.override-drawer-table .override-drawer-group th {
+.permission-editor-modal-table .permission-editor-modal-group th {
   padding: 14px 0 6px;
   text-align: left;
   border-bottom: 1px solid var(--border);
 }
-.override-drawer-table .override-drawer-group:first-child th {
+.permission-editor-modal-table .permission-editor-modal-group:first-child th {
   padding-top: 4px;
 }
-.override-drawer-group-title {
+.permission-editor-modal-group-title {
   display: inline-block;
   font-family: var(--f-head);
   font-size: 11px;
@@ -4725,89 +5038,119 @@ table.data-table {
   text-transform: uppercase;
   color: var(--green-2, var(--green));
 }
-.override-row td {
+.permission-editor-modal-row td {
   vertical-align: top;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
-.override-row-info {
-  padding-right: 14px;
+.permission-editor-modal-row-policy-blocked td {
+  opacity: 0.7;
 }
-.override-row-label {
+.permission-editor-modal-row-info { padding-right: 14px; }
+.permission-editor-modal-row-label {
   font-family: var(--f-head);
   font-size: 13px;
   font-weight: 700;
   color: var(--text);
 }
-.override-row-description {
+.permission-editor-modal-row-description {
   margin-top: 2px;
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.45;
 }
-.override-row-effective {
+.permission-editor-modal-row-effective {
   margin-top: 6px;
   font-size: 11.5px;
   font-weight: 600;
 }
-.effective-hint-allow { color: var(--green); }
-.effective-hint-deny  { color: var(--danger, #B0413E); }
-
-.override-row-radios {
+.permission-editor-modal-row-policy-text {
+  margin-top: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.permission-editor-modal-row-radios {
   width: 1%;
   white-space: nowrap;
 }
-.override-row-radio-group {
+
+/* ----- Tri-state optical-bubble radio (modal per-row control) ----- */
+.tri-state-bubble-radio {
   display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px;
-  background: var(--surface-2);
+  gap: 8px;
 }
-.override-row-radio-group:disabled {
-  opacity: 0.6;
-}
-.override-radio-option {
+.tri-state-bubble-option {
   position: relative;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  padding: 3px 10px;
-  font-family: var(--f-head);
-  font-size: 11.5px;
-  font-weight: 700;
-  border-radius: 999px;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
   color: var(--text-muted);
-  cursor: pointer;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
-.override-radio-option input[type="radio"] {
-  /* Visually hidden but still the click target so Playwright's
-     .check() can interact with the input directly. The label's
-     span is dimmed to ignore clicks, letting them flow to the
-     input regardless of where the operator taps within the chip. */
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
+.tri-state-bubble-option:hover:not(.tri-state-bubble-option-disabled) {
+  background: var(--surface-2);
 }
-.override-radio-option > span {
-  pointer-events: none;
+.tri-state-bubble-option-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
-.override-radio-option-active {
-  background: var(--shell);
-  color: #fff;
+.tri-state-bubble-option-selected {
+  color: var(--text);
+}
+.tri-state-bubble {
+  width: 18px;
+  height: 18px;
+}
+.tri-state-bubble-selected.permission-bubble {
+  border-color: var(--text-muted);
+}
+.tri-state-bubble-option-inherit .tri-state-bubble-selected {
+  background: var(--text-muted);
+  border-color: var(--text-muted);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+.tri-state-bubble-option-allow .tri-state-bubble-selected {
+  background: var(--green);
+  border-color: var(--green);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+.tri-state-bubble-option-deny .tri-state-bubble-selected {
+  background: var(--danger, #B0413E);
+  border-color: var(--danger, #B0413E);
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85);
+}
+.tri-state-bubble-empty.permission-bubble {
+  background: transparent;
+}
+.tri-state-bubble-label {
+  display: inline-block;
 }
 
-@media (max-width: 640px) {
-  .override-drawer { inset: 0; width: 100vw; }
-  .access-chip {
-    flex-direction: column;
-    align-items: stretch;
+@media (max-width: 760px) {
+  .permission-editor-modal { max-width: 100%; }
+  /* Drop sticky on the three identity/control columns at narrow
+     widths — keeping them frozen would consume ~380px of the
+     viewport, leaving no room for the permission cells. Mobile
+     scrolls the whole table cleanly instead. The Role column's
+     freeze-line shadow also drops here so the "boundary marker"
+     does not show without a real boundary behind it. */
+  .permissions-matrix-sticky-user,
+  .permissions-matrix-sticky-actions,
+  .permissions-matrix-sticky-role {
+    position: static;
+    min-width: 0;
+    width: auto;
   }
-  .access-chip-controls {
-    justify-content: space-between;
+  .permissions-matrix-sticky-role {
+    box-shadow: none;
   }
 }
 
