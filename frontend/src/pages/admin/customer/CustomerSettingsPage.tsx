@@ -195,12 +195,16 @@ export function CustomerSettingsPage() {
             style={{ padding: "20px 22px", marginBottom: 16 }}
             onSubmit={handleSubmit}
           >
-            <h3 className="section-title">
-              {t("customer_view.settings.contact_visibility_title")}
-            </h3>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {t("customer_view.settings.visibility_helper")}
-            </p>
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <div>
+                <div className="section-head-title">
+                  {t("customer_view.settings.contact_visibility_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("customer_view.settings.visibility_helper")}
+                </div>
+              </div>
+            </div>
 
             <div className="field">
               <label
@@ -266,7 +270,7 @@ export function CustomerSettingsPage() {
               </label>
             </div>
 
-            <div className="form-actions">
+            <div className="form-actions card-actions-cluster">
               <button
                 type="submit"
                 className="btn btn-primary"
@@ -284,15 +288,19 @@ export function CustomerSettingsPage() {
             data-testid="customer-lifecycle-section"
             style={{ padding: "20px 22px" }}
           >
-            <h3 className="section-title">
-              {t("customer_view.settings.lifecycle_title")}
-            </h3>
-            <p className="muted small" style={{ marginBottom: 12 }}>
-              {customer.is_active
-                ? t("customer_view.settings.deactivate_consequence")
-                : t("customer_view.settings.reactivate_consequence")}
-            </p>
-            <div className="form-actions">
+            <div className="section-head" style={{ marginBottom: 12 }}>
+              <div>
+                <div className="section-head-title">
+                  {t("customer_view.settings.lifecycle_title")}
+                </div>
+                <div className="section-head-sub">
+                  {customer.is_active
+                    ? t("customer_view.settings.deactivate_consequence")
+                    : t("customer_view.settings.reactivate_consequence")}
+                </div>
+              </div>
+            </div>
+            <div className="form-actions card-actions-cluster">
               {customer.is_active ? (
                 <button
                   type="button"
