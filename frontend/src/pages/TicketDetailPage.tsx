@@ -93,6 +93,18 @@ const NOTE_TIER_PLACEHOLDER_KEY: Record<TicketMessageType, string> = {
   STAFF_COMPLETION: "composer_staff_completion_placeholder",
 };
 
+// "Who sees this" description rendered under the composer-tier
+// toggle. The map covers all four tiers so the helper line renders
+// even when the viewer only has one tier available (the toggle row
+// itself hides in that case, but the visibility statement still
+// shows so an author never posts without knowing the audience).
+const NOTE_TIER_WHO_SEES_KEY: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "composer_public_who_sees",
+  INTERNAL_NOTE: "composer_internal_who_sees",
+  STAFF_OPERATIONAL: "composer_staff_operational_who_sees",
+  STAFF_COMPLETION: "composer_staff_completion_who_sees",
+};
+
 const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
   PUBLIC_REPLY: "",
   INTERNAL_NOTE: "internal",
@@ -1242,6 +1254,18 @@ export function TicketDetailPage() {
                   {sendingMessage ? t("sending") : t("post_message")}
                 </button>
               </div>
+              {/* "Who sees this" helper, keyed to the active tier so
+                  the author knows the visibility scope before posting.
+                  Renders for every tier (even when only one is
+                  available) so the author cannot post a note without
+                  the visibility statement on screen. */}
+              <p
+                className="muted small composer-tier-help"
+                data-testid="composer-tier-help"
+                style={{ margin: "6px 22px 0", padding: "0 0 14px" }}
+              >
+                {t(NOTE_TIER_WHO_SEES_KEY[effectiveMessageType])}
+              </p>
             </form>
 
             {messages.length === 0 ? (
@@ -1426,11 +1450,18 @@ export function TicketDetailPage() {
                   letterSpacing: "0.06em",
                   textTransform: "uppercase",
                   color: "var(--text-faint)",
-                  marginBottom: 6,
+                  marginBottom: 2,
                 }}
               >
                 {t("assignment_section_bm_heading")}
               </div>
+              <p
+                className="muted small"
+                style={{ margin: "0 0 8px" }}
+                data-testid="assignment-section-bm-helper"
+              >
+                {t("assignment_section_bm_helper")}
+              </p>
               <div className="assignee-row">
                 <div className="assignee-avatar">
                   {getInitials(ticket.assigned_to_email || "unassigned@")}
@@ -1804,9 +1835,10 @@ export function TicketDetailPage() {
                     <div
                       style={{
                         display: "flex",
-                        gap: 6,
+                        gap: 10,
                         alignItems: "flex-end",
                         flexWrap: "wrap",
+                        marginTop: 4,
                       }}
                     >
                       <select
@@ -1817,7 +1849,7 @@ export function TicketDetailPage() {
                         }
                         disabled={addingStaff || candidates.length === 0}
                         data-testid="assigned-staff-admin-select"
-                        style={{ flex: 1, minWidth: 0 }}
+                        style={{ flex: 1, minWidth: 180 }}
                       >
                         <option value="">
                           {candidates.length === 0
@@ -2384,9 +2416,28 @@ export function TicketDetailPage() {
                   </div>
                 </>
               ) : visibleNextStatuses.length === 0 ? (
-                <p className="muted small">
-                  {t("workflow_no_transitions")}
-                </p>
+                // Disabled-action clarity: when the backend gives the
+                // viewer zero transitions on a WCA ticket AND the
+                // override action is explicitly false, surface the
+                // *reason* rather than the generic terminal helper.
+                // Driven by the per-record action, not a role string —
+                // the only people who land here are providers without
+                // override authority (CUSTOMER_USER on their own WCA
+                // ticket gets APPROVED/REJECTED in allowed_next; STAFF
+                // sees Complete Work or a non-WCA status).
+                ticket.status === "WAITING_CUSTOMER_APPROVAL" &&
+                ticket.actions?.can_override_customer_decision === false ? (
+                  <p
+                    className="muted small"
+                    data-testid="workflow-wca-no-provider-decision"
+                  >
+                    {t("workflow_wca_no_provider_decision")}
+                  </p>
+                ) : (
+                  <p className="muted small">
+                    {t("workflow_no_transitions")}
+                  </p>
+                )
               ) : (
                 <>
                   <div className="field">
@@ -2650,8 +2701,8 @@ export function TicketDetailPage() {
                               }
                             >
                               {isSecondaryOpen
-                                ? t("hide_more_actions")
-                                : t("show_more_actions")}
+                                ? t("workflow_correction_actions_hide")
+                                : t("workflow_correction_actions_show")}
                             </button>
                           )}
                         {secondaryForRender.length > 0 && isSecondaryOpen && (
@@ -2659,6 +2710,19 @@ export function TicketDetailPage() {
                             className="workflow-secondary-list"
                             data-testid="workflow-secondary-list"
                           >
+                            {/* Set-subtraction header: every status here
+                                is in allowed_next_statuses but NOT in
+                                PRIMARY_TRANSITIONS for the current
+                                state. They are admin corrections, not
+                                the normal next step. The frontend does
+                                not filter what the backend permits —
+                                the partition only changes layout. */}
+                            <p
+                              className="muted small"
+                              style={{ margin: "0 0 6px" }}
+                            >
+                              {t("workflow_correction_actions_help")}
+                            </p>
                             {secondaryForRender.map((status) =>
                               renderTransitionButton(status, "secondary"),
                             )}
