@@ -20,12 +20,29 @@ import type {
   TicketList,
 } from "./types";
 
-export async function listExtraWork(): Promise<
-  PaginatedResponse<ExtraWorkRequestList>
-> {
+// Sprint 28 follow-up — backend `ExtraWorkRequestFilter` (see
+// `backend/extra_work/filters.py`) exposes `customer`, `building`,
+// `status`, `routing_decision` as query-param filters; the
+// scope-respecting `get_queryset` runs first so a CUSTOMER_USER
+// passing a foreign `customer=` just gets zero rows rather than a
+// 403. We accept the filter shape here as optional params — existing
+// callers (`ExtraWorkListPage`) continue to call `listExtraWork()`
+// with no args and the request shape stays identical to pre-this-
+// change.
+export interface ListExtraWorkParams {
+  customer?: number;
+  building?: number;
+  status?: ExtraWorkStatus;
+  routing_decision?: "INSTANT" | "PROPOSAL";
+  page_size?: number;
+}
+
+export async function listExtraWork(
+  params: ListExtraWorkParams = {},
+): Promise<PaginatedResponse<ExtraWorkRequestList>> {
   const response = await api.get<PaginatedResponse<ExtraWorkRequestList>>(
     "/extra-work/",
-    { params: { page_size: 100 } },
+    { params: { page_size: 100, ...params } },
   );
   return response.data;
 }

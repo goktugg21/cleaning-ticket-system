@@ -33,7 +33,6 @@ import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
 import { CustomerPricingPage } from "./pages/admin/CustomerPricingPage";
-import { CustomerSubPagePlaceholder } from "./pages/admin/CustomerSubPagePlaceholder";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // Sprint 28 Batch 13 — view-first refactor of the customer detail
 // surface. `/admin/customers/:id` (Overview) and `/permissions` are
@@ -42,6 +41,7 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // create flow (`/admin/customers/new`) and as the basics editor
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
+import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
@@ -329,7 +329,7 @@ export default function App() {
             path="/admin/customers/:id/extra-work"
             element={
               <AdminRoute>
-                <CustomerSubPagePlaceholder />
+                <CustomerExtraWorkPage />
               </AdminRoute>
             }
           />
