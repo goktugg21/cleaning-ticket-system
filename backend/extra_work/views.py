@@ -30,6 +30,7 @@ from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 
+from .filters import ExtraWorkRequestFilter
 from .models import (
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
@@ -85,6 +86,13 @@ class ExtraWorkRequestViewSet(
     viewsets.GenericViewSet,
 ):
     permission_classes = [IsAuthenticatedAndActive]
+    # `filterset_class` runs AFTER `get_queryset`, so the scope helper
+    # narrows the queryset first and the filter can only narrow further.
+    # A CUSTOMER_USER passing `?customer=<id>` for a customer they have
+    # no access to gets zero rows (scope removed them before the filter
+    # ran). Non-integer values are rejected with HTTP 400 by django-
+    # filter's NumberFilter.
+    filterset_class = ExtraWorkRequestFilter
 
     def get_queryset(self):
         return scope_extra_work_for(self.request.user).select_related(

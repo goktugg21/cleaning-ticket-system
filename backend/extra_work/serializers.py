@@ -47,6 +47,57 @@ def _is_customer(user) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Per-line pricing source (read-only fields exposed on every Extra Work
+# line serializer so the frontend invoice renderer can render the
+# "Source" column without re-deriving the contract/custom/needs-proposal
+# label client-side).
+#
+# Stable enum string values surfaced as `price_source`:
+#   * "CONTRACT"        — the line is anchored to an active
+#                         `CustomerServicePrice` row for the (service,
+#                         customer) pair. For PERSISTED proposal /
+#                         pricing lines this means the line's snapshot
+#                         (unit_price + vat_pct) currently matches the
+#                         contract row's values; for CART lines (which
+#                         have no own price snapshot yet) this means a
+#                         contract row exists at the line's
+#                         requested_date.
+#   * "CUSTOM"          — the line's price was operator-typed and does
+#                         NOT match an active contract row. For
+#                         ad-hoc `ExtraWorkPricingLineItem` (no service
+#                         FK) and ad-hoc ProposalLine (service=None)
+#                         this is always the source.
+#   * "NEEDS_PROPOSAL"  — cart line with no contract row resolvable.
+#                         Only emitted by `ExtraWorkRequestItem` rows
+#                         whose parent EW has not yet been priced.
+#
+# Snapshot vs live re-resolve rule:
+#   * Cart lines (`ExtraWorkRequestItem`) have no persisted unit price
+#     of their own; the live `resolve_price()` call IS the truth at
+#     read time. The moment the line is folded into a Proposal, the
+#     operator-typed Proposal line's unit_price becomes the snapshot.
+#   * Persisted proposal / pricing lines carry their own unit_price +
+#     vat_pct values. The serializer NEVER mutates those historical
+#     values; the `contract_*` fields mirror the line's persisted
+#     snapshot when we label it CONTRACT, so a later edit to the
+#     `CustomerServicePrice` row cannot retroactively rewrite the
+#     amount in a saved response.
+# ---------------------------------------------------------------------------
+
+
+PRICE_SOURCE_CONTRACT = "CONTRACT"
+PRICE_SOURCE_CUSTOM = "CUSTOM"
+PRICE_SOURCE_NEEDS_PROPOSAL = "NEEDS_PROPOSAL"
+
+
+def _decimal_str(value: Decimal | None) -> str | None:
+    """Render a Decimal like DRF's DecimalField does (str, 2dp)."""
+    if value is None:
+        return None
+    return f"{value:.2f}"
+
+
+# ---------------------------------------------------------------------------
 # Pricing line item
 # ---------------------------------------------------------------------------
 class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
@@ -54,6 +105,14 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
     Provider-side serializer (full shape including internal_cost_note).
     For customer-side reads use ExtraWorkPricingLineItemCustomerSerializer.
     """
+
+    # See module-level "Per-line pricing source" docblock for the
+    # contract. `ExtraWorkPricingLineItem` rows are ALWAYS custom: they
+    # have no `service` FK to anchor against and are operator-typed by
+    # construction.
+    price_source = serializers.SerializerMethodField()
+    contract_unit_price = serializers.SerializerMethodField()
+    contract_vat_pct = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkPricingLineItem
@@ -69,6 +128,9 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             "total",
             "customer_visible_note",
             "internal_cost_note",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
             "created_at",
             "updated_at",
         ]
@@ -80,6 +142,9 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             "subtotal",
             "vat_amount",
             "total",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
             "created_at",
             "updated_at",
         ]
@@ -99,6 +164,15 @@ class ExtraWorkPricingLineItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Must be non-negative.")
         return value
 
+    def get_price_source(self, obj):
+        return PRICE_SOURCE_CUSTOM
+
+    def get_contract_unit_price(self, obj):
+        return None
+
+    def get_contract_vat_pct(self, obj):
+        return None
+
 
 class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
     """
@@ -106,6 +180,13 @@ class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
     the nested representation on ExtraWorkRequestDetailSerializer
     when the requesting user is a CUSTOMER_USER.
     """
+
+    # Mirror the admin serializer's price-source fields. The three
+    # fields are customer-safe — they describe the same numbers the
+    # customer already sees in `unit_price` / `vat_rate`.
+    price_source = serializers.SerializerMethodField()
+    contract_unit_price = serializers.SerializerMethodField()
+    contract_vat_pct = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkPricingLineItem
@@ -120,10 +201,22 @@ class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
             "vat_amount",
             "total",
             "customer_visible_note",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_price_source(self, obj):
+        return PRICE_SOURCE_CUSTOM
+
+    def get_contract_unit_price(self, obj):
+        return None
+
+    def get_contract_vat_pct(self, obj):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +250,16 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         default=None,
     )
 
+    # See module-level "Per-line pricing source" docblock for the
+    # contract. Cart lines have no persisted unit_price of their own
+    # (they are pre-pricing rows), so the live `resolve_price()` call
+    # IS the truth at read time. The moment the line is folded into a
+    # Proposal, the operator-typed Proposal line's unit_price becomes
+    # the snapshot and the live-resolve exception no longer applies.
+    price_source = serializers.SerializerMethodField()
+    contract_unit_price = serializers.SerializerMethodField()
+    contract_vat_pct = serializers.SerializerMethodField()
+
     class Meta:
         model = ExtraWorkRequestItem
         fields = [
@@ -167,6 +270,9 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             "unit_type",
             "requested_date",
             "customer_note",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
         ]
         read_only_fields = [
             "id",
@@ -175,6 +281,9 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             # create time from Service.unit_type — clients must not
             # supply it.
             "unit_type",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
         ]
 
     def validate_quantity(self, value):
@@ -194,6 +303,54 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
                 "Cannot order an inactive service."
             )
         return value
+
+    def _resolved_contract(self, obj):
+        """Live-resolve the line's contract row at read time.
+
+        Cart lines are pre-pricing — there is no snapshot to defend, so
+        calling `resolve_price` on every render is the correct
+        behaviour. Cached on the serializer instance per cart-line id
+        so repeated `get_*` calls share one query per line per render.
+        """
+        if obj.service_id is None:
+            # Legacy backfilled rows have no service FK. The Batch 6
+            # migration backfilled exactly one row per legacy parent
+            # and the project never spawns instant tickets for them;
+            # mark them NEEDS_PROPOSAL by convention so the frontend
+            # can render them consistently with new no-contract carts.
+            return None
+        cache = getattr(self, "_contract_cache", None)
+        if cache is None:
+            cache = {}
+            self._contract_cache = cache
+        if obj.id in cache:
+            return cache[obj.id]
+        parent = obj.extra_work_request
+        contract = resolve_price(
+            obj.service,
+            parent.customer,
+            on=obj.requested_date,
+        )
+        cache[obj.id] = contract
+        return contract
+
+    def get_price_source(self, obj):
+        contract = self._resolved_contract(obj)
+        if contract is None:
+            return PRICE_SOURCE_NEEDS_PROPOSAL
+        return PRICE_SOURCE_CONTRACT
+
+    def get_contract_unit_price(self, obj):
+        contract = self._resolved_contract(obj)
+        if contract is None:
+            return None
+        return _decimal_str(contract.unit_price)
+
+    def get_contract_vat_pct(self, obj):
+        contract = self._resolved_contract(obj)
+        if contract is None:
+            return None
+        return _decimal_str(contract.vat_pct)
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +968,58 @@ class ExtraWorkTransitionSerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 # Sprint 28 Batch 8 — proposal serializers
 # ---------------------------------------------------------------------------
+def _classify_proposal_line_source(obj: "ProposalLine"):
+    """Shared snapshot-vs-live classifier for ProposalLine rows.
+
+    Returns ``(price_source, contract_unit_price, contract_vat_pct)``
+    where the last two are Decimals (or None) ready for
+    `_decimal_str()` rendering.
+
+    Snapshot rule (matches the module-level docblock):
+
+    * Ad-hoc lines (no `service` FK) are ALWAYS CUSTOM. They were
+      operator-typed and have no catalog row to anchor against.
+    * Catalog-linked lines call `resolve_price(line.service,
+      parent.customer, on=parent.requested_at.date())` to find the
+      contract row that WOULD apply right now. If a row is returned
+      AND its `unit_price` + `vat_pct` match the line's persisted
+      values exactly, the line is CONTRACT and the `contract_*` fields
+      mirror the line's snapshot. If the contract row exists but the
+      prices diverge (operator typed a different number on the
+      proposal), the line is CUSTOM. If no contract row exists, the
+      line is CUSTOM. In every CUSTOM case the `contract_*` fields are
+      None.
+
+    The resolver is intentionally consulted on a date from the parent
+    EW, not the current date, so a contract row that has changed since
+    the proposal was built does not silently change the source label
+    for a historical render. The snapshot-mirror policy on the
+    `contract_*` fields means a downstream contract edit never rewrites
+    the amounts in a stored response either.
+    """
+    if obj.service_id is None:
+        return PRICE_SOURCE_CUSTOM, None, None
+    parent = obj.proposal.extra_work_request
+    contract = resolve_price(
+        obj.service,
+        parent.customer,
+        on=parent.requested_at.date(),
+    )
+    if contract is None:
+        return PRICE_SOURCE_CUSTOM, None, None
+    if (
+        contract.unit_price == obj.unit_price
+        and contract.vat_pct == obj.vat_pct
+    ):
+        # Mirror the line's persisted snapshot (which equals the
+        # contract row's values by construction). We intentionally do
+        # NOT return `contract.unit_price` directly — a later edit to
+        # the contract row must never rewrite the persisted amount
+        # surfaced through this read path.
+        return PRICE_SOURCE_CONTRACT, obj.unit_price, obj.vat_pct
+    return PRICE_SOURCE_CUSTOM, None, None
+
+
 class ProposalLineAdminSerializer(serializers.ModelSerializer):
     """
     Full provider-side proposal-line serializer. Carries both
@@ -821,6 +1030,13 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(
         source="service.name", read_only=True, default=None
     )
+    # See module-level "Per-line pricing source" docblock for the
+    # contract. Proposal lines have their own persisted `unit_price` +
+    # `vat_pct` snapshot; the classifier compares against an active
+    # contract row but NEVER mutates the snapshot.
+    price_source = serializers.SerializerMethodField()
+    contract_unit_price = serializers.SerializerMethodField()
+    contract_vat_pct = serializers.SerializerMethodField()
 
     class Meta:
         model = ProposalLine
@@ -840,6 +1056,9 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             "line_subtotal",
             "line_vat",
             "line_total",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
             "created_at",
             "updated_at",
         ]
@@ -854,6 +1073,9 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             "line_subtotal",
             "line_vat",
             "line_total",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
             "created_at",
             "updated_at",
         ]
@@ -890,6 +1112,24 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    def _classified(self, obj):
+        cache = getattr(self, "_classify_cache", None)
+        if cache is None:
+            cache = {}
+            self._classify_cache = cache
+        if obj.id not in cache:
+            cache[obj.id] = _classify_proposal_line_source(obj)
+        return cache[obj.id]
+
+    def get_price_source(self, obj):
+        return self._classified(obj)[0]
+
+    def get_contract_unit_price(self, obj):
+        return _decimal_str(self._classified(obj)[1])
+
+    def get_contract_vat_pct(self, obj):
+        return _decimal_str(self._classified(obj)[2])
+
 
 class ProposalLineCustomerSerializer(serializers.ModelSerializer):
     """
@@ -901,6 +1141,12 @@ class ProposalLineCustomerSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(
         source="service.name", read_only=True, default=None
     )
+    # See module-level "Per-line pricing source" docblock for the
+    # contract. Customer-safe by construction — describes the same
+    # numbers the customer already sees in `unit_price` / `vat_pct`.
+    price_source = serializers.SerializerMethodField()
+    contract_unit_price = serializers.SerializerMethodField()
+    contract_vat_pct = serializers.SerializerMethodField()
 
     class Meta:
         model = ProposalLine
@@ -917,10 +1163,31 @@ class ProposalLineCustomerSerializer(serializers.ModelSerializer):
             "line_subtotal",
             "line_vat",
             "line_total",
+            "price_source",
+            "contract_unit_price",
+            "contract_vat_pct",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+    def _classified(self, obj):
+        cache = getattr(self, "_classify_cache", None)
+        if cache is None:
+            cache = {}
+            self._classify_cache = cache
+        if obj.id not in cache:
+            cache[obj.id] = _classify_proposal_line_source(obj)
+        return cache[obj.id]
+
+    def get_price_source(self, obj):
+        return self._classified(obj)[0]
+
+    def get_contract_unit_price(self, obj):
+        return _decimal_str(self._classified(obj)[1])
+
+    def get_contract_vat_pct(self, obj):
+        return _decimal_str(self._classified(obj)[2])
 
 
 class ProposalCreateSerializer(serializers.ModelSerializer):

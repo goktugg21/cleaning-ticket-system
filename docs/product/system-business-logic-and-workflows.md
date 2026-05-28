@@ -1085,6 +1085,30 @@ When a proposal is created on a PROPOSAL-routed cart with no explicit `lines` pa
 
 When the caller sends explicit `lines` on proposal create, the serializer creates exactly those rows. SEND-time validation (`apply_proposal_transition`) is the safety net for the cart-coverage / contract-price-drift / custom-line-priced contract regardless of whether the lines were auto-seeded or hand-built.
 
+### 8.4 Per-line pricing source on Extra Work serializers
+
+Extra Work invoice rows are rendered backend-first. Every line shape on every Extra Work serializer (`ExtraWorkRequestItemSerializer` for cart lines, `ProposalLineAdminSerializer` + `ProposalLineCustomerSerializer` for proposal lines, `ExtraWorkPricingLineItemSerializer` + `ExtraWorkPricingLineItemCustomerSerializer` for legacy ad-hoc pricing lines) emits the same three READ-ONLY fields:
+
+- `price_source` — stable enum string. Values:
+  - `"CONTRACT"` — the line is anchored to an active `CustomerServicePrice` row for the (service, customer) pair. For PERSISTED proposal / pricing lines this means the line's snapshot (`unit_price` + `vat_pct`) currently matches the contract row's values; for CART lines this means a contract row exists at the line's `requested_date`.
+  - `"CUSTOM"` — the line's price was operator-typed and does NOT match an active contract row. For ad-hoc lines without a `service` FK this is always the source.
+  - `"NEEDS_PROPOSAL"` — cart line with no contract row resolvable. Only emitted by `ExtraWorkRequestItem` rows whose parent EW has not yet been priced.
+- `contract_unit_price` — Decimal-as-string (DRF default for Decimal fields) OR `null` when no contract applies.
+- `contract_vat_pct` — Decimal-as-string OR `null` when no contract applies. The `_pct` spelling matches `CustomerServicePrice.vat_pct` and `ProposalLine.vat_pct`; the outlier is the legacy `ExtraWorkPricingLineItem.vat_rate` column which keeps its name on the wire for backward compatibility.
+
+The frontend MUST consume these three fields directly when rendering the invoice-row "Source" column. It MUST NOT infer contract/custom/proposal status from category names, the presence of a service link, or client-side decimal comparisons — those heuristics drift from the backend's authoritative resolver result.
+
+`Service.default_unit_price` is NEVER what makes a customer order instant. A customer-specific active `CustomerServicePrice` is required for the contract / instant-ticket behaviour. The `price_source` enum reflects this: a cart line whose `Service` carries a non-zero `default_unit_price` but no matching `CustomerServicePrice` for the requesting customer renders as `NEEDS_PROPOSAL`, not `CONTRACT`.
+
+Snapshot vs live re-resolve rule:
+
+- Persisted proposal lines + persisted ad-hoc pricing lines carry their own `unit_price` / `vat_pct` (or `vat_rate`) as audit snapshots. The serializer NEVER silently re-resolves those historical amounts against the current `CustomerServicePrice`. When the line is labelled `CONTRACT`, the `contract_*` fields mirror the line's persisted snapshot (which equals the contract row's values at the moment of the resolve), so a later edit to the contract row cannot retroactively rewrite the amount surfaced through this read path. When the contract row exists but its `unit_price` / `vat_pct` has drifted from the line's snapshot, the line flips to `CUSTOM` (the operator's typed value IS the truth on this proposal) and the `contract_*` fields become `null`.
+- Cart lines (`ExtraWorkRequestItem`) are the exception. They have no persisted price snapshot of their own — they are pre-pricing rows whose live `resolve_price` call IS the truth at read time. The moment a cart line is folded into a Proposal, the operator-typed Proposal line's `unit_price` becomes the snapshot and the live-resolve exception no longer applies.
+
+The three fields are customer-safe by construction — they describe the same numbers the customer already sees in `unit_price` / `vat_pct`. They surface on every customer-facing serializer alongside the existing `internal_*` redaction; the customer/provider visibility split for `internal_cost_note` / `internal_note` is unaffected.
+
+The Customer detail "Extra Work" tab uses `GET /api/extra-work/?customer=<id>` to list rows for a single customer. The filter composes with `extra_work.scoping.scope_extra_work_for` — the scope helper runs first, the filter narrows the already-scoped queryset. A CUSTOMER_USER passing a `?customer=` value outside their own access rows therefore receives zero rows (the scope helper removed them before the filter ran). Non-integer values are rejected with HTTP 400 by django-filter's `NumberFilter`. See also §5 per-record actions blocks for the matching runtime gating contract.
+
 ---
 
 ## 9. Notes and visibility
