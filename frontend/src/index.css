@@ -5329,6 +5329,31 @@ table.data-table {
   color: var(--green-2, var(--green));
   margin-bottom: 8px;
 }
+/* ExtraWorkDetailPage header action cluster — replaces the right-hand
+   `.ew-detail-aside` action stack. Sits inside the `<PageHeader>`'s
+   `actions` slot (which is already right-aligned by `.page-header`'s
+   `justify-content: space-between`). This rule only controls the
+   inner button layout. Buttons wrap to multiple lines on narrow
+   widths instead of overflowing the header. */
+.ew-detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.ew-detail-header-actions > .workflow-override-target {
+  display: inline-flex;
+  align-items: center;
+}
+/* Provider-override armed-state banner — renders below `<PageHeader>`
+   when the provider has armed an Approve or Reject override decision
+   (two-press confirmation). Holds the mandatory-reason textarea +
+   Cancel/Confirm pair. The left-edge accent distinguishes it from
+   regular content cards. */
+.ew-override-banner {
+  border-left: 4px solid var(--green-2, var(--green));
+}
 .ew-detail-header-meta {
   display: inline-flex;
   align-items: center;

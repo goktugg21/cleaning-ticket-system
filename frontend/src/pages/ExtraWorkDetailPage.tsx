@@ -771,6 +771,163 @@ export function ExtraWorkDetailPage() {
             </span>
           </div>
         }
+        actions={
+          // Action cluster relocated from the right-hand <aside>. Every
+          // button keeps its exact onClick, disabled, loading state,
+          // and testid — only the POSITION moves. The `extra-work-
+          // detail-actions` testid carries over to this container so
+          // the Sprint 28 Batch 15.4 visibility spec still resolves.
+          // The provider-override two-press-confirmation flow now arms
+          // a reason banner BELOW the header (see ew-override-banner)
+          // because the textarea can't fit in a header button row.
+          <div
+            className="ew-detail-header-actions"
+            data-testid="extra-work-detail-actions"
+            aria-label={t("detail.actions_aria_label")}
+          >
+            {canApproveAsCustomer && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={transitionBusy !== null}
+                onClick={() => handleCustomerDecision("CUSTOMER_APPROVED")}
+                data-testid="extra-work-customer-approve"
+              >
+                {transitionBusy === "CUSTOMER_APPROVED"
+                  ? t("detail.workflow_approving")
+                  : t("detail.workflow_approve_button")}
+              </button>
+            )}
+            {canRejectAsCustomer && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={transitionBusy !== null}
+                onClick={() => setRejectDialogOpen(true)}
+                data-testid="extra-work-customer-reject"
+              >
+                {transitionBusy === "CUSTOMER_REJECTED"
+                  ? t("detail.workflow_rejecting")
+                  : t("detail.workflow_reject_button")}
+              </button>
+            )}
+            {isProvider &&
+              providerWorkflowTargets.map((target) => (
+                <button
+                  key={target}
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={transitionBusy !== null}
+                  onClick={() => {
+                    // Sprint 29 Batch 29.8 — CANCELLED still routes
+                    // through the confirmation dialog so the spawned-
+                    // tickets warning panel renders before the
+                    // destructive transition fires.
+                    if (target === "CANCELLED") {
+                      cancelDialogRef.current?.open();
+                      return;
+                    }
+                    void handleTransition(target);
+                  }}
+                  data-testid={
+                    target === "CANCELLED"
+                      ? "extra-work-cancel-button"
+                      : undefined
+                  }
+                >
+                  {transitionBusy === target
+                    ? t("detail.workflow_working")
+                    : t("detail.workflow_move_to", {
+                        label: t(STATUS_I18N_KEY[target]),
+                      })}
+                </button>
+              ))}
+            {providerOverrideAvailable &&
+              (["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
+                .filter((target) => allowed.includes(target))
+                .map((target) => {
+                  const isArmed = overrideDecision === target;
+                  return (
+                    <span
+                      key={target}
+                      className="workflow-override-target"
+                      data-testid={`extra-work-override-${target}`}
+                    >
+                      <button
+                        type="button"
+                        className={
+                          target === "CUSTOMER_APPROVED"
+                            ? "btn btn-primary btn-sm"
+                            : "btn btn-secondary btn-sm"
+                        }
+                        onClick={() => {
+                          setOverrideDecision(target);
+                          setOverrideError("");
+                        }}
+                        data-testid={`extra-work-provider-${
+                          target === "CUSTOMER_APPROVED" ? "approve" : "reject"
+                        }`}
+                        aria-expanded={isArmed}
+                        disabled={overrideBusy}
+                      >
+                        {target === "CUSTOMER_APPROVED"
+                          ? t("detail.workflow_approve_button")
+                          : t("detail.workflow_reject_button")}
+                      </button>
+                    </span>
+                  );
+                })}
+            {canRetrySpawn && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={retrySpawnBusy}
+                onClick={() => {
+                  void handleRetrySpawn();
+                }}
+                data-testid="extra-work-retry-spawn"
+              >
+                {retrySpawnBusy
+                  ? t("detail.retry_spawn_busy")
+                  : t("detail.retry_spawn")}
+              </button>
+            )}
+            {draftProposalDetail?.actions?.can_direct_publish === true && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setDirectPublishError("");
+                  setDirectPublishReason("");
+                  setDirectPublishOpen(true);
+                }}
+                data-testid="extra-work-detail-direct-publish-button"
+              >
+                {t("detail.direct_publish_button")}
+              </button>
+            )}
+            {hasActiveProposal && canViewProposalPdf && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void handleDownloadPdf();
+                }}
+                disabled={pdfBusy}
+                data-testid="extra-work-detail-pdf-download"
+              >
+                <FileText
+                  size={14}
+                  strokeWidth={2.2}
+                  aria-hidden="true"
+                />
+                {pdfBusy
+                  ? t("detail.pdf_download_busy")
+                  : t("detail.pdf_download_button")}
+              </button>
+            )}
+          </div>
+        }
       />
 
       {error && (
@@ -779,11 +936,97 @@ export function ExtraWorkDetailPage() {
         </div>
       )}
 
-      <div className="ew-detail-grid">
-        {/* ============================================================
-             LEFT COLUMN — read-only data
-            ============================================================ */}
-        <div className="ew-detail-main">
+      {/* Provider-override armed-state banner. Lives BELOW the header
+          because the reason textarea won't fit in the header button
+          row, and is only mounted when the provider has pressed
+          Approve or Reject in the header (two-press confirmation).
+          Preserves the locked override-* testids and the
+          handleOverrideSubmit handler verbatim. */}
+      {providerOverrideAvailable && overrideDecision !== null && (
+        <div
+          className="card ew-override-banner"
+          style={{ marginBottom: 16 }}
+        >
+          <div className="form-section">
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {t("detail.override_inline_helper")}
+            </p>
+            <div
+              className="workflow-override-inline"
+              data-testid="extra-work-override-modal"
+            >
+              <form onSubmit={handleOverrideSubmit}>
+                <div className="field">
+                  <label
+                    className="field-label"
+                    htmlFor="override-reason"
+                  >
+                    {t("detail.override_reason_label")}
+                  </label>
+                  <textarea
+                    id="override-reason"
+                    data-testid="extra-work-override-reason"
+                    className="field-textarea"
+                    rows={3}
+                    value={overrideReason}
+                    onChange={(event) =>
+                      setOverrideReason(event.target.value)
+                    }
+                    placeholder={t(
+                      "detail.override_reason_placeholder",
+                    )}
+                    required
+                  />
+                </div>
+                {overrideError && (
+                  <div
+                    className="alert-error"
+                    role="alert"
+                    data-testid="extra-work-override-error"
+                    style={{ marginTop: 6 }}
+                  >
+                    {overrideError}
+                  </div>
+                )}
+                <div className="override-card-footer card-actions-cluster">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setOverrideDecision(null);
+                      setOverrideReason("");
+                      setOverrideError("");
+                    }}
+                    disabled={overrideBusy}
+                    data-testid="extra-work-override-cancel"
+                  >
+                    {t("detail.override_cancel")}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={
+                      overrideBusy || !overrideReason.trim()
+                    }
+                    data-testid="extra-work-override-submit"
+                  >
+                    {overrideBusy
+                      ? t("detail.override_submitting")
+                      : t("detail.override_confirm", {
+                          label: t(STATUS_I18N_KEY[overrideDecision]),
+                        })}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main content — full-width now that the right action aside
+          is gone. The outer `.ew-detail-grid` two-column wrapper has
+          been removed; cards render as direct children of the page. */}
+      <div className="ew-detail-main">
           {/* ----- Core details ----- */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="form-section">
@@ -1094,34 +1337,42 @@ export function ExtraWorkDetailPage() {
                     className="ew-pricing-add-form"
                     style={{ marginTop: 12 }}
                   >
-                    {/* Tier 1 — Description, full width. */}
-                    <div className="field">
-                      <label
-                        className="field-label"
-                        htmlFor="pricing-description"
-                      >
-                        {t("detail.pricing_form_description")}
-                      </label>
-                      <input
-                        id="pricing-description"
-                        className="field-input"
-                        type="text"
-                        value={pricingForm.description}
-                        onChange={(event) =>
-                          setPricingForm((c) => ({
-                            ...c,
-                            description: event.target.value,
-                          }))
-                        }
-                        placeholder={t(
-                          "detail.pricing_form_description_placeholder",
-                        )}
-                        required
-                      />
-                    </div>
-                    {/* Tier 2 — Unit | Quantity | Unit price | VAT %. */}
+                    {/* Single invoice-style row: Description | Unit |
+                        Quantity | Unit price | VAT % | Customer note |
+                        Internal note | [Add button]. Description and
+                        the two free-text notes grow; the four
+                        numeric/unit fields stay narrow. The existing
+                        .ew-line-row helper wraps each field to its own
+                        100%-wide row on <=760px (mobile). Every binding
+                        + the submit payload are byte-identical to the
+                        previous three-tier layout — only arrangement
+                        changes. */}
                     <div className="ew-line-row">
-                      <div className="field">
+                      <div className="field ew-line-field-grow">
+                        <label
+                          className="field-label"
+                          htmlFor="pricing-description"
+                        >
+                          {t("detail.pricing_form_description")}
+                        </label>
+                        <input
+                          id="pricing-description"
+                          className="field-input"
+                          type="text"
+                          value={pricingForm.description}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              description: event.target.value,
+                            }))
+                          }
+                          placeholder={t(
+                            "detail.pricing_form_description_placeholder",
+                          )}
+                          required
+                        />
+                      </div>
+                      <div className="field ew-line-field-medium">
                         <label
                           className="field-label"
                           htmlFor="pricing-unit-type"
@@ -1167,7 +1418,7 @@ export function ExtraWorkDetailPage() {
                           required
                         />
                       </div>
-                      <div className="field">
+                      <div className="field ew-line-field-compact">
                         <label
                           className="field-label"
                           htmlFor="pricing-unit-price"
@@ -1210,10 +1461,6 @@ export function ExtraWorkDetailPage() {
                           required
                         />
                       </div>
-                    </div>
-                    {/* Tier 3 — Customer-visible explanation |
-                        Internal cost note. */}
-                    <div className="ew-line-row">
                       <div className="field ew-line-field-grow">
                         <label
                           className="field-label"
@@ -1260,24 +1507,17 @@ export function ExtraWorkDetailPage() {
                           )}
                         />
                       </div>
-                    </div>
-                    {/* Tier 4 — Add-pricing-line button, right-aligned. */}
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "flex-end",
-                        marginTop: 8,
-                      }}
-                    >
-                      <button
-                        type="submit"
-                        className="btn btn-primary btn-sm"
-                        disabled={pricingBusy}
-                      >
-                        {pricingBusy
-                          ? t("detail.pricing_form_submitting")
-                          : t("detail.pricing_form_submit")}
-                      </button>
+                      <div className="ew-line-row-actions">
+                        <button
+                          type="submit"
+                          className="btn btn-primary btn-sm"
+                          disabled={pricingBusy}
+                        >
+                          {pricingBusy
+                            ? t("detail.pricing_form_submitting")
+                            : t("detail.pricing_form_submit")}
+                        </button>
+                      </div>
                     </div>
                   </form>
                 </>
@@ -1429,354 +1669,6 @@ export function ExtraWorkDetailPage() {
           >
             {t("detail.updated_at", { date: formatDateTime(ew.updated_at) })}
           </div>
-        </div>
-
-        {/* ============================================================
-             RIGHT COLUMN — actions (sticky on desktop)
-            ============================================================ */}
-        <aside
-          className="ew-detail-aside"
-          data-testid="extra-work-detail-actions"
-          aria-label={t("detail.actions_aria_label")}
-        >
-          {/* Customer decision card — only when allowed by backend
-              and the actor is a customer-side user. */}
-          {(canApproveAsCustomer || canRejectAsCustomer) && (
-            <div className="card">
-              <div className="form-section">
-                <div className="ew-detail-actions-section-title">
-                  {t("detail.actions_decision_title")}
-                </div>
-                <p className="muted small" style={{ marginTop: 0 }}>
-                  {t("detail.workflow_customer_decision_helper")}
-                </p>
-                <div
-                  className="status-actions"
-                  style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                >
-                  {canApproveAsCustomer && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={transitionBusy !== null}
-                      onClick={() =>
-                        handleCustomerDecision("CUSTOMER_APPROVED")
-                      }
-                      data-testid="extra-work-customer-approve"
-                    >
-                      {transitionBusy === "CUSTOMER_APPROVED"
-                        ? t("detail.workflow_approving")
-                        : t("detail.workflow_approve_button")}
-                    </button>
-                  )}
-                  {canRejectAsCustomer && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      disabled={transitionBusy !== null}
-                      onClick={() => setRejectDialogOpen(true)}
-                      data-testid="extra-work-customer-reject"
-                    >
-                      {transitionBusy === "CUSTOMER_REJECTED"
-                        ? t("detail.workflow_rejecting")
-                        : t("detail.workflow_reject_button")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Provider workflow card */}
-          {isProvider && (
-            <div className="card">
-              <div className="form-section">
-                <div className="ew-detail-actions-section-title">
-                  {t("detail.actions_workflow_title")}
-                </div>
-                {providerWorkflowTargets.length > 0 ? (
-                  <div
-                    className="status-actions"
-                    style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                  >
-                    {providerWorkflowTargets.map((target) => (
-                      <button
-                        key={target}
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={transitionBusy !== null}
-                        onClick={() => {
-                          // Sprint 29 Batch 29.8 — route CANCELLED
-                          // through the confirmation dialog so the
-                          // spawned-tickets warning renders before
-                          // the destructive transition fires. Every
-                          // other target goes straight through.
-                          if (target === "CANCELLED") {
-                            cancelDialogRef.current?.open();
-                            return;
-                          }
-                          void handleTransition(target);
-                        }}
-                        data-testid={
-                          target === "CANCELLED"
-                            ? "extra-work-cancel-button"
-                            : undefined
-                        }
-                      >
-                        {transitionBusy === target
-                          ? t("detail.workflow_working")
-                          : t("detail.workflow_move_to", {
-                              label: t(STATUS_I18N_KEY[target]),
-                            })}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="muted small" style={{ margin: 0 }}>
-                    {t("detail.workflow_no_transitions")}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Sprint 30 Batch 30.1 — retry-spawn card. Surfaces only
-              when the EW is stuck in CUSTOMER_APPROVED with zero
-              spawned tickets AND the actor is SUPER_ADMIN /
-              COMPANY_ADMIN. Recovers legacy EWs that landed in
-              CUSTOMER_APPROVED before the auto-spawn fix shipped. */}
-          {canRetrySpawn && (
-            <div className="card">
-              <div className="form-section">
-                <div className="ew-detail-actions-section-title">
-                  {t("detail.actions_retry_spawn_title")}
-                </div>
-                <p className="muted small" style={{ marginTop: 0 }}>
-                  {t("detail.retry_spawn_helper")}
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  disabled={retrySpawnBusy}
-                  onClick={() => {
-                    void handleRetrySpawn();
-                  }}
-                  data-testid="extra-work-retry-spawn"
-                >
-                  {retrySpawnBusy
-                    ? t("detail.retry_spawn_busy")
-                    : t("detail.retry_spawn")}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Sprint 30 Batch 30.1.3 — provider customer-decision card.
-              Replaces the standalone "Provider override" card. Mirrors
-              the customer's decision card above but ARMS inline on
-              first press: the Approve/Reject button expands a reason
-              textarea + Confirm/Cancel pair. Second press posts
-              {is_override:true, override_reason} per the EW state
-              machine contract.
-
-              This surface ONLY renders on the customer-decision step
-              (PRICING_PROPOSED). Forward provider moves (Under review,
-              propose pricing, Cancelled) stay as plain buttons in the
-              Provider workflow card above. */}
-          {providerOverrideAvailable && (
-            <div className="card">
-              <div className="form-section">
-                <div className="ew-detail-actions-section-title">
-                  {t("detail.actions_decision_title")}
-                </div>
-                <p className="muted small" style={{ marginTop: 0 }}>
-                  {t("detail.override_inline_helper")}
-                </p>
-                <div
-                  className="status-actions"
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  {(["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
-                    .filter((target) => allowed.includes(target))
-                    .map((target) => {
-                      const isArmed = overrideDecision === target;
-                      return (
-                        <div
-                          key={target}
-                          className="workflow-override-target"
-                          data-testid={`extra-work-override-${target}`}
-                        >
-                          <button
-                            type="button"
-                            className={
-                              target === "CUSTOMER_APPROVED"
-                                ? "btn btn-primary btn-sm"
-                                : "btn btn-secondary btn-sm"
-                            }
-                            onClick={() => {
-                              setOverrideDecision(target);
-                              setOverrideError("");
-                            }}
-                            data-testid={`extra-work-provider-${
-                              target === "CUSTOMER_APPROVED"
-                                ? "approve"
-                                : "reject"
-                            }`}
-                            aria-expanded={isArmed}
-                            disabled={overrideBusy}
-                          >
-                            {target === "CUSTOMER_APPROVED"
-                              ? t("detail.workflow_approve_button")
-                              : t("detail.workflow_reject_button")}
-                          </button>
-                          {isArmed && (
-                            <div
-                              className="workflow-override-inline"
-                              data-testid="extra-work-override-modal"
-                            >
-                              <form onSubmit={handleOverrideSubmit}>
-                                <div className="field">
-                                  <label
-                                    className="field-label"
-                                    htmlFor="override-reason"
-                                  >
-                                    {t("detail.override_reason_label")}
-                                  </label>
-                                  <textarea
-                                    id="override-reason"
-                                    data-testid="extra-work-override-reason"
-                                    className="field-textarea"
-                                    rows={3}
-                                    value={overrideReason}
-                                    onChange={(event) =>
-                                      setOverrideReason(event.target.value)
-                                    }
-                                    placeholder={t(
-                                      "detail.override_reason_placeholder",
-                                    )}
-                                    required
-                                  />
-                                </div>
-                                {overrideError && (
-                                  <div
-                                    className="alert-error"
-                                    role="alert"
-                                    data-testid="extra-work-override-error"
-                                    style={{ marginTop: 6 }}
-                                  >
-                                    {overrideError}
-                                  </div>
-                                )}
-                                <div className="override-card-footer card-actions-cluster">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost btn-sm"
-                                    onClick={() => {
-                                      setOverrideDecision(null);
-                                      setOverrideReason("");
-                                      setOverrideError("");
-                                    }}
-                                    disabled={overrideBusy}
-                                    data-testid="extra-work-override-cancel"
-                                  >
-                                    {t("detail.override_cancel")}
-                                  </button>
-                                  <button
-                                    type="submit"
-                                    className="btn btn-primary btn-sm"
-                                    disabled={
-                                      overrideBusy ||
-                                      !overrideReason.trim()
-                                    }
-                                    data-testid="extra-work-override-submit"
-                                  >
-                                    {overrideBusy
-                                      ? t("detail.override_submitting")
-                                      : t("detail.override_confirm", {
-                                          label: t(STATUS_I18N_KEY[target]),
-                                        })}
-                                  </button>
-                                </div>
-                              </form>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Direct-publish (DRAFT proposal -> CUSTOMER_APPROVED in
-              one atomic call). Gated on the per-record proposal action
-              `can_direct_publish` (backend tightens this to include the
-              same cheap send preconditions plus, for BM, the override
-              key — so the button never renders when the request would
-              be 400'd at parent-EW state, nor when prep/override is
-              revoked). */}
-          {draftProposalDetail?.actions?.can_direct_publish === true && (
-            <div className="card">
-              <div className="form-section">
-                <div className="ew-detail-actions-section-title">
-                  {t("detail.direct_publish_section_title")}
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    setDirectPublishError("");
-                    setDirectPublishReason("");
-                    setDirectPublishOpen(true);
-                  }}
-                  data-testid="extra-work-detail-direct-publish-button"
-                >
-                  {t("detail.direct_publish_button")}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Proposal PDF download — gated on per-record
-              `can_view_proposal_pdf` so an assigned BM with the prep
-              key revoked KEEPS PDF access (backend invariant: prep
-              revoke removes mutation, not read). */}
-          {hasActiveProposal && canViewProposalPdf && (
-            <div className="card">
-              <div className="form-section">
-                <div className="ew-detail-actions-section-title">
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <FileText size={14} strokeWidth={2.2} />
-                    {t("detail.actions_pdf_title")}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    void handleDownloadPdf();
-                  }}
-                  disabled={pdfBusy}
-                  data-testid="extra-work-detail-pdf-download"
-                >
-                  {pdfBusy
-                    ? t("detail.pdf_download_busy")
-                    : t("detail.pdf_download_button")}
-                </button>
-              </div>
-            </div>
-          )}
-        </aside>
       </div>
 
       {/* Sprint 28 Batch 15.4 — customer-side reject dialog. Captures
