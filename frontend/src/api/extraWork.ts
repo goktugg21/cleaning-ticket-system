@@ -169,6 +169,42 @@ export async function fetchProposalPdf(
   return response.data;
 }
 
+// Proposal detail — the only response shape that carries the per-record
+// `actions` block (the list endpoint above returns the lean
+// `ProposalListSerializer` without it). Fetched separately when the EW
+// detail page needs to gate proposal-scoped controls (Send / Cancel /
+// Direct Publish / Edit Lines).
+export async function getProposalDetail(
+  ewId: number | string,
+  proposalId: number,
+): Promise<Proposal> {
+  const response = await api.get<Proposal>(
+    `/extra-work/${ewId}/proposals/${proposalId}/`,
+  );
+  return response.data;
+}
+
+// Direct-publish — the new atomic endpoint added by backend commit
+// fff79c1. Backend (atomic in one transaction):
+//   1. DRAFT -> SENT
+//   2. SENT -> CUSTOMER_APPROVED as provider override
+//   3. Parent EW reaches CUSTOMER_APPROVED
+//   4. Operational tickets spawn via the existing post-approval hook
+// `override_reason` is REQUIRED — backend returns 400 with stable code
+// `override_reason_required` when blank/whitespace. Mirror that check
+// in the UI before submitting.
+export async function directPublishProposal(
+  ewId: number | string,
+  proposalId: number,
+  payload: { override_reason: string; note?: string },
+): Promise<Proposal> {
+  const response = await api.post<Proposal>(
+    `/extra-work/${ewId}/proposals/${proposalId}/direct-publish/`,
+    payload,
+  );
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // Sprint 30 Batch 30.1 — spawned-tickets discovery via the new server-side
 // filter.

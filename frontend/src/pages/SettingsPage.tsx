@@ -5,6 +5,7 @@ import axios from "axios";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { roleLabelKeyNs } from "../auth/permissions";
 import type {
   NotificationEventType,
   NotificationPreferenceEntry,
@@ -42,13 +43,6 @@ function errorPayload(err: unknown): unknown {
   if (axios.isAxiosError(err)) return err.response?.data;
   return undefined;
 }
-
-const ROLE_KEYS: Record<string, string> = {
-  SUPER_ADMIN: "common:roles.super_admin",
-  COMPANY_ADMIN: "common:roles.company_admin",
-  BUILDING_MANAGER: "common:roles.building_manager",
-  CUSTOMER_USER: "common:roles.customer_user",
-};
 
 function getInitials(fullName: string, email: string): string {
   const cleaned = (fullName || "").trim();
@@ -294,7 +288,7 @@ export function SettingsPage() {
                   <div className="account-email">{me.email}</div>
                   {me.role && (
                     <span className="account-role-pill">
-                      {t(ROLE_KEYS[me.role] ?? "common:roles.fallback")}
+                      {t(roleLabelKeyNs(me.role))}
                     </span>
                   )}
                 </div>

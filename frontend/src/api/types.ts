@@ -24,7 +24,26 @@ export type TicketStatus =
   | "CLOSED"
   | "REOPENED_BY_ADMIN";
 
-export type TicketMessageType = "PUBLIC_REPLY" | "INTERNAL_NOTE";
+// B7 four-tier note taxonomy. Source of truth:
+// backend/tickets/models.py::TicketMessageType.
+//
+//   PUBLIC_REPLY       — customer-visible reply.
+//   INTERNAL_NOTE      — provider-internal (PROVIDER_INTERNAL in §9 of
+//                        the canonical doc). Provider management only;
+//                        STAFF and customer-side never see it.
+//   STAFF_OPERATIONAL  — provider-side + STAFF; NOT customer-side.
+//   STAFF_COMPLETION   — provider-side + STAFF; ALSO customer-visible as
+//                        completion evidence.
+//
+// Backend filters at the queryset level — the SPA renders whatever the
+// API returns. The frontend's job is to render the correct badge / bubble
+// class per tier and to gate the composer to tiers the viewer may write.
+// Tier-create predicates live in frontend/src/auth/permissions.ts.
+export type TicketMessageType =
+  | "PUBLIC_REPLY"
+  | "INTERNAL_NOTE"
+  | "STAFF_OPERATIONAL"
+  | "STAFF_COMPLETION";
 
 export interface PaginatedResponse<T> {
   count: number;
@@ -66,6 +85,18 @@ export interface Building {
   is_active: boolean;
 }
 
+// Mirrors backend `customers/serializers.py::compute_customer_actions`.
+// Used by both `CustomerSerializer.actions` (detail responses) and
+// every row of `CustomerUserMembershipSerializer.actions` (per-customer
+// user-membership listings). The frontend renders writable role
+// dropdowns directly from `allowed_target_customer_access_roles` and
+// gates management surfaces on the two booleans.
+export interface CustomerActions {
+  can_manage_customer_users: boolean;
+  can_manage_customer_company_admins: boolean;
+  allowed_target_customer_access_roles: CustomerAccessRole[];
+}
+
 export interface Customer {
   id: number;
   company: number;
@@ -85,6 +116,9 @@ export interface Customer {
   phone: string;
   language: string;
   is_active: boolean;
+  // Per-current-user, per-customer capability block. Optional so
+  // older /me / non-customer-scoped responses don't break typing.
+  actions?: CustomerActions;
 }
 
 export type SLAStatus =
@@ -224,6 +258,30 @@ export interface TicketDetail extends TicketList {
   // actually assigned (and is STAFF). Backend enforces the same
   // gate on the status transition — this is purely a UX hint.
   is_assigned_staff: boolean;
+  // Per-current-user, per-ticket capability block — backend
+  // `TicketDetailSerializer.get_actions`. Optional so older list
+  // serializers / pre-cherry-pick caches don't break typing; treat
+  // an absent `actions` as all-false (hide every action-gated control).
+  actions?: TicketDetailActions;
+}
+
+// Mirrors backend `tickets/serializers.py::TicketDetailSerializer.get_actions`.
+// `allowed_next_statuses` is the same list as `TicketDetail.allowed_next_statuses`
+// (the backend caches the computation between the two fields so they
+// cannot drift). `status_transitions` is the same data reshaped as an
+// O(1) lookup keyed by every TicketStatus value.
+// `can_override_customer_decision` is TIGHTENED to current-record:
+// True only when the viewer holds override authority AND the ticket
+// is at WAITING_CUSTOMER_APPROVAL AND APPROVED/REJECTED is in the
+// allowed-next list.
+export interface TicketDetailActions {
+  allowed_next_statuses: TicketStatus[];
+  can_override_customer_decision: boolean;
+  can_post_provider_internal_note: boolean;
+  can_post_staff_operational_note: boolean;
+  can_post_staff_completion_note: boolean;
+  can_upload_hidden_attachment: boolean;
+  status_transitions: Record<TicketStatus, boolean>;
 }
 
 // Sprint 23B — Staff-initiated "I want to do this work" request.
@@ -404,6 +462,9 @@ export interface CustomerAdmin {
   show_assigned_staff_phone: boolean;
   created_at: string;
   updated_at: string;
+  // Per-current-user, per-customer capability block from the
+  // CustomerSerializer.actions field. Optional for older list payloads.
+  actions?: CustomerActions;
 }
 
 // Sprint 14 — Customer ↔ Building (M:N) link.
@@ -773,6 +834,26 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   line_items: ExtraWorkRequestItem[];
   routing_decision: RoutingDecision;
   allowed_next_statuses: ExtraWorkStatus[];
+  // Per-current-user, per-EW capability block — backend
+  // `ExtraWorkRequestDetailSerializer.get_actions`. Optional so older
+  // list responses don't break typing; treat absent as all-false.
+  actions?: ExtraWorkActions;
+}
+
+// Mirrors backend `extra_work/serializers.py::ExtraWorkRequestDetailSerializer.get_actions`.
+// `can_view_pricing` is the EW-level pricing-visibility key (Proposal
+// uses the parallel `can_view_proposal_pricing` — different spelling
+// because they're separate read concerns on different resources).
+// `can_override_customer_decision` is tightened to current-record:
+// True only when authority holds AND status == PRICING_PROPOSED.
+export interface ExtraWorkActions {
+  allowed_next_statuses: ExtraWorkStatus[];
+  can_prepare_extra_work_proposal: boolean;
+  can_override_customer_decision: boolean;
+  can_view_pricing: boolean;
+  can_view_proposal_pdf: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
 }
 
 // Sprint 28 Batch 6 — cart-shaped POST payload for /extra-work/.
@@ -802,11 +883,14 @@ export interface ExtraWorkRequestCartCreatePayload {
 // admin-facing builder UI (line items, transitions, timeline) is a
 // future deliverable; the detail page only needs enough shape to
 // pick the active proposal for the PDF-download button.
+// Source of truth: backend/extra_work/models.py::ProposalStatus.
+// Backend uses CUSTOMER_APPROVED / CUSTOMER_REJECTED (not the shorter
+// ACCEPTED / REJECTED that earlier drafts of this file carried).
 export type ProposalStatus =
   | "DRAFT"
   | "SENT"
-  | "ACCEPTED"
-  | "REJECTED"
+  | "CUSTOMER_APPROVED"
+  | "CUSTOMER_REJECTED"
   | "CANCELLED";
 
 export interface Proposal {
@@ -819,6 +903,30 @@ export interface Proposal {
   sent_at: string | null;
   customer_decided_at: string | null;
   created_at: string;
+  // Per-current-user, per-proposal capability block — backend
+  // `ProposalDetailSerializer.get_actions`. Optional because the list
+  // serializer omits it; detail responses always carry it.
+  actions?: ProposalActions;
+}
+
+// Mirrors backend `extra_work/serializers.py::ProposalDetailSerializer.get_actions`.
+// `can_view_proposal_pricing` (and the parallel `can_view_proposal_pdf`)
+// remain TRUE for an assigned BM whose
+// `osius.building_manager.prepare_extra_work_proposal` is revoked —
+// only mutation actions flip False.
+export interface ProposalActions {
+  allowed_next_statuses: ProposalStatus[];
+  can_view_proposal_pricing: boolean;
+  can_view_proposal_pdf: boolean;
+  can_edit_lines: boolean;
+  can_send: boolean;
+  can_cancel: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
+  // Direct-publish (DRAFT proposal → SENT → CUSTOMER_APPROVED) is
+  // tightened to include all cheap send preconditions PLUS, for BM,
+  // the override key. See backend/extra_work/views_proposals.py.
+  can_direct_publish: boolean;
 }
 
 export interface ExtraWorkStatusHistoryEntry {
@@ -859,6 +967,11 @@ export interface CustomerUserMembership {
   user_full_name: string;
   user_role: Role;
   created_at: string;
+  // Per-row capability block — same shape as `Customer.actions`,
+  // computed against `request.user` + this membership's parent
+  // customer. Surfacing it per-row keeps the existing paginated
+  // {count, next, previous, results} envelope unchanged.
+  actions?: CustomerActions;
 }
 
 // Sprint 28 Batch 4 — Contact phone-book entries.

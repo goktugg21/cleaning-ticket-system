@@ -39,12 +39,66 @@ import type {
   TicketStatusChangePayload,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import {
+  composerTiersForRole,
+  isProviderAdmin,
+  isProviderManagementRole,
+  isStaff as isStaffRoleFn,
+} from "../auth/permissions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
+
+// B7 four-tier note taxonomy — per-tier UI vocabulary. The bubble class
+// flags "private to provider" tiers ("internal") so existing CSS keeps
+// applying the muted treatment; STAFF_COMPLETION is customer-visible so
+// it gets no muted class. The tag class flags PUBLIC_REPLY as the
+// customer-side conversation tier; the other three render with the
+// default tag styling.
+const NOTE_TIER_BADGE_KEY: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "tag_public",
+  INTERNAL_NOTE: "tag_internal",
+  STAFF_OPERATIONAL: "tag_staff_operational",
+  STAFF_COMPLETION: "tag_staff_completion",
+};
+
+const NOTE_TIER_BUBBLE_CLASS: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "",
+  INTERNAL_NOTE: "internal",
+  STAFF_OPERATIONAL: "internal",
+  STAFF_COMPLETION: "",
+};
+
+const NOTE_TIER_TAG_CLASS: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "public",
+  INTERNAL_NOTE: "",
+  STAFF_OPERATIONAL: "",
+  STAFF_COMPLETION: "",
+};
+
+const NOTE_TIER_COMPOSER_LABEL_KEY: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "composer_public",
+  INTERNAL_NOTE: "composer_internal",
+  STAFF_OPERATIONAL: "composer_staff_operational",
+  STAFF_COMPLETION: "composer_staff_completion",
+};
+
+const NOTE_TIER_PLACEHOLDER_KEY: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "composer_public_placeholder",
+  INTERNAL_NOTE: "composer_internal_placeholder",
+  STAFF_OPERATIONAL: "composer_staff_operational_placeholder",
+  STAFF_COMPLETION: "composer_staff_completion_placeholder",
+};
+
+const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
+  PUBLIC_REPLY: "",
+  INTERNAL_NOTE: "internal",
+  STAFF_OPERATIONAL: "internal",
+  STAFF_COMPLETION: "",
+};
 
 // Sprint 15: backend is the source of truth for which transitions are
 // available. Previously the frontend carried a SUPER_ADMIN_UI_NEXT_STATUS
@@ -287,7 +341,34 @@ export function TicketDetailPage() {
   const [completeBusy, setCompleteBusy] = useState(false);
 
   const [message, setMessage] = useState("");
+  // Composer tier list — driven by per-record `ticket.actions` when the
+  // detail has loaded (PUBLIC_REPLY is always allowed for an
+  // authenticated viewer in scope, plus whichever of INTERNAL_NOTE /
+  // STAFF_OPERATIONAL / STAFF_COMPLETION the backend says this user
+  // can author on THIS ticket). Falls back to the role-based predicate
+  // before the detail loads (or for older serializers that don't carry
+  // `actions`), so the page never crashes on undefined.
+  const composerTiers = useMemo<TicketMessageType[]>(() => {
+    const actions = ticket?.actions;
+    if (actions) {
+      const tiers: TicketMessageType[] = ["PUBLIC_REPLY"];
+      if (actions.can_post_provider_internal_note) tiers.push("INTERNAL_NOTE");
+      if (actions.can_post_staff_operational_note) tiers.push("STAFF_OPERATIONAL");
+      if (actions.can_post_staff_completion_note) tiers.push("STAFF_COMPLETION");
+      return tiers;
+    }
+    return composerTiersForRole(me?.role);
+  }, [ticket?.actions, me?.role]);
   const [messageType, setMessageType] = useState<TicketMessageType>("PUBLIC_REPLY");
+  // Render-time fallback: if `messageType` is no longer in the action-
+  // driven tier list (e.g. role just loaded and dropped INTERNAL_NOTE),
+  // fall back to the first allowed tier. Render-time derivation avoids
+  // a setState-in-effect.
+  const effectiveMessageType: TicketMessageType = composerTiers.includes(
+    messageType,
+  )
+    ? messageType
+    : composerTiers[0] ?? "PUBLIC_REPLY";
   const [sendingMessage, setSendingMessage] = useState(false);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -333,22 +414,22 @@ export function TicketDetailPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingTicket, setDeletingTicket] = useState(false);
 
-  const isStaff =
-    me?.role === "SUPER_ADMIN" ||
-    me?.role === "COMPANY_ADMIN" ||
-    me?.role === "BUILDING_MANAGER";
+  // Provider-management trio (SA + CA + BM). Drives note-author UI,
+  // assignable-manager dropdown, etc. — the surface that may see+author
+  // PROVIDER_INTERNAL notes (B7) and direct ticket assignment.
+  const isStaff = isProviderManagementRole(me?.role);
 
-  // Sprint 30 Batch 30.1.3 — "provider acting on a customer-decision
-  // step" gate. Used to swap the plain Approve/Reject buttons on a
-  // WCA ticket for the inline override-arming flow (mandatory reason +
-  // two-press confirm) while keeping the CUSTOMER_USER's direct
-  // approve/reject path unchanged.
-  const isProviderOverrideRole =
-    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
-  const isCustomerDecisionStep =
-    !!ticket && ticket.status === "WAITING_CUSTOMER_APPROVAL";
+  // "Provider acting on a customer-decision step." Drive ENTIRELY off
+  // the per-record action `ticket.actions.can_override_customer_decision`
+  // (backend tightens it to True only when the viewer holds override
+  // authority AND the ticket is at WAITING_CUSTOMER_APPROVAL AND
+  // APPROVED/REJECTED is in `allowed_next_statuses`). Replaces the
+  // earlier `isProviderAdmin(me.role) && status==WCA` composition,
+  // which wrongly hid the override path from a BM with the B6 override
+  // key. Treat absent `actions` as False so the page hides the override
+  // arming UI until the detail loads.
   const providerActsAsOverride =
-    isProviderOverrideRole && isCustomerDecisionStep;
+    ticket?.actions?.can_override_customer_decision === true;
 
   // Sprint 30 Batch 30.1.3 — STAFF completion-evidence gate (frontend
   // mirror of the backend `completion_evidence_required` rule). For
@@ -365,7 +446,7 @@ export function TicketDetailPage() {
     [attachments],
   );
   const staffCompletionEvidenceRequired =
-    me?.role === "STAFF" &&
+    isStaffRoleFn(me?.role) &&
     !!ticket &&
     ticket.status === "IN_PROGRESS";
 
@@ -374,8 +455,7 @@ export function TicketDetailPage() {
   // contacts list endpoint rejects everyone else with 403; we mirror
   // that gate here so BUILDING_MANAGER / STAFF / CUSTOMER_USER never
   // emit the call (silent fail; the panel just doesn't render).
-  const canSeeCustomerContacts =
-    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
+  const canSeeCustomerContacts = isProviderAdmin(me?.role);
   const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
 
   // Sprint 30 Batch 30.1.2 — multi-tenant fix for the Assigned field
@@ -836,12 +916,16 @@ export function TicketDetailPage() {
     setError("");
     setSendingMessage(true);
     try {
+      // Send the effective (render-time-derived) tier so a stale
+      // `messageType` set from a previous role context can never escape
+      // onto the wire. The composer toggle only surfaces tiers the role
+      // can write, but this kept honest at the network boundary too.
       await api.post(`/tickets/${id}/messages/`, {
         message: message.trim(),
-        message_type: isStaff ? messageType : "PUBLIC_REPLY",
+        message_type: effectiveMessageType,
       });
       setMessage("");
-      setMessageType("PUBLIC_REPLY");
+      setMessageType(composerTiers[0] ?? "PUBLIC_REPLY");
       await loadTicket();
     } catch (err) {
       setError(getApiError(err));
@@ -1122,43 +1206,31 @@ export function TicketDetailPage() {
             <form className="notes-composer-body" onSubmit={submitMessage}>
               <textarea
                 className="notes-textarea"
-                placeholder={
-                  isStaff && messageType === "INTERNAL_NOTE"
-                    ? t("composer_internal_placeholder")
-                    : t("composer_public_placeholder")
-                }
+                placeholder={t(NOTE_TIER_PLACEHOLDER_KEY[effectiveMessageType])}
                 value={message}
                 onChange={(event) => setMessage(event.target.value)}
                 required
               />
               <div className="notes-actions">
                 <div className="notes-tools">
-                  {isStaff && (
+                  {composerTiers.length > 1 && (
                     <div className="composer-toggle" role="tablist">
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={messageType === "PUBLIC_REPLY"}
-                        className={`composer-toggle-btn ${
-                          messageType === "PUBLIC_REPLY" ? "active" : ""
-                        }`}
-                        onClick={() => setMessageType("PUBLIC_REPLY")}
-                      >
-                        {t("composer_public")}
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={messageType === "INTERNAL_NOTE"}
-                        className={`composer-toggle-btn ${
-                          messageType === "INTERNAL_NOTE"
-                            ? "active internal"
-                            : ""
-                        }`}
-                        onClick={() => setMessageType("INTERNAL_NOTE")}
-                      >
-                        {t("composer_internal")}
-                      </button>
+                      {composerTiers.map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          role="tab"
+                          aria-selected={effectiveMessageType === tier}
+                          className={`composer-toggle-btn ${
+                            effectiveMessageType === tier
+                              ? `active ${NOTE_TIER_TONE_CLASS[tier]}`
+                              : ""
+                          }`}
+                          onClick={() => setMessageType(tier)}
+                        >
+                          {t(NOTE_TIER_COMPOSER_LABEL_KEY[tier])}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1186,9 +1258,7 @@ export function TicketDetailPage() {
               messages.map((item) => (
                 <div
                   key={item.id}
-                  className={`note-bubble ${
-                    item.message_type === "INTERNAL_NOTE" ? "internal" : ""
-                  }`}
+                  className={`note-bubble ${NOTE_TIER_BUBBLE_CLASS[item.message_type] ?? ""}`}
                 >
                   <div className="note-bubble-avatar">
                     {getInitials(item.author_email)}
@@ -1202,13 +1272,9 @@ export function TicketDetailPage() {
                         {formatDate(item.created_at)}
                       </span>
                       <span
-                        className={`note-bubble-tag ${
-                          item.message_type === "PUBLIC_REPLY" ? "public" : ""
-                        }`}
+                        className={`note-bubble-tag ${NOTE_TIER_TAG_CLASS[item.message_type] ?? ""}`}
                       >
-                        {item.message_type === "INTERNAL_NOTE"
-                          ? t("tag_internal")
-                          : t("tag_public")}
+                        {t(NOTE_TIER_BADGE_KEY[item.message_type] ?? "tag_public")}
                       </span>
                     </div>
                     <div className="note-bubble-text">{item.message}</div>
@@ -1297,7 +1363,7 @@ export function TicketDetailPage() {
                     flexWrap: "wrap",
                   }}
                 >
-                  {isStaff && (
+                  {ticket?.actions?.can_upload_hidden_attachment && (
                     <label className="login-check" style={{ margin: 0 }}>
                       <input
                         type="checkbox"

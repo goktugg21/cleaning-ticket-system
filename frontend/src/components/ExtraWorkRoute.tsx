@@ -1,30 +1,23 @@
-// Sprint 26C — Extra Work route guard.
+// Extra Work route guard.
 //
-// Admits SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER, and
-// CUSTOMER_USER. STAFF was originally excluded because the backend's
-// `scope_extra_work_for` returned `.none()` for staff in this MVP
-// (no staff-execution surface yet), so the page would render an
-// empty list.
+// Admits SUPER_ADMIN, COMPANY_ADMIN, BUILDING_MANAGER, CUSTOMER_USER.
+// STAFF is excluded: backend `extra_work.scoping.scope_extra_work_for`
+// returns `.none()` for STAFF (the P0 staff-privacy revert,
+// post-2026-05-20). STAFF still sees EW-spawned operational tickets
+// through the normal ticket scope — `Ticket.extra_work_origin` surfaces
+// the safe metadata subset on those tickets.
 //
-// Sprint 29 Batch 29.8 opened the backend scope for STAFF (they can
-// now see EWs at buildings where they have BuildingStaffVisibility,
-// mirroring the ticket scope). Sprint 29 Batch 29.8.5 lifts the SPA
-// gate in parallel so STAFF users no longer get redirected to the
-// dashboard when they navigate to /extra-work.
+// Earlier Sprint 29 Batch 29.8 opened the SPA gate to STAFF in
+// anticipation of a STAFF-facing EW surface. That landed before the
+// staff-privacy revert closed the backend scope again; the SPA gate
+// drifted out of sync. Closing it here so STAFF no longer lands on an
+// empty page.
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthContext";
+import { canAccessExtraWork } from "../auth/permissions";
 import { AppShell } from "../layout/AppShell";
-
-
-const ALLOWED_ROLES = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-  "CUSTOMER_USER",
-  "STAFF",
-]);
 
 
 export function ExtraWorkRoute({ children }: { children: ReactNode }) {
@@ -42,7 +35,7 @@ export function ExtraWorkRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!ALLOWED_ROLES.has(me.role)) {
+  if (!canAccessExtraWork(me.role)) {
     return <Navigate to="/" replace />;
   }
 

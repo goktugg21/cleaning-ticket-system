@@ -1,13 +1,8 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { canAccessReports } from "../auth/permissions";
 import { AppShell } from "../layout/AppShell";
-
-const REPORTS_ROLES = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-]);
 
 export function ReportsRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
@@ -24,7 +19,7 @@ export function ReportsRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!REPORTS_ROLES.has(me.role)) {
+  if (!canAccessReports(me.role)) {
     return <Navigate to="/" replace />;
   }
 

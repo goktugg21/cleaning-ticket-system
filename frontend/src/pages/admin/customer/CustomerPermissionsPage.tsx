@@ -134,7 +134,17 @@ export function CustomerPermissionsPage() {
 
   const isSelfAccess = (access: CustomerUserBuildingAccess) =>
     me?.id === access.user_id;
-  const canGrantCustomerCompanyAdmin = me?.role === "SUPER_ADMIN";
+  // Drive the CCA-grant gate from per-record `customer.actions
+  // .allowed_target_customer_access_roles` so the B5 company policy is
+  // honoured (CA may also grant CCA when the toggle is True). The
+  // earlier `me.role === "SUPER_ADMIN"` check ignored the policy.
+  // Absent `actions` (older response) falls back to SA-only — the
+  // safest behavior pre-cherry-pick.
+  const allowedTargetAccessRoles =
+    customer?.actions?.allowed_target_customer_access_roles ?? null;
+  const canGrantCustomerCompanyAdmin = allowedTargetAccessRoles
+    ? allowedTargetAccessRoles.includes("CUSTOMER_COMPANY_ADMIN")
+    : me?.role === "SUPER_ADMIN";
 
   // Sprint 29 Batch 29.1 — operator-controlled toggle for the
   // "Affects: customer.ticket.approve_own, ..." sub-lines on

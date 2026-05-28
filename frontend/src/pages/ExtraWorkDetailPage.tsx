@@ -44,7 +44,9 @@ import { getApiError } from "../api/client";
 import {
   createExtraWorkPricingItem,
   deleteExtraWorkPricingItem,
+  directPublishProposal,
   fetchProposalPdf,
+  getProposalDetail,
   getExtraWork,
   listProposalsForEw,
   listSpawnedTickets,
@@ -234,6 +236,17 @@ export function ExtraWorkDetailPage() {
   // Sprint 28 Batch 15.4 — proposals list (used only to pick the
   // active proposal for the PDF download button).
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  // Per-record proposal actions for the DRAFT proposal — needed to
+  // gate the new direct-publish button. The list endpoint above
+  // returns the lean serializer (no `actions`); we fetch the detail
+  // separately for the draft when one exists.
+  const [draftProposalDetail, setDraftProposalDetail] =
+    useState<Proposal | null>(null);
+  // Direct-publish flow state.
+  const [directPublishOpen, setDirectPublishOpen] = useState(false);
+  const [directPublishReason, setDirectPublishReason] = useState("");
+  const [directPublishBusy, setDirectPublishBusy] = useState(false);
+  const [directPublishError, setDirectPublishError] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
 
   // Sprint 30 Batch 30.1 — spawned tickets fetched via the new
@@ -330,6 +343,35 @@ export function ExtraWorkDetailPage() {
     };
   }, [ewId]);
 
+  // When a DRAFT proposal exists, fetch its detail so we have
+  // `actions.can_direct_publish` for the direct-publish button. The
+  // list serializer omits `actions`; the detail endpoint is the only
+  // wire shape that carries it. Silently collapses to `null` on 403/
+  // not-found (e.g. customer-side caller cannot see DRAFT proposals).
+  const draftProposal = proposals.find((p) => p.status === "DRAFT") ?? null;
+  const draftProposalId = draftProposal?.id ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    if (ewId === null || draftProposalId === null) {
+      queueMicrotask(() => {
+        if (!cancelled) setDraftProposalDetail(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    getProposalDetail(ewId, draftProposalId)
+      .then((detail) => {
+        if (!cancelled) setDraftProposalDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setDraftProposalDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, draftProposalId]);
+
   // Sprint 30 Batch 30.1 — spawned tickets fetch using the new
   // server-side `extra_work_request` filter (walks both the cart-item
   // FK chain and the proposal-line FK chain). Replaces the Sprint 29
@@ -387,19 +429,34 @@ export function ExtraWorkDetailPage() {
   }
 
   const allowed = ew.allowed_next_statuses;
-  const canApproveAsCustomer =
-    ew.status === "PRICING_PROPOSED" &&
-    allowed.includes("CUSTOMER_APPROVED") &&
-    !isProvider;
-  const canRejectAsCustomer =
-    ew.status === "PRICING_PROPOSED" &&
-    allowed.includes("CUSTOMER_REJECTED") &&
-    !isProvider;
+  // Per-record actions drive the decision UI. `ew.actions.can_approve`
+  // covers both customer-direct approve and provider-override approve
+  // (the backend tightens it to PRICING_PROPOSED). We split the UI
+  // surface by `!isProvider` vs `providerOverrideAvailable` so the
+  // customer sees plain Approve/Reject and the provider sees the
+  // override-arming flow. Absent `actions` falls through to false.
+  const ewActions = ew.actions;
+  const canApproveAsCustomer = !isProvider && ewActions?.can_approve === true;
+  const canRejectAsCustomer = !isProvider && ewActions?.can_reject === true;
   const providerOverrideAvailable =
-    isProvider &&
-    ew.status === "PRICING_PROPOSED" &&
-    (allowed.includes("CUSTOMER_APPROVED") ||
-      allowed.includes("CUSTOMER_REJECTED"));
+    ewActions?.can_override_customer_decision === true;
+  // Pricing visibility + PDF read are now action-driven so a customer
+  // without approve rights doesn't see pricing rows AND a BM with the
+  // prep key revoked STILL sees pricing + PDF (backend invariant).
+  // Absent `actions` (older response) falls back to the prior
+  // is-provider check so the page doesn't go blank.
+  const canViewEwPricing = ewActions
+    ? ewActions.can_view_pricing
+    : isProvider;
+  const canViewProposalPdf = ewActions
+    ? ewActions.can_view_proposal_pdf
+    : isProvider;
+  // Proposal-preparation entry points (line-item add/edit/remove
+  // form) — BM with prep revoked must lose these. Absent `actions`
+  // falls back to is-provider (pre-cherry-pick behavior).
+  const canPrepareProposal = ewActions
+    ? ewActions.can_prepare_extra_work_proposal
+    : isProvider;
 
   // Provider workflow buttons exclude the override targets — those
   // route through the dedicated override block below.
@@ -426,13 +483,15 @@ export function ExtraWorkDetailPage() {
     ew.status === "CUSTOMER_APPROVED" &&
     spawnedTickets.length === 0;
 
-  // Sprint 28 Batch 15.4 — pick the currently-active proposal for
-  // PDF download. SENT and ACCEPTED are the two "live" states; DRAFT
-  // is provider-private and not downloadable until sent, REJECTED /
-  // CANCELLED proposals stay accessible via the timeline but are
-  // not the headline document anyone wants to grab right now.
+  // Pick the currently-active proposal for PDF download. SENT and
+  // CUSTOMER_APPROVED are the two "live" states; DRAFT is provider-
+  // private and not downloadable until sent, CUSTOMER_REJECTED /
+  // CANCELLED proposals stay accessible via the timeline but are not
+  // the headline document anyone wants to grab right now. (The
+  // earlier "ACCEPTED" sentinel was a stale alias — backend emits
+  // CUSTOMER_APPROVED per `extra_work.models.ProposalStatus`.)
   const activeProposal = proposals.find(
-    (p) => p.status === "SENT" || p.status === "ACCEPTED",
+    (p) => p.status === "SENT" || p.status === "CUSTOMER_APPROVED",
   );
   const hasActiveProposal = !!activeProposal;
 
@@ -603,6 +662,44 @@ export function ExtraWorkDetailPage() {
       await refresh();
     } catch (err) {
       setPricingError(getApiError(err));
+    }
+  }
+
+  // Direct-publish a DRAFT proposal. Endpoint is atomic on the backend:
+  // it runs DRAFT->SENT, then SENT->CUSTOMER_APPROVED as a provider
+  // override, then spawns operational tickets — all in one transaction
+  // that rolls back if any step fails. Bypasses customer approval, so
+  // the UI must collect a non-empty override_reason and warn the
+  // operator explicitly before submitting.
+  async function handleDirectPublish() {
+    if (!id || !draftProposal || !draftProposal.id) return;
+    const reason = directPublishReason.trim();
+    if (!reason) {
+      setDirectPublishError(t("detail.direct_publish_reason_required"));
+      return;
+    }
+    setDirectPublishError("");
+    setDirectPublishBusy(true);
+    try {
+      await directPublishProposal(id, draftProposal.id, {
+        override_reason: reason,
+      });
+      // Reload EW + proposal list so the new CUSTOMER_APPROVED state
+      // + spawned tickets reflect. Do NOT optimistically mutate
+      // anything — defer to the refreshed wire response.
+      await refresh();
+      const refreshedProposals = await listProposalsForEw(id);
+      setProposals(refreshedProposals);
+      setDirectPublishOpen(false);
+      setDirectPublishReason("");
+      pushToast({
+        variant: "success",
+        title: t("detail.direct_publish_success"),
+      });
+    } catch (err) {
+      setDirectPublishError(getApiError(err));
+    } finally {
+      setDirectPublishBusy(false);
     }
   }
 
@@ -920,10 +1017,10 @@ export function ExtraWorkDetailPage() {
               <div className="form-section-title">
                 {t("detail.pricing_section_title")}
               </div>
-              {ew.pricing_line_items.length === 0 && (
+              {canViewEwPricing && ew.pricing_line_items.length === 0 && (
                 <div className="muted small">{t("detail.pricing_empty")}</div>
               )}
-              {ew.pricing_line_items.length > 0 && (
+              {canViewEwPricing && ew.pricing_line_items.length > 0 && (
                 <table className="data-table ew-pricing-table">
                   <thead>
                     <tr>
@@ -947,7 +1044,7 @@ export function ExtraWorkDetailPage() {
                       <th style={{ textAlign: "right" }}>
                         {t("detail.pricing_column_total")}
                       </th>
-                      {isProvider && <th />}
+                      {canPrepareProposal && <th />}
                     </tr>
                   </thead>
                   <tbody>
@@ -992,7 +1089,7 @@ export function ExtraWorkDetailPage() {
                         <td style={{ textAlign: "right" }}>
                           {formatMoney(item.total)}
                         </td>
-                        {isProvider && (
+                        {canPrepareProposal && (
                           <td style={{ textAlign: "right" }}>
                             <button
                               type="button"
@@ -1028,13 +1125,13 @@ export function ExtraWorkDetailPage() {
                       <td style={{ textAlign: "right", fontWeight: 700 }}>
                         {formatMoney(ew.total_amount)}
                       </td>
-                      {isProvider && <td />}
+                      {canPrepareProposal && <td />}
                     </tr>
                   </tbody>
                 </table>
               )}
 
-              {isProvider && (
+              {canPrepareProposal && (
                 <>
                   {pricingError && (
                     <div
@@ -1570,8 +1667,40 @@ export function ExtraWorkDetailPage() {
             </div>
           )}
 
-          {/* Proposal PDF download */}
-          {hasActiveProposal && (
+          {/* Direct-publish (DRAFT proposal -> CUSTOMER_APPROVED in
+              one atomic call). Gated on the per-record proposal action
+              `can_direct_publish` (backend tightens this to include the
+              same cheap send preconditions plus, for BM, the override
+              key — so the button never renders when the request would
+              be 400'd at parent-EW state, nor when prep/override is
+              revoked). */}
+          {draftProposalDetail?.actions?.can_direct_publish === true && (
+            <div className="card">
+              <div className="form-section">
+                <div className="ew-detail-actions-section-title">
+                  {t("detail.direct_publish_section_title")}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setDirectPublishError("");
+                    setDirectPublishReason("");
+                    setDirectPublishOpen(true);
+                  }}
+                  data-testid="extra-work-detail-direct-publish-button"
+                >
+                  {t("detail.direct_publish_button")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Proposal PDF download — gated on per-record
+              `can_view_proposal_pdf` so an assigned BM with the prep
+              key revoked KEEPS PDF access (backend invariant: prep
+              revoke removes mutation, not read). */}
+          {hasActiveProposal && canViewProposalPdf && (
             <div className="card">
               <div className="form-section">
                 <div className="ew-detail-actions-section-title">
@@ -1616,6 +1745,97 @@ export function ExtraWorkDetailPage() {
           void handleCustomerDecision("CUSTOMER_REJECTED", reason);
         }}
       />
+
+      {/* Direct-publish confirmation. Renders a prominent warning
+          ("bypasses customer approval, opens tickets immediately") plus
+          a mandatory override-reason textarea. The confirm button stays
+          disabled until the reason is non-empty (the backend rejects
+          with stable code `override_reason_required` otherwise; this
+          is the matching client-side guard). */}
+      {directPublishOpen && (
+        <div
+          className="reject-modal-backdrop"
+          data-testid="extra-work-direct-publish-dialog"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="reject-modal">
+            <h3 className="reject-modal-title">
+              {t("detail.direct_publish_dialog_title")}
+            </h3>
+            <div
+              className="alert-warning"
+              style={{ marginBottom: 12 }}
+              data-testid="extra-work-direct-publish-warning"
+            >
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                {t("detail.direct_publish_dialog_warning_title")}
+              </div>
+              <div>{t("detail.direct_publish_dialog_warning_desc")}</div>
+            </div>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 6,
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+              htmlFor="extra-work-direct-publish-reason"
+            >
+              {t("detail.direct_publish_reason_label")}
+            </label>
+            <textarea
+              id="extra-work-direct-publish-reason"
+              data-testid="extra-work-direct-publish-reason-textarea"
+              className="field-textarea reject-modal-textarea"
+              value={directPublishReason}
+              onChange={(e) => setDirectPublishReason(e.target.value)}
+              placeholder={t("detail.direct_publish_reason_placeholder")}
+              rows={4}
+              autoFocus
+              disabled={directPublishBusy}
+            />
+            {directPublishError && (
+              <div
+                className="alert-error"
+                style={{ marginTop: 8 }}
+                role="alert"
+                data-testid="extra-work-direct-publish-error"
+              >
+                {directPublishError}
+              </div>
+            )}
+            <div className="reject-modal-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setDirectPublishOpen(false);
+                  setDirectPublishReason("");
+                  setDirectPublishError("");
+                }}
+                disabled={directPublishBusy}
+                data-testid="extra-work-direct-publish-cancel"
+              >
+                {t("detail.direct_publish_cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm reject-modal-confirm"
+                onClick={() => void handleDirectPublish()}
+                disabled={
+                  directPublishBusy || directPublishReason.trim().length === 0
+                }
+                data-testid="extra-work-direct-publish-confirm"
+              >
+                {directPublishBusy
+                  ? t("detail.direct_publish_busy")
+                  : t("detail.direct_publish_confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sprint 29 Batch 29.8 — cancel-confirmation dialog. Warns when
           spawned tickets are still active so the operator is aware

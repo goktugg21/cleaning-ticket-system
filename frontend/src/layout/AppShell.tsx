@@ -24,45 +24,19 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
+import {
+  canAccessAdminArea,
+  canAccessAuditLogs,
+  canAccessExtraWork,
+  canAccessReports,
+  canAccessStaffRequestReview,
+  isBuildingManager,
+  roleLabelKey,
+} from "../auth/permissions";
 import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
 import { getCompany, getCustomer } from "../api/admin";
 import { getInitials } from "../lib/initials";
-
-const STAFF_ROLES = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
-// Sprint 26C — Extra Work MVP. STAFF is excluded because the
-// backend's scope_extra_work_for returns .none() for staff today
-// (no staff-execution surface yet). Mirror the ExtraWorkRoute
-// guard so staff users don't see a sidebar link that leads to an
-// empty list.
-const EXTRA_WORK_ROLES = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-  "CUSTOMER_USER",
-]);
-// Sprint 23B — the staff-assignment-request review queue is for
-// service-provider-side reviewers. Building managers also see it
-// (their own buildings only — backend queryset gate). STAFF and
-// CUSTOMER_USER never see the link; STAFF requests via the ticket
-// detail "Request assignment" button instead.
-const STAFF_REQUEST_REVIEW_ROLES = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-]);
-const REPORTS_ROLES = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-]);
-
-const ROLE_KEY: Record<string, string> = {
-  SUPER_ADMIN: "roles.super_admin",
-  COMPANY_ADMIN: "roles.company_admin",
-  BUILDING_MANAGER: "roles.building_manager",
-  CUSTOMER_USER: "roles.customer_user",
-};
 
 // Sprint 28 Batch 3 — sidebar mode is URL-derived (not React state)
 // so a browser refresh on a customer-scoped route preserves the
@@ -190,12 +164,10 @@ export function AppShell({ children }: AppShellProps) {
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
-  // Role label resolves through the i18n key map: enum value (SUPER_ADMIN
-  // etc.) → key (roles.super_admin) → translated label. Falls back to the
-  // generic "User" key when role is missing.
-  const roleLabel = me?.role
-    ? t(ROLE_KEY[me.role] ?? "roles.fallback")
-    : t("roles.fallback");
+  // Role label resolves through the central role/key map in
+  // auth/permissions.ts so every role (including STAFF) has a label and
+  // a future seventh role won't silently fall through to "User".
+  const roleLabel = t(roleLabelKey(me?.role));
 
   return (
     <div className={`app${sidebarOpen ? " sidebar-mobile-open" : ""}`}>
@@ -268,7 +240,7 @@ export function AppShell({ children }: AppShellProps) {
                   Work, Settings) are admin-only edit surfaces and
                   hiding them keeps the role's surface area
                   consistent with the route guards. */}
-              {me?.role !== "BUILDING_MANAGER" && (
+              {!isBuildingManager(me?.role) && (
                 <>
                   <NavLink
                     to={`/admin/customers/${sidebar.customerId}/buildings`}
@@ -333,7 +305,7 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.customer_submenu.contacts")}
               </NavLink>
-              {me?.role !== "BUILDING_MANAGER" && (
+              {!isBuildingManager(me?.role) && (
                 <NavLink
                   to={`/admin/customers/${sidebar.customerId}/settings`}
                   className={navClass}
@@ -361,7 +333,7 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.new_ticket")}
               </NavLink>
-              {me?.role && EXTRA_WORK_ROLES.has(me.role) && (
+              {canAccessExtraWork(me?.role) && (
                 <NavLink to="/extra-work" className={navClass}>
                   <span className="nav-icon">
                     <Receipt size={16} strokeWidth={2} />
@@ -369,7 +341,7 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.extra_work")}
                 </NavLink>
               )}
-              {me?.role && REPORTS_ROLES.has(me.role) && (
+              {canAccessReports(me?.role) && (
                 <NavLink to="/reports" className={navClass}>
                   <span className="nav-icon">
                     <BarChart3 size={16} strokeWidth={2} />
@@ -384,7 +356,7 @@ export function AppShell({ children }: AppShellProps) {
                 {t("nav_settings")}
               </NavLink>
 
-              {me?.role && STAFF_ROLES.has(me.role) && (
+              {canAccessAdminArea(me?.role) && (
                 <>
                   <div className="nav-group-label" style={{ marginTop: 8 }}>
                     {t("nav.admin_group")}
@@ -436,7 +408,7 @@ export function AppShell({ children }: AppShellProps) {
                     that gate here so company admins do not see a link
                     that would 403 on every visit.
                   */}
-                  {me?.role === "SUPER_ADMIN" && (
+                  {canAccessAuditLogs(me?.role) && (
                     <NavLink to="/admin/audit-logs" className={navClass}>
                       <span className="nav-icon">
                         <ClipboardList size={16} strokeWidth={2} />
@@ -454,7 +426,7 @@ export function AppShell({ children }: AppShellProps) {
                   outside STAFF_ROLES). Building managers see the link
                   even though they don't see the rest of the admin
                   group — they need this one queue. */}
-              {me?.role && STAFF_REQUEST_REVIEW_ROLES.has(me.role) && (
+              {canAccessStaffRequestReview(me?.role) && (
                 <NavLink
                   to="/admin/staff-assignment-requests"
                   className={navClass}

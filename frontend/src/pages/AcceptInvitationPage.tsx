@@ -5,15 +5,8 @@ import { Building2, Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, clearAuthTokens, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import type { InvitationPreview, Role } from "../api/types";
-
-const ROLE_KEYS: Record<Role, string> = {
-  SUPER_ADMIN: "common:roles.super_admin",
-  COMPANY_ADMIN: "common:roles.company_admin",
-  BUILDING_MANAGER: "common:roles.building_manager",
-  STAFF: "common:roles.staff",
-  CUSTOMER_USER: "common:roles.customer_user",
-};
+import { roleLabelKeyNs } from "../auth/permissions";
+import type { InvitationPreview } from "../api/types";
 
 type FieldErrors = {
   new_password?: string;
@@ -346,7 +339,7 @@ export function AcceptInvitationPage() {
               <p className="login-welcome-sub">
                 {t("accept_invitation.welcome_lead", {
                   inviter: inviterName,
-                  role: t(ROLE_KEYS[loadState.preview.role] ?? "common:roles.fallback"),
+                  role: t(roleLabelKeyNs(loadState.preview.role)),
                 })}
                 {scopeLine && (
                   <>

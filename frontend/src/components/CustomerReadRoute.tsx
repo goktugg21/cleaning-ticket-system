@@ -1,28 +1,21 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { canReadCustomerArea } from "../auth/permissions";
 import { AppShell } from "../layout/AppShell";
 
 /**
- * Sprint 28 Batch 12 — route wrapper for the read-only BM customer
- * surfaces.
+ * Route wrapper for the read-only BM customer surfaces.
  *
- * Admits SUPER_ADMIN + COMPANY_ADMIN (who reach the existing admin
- * pages) AND BUILDING_MANAGER (who reach the read-only BM pages —
- * the caller of this wrapper dispatches by role and renders the
- * BM-specific component). The wrapper itself is role-permissive; the
+ * Admits the provider management trio (SA + COMPANY_ADMIN reach the
+ * existing admin pages; BUILDING_MANAGER reaches the read-only BM
+ * pages — the caller of this wrapper dispatches by role and renders
+ * the BM-specific component). The wrapper itself is role-permissive;
  * read-only narrowing lives inside the BM page components.
  *
- * STAFF / CUSTOMER_USER / anonymous are bounced to the dashboard
- * with the same `admin_required` query string the AdminRoute uses,
- * keeping the redirect-on-deny pattern consistent.
+ * STAFF / CUSTOMER_USER / anonymous are bounced to the dashboard with
+ * the `admin_required` query string for consistency with AdminRoute.
  */
-const CUSTOMER_READ_ROLES = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-  "BUILDING_MANAGER",
-]);
-
 export function CustomerReadRoute({ children }: { children: ReactNode }) {
   const { me, loading } = useAuth();
 
@@ -38,7 +31,7 @@ export function CustomerReadRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  if (!CUSTOMER_READ_ROLES.has(me.role)) {
+  if (!canReadCustomerArea(me.role)) {
     return <Navigate to="/?admin_required=ok" replace />;
   }
 

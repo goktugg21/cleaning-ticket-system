@@ -200,6 +200,15 @@ export function CustomerUsersPage() {
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
   const customerNameDisplay = customer?.name ?? "";
+  // Per-record action — drives whether the viewer can add or remove
+  // customer-user memberships on THIS customer. Backend
+  // (`compute_customer_actions`) returns True for SA, COMPANY_ADMIN in
+  // scope, and CUSTOMER_USER whose customer-level
+  // `customer.users.manage` resolves True (the CCA admit path). Absent
+  // (older response) defaults to false — safer to hide the controls
+  // than to show a button the API will 403.
+  const canManageMembers =
+    customer?.actions?.can_manage_customer_users === true;
 
   return (
     <div data-testid="customer-users-page">
@@ -319,13 +328,15 @@ export function CustomerUsersPage() {
                             )}
                           </td>
                           <td>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => openRemoveDialog(membership)}
-                            >
-                              {t("admin_form.remove")}
-                            </button>
+                            {canManageMembers && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => openRemoveDialog(membership)}
+                              >
+                                {t("admin_form.remove")}
+                              </button>
+                            )}
                           </td>
                         </tr>
                         {isSummaryOpen && numericId !== null && (
@@ -375,6 +386,7 @@ export function CustomerUsersPage() {
               )}
             </div>
 
+            {canManageMembers && (
             <form
               onSubmit={handleAddMember}
               style={{
@@ -420,6 +432,7 @@ export function CustomerUsersPage() {
                 {memberBusy ? t("admin_form.adding") : t("admin_form.add")}
               </button>
             </form>
+            )}
 
             <ConfirmDialog
               ref={removeDialogRef}

@@ -26,6 +26,7 @@ import type {
   UserAdminDetail,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { roleLabelKeyNs } from "../../auth/permissions";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
@@ -37,20 +38,13 @@ interface UserUpdatePayload {
   role: Role;
 }
 
-const ROLE_KEYS: Record<Role, string> = {
-  SUPER_ADMIN: "common:roles.super_admin",
-  COMPANY_ADMIN: "common:roles.company_admin",
-  BUILDING_MANAGER: "common:roles.building_manager",
-  STAFF: "common:roles.staff",
-  CUSTOMER_USER: "common:roles.customer_user",
-};
 
 // Sprint 23B — STAFF deliberately left OUT of ALL_ROLES. STAFF users
 // are created via the Sprint 23A `StaffProfile` admin path; the
 // generic user form keeps its pre-23B options to avoid letting an
 // operator type-promote an existing user into STAFF without also
 // creating the matching profile and visibility rows. Display of an
-// already-STAFF user still works because ROLE_KEYS covers it above.
+// already-STAFF user still works because roleLabelKeyNs covers it.
 const ALL_ROLES: Role[] = [
   "SUPER_ADMIN",
   "COMPANY_ADMIN",
@@ -206,7 +200,7 @@ export function UserFormPage() {
           <p className="page-sub" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span className="cell-tag cell-tag-open">
               <i />
-              {t(ROLE_KEYS[role] ?? "common:roles.fallback")}
+              {t(roleLabelKeyNs(role))}
             </span>
             {user && !user.is_active && (
               <span className="cell-tag cell-tag-closed">
@@ -311,12 +305,12 @@ export function UserFormPage() {
                   {/* Always include the current role so a disabled select still shows it. */}
                   {!availableRoleOptions.includes(role) && (
                     <option value={role}>
-                      {t(ROLE_KEYS[role] ?? "common:roles.fallback")}
+                      {t(roleLabelKeyNs(role))}
                     </option>
                   )}
                   {availableRoleOptions.map((option) => (
                     <option key={option} value={option}>
-                      {t(ROLE_KEYS[option])}
+                      {t(roleLabelKeyNs(option))}
                     </option>
                   ))}
                 </select>
