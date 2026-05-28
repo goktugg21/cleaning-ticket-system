@@ -978,6 +978,24 @@ export interface Proposal {
   actions?: ProposalActions;
 }
 
+// Detail shape — extends the lean `Proposal` (which mirrors the LIST
+// serializer) with the nested `lines` array surfaced by
+// `extra_work.serializers.ProposalDetailSerializer.get_lines`. The
+// detail response is role-aware: provider operators receive
+// ProposalLineAdminSerializer rows (carry `internal_note`), customers
+// receive ProposalLineCustomerSerializer rows (omit `internal_note`).
+// The optional `internal_note` on ProposalLine reflects this — its
+// presence on the typed object is the role discriminator, not a
+// truthiness check on the value.
+//
+// Other detail-only fields (override_by/override_reason/override_at,
+// allowed_next_statuses, created_by/_email) are present on the wire
+// but not consumed by the frontend yet; left out so the type honestly
+// reflects what we use.
+export interface ProposalDetail extends Proposal {
+  lines: ProposalLine[];
+}
+
 // Mirrors backend `extra_work/serializers.py::ProposalDetailSerializer.get_actions`.
 // `can_view_proposal_pricing` (and the parallel `can_view_proposal_pdf`)
 // remain TRUE for an assigned BM whose

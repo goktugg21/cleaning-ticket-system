@@ -110,6 +110,7 @@
   "detail.routing_decision_instant": "Direct — tickets worden aangemaakt",
   "detail.routing_decision_proposal": "Voorstel — wacht op prijsbeoordeling",
 
+  "detail.proposal_lines_section_title": "Conceptvoorstel — regels",
   "detail.pricing_section_title": "Prijsvoorstel",
   "detail.pricing_empty": "Nog geen prijsregels.",
   "detail.pricing_column_description": "Omschrijving",

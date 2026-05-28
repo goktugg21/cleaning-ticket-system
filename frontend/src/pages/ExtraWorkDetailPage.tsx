@@ -62,6 +62,7 @@ import type {
   ExtraWorkUnitType,
   ExtraWorkUrgency,
   Proposal,
+  ProposalDetail,
   Role,
   ServiceUnitType,
   TicketList,
@@ -242,11 +243,12 @@ export function ExtraWorkDetailPage() {
   // active proposal for the PDF download button).
   const [proposals, setProposals] = useState<Proposal[]>([]);
   // Per-record proposal actions for the DRAFT proposal — needed to
-  // gate the new direct-publish button. The list endpoint above
-  // returns the lean serializer (no `actions`); we fetch the detail
+  // gate the new direct-publish button AND the read-only proposal-
+  // lines section. The list endpoint above returns the lean
+  // serializer (no `actions`, no `lines`); we fetch the detail
   // separately for the draft when one exists.
   const [draftProposalDetail, setDraftProposalDetail] =
-    useState<Proposal | null>(null);
+    useState<ProposalDetail | null>(null);
   // Direct-publish flow state.
   const [directPublishOpen, setDirectPublishOpen] = useState(false);
   const [directPublishReason, setDirectPublishReason] = useState("");
@@ -1279,6 +1281,101 @@ export function ExtraWorkDetailPage() {
               )}
             </div>
           </div>
+
+          {/* Draft proposal lines — read-only display of the DRAFT
+              proposal's nested `lines` array. Gated on the per-record
+              `can_view_proposal_pricing` action so a viewer who cannot
+              meaningfully consume prices never sees the section. The
+              direct-publish button (right aside) is the only mutation
+              surface near this card; line editing / Send / Cancel /
+              Approve / Reject UI is deferred. The customer-vs-admin
+              `internal_note` distinction is driven by serializer
+              absence: ProposalLineCustomerSerializer omits the field,
+              so `"internal_note" in line` is the visibility signal,
+              NOT a truthiness check on the value. */}
+          {draftProposalDetail !== null &&
+            draftProposalDetail.actions?.can_view_proposal_pricing ===
+              true &&
+            draftProposalDetail.lines.length > 0 && (
+              <div
+                className="card"
+                style={{ marginBottom: 16 }}
+                data-testid="extra-work-proposal-lines-section"
+              >
+                <div className="form-section">
+                  <div className="form-section-title">
+                    {t("detail.proposal_lines_section_title")}
+                  </div>
+                  <table className="data-table ew-pricing-table">
+                    <thead>
+                      <tr>
+                        {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                          <th key={key}>{t(key)}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draftProposalDetail.lines.map((line) => {
+                        // Presence (not truthiness) is the role
+                        // discriminator: the customer serializer omits
+                        // `internal_note` entirely, so the key being
+                        // absent means we're on a customer payload and
+                        // must not render the field. When the key IS
+                        // present we still skip rendering when the
+                        // string is empty (cosmetic — an "internal: "
+                        // label with no content reads as broken).
+                        const adminPayload =
+                          Object.prototype.hasOwnProperty.call(
+                            line,
+                            "internal_note",
+                          );
+                        const internalNoteText = adminPayload
+                          ? line.internal_note ?? ""
+                          : "";
+                        const showInternalNote =
+                          adminPayload &&
+                          internalNoteText.trim().length > 0;
+                        const showExplanation =
+                          line.customer_explanation.trim().length > 0;
+                        return (
+                          <InvoiceLineRow
+                            key={line.id}
+                            lineKind="proposal"
+                            line={line}
+                            editable={false}
+                            rowTestId="extra-work-proposal-line-row"
+                            subLabel={
+                              showExplanation || showInternalNote ? (
+                                <>
+                                  {showExplanation && (
+                                    <span className="muted small">
+                                      {line.customer_explanation}
+                                    </span>
+                                  )}
+                                  {showInternalNote && (
+                                    <span
+                                      className="muted small"
+                                      style={{ fontStyle: "italic" }}
+                                    >
+                                      internal: {internalNoteText}
+                                    </span>
+                                  )}
+                                </>
+                              ) : undefined
+                            }
+                          />
+                        );
+                      })}
+                      <InvoiceLineTotalsRow
+                        subtotal={draftProposalDetail.subtotal_amount}
+                        vatAmount={draftProposalDetail.vat_amount}
+                        total={draftProposalDetail.total_amount}
+                      />
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
           {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders
               read-only when the EW has at least one ticket spawned

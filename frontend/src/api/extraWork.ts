@@ -16,6 +16,7 @@ import type {
   ExtraWorkStatusHistoryEntry,
   PaginatedResponse,
   Proposal,
+  ProposalDetail,
   TicketList,
 } from "./types";
 
@@ -170,15 +171,16 @@ export async function fetchProposalPdf(
 }
 
 // Proposal detail — the only response shape that carries the per-record
-// `actions` block (the list endpoint above returns the lean
-// `ProposalListSerializer` without it). Fetched separately when the EW
-// detail page needs to gate proposal-scoped controls (Send / Cancel /
-// Direct Publish / Edit Lines).
+// `actions` block AND the nested `lines` array (the list endpoint above
+// returns the lean `ProposalListSerializer` without either). Fetched
+// separately when the EW detail page needs to gate proposal-scoped
+// controls (Send / Cancel / Direct Publish / Edit Lines) or render the
+// proposal's pricing breakdown read-only.
 export async function getProposalDetail(
   ewId: number | string,
   proposalId: number,
-): Promise<Proposal> {
-  const response = await api.get<Proposal>(
+): Promise<ProposalDetail> {
+  const response = await api.get<ProposalDetail>(
     `/extra-work/${ewId}/proposals/${proposalId}/`,
   );
   return response.data;

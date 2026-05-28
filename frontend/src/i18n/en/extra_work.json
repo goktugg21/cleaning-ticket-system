@@ -110,6 +110,7 @@
   "detail.routing_decision_instant": "Instant — tickets being created",
   "detail.routing_decision_proposal": "Proposal — awaiting pricing review",
 
+  "detail.proposal_lines_section_title": "Draft proposal lines",
   "detail.pricing_section_title": "Pricing proposal",
   "detail.pricing_empty": "No pricing line items yet.",
   "detail.pricing_column_description": "Description",
