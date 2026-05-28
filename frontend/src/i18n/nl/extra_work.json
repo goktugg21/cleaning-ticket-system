@@ -79,6 +79,8 @@
   "result.heading": "Aanvraag ingediend",
   "result.instant_processing": "Uw bestelling wordt verwerkt — operationele tickets worden binnenkort aangemaakt.",
   "result.proposal_pending": "Uw aanvraag is verzonden voor prijsbeoordeling — u ontvangt bericht zodra een voorstel klaar is.",
+  "result.routing_breakdown": "{{contract}} van {{total}} regel(s) heeft een actieve contractprijs; {{needsProposal}} hebben prijs van de provider nodig.",
+  "result.cart_preview_title": "Ingediende winkelwagen",
   "result.back_to_list": "Terug naar Extra Werk",
   "result.view_request": "Bekijk deze aanvraag",
 
@@ -240,7 +242,23 @@
   "unit_type.square_meters": "m²",
   "unit_type.fixed": "Vaste prijs",
   "unit_type.item": "Per stuk",
-  "unit_type.other": "Anders"
+  "unit_type.other": "Anders",
+
+  "invoice_row.col_service": "Dienst",
+  "invoice_row.col_source": "Bron",
+  "invoice_row.col_quantity": "Aantal",
+  "invoice_row.col_unit": "Eenheid",
+  "invoice_row.col_unit_price": "Eenheidsprijs",
+  "invoice_row.col_vat_pct": "BTW %",
+  "invoice_row.col_subtotal": "Subtotaal",
+  "invoice_row.col_vat": "BTW",
+  "invoice_row.col_total": "Totaal",
+  "invoice_row.col_actions": "Acties",
+  "invoice_row.source.contract_price": "Contractprijs",
+  "invoice_row.source.agreed_price": "Afgesproken prijs",
+  "invoice_row.source.needs_proposal": "Op maat / voorstel nodig",
+  "invoice_row.action_edit": "Bewerken",
+  "invoice_row.action_remove": "Verwijderen"
 }
 
 

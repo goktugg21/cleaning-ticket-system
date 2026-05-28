@@ -766,6 +766,22 @@ export interface ExtraWorkRequestList {
 
 // Provider-side pricing line item — full shape with internal note.
 // Customer-side reads come back with internal_cost_note omitted.
+// Backend per-line pricing-source taxonomy emitted by every line-shape
+// serializer under extra_work (cart line, proposal line, ad-hoc pricing
+// line). Source of truth:
+// backend/extra_work/serializers.py — PRICE_SOURCE_* constants + the
+// `_classify_proposal_line_source()` helper + each get_price_source().
+//
+// Per-line-kind runtime narrowing (the backend never returns values
+// outside the listed sets for a given line kind):
+//   * ExtraWorkRequestItem (cart line)        -> "CONTRACT" | "NEEDS_PROPOSAL"
+//   * ProposalLine (proposal line, persisted) -> "CONTRACT" | "CUSTOM"
+//   * ExtraWorkPricingLineItem (free-form)    -> "CUSTOM" only
+//
+// The union type below carries all three values; the InvoiceLineRow
+// component enforces the per-kind subset via its lineKind prop.
+export type PriceSource = "CONTRACT" | "CUSTOM" | "NEEDS_PROPOSAL";
+
 export interface ExtraWorkPricingLineItem {
   id: number;
   description: string;
@@ -778,6 +794,14 @@ export interface ExtraWorkPricingLineItem {
   total: string;
   customer_visible_note: string;
   internal_cost_note?: string;
+  // Backend serializer emits these on every line shape. For free-form
+  // pricing lines (no service FK by construction) `price_source` is
+  // always "CUSTOM" and the contract fields are always null. Quoted by
+  // backend/extra_work/serializers.py — get_price_source / get_contract_*
+  // return PRICE_SOURCE_CUSTOM / None / None unconditionally.
+  price_source: PriceSource;
+  contract_unit_price: string | null;
+  contract_vat_pct: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -806,6 +830,51 @@ export interface ExtraWorkRequestItem {
   unit_type: ServiceUnitType;
   requested_date: string;
   customer_note: string;
+  // Per-line pricing-source fields. Cart lines have no persisted
+  // unit_price of their own; the backend live-resolves the customer's
+  // contract row at READ time. Runtime value set for cart lines is
+  // strictly {"CONTRACT", "NEEDS_PROPOSAL"} — see
+  // backend/extra_work/serializers.py::ExtraWorkRequestItemSerializer
+  // .get_price_source.
+  price_source: PriceSource;
+  contract_unit_price: string | null;
+  contract_vat_pct: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Mirrors backend `extra_work/serializers.py::ProposalLineAdminSerializer`
+// field-list at L1041-1064 verbatim. Persisted line on a Proposal.
+// `unit_price` + `vat_pct` are the operator-typed snapshot (NEVER mutated
+// on serializer read; see backend module docblock on snapshot rule).
+// `line_subtotal` / `line_vat` / `line_total` are backend-computed.
+// `price_source` runtime set for proposal lines is strictly
+// {"CONTRACT", "CUSTOM"}; classifier at L971-1020 returns those two
+// values only.
+export interface ProposalLine {
+  id: number;
+  proposal: number;
+  service: number | null;
+  service_name: string | null;
+  description: string;
+  quantity: string;
+  unit_type: ExtraWorkUnitType;
+  unit_price: string;
+  vat_pct: string;
+  customer_explanation: string;
+  // Provider-only. Customer-side ProposalLine reads omit this field
+  // (ProposalLineCustomerSerializer drops it). Optional here so a
+  // single type works for both reads; consumers MUST NOT rely on
+  // truthiness for the visibility decision — backend gating is the
+  // source of truth.
+  internal_note?: string;
+  is_approved_for_spawn: boolean;
+  line_subtotal: string;
+  line_vat: string;
+  line_total: string;
+  price_source: PriceSource;
+  contract_unit_price: string | null;
+  contract_vat_pct: string | null;
   created_at: string;
   updated_at: string;
 }

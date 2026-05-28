@@ -30,6 +30,8 @@ import type {
   PaginatedResponse,
   Service,
 } from "../api/types";
+import { InvoiceLineRow } from "../components/InvoiceLineRow";
+import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 
 
 interface ParentFormState {
@@ -397,6 +399,19 @@ export function CreateExtraWorkPage() {
   // ----- Result panel (read-only confirmation) -----
   if (result) {
     const isInstant = result.routing_decision === "INSTANT";
+    // Per-line breakdown for the routing-explanation banner. Each
+    // count is sourced from the BACKEND's per-line `price_source` —
+    // never inferred from labels / category names / client math. Cart
+    // lines only ever return "CONTRACT" or "NEEDS_PROPOSAL"
+    // (backend/extra_work/serializers.py::ExtraWorkRequestItemSerializer
+    // .get_price_source); any other value would be a bug.
+    const cartLineList = result.line_items ?? [];
+    const contractLineCount = cartLineList.filter(
+      (line) => line.price_source === "CONTRACT",
+    ).length;
+    const needsProposalLineCount = cartLineList.filter(
+      (line) => line.price_source === "NEEDS_PROPOSAL",
+    ).length;
     return (
       <div data-testid="extra-work-create-result">
         <div className="page-header">
@@ -422,6 +437,19 @@ export function CreateExtraWorkPage() {
               {isInstant
                 ? t("result.instant_processing")
                 : t("result.proposal_pending")}
+              {cartLineList.length > 0 && (
+                <div
+                  className="muted small"
+                  style={{ marginTop: 6 }}
+                  data-testid="extra-work-result-routing-breakdown"
+                >
+                  {t("result.routing_breakdown", {
+                    contract: contractLineCount,
+                    needsProposal: needsProposalLineCount,
+                    total: cartLineList.length,
+                  })}
+                </div>
+              )}
             </div>
             <div
               className="status-actions"
@@ -440,6 +468,54 @@ export function CreateExtraWorkPage() {
             </div>
           </div>
         </div>
+
+        {/* Cart-line preview. First consumer of InvoiceLineRow — uses
+            real persisted ExtraWorkRequestItem rows returned by the
+            create endpoint, with backend-driven `price_source` /
+            `contract_unit_price` / `contract_vat_pct`. NO frontend
+            inference; the Source column is whatever the backend says.
+
+            Totals row deliberately NOT rendered here: parent aggregates
+            (`subtotal_amount`, `vat_amount`, `total_amount`) DO exist on
+            the wire (backend/extra_work/serializers.py L461-463) but
+            they aggregate from `pricing_line_items`, not from cart
+            `line_items`. On a fresh post-submit cart they are
+            therefore "0.00" until provider pricing is built. Surfacing
+            zeros would mislead more than it informs; the EW-detail
+            consumer (later task) renders totals when pricing exists. */}
+        {cartLineList.length > 0 && (
+          <div className="card">
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("result.cart_preview_title")}
+              </div>
+              <div className="table-wrap">
+                <table
+                  className="data-table ew-pricing-table"
+                  data-testid="extra-work-result-cart-table"
+                >
+                  <thead>
+                    <tr>
+                      {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                        <th key={key}>{t(key)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cartLineList.map((line) => (
+                      <InvoiceLineRow
+                        key={line.id}
+                        lineKind="cart"
+                        line={line}
+                        editable={false}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

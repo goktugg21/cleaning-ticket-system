@@ -79,6 +79,8 @@
   "result.heading": "Request submitted",
   "result.instant_processing": "Your order is being processed — operational tickets will be created shortly.",
   "result.proposal_pending": "Your request has been sent for pricing review — you'll be notified when a proposal is ready.",
+  "result.routing_breakdown": "{{contract}} of {{total}} line(s) match an active contract price; {{needsProposal}} need provider pricing.",
+  "result.cart_preview_title": "Submitted cart",
   "result.back_to_list": "Back to Extra Work",
   "result.view_request": "View this request",
 
@@ -240,7 +242,23 @@
   "unit_type.square_meters": "m²",
   "unit_type.fixed": "Fixed price",
   "unit_type.item": "Per item",
-  "unit_type.other": "Other"
+  "unit_type.other": "Other",
+
+  "invoice_row.col_service": "Service",
+  "invoice_row.col_source": "Source",
+  "invoice_row.col_quantity": "Qty",
+  "invoice_row.col_unit": "Unit",
+  "invoice_row.col_unit_price": "Unit price",
+  "invoice_row.col_vat_pct": "VAT %",
+  "invoice_row.col_subtotal": "Subtotal",
+  "invoice_row.col_vat": "VAT",
+  "invoice_row.col_total": "Total",
+  "invoice_row.col_actions": "Actions",
+  "invoice_row.source.contract_price": "Contract price",
+  "invoice_row.source.agreed_price": "Agreed price",
+  "invoice_row.source.needs_proposal": "Custom / needs proposal",
+  "invoice_row.action_edit": "Edit",
+  "invoice_row.action_remove": "Remove"
 }
 
 

@@ -5576,5 +5576,100 @@ table.data-table {
   width: 100%;
 }
 
+/* ----- Invoice-row foundation (P0-1) ----------------------------- */
+/* Shared <tr> rendered by `InvoiceLineRow`. Layered on top of the
+   existing `.data-table` / `.ew-pricing-table` cell padding — those
+   classes still apply to the parent <table>, so this block only adds
+   alignment, the source-tag treatment, and the action-cluster wrap
+   discipline. Money + numeric columns get the right-align here so the
+   component doesn't have to inline `style={{ textAlign: "right" }}` on
+   every cell. */
 
+.invoice-line-row-num,
+.invoice-line-totals-row .invoice-line-row-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.invoice-line-row-money {
+  white-space: nowrap;
+}
+.invoice-line-row-total {
+  font-weight: 600;
+}
+.invoice-line-row-service,
+.invoice-line-row-source,
+.invoice-line-row-unit {
+  text-align: left;
+}
+.invoice-line-row-service-label {
+  word-break: break-word;
+}
 
+/* Source tag — small inline chip that visually distinguishes the
+   three labelling states. Reuses the existing `.cell-tag` vocabulary
+   only where the colour fits; otherwise stays neutral. */
+.invoice-line-row-source-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+.invoice-line-row-source-tag.invoice-line-row-source-contract {
+  background: var(--green-faint, var(--surface-2));
+  color: var(--text);
+  border-color: var(--border);
+}
+.invoice-line-row-source-tag.invoke-line-row-source-needs_proposal,
+.invoice-line-row-source-tag.invoice-line-row-source-needs_proposal {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* Actions cluster — buttons must wrap within the cell, never overflow
+   it. Same discipline as the override-button fix called out in P0-5.
+   On narrow viewports the table cell shrinks, the buttons wrap onto
+   the next line; the row grows in height rather than the buttons
+   bleeding into adjacent cells. */
+.invoice-line-row-actions-cluster {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.invoice-line-row-actions-cluster .btn {
+  min-width: 0;
+  max-width: 100%;
+}
+.invoice-line-row-actions {
+  text-align: right;
+  vertical-align: top;
+  white-space: normal;
+}
+
+/* Totals row reuses the existing `.ew-pricing-totals-row` border /
+   padding (still on the component tr); this block only emphasises the
+   "Subtotal" label cell so it reads as a summary anchor. */
+.invoice-line-totals-label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Responsive — at narrow viewports we let the parent .table-wrap (or
+   .responsive-table-wrap) provide horizontal scroll rather than
+   forcing the row to stack. Stacking a 10-column invoice row into a
+   labeled block would lose the visual alignment the operator relies
+   on for spot-checking totals; readable horizontal scroll wins. The
+   parent table should wrap with `.table-wrap` (already used by every
+   admin table) so this scroll surface is consistent. */
+
+/* --- End invoice-row foundation -------------------------------- */
