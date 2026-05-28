@@ -1668,7 +1668,7 @@ export function ExtraWorkDetailPage() {
                                     {overrideError}
                                   </div>
                                 )}
-                                <div className="override-card-footer">
+                                <div className="override-card-footer card-actions-cluster">
                                   <button
                                     type="button"
                                     className="btn btn-ghost btn-sm"
