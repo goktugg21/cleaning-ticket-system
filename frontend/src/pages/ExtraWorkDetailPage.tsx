@@ -1094,31 +1094,33 @@ export function ExtraWorkDetailPage() {
                     className="ew-pricing-add-form"
                     style={{ marginTop: 12 }}
                   >
-                    <div className="form-2col">
-                      <div className="field">
-                        <label
-                          className="field-label"
-                          htmlFor="pricing-description"
-                        >
-                          {t("detail.pricing_form_description")}
-                        </label>
-                        <input
-                          id="pricing-description"
-                          className="field-input"
-                          type="text"
-                          value={pricingForm.description}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              description: event.target.value,
-                            }))
-                          }
-                          placeholder={t(
-                            "detail.pricing_form_description_placeholder",
-                          )}
-                          required
-                        />
-                      </div>
+                    {/* Tier 1 — Description, full width. */}
+                    <div className="field">
+                      <label
+                        className="field-label"
+                        htmlFor="pricing-description"
+                      >
+                        {t("detail.pricing_form_description")}
+                      </label>
+                      <input
+                        id="pricing-description"
+                        className="field-input"
+                        type="text"
+                        value={pricingForm.description}
+                        onChange={(event) =>
+                          setPricingForm((c) => ({
+                            ...c,
+                            description: event.target.value,
+                          }))
+                        }
+                        placeholder={t(
+                          "detail.pricing_form_description_placeholder",
+                        )}
+                        required
+                      />
+                    </div>
+                    {/* Tier 2 — Unit | Quantity | Unit price | VAT %. */}
+                    <div className="ew-line-row">
                       <div className="field">
                         <label
                           className="field-label"
@@ -1145,9 +1147,7 @@ export function ExtraWorkDetailPage() {
                           ))}
                         </select>
                       </div>
-                    </div>
-                    <div className="form-2col">
-                      <div className="field">
+                      <div className="field ew-line-field-compact">
                         <label className="field-label" htmlFor="pricing-qty">
                           {t("detail.pricing_form_quantity")}
                         </label>
@@ -1190,9 +1190,7 @@ export function ExtraWorkDetailPage() {
                           required
                         />
                       </div>
-                    </div>
-                    <div className="form-2col">
-                      <div className="field">
+                      <div className="field ew-line-field-compact">
                         <label className="field-label" htmlFor="pricing-vat">
                           {t("detail.pricing_form_vat")}
                         </label>
@@ -1212,7 +1210,11 @@ export function ExtraWorkDetailPage() {
                           required
                         />
                       </div>
-                      <div className="field">
+                    </div>
+                    {/* Tier 3 — Customer-visible explanation |
+                        Internal cost note. */}
+                    <div className="ew-line-row">
+                      <div className="field ew-line-field-grow">
                         <label
                           className="field-label"
                           htmlFor="pricing-customer-note"
@@ -1235,30 +1237,31 @@ export function ExtraWorkDetailPage() {
                           )}
                         />
                       </div>
+                      <div className="field ew-line-field-grow">
+                        <label
+                          className="field-label"
+                          htmlFor="pricing-internal-note"
+                        >
+                          {t("detail.pricing_form_internal_note")}
+                        </label>
+                        <input
+                          id="pricing-internal-note"
+                          className="field-input"
+                          type="text"
+                          value={pricingForm.internal_cost_note}
+                          onChange={(event) =>
+                            setPricingForm((c) => ({
+                              ...c,
+                              internal_cost_note: event.target.value,
+                            }))
+                          }
+                          placeholder={t(
+                            "detail.pricing_form_internal_note_placeholder",
+                          )}
+                        />
+                      </div>
                     </div>
-                    <div className="field">
-                      <label
-                        className="field-label"
-                        htmlFor="pricing-internal-note"
-                      >
-                        {t("detail.pricing_form_internal_note")}
-                      </label>
-                      <input
-                        id="pricing-internal-note"
-                        className="field-input"
-                        type="text"
-                        value={pricingForm.internal_cost_note}
-                        onChange={(event) =>
-                          setPricingForm((c) => ({
-                            ...c,
-                            internal_cost_note: event.target.value,
-                          }))
-                        }
-                        placeholder={t(
-                          "detail.pricing_form_internal_note_placeholder",
-                        )}
-                      />
-                    </div>
+                    {/* Tier 4 — Add-pricing-line button, right-aligned. */}
                     <div
                       style={{
                         display: "flex",

@@ -787,28 +787,119 @@ export function CreateExtraWorkPage() {
               <div
                 key={line.tempId}
                 data-testid="extra-work-create-cart-line"
-                className="card"
-                style={{
-                  padding: 12,
-                  marginBottom: 10,
-                  background: "transparent",
-                  border: "1px solid var(--border, #e5e7eb)",
-                }}
+                className="ew-line-row ew-line-row-card"
               >
                 <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: 8,
-                  }}
+                  className="field ew-line-field-grow"
+                  data-testid={`extra-work-create-cart-line-${index}`}
                 >
-                  <div
-                    style={{ fontWeight: 600 }}
-                    data-testid={`extra-work-create-cart-line-${index}`}
+                  <label
+                    className="field-label"
+                    htmlFor={`ew-line-service-${index}`}
                   >
-                    #{index + 1}
-                  </div>
+                    {t("create.line_field_service")}
+                  </label>
+                  <select
+                    id={`ew-line-service-${index}`}
+                    data-testid={`extra-work-create-line-service-${index}`}
+                    className="field-select"
+                    value={line.serviceId}
+                    onChange={(event) =>
+                      updateCartLine(
+                        line.tempId,
+                        "serviceId",
+                        event.target.value,
+                      )
+                    }
+                    required
+                  >
+                    <option value="" disabled>
+                      {t("create.line_field_service_placeholder")}
+                    </option>
+                    {services.map((svc) => (
+                      <option key={svc.id} value={svc.id}>
+                        {svc.category_name
+                          ? `${svc.category_name} — ${svc.name}`
+                          : svc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field ew-line-field-compact">
+                  <label
+                    className="field-label"
+                    htmlFor={`ew-line-quantity-${index}`}
+                  >
+                    {t("create.line_field_quantity")}
+                  </label>
+                  <input
+                    id={`ew-line-quantity-${index}`}
+                    data-testid={`extra-work-create-line-quantity-${index}`}
+                    className="field-input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={line.quantity}
+                    onChange={(event) =>
+                      updateCartLine(
+                        line.tempId,
+                        "quantity",
+                        event.target.value,
+                      )
+                    }
+                    required
+                  />
+                </div>
+                <div className="field ew-line-field-medium">
+                  <label
+                    className="field-label"
+                    htmlFor={`ew-line-date-${index}`}
+                  >
+                    {t("create.line_field_requested_date")}
+                  </label>
+                  <input
+                    id={`ew-line-date-${index}`}
+                    data-testid={`extra-work-create-line-date-${index}`}
+                    className="field-input"
+                    type="date"
+                    value={line.requestedDate}
+                    onChange={(event) =>
+                      updateCartLine(
+                        line.tempId,
+                        "requestedDate",
+                        event.target.value,
+                      )
+                    }
+                    required
+                  />
+                </div>
+                <div className="field ew-line-field-grow">
+                  <label
+                    className="field-label"
+                    htmlFor={`ew-line-note-${index}`}
+                  >
+                    {t("create.line_field_customer_note")}
+                  </label>
+                  <input
+                    id={`ew-line-note-${index}`}
+                    data-testid={`extra-work-create-line-note-${index}`}
+                    className="field-input"
+                    type="text"
+                    maxLength={500}
+                    placeholder={t(
+                      "create.line_field_customer_note_placeholder",
+                    )}
+                    value={line.customerNote}
+                    onChange={(event) =>
+                      updateCartLine(
+                        line.tempId,
+                        "customerNote",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </div>
+                <div className="ew-line-row-actions">
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
@@ -820,119 +911,6 @@ export function CreateExtraWorkPage() {
                       {t("create.remove_line_button")}
                     </span>
                   </button>
-                </div>
-
-                <div className="form-2col">
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor={`ew-line-service-${index}`}
-                    >
-                      {t("create.line_field_service")}
-                    </label>
-                    <select
-                      id={`ew-line-service-${index}`}
-                      data-testid={`extra-work-create-line-service-${index}`}
-                      className="field-select"
-                      value={line.serviceId}
-                      onChange={(event) =>
-                        updateCartLine(
-                          line.tempId,
-                          "serviceId",
-                          event.target.value,
-                        )
-                      }
-                      required
-                    >
-                      <option value="" disabled>
-                        {t("create.line_field_service_placeholder")}
-                      </option>
-                      {services.map((svc) => (
-                        <option key={svc.id} value={svc.id}>
-                          {svc.category_name
-                            ? `${svc.category_name} — ${svc.name}`
-                            : svc.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor={`ew-line-quantity-${index}`}
-                    >
-                      {t("create.line_field_quantity")}
-                    </label>
-                    <input
-                      id={`ew-line-quantity-${index}`}
-                      data-testid={`extra-work-create-line-quantity-${index}`}
-                      className="field-input"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={line.quantity}
-                      onChange={(event) =>
-                        updateCartLine(
-                          line.tempId,
-                          "quantity",
-                          event.target.value,
-                        )
-                      }
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="form-2col">
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor={`ew-line-date-${index}`}
-                    >
-                      {t("create.line_field_requested_date")}
-                    </label>
-                    <input
-                      id={`ew-line-date-${index}`}
-                      data-testid={`extra-work-create-line-date-${index}`}
-                      className="field-input"
-                      type="date"
-                      value={line.requestedDate}
-                      onChange={(event) =>
-                        updateCartLine(
-                          line.tempId,
-                          "requestedDate",
-                          event.target.value,
-                        )
-                      }
-                      required
-                    />
-                  </div>
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor={`ew-line-note-${index}`}
-                    >
-                      {t("create.line_field_customer_note")}
-                    </label>
-                    <input
-                      id={`ew-line-note-${index}`}
-                      data-testid={`extra-work-create-line-note-${index}`}
-                      className="field-input"
-                      type="text"
-                      maxLength={500}
-                      placeholder={t(
-                        "create.line_field_customer_note_placeholder",
-                      )}
-                      value={line.customerNote}
-                      onChange={(event) =>
-                        updateCartLine(
-                          line.tempId,
-                          "customerNote",
-                          event.target.value,
-                        )
-                      }
-                    />
-                  </div>
                 </div>
               </div>
             ))}

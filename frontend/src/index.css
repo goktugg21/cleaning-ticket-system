@@ -5185,8 +5185,73 @@ table.data-table {
 .ew-pricing-add-form .form-2col + .form-2col,
 .ew-pricing-add-form .form-2col + .field,
 .ew-pricing-add-form .field + .form-2col,
-.ew-pricing-add-form .field + .field {
+.ew-pricing-add-form .field + .field,
+.ew-pricing-add-form .ew-line-row + .ew-line-row,
+.ew-pricing-add-form .ew-line-row + .field,
+.ew-pricing-add-form .field + .ew-line-row {
   margin-top: 14px;
+}
+
+/* ----- Horizontal compose-line row (Phase 1) ---------------------- */
+/* Shared pattern for INPUT form-line rows used by:
+     * CreateExtraWorkPage cart line composer (per-line card),
+     * ExtraWorkDetailPage `.ew-pricing-add-form` provider proposal
+       composer (three tiers — Description, Unit/Qty/Price/VAT,
+       Notes).
+   Fields keep their existing `.field` / `.field-label` /
+   `.field-input` / `.field-select` markup; this class only
+   arranges them as a single horizontal row on desktop that wraps
+   to a single-column stack on mobile (<= 760px). The grow /
+   medium / compact modifiers control which fields get extra space
+   (Service, Note, Description) versus which stay narrow
+   (Quantity, Unit, VAT %). The action slot (Remove / Add button)
+   hugs its content and aligns to the input baseline. This is a
+   layout overlay — field bindings, validation, and submit payload
+   shapes are untouched. */
+.ew-line-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.ew-line-row > .field {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.ew-line-row > .field.ew-line-field-grow {
+  flex: 2 1 200px;
+}
+.ew-line-row > .field.ew-line-field-medium {
+  flex: 0 1 170px;
+}
+.ew-line-row > .field.ew-line-field-compact {
+  flex: 0 1 120px;
+}
+.ew-line-row > .ew-line-row-actions {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  padding-bottom: 2px;
+}
+@media (max-width: 760px) {
+  .ew-line-row > .field,
+  .ew-line-row > .field.ew-line-field-grow,
+  .ew-line-row > .field.ew-line-field-medium,
+  .ew-line-row > .field.ew-line-field-compact,
+  .ew-line-row > .ew-line-row-actions {
+    flex: 1 1 100%;
+  }
+}
+/* Cart-line wrapper retains the existing per-line soft card look. */
+.ew-line-row-card {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  padding: 12px;
+  background: transparent;
+}
+.ew-line-row-card + .ew-line-row-card {
+  margin-top: 10px;
 }
 
 /* ----- "Show technical keys" toggle (Permissions page) ------------ */
