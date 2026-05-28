@@ -4679,15 +4679,10 @@ table.data-table {
   overflow-x: auto;
   overflow-y: visible;
   border-radius: 10px;
-  /* Right-side breathing room INSIDE the wrapper so the rightmost
-     rotated label ("manage permissions" / "locatie goedkeuren")
-     can extend past its column's right edge without poking out of
-     the rounded frame and without triggering horizontal scroll.
-     The label's horizontal projection at -45deg is ~70px from its
-     pivot at column centre; with column widths in the 60-90px
-     range the overflow past the column right edge is ~25-45px,
-     comfortably inside this 60px buffer. */
-  padding-right: 60px;
+  /* No right-side padding — column headers are plain horizontal
+     two-line text that wraps inside its own column, so nothing
+     projects past the rightmost column's right edge. The table
+     fills the wrapper's content width exactly. */
 }
 .permissions-matrix-table {
   /* `width: 100%` + `table-layout: fixed` makes the table fill the
@@ -4695,10 +4690,9 @@ table.data-table {
      space equally among the 16 permission columns (the three frozen
      identity columns keep their fixed 120 / 100 / 160 widths via
      the sticky-* rules below). Each permission column = (wrapper
-     content width - 60px padding-right - 380px frozen) / 16,
-     typically 55-95px depending on viewport. No horizontal scroll
-     because the table is sized to fit the container, not to its
-     content. */
+     content width - 380px frozen) / 16, typically 38-95px depending
+     on viewport. No horizontal scroll because the table is sized
+     to fit the container, not to its content. */
   width: 100%;
   table-layout: fixed;
   border-collapse: separate;
@@ -4736,68 +4730,55 @@ table.data-table {
 .permissions-matrix-group-extra_work { color: var(--orange, var(--green-2)); }
 .permissions-matrix-group-users      { color: var(--text-2); }
 
-/* 45°-angled column-header treatment over wide, table-layout-fixed
-   columns. The 16 permission cells in the angled-key row have no
-   explicit width, so `table-layout: fixed` on `.permissions-matrix-
-   table` distributes the available horizontal space (table_width −
-   380px for the three frozen identity columns) equally among them.
-   Each cell positions a rotated label span anchored at the column's
-   bottom-centre and rotates it -45deg so it reads up-and-right from
-   that anchor — the BOTTOM of the label sits directly over the
-   column it labels.
-
-   The cell is forced to `position: relative; z-index: auto` to
-   OVERRIDE the base `.permissions-matrix-table thead th { position:
-   sticky; z-index: 1 }`. `position: sticky` always forms a stacking
-   context regardless of z-index, and a stacking context on the cell
-   would TRAP the absolutely-positioned label inside it — sibling
-   cells' opaque var(--surface-2) backgrounds would then composite
-   on top of the previous cell's rotated overflow (visible result:
-   every label except the rightmost gets clipped at its own cell's
-   right edge). Swapping to `position: relative; z-index: auto`
-   breaks the cell's stacking context so the label's own
-   `z-index: 2` applies in the table's ancestor stacking context —
-   labels render above sibling cells (which paint at step 6 with
-   z-auto) and below the frozen-sticky cells (z: 3), which keeps
-   horizontal scroll behaviour intact. */
+/* Plain horizontal two-line column-header treatment. Replaces the
+   earlier 45°-angled-label design. The i18n short label is split
+   in TSX on its FIRST space into two `.permissions-matrix-key-
+   line` block spans, so every two-word header renders as exactly
+   two stacked lines (word1 top, word2 bottom) — consistent across
+   "view own", "view location", "approve own", "approve location",
+   "assign role", "manage permissions", and their NL equivalents.
+   Single-word labels ("create", "invite", "manage", NL "aanmaken"
+   / "beheren" / "uitnodigen" / "rechten" / "locatie") render as
+   one line. No rotation, no absolute positioning. The header row
+   grows naturally to fit the tallest (two-line) label, and every
+   label sits centred directly above its column of bubbles. The
+   `vertical-align: bottom` on the cell + the natural baseline of
+   the last line keeps single-line labels and the SECOND line of
+   two-line labels sharing the same bottom baseline — the row
+   reads as a tidy block. `word-break: normal; overflow-wrap:
+   normal` is load-bearing: it guarantees no word ever breaks
+   mid-character (no "permis…ions" splits) — if a single word is
+   genuinely wider than its column on a narrow viewport, it
+   overflows whole rather than fracturing. */
 .permissions-matrix-key-header {
   text-align: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-muted);
-}
-.permissions-matrix-table thead th.permissions-matrix-key-header-angled {
-  padding: 0;
-  position: relative;
-  z-index: auto;
-}
-.permissions-matrix-key-header-angled {
+  line-height: 1.15;
   vertical-align: bottom;
-  overflow: visible;
-}
-/* Forces the angled-row cells to 100px tall — enough to fit the
-   longest label ("manage permissions" / "locatie goedkeuren",
-   18 chars × ~5.5px sans ≈ 99px text width → ~70px vertical
-   projection at -45deg) plus the 8px bottom offset, with headroom
-   above. Absolutely-positioned children do not contribute to flow
-   height, so a block-level pseudo with explicit height is required
-   to give the cell its height. */
-.permissions-matrix-key-header-angled::before {
-  content: "";
-  display: block;
-  height: 100px;
+  padding: 8px 3px;
 }
 .permissions-matrix-key-short {
-  display: inline-block;
-  position: absolute;
-  bottom: 8px;
-  left: 50%;
-  transform: rotate(-45deg);
-  transform-origin: bottom left;
-  white-space: nowrap;
+  display: block;
+  word-break: normal;
+  overflow-wrap: normal;
   letter-spacing: 0.01em;
-  line-height: 1;
-  z-index: 2;
+}
+.permissions-matrix-key-line {
+  display: block;
+}
+
+/* Subtle vertical group divider. Applied (via the `permissions-
+   matrix-group-start` class added in TSX) to the FIRST column of
+   the Extra Work group (the 7th permission column) and the FIRST
+   column of the Users group (the 13th permission column), on
+   BOTH the header cell AND every body cell of that column so the
+   hairline runs the full matrix height. The first Tickets column
+   doesn't need this because it already sits flush against the
+   Role frozen seam's right-edge shadow. */
+.permissions-matrix-table .permissions-matrix-group-start {
+  border-left: 1px solid var(--border);
 }
 
 /* Frozen identity columns: User | Actions | Role.
@@ -5557,6 +5538,47 @@ table.data-table {
    page. The `.ew-pricing-totals-row` carries a stronger top border
    and extra vertical padding so the subtotal/VAT/total line reads
    as a summary rather than yet another data row. */
+
+/* Fixed column geometry. Without this, each `.ew-pricing-table`
+   instance auto-sizes its columns to its OWN content — Requested
+   services (cart kind, every numeric cell rendered as an em-dash
+   placeholder) gets narrow numeric columns; Pricing proposal
+   (with values like "€1,000.00" / "€1,270.50") gets wide ones —
+   so the same column (UNIT PRICE, TOTAL, ...) starts at a
+   DIFFERENT x in each table, and stacked vertically on the page
+   the columns drift apart. `table-layout: fixed` + explicit
+   per-column widths force every `.ew-pricing-table` instance to
+   share the same geometry, so the same column starts at the same
+   x in Requested services, Pricing proposal, AND the cart preview
+   on CreateExtraWorkPage. The totals row's `<td colSpan={4}>`
+   spans the sum of columns 1-4 widths (48%), and its remaining
+   per-column cells slot into the established column tracks.
+
+   Widths target the canonical 10-column order in
+   `frontend/src/components/invoiceLineColumns.ts` via `:nth-child`
+   on the header row — `table-layout: fixed` reads column widths
+   from the first row, so setting them on `thead th` is sufficient
+   (body rows inherit the column tracks; this also lets the totals
+   row's colSpan cell take the natural 48% sum without competing
+   with a per-cell width). Sum = 100%. Each numeric column is
+   wide enough to fit "€1,270.50" on one line, SOURCE is wide
+   enough for the "Custom / needs proposal" chip without wrapping,
+   SERVICE has the largest share for the service label + the
+   small sublabel underneath. */
+.ew-pricing-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.ew-pricing-table thead th:nth-child(1)  { width: 18%; } /* SERVICE */
+.ew-pricing-table thead th:nth-child(2)  { width: 16%; } /* SOURCE */
+.ew-pricing-table thead th:nth-child(3)  { width: 5%; }  /* QTY */
+.ew-pricing-table thead th:nth-child(4)  { width: 9%; }  /* UNIT */
+.ew-pricing-table thead th:nth-child(5)  { width: 9%; }  /* UNIT PRICE */
+.ew-pricing-table thead th:nth-child(6)  { width: 6%; }  /* VAT % */
+.ew-pricing-table thead th:nth-child(7)  { width: 9%; }  /* SUBTOTAL */
+.ew-pricing-table thead th:nth-child(8)  { width: 9%; }  /* VAT */
+.ew-pricing-table thead th:nth-child(9)  { width: 10%; } /* TOTAL */
+.ew-pricing-table thead th:nth-child(10) { width: 9%; }  /* ACTIONS */
 .ew-pricing-table th,
 .ew-pricing-table td {
   padding: 12px 14px;
@@ -5565,6 +5587,57 @@ table.data-table {
   padding-top: 16px;
   padding-bottom: 16px;
   border-top: 1px solid var(--border);
+}
+/* CENTER every cell (header AND body, every column) in the EW
+   invoice tables. Iterating on left/right alignment per column
+   exposed too many header-vs-body edge mismatches (notably ACTIONS
+   header left vs Remove button right; SERVICE / SOURCE label
+   widths putting the label's centre tens of px off the header's
+   centre, etc.). Centering both sides guarantees header-centre ==
+   body-centre by construction — no edge can drift.
+
+   InvoiceLineRow (.invoice-line-row-num / -service / -source /
+   -unit / -actions) is only ever rendered inside a
+   `<table className="data-table ew-pricing-table">` — verified
+   across ExtraWorkDetailPage's 3 tables + CreateExtraWorkPage's
+   cart-preview — so scoping these centering rules to
+   `.ew-pricing-table` doesn't risk collateral damage elsewhere.
+
+   Specificity reasoning:
+     • `.data-table thead th { text-align: left }` (0,1,2) →
+       `.ew-pricing-table thead th` (0,1,2). Equal — mine comes
+       later in the file, source order wins.
+     • `.invoice-line-row-num | -service | -source | -unit |
+       -actions { text-align: ... }` (0,1,0) →
+       `.ew-pricing-table tbody td` (0,1,2). Mine wins.
+     • `.invoice-line-row-actions-cluster
+       { justify-content: flex-end }` (0,1,0) →
+       `.ew-pricing-table .invoice-line-row-actions-cluster`
+       (0,2,0). Mine wins.
+
+   Columns affected: every numeric (QTY / UNIT PRICE / VAT % /
+   SUBTOTAL / VAT / TOTAL), every text (SERVICE / SOURCE / UNIT),
+   ACTIONS, and the totals row's Subtotal label + amount cells. */
+.ew-pricing-table thead th,
+.ew-pricing-table tbody td {
+  text-align: center;
+}
+/* The totals row's `<td>`s also carry `.invoice-line-row-num`,
+   which the Invoice-row foundation rule below targets with
+   `.invoice-line-totals-row .invoice-line-row-num` (specificity
+   0,2,0) for right-alignment — that beats the blanket `.ew-pricing-
+   table tbody td` (0,1,2). Re-declare at (0,3,2) so the totals
+   row's Subtotal label + amount cells centre under their headers
+   the same way the line-row cells do. */
+.ew-pricing-table tbody .invoice-line-totals-row .invoice-line-row-num {
+  text-align: center;
+}
+/* The Remove / Edit button cluster's `justify-content: flex-end`
+   would otherwise pin the buttons to the cell's right edge under a
+   centred ACTIONS header. Override to centre here so buttons sit
+   on the column's vertical centre line. */
+.ew-pricing-table .invoice-line-row-actions-cluster {
+  justify-content: center;
 }
 
 /* ----- Extra Work pricing add-form spacing (Sprint 29 Batch 29.2) - */

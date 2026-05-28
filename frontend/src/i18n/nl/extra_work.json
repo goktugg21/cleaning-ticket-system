@@ -130,7 +130,7 @@
   "detail.pricing_form_unit_price": "Eenheidsprijs",
   "detail.pricing_form_vat": "BTW %",
   "detail.pricing_form_customer_note": "Voor klant zichtbare toelichting",
-  "detail.pricing_form_customer_note_placeholder": "Wordt aan de klant getoond naast deze regel",
+  "detail.pricing_form_customer_note_placeholder": "Zichtbaar voor de klant",
   "detail.pricing_form_internal_note": "Interne kostenopmerking (alleen aanbieder)",
   "detail.pricing_form_internal_note_placeholder": "Wordt nooit aan de klant getoond",
   "detail.pricing_form_submit": "Prijsregel toevoegen",
