@@ -5329,30 +5329,55 @@ table.data-table {
   color: var(--green-2, var(--green));
   margin-bottom: 8px;
 }
-/* ExtraWorkDetailPage header action cluster — replaces the right-hand
-   `.ew-detail-aside` action stack. Sits inside the `<PageHeader>`'s
-   `actions` slot (which is already right-aligned by `.page-header`'s
-   `justify-content: space-between`). This rule only controls the
-   inner button layout. Buttons wrap to multiple lines on narrow
-   widths instead of overflowing the header. */
-.ew-detail-header-actions {
+/* ExtraWorkDetailPage top row — Details card (left, larger share) +
+   Workflow card (right, smaller share), side by side, spanning the
+   full content width. Replaces the brief header-actions cluster
+   from commit 04bf53b and the original right-hand `.ew-detail-aside`
+   stack. The Workflow card stays at least 240px wide so its full-
+   width buttons stay readable; on viewports <=1024px the grid
+   collapses to a single column (Workflow card drops below Details). */
+.ew-detail-top-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+  /* `stretch` (the grid default) makes the Workflow card grow to
+     the same height as the taller Details card so their bottom
+     edges align. The Workflow card's content stays anchored at the
+     top via its default block flow (the `.form-section` doesn't
+     stretch — only the card box does, so the extra height is empty
+     surface below the buttons). */
+  align-items: stretch;
+}
+@media (max-width: 1024px) {
+  .ew-detail-top-row {
+    grid-template-columns: 1fr;
+  }
+}
+/* Workflow card — single card with stacked, full-width buttons. The
+   `ew-detail-actions-section-title` heading (small green uppercase)
+   is the same one the original aside cards used. The provider-
+   override two-press flow renders its reason form INLINE inside the
+   `workflow-override-target` wrapper next to the armed button (the
+   wrapper is a flex column so the form sits directly under its
+   triggering button). */
+.ew-workflow-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
-.ew-detail-header-actions > .workflow-override-target {
-  display: inline-flex;
-  align-items: center;
+.ew-workflow-actions > .btn {
+  width: 100%;
+  justify-content: center;
 }
-/* Provider-override armed-state banner — renders below `<PageHeader>`
-   when the provider has armed an Approve or Reject override decision
-   (two-press confirmation). Holds the mandatory-reason textarea +
-   Cancel/Confirm pair. The left-edge accent distinguishes it from
-   regular content cards. */
-.ew-override-banner {
-  border-left: 4px solid var(--green-2, var(--green));
+.ew-workflow-actions > .workflow-override-target {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ew-workflow-actions > .workflow-override-target > .btn {
+  width: 100%;
+  justify-content: center;
 }
 .ew-detail-header-meta {
   display: inline-flex;

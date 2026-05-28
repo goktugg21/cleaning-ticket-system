@@ -568,7 +568,13 @@ export function CreateExtraWorkPage() {
         </div>
       )}
 
-      <form className="create-layout" onSubmit={handleSubmit}>
+      {/* Full-width form — the previous `.create-layout` class wrapped
+          this form in a `1fr 300px` grid that reserved an empty right
+          column (there is no `.create-side` on this page), leaving
+          ~320px of grey space on the right of the form. The form is
+          now a plain block; the inner `.create-main` card still owns
+          the vertical flow of form-sections. */}
+      <form onSubmit={handleSubmit}>
         <div className="card create-main">
           <div className="form-section">
             <div className="form-section-title">
