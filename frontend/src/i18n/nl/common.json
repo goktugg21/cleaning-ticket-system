@@ -231,6 +231,7 @@
 
   "admin.create_new": "Nieuw aanmaken",
   "admin.edit": "Bewerken",
+  "admin.view": "Bekijken",
   "admin.status_active": "Actief",
   "admin.status_inactive": "Inactief",
   "admin.status_all": "Alle",

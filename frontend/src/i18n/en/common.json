@@ -231,6 +231,7 @@
 
   "admin.create_new": "Create new",
   "admin.edit": "Edit",
+  "admin.view": "View",
   "admin.status_active": "Active",
   "admin.status_inactive": "Inactive",
   "admin.status_all": "All",

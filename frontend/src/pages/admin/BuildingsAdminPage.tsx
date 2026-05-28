@@ -259,6 +259,7 @@ export function BuildingsAdminPage() {
             <tbody>
               {buildings.map((building) => {
                 const detailPath = `/admin/buildings/${building.id}`;
+                const editPath = `${detailPath}/edit`;
                 const openDetail = () => navigate(detailPath);
                 return (
                   <tr
@@ -266,7 +267,7 @@ export function BuildingsAdminPage() {
                     className="admin-row-clickable"
                     role="link"
                     tabIndex={0}
-                    aria-label={t("admin.edit") + ": " + building.name}
+                    aria-label={t("admin.view") + ": " + building.name}
                     onClick={openDetail}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
@@ -296,7 +297,8 @@ export function BuildingsAdminPage() {
                     <td>
                       <Link
                         className="btn btn-ghost btn-sm"
-                        to={detailPath}
+                        to={editPath}
+                        onClick={(event) => event.stopPropagation()}
                       >
                         {t("admin.edit")}
                       </Link>

@@ -207,6 +207,7 @@ export function CompaniesAdminPage() {
             <tbody>
               {companies.map((company) => {
                 const detailPath = `/admin/companies/${company.id}`;
+                const editPath = `${detailPath}/edit`;
                 const openDetail = () => navigate(detailPath);
                 return (
                   <tr
@@ -214,7 +215,7 @@ export function CompaniesAdminPage() {
                     className="admin-row-clickable"
                     role="link"
                     tabIndex={0}
-                    aria-label={t("admin.edit") + ": " + company.name}
+                    aria-label={t("admin.view") + ": " + company.name}
                     onClick={openDetail}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
@@ -242,7 +243,8 @@ export function CompaniesAdminPage() {
                     <td>
                       <Link
                         className="btn btn-ghost btn-sm"
-                        to={detailPath}
+                        to={editPath}
+                        onClick={(event) => event.stopPropagation()}
                       >
                         {t("admin.edit")}
                       </Link>

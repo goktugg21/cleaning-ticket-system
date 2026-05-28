@@ -161,25 +161,26 @@ export function UsersAdminPage() {
   // share the same row rendering for the provider and customer
   // partitions.
   function renderUserRow(user: UserAdmin) {
-    const editPath = `/admin/users/${user.id}`;
-    const openEdit = () => navigate(editPath);
+    const detailPath = `/admin/users/${user.id}`;
+    const editPath = `${detailPath}/edit`;
+    const openDetail = () => navigate(detailPath);
     return (
       <tr
         key={user.id}
         className="admin-row-clickable"
         role="link"
         tabIndex={0}
-        aria-label={t("admin.edit") + ": " + user.email}
-        onClick={openEdit}
+        aria-label={t("admin.view") + ": " + user.email}
+        onClick={openDetail}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            openEdit();
+            openDetail();
           }
         }}
       >
         <td className="td-subject">
-          <Link to={editPath}>{user.email}</Link>
+          <Link to={detailPath}>{user.email}</Link>
         </td>
         <td>{user.full_name || "—"}</td>
         <td data-testid="user-row-role" data-role={user.role}>
@@ -200,7 +201,11 @@ export function UsersAdminPage() {
           </span>
         </td>
         <td>
-          <Link className="btn btn-ghost btn-sm" to={editPath}>
+          <Link
+            className="btn btn-ghost btn-sm"
+            to={editPath}
+            onClick={(event) => event.stopPropagation()}
+          >
             {t("admin.edit")}
           </Link>
         </td>

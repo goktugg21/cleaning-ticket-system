@@ -311,25 +311,26 @@ export function CustomersAdminPage() {
             </thead>
             <tbody>
               {customers.map((customer) => {
-                const editPath = `/admin/customers/${customer.id}`;
-                const openEdit = () => navigate(editPath);
+                const detailPath = `/admin/customers/${customer.id}`;
+                const editPath = `${detailPath}/edit`;
+                const openDetail = () => navigate(detailPath);
                 return (
                   <tr
                     key={customer.id}
                     className="admin-row-clickable"
                     role="link"
                     tabIndex={0}
-                    aria-label={t("admin.edit") + ": " + customer.name}
-                    onClick={openEdit}
+                    aria-label={t("admin.view") + ": " + customer.name}
+                    onClick={openDetail}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        openEdit();
+                        openDetail();
                       }
                     }}
                   >
                     <td className="td-subject">
-                      <Link to={editPath}>{customer.name}</Link>
+                      <Link to={detailPath}>{customer.name}</Link>
                     </td>
                     <td>{companyName(customer.company)}</td>
                     <td>{buildingName(customer.building)}</td>
@@ -348,6 +349,7 @@ export function CustomersAdminPage() {
                       <Link
                         className="btn btn-ghost btn-sm"
                         to={editPath}
+                        onClick={(event) => event.stopPropagation()}
                       >
                         {t("admin.edit")}
                       </Link>
