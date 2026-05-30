@@ -173,23 +173,54 @@ export function PermissionsMatrix(props: PermissionsMatrixProps) {
                 frozen User | Actions | Role columns when needed —
                 the angle just shrinks how wide it has to be. */}
             <tr className="permissions-matrix-head-keys">
-              {(["tickets", "extra_work", "users"] as const).flatMap((group) =>
-                groupedKeys[group].map((row) => (
-                  <th
-                    key={row.key}
-                    className="permissions-matrix-key-header permissions-matrix-key-header-angled"
-                    title={t(
-                      `customer_permissions.permission_keys.${row.key}.label`,
-                    )}
-                    scope="col"
-                  >
-                    <span className="permissions-matrix-key-short">
-                      {t(
-                        `customer_permissions.matrix.key_short.${row.key}`,
-                      )}
-                    </span>
-                  </th>
-                )),
+              {(["tickets", "extra_work", "users"] as const).flatMap(
+                (group, groupIdx) =>
+                  groupedKeys[group].map((row, rowIdx) => {
+                    // Subtle vertical divider before the first column of
+                    // each non-Tickets group (Tickets follows the Role
+                    // frozen seam, so doesn't need its own divider).
+                    const isGroupStart = groupIdx > 0 && rowIdx === 0;
+                    // Split the i18n short label on its FIRST space so
+                    // every two-word header renders as two consistent
+                    // stacked lines (word1 top, word2 bottom) regardless
+                    // of whether it would have fit on one line.
+                    // Single-word labels ("create", "invite", "manage",
+                    // NL "aanmaken", "beheren", ...) render as one line.
+                    // Purely presentational — i18n values stay as-is.
+                    const labelShort = t(
+                      `customer_permissions.matrix.key_short.${row.key}`,
+                    );
+                    const spaceIdx = labelShort.indexOf(" ");
+                    const labelFirst =
+                      spaceIdx === -1 ? labelShort : labelShort.slice(0, spaceIdx);
+                    const labelRest =
+                      spaceIdx === -1 ? "" : labelShort.slice(spaceIdx + 1);
+                    return (
+                      <th
+                        key={row.key}
+                        className={
+                          isGroupStart
+                            ? "permissions-matrix-key-header permissions-matrix-group-start"
+                            : "permissions-matrix-key-header"
+                        }
+                        title={t(
+                          `customer_permissions.permission_keys.${row.key}.label`,
+                        )}
+                        scope="col"
+                      >
+                        <span className="permissions-matrix-key-short">
+                          <span className="permissions-matrix-key-line">
+                            {labelFirst}
+                          </span>
+                          {labelRest && (
+                            <span className="permissions-matrix-key-line">
+                              {labelRest}
+                            </span>
+                          )}
+                        </span>
+                      </th>
+                    );
+                  }),
               )}
             </tr>
           </thead>
@@ -369,23 +400,31 @@ function MatrixRow(props: MatrixRowProps) {
           )}
         </select>
       </td>
-      {PERMISSION_KEY_ROWS.map((row) => (
-        <PermissionMatrixCell
-          key={row.key}
-          permissionKey={row.key}
-          overrides={overrides}
-          isActive={isActive}
-          policy={props.policy}
-          accessRole={props.access.access_role}
-          policyBlockedLabel={props.policyBlockedLabel}
-        />
-      ))}
+      {PERMISSION_KEY_ROWS.map((row, idx) => {
+        const prev = idx > 0 ? PERMISSION_KEY_ROWS[idx - 1] : null;
+        const isGroupStart = prev !== null && prev.group !== row.group;
+        return (
+          <PermissionMatrixCell
+            key={row.key}
+            permissionKey={row.key}
+            isGroupStart={isGroupStart}
+            overrides={overrides}
+            isActive={isActive}
+            policy={props.policy}
+            accessRole={props.access.access_role}
+            policyBlockedLabel={props.policyBlockedLabel}
+          />
+        );
+      })}
     </tr>
   );
 }
 
 interface PermissionMatrixCellProps {
   permissionKey: CustomerPermissionKey;
+  /** True iff this cell is the FIRST column of a non-Tickets group;
+   *  draws the subtle vertical group divider on this column. */
+  isGroupStart: boolean;
   overrides: Record<string, boolean>;
   isActive: boolean;
   policy: CustomerCompanyPolicyAdmin | null;
@@ -395,6 +434,7 @@ interface PermissionMatrixCellProps {
 
 function PermissionMatrixCell({
   permissionKey,
+  isGroupStart,
   overrides,
   isActive,
   policy,
@@ -421,7 +461,11 @@ function PermissionMatrixCell({
       : t("customer_permissions.matrix.cell_denied_aria", { key: keyLabel });
   return (
     <td
-      className="permissions-matrix-cell-perm"
+      className={
+        isGroupStart
+          ? "permissions-matrix-cell-perm permissions-matrix-group-start"
+          : "permissions-matrix-cell-perm"
+      }
       data-testid="permissions-matrix-cell"
       data-permission-key={permissionKey}
       data-effective={resolution.granted ? "granted" : "denied"}

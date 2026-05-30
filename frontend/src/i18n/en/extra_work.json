@@ -130,7 +130,7 @@
   "detail.pricing_form_unit_price": "Unit price",
   "detail.pricing_form_vat": "VAT %",
   "detail.pricing_form_customer_note": "Customer-visible explanation",
-  "detail.pricing_form_customer_note_placeholder": "Shown to the customer alongside this line",
+  "detail.pricing_form_customer_note_placeholder": "Shown to the customer",
   "detail.pricing_form_internal_note": "Internal cost note (provider-only)",
   "detail.pricing_form_internal_note_placeholder": "Never shown to the customer",
   "detail.pricing_form_submit": "Add pricing line",
