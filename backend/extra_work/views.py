@@ -48,6 +48,7 @@ from .models import (
 )
 from .scoping import scope_extra_work_for
 from .serializers import (
+    ActualHoursEntrySerializer,
     ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
     ExtraWorkPricingLineItemSerializer,
@@ -328,6 +329,209 @@ class ExtraWorkRequestViewSet(
             ExtraWorkRequestDetailSerializer(
                 updated, context={"request": request}
             ).data
+        )
+
+    @action(detail=True, methods=["post"], url_path="actual-hours")
+    def actual_hours(self, request, pk=None):
+        """
+        Sprint 8B — provider-only entry of actual hours on hourly Extra
+        Work lines.
+
+        Body: ``{"lines": [{"line_id": <id>, "actual_hours": "3.50"}, ...]}``
+
+        Role gate runs BEFORE the object lookup so STAFF / customer-side
+        actors get a stable 403 `actual_hours_forbidden` instead of a
+        scope-driven 404 (STAFF scopes to `.none()`, so a post-lookup
+        check would 404). Mirrors the Sprint 7B conversion endpoint
+        shape.
+
+        On success: stamps `actual_hours` + entered_by/at on each named
+        line, recomputes the parent EW's `final_*`, writes one
+        `ExtraWorkStatusHistory` annotation row, and returns the EW
+        through the role-aware detail serializer (now carrying the
+        `final_*` fields). Idempotent — re-submitting overwrites until
+        the operational ticket is APPROVED/CLOSED (then 400
+        `final_amount_locked`).
+        """
+        from decimal import Decimal, InvalidOperation
+
+        from django.db import transaction
+        from django.utils import timezone
+
+        from rest_framework.exceptions import ErrorDetail
+
+        from tickets.models import Ticket, TicketStatus
+
+        from .final_amounts import active_priced_lines
+        from .models import ExtraWorkPricingUnitType, ExtraWorkStatusHistory
+
+        user = request.user
+
+        # Role gate FIRST (before get_object) — blocks STAFF +
+        # customer-side with a stable 403.
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot enter actual hours.",
+                    "code": "actual_hours_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope
+
+        # Provider scope: SUPER_ADMIN passes; COMPANY_ADMIN /
+        # BUILDING_MANAGER must hold provider-side building scope.
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for "
+                    "this Extra Work request.",
+                    "code": "actual_hours_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Lock: once the operational ticket is APPROVED/CLOSED, the
+        # final amount is frozen. Reopen required to edit further.
+        locked_statuses = {
+            str(TicketStatus.APPROVED),
+            str(TicketStatus.CLOSED),
+        }
+        if (
+            Ticket.objects.filter(extra_work_request=extra_work)
+            .filter(status__in=list(locked_statuses))
+            .exists()
+        ):
+            return Response(
+                {
+                    "detail": "Final amount is locked: the operational "
+                    "ticket has been approved or closed. Reopen it to "
+                    "edit actual hours.",
+                    "code": "final_amount_locked",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = ActualHoursEntrySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        body_lines = payload.validated_data["lines"]
+
+        # Resolve the active priced-line set; index by id for O(1)
+        # membership + target lookup.
+        kind, active_lines = active_priced_lines(extra_work)
+        by_id = {line.id: line for line in active_lines}
+
+        # Validate every body line against the active set BEFORE
+        # mutating anything (all-or-nothing).
+        targets: list = []
+        for entry in body_lines:
+            line_id = entry["line_id"]
+            target = by_id.get(line_id)
+            if target is None:
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} is not part of this Extra "
+                            "Work request's active priced lines.",
+                            code="actual_hours_invalid",
+                        ),
+                        "code": "actual_hours_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if str(target.unit_type) != ExtraWorkPricingUnitType.HOURS:
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} is not an hourly line; "
+                            "actual hours cannot be entered.",
+                            code="actual_hours_not_hourly",
+                        ),
+                        "code": "actual_hours_not_hourly",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            hours = entry["actual_hours"]
+            try:
+                hours = Decimal(hours)
+            except (InvalidOperation, TypeError):
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} actual_hours is not a valid "
+                            "number.",
+                            code="actual_hours_invalid",
+                        ),
+                        "code": "actual_hours_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if hours <= Decimal("0"):
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} actual_hours must be greater "
+                            "than zero.",
+                            code="actual_hours_invalid",
+                        ),
+                        "code": "actual_hours_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            targets.append((target, hours))
+
+        now = timezone.now()
+        old_final_total = extra_work.final_total_amount
+        trace_parts: list[str] = []
+        with transaction.atomic():
+            for target, hours in targets:
+                old_hours = target.actual_hours
+                target.actual_hours = hours
+                target.actual_hours_entered_by = user
+                target.actual_hours_entered_at = now
+                target.save(
+                    update_fields=[
+                        "actual_hours",
+                        "actual_hours_entered_by",
+                        "actual_hours_entered_at",
+                        "updated_at",
+                    ]
+                )
+                trace_parts.append(
+                    f"line {target.id}: "
+                    f"{old_hours if old_hours is not None else '-'} -> "
+                    f"{hours}"
+                )
+
+            extra_work.recompute_final_amounts()
+            extra_work.refresh_from_db(fields=["final_total_amount"])
+
+            note = (
+                f"Actual hours entered by {user.email} "
+                f"({kind} lines): " + "; ".join(trace_parts) + ". "
+                f"final_total_amount "
+                f"{old_final_total if old_final_total is not None else '-'} "
+                f"-> {extra_work.final_total_amount}."
+            )
+            ExtraWorkStatusHistory.objects.create(
+                extra_work=extra_work,
+                old_status=extra_work.status,
+                new_status=extra_work.status,
+                changed_by=user,
+                note=note,
+                is_override=False,
+            )
+
+        return Response(
+            ExtraWorkRequestDetailSerializer(
+                extra_work, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=["get"], url_path="status-history")

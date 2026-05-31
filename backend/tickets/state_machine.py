@@ -393,6 +393,30 @@ def apply_transition(
                 code="completion_evidence_required",
             )
 
+    # Sprint 8B — hourly Extra Work completion gate. An EW-origin
+    # operational ticket cannot be sent for customer approval until every
+    # hourly line on the active priced-line set has its `actual_hours`
+    # entered. Fires for BOTH IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL and
+    # WAITING_MANAGER_REVIEW -> WAITING_CUSTOMER_APPROVAL. Normal (non-EW)
+    # tickets and fixed-price EW tickets (no hourly line) are unaffected.
+    # Lazy import to avoid a tickets <-> extra_work module-load cycle.
+    if (
+        str(to_status) == str(TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        and ticket.extra_work_request_id is not None
+    ):
+        from extra_work.final_amounts import ew_has_unfinalized_hourly_lines
+        from extra_work.models import ExtraWorkRequest
+
+        ew = ExtraWorkRequest.objects.filter(
+            pk=ticket.extra_work_request_id
+        ).first()
+        if ew is not None and ew_has_unfinalized_hourly_lines(ew):
+            raise TransitionError(
+                "Enter actual hours for all hourly lines before sending "
+                "for customer approval.",
+                code="actual_hours_required",
+            )
+
     locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
     if locked.status != ticket.status:
         raise TransitionError(
@@ -500,6 +524,20 @@ def _sync_parent_extra_work_after_ticket_transition(
         ).first()
         if ew is None:
             return  # Parent EW soft-deleted or missing; bail quietly.
+
+        # Sprint 8B — freeze the final amounts at customer approval of
+        # the operational ticket. The completion gate above guarantees
+        # actual_hours are present by the time the ticket reaches
+        # WAITING_CUSTOMER_APPROVAL, so by APPROVED they are set. We
+        # recompute (and persist) `final_*` here so they are frozen
+        # before the section-C lock (operational ticket APPROVED/CLOSED)
+        # refuses further actual-hours edits. This runs inside the
+        # never-raise try/except so a freeze failure cannot break the
+        # ticket transition.
+        if str(new_status) == str(TicketStatus.APPROVED):
+            from extra_work.final_amounts import recompute_final_amounts
+
+            recompute_final_amounts(ew)
 
         # Rule 1: first ticket going IN_PROGRESS while EW is
         # CUSTOMER_APPROVED advances EW to IN_PROGRESS.

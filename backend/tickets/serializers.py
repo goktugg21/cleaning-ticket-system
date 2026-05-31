@@ -487,6 +487,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             stamped on the back-compat FK).
           * Return None only when NO EW can be resolved by any path.
         """
+        from extra_work.final_amounts import ew_has_unfinalized_hourly_lines
         from extra_work.models import ExtraWorkRoutingDecision
 
         item = obj.extra_work_request_item
@@ -523,14 +524,38 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             else "PROPOSAL"
         )
 
-        return {
+        payload = {
             "extra_work_request_id": ew_request.id,
             "extra_work_request_title": ew_request.title,
             "extra_work_request_status": ew_request.status,
             "extra_work_request_item_id": item_id,
             "service_name": service.name if service is not None else None,
             "origin": origin,
+            # Sprint 8B — `actual_hours_required` flags an EW-origin
+            # ticket that cannot yet be sent for customer approval
+            # because an hourly line is missing its actual hours. It is
+            # a workflow boolean (no money / rate), safe for every role
+            # including STAFF.
+            "actual_hours_required": ew_has_unfinalized_hourly_lines(
+                ew_request
+            ),
         }
+        # Sprint 8B — `final_total_amount` is a COMMERCIAL amount. The
+        # staff-privacy floor forbids STAFF from seeing price/amount
+        # data, so it is gated OUT for STAFF viewers (who can reach this
+        # ticket-detail endpoint operationally). Provider + customer see
+        # it (the customer must see the final amount at completion
+        # approval, SoT §5.12). NULL until actual hours are entered /
+        # frozen at customer approval.
+        request = self.context.get("request") if self.context else None
+        viewer = getattr(request, "user", None) if request else None
+        if getattr(viewer, "role", None) != UserRole.STAFF:
+            payload["final_total_amount"] = (
+                f"{ew_request.final_total_amount:.2f}"
+                if ew_request.final_total_amount is not None
+                else None
+            )
+        return payload
 
 
 class TicketConvertToExtraWorkSerializer(serializers.Serializer):

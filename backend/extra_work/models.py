@@ -386,6 +386,36 @@ class ExtraWorkRequest(models.Model):
     pricing_proposed_at = models.DateTimeField(null=True, blank=True)
     customer_decided_at = models.DateTimeField(null=True, blank=True)
 
+    # Sprint 8B — final billable amounts. Distinct from the
+    # `subtotal_amount` / `vat_amount` / `total_amount` quote/cache
+    # above: those mirror the proposed (or contract) line prices at the
+    # quantities the customer ordered. The `final_*` columns are the
+    # ACTUAL amounts after hourly lines have their `actual_hours`
+    # entered by the provider, and are FROZEN when the operational
+    # ticket reaches customer approval (APPROVED). NULL until the first
+    # `recompute_final_amounts` call. See `extra_work.final_amounts`.
+    final_subtotal_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    final_vat_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    final_total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+    )
+
     class Meta:
         ordering = ["-requested_at"]
         indexes = [
@@ -423,6 +453,18 @@ class ExtraWorkRequest(models.Model):
                 "updated_at",
             ]
         )
+
+    def recompute_final_amounts(self) -> None:
+        """Sprint 8B — recompute and persist the `final_*` amounts from
+        the active priced-line set (proposal / cart / legacy), honouring
+        `actual_hours` on hourly lines. Delegates to
+        `extra_work.final_amounts.recompute_final_amounts` so the
+        line-set resolution + billable-quantity rules live in one
+        module. Imported locally to avoid an import cycle
+        (final_amounts imports from this module)."""
+        from .final_amounts import recompute_final_amounts
+
+        recompute_final_amounts(self)
 
 
 class ExtraWorkPricingLineItem(models.Model):
@@ -899,6 +941,30 @@ class ExtraWorkRequestItem(models.Model):
         ),
     )
 
+    # Sprint 8B — actual hours worked on an HOURS-unit cart line. Entered
+    # provider-side after the work is done (before customer approval of
+    # the operational ticket); drives `final_*` on the parent EW. NULL
+    # for non-hourly lines and for hourly lines not yet finalised. NEVER
+    # overwrites `quantity` (the ordered amount); `final_amounts`
+    # substitutes `actual_hours` for `quantity` only when computing the
+    # final billable total.
+    actual_hours = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_hours_entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    actual_hours_entered_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1169,6 +1235,28 @@ class ProposalLine(models.Model):
     line_subtotal = models.DecimalField(max_digits=12, decimal_places=2)
     line_vat = models.DecimalField(max_digits=12, decimal_places=2)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    # Sprint 8B — actual hours worked on an HOURS-unit proposal line.
+    # Mirror of `ExtraWorkRequestItem.actual_hours`: entered
+    # provider-side after the work is done, drives the parent EW's
+    # `final_*`, NEVER overwrites `quantity` / `unit_price`. NULL for
+    # non-hourly lines and for hourly lines not yet finalised.
+    actual_hours = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_hours_entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    actual_hours_entered_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

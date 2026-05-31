@@ -333,6 +333,12 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         max_length=255,
     )
     line_price_source = serializers.CharField(read_only=True)
+    # Sprint 8B — actual hours worked (HOURS-unit lines). Read-only on
+    # the cart-line read path; written only via the actual-hours
+    # endpoint. Visible to the customer per SoT §5.12.
+    actual_hours = serializers.DecimalField(
+        read_only=True, max_digits=12, decimal_places=2, allow_null=True
+    )
     snapshot_unit_price = serializers.DecimalField(
         read_only=True, max_digits=12, decimal_places=2
     )
@@ -366,6 +372,8 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
+            # Sprint 8B — actual hours (read-only).
+            "actual_hours",
             # Sprint 2A — snapshot surface (read-only).
             "line_price_source",
             "snapshot_unit_price",
@@ -383,6 +391,7 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
+            "actual_hours",
             "line_price_source",
             "snapshot_unit_price",
             "snapshot_vat_pct",
@@ -600,6 +609,12 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # Sprint 8B — final billable amounts (NULL until actual
+            # hours are entered / frozen at customer approval). Visible
+            # to the customer per SoT §5.12.
+            "final_subtotal_amount",
+            "final_vat_amount",
+            "final_total_amount",
             # Bookkeeping.
             "created_by",
             "created_by_email",
@@ -625,6 +640,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            "final_subtotal_amount",
+            "final_vat_amount",
+            "final_total_amount",
             "created_by",
             "created_by_email",
             "requested_at",
@@ -1421,6 +1439,37 @@ class ExtraWorkTransitionSerializer(serializers.Serializer):
 
 
 # ---------------------------------------------------------------------------
+# Sprint 8B — actual-hours entry payload
+# ---------------------------------------------------------------------------
+class ActualHoursLineSerializer(serializers.Serializer):
+    """One `{line_id, actual_hours}` entry in the actual-hours payload.
+
+    `actual_hours` must parse as a Decimal and be strictly > 0 (the
+    view raises stable code `actual_hours_invalid` for <= 0; the field
+    here only guarantees it is a well-formed Decimal). The view does
+    the cross-checks (line belongs to the active set, line is hourly,
+    EW not locked) because those need the resolved EW context.
+    """
+
+    line_id = serializers.IntegerField()
+    actual_hours = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class ActualHoursEntrySerializer(serializers.Serializer):
+    lines = ActualHoursLineSerializer(many=True)
+
+    def validate_lines(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "At least one line is required.",
+                    code="actual_hours_required",
+                )
+            )
+        return value
+
+
+# ---------------------------------------------------------------------------
 # Sprint 28 Batch 8 — proposal serializers
 # ---------------------------------------------------------------------------
 def _classify_proposal_line_source(obj: "ProposalLine"):
@@ -1511,6 +1560,9 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             "line_subtotal",
             "line_vat",
             "line_total",
+            # Sprint 8B — actual hours (read-only on this read/write
+            # serializer; written only via the actual-hours endpoint).
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -1528,6 +1580,7 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             "line_subtotal",
             "line_vat",
             "line_total",
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
@@ -1618,6 +1671,8 @@ class ProposalLineCustomerSerializer(serializers.ModelSerializer):
             "line_subtotal",
             "line_vat",
             "line_total",
+            # Sprint 8B — actual hours; customer-visible per SoT §5.12.
+            "actual_hours",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",

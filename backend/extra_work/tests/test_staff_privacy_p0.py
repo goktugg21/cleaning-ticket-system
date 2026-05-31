@@ -500,6 +500,12 @@ class StaffTicketExtraWorkOriginIsSafeTests(_StaffPrivacyFixture):
         "extra_work_request_item_id",
         "service_name",
         "origin",
+        # Sprint 8B — `actual_hours_required` is a safe workflow boolean
+        # (no money / rate), allowed for STAFF. `final_total_amount` is a
+        # COMMERCIAL amount and is deliberately NOT here: it is gated out
+        # of the origin payload for STAFF (staff-privacy floor). A leak
+        # would make this strict key-equality assertion fail.
+        "actual_hours_required",
     }
 
     # Substrings that, if they appear inside any string value of the
