@@ -148,6 +148,7 @@ class ProposalPdfFixtureMixin:
         cls.service_cat = ServiceCategory.objects.create(name="Cat-B14")
         cls.service = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Window cleaning B14",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),

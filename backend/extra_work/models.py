@@ -527,12 +527,41 @@ class Service(models.Model):
     `default_vat_pct` defaults to 21.00 (Dutch BTW) per the
     2026-05-15 stakeholder meeting spec §5; per-customer rows can
     override.
+
+    Sprint 3B — `company` FK ties each Service to a single provider
+    `companies.Company`. Pre-Sprint-3B the catalog was global; the
+    Sprint 3B migration set
+    (`extra_work/0007/0008/0009`) adds a nullable column,
+    backfills it from CustomerServicePrice ownership (or pins to
+    the single Company when the DB has exactly one), then flips it
+    NOT NULL. The PROTECT delete reflects that a Company with a
+    catalog cannot be hard-deleted; archival lives on the Company
+    side as `is_active=False`.
     """
 
     category = models.ForeignKey(
         ServiceCategory,
         on_delete=models.PROTECT,
         related_name="services",
+    )
+    # Sprint 3B — provider-company scope. PROTECT so a Company
+    # cannot be hard-deleted while it still has Services pointing
+    # at it. `related_name="services"` mirrors the catalog noun.
+    #
+    # NOT NULL after Sprint 3B migration 0009 — 0007 adds the
+    # column nullable, 0008 backfills it (aborting on ambiguous
+    # data), 0009 flips NOT NULL. Tests and API consumers must
+    # always supply company; the few legacy ORM-direct test
+    # creates were updated in Sprint 3B to pass it.
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="services",
+        help_text=(
+            "Sprint 3B — provider company that owns this catalog "
+            "row. Required on every API-created Service; pre-3B "
+            "legacy rows are backfilled via migration 0008."
+        ),
     )
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True, default="")
@@ -548,7 +577,8 @@ class Service(models.Model):
             "Provider-side reference price for the catalog UI. NOT "
             "consumed by the instant-ticket pricing resolver — a "
             "customer-specific CustomerServicePrice row is required "
-            "before a line can skip the proposal phase."
+            "before a line can skip the proposal phase. Sprint 3B "
+            "stripped from CUSTOMER_USER / STAFF API reads."
         ),
     )
     default_vat_pct = models.DecimalField(
@@ -565,9 +595,13 @@ class Service(models.Model):
     class Meta:
         ordering = ["category__name", "name", "id"]
         constraints = [
+            # Sprint 3B — uniqueness now includes the provider
+            # company FK. Two different providers may carry a
+            # Service with the same (category, name) tuple because
+            # they are independent catalogs.
             models.UniqueConstraint(
-                fields=["category", "name"],
-                name="uniq_service_name_per_category",
+                fields=["company", "category", "name"],
+                name="uniq_service_name_per_company_category",
             ),
         ]
 

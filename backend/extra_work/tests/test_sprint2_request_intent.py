@@ -178,6 +178,7 @@ class IntentFixtureMixin:
         cls.service_cat = ServiceCategory.objects.create(name="Cleaning S2A")
         cls.service_priced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.provider_a,
             name="Window cleaning S2A",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),
@@ -185,6 +186,7 @@ class IntentFixtureMixin:
         )
         cls.service_unpriced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.provider_a,
             name="Floor maintenance S2A",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("3.50"),

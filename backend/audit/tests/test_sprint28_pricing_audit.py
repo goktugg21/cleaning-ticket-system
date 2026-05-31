@@ -118,6 +118,7 @@ class ServiceAuditTests(TenantFixtureMixin, APITestCase):
         response = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.category.id,
                 "name": "Window cleaning",
                 "unit_type": ExtraWorkPricingUnitType.HOURS,
@@ -141,6 +142,7 @@ class ServiceAuditTests(TenantFixtureMixin, APITestCase):
     def test_update_via_api_writes_update_audit_log(self):
         svc = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="Floor polishing",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("12.50"),
@@ -171,6 +173,7 @@ class ServiceAuditTests(TenantFixtureMixin, APITestCase):
     def test_delete_via_api_writes_delete_audit_log(self):
         svc = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="To Delete Svc",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("100.00"),
@@ -196,6 +199,7 @@ class CustomerServicePriceAuditTests(TenantFixtureMixin, APITestCase):
         self.category = ServiceCategory.objects.create(name="Cleaning")
         self.service = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("45.00"),

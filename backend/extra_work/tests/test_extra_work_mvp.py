@@ -387,6 +387,7 @@ class CreateTests(ExtraWorkFixtureMixin, TestCase):
         cls.service_cat = ServiceCategory.objects.create(name="Standard")
         cls.service = Service.objects.create(
             category=cls.service_cat,
+            company=cls.provider_a,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),

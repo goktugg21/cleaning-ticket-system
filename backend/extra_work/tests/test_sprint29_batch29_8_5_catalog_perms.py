@@ -56,6 +56,7 @@ class CatalogPermissionSplitTests(TenantFixtureMixin, APITestCase):
         )
         self.service = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="29.8.5 Reference Service",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("42.00"),
@@ -87,6 +88,7 @@ class CatalogPermissionSplitTests(TenantFixtureMixin, APITestCase):
         response = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.category.id,
                 "name": "Customer-created service",
                 "unit_type": ExtraWorkPricingUnitType.HOURS,

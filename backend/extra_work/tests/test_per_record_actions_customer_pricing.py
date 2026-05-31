@@ -99,6 +99,7 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
 
         cls.service_priced = Service.objects.create(
             category=ServiceCategory.objects.create(name="Cat-PR-Pricing"),
+            company=cls.company,
             name="Shared service (different prices per customer)",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),
@@ -107,6 +108,7 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
         # Used to construct mixed-cart proposal-routing scenarios.
         cls.service_unpriced = Service.objects.create(
             category=cls.service_priced.category,
+            company=cls.company,
             name="Other service (no contract anywhere)",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("100.00"),

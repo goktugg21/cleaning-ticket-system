@@ -122,6 +122,7 @@ class Sprint30Batch30_1FixtureMixin:
         )
         cls.service = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Sprint30-Service",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),
