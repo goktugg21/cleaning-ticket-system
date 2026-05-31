@@ -261,7 +261,13 @@ class CustomerServicePriceAuditTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(log.changes["unit_price"]["before"], "40.00")
         self.assertEqual(log.changes["unit_price"]["after"], "42.50")
 
-    def test_delete_via_api_writes_delete_audit_log(self):
+    def test_delete_via_api_writes_soft_archive_audit_log(self):
+        # Sprint 4B — the public DELETE on /api/customers/<cid>/
+        # pricing/<pid>/ now SOFT-archives (flips `is_active` to
+        # False) instead of hard-deleting. The post_save audit
+        # signal therefore writes an UPDATE row with the
+        # `is_active` diff, and the audit context carries the
+        # `customer_price_soft_archive` reason marker.
         price = CustomerServicePrice.objects.create(
             service=self.service,
             customer=self.customer,
@@ -276,10 +282,17 @@ class CustomerServicePriceAuditTests(TenantFixtureMixin, APITestCase):
             price_detail_url(self.customer.id, price_id)
         )
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
         log = AuditLog.objects.filter(
             target_model="extra_work.CustomerServicePrice",
             target_id=price_id,
-            action=AuditAction.DELETE,
+            action=AuditAction.UPDATE,
         ).get()
-        self.assertEqual(log.changes["unit_price"]["before"], "40.00")
-        self.assertIsNone(log.changes["unit_price"]["after"])
+        self.assertEqual(log.changes["is_active"]["before"], True)
+        self.assertEqual(log.changes["is_active"]["after"], False)
+        self.assertEqual(log.reason, "customer_price_soft_archive")
+
+        # The row itself is still present (not hard-deleted).
+        self.assertTrue(
+            CustomerServicePrice.objects.filter(pk=price_id).exists()
+        )

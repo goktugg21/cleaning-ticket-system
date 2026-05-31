@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from extra_work.views_pricing import (
+    CustomerServicePriceCopyFromDefaultView,
     CustomerServicePriceDetailView,
     CustomerServicePriceListCreateView,
 )
@@ -90,5 +91,13 @@ urlpatterns = [
         "<int:customer_id>/pricing/<int:price_id>/",
         CustomerServicePriceDetailView.as_view(),
         name="customer-pricing-detail",
+    ),
+    # Sprint 4B — bulk seed CSP rows from Service.default_unit_price /
+    # default_vat_pct. Provider-side action (SA always; CA when the
+    # customer-price toggle is True).
+    path(
+        "<int:customer_id>/pricing/copy-from-default/",
+        CustomerServicePriceCopyFromDefaultView.as_view(),
+        name="customer-pricing-copy-from-default",
     ),
 ] + router.urls
