@@ -466,7 +466,9 @@ class CustomerApproveSpawnTests(ProposalFixtureMixin, TestCase):
     def setUpTestData(cls):
         cls._setup_fixture()
 
-    def test_customer_approve_spawns_one_ticket_per_line(self):
+    def test_customer_approve_spawns_one_ticket_per_request(self):
+        # Sprint 6A — a multi-line proposal spawns EXACTLY ONE ticket
+        # for the parent request (collapsed from one-per-line).
         ew = self._make_ew()
         # B2 — extend the cart so the second proposal line below has
         # a matching cart item; otherwise the SEND coverage gate
@@ -498,12 +500,13 @@ class CustomerApproveSpawnTests(ProposalFixtureMixin, TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(Ticket.objects.count(), before + 2)
-        # Each ticket is linked to its proposal line.
+        self.assertEqual(Ticket.objects.count(), before + 1)
+        # Exactly one ticket, linked to the parent request (canonical)
+        # and to the FIRST proposal line (back-compat).
         proposal.refresh_from_db()
-        for line in proposal.lines.all():
-            tickets = Ticket.objects.filter(proposal_line=line)
-            self.assertEqual(tickets.count(), 1)
+        ticket = Ticket.objects.get(extra_work_request=ew)
+        first_line = proposal.lines.order_by("id").first()
+        self.assertEqual(ticket.proposal_line_id, first_line.id)
         # Parent EW advanced to CUSTOMER_APPROVED.
         ew.refresh_from_db()
         self.assertEqual(ew.status, ExtraWorkStatus.CUSTOMER_APPROVED)
@@ -611,14 +614,16 @@ class AtomicityTests(ProposalFixtureMixin, TestCase):
     def setUpTestData(cls):
         cls._setup_fixture()
 
-    def test_atomicity_rollback_when_ticket_creation_fails_mid_loop(self):
+    def test_atomicity_rollback_when_ticket_creation_fails(self):
+        # Sprint 6A — the proposal spawns exactly one ticket, so the
+        # rollback is exercised by failing that single Ticket.create.
+        # The transaction owned by apply_proposal_transition rolls
+        # every side effect (status update + history + timeline) back.
         ew = self._make_ew()
         # B2 — second cart item so SEND coverage permits the second
-        # proposal line that drives the multi-iteration spawn loop.
+        # proposal line.
         self._add_cart_item(ew, quantity=Decimal("1.00"))
         proposal = self._create_proposal(ew)
-        # Add a second line so the spawn loop has more than one
-        # iteration to bail on.
         self._api(self.admin).post(
             self._lines_url(ew.id, proposal.id),
             self._line_payload(quantity="1.00", unit_price="10.00"),
@@ -630,16 +635,9 @@ class AtomicityTests(ProposalFixtureMixin, TestCase):
             format="json",
         )
         before = Ticket.objects.count()
-        # Make the 2nd Ticket.objects.create blow up. The transaction
-        # owned by apply_proposal_transition rolls everything back.
-        original_create = Ticket.objects.create
-        call_count = {"n": 0}
 
         def _boom(*args, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 2:
-                raise RuntimeError("simulated mid-loop ticket failure")
-            return original_create(*args, **kwargs)
+            raise RuntimeError("simulated ticket-creation failure")
 
         with patch.object(Ticket.objects, "create", side_effect=_boom):
             with self.assertRaises(RuntimeError):

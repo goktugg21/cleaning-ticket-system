@@ -3,11 +3,12 @@ Sprint 28 Batch 7 — instant-ticket spawn service.
 
 When an `ExtraWorkRequest` is submitted and the cart routing decision
 resolves to `INSTANT` (every line item has an active customer-specific
-`CustomerServicePrice`), this module spawns one operational
-`tickets.Ticket` per `ExtraWorkRequestItem` and drives the parent
-request from `REQUESTED` straight to `CUSTOMER_APPROVED`. The customer's
-submission IS the approval — no proposal phase is needed because the
-price is already agreed by contract (master plan §6 Batch 7).
+`CustomerServicePrice`), this module spawns EXACTLY ONE operational
+`tickets.Ticket` for the whole request (Sprint 6A — collapsed from the
+former one-ticket-per-line model) and drives the parent request from
+`REQUESTED` straight to `CUSTOMER_APPROVED`. The customer's submission
+IS the approval — no proposal phase is needed because the price is
+already agreed by contract (master plan §6 Batch 7).
 
 Contract:
   * **Caller MUST hold an active transaction.** The serializer's
@@ -15,9 +16,9 @@ Contract:
     existing `transaction.atomic()` block. We do not open a new one
     so a per-line abort rolls the whole submission (parent +
     line-items + tickets) back together.
-  * **Idempotent.** A line whose `spawned_tickets` already exists is
-    skipped silently. Re-running on the same request is a no-op that
-    returns an empty list.
+  * **Idempotent.** A request that already has a spawned ticket
+    (`Ticket.objects.filter(extra_work_request=request).exists()`) is
+    a no-op that returns an empty list.
   * **Defensive abort.** Each line's `resolve_price()` is re-called at
     spawn time. If any line now returns `None` (a contract row was
     deactivated or its valid window edited between Batch 6 routing-
@@ -60,42 +61,56 @@ from .pricing import resolve_price
 from .state_machine import TransitionError
 
 
-def _build_title(item: ExtraWorkRequestItem) -> str:
-    """Derive a short Ticket title from the cart line.
-
-    Service.name is the human-readable catalog label; quantity makes
-    the line unambiguous when the same service appears across
-    multiple requests. Mirrors the line's `__str__` shape.
-    """
+def _line_summary(item: ExtraWorkRequestItem) -> str:
+    """One-line human label for a cart line. Mirrors the line's
+    `__str__` shape."""
     if item.service is not None:
         return f"{item.service.name} × {item.quantity}"
-    # Defensive: legacy lines have `service=None` (backfilled by the
-    # Batch 6 migration). Those rows always route to PROPOSAL, so the
-    # spawn service should never be called for them — but if it is,
-    # we still want a sane title.
     return f"Extra work line × {item.quantity}"
 
 
+def _build_title(request: ExtraWorkRequest, items: List[ExtraWorkRequestItem]) -> str:
+    """Sprint 6A — derive ONE Ticket title summarizing the whole
+    request. Prefer the request's own title; if blank, derive from the
+    first line; append a count suffix when more than one line exists.
+    """
+    base = (request.title or "").strip()
+    if not base:
+        base = _line_summary(items[0]) if items else "Extra work"
+    if len(items) > 1:
+        base = f"{base} (+{len(items) - 1} more)"
+    return base
+
+
+def _build_line_block(item: ExtraWorkRequestItem) -> str:
+    """Per-line description block: the line label, its customer_note,
+    and the Service catalog description (provider-side reference text
+    that survives the catalog -> ticket boundary). Empty parts are
+    dropped."""
+    parts: List[str] = [_line_summary(item)]
+    if item.customer_note and item.customer_note.strip():
+        parts.append(f"Line note: {item.customer_note.strip()}")
+    if (
+        item.service is not None
+        and item.service.description
+        and item.service.description.strip()
+    ):
+        parts.append(f"Service: {item.service.description.strip()}")
+    return "\n".join(parts)
+
+
 def _build_description(
-    request: ExtraWorkRequest, item: ExtraWorkRequestItem
+    request: ExtraWorkRequest, items: List[ExtraWorkRequestItem]
 ) -> str:
-    """Compose a readable Ticket description from the cart context.
-
-    Combines (in order):
-      1. The request-level free-text description.
-      2. The line-level customer_note, if any.
-      3. The Service catalog row's description, if any (provider-side
-         reference text that survives the catalog -> ticket boundary).
-
-    Empty parts are dropped; sections are separated by a blank line.
+    """Sprint 6A — compose ONE Ticket description summarizing ALL cart
+    lines. The request-level description appears once at the top,
+    followed by one block per line. Sections separated by a blank line.
     """
     parts: List[str] = []
     if request.description and request.description.strip():
         parts.append(request.description.strip())
-    if item.customer_note and item.customer_note.strip():
-        parts.append(f"Line note: {item.customer_note.strip()}")
-    if item.service is not None and item.service.description and item.service.description.strip():
-        parts.append(f"Service: {item.service.description.strip()}")
+    for item in items:
+        parts.append(_build_line_block(item))
     return "\n\n".join(parts)
 
 
@@ -103,16 +118,18 @@ def spawn_tickets_for_request(
     request: ExtraWorkRequest, *, actor
 ) -> List[Ticket]:
     """
-    Sprint 28 Batch 7 — atomically spawn one Ticket per
-    ExtraWorkRequestItem for an INSTANT-routed ExtraWorkRequest.
+    Sprint 6A — atomically spawn EXACTLY ONE Ticket for an
+    INSTANT-routed ExtraWorkRequest (collapsed from the former
+    one-ticket-per-line model), summarizing all cart lines.
 
     Caller MUST hold an active transaction (we do not wrap our own
     `transaction.atomic()` block — the parent `serializers.
     ExtraWorkRequestCreateSerializer.create()` flow owns the atomic
     boundary, so a partial failure rolls the whole submission back).
 
-    Idempotent: items whose `spawned_tickets` queryset already contains
-    a Ticket are skipped.
+    Idempotent: if the request already has a spawned ticket
+    (`Ticket.objects.filter(extra_work_request=request).exists()`),
+    this is a no-op that returns an empty list.
 
     Defensive abort: if any line's `resolve_price()` returns None at
     spawn time (despite `routing_decision == "INSTANT"` having been
@@ -120,8 +137,8 @@ def spawn_tickets_for_request(
     code `instant_spawn_price_lost` and aborts. The surrounding
     `transaction.atomic()` rolls everything back.
 
-    Returns: list of created Ticket instances (empty if all items
-    were already spawned — the idempotent re-run case).
+    Returns: a single-element list with the created Ticket, or an
+    empty list on an idempotent re-run.
     """
     # Belt-and-braces guard: this service should only ever be called on
     # an INSTANT-routed request. If the caller invokes us on a PROPOSAL
@@ -141,39 +158,46 @@ def spawn_tickets_for_request(
     # downstream code mutates the relation during iteration.
     items = list(request.line_items.all().order_by("id"))
 
-    for item in items:
-        # Idempotency — already spawned on a previous call.
-        if Ticket.objects.filter(extra_work_request_item=item).exists():
-            continue
+    # Sprint 6A — request-level idempotency. A request spawns exactly
+    # ONE ticket; if it already has one, this is a no-op re-run.
+    already = Ticket.objects.filter(extra_work_request=request).exists()
 
-        # Defensive abort: re-resolve the line's contract price. If the
-        # row was deactivated or its window edited between Batch 6
-        # submission and this spawn call, fail the whole submission
-        # rather than silently flipping the cart to a free-of-charge
-        # operational ticket.
-        price_row = resolve_price(
-            item.service,
-            customer,
-            on=item.requested_date,
-        )
-        if price_row is None:
-            raise TransitionError(
-                "Contract price unavailable for line "
-                f"{item.id} (service={item.service_id}); aborting "
-                "instant-ticket spawn.",
-                code="instant_spawn_price_lost",
+    if not already:
+        # Defensive abort: re-resolve EVERY line's contract price before
+        # creating the single ticket. If any row was deactivated or its
+        # window edited between Batch 6 submission and this spawn call,
+        # fail the whole submission rather than silently flipping the
+        # cart to a free-of-charge operational ticket.
+        for item in items:
+            price_row = resolve_price(
+                item.service,
+                customer,
+                on=item.requested_date,
             )
+            if price_row is None:
+                raise TransitionError(
+                    "Contract price unavailable for line "
+                    f"{item.id} (service={item.service_id}); aborting "
+                    "instant-ticket spawn.",
+                    code="instant_spawn_price_lost",
+                )
+
+        # Back-compat legacy link: FIRST cart line. Does NOT drive
+        # canonical origin (that is `extra_work_request`); it only feeds
+        # the origin payload's representative service name.
+        first_item = items[0] if items else None
 
         ticket = Ticket.objects.create(
             company=request.company,
             building=request.building,
             customer=request.customer,
             created_by=actor,
-            title=_build_title(item),
-            description=_build_description(request, item),
+            title=_build_title(request, items),
+            description=_build_description(request, items),
             priority=TicketPriority.NORMAL,
             status=TicketStatus.OPEN,
-            extra_work_request_item=item,
+            extra_work_request=request,
+            extra_work_request_item=first_item,
         )
 
         # Initial OPEN history row. The Ticket model does NOT auto-write

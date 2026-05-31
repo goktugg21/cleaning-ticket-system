@@ -408,29 +408,25 @@ class ExtraWorkRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from django.db.models import Q
         from tickets.models import Ticket
 
-        existing_count = (
+        # Sprint 6A — request-level idempotency. A request spawns
+        # exactly ONE operational Ticket; when it already exists, return
+        # 200 with the existing id(s) instead of a 400 error so the
+        # retry endpoint is safe to re-fire.
+        existing_ids = list(
             Ticket.objects.filter(
-                Q(extra_work_request_item__extra_work_request_id=extra_work.id)
-                | Q(
-                    proposal_line__proposal__extra_work_request_id=extra_work.id
-                )
-            )
-            .distinct()
-            .count()
+                extra_work_request=extra_work
+            ).values_list("id", flat=True)
         )
-        if existing_count > 0:
+        if existing_ids:
             return Response(
                 {
-                    "detail": (
-                        "Extra Work request already has spawned tickets "
-                        f"(count={existing_count}); refusing to spawn again."
-                    ),
-                    "code": "spawn_already_done",
+                    "spawned_ticket_ids": existing_ids,
+                    "count": len(existing_ids),
+                    "already_spawned": True,
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_200_OK,
             )
 
         # Lazy import to keep view-module import cheap and avoid
@@ -448,6 +444,7 @@ class ExtraWorkRequestViewSet(
             {
                 "spawned_ticket_ids": [t.id for t in tickets],
                 "count": len(tickets),
+                "already_spawned": False,
             },
             status=status.HTTP_200_OK,
         )

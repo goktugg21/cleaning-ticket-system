@@ -253,6 +253,34 @@ class _StaffPrivacyFixture(TestCase):
             requested_date=date(2026, 6, 1),
         )
 
+        # Sprint 6A — origin is now classified by the parent EW's
+        # `routing_decision`. The cart-spawn regression below expects
+        # origin "INSTANT", so the cart ticket needs an INSTANT-routed
+        # parent. `cls.ew` stays PROPOSAL-routed for the proposal-spawn
+        # branch. Both carry the same provider-internal text so the
+        # privacy assertions hold regardless of which EW is resolved.
+        cls.ew_instant = ExtraWorkRequest.objects.create(
+            company=cls.company,
+            building=cls.building,
+            customer=cls.customer,
+            created_by=cls.cust_user,
+            title=f"EW {suffix}",
+            description="seed",
+            category=ExtraWorkCategory.DEEP_CLEANING,
+            status=ExtraWorkStatus.CUSTOMER_APPROVED,
+            routing_decision=ExtraWorkRoutingDecision.INSTANT,
+            manager_note="MANAGER-ONLY",
+            internal_cost_note="COST-ONLY",
+            customer_visible_note="customer-side note",
+        )
+        cls.line_instant = ExtraWorkRequestItem.objects.create(
+            extra_work_request=cls.ew_instant,
+            service=cls.service,
+            quantity=Decimal("1.00"),
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            requested_date=date(2026, 6, 1),
+        )
+
         # SENT proposal + line + a provider-only timeline event.
         cls.proposal = Proposal.objects.create(
             extra_work_request=cls.ew,
@@ -288,7 +316,9 @@ class _StaffPrivacyFixture(TestCase):
             title="Cart Ticket",
             description="cart-spawn",
             status=TicketStatus.OPEN,
-            extra_work_request_item=cls.line_a,
+            # Sprint 6A — canonical link to the INSTANT-routed EW.
+            extra_work_request=cls.ew_instant,
+            extra_work_request_item=cls.line_instant,
         )
         TicketStaffAssignment.objects.create(
             ticket=cls.ticket_cart, user=cls.staff
@@ -305,6 +335,8 @@ class _StaffPrivacyFixture(TestCase):
             title="Proposal Ticket",
             description="proposal-spawn",
             status=TicketStatus.OPEN,
+            # Sprint 6A — canonical link to the PROPOSAL-routed EW.
+            extra_work_request=cls.ew,
             proposal_line=cls.proposal_line,
         )
         TicketStaffAssignment.objects.create(
@@ -508,9 +540,14 @@ class StaffTicketExtraWorkOriginIsSafeTests(_StaffPrivacyFixture):
         self.assertIsNotNone(origin)
         self.assertEqual(origin.get("origin"), "INSTANT")
         # The origin should reference the EW the staff cannot otherwise
-        # reach, but only with safe metadata.
-        self.assertEqual(origin.get("extra_work_request_id"), self.ew.id)
-        self.assertEqual(origin.get("extra_work_request_title"), self.ew.title)
+        # reach, but only with safe metadata. Sprint 6A — the cart
+        # ticket's canonical parent is the INSTANT-routed EW.
+        self.assertEqual(
+            origin.get("extra_work_request_id"), self.ew_instant.id
+        )
+        self.assertEqual(
+            origin.get("extra_work_request_title"), self.ew_instant.title
+        )
         self.assertEqual(
             origin.get("extra_work_request_status"),
             ExtraWorkStatus.CUSTOMER_APPROVED,

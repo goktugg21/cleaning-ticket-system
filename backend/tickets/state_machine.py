@@ -465,8 +465,13 @@ def _sync_parent_extra_work_after_ticket_transition(
             apply_transition as ew_apply_transition,
         )
 
-        ew_id = None
-        if ticket.extra_work_request_item_id is not None:
+        # Sprint 6A — resolve the parent EW from the CANONICAL
+        # `extra_work_request` FK first, then fall back to the legacy
+        # cart-item / proposal-line chains for any ticket whose new FK
+        # is somehow null (e.g. pre-migration historical rows whose
+        # backfill SET_NULL'd the parent).
+        ew_id = ticket.extra_work_request_id
+        if ew_id is None and ticket.extra_work_request_item_id is not None:
             # Cart-item path.
             ew_id = (
                 Ticket.objects.filter(pk=ticket.pk)
@@ -524,10 +529,18 @@ def _sync_parent_extra_work_after_ticket_transition(
             str(new_status) in terminal_ticket_statuses
             and ew.status == ExtraWorkStatus.IN_PROGRESS
         ):
-            sibling_qs = Ticket.objects.filter(
-                extra_work_request_item__extra_work_request_id=ew.id
-            ) | Ticket.objects.filter(
-                proposal_line__proposal__extra_work_request_id=ew.id
+            # Sprint 6A — the canonical `extra_work_request` FK is the
+            # primary enumeration anchor; the two legacy chains remain
+            # in the union for historical rows whose canonical FK is
+            # null. set() below naturally de-dups.
+            sibling_qs = (
+                Ticket.objects.filter(extra_work_request_id=ew.id)
+                | Ticket.objects.filter(
+                    extra_work_request_item__extra_work_request_id=ew.id
+                )
+                | Ticket.objects.filter(
+                    proposal_line__proposal__extra_work_request_id=ew.id
+                )
             )
             sibling_statuses = set(
                 sibling_qs.values_list("status", flat=True)

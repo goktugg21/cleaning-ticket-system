@@ -203,8 +203,12 @@ class SeedDemoDataShapeTests(TestCase):
                 company=company_b, title__startswith="[DEMO]"
             ).values_list("title", flat=True)
         )
-        # Counts match the documented seed (4 in A, 2 in B).
-        self.assertEqual(len(tickets_a), 4)
+        # Counts match the documented seed: 4 hand-seeded demo tickets
+        # in A + the one operational Ticket spawned for the demo Extra
+        # Work request (Sprint 6A — one ticket per request; its title
+        # now inherits the EW's "[DEMO] ..." marker, so it is counted
+        # here), and 2 in B.
+        self.assertEqual(len(tickets_a), 5)
         self.assertEqual(len(tickets_b), 2)
         # No ticket in Company A points at a Company B building, and
         # vice versa.

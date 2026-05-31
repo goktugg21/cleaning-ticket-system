@@ -2,7 +2,8 @@
 Sprint 28 Batch 7 — instant-ticket spawn backend tests.
 
 Covers:
-  * InstantSpawnHappyPathTests   — N=1, N=3 lines spawn N tickets,
+  * InstantSpawnHappyPathTests   — N=1 and N=3 lines each spawn EXACTLY
+                                   ONE ticket per request (Sprint 6A),
                                    parent status moves to
                                    CUSTOMER_APPROVED, EW status-history
                                    row exists, initial Ticket OPEN
@@ -241,7 +242,10 @@ class InstantSpawnHappyPathTests(InstantSpawnFixtureMixin, TestCase):
 
         ew = ExtraWorkRequest.objects.get(id=response.data["id"])
         line = ew.line_items.get()
-        ticket = Ticket.objects.get(extra_work_request_item=line)
+        # Sprint 6A — one ticket per request, linked via the canonical
+        # `extra_work_request` FK (back-compat item FK on the first line).
+        ticket = Ticket.objects.get(extra_work_request=ew)
+        self.assertEqual(ticket.extra_work_request_item_id, line.id)
         # Ticket field defaults per master plan §6 Batch 7 bullet 2.
         self.assertEqual(ticket.status, TicketStatus.OPEN)
         self.assertEqual(ticket.priority, "NORMAL")
@@ -249,9 +253,11 @@ class InstantSpawnHappyPathTests(InstantSpawnFixtureMixin, TestCase):
         self.assertEqual(ticket.building_id, ew.building_id)
         self.assertEqual(ticket.customer_id, ew.customer_id)
         self.assertEqual(ticket.created_by_id, self.cust_user.id)
-        # Title derivation: "<service name> × <quantity>".
-        self.assertIn(self.service_a.name, ticket.title)
-        # Description composes request.description + line note + service description.
+        # Sprint 6A — title summarizes the whole request, preferring
+        # the request title.
+        self.assertIn(ew.title, ticket.title)
+        # Description composes request.description + per-line block
+        # (line summary + line note + service description).
         self.assertIn("happy path", ticket.description)
         self.assertIn("first line note", ticket.description)
         self.assertIn(
@@ -261,7 +267,9 @@ class InstantSpawnHappyPathTests(InstantSpawnFixtureMixin, TestCase):
         self.assertTrue(ticket.ticket_no)
         self.assertTrue(ticket.ticket_no.startswith("TCK-"))
 
-    def test_three_lines_spawn_three_tickets(self):
+    def test_three_lines_spawn_one_ticket(self):
+        # Sprint 6A — a 3-line cart spawns EXACTLY ONE ticket for the
+        # whole request (collapsed from one-per-line).
         before = Ticket.objects.count()
         response = self._submit_three_line()
         self.assertEqual(response.status_code, 201, response.data)
@@ -269,13 +277,14 @@ class InstantSpawnHappyPathTests(InstantSpawnFixtureMixin, TestCase):
             response.data["routing_decision"],
             ExtraWorkRoutingDecision.INSTANT,
         )
-        self.assertEqual(Ticket.objects.count(), before + 3)
+        self.assertEqual(Ticket.objects.count(), before + 1)
 
         ew = ExtraWorkRequest.objects.get(id=response.data["id"])
         lines = list(ew.line_items.all().order_by("id"))
         self.assertEqual(len(lines), 3)
-        for line in lines:
-            self.assertEqual(line.spawned_tickets.count(), 1)
+        self.assertEqual(
+            Ticket.objects.filter(extra_work_request=ew).count(), 1
+        )
 
     def test_parent_status_advances_to_customer_approved(self):
         response = self._submit_one_line()
@@ -429,11 +438,12 @@ class InstantSpawnIdempotencyTests(InstantSpawnFixtureMixin, TestCase):
         response = self._submit_three_line()
         self.assertEqual(response.status_code, 201, response.data)
         ew = ExtraWorkRequest.objects.get(id=response.data["id"])
-        self.assertEqual(Ticket.objects.filter(
-            extra_work_request_item__extra_work_request=ew
-        ).count(), 3)
+        # Sprint 6A — exactly ONE ticket per request.
+        self.assertEqual(
+            Ticket.objects.filter(extra_work_request=ew).count(), 1
+        )
 
-        # Re-call the spawn service directly. Each line already has a
+        # Re-call the spawn service directly. The request already has a
         # spawned ticket, so the second call returns an empty list and
         # creates no new rows.
         before = Ticket.objects.count()
@@ -442,9 +452,10 @@ class InstantSpawnIdempotencyTests(InstantSpawnFixtureMixin, TestCase):
             new_tickets = spawn_tickets_for_request(ew, actor=self.cust_user)
         self.assertEqual(new_tickets, [])
         self.assertEqual(Ticket.objects.count(), before)
-        # Still exactly N tickets per line (not 2N).
-        for line in ew.line_items.all():
-            self.assertEqual(line.spawned_tickets.count(), 1)
+        # Still exactly one ticket for the request (not two).
+        self.assertEqual(
+            Ticket.objects.filter(extra_work_request=ew).count(), 1
+        )
 
 
 # ---------------------------------------------------------------------------

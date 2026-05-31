@@ -468,52 +468,62 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         provider-only-field stripping; this serializer never carries
         those fields in the first place).
 
-        Origin resolution:
-          * `extra_work_request_item` set, `proposal_line` null
-              -> INSTANT-route spawn (`extra_work.instant_tickets`).
-          * `proposal_line` set (with or without `extra_work_request_
-            item`) -> PROPOSAL-route spawn
-            (`extra_work.proposal_tickets`). The parent EW + item id
-            are walked back through `proposal_line.proposal.
-            extra_work_request`.
-          * Neither -> None.
+        Sprint 6A — origin resolution:
+          * Resolve the parent EW via the CANONICAL
+            `obj.extra_work_request` FK first; fall back to the legacy
+            `proposal_line` / `extra_work_request_item` chains only
+            when the canonical FK is null (historical rows).
+          * Classify `origin` from the resolved EW's
+            `routing_decision`: INSTANT -> "INSTANT", else "PROPOSAL".
+          * `extra_work_request_item_id` + `service_name` come from the
+            representative linked line (the FIRST line the spawn helper
+            stamped on the back-compat FK).
+          * Return None only when NO EW can be resolved by any path.
         """
+        from extra_work.models import ExtraWorkRoutingDecision
+
         item = obj.extra_work_request_item
         proposal_line = obj.proposal_line
 
+        # Canonical resolution.
+        ew_request = obj.extra_work_request
+        if ew_request is None:
+            # Legacy fallback: proposal chain, then cart-item chain.
+            if proposal_line is not None:
+                ew_request = proposal_line.proposal.extra_work_request
+            elif item is not None:
+                ew_request = item.extra_work_request
+
+        if ew_request is None:
+            return None
+
+        # Representative line for the back-compat payload keys. The
+        # proposal helper stamps `proposal_line`; the instant / legacy
+        # helpers stamp `extra_work_request_item`.
         if proposal_line is not None:
-            # PROPOSAL-route. Walk back to the parent EW request via
-            # the proposal chain. `extra_work_request_item` is normally
-            # None on this path (the proposal spawn helper does not set
-            # it), but we still surface the line item id if the FK was
-            # populated by some future code path.
-            proposal = proposal_line.proposal
-            ew_request = proposal.extra_work_request
             service = proposal_line.service
-            return {
-                "extra_work_request_id": ew_request.id,
-                "extra_work_request_title": ew_request.title,
-                "extra_work_request_status": ew_request.status,
-                "extra_work_request_item_id": item.id if item is not None else None,
-                "service_name": service.name if service is not None else None,
-                "origin": "PROPOSAL",
-            }
-
-        if item is not None:
-            # INSTANT-route. The cart line carries the parent EW
-            # request and the service catalog row directly.
-            ew_request = item.extra_work_request
+            item_id = item.id if item is not None else None
+        elif item is not None:
             service = item.service
-            return {
-                "extra_work_request_id": ew_request.id,
-                "extra_work_request_title": ew_request.title,
-                "extra_work_request_status": ew_request.status,
-                "extra_work_request_item_id": item.id,
-                "service_name": service.name if service is not None else None,
-                "origin": "INSTANT",
-            }
+            item_id = item.id
+        else:
+            service = None
+            item_id = None
 
-        return None
+        origin = (
+            "INSTANT"
+            if ew_request.routing_decision == ExtraWorkRoutingDecision.INSTANT
+            else "PROPOSAL"
+        )
+
+        return {
+            "extra_work_request_id": ew_request.id,
+            "extra_work_request_title": ew_request.title,
+            "extra_work_request_status": ew_request.status,
+            "extra_work_request_item_id": item_id,
+            "service_name": service.name if service is not None else None,
+            "origin": origin,
+        }
 
 
 def _assigned_staff_payload(ticket, viewer):

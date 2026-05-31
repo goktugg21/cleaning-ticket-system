@@ -153,6 +153,9 @@ class ExtraWorkOriginFixtureMixin:
             title="Spawned ticket (instant)",
             description="from instant cart",
             status=TicketStatus.OPEN,
+            # Sprint 6A — canonical request link drives origin; the
+            # item FK is the back-compat representative line.
+            extra_work_request=ew,
             extra_work_request_item=item,
         )
         return ew, item, ticket
@@ -198,6 +201,11 @@ class ExtraWorkOriginFixtureMixin:
             title="Spawned ticket (proposal)",
             description="from proposal",
             status=TicketStatus.OPEN,
+            # Sprint 6A — canonical request link drives origin; the
+            # proposal_line FK is the back-compat representative line.
+            # The legacy item FK is intentionally NOT set, so the
+            # origin payload's `extra_work_request_item_id` stays None.
+            extra_work_request=ew,
             proposal_line=line,
         )
         return ew, line, ticket

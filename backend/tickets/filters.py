@@ -5,12 +5,12 @@ from .models import Ticket
 
 
 class TicketFilter(df.FilterSet):
-    # Sprint 30 Batch 30.1 — filter the ticket list by parent EW id.
-    # Walks both spawn paths:
+    # Sprint 30 Batch 30.1 / Sprint 6A — filter the ticket list by
+    # parent EW id. Anchors on the canonical `extra_work_request` FK
+    # and keeps both legacy chains in the union for historical rows:
+    #   * canonical: extra_work_request_id
     #   * cart route: extra_work_request_item__extra_work_request_id
     #   * proposal route: proposal_line__proposal__extra_work_request_id
-    # A single param covers both because no ticket is parented through
-    # both FKs at once (the spawn helpers each set exactly one).
     extra_work_request = df.NumberFilter(method="filter_extra_work_request")
 
     class Meta:
@@ -30,6 +30,7 @@ class TicketFilter(df.FilterSet):
         if value in (None, ""):
             return queryset
         return queryset.filter(
-            Q(extra_work_request_item__extra_work_request_id=value)
+            Q(extra_work_request_id=value)
+            | Q(extra_work_request_item__extra_work_request_id=value)
             | Q(proposal_line__proposal__extra_work_request_id=value)
         ).distinct()

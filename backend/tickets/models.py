@@ -176,10 +176,35 @@ class Ticket(models.Model):
     # surface. SET_NULL so a Ticket survives if the proposal / line
     # is later deleted — the operational job has audit history we
     # don't want to lose.
+    #
+    # Sprint 6A — retained for back-compat of the origin payload's
+    # `extra_work_request_item_id` / `service_name` keys. NOT the
+    # canonical EW link anymore: a request now spawns exactly ONE
+    # ticket and the canonical parent is `extra_work_request` below.
+    # The instant / legacy helpers set `extra_work_request_item` to the
+    # FIRST cart line; the proposal helper sets `proposal_line` to the
+    # FIRST is_approved_for_spawn line — purely so the origin payload
+    # can surface a representative service name.
     proposal_line = models.ForeignKey(
         "extra_work.ProposalLine",
         on_delete=models.SET_NULL,
         related_name="spawned_tickets_for_proposal_line",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    # Sprint 6A — CANONICAL parent Extra Work request. One
+    # ExtraWorkRequest spawns exactly ONE operational Ticket; this FK
+    # is that link. SET_NULL so the operational job survives if the
+    # parent EW is later soft/hard-deleted. No DB unique constraint:
+    # historical data carries multiple tickets per request, so a
+    # unique index would fail the backfill. Idempotency
+    # (one-ticket-per-request) is enforced in the spawn helpers + tests.
+    extra_work_request = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.SET_NULL,
+        related_name="operational_tickets",
         null=True,
         blank=True,
         default=None,

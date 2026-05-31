@@ -2,9 +2,10 @@
 Sprint 28 Batch 8 — proposal approval -> ticket spawn service.
 
 When a `Proposal` lands in `CUSTOMER_APPROVED` (customer-driven OR
-provider-overridden approval), one operational `tickets.Ticket` is
-spawned per `ProposalLine` that has `is_approved_for_spawn=True`
-and does not already have a spawned Ticket. The customer's per-line
+provider-overridden approval), EXACTLY ONE operational `tickets.Ticket`
+is spawned for the parent `ExtraWorkRequest` (Sprint 6A — collapsed
+from one-per-line), summarizing every `ProposalLine` that has
+`is_approved_for_spawn=True`. The customer's per-line
 `customer_explanation` is composed into the ticket description; the
 provider-only `internal_note` is NEVER copied into the customer-
 facing Ticket text.
@@ -63,13 +64,9 @@ from .models import (
 from .proposal_state_machine import TransitionError
 
 
-def _build_proposal_title(line: ProposalLine) -> str:
-    """Derive a Ticket title from a proposal line.
-
-    Prefer the catalog `service.name`, fall back to the line's own
-    `description`, and finally a generic placeholder. Mirrors the
-    line `__str__` shape.
-    """
+def _proposal_line_summary(line: ProposalLine) -> str:
+    """One-line human label for a proposal line. Mirrors the line's
+    `__str__` shape."""
     if line.service is not None:
         return f"{line.service.name} × {line.quantity}"
     if (line.description or "").strip():
@@ -77,25 +74,47 @@ def _build_proposal_title(line: ProposalLine) -> str:
     return f"Extra work line × {line.quantity}"
 
 
-def _build_proposal_description(
-    request, line: ProposalLine
+def _build_proposal_title(
+    request, lines: List[ProposalLine]
 ) -> str:
-    """Compose a Ticket description from the parent EW + line.
+    """Sprint 6A — derive ONE Ticket title summarizing the whole
+    proposal. Prefer the parent request's title; if blank, derive from
+    the first line; append a count suffix when more than one line."""
+    base = (request.title or "").strip()
+    if not base:
+        base = _proposal_line_summary(lines[0]) if lines else "Extra work"
+    if len(lines) > 1:
+        base = f"{base} (+{len(lines) - 1} more)"
+    return base
 
-    Sections (in order, dropped if blank):
-      1. The parent request's `description`.
-      2. The line's `customer_explanation` (customer-visible).
 
-    The provider-only `internal_note` is NEVER included — that is
-    the H-11 / spec §6 "dual note privacy" guarantee.
+def _build_proposal_line_block(line: ProposalLine) -> str:
+    """Per-line description block: line label + the customer-visible
+    `customer_explanation`. The provider-only `internal_note` is NEVER
+    included — that is the H-11 / spec §6 dual-note privacy guarantee.
     """
-    parts: List[str] = []
-    if request.description and request.description.strip():
-        parts.append(request.description.strip())
+    parts: List[str] = [_proposal_line_summary(line)]
     if line.customer_explanation and line.customer_explanation.strip():
         parts.append(
             f"Proposal explanation: {line.customer_explanation.strip()}"
         )
+    return "\n".join(parts)
+
+
+def _build_proposal_description(
+    request, lines: List[ProposalLine]
+) -> str:
+    """Sprint 6A — compose ONE Ticket description summarizing ALL
+    approved-for-spawn proposal lines. The parent request description
+    appears once at the top, then one block per line.
+
+    The provider-only `internal_note` is NEVER included.
+    """
+    parts: List[str] = []
+    if request.description and request.description.strip():
+        parts.append(request.description.strip())
+    for line in lines:
+        parts.append(_build_proposal_line_block(line))
     return "\n\n".join(parts)
 
 
@@ -103,12 +122,18 @@ def spawn_tickets_for_proposal(
     proposal: Proposal, *, actor
 ) -> List[Ticket]:
     """
-    Spawn one operational Ticket per approved-for-spawn ProposalLine
-    on a CUSTOMER_APPROVED proposal. Idempotent (skips lines whose
-    Ticket already exists). Returns the list of created Tickets.
+    Sprint 6A — spawn EXACTLY ONE operational Ticket for the parent
+    ExtraWorkRequest of a CUSTOMER_APPROVED proposal, summarizing every
+    `is_approved_for_spawn=True` line. The ticket links
+    `extra_work_request` (CANONICAL) + `proposal_line` = the FIRST
+    approved-for-spawn line (back-compat for the origin payload).
 
-    Caller MUST hold an active transaction so a mid-loop failure
-    rolls every side effect back together.
+    Returns `[ticket]` when it creates the single ticket, or `[]` on an
+    idempotent re-run (a ticket already exists for the request) OR when
+    there are zero approved-for-spawn lines (nothing to spawn).
+
+    Caller MUST hold an active transaction so a failure rolls every
+    side effect back together.
     """
     if proposal.status != ProposalStatus.CUSTOMER_APPROVED:
         raise TransitionError(
@@ -118,77 +143,77 @@ def spawn_tickets_for_proposal(
         )
 
     request = proposal.extra_work_request
-    created: List[Ticket] = []
 
-    lines = list(proposal.lines.all().order_by("id"))
-    for line in lines:
-        if not line.is_approved_for_spawn:
-            # Forward-compat: per-line approval slot is False, do not
-            # spawn for this line (nothing in Batch 8 flips it; UI
-            # to mark False lands in a follow-up).
-            continue
-        if Ticket.objects.filter(proposal_line=line).exists():
-            # Idempotency — already spawned on a previous call.
-            continue
+    # Sprint 6A — request-level idempotency.
+    if Ticket.objects.filter(extra_work_request=request).exists():
+        return []
 
-        ticket = Ticket.objects.create(
-            company=request.company,
-            building=request.building,
-            customer=request.customer,
-            created_by=actor,
-            title=_build_proposal_title(line),
-            description=_build_proposal_description(request, line),
-            priority=TicketPriority.NORMAL,
-            status=TicketStatus.OPEN,
-            proposal_line=line,
-        )
+    spawn_lines = [
+        line
+        for line in proposal.lines.all().order_by("id")
+        if line.is_approved_for_spawn
+    ]
+    if not spawn_lines:
+        # No approved-for-spawn lines -> nothing to spawn.
+        return []
 
-        TicketStatusHistory.objects.create(
-            ticket=ticket,
-            old_status="",
-            new_status=TicketStatus.OPEN,
-            changed_by=actor,
-            note="Spawned from approved Extra Work proposal.",
-            is_override=False,
-            override_reason="",
-        )
+    # Back-compat legacy link: FIRST approved-for-spawn line.
+    first_line = spawn_lines[0]
 
-        created.append(ticket)
+    ticket = Ticket.objects.create(
+        company=request.company,
+        building=request.building,
+        customer=request.customer,
+        created_by=actor,
+        title=_build_proposal_title(request, spawn_lines),
+        description=_build_proposal_description(request, spawn_lines),
+        priority=TicketPriority.NORMAL,
+        status=TicketStatus.OPEN,
+        extra_work_request=request,
+        proposal_line=first_line,
+    )
 
-    return created
+    TicketStatusHistory.objects.create(
+        ticket=ticket,
+        old_status="",
+        new_status=TicketStatus.OPEN,
+        changed_by=actor,
+        note="Spawned from approved Extra Work proposal.",
+        is_override=False,
+        override_reason="",
+    )
+
+    return [ticket]
 
 
 # ---------------------------------------------------------------------------
 # Sprint 30 Batch 30.1 — legacy pricing-flow spawn
 # ---------------------------------------------------------------------------
-def _build_ew_title(item: ExtraWorkRequestItem, *, fallback_title: str) -> str:
-    """Derive a Ticket title from a cart line, falling back to the
-    parent EW title when the cart line has no Service link (legacy
-    backfill row)."""
+def _ew_line_summary(item: ExtraWorkRequestItem) -> str:
+    """One-line human label for a cart line."""
     if item.service is not None:
         return f"{item.service.name} × {item.quantity}"
-    if fallback_title.strip():
-        return f"{fallback_title.strip()} × {item.quantity}"
     return f"Extra work line × {item.quantity}"
 
 
-def _build_ew_description(
-    ew: ExtraWorkRequest, item: ExtraWorkRequestItem
+def _build_ew_title(
+    ew: ExtraWorkRequest, items: List[ExtraWorkRequestItem]
 ) -> str:
-    """Compose a readable Ticket description for a legacy-flow spawn.
+    """Sprint 6A — derive ONE Ticket title summarizing the whole
+    request. Prefer the parent EW title; if blank, derive from the
+    first line; append a count suffix when more than one line."""
+    base = (ew.title or "").strip()
+    if not base:
+        base = _ew_line_summary(items[0]) if items else "Extra work"
+    if len(items) > 1:
+        base = f"{base} (+{len(items) - 1} more)"
+    return base
 
-    Sections (dropped if blank):
-      1. Parent EW `description`.
-      2. Line-level `customer_note`.
-      3. `Service.description` if the cart line has a Service link.
 
-    Mirrors `instant_tickets._build_description` so legacy-pricing
-    and instant-route tickets read identically on the operational
-    timeline.
-    """
-    parts: List[str] = []
-    if ew.description and ew.description.strip():
-        parts.append(ew.description.strip())
+def _build_ew_line_block(item: ExtraWorkRequestItem) -> str:
+    """Per-line description block: line label, customer_note, and the
+    Service catalog description if linked."""
+    parts: List[str] = [_ew_line_summary(item)]
     if item.customer_note and item.customer_note.strip():
         parts.append(f"Line note: {item.customer_note.strip()}")
     if (
@@ -197,6 +222,22 @@ def _build_ew_description(
         and item.service.description.strip()
     ):
         parts.append(f"Service: {item.service.description.strip()}")
+    return "\n".join(parts)
+
+
+def _build_ew_description(
+    ew: ExtraWorkRequest, items: List[ExtraWorkRequestItem]
+) -> str:
+    """Sprint 6A — compose ONE Ticket description summarizing ALL cart
+    lines. The parent EW description appears once at the top, then one
+    block per line. Mirrors `instant_tickets._build_description` so
+    legacy-pricing and instant-route tickets read identically.
+    """
+    parts: List[str] = []
+    if ew.description and ew.description.strip():
+        parts.append(ew.description.strip())
+    for item in items:
+        parts.append(_build_ew_line_block(item))
     return "\n\n".join(parts)
 
 
@@ -209,23 +250,22 @@ def spawn_tickets_for_extra_work_request(
     Invoked from `extra_work.state_machine.apply_transition` AFTER
     the EW lands in `CUSTOMER_APPROVED` via the legacy pricing path
     (`PRICING_PROPOSED -> CUSTOMER_APPROVED`, customer-driven OR
-    provider-overridden). Spawns one `tickets.Ticket` per
-    `ExtraWorkRequestItem` (cart line) on the request and links each
-    Ticket back via `extra_work_request_item` so the existing
-    parent-EW auto-sync hook in
-    `tickets.state_machine.apply_transition` can drive the
-    operational segment (CUSTOMER_APPROVED -> IN_PROGRESS ->
-    COMPLETED) when the spawned tickets start moving.
+    provider-overridden). Sprint 6A — spawns EXACTLY ONE
+    `tickets.Ticket` for the whole request, summarizing all cart
+    lines, linking `extra_work_request` (CANONICAL) +
+    `extra_work_request_item` = the FIRST cart line (back-compat). The
+    parent-EW auto-sync hook in `tickets.state_machine.apply_transition`
+    drives the operational segment (CUSTOMER_APPROVED -> IN_PROGRESS ->
+    COMPLETED) when the spawned ticket starts moving.
 
-    Caller MUST hold an active transaction so a mid-loop failure
-    rolls every side effect back together. `apply_transition` is
-    already `@transaction.atomic`-wrapped.
+    Caller MUST hold an active transaction so a failure rolls every
+    side effect back together. `apply_transition` is already
+    `@transaction.atomic`-wrapped.
 
-    Idempotent: items whose `Ticket.objects.filter(
-    extra_work_request_item=item).exists()` is True are skipped.
-    Re-running returns an empty list. Used by the retry endpoint
-    `POST /api/extra-work/<id>/spawn/` to recover stuck EWs that
-    were customer-approved before this fix shipped.
+    Idempotent on `Ticket.objects.filter(extra_work_request=ew)`:
+    returns `[ticket]` on a fresh spawn and `[]` on a re-run. Used by
+    the retry endpoint `POST /api/extra-work/<id>/spawn/` to recover
+    stuck EWs that were customer-approved before this fix shipped.
 
     Defensive precondition: raises `TransitionError` with code
     `ew_spawn_wrong_status` when called on an EW not in
@@ -241,37 +281,36 @@ def spawn_tickets_for_extra_work_request(
             code="ew_spawn_wrong_status",
         )
 
-    created: List[Ticket] = []
+    # Sprint 6A — request-level idempotency. One ticket per request.
+    if Ticket.objects.filter(extra_work_request=ew).exists():
+        return []
+
     items = list(ew.line_items.all().order_by("id"))
 
-    for item in items:
-        if Ticket.objects.filter(extra_work_request_item=item).exists():
-            # Idempotency — already spawned (e.g. an INSTANT-route row
-            # being retried, or a manual re-fire of the retry endpoint).
-            continue
+    # Back-compat legacy link: FIRST cart line.
+    first_item = items[0] if items else None
 
-        ticket = Ticket.objects.create(
-            company=ew.company,
-            building=ew.building,
-            customer=ew.customer,
-            created_by=actor,
-            title=_build_ew_title(item, fallback_title=ew.title),
-            description=_build_ew_description(ew, item),
-            priority=TicketPriority.NORMAL,
-            status=TicketStatus.OPEN,
-            extra_work_request_item=item,
-        )
+    ticket = Ticket.objects.create(
+        company=ew.company,
+        building=ew.building,
+        customer=ew.customer,
+        created_by=actor,
+        title=_build_ew_title(ew, items),
+        description=_build_ew_description(ew, items),
+        priority=TicketPriority.NORMAL,
+        status=TicketStatus.OPEN,
+        extra_work_request=ew,
+        extra_work_request_item=first_item,
+    )
 
-        TicketStatusHistory.objects.create(
-            ticket=ticket,
-            old_status="",
-            new_status=TicketStatus.OPEN,
-            changed_by=actor,
-            note="Spawned from approved Extra Work request (legacy pricing flow).",
-            is_override=False,
-            override_reason="",
-        )
+    TicketStatusHistory.objects.create(
+        ticket=ticket,
+        old_status="",
+        new_status=TicketStatus.OPEN,
+        changed_by=actor,
+        note="Spawned from approved Extra Work request (legacy pricing flow).",
+        is_override=False,
+        override_reason="",
+    )
 
-        created.append(ticket)
-
-    return created
+    return [ticket]
