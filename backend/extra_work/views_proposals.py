@@ -605,14 +605,25 @@ class ProposalDirectPublishView(views.APIView):
                 # variable's `status` is stale. Refresh from DB.
                 proposal.refresh_from_db()
 
-                updated = apply_proposal_transition(
-                    proposal,
-                    request.user,
-                    ProposalStatus.CUSTOMER_APPROVED,
-                    note=note,
-                    is_override=True,
-                    override_reason=override_reason,
-                )
+                # Sprint 6B — if the parent EW carries
+                # AUTO_START_AFTER_PRICING, the SEND leg above already
+                # auto-approved the proposal and spawned the operational
+                # ticket (system pre-authorisation, is_override=False).
+                # There is no customer decision to override, so skip the
+                # SENT->CUSTOMER_APPROVED override leg (it would be a
+                # no-op transition) and return the already-approved
+                # proposal as-is.
+                if proposal.status == ProposalStatus.CUSTOMER_APPROVED:
+                    updated = proposal
+                else:
+                    updated = apply_proposal_transition(
+                        proposal,
+                        request.user,
+                        ProposalStatus.CUSTOMER_APPROVED,
+                        note=note,
+                        is_override=True,
+                        override_reason=override_reason,
+                    )
         except TransitionError as exc:
             return Response(
                 {"detail": str(exc), "code": exc.code},
