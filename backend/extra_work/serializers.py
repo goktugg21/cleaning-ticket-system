@@ -893,6 +893,41 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 "Customer is not linked to the selected building."
             )
 
+        # Sprint 3B — every catalog-linked line's service must be
+        # owned by the same provider company as the customer.
+        # Ad-hoc lines (no service FK) bypass — they are operator-
+        # typed and have no provider FK of their own. Mismatched
+        # rows are rejected with stable code
+        # `line_service_company_mismatch`.
+        for index, line in enumerate(attrs.get("line_items", []) or []):
+            line_service = line.get("service")
+            if line_service is None:
+                continue
+            if line_service.company_id != customer.company_id:
+                raise serializers.ValidationError(
+                    {
+                        "line_items": [
+                            {
+                                "service": [
+                                    serializers.ErrorDetail(
+                                        "Service belongs to a "
+                                        "different provider company "
+                                        "than the customer.",
+                                        code=(
+                                            "line_service_company_mismatch"
+                                        ),
+                                    )
+                                ]
+                            }
+                            if i == index
+                            else {}
+                            for i, _ in enumerate(
+                                attrs.get("line_items", []) or []
+                            )
+                        ]
+                    }
+                )
+
         if attrs.get("category") == ExtraWorkCategory.OTHER and not attrs.get(
             "category_other_text", ""
         ).strip():

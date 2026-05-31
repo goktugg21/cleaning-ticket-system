@@ -123,6 +123,7 @@ class InstantSpawnFixtureMixin:
         cls.service_cat = ServiceCategory.objects.create(name="Cat-B7")
         cls.service_a = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Service A",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),
@@ -130,18 +131,21 @@ class InstantSpawnFixtureMixin:
         )
         cls.service_b = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Service B",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("3.50"),
         )
         cls.service_c = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Service C",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("100.00"),
         )
         cls.service_unpriced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="No contract",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("40.00"),

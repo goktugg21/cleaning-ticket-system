@@ -24,14 +24,54 @@ from __future__ import annotations
 
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
+from accounts.models import UserRole
 from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
 from config.pagination import UnboundedPagination
 from customers.models import Customer
 
 from .models import CustomerServicePrice
 from .serializers_catalog import CustomerServicePriceSerializer
+
+
+# Sprint 3B — stable error code surfaced when COMPANY_ADMIN tries to
+# write CustomerServicePrice but the owning Company has the
+# `provider_admin_may_manage_customer_prices` toggle off.
+ERR_CUSTOMER_PRICE_POLICY_DISABLED = (
+    "provider_admin_customer_price_management_disabled"
+)
+
+
+def _enforce_customer_price_policy(user, customer):
+    """Sprint 3B — gate WRITE methods on the CSP endpoint against
+    `Company.provider_admin_may_manage_customer_prices`.
+
+    SUPER_ADMIN bypasses. COMPANY_ADMIN passes only when their
+    target company's toggle is True. The cross-company branch is
+    already handled by `IsSuperAdminOrCompanyAdminForCompany` at
+    the object level (403 there); this helper only fires the
+    policy-disabled branch.
+    """
+    if user.role == UserRole.SUPER_ADMIN:
+        return
+    if user.role != UserRole.COMPANY_ADMIN:
+        # Defensive — `IsSuperAdminOrCompanyAdminForCompany` already
+        # rejected other roles at the permission layer.
+        raise PermissionDenied(detail="Forbidden.")
+    company = customer.company
+    if not company.provider_admin_may_manage_customer_prices:
+        raise PermissionDenied(
+            detail={
+                "detail": (
+                    "Provider Admin customer-price management is "
+                    "disabled for this provider company. Ask Super "
+                    "Admin to enable it."
+                ),
+                "code": ERR_CUSTOMER_PRICE_POLICY_DISABLED,
+            }
+        )
 
 
 class CustomerServicePriceListCreateView(generics.ListCreateAPIView):
@@ -69,6 +109,7 @@ class CustomerServicePriceListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         customer = self._get_customer()
+        _enforce_customer_price_policy(self.request.user, customer)
         serializer.save(customer=customer)
 
 
@@ -96,7 +137,14 @@ class CustomerServicePriceDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
         return price
 
+    def perform_update(self, serializer):
+        _enforce_customer_price_policy(
+            self.request.user, serializer.instance.customer
+        )
+        serializer.save()
+
     def delete(self, request, *args, **kwargs):
         price = self.get_object()
+        _enforce_customer_price_policy(request.user, price.customer)
         price.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

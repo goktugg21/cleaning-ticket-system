@@ -904,7 +904,7 @@ class Command(BaseCommand):
     # -----------------------------------------------------------------
     # Sprint 29 Batch 29.8.5 — provider-global service catalog
     # -----------------------------------------------------------------
-    def _seed_service_catalog(self):
+    def _seed_service_catalog(self, primary_company=None):
         """
         Idempotently upsert a small but realistic provider-side service
         catalog (4 categories, 14 services). The catalog is provider-
@@ -965,6 +965,18 @@ class Command(BaseCommand):
             ),
         ]
 
+        # Sprint 3B — Service is provider-scoped. Pin every seeded
+        # row to a primary Company. If the caller did not pass one,
+        # fall back to the first Company in the DB; if there is no
+        # Company yet, skip the catalog seed entirely (the
+        # `_seed_company` pass that ran first would normally have
+        # created it).
+        if primary_company is None:
+            primary_company = Company.objects.order_by("id").first()
+        if primary_company is None:
+            self._service_catalog_counts = {"categories": 0, "services": 0}
+            return
+
         cat_count = 0
         svc_count = 0
         for cat_name, cat_description, services in catalog:
@@ -975,6 +987,7 @@ class Command(BaseCommand):
             cat_count += 1
             for svc_name, unit_type, default_price in services:
                 Service.objects.update_or_create(
+                    company=primary_company,
                     category=category,
                     name=svc_name,
                     defaults={

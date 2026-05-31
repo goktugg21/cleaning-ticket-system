@@ -46,6 +46,47 @@ class Company(models.Model):
         ),
     )
 
+    # Sprint 3B — Super Admin-controlled policy toggles on the
+    # provider catalog + customer-specific pricing surfaces.
+    #
+    # When True (default — preserves pre-Sprint-3B behaviour), a
+    # COMPANY_ADMIN (Provider Admin) of this provider company MAY
+    # create / update / archive `extra_work.Service` and
+    # `extra_work.ServiceCategory` rows owned by this provider
+    # company. When False, only SUPER_ADMIN may. The catalog view
+    # layer (`extra_work.views_catalog`) raises HTTP 403 with the
+    # stable code `provider_admin_catalog_management_disabled` when
+    # the toggle is False.
+    provider_admin_may_manage_catalog = models.BooleanField(
+        default=True,
+        help_text=(
+            "Sprint 3B — Super Admin-controlled policy. When True "
+            "(default), a Provider Company Admin of this provider "
+            "company may manage the provider service catalog "
+            "(create/update/archive Service + ServiceCategory) for "
+            "this company. When False, only Super Admin may. "
+            "Building Manager / Staff / Customer-side users are "
+            "blocked regardless of this toggle."
+        ),
+    )
+
+    # Sprint 3B — same shape as the catalog toggle, but governs the
+    # write surface on `extra_work.CustomerServicePrice` rows for
+    # any customer under this provider company. Reject path returns
+    # HTTP 403 with stable code
+    # `provider_admin_customer_price_management_disabled`.
+    provider_admin_may_manage_customer_prices = models.BooleanField(
+        default=True,
+        help_text=(
+            "Sprint 3B — Super Admin-controlled policy. When True "
+            "(default), a Provider Company Admin of this provider "
+            "company may create / update / archive customer-"
+            "specific service prices (CustomerServicePrice) for "
+            "any customer under this provider company. When False, "
+            "only Super Admin may."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

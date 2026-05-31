@@ -127,6 +127,7 @@ class _B7EwFixture(TestCase):
         category = ServiceCategory.objects.create(name="B7-cat")
         cls.service = Service.objects.create(
             category=category,
+            company=cls.company,
             name="B7-service",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("100.00"),

@@ -46,12 +46,14 @@ class PricingApiFixtureMixin(TenantFixtureMixin):
         self.category = ServiceCategory.objects.create(name="Cleaning")
         self.service = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("45.00"),
         )
         self.other_service = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="Floor polishing",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("12.50"),

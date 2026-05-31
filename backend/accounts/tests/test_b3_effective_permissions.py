@@ -162,6 +162,7 @@ class _B3Fixture(TestCase):
         cls.service_cat = ServiceCategory.objects.create(name="Cat B3")
         cls.service = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company_a,
             name="Window cleaning B3",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("7.00"),

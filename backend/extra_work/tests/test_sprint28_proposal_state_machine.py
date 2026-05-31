@@ -99,6 +99,7 @@ class ProposalStateMachineFixtureMixin:
         cls.service_cat = ServiceCategory.objects.create(name="SM-Cat")
         cls.service = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="SM-Service",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),

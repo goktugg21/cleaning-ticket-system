@@ -151,18 +151,21 @@ class CartFixtureMixin:
         cls.service_cat = ServiceCategory.objects.create(name="Cleaning")
         cls.service_priced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.provider_a,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),
         )
         cls.service_unpriced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.provider_a,
             name="Floor maintenance",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("3.50"),
         )
         cls.service_inactive = Service.objects.create(
             category=cls.service_cat,
+            company=cls.provider_a,
             name="Discontinued",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("100.00"),

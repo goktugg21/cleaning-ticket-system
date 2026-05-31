@@ -196,6 +196,7 @@ class _B6Fixture(TestCase):
         category = ServiceCategory.objects.create(name="B6-cat")
         service = Service.objects.create(
             category=category,
+            company=self.company,
             name="B6-service",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("100.00"),
@@ -239,6 +240,7 @@ class _B6Fixture(TestCase):
         category = ServiceCategory.objects.create(name="B6-cat-draft")
         service = Service.objects.create(
             category=category,
+            company=self.company,
             name="B6-service-draft",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("50.00"),

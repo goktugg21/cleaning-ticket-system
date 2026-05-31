@@ -53,33 +53,37 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
         names = {row["name"] for row in list_resp.data["results"]}
         self.assertIn("Cleaning", names)
 
-    def test_company_admin_can_crud_category(self):
+    def test_company_admin_cannot_crud_category(self):
+        # Sprint 3B narrows ServiceCategory writes to SUPER_ADMIN
+        # only because the model is global. Provider Admin attempts
+        # land on 403 with the stable code; the pre-Sprint-3B "PA
+        # may CRUD categories" surface is intentionally gone.
         self.authenticate(self.company_admin)
         create = self.client.post(
             CATEGORY_LIST_URL, {"name": "Maintenance"}, format="json"
         )
-        self.assertEqual(create.status_code, status.HTTP_201_CREATED)
-        cat_id = create.data["id"]
+        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
 
+        # Reads still work — the GET surface is unchanged.
+        cat = ServiceCategory.objects.create(name="Maintenance-PA-read")
         retrieve = self.client.get(
-            CATEGORY_DETAIL_URL.format(cat_id=cat_id)
+            CATEGORY_DETAIL_URL.format(cat_id=cat.id)
         )
         self.assertEqual(retrieve.status_code, status.HTTP_200_OK)
 
+        # PATCH / DELETE land on 403 too.
         update = self.client.patch(
-            CATEGORY_DETAIL_URL.format(cat_id=cat_id),
-            {"description": "All maintenance work"},
+            CATEGORY_DETAIL_URL.format(cat_id=cat.id),
+            {"description": "Hijack"},
             format="json",
         )
-        self.assertEqual(update.status_code, status.HTTP_200_OK)
-        self.assertEqual(update.data["description"], "All maintenance work")
-
+        self.assertEqual(update.status_code, status.HTTP_403_FORBIDDEN)
         delete = self.client.delete(
-            CATEGORY_DETAIL_URL.format(cat_id=cat_id)
+            CATEGORY_DETAIL_URL.format(cat_id=cat.id)
         )
-        self.assertEqual(delete.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(
-            ServiceCategory.objects.filter(pk=cat_id).exists()
+        self.assertEqual(delete.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(
+            ServiceCategory.objects.filter(pk=cat.id).exists()
         )
 
     def test_duplicate_category_name_returns_400(self):
@@ -174,6 +178,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         response = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.cat_a.id,
                 "name": "Floor polishing",
                 "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
@@ -196,6 +201,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         create = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.cat_a.id,
                 "name": "Cleaning shift",
                 "unit_type": ExtraWorkPricingUnitType.HOURS,
@@ -224,12 +230,14 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
     def test_filter_by_category(self):
         Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Service A1",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("10.00"),
         )
         Service.objects.create(
             category=self.cat_b,
+            company=self.company,
             name="Service B1",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("10.00"),
@@ -243,6 +251,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
     def test_is_active_filter(self):
         Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Active Svc",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("99.00"),
@@ -250,6 +259,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         )
         Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Inactive Svc",
             unit_type=ExtraWorkPricingUnitType.FIXED,
             default_unit_price=Decimal("99.00"),
@@ -264,6 +274,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
     def test_duplicate_name_within_same_category_rejected(self):
         Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Floor polishing",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("12.50"),
@@ -272,6 +283,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         response = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.cat_a.id,
                 "name": "Floor polishing",
                 "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
@@ -284,6 +296,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
     def test_same_name_different_category_allowed(self):
         Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Floor polishing",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("12.50"),
@@ -292,6 +305,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         response = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.cat_b.id,
                 "name": "Floor polishing",
                 "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
@@ -306,6 +320,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         response = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.cat_a.id,
                 "name": "Bad price",
                 "unit_type": ExtraWorkPricingUnitType.HOURS,
@@ -320,6 +335,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         """Sprint 29 Batch 29.8.5 — BM can GET Service rows; cannot write."""
         svc = Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Existing Svc",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("10.00"),
@@ -338,6 +354,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
             self.client.post(
                 SERVICE_LIST_URL,
                 {
+                    "company": self.company.id,
                     "category": self.cat_a.id,
                     "name": "Nope",
                     "unit_type": ExtraWorkPricingUnitType.HOURS,
@@ -359,6 +376,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         (needed by EW create form); cannot write."""
         svc = Service.objects.create(
             category=self.cat_a,
+            company=self.company,
             name="Existing Svc",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("10.00"),
@@ -373,6 +391,7 @@ class ServiceCrudTests(TenantFixtureMixin, APITestCase):
         create_resp = self.client.post(
             SERVICE_LIST_URL,
             {
+                "company": self.company.id,
                 "category": self.cat_a.id,
                 "name": "Nope",
                 "unit_type": ExtraWorkPricingUnitType.HOURS,
@@ -393,6 +412,7 @@ class ServiceCategoryProtectsServiceTests(TenantFixtureMixin, APITestCase):
         self.cat = ServiceCategory.objects.create(name="Locked Cat")
         self.svc = Service.objects.create(
             category=self.cat,
+            company=self.company,
             name="Attached Svc",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("15.00"),

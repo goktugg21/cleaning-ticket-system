@@ -45,6 +45,7 @@ class PricingResolverFixtureMixin(TenantFixtureMixin):
         self.category = ServiceCategory.objects.create(name="Cleaning")
         self.service = Service.objects.create(
             category=self.category,
+            company=self.company,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("45.00"),

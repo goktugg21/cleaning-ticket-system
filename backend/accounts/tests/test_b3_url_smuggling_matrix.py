@@ -160,6 +160,7 @@ class _Fixture(TestCase):
         cls.service_cat = ServiceCategory.objects.create(name="Cat B3 URL")
         cls.service = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company_a,
             name="Service B3 URL",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),

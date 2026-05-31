@@ -147,6 +147,7 @@ class _B2Fixture(TestCase):
         # Service A: contract-priced for this customer.
         cls.svc_window = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name=f"Window cleaning {suffix}",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("7.00"),
@@ -162,6 +163,7 @@ class _B2Fixture(TestCase):
         # Service B: NOT contract-priced for this customer.
         cls.svc_grass = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name=f"Grass cutting {suffix}",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("2.00"),
@@ -173,6 +175,7 @@ class _B2Fixture(TestCase):
         # distinct contract-priced services).
         cls.svc_polish = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name=f"Floor polish {suffix}",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("60.00"),

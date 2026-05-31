@@ -112,6 +112,7 @@ class _ActionsFixtureMixin:
         )
         cls.service = Service.objects.create(
             category=ServiceCategory.objects.create(name="Cat-PR"),
+            company=cls.company,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),

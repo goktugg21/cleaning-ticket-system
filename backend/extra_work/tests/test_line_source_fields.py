@@ -134,12 +134,14 @@ class _LineSourceFixtureMixin:
         cls.service_cat = ServiceCategory.objects.create(name="Cleaning-LS")
         cls.service_priced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Window cleaning LS",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("50.00"),
         )
         cls.service_unpriced = Service.objects.create(
             category=cls.service_cat,
+            company=cls.company,
             name="Floor maintenance LS",
             unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
             default_unit_price=Decimal("3.50"),
