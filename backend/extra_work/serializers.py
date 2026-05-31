@@ -22,11 +22,25 @@ from customers.models import (
 )
 from customers.permissions import access_has_permission, user_can
 
+from .classification import (
+    ACTOR_CUSTOMER_COMPANY_ADMIN,
+    ACTOR_CUSTOMER_LOCATION_MANAGER,
+    ACTOR_CUSTOMER_USER,
+    ACTOR_PROVIDER,
+    ACTOR_STAFF,
+    IntentValidationError,
+    classify_cart,
+    classify_line,
+    derive_default_intent,
+    validate_intent_for_cart,
+)
 from .models import (
     ExtraWorkCategory,
+    ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
     ExtraWorkPricingUnitType,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
     ExtraWorkRoutingDecision,
     ExtraWorkStatus,
@@ -234,21 +248,48 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         chosen `Service.unit_type` by the parent serializer's
         `create()` — clients do NOT supply it on the wire.
 
-    `service` is **required on the wire** for new submissions (the
-    Batch 6 contract: no service ⇒ proposal-only line, and the
-    cart flow only accepts catalog-linked lines). The DB column is
-    NULL-allowed only so the migration backfill can adopt legacy
-    single-line rows; the serializer never accepts NULL.
+    Sprint 2A:
+      * `service` is OPTIONAL on the wire. A line may instead carry
+        a non-empty `custom_description` to express a free-text /
+        ad-hoc cart line that has no catalog row. Exactly one of
+        `service` or `custom_description` must be present; sending
+        both — or neither — is a 400 with code
+        `line_requires_service_or_description`.
+      * Snapshot fields (`line_price_source`, `snapshot_*`) are
+        read-only and surfaced so the frontend can render the
+        per-line source without re-resolving client-side.
+
+    Pre-Sprint-2A note: Batch 6 required `service` on the wire.
+    Existing 341 tests submit catalog-linked lines; the relaxed
+    rule keeps every catalog-linked submission working unchanged.
     """
 
     service = serializers.PrimaryKeyRelatedField(
         queryset=Service.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
     )
     service_name = serializers.CharField(
         source="service.name",
         read_only=True,
         default=None,
     )
+    custom_description = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=255,
+    )
+    line_price_source = serializers.CharField(read_only=True)
+    snapshot_unit_price = serializers.DecimalField(
+        read_only=True, max_digits=12, decimal_places=2
+    )
+    snapshot_vat_pct = serializers.DecimalField(
+        read_only=True, max_digits=5, decimal_places=2
+    )
+    snapshot_service_name = serializers.CharField(read_only=True)
+    snapshot_service_category_name = serializers.CharField(read_only=True)
 
     # See module-level "Per-line pricing source" docblock for the
     # contract. Cart lines have no persisted unit_price of their own
@@ -266,6 +307,7 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             "id",
             "service",
             "service_name",
+            "custom_description",
             "quantity",
             "unit_type",
             "requested_date",
@@ -273,17 +315,28 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
+            # Sprint 2A — snapshot surface (read-only).
+            "line_price_source",
+            "snapshot_unit_price",
+            "snapshot_vat_pct",
+            "snapshot_service_name",
+            "snapshot_service_category_name",
         ]
         read_only_fields = [
             "id",
             "service_name",
             # `unit_type` is denormalised by the parent serializer at
-            # create time from Service.unit_type — clients must not
-            # supply it.
+            # create time from Service.unit_type (or set to OTHER for
+            # ad-hoc lines) — clients must not supply it.
             "unit_type",
             "price_source",
             "contract_unit_price",
             "contract_vat_pct",
+            "line_price_source",
+            "snapshot_unit_price",
+            "snapshot_vat_pct",
+            "snapshot_service_name",
+            "snapshot_service_category_name",
         ]
 
     def validate_quantity(self, value):
@@ -294,15 +347,46 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         return value
 
     def validate_service(self, value):
-        if value is None:
-            raise serializers.ValidationError(
-                "Service is required for new line items."
-            )
-        if not value.is_active:
+        # Sprint 2A — service is OPTIONAL (ad-hoc lines have none).
+        # Still reject inactive catalog rows when one IS supplied.
+        if value is not None and not value.is_active:
             raise serializers.ValidationError(
                 "Cannot order an inactive service."
             )
         return value
+
+    def validate(self, attrs):
+        # Sprint 2A — XOR: exactly one of `service` or
+        # `custom_description` must be present. Both blank ⇒
+        # `line_requires_service_or_description`; both set ⇒ same
+        # code (ambiguous line).
+        service = attrs.get("service")
+        custom_description = (attrs.get("custom_description") or "").strip()
+        if service is None and not custom_description:
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        serializers.ErrorDetail(
+                            "Line must reference a service or supply a "
+                            "custom_description.",
+                            code="line_requires_service_or_description",
+                        )
+                    ]
+                }
+            )
+        if service is not None and custom_description:
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        serializers.ErrorDetail(
+                            "Line cannot carry both a service and a "
+                            "custom_description.",
+                            code="line_requires_service_or_description",
+                        )
+                    ]
+                }
+            )
+        return attrs
 
     def _resolved_contract(self, obj):
         """Live-resolve the line's contract row at read time.
@@ -382,6 +466,8 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             # the lean list shape so the inbox / overview UIs can
             # branch on INSTANT vs PROPOSAL without a detail fetch.
             "routing_decision",
+            # Sprint 2A — explicit customer-facing intent.
+            "request_intent",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
@@ -447,6 +533,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             # the create serializer and is read-only thereafter (Batch 7
             # will act on the value; Batch 6 only stores it).
             "routing_decision",
+            # Sprint 2A — explicit customer-facing intent.
+            "request_intent",
             "line_items",
             "customer_visible_note",
             "pricing_note",
@@ -482,6 +570,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "customer_name",
             "status",
             "routing_decision",
+            "request_intent",
             "subtotal_amount",
             "vat_amount",
             "total_amount",
@@ -722,6 +811,18 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         queryset=Customer.objects.filter(is_active=True)
     )
     line_items = ExtraWorkRequestItemSerializer(many=True)
+    # Sprint 2A — explicit customer-facing intent. OPTIONAL on the
+    # wire so existing Batch 6/7/8 clients keep working unchanged;
+    # when omitted, the serializer derives a safe default from the
+    # cart shape (all-agreed ⇒ DIRECT_AGREED_PRICE_ORDER, otherwise
+    # REQUEST_QUOTE — never AUTO_START_AFTER_PRICING by default
+    # because that flow skips customer approval and must be opt-in).
+    request_intent = serializers.ChoiceField(
+        choices=ExtraWorkRequest._meta.get_field("request_intent").choices,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
 
     class Meta:
         model = ExtraWorkRequest
@@ -735,6 +836,7 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "category_other_text",
             "urgency",
             "preferred_date",
+            "request_intent",
             "line_items",
         ]
         read_only_fields = ["id"]
@@ -750,12 +852,16 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         # Defense in depth: a duplicate service entry in the same
         # cart is ambiguous (which requested_date / quantity wins?)
         # and rejected at the serializer layer. Same-service-twice-
-        # with-different-dates is a future feature.
+        # with-different-dates is a future feature. Ad-hoc lines
+        # (Sprint 2A) intentionally bypass this check — two ad-hoc
+        # lines are distinct line items, never duplicates.
         seen_service_ids = set()
         for line in value:
             service = line.get("service")
-            sid = service.pk if service is not None else None
-            if sid is not None and sid in seen_service_ids:
+            if service is None:
+                continue
+            sid = service.pk
+            if sid in seen_service_ids:
                 raise serializers.ValidationError(
                     "Duplicate service in cart: each service may "
                     "appear only once per submission."
@@ -837,13 +943,109 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    def _actor_kind(self, user, customer, building):
+        """Sprint 2A — derive a coarse actor classification for
+        intent validation. See `extra_work.classification` for the
+        full taxonomy.
+
+        Provider-side roles map to ACTOR_PROVIDER (intent rules treat
+        Super Admin / Provider Admin / Building Manager the same for
+        the create gate; tenant/building scope is already enforced
+        elsewhere in `validate`). STAFF cannot reach this code path
+        (rejected in `validate`), but we still classify defensively.
+
+        Customer-side: walk `CustomerUserBuildingAccess` for the
+        actor on the target (customer, building) and lift the
+        access_role into the matching actor kind. Missing access ⇒
+        baseline CUSTOMER_USER.
+        """
+        role = getattr(user, "role", None)
+        if role == UserRole.STAFF:
+            return ACTOR_STAFF
+        if role in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            return ACTOR_PROVIDER
+
+        # CUSTOMER_USER global role — refine via per-building
+        # access_role.
+        access = (
+            CustomerUserBuildingAccess.objects.filter(
+                membership__user=user,
+                membership__customer=customer,
+                building=building,
+                is_active=True,
+            )
+            .only("access_role")
+            .first()
+        )
+        if access is None:
+            return ACTOR_CUSTOMER_USER
+        if (
+            access.access_role
+            == CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+        ):
+            return ACTOR_CUSTOMER_COMPANY_ADMIN
+        if (
+            access.access_role
+            == CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        ):
+            return ACTOR_CUSTOMER_LOCATION_MANAGER
+        return ACTOR_CUSTOMER_USER
+
     def create(self, validated_data):
         from django.db import transaction
 
         line_items_data = validated_data.pop("line_items", [])
+        supplied_intent = validated_data.pop("request_intent", None)
         validated_data["company"] = validated_data["customer"].company
         validated_data["created_by"] = self.context["request"].user
         validated_data["status"] = ExtraWorkStatus.REQUESTED
+
+        customer = validated_data["customer"]
+        building = validated_data["building"]
+        user = self.context["request"].user
+
+        # Sprint 2A — classify every cart line BEFORE persisting so
+        # we can validate the (intent × cart × actor) tuple and stamp
+        # snapshots in one pass.
+        per_line_classification = [
+            classify_line(
+                service=line.get("service"),
+                customer=customer,
+                requested_date=line["requested_date"],
+                custom_description=(line.get("custom_description") or ""),
+            )
+            for line in line_items_data
+        ]
+        cart_classification = classify_cart(per_line_classification)
+
+        actor_kind = self._actor_kind(user, customer, building)
+        if supplied_intent:
+            try:
+                validate_intent_for_cart(
+                    intent=supplied_intent,
+                    cart=cart_classification,
+                    actor_kind=actor_kind,
+                )
+            except IntentValidationError as exc:
+                raise serializers.ValidationError(
+                    {
+                        "request_intent": [
+                            serializers.ErrorDetail(exc.message, code=exc.code)
+                        ]
+                    }
+                )
+            effective_intent = supplied_intent
+        else:
+            # Backward compatibility for Batch 6/7/8 clients that
+            # never sent an intent. Derive a safe default (never
+            # AUTO_START — that would skip customer approval).
+            effective_intent = derive_default_intent(cart_classification)
+
+        validated_data["request_intent"] = effective_intent
 
         # Sprint 28 Batch 6 — parent + line items + routing decision
         # all land inside a single transaction so a half-created cart
@@ -851,32 +1053,45 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         with transaction.atomic():
             request = super().create(validated_data)
 
-            customer = request.customer
             all_lines_have_contract = True
-            for line in line_items_data:
-                service = line["service"]
-                # Denormalise unit_type at create time — see model
-                # docstring for the "pin the historical pricing
-                # semantics" rationale.
+            for line, classification in zip(
+                line_items_data, per_line_classification
+            ):
+                service = line.get("service")
+                # Sprint 2A — ad-hoc lines have no Service FK; unit
+                # type defaults to OTHER (legacy placeholder mirroring
+                # migration 0003 backfill). Catalog lines denormalise
+                # from Service.unit_type to pin pricing semantics.
+                if service is None:
+                    unit_type = ExtraWorkPricingUnitType.OTHER
+                else:
+                    unit_type = service.unit_type
                 ExtraWorkRequestItem.objects.create(
                     extra_work_request=request,
                     service=service,
+                    custom_description=(line.get("custom_description") or ""),
                     quantity=line["quantity"],
-                    unit_type=service.unit_type,
+                    unit_type=unit_type,
                     requested_date=line["requested_date"],
                     customer_note=line.get("customer_note", ""),
+                    # Sprint 2A — snapshot stamping. Source label is
+                    # always set; snapshot price columns only when the
+                    # line resolved to a contract row (AGREED case).
+                    line_price_source=classification.source,
+                    snapshot_unit_price=classification.snapshot_unit_price,
+                    snapshot_vat_pct=classification.snapshot_vat_pct,
+                    snapshot_service_name=classification.snapshot_service_name,
+                    snapshot_service_category_name=(
+                        classification.snapshot_service_category_name
+                    ),
+                    snapshot_customer_service_price=classification.contract,
                 )
-                # Per master plan §5 rule #9 + 2026-05-15 decision
-                # log: resolver-returns-None ⇒ proposal; only an
-                # active CustomerServicePrice row triggers the
-                # instant-ticket path. Service.default_unit_price
-                # does NOT count.
-                price_row = resolve_price(
-                    service,
-                    customer,
-                    on=line["requested_date"],
-                )
-                if price_row is None:
+                # Routing decision uses the same AGREED-vs-not split
+                # the classifier already computed — keep both in sync.
+                if (
+                    classification.source
+                    != ExtraWorkLinePriceSource.AGREED_CUSTOMER_PRICE
+                ):
                     all_lines_have_contract = False
 
             request.routing_decision = (
@@ -894,6 +1109,17 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             # spawn runs INSIDE this transaction.atomic() so a partial
             # failure (e.g. a contract row deactivated mid-flight) rolls
             # the parent + line-items + tickets back together.
+            #
+            # Sprint 2A note: the instant-spawn path here is gated on
+            # `routing_decision == INSTANT` AND implicitly on the
+            # derived/explicit intent being DIRECT_AGREED_PRICE_ORDER
+            # — validate_intent_for_cart guarantees that any other
+            # intent on an all-agreed cart is rejected, and an
+            # all-agreed cart with no explicit intent derives to
+            # DIRECT. The one-ticket-per-request refactor is
+            # explicitly deferred (see Sprint 2A non-goals); this
+            # spawn still emits one Ticket per ExtraWorkRequestItem
+            # for now.
             if request.routing_decision == ExtraWorkRoutingDecision.INSTANT:
                 # Imported lazily to avoid circular import:
                 # `instant_tickets.py` imports from this app's models +

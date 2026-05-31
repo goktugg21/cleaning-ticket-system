@@ -107,6 +107,75 @@ class ExtraWorkPricingUnitType(models.TextChoices):
     OTHER = "OTHER", "Other"
 
 
+class ExtraWorkRequestIntent(models.TextChoices):
+    """
+    Sprint 2A — explicit customer-facing intent on an Extra Work
+    request. Separate from `ExtraWorkStatus` (lifecycle) and from
+    `ExtraWorkRoutingDecision` (internal cart classification).
+
+    DIRECT_AGREED_PRICE_ORDER:
+        Every cart line resolves to an active customer-specific
+        agreed price. No proposal phase, no customer approval step
+        — the submission IS the order; operational work is spawned
+        immediately.
+    AUTO_START_AFTER_PRICING:
+        At least one cart line needs provider pricing or is ad-hoc.
+        Provider enters prices and operational work starts WITHOUT
+        a customer approval step (the customer pre-authorised
+        starting the work after pricing).
+    REQUEST_QUOTE:
+        At least one cart line needs provider pricing or is ad-hoc.
+        Provider sends a quote/proposal; customer must accept or
+        reject. Accept → spawn; reject → REJECTED.
+
+    Intent is nullable on the row so legacy pre-Sprint-2A requests
+    (which never carried an explicit intent) survive without a
+    forced default. The Sprint 2A backfill stamps a best-effort
+    historical value (see migration 0006).
+    """
+
+    DIRECT_AGREED_PRICE_ORDER = (
+        "DIRECT_AGREED_PRICE_ORDER",
+        "Direct agreed-price order",
+    )
+    AUTO_START_AFTER_PRICING = (
+        "AUTO_START_AFTER_PRICING",
+        "Auto-start after pricing",
+    )
+    REQUEST_QUOTE = "REQUEST_QUOTE", "Request a quote"
+
+
+class ExtraWorkLinePriceSource(models.TextChoices):
+    """
+    Sprint 2A — per-line price-source classification stamped at
+    request-create time.
+
+    AGREED_CUSTOMER_PRICE:
+        The line's `service` resolved to an active
+        `CustomerServicePrice` row at submit time and its
+        unit_price / vat_pct were snapshotted onto the line.
+    NEEDS_PROVIDER_PRICING:
+        The line references a catalog `Service` but no active
+        contract row exists for the (service, customer) pair on
+        the requested date. The provider must enter a price.
+    AD_HOC:
+        The line has NO catalog `Service` FK — it is a free-text /
+        operator-typed line described by `custom_description`. By
+        definition the provider must enter a price.
+
+    Stamped on `ExtraWorkRequestItem` at create time so a future
+    `CustomerServicePrice` edit cannot retroactively rewrite the
+    source label or the snapshot prices.
+    """
+
+    AGREED_CUSTOMER_PRICE = "AGREED_CUSTOMER_PRICE", "Agreed customer price"
+    NEEDS_PROVIDER_PRICING = (
+        "NEEDS_PROVIDER_PRICING",
+        "Needs provider pricing",
+    )
+    AD_HOC = "AD_HOC", "Ad-hoc / free-text"
+
+
 class ExtraWorkRoutingDecision(models.TextChoices):
     """
     Sprint 28 Batch 6 — routing taxonomy computed at submission time
@@ -205,6 +274,25 @@ class ExtraWorkRequest(models.Model):
         max_length=10,
         choices=ExtraWorkRoutingDecision.choices,
         default=ExtraWorkRoutingDecision.PROPOSAL,
+    )
+
+    # Sprint 2A — explicit customer-facing intent (see
+    # ExtraWorkRequestIntent docstring). Nullable on the row so legacy
+    # pre-Sprint-2A requests survive; the create serializer derives a
+    # safe value when the caller does not send one (preserves
+    # backward compatibility with Batch 6/7/8 clients) and fully
+    # validates when the caller sends one explicitly.
+    request_intent = models.CharField(
+        max_length=32,
+        choices=ExtraWorkRequestIntent.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Sprint 2A — DIRECT_AGREED_PRICE_ORDER / "
+            "AUTO_START_AFTER_PRICING / REQUEST_QUOTE. Separate from "
+            "lifecycle status."
+        ),
     )
 
     # Visible notes — provider operators write these for the customer
@@ -677,6 +765,85 @@ class ExtraWorkRequestItem(models.Model):
         ),
     )
 
+    # Sprint 2A — ad-hoc / free-text cart line. When `service is
+    # NULL` and `custom_description` is non-empty, the line is an
+    # ad-hoc line: no catalog row, provider must enter a price.
+    # Ad-hoc lines never auto-create a catalog `Service` row; they
+    # only live on this cart entry. The serializer enforces "service
+    # OR custom_description, never both blank, never both set."
+    custom_description = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Sprint 2A — free-text label for ad-hoc cart lines. "
+            "Required when `service` is NULL; must be empty when "
+            "`service` is set."
+        ),
+    )
+
+    # Sprint 2A — per-line price-source classification stamped at
+    # request-create time. See ExtraWorkLinePriceSource docstring.
+    # Nullable to keep the schema additive — legacy rows are
+    # backfilled in migration 0006 from their parent's
+    # routing_decision, but the column stays nullable in case a
+    # later forward-compat row sneaks through with no classification.
+    line_price_source = models.CharField(
+        max_length=32,
+        choices=ExtraWorkLinePriceSource.choices,
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    # Sprint 2A — agreed-price snapshot. Populated by the create
+    # serializer ONLY when the line resolves to an active
+    # `CustomerServicePrice` at submit time (`line_price_source ==
+    # AGREED_CUSTOMER_PRICE`). NULL for NEEDS_PROVIDER_PRICING /
+    # AD_HOC lines. Future edits to the resolved
+    # `CustomerServicePrice` row (or to `Service.default_unit_price`)
+    # MUST NOT rewrite these columns.
+    snapshot_unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    snapshot_vat_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    snapshot_service_name = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+    )
+    snapshot_service_category_name = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+    )
+    snapshot_customer_service_price = models.ForeignKey(
+        "extra_work.CustomerServicePrice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="snapshotted_line_items",
+        help_text=(
+            "Sprint 2A — the CustomerServicePrice row resolved at "
+            "create time. SET_NULL so deleting the contract row does "
+            "not delete operational history; the snapshot_* columns "
+            "are the durable audit trail."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -685,7 +852,12 @@ class ExtraWorkRequestItem(models.Model):
         indexes = [models.Index(fields=["extra_work_request"])]
 
     def __str__(self):
-        label = self.service.name if self.service is not None else "legacy"
+        if self.service is not None:
+            label = self.service.name
+        elif self.custom_description:
+            label = self.custom_description
+        else:
+            label = "legacy"
         return f"{label} × {self.quantity}"
 
 
