@@ -30,15 +30,25 @@ from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 
+from .classification import (
+    IntentValidationError,
+    classify_cart,
+    classify_line,
+    derive_default_intent,
+    validate_intent_for_cart,
+)
 from .filters import ExtraWorkRequestFilter
 from .models import (
+    ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
 )
 from .scoping import scope_extra_work_for
 from .serializers import (
+    ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
     ExtraWorkPricingLineItemSerializer,
     ExtraWorkRequestCreateSerializer,
@@ -46,8 +56,25 @@ from .serializers import (
     ExtraWorkRequestListSerializer,
     ExtraWorkStatusHistorySerializer,
     ExtraWorkTransitionSerializer,
+    derive_actor_kind,
 )
 from .state_machine import TransitionError, apply_transition
+
+
+# Sprint 5 — stable order of intents in the preview `allowed_intents`
+# list. Matches the enum declaration order in models.py.
+_PREVIEW_INTENT_ORDER = (
+    ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER,
+    ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING,
+    ExtraWorkRequestIntent.REQUEST_QUOTE,
+)
+
+
+def _decimal_str(value) -> str | None:
+    """Render a Decimal like DRF's DecimalField (str, 2dp); None-safe."""
+    if value is None:
+        return None
+    return f"{value:.2f}"
 
 
 PROVIDER_ROLES = {
@@ -118,6 +145,126 @@ class ExtraWorkRequestViewSet(
             instance, context={"request": request}
         )
         return Response(detail.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="preview")
+    def preview(self, request):
+        """
+        Sprint 5 — non-mutating cart preview / classification.
+
+        Mirrors the create cart's scope + permission gate and the
+        single source of truth in `extra_work.classification`. Zero DB
+        writes: no ExtraWorkRequest / ExtraWorkRequestItem is created.
+
+        HARD INVARIANT: provider default prices NEVER appear. Only the
+        customer's OWN agreed contract price (the classification
+        snapshot) is returned, and only for AGREED_CUSTOMER_PRICE
+        lines. NEEDS_PROVIDER_PRICING / AD_HOC lines carry
+        agreed_unit_price=null, agreed_vat_pct=null.
+        """
+        serializer = ExtraWorkPreviewSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        customer = data["customer"]
+        building = data["building"]
+        line_items = data["line_items"]
+        supplied_intent = data.get("request_intent")
+
+        actor_kind = derive_actor_kind(request.user, customer, building)
+
+        per_line = [
+            classify_line(
+                service=line.get("service"),
+                customer=customer,
+                requested_date=line["requested_date"],
+                custom_description=(line.get("custom_description") or ""),
+            )
+            for line in line_items
+        ]
+        cart = classify_cart(per_line)
+
+        lines_payload = []
+        for index, (line, classification) in enumerate(
+            zip(line_items, per_line)
+        ):
+            service = line.get("service")
+            is_agreed = (
+                classification.source
+                == ExtraWorkLinePriceSource.AGREED_CUSTOMER_PRICE
+            )
+            lines_payload.append(
+                {
+                    "index": index,
+                    "service": service.id if service is not None else None,
+                    "custom_description": (
+                        line.get("custom_description") or ""
+                    ),
+                    "requested_date": line["requested_date"],
+                    "quantity": _decimal_str(line["quantity"]),
+                    "price_source": classification.source,
+                    "service_name": classification.snapshot_service_name,
+                    "service_category_name": (
+                        classification.snapshot_service_category_name
+                    ),
+                    # Customer's OWN agreed price only — provider default
+                    # prices are never serialized here.
+                    "agreed_unit_price": (
+                        _decimal_str(classification.snapshot_unit_price)
+                        if is_agreed
+                        else None
+                    ),
+                    "agreed_vat_pct": (
+                        _decimal_str(classification.snapshot_vat_pct)
+                        if is_agreed
+                        else None
+                    ),
+                }
+            )
+
+        allowed_intents = []
+        for intent in _PREVIEW_INTENT_ORDER:
+            try:
+                validate_intent_for_cart(
+                    intent=intent, cart=cart, actor_kind=actor_kind
+                )
+            except IntentValidationError:
+                continue
+            allowed_intents.append(intent)
+
+        payload = {
+            "customer": customer.id,
+            "building": building.id,
+            "actor_kind": actor_kind,
+            "lines": lines_payload,
+            "cart": {
+                "all_agreed": cart.all_agreed,
+                "has_non_agreed": cart.has_non_agreed,
+                "has_ad_hoc": cart.has_ad_hoc,
+            },
+            "allowed_intents": allowed_intents,
+            "default_intent": derive_default_intent(cart),
+        }
+
+        if supplied_intent:
+            payload["requested_intent"] = supplied_intent
+            try:
+                validate_intent_for_cart(
+                    intent=supplied_intent,
+                    cart=cart,
+                    actor_kind=actor_kind,
+                )
+            except IntentValidationError as exc:
+                payload["requested_intent_allowed"] = False
+                payload["requested_intent_error"] = {
+                    "code": exc.code,
+                    "detail": exc.message,
+                }
+            else:
+                payload["requested_intent_allowed"] = True
+
+        return Response(payload, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="transition")
     def transition(self, request, pk=None):

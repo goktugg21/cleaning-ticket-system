@@ -60,6 +60,57 @@ def _is_customer(user) -> bool:
     return user is not None and user.role == UserRole.CUSTOMER_USER
 
 
+def derive_actor_kind(user, customer, building) -> str:
+    """Sprint 2A — derive a coarse actor classification for intent
+    validation. Single source of truth shared by the create
+    serializer and the Sprint 5 preview endpoint. See
+    `extra_work.classification` for the full taxonomy.
+
+    Provider-side roles map to ACTOR_PROVIDER (intent rules treat
+    Super Admin / Provider Admin / Building Manager the same; tenant/
+    building scope is enforced separately in the calling serializer's
+    `validate`). STAFF maps to ACTOR_STAFF.
+
+    Customer-side: walk `CustomerUserBuildingAccess` for the actor on
+    the target (customer, building) and lift the access_role into the
+    matching actor kind. Missing/inactive access ⇒ baseline
+    CUSTOMER_USER.
+    """
+    role = getattr(user, "role", None)
+    if role == UserRole.STAFF:
+        return ACTOR_STAFF
+    if role in {
+        UserRole.SUPER_ADMIN,
+        UserRole.COMPANY_ADMIN,
+        UserRole.BUILDING_MANAGER,
+    }:
+        return ACTOR_PROVIDER
+
+    access = (
+        CustomerUserBuildingAccess.objects.filter(
+            membership__user=user,
+            membership__customer=customer,
+            building=building,
+            is_active=True,
+        )
+        .only("access_role")
+        .first()
+    )
+    if access is None:
+        return ACTOR_CUSTOMER_USER
+    if (
+        access.access_role
+        == CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+    ):
+        return ACTOR_CUSTOMER_COMPANY_ADMIN
+    if (
+        access.access_role
+        == CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+    ):
+        return ACTOR_CUSTOMER_LOCATION_MANAGER
+    return ACTOR_CUSTOMER_USER
+
+
 # ---------------------------------------------------------------------------
 # Per-line pricing source (read-only fields exposed on every Extra Work
 # line serializer so the frontend invoice renderer can render the
@@ -979,56 +1030,9 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def _actor_kind(self, user, customer, building):
-        """Sprint 2A — derive a coarse actor classification for
-        intent validation. See `extra_work.classification` for the
-        full taxonomy.
-
-        Provider-side roles map to ACTOR_PROVIDER (intent rules treat
-        Super Admin / Provider Admin / Building Manager the same for
-        the create gate; tenant/building scope is already enforced
-        elsewhere in `validate`). STAFF cannot reach this code path
-        (rejected in `validate`), but we still classify defensively.
-
-        Customer-side: walk `CustomerUserBuildingAccess` for the
-        actor on the target (customer, building) and lift the
-        access_role into the matching actor kind. Missing access ⇒
-        baseline CUSTOMER_USER.
-        """
-        role = getattr(user, "role", None)
-        if role == UserRole.STAFF:
-            return ACTOR_STAFF
-        if role in {
-            UserRole.SUPER_ADMIN,
-            UserRole.COMPANY_ADMIN,
-            UserRole.BUILDING_MANAGER,
-        }:
-            return ACTOR_PROVIDER
-
-        # CUSTOMER_USER global role — refine via per-building
-        # access_role.
-        access = (
-            CustomerUserBuildingAccess.objects.filter(
-                membership__user=user,
-                membership__customer=customer,
-                building=building,
-                is_active=True,
-            )
-            .only("access_role")
-            .first()
-        )
-        if access is None:
-            return ACTOR_CUSTOMER_USER
-        if (
-            access.access_role
-            == CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
-        ):
-            return ACTOR_CUSTOMER_COMPANY_ADMIN
-        if (
-            access.access_role
-            == CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
-        ):
-            return ACTOR_CUSTOMER_LOCATION_MANAGER
-        return ACTOR_CUSTOMER_USER
+        # Sprint 5 — delegate to the shared module-level helper so the
+        # create gate and the preview endpoint stay byte-equivalent.
+        return derive_actor_kind(user, customer, building)
 
     def create(self, validated_data):
         from django.db import transaction
@@ -1167,6 +1171,196 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 )
 
         return request
+
+
+# ---------------------------------------------------------------------------
+# Extra Work — cart preview / classification (Sprint 5)
+# ---------------------------------------------------------------------------
+class ExtraWorkPreviewLineSerializer(serializers.Serializer):
+    """Lightweight per-line input for the non-mutating preview
+    endpoint. Mirrors the cart-line contract of
+    `ExtraWorkRequestItemSerializer` (service XOR custom_description,
+    quantity > 0, inactive service rejected) WITHOUT pulling in any
+    model-bound write path — preview never persists a row.
+    """
+
+    service = serializers.PrimaryKeyRelatedField(
+        queryset=Service.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    custom_description = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=255,
+    )
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=2)
+    requested_date = serializers.DateField()
+    customer_note = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+    def validate_quantity(self, value):
+        if value <= Decimal("0"):
+            raise serializers.ValidationError(
+                "Quantity must be greater than zero."
+            )
+        return value
+
+    def validate_service(self, value):
+        if value is not None and not value.is_active:
+            raise serializers.ValidationError(
+                "Cannot order an inactive service."
+            )
+        return value
+
+    def validate(self, attrs):
+        service = attrs.get("service")
+        custom_description = (attrs.get("custom_description") or "").strip()
+        if service is None and not custom_description:
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        serializers.ErrorDetail(
+                            "Line must reference a service or supply a "
+                            "custom_description.",
+                            code="line_requires_service_or_description",
+                        )
+                    ]
+                }
+            )
+        if service is not None and custom_description:
+            raise serializers.ValidationError(
+                {
+                    "non_field_errors": [
+                        serializers.ErrorDetail(
+                            "Line cannot carry both a service and a "
+                            "custom_description.",
+                            code="line_requires_service_or_description",
+                        )
+                    ]
+                }
+            )
+        return attrs
+
+
+class ExtraWorkPreviewSerializer(serializers.Serializer):
+    """Input validation for `POST /api/extra-work/preview/`.
+
+    Subset of the create cart — no title/description/category. Reuses
+    the SAME customer/building scope + permission gate as
+    `ExtraWorkRequestCreateSerializer.validate` and the SAME
+    cross-company service check. STRICTLY NON-MUTATING: this serializer
+    has no `create()`/`save()`; the view reads `validated_data` and
+    runs the classifier.
+    """
+
+    building = serializers.PrimaryKeyRelatedField(
+        queryset=Building.objects.filter(is_active=True)
+    )
+    customer = serializers.PrimaryKeyRelatedField(
+        queryset=Customer.objects.filter(is_active=True)
+    )
+    request_intent = serializers.ChoiceField(
+        choices=ExtraWorkRequest._meta.get_field("request_intent").choices,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    line_items = ExtraWorkPreviewLineSerializer(many=True)
+
+    def validate_line_items(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "At least one line item is required."
+            )
+        return value
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        user = request.user
+
+        building = attrs["building"]
+        customer = attrs["customer"]
+
+        if customer.company_id != building.company_id:
+            raise serializers.ValidationError(
+                "Building and customer must belong to the same company."
+            )
+
+        if not CustomerBuildingMembership.objects.filter(
+            customer=customer, building=building
+        ).exists():
+            raise serializers.ValidationError(
+                "Customer is not linked to the selected building."
+            )
+
+        # Cross-company service guard — same stable code as create.
+        for index, line in enumerate(attrs.get("line_items", []) or []):
+            line_service = line.get("service")
+            if line_service is None:
+                continue
+            if line_service.company_id != customer.company_id:
+                raise serializers.ValidationError(
+                    {
+                        "line_items": [
+                            {
+                                "service": [
+                                    serializers.ErrorDetail(
+                                        "Service belongs to a "
+                                        "different provider company "
+                                        "than the customer.",
+                                        code=(
+                                            "line_service_company_mismatch"
+                                        ),
+                                    )
+                                ]
+                            }
+                            if i == index
+                            else {}
+                            for i, _ in enumerate(
+                                attrs.get("line_items", []) or []
+                            )
+                        ]
+                    }
+                )
+
+        # Same scope + permission gate as create.
+        if user.role == UserRole.CUSTOMER_USER:
+            if not user_can(
+                user,
+                customer.id,
+                building.id,
+                "customer.extra_work.create",
+            ):
+                raise serializers.ValidationError(
+                    "You do not have permission to preview Extra Work "
+                    "for this customer/building."
+                )
+        elif user.role in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            from accounts.permissions_v2 import user_has_osius_permission
+
+            if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=building.id,
+            ):
+                raise serializers.ValidationError(
+                    "You do not have provider-side scope to preview "
+                    "Extra Work in this building."
+                )
+        else:
+            raise serializers.ValidationError(
+                "This role cannot preview Extra Work."
+            )
+
+        return attrs
 
 
 # ---------------------------------------------------------------------------
