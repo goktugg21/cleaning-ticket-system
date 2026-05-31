@@ -26,7 +26,16 @@ from . import business_hours
 
 
 TERMINAL_STATUSES = frozenset(
-    (TicketStatus.APPROVED, TicketStatus.REJECTED, TicketStatus.CLOSED)
+    (
+        TicketStatus.APPROVED,
+        TicketStatus.REJECTED,
+        TicketStatus.CLOSED,
+        # Sprint 7B — a converted ticket is terminal for SLA purposes.
+        # The conversion flow writes the status directly (not through
+        # the engine signal), so this only matters as defense-in-depth
+        # for any future code path that routes the transition here.
+        TicketStatus.CONVERTED_TO_EXTRA_WORK,
+    )
 )
 PAUSED_STATUS = TicketStatus.WAITING_CUSTOMER_APPROVAL
 

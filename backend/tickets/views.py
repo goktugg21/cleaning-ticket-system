@@ -26,13 +26,20 @@ from notifications.services import (
 )
 
 from .filters import TicketFilter
-from .models import Ticket, TicketAttachment, TicketMessage, TicketMessageType
+from .models import (
+    Ticket,
+    TicketAttachment,
+    TicketMessage,
+    TicketMessageType,
+    TicketStatus,
+)
 from buildings.models import BuildingManagerAssignment
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
 from .serializers import (
     TicketAssignableManagerSerializer,
     TicketAssignSerializer,
     TicketAttachmentSerializer,
+    TicketConvertToExtraWorkSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
     TicketListSerializer,
@@ -248,6 +255,128 @@ class TicketViewSet(
         )
 
 
+    @action(detail=True, methods=["post"], url_path="convert-to-extra-work")
+    def convert_to_extra_work(self, request, pk=None):
+        """
+        Sprint 7B — convert a normal ticket / melding into a new Extra
+        Work request. The source ticket is superseded to the terminal
+        status CONVERTED_TO_EXTRA_WORK; a NEW operational ticket is
+        spawned by the existing Sprint 6A/6B machinery (immediately on
+        the INSTANT route, later via the proposal flow on the PROPOSAL
+        route). The original ticket is NOT reused.
+
+        Provider-only (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER).
+        All three EW intents are allowed on conversion, including
+        REQUEST_QUOTE, which the normal provider create path forbids.
+        """
+        user = request.user
+
+        # Role gate FIRST — before the object lookup — so STAFF and every
+        # customer-side role get a stable 403 `conversion_forbidden_for_role`
+        # rather than a scope-driven 404 (the convert action is a
+        # provider-management capability; the role check does not depend on
+        # the specific ticket).
+        if user.role not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            return Response(
+                {
+                    "detail": "This role cannot convert tickets to Extra Work.",
+                    "code": "conversion_forbidden_for_role",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # `get_object()` runs through `scope_tickets_for` — out-of-scope
+        # / soft-deleted tickets 404 before the scope/convertibility gates.
+        ticket = self.get_object()
+
+        # Scope gate: SUPER_ADMIN is global; COMPANY_ADMIN /
+        # BUILDING_MANAGER must hold provider-side building scope.
+        if user.role != UserRole.SUPER_ADMIN:
+            from accounts.permissions_v2 import user_has_osius_permission
+
+            if not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=ticket.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": "You do not have provider-side scope to "
+                        "convert this ticket.",
+                        "code": "conversion_forbidden_scope",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Convertibility gate.
+        if ticket.status == TicketStatus.CONVERTED_TO_EXTRA_WORK:
+            return Response(
+                {
+                    "detail": "This ticket has already been converted to "
+                    "Extra Work.",
+                    "code": "ticket_already_converted",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ticket.status not in {
+            TicketStatus.OPEN,
+            TicketStatus.IN_PROGRESS,
+            TicketStatus.REOPENED_BY_ADMIN,
+        }:
+            return Response(
+                {
+                    "detail": "This ticket is not in a convertible status.",
+                    "code": "ticket_not_convertible",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = TicketConvertToExtraWorkSerializer(
+            data=request.data,
+            context={"request": request, "ticket": ticket},
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        from extra_work.classification import IntentValidationError
+        from extra_work.conversion import convert_ticket_to_extra_work
+        from extra_work.serializers import ExtraWorkRequestDetailSerializer
+
+        try:
+            ew, spawned = convert_ticket_to_extra_work(
+                ticket,
+                actor=user,
+                request_intent=data["request_intent"],
+                line_items_data=data["line_items"],
+                customer_visible_note=data.get("customer_visible_note", ""),
+                internal_note=data.get("internal_note", ""),
+            )
+        except IntentValidationError as exc:
+            return Response(
+                {"request_intent": [exc.message], "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ticket.refresh_from_db()
+        return Response(
+            {
+                "extra_work_request": ExtraWorkRequestDetailSerializer(
+                    ew, context={"request": request}
+                ).data,
+                "source_ticket": {
+                    "id": ticket.id,
+                    "ticket_no": ticket.ticket_no,
+                    "status": ticket.status,
+                },
+                "operational_ticket_ids": [t.id for t in spawned],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
@@ -322,7 +451,10 @@ class TicketViewSet(
         status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
         priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
 
-        closed_states = {"CLOSED", "APPROVED", "REJECTED"}
+        # Sprint 7B — CONVERTED_TO_EXTRA_WORK is terminal: a converted
+        # ticket has left every operational queue and must not count as
+        # open / urgent.
+        closed_states = {"CLOSED", "APPROVED", "REJECTED", "CONVERTED_TO_EXTRA_WORK"}
         my_open = sum(c for s, c in status_counts.items() if s not in closed_states)
         waiting_customer_approval = status_counts.get("WAITING_CUSTOMER_APPROVAL", 0)
         urgent = scoped.exclude(status__in=closed_states).filter(priority="URGENT").count()
@@ -343,7 +475,8 @@ class TicketViewSet(
     @action(detail=False, methods=["get"], url_path="stats/by-building")
     def stats_by_building(self, request):
         scoped = scope_tickets_for(request.user)
-        closed_states = ["CLOSED", "APPROVED", "REJECTED"]
+        # Sprint 7B — CONVERTED_TO_EXTRA_WORK is terminal (see `stats`).
+        closed_states = ["CLOSED", "APPROVED", "REJECTED", "CONVERTED_TO_EXTRA_WORK"]
 
         rows = (
             scoped.values("building_id", "building__name")

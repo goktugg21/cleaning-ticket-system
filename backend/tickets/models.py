@@ -35,6 +35,14 @@ class TicketStatus(models.TextChoices):
     APPROVED = "APPROVED", "Approved"
     CLOSED = "CLOSED", "Closed"
     REOPENED_BY_ADMIN = "REOPENED_BY_ADMIN", "Reopened by Admin"
+    # Sprint 7B — terminal status for a normal ticket that a provider
+    # converted into an Extra Work request. The original ticket is
+    # SUPERSEDED (it leaves every operational queue); a NEW operational
+    # ticket is spawned later by the Sprint 6A/6B machinery anchored to
+    # the new ExtraWorkRequest — the original is NOT reused. This status
+    # is intentionally absent from `ALLOWED_TRANSITIONS` in
+    # `state_machine.py`, keeping it terminal: no transition leaves it.
+    CONVERTED_TO_EXTRA_WORK = "CONVERTED_TO_EXTRA_WORK", "Converted to Extra Work"
 
 
 class TicketMessageType(models.TextChoices):

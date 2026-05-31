@@ -38,7 +38,16 @@ from .scoping import (
 
 
 OPEN_STATUSES = [
-    s for s in TicketStatus.values if s not in (TicketStatus.APPROVED, TicketStatus.REJECTED)
+    s
+    for s in TicketStatus.values
+    # Sprint 7B — CONVERTED_TO_EXTRA_WORK is terminal: a converted ticket
+    # is superseded and must not be counted as open/active in age buckets.
+    if s
+    not in (
+        TicketStatus.APPROVED,
+        TicketStatus.REJECTED,
+        TicketStatus.CONVERTED_TO_EXTRA_WORK,
+    )
 ]
 
 

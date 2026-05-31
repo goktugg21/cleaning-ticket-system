@@ -235,6 +235,27 @@ class ExtraWorkRequest(models.Model):
         related_name="created_extra_work_requests",
     )
 
+    # Sprint 7B — the original normal Ticket this Extra Work request was
+    # converted FROM. Populated only by the conversion flow
+    # (`extra_work.conversion.convert_ticket_to_extra_work`); NULL for
+    # every other creation path. SET_NULL so the EW survives if the
+    # source ticket is later hard-deleted.
+    #
+    # DISTINCT from `tickets.Ticket.extra_work_request` (the reverse of
+    # `related_name="operational_tickets"`): that FK means "this ticket
+    # is the operational ticket SPAWNED from an EW" and is the
+    # spawn-idempotency anchor. `source_ticket` is the opposite
+    # direction — "this EW was born from that pre-existing ticket". Do
+    # NOT overload one for the other.
+    source_ticket = models.ForeignKey(
+        "tickets.Ticket",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="converted_extra_work_requests",
+        default=None,
+    )
+
     title = models.CharField(max_length=255)
     description = models.TextField()
     category = models.CharField(

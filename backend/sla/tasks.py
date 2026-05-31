@@ -12,7 +12,15 @@ from . import services
 
 _NON_TERMINAL_STATUSES = [
     s for s in TicketStatus.values
-    if s not in (TicketStatus.APPROVED, TicketStatus.REJECTED, TicketStatus.CLOSED)
+    # Sprint 7B — CONVERTED_TO_EXTRA_WORK is terminal: SLA reconciliation
+    # must treat a converted ticket as done and stop touching its clock.
+    if s
+    not in (
+        TicketStatus.APPROVED,
+        TicketStatus.REJECTED,
+        TicketStatus.CLOSED,
+        TicketStatus.CONVERTED_TO_EXTRA_WORK,
+    )
 ]
 
 

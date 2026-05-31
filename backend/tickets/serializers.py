@@ -29,6 +29,13 @@ from .models import (
 from .permissions import user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 
+# Sprint 7B — reuse the Extra Work cart-line input contract for the
+# convert-to-extra-work endpoint. `extra_work.serializers` does NOT
+# import `tickets.serializers` at module level, so this import is
+# cycle-safe.
+from extra_work.models import ExtraWorkRequestIntent
+from extra_work.serializers import ExtraWorkPreviewLineSerializer
+
 
 def _sla_display_state(obj):
     """Mirror of frontend getSLADisplayState — paused overrides underlying state."""
@@ -524,6 +531,71 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "service_name": service.name if service is not None else None,
             "origin": origin,
         }
+
+
+class TicketConvertToExtraWorkSerializer(serializers.Serializer):
+    """
+    Sprint 7B — input contract for
+    `POST /api/tickets/<pk>/convert-to-extra-work/`.
+
+    Reuses `extra_work.serializers.ExtraWorkPreviewLineSerializer` for
+    the cart lines (service-XOR-custom_description with code
+    `line_requires_service_or_description`, quantity > 0, inactive
+    service rejected). The cross-company service guard
+    (`line_service_company_mismatch`) is enforced here against the
+    source ticket's customer company. Role / scope / convertibility
+    gates live in the view; intent validation lives in the conversion
+    service.
+    """
+
+    request_intent = serializers.ChoiceField(
+        choices=ExtraWorkRequestIntent.choices
+    )
+    line_items = ExtraWorkPreviewLineSerializer(many=True)
+    customer_visible_note = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    internal_note = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+    def validate_line_items(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "At least one line item is required."
+            )
+        return value
+
+    def validate(self, attrs):
+        ticket = self.context["ticket"]
+        company_id = ticket.customer.company_id
+        for index, line in enumerate(attrs.get("line_items", []) or []):
+            line_service = line.get("service")
+            if line_service is None:
+                continue
+            if line_service.company_id != company_id:
+                raise serializers.ValidationError(
+                    {
+                        "line_items": [
+                            {
+                                "service": [
+                                    serializers.ErrorDetail(
+                                        "Service belongs to a different "
+                                        "provider company than the "
+                                        "customer.",
+                                        code="line_service_company_mismatch",
+                                    )
+                                ]
+                            }
+                            if i == index
+                            else {}
+                            for i, _ in enumerate(
+                                attrs.get("line_items", []) or []
+                            )
+                        ]
+                    }
+                )
+        return attrs
 
 
 def _assigned_staff_payload(ticket, viewer):
