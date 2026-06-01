@@ -20,6 +20,24 @@ class TicketPriority(models.TextChoices):
     URGENT = "URGENT", "Urgent"
 
 
+class TicketScheduleStatus(models.TextChoices):
+    """
+    Sprint 9B — operational scheduling lifecycle on a Ticket.
+
+    Additive to the existing `TicketStatus` workflow: scheduling is an
+    orthogonal axis (when is the work planned) that never changes the
+    workflow status and never disturbs SLA (SLA stays anchored on
+    `created_at`). A ticket is UNSCHEDULED until a provider operator
+    sets a `scheduled_start_at`; rescheduling an already-scheduled
+    ticket records the prior start + a mandatory reason and lands the
+    row in RESCHEDULED. Clearing the schedule returns it to UNSCHEDULED.
+    """
+
+    UNSCHEDULED = "UNSCHEDULED", "Unscheduled"
+    SCHEDULED = "SCHEDULED", "Scheduled"
+    RESCHEDULED = "RESCHEDULED", "Rescheduled"
+
+
 class TicketStatus(models.TextChoices):
     OPEN = "OPEN", "Open"
     IN_PROGRESS = "IN_PROGRESS", "In Progress"
@@ -239,6 +257,30 @@ class Ticket(models.Model):
         default="ON_TRACK",
         db_index=True,
     )
+
+    # Sprint 9B — operational scheduling (additive; orthogonal to the
+    # workflow `status` field and to SLA). `scheduled_start_at` is the
+    # planned start of the on-site work; `scheduled_end_at` is the
+    # optional planned end; `time_window_label` is a free-text window
+    # hint ("morning", "08:00-10:00"). `schedule_status` tracks the
+    # UNSCHEDULED / SCHEDULED / RESCHEDULED lifecycle. On a reschedule,
+    # `rescheduled_from` keeps the prior start and `reschedule_reason`
+    # holds the mandatory operator explanation. SLA is NOT affected:
+    # the schedule endpoints save with an explicit `update_fields` set
+    # that excludes `status`, so the SLA post_save signal sees no
+    # status change and never recomputes `sla_*`.
+    scheduled_start_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, default=None
+    )
+    scheduled_end_at = models.DateTimeField(null=True, blank=True, default=None)
+    time_window_label = models.CharField(max_length=64, blank=True, default="")
+    schedule_status = models.CharField(
+        max_length=16,
+        choices=TicketScheduleStatus.choices,
+        default=TicketScheduleStatus.UNSCHEDULED,
+    )
+    rescheduled_from = models.DateTimeField(null=True, blank=True, default=None)
+    reschedule_reason = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]

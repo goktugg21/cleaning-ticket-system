@@ -43,12 +43,19 @@ list ⇒ idempotent re-run (everything was already spawned).
 """
 from __future__ import annotations
 
-from typing import List
+import datetime
+from typing import List, Optional
 
 from django.db import transaction
 from django.utils import timezone
 
-from tickets.models import Ticket, TicketPriority, TicketStatus, TicketStatusHistory
+from tickets.models import (
+    Ticket,
+    TicketPriority,
+    TicketScheduleStatus,
+    TicketStatus,
+    TicketStatusHistory,
+)
 
 from .models import (
     ExtraWorkRequest,
@@ -59,6 +66,29 @@ from .models import (
 )
 from .pricing import resolve_price
 from .state_machine import TransitionError
+
+
+def earliest_requested_start(ew: ExtraWorkRequest) -> Optional[datetime.datetime]:
+    """
+    Sprint 9B — seed a spawned ticket's `scheduled_start_at` from the
+    EARLIEST cart-line `requested_date` on the parent ExtraWorkRequest.
+
+    Reads the EW's cart `line_items` (`ExtraWorkRequestItem.requested_date`)
+    in EVERY flow — including the proposal / auto-start spawn — because
+    `ProposalLine` carries NO `requested_date`. Returns a timezone-aware
+    datetime at local 00:00 of the earliest requested date, or `None`
+    when the request has no line items or none carry a requested_date.
+    """
+    requested_dates = [
+        item.requested_date
+        for item in ew.line_items.all()
+        if item.requested_date is not None
+    ]
+    if not requested_dates:
+        return None
+    earliest = min(requested_dates)
+    naive = datetime.datetime.combine(earliest, datetime.time.min)
+    return timezone.make_aware(naive)
 
 
 def _line_summary(item: ExtraWorkRequestItem) -> str:
@@ -187,6 +217,18 @@ def spawn_tickets_for_request(
         # the origin payload's representative service name.
         first_item = items[0] if items else None
 
+        # Sprint 9B — seed the operational schedule from the earliest
+        # cart-line requested_date. When None (no dated line) the ticket
+        # stays UNSCHEDULED. No schedule history annotation row is
+        # written at spawn time — the OPEN history row already records
+        # creation and the schedule fields carry the seed.
+        seed_start = earliest_requested_start(request)
+        seed_schedule_status = (
+            TicketScheduleStatus.SCHEDULED
+            if seed_start is not None
+            else TicketScheduleStatus.UNSCHEDULED
+        )
+
         ticket = Ticket.objects.create(
             company=request.company,
             building=request.building,
@@ -198,6 +240,8 @@ def spawn_tickets_for_request(
             status=TicketStatus.OPEN,
             extra_work_request=request,
             extra_work_request_item=first_item,
+            scheduled_start_at=seed_start,
+            schedule_status=seed_schedule_status,
         )
 
         # Initial OPEN history row. The Ticket model does NOT auto-write

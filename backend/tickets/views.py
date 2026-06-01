@@ -1,5 +1,6 @@
 import logging
 
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
@@ -31,7 +32,9 @@ from .models import (
     TicketAttachment,
     TicketMessage,
     TicketMessageType,
+    TicketScheduleStatus,
     TicketStatus,
+    TicketStatusHistory,
 )
 from buildings.models import BuildingManagerAssignment
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
@@ -44,8 +47,29 @@ from .serializers import (
     TicketDetailSerializer,
     TicketListSerializer,
     TicketMessageSerializer,
+    TicketScheduleInputSerializer,
     TicketStatusChangeSerializer,
 )
+
+
+# Sprint 9B — terminal statuses for the schedule endpoint guard.
+# A converted / closed / decided ticket has left every operational
+# queue and cannot be scheduled or rescheduled.
+_SCHEDULE_TERMINAL_STATUSES = {
+    TicketStatus.APPROVED,
+    TicketStatus.REJECTED,
+    TicketStatus.CLOSED,
+    TicketStatus.CONVERTED_TO_EXTRA_WORK,
+}
+
+# Sprint 9B — provider-management roles permitted to mutate a ticket's
+# schedule. STAFF + customer-side roles can still READ the schedule via
+# the list / agenda / detail endpoints; they just cannot set it.
+_SCHEDULE_ALLOWED_ROLES = {
+    UserRole.SUPER_ADMIN,
+    UserRole.COMPANY_ADMIN,
+    UserRole.BUILDING_MANAGER,
+}
 
 
 _audit_logger = logging.getLogger(__name__)
@@ -375,6 +399,207 @@ class TicketViewSet(
                 "operational_ticket_ids": [t.id for t in spawned],
             },
             status=status.HTTP_201_CREATED,
+        )
+
+    def _schedule_history_note(
+        self, *, action: str, old_start, new_start, window_label, reason
+    ) -> str:
+        """Sprint 9B — compose the TicketStatusHistory annotation-row note
+        summarizing a schedule set / reschedule / clear."""
+        def _fmt(dt):
+            return dt.isoformat() if dt is not None else "—"
+
+        if action == "clear":
+            return f"Schedule cleared (was {_fmt(old_start)})."
+        parts = [f"Schedule {action}: {_fmt(old_start)} -> {_fmt(new_start)}"]
+        if window_label:
+            parts.append(f"window={window_label}")
+        if reason:
+            parts.append(f"reason={reason}")
+        return "; ".join(parts)
+
+    @action(detail=True, methods=["post", "delete"], url_path="schedule")
+    def schedule(self, request, pk=None):
+        """
+        Sprint 9B — set / reschedule (POST) or clear (DELETE) a ticket's
+        operational schedule. Additive: never changes the workflow
+        `status` and never disturbs SLA (the save uses an explicit
+        `update_fields` set that excludes `status`, so the SLA post_save
+        signal sees no status change).
+
+        Provider-management only (SUPER_ADMIN / COMPANY_ADMIN /
+        BUILDING_MANAGER). STAFF + customer-side roles can READ the
+        schedule via list / agenda / detail but get a stable 403
+        `schedule_forbidden_for_role` here.
+        """
+        user = request.user
+
+        # Role gate FIRST — before the object lookup — mirrors the
+        # `convert_to_extra_work` shape so STAFF / customer roles get a
+        # stable 403 rather than a scope-driven 404.
+        if user.role not in _SCHEDULE_ALLOWED_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot schedule tickets.",
+                    "code": "schedule_forbidden_for_role",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # `get_object()` runs through `scope_tickets_for` — out-of-scope
+        # / soft-deleted tickets 404 before the scope / terminal gates.
+        ticket = self.get_object()
+
+        # Scope gate: SUPER_ADMIN is global; CA / BM must hold
+        # provider-side building scope for this ticket's building.
+        if user.role != UserRole.SUPER_ADMIN:
+            from accounts.permissions_v2 import user_has_osius_permission
+
+            if not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=ticket.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": "You do not have provider-side scope to "
+                        "schedule this ticket.",
+                        "code": "schedule_forbidden_scope",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Terminal guard — applies to BOTH POST and DELETE.
+        if ticket.status in _SCHEDULE_TERMINAL_STATUSES:
+            return Response(
+                {
+                    "detail": "This ticket is in a terminal status and "
+                    "cannot be scheduled.",
+                    "code": "schedule_not_allowed_terminal",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.method == "DELETE":
+            return self._schedule_clear(request, ticket)
+        return self._schedule_set(request, ticket)
+
+    def _schedule_set(self, request, ticket):
+        serializer = TicketScheduleInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        old_start = ticket.scheduled_start_at
+        is_reschedule = (
+            ticket.schedule_status != TicketScheduleStatus.UNSCHEDULED
+        )
+        reason = (data.get("reschedule_reason") or "").strip()
+
+        if is_reschedule and not reason:
+            return Response(
+                {
+                    "detail": "A reschedule reason is required when "
+                    "changing an existing schedule.",
+                    "code": "reschedule_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            ticket.scheduled_start_at = data["scheduled_start_at"]
+            ticket.scheduled_end_at = data.get("scheduled_end_at")
+            ticket.time_window_label = data.get("time_window_label", "")
+            if is_reschedule:
+                ticket.schedule_status = TicketScheduleStatus.RESCHEDULED
+                ticket.rescheduled_from = old_start
+                ticket.reschedule_reason = reason
+                history_action = "rescheduled"
+            else:
+                ticket.schedule_status = TicketScheduleStatus.SCHEDULED
+                # First scheduling leaves rescheduled_from /
+                # reschedule_reason empty.
+                ticket.rescheduled_from = None
+                ticket.reschedule_reason = ""
+                history_action = "set"
+
+            # Explicit update_fields EXCLUDES `status` so the SLA
+            # post_save signal sees no status change.
+            ticket.save(
+                update_fields=[
+                    "scheduled_start_at",
+                    "scheduled_end_at",
+                    "time_window_label",
+                    "schedule_status",
+                    "rescheduled_from",
+                    "reschedule_reason",
+                    "updated_at",
+                ]
+            )
+
+            # Sprint 8B annotation-row pattern: old_status == new_status
+            # == ticket.status; is_override=False. This IS the audit
+            # trail for the schedule change (no generic AuditLog row).
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=request.user,
+                note=self._schedule_history_note(
+                    action=history_action,
+                    old_start=old_start,
+                    new_start=ticket.scheduled_start_at,
+                    window_label=ticket.time_window_label,
+                    reason=reason,
+                ),
+                is_override=False,
+                override_reason="",
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def _schedule_clear(self, request, ticket):
+        old_start = ticket.scheduled_start_at
+
+        with transaction.atomic():
+            ticket.scheduled_start_at = None
+            ticket.scheduled_end_at = None
+            ticket.time_window_label = ""
+            ticket.rescheduled_from = None
+            ticket.reschedule_reason = ""
+            ticket.schedule_status = TicketScheduleStatus.UNSCHEDULED
+            ticket.save(
+                update_fields=[
+                    "scheduled_start_at",
+                    "scheduled_end_at",
+                    "time_window_label",
+                    "schedule_status",
+                    "rescheduled_from",
+                    "reschedule_reason",
+                    "updated_at",
+                ]
+            )
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=request.user,
+                note=self._schedule_history_note(
+                    action="clear",
+                    old_start=old_start,
+                    new_start=None,
+                    window_label="",
+                    reason="",
+                ),
+                is_override=False,
+                override_reason="",
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=["post"], url_path="assign")

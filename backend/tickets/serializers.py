@@ -201,6 +201,12 @@ class TicketListSerializer(serializers.ModelSerializer):
             "sla_is_paused",
             "sla_remaining_business_seconds",
             "sla_display_state",
+            # Sprint 9B — scheduling fields on the list serializer too so
+            # the agenda view can render them without a detail fetch.
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "schedule_status",
         ]
         read_only_fields = fields
 
@@ -300,6 +306,16 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            # Sprint 9B — operational scheduling (read-only here; mutated
+            # via the dedicated POST/DELETE schedule endpoint). These are
+            # operational (no amounts), safe for every role that already
+            # sees ticket detail.
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "schedule_status",
+            "rescheduled_from",
+            "reschedule_reason",
         ]
         read_only_fields = fields
 
@@ -1145,3 +1161,39 @@ class TicketAssignSerializer(serializers.Serializer):
         ticket.assigned_to = self.validated_data["assigned_to"]
         ticket.save(update_fields=["assigned_to", "updated_at"])
         return ticket
+
+
+class TicketScheduleInputSerializer(serializers.Serializer):
+    """
+    Sprint 9B — validate the POST /api/tickets/<pk>/schedule/ body.
+
+    `scheduled_start_at` is required; `scheduled_end_at` is optional and,
+    when present, must not be before the start (HTTP 400 with stable code
+    `schedule_invalid`). `time_window_label` and `reschedule_reason` are
+    optional free text. The reschedule-reason REQUIREMENT (when the
+    ticket is already scheduled) is enforced in the view, not here, so
+    the first-scheduling path does not need a reason.
+    """
+
+    scheduled_start_at = serializers.DateTimeField(required=True)
+    scheduled_end_at = serializers.DateTimeField(
+        required=False, allow_null=True, default=None
+    )
+    time_window_label = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=64
+    )
+    reschedule_reason = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+    def validate(self, attrs):
+        start = attrs.get("scheduled_start_at")
+        end = attrs.get("scheduled_end_at")
+        if end is not None and start is not None and end < start:
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "scheduled_end_at cannot be before scheduled_start_at.",
+                    code="schedule_invalid",
+                )
+            )
+        return attrs

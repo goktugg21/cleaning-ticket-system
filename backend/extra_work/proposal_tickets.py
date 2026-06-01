@@ -49,9 +49,12 @@ from typing import List
 from tickets.models import (
     Ticket,
     TicketPriority,
+    TicketScheduleStatus,
     TicketStatus,
     TicketStatusHistory,
 )
+
+from .instant_tickets import earliest_requested_start
 
 from .models import (
     ExtraWorkRequest,
@@ -160,6 +163,16 @@ def spawn_tickets_for_proposal(
     # Back-compat legacy link: FIRST approved-for-spawn line.
     first_line = spawn_lines[0]
 
+    # Sprint 9B — seed the operational schedule from the EW's cart
+    # `line_items` requested_date (NOT the proposal lines — ProposalLine
+    # has no requested_date). None -> ticket stays UNSCHEDULED.
+    seed_start = earliest_requested_start(request)
+    seed_schedule_status = (
+        TicketScheduleStatus.SCHEDULED
+        if seed_start is not None
+        else TicketScheduleStatus.UNSCHEDULED
+    )
+
     ticket = Ticket.objects.create(
         company=request.company,
         building=request.building,
@@ -171,6 +184,8 @@ def spawn_tickets_for_proposal(
         status=TicketStatus.OPEN,
         extra_work_request=request,
         proposal_line=first_line,
+        scheduled_start_at=seed_start,
+        schedule_status=seed_schedule_status,
     )
 
     TicketStatusHistory.objects.create(
@@ -290,6 +305,15 @@ def spawn_tickets_for_extra_work_request(
     # Back-compat legacy link: FIRST cart line.
     first_item = items[0] if items else None
 
+    # Sprint 9B — seed the operational schedule from the earliest cart
+    # `line_items` requested_date. None -> ticket stays UNSCHEDULED.
+    seed_start = earliest_requested_start(ew)
+    seed_schedule_status = (
+        TicketScheduleStatus.SCHEDULED
+        if seed_start is not None
+        else TicketScheduleStatus.UNSCHEDULED
+    )
+
     ticket = Ticket.objects.create(
         company=ew.company,
         building=ew.building,
@@ -301,6 +325,8 @@ def spawn_tickets_for_extra_work_request(
         status=TicketStatus.OPEN,
         extra_work_request=ew,
         extra_work_request_item=first_item,
+        scheduled_start_at=seed_start,
+        schedule_status=seed_schedule_status,
     )
 
     TicketStatusHistory.objects.create(
