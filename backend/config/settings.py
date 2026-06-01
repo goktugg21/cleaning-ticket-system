@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     "reports",
     "notifications",
     "sla",
+    "planned_work",
     "audit",
 ]
 
@@ -181,6 +182,7 @@ LOGGING = {
         "notifications": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
         "reports": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
         "sla": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
+        "planned_work": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
         "tickets": {"handlers": ["console"], "level": LOGGING_LEVEL, "propagate": False},
         "celery": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "urllib3": {"handlers": ["console"], "level": "WARNING", "propagate": False},
@@ -310,6 +312,12 @@ CELERY_BEAT_SCHEDULE = {
     "reconcile-sla-states": {
         "task": "sla.tasks.reconcile_sla_states",
         "schedule": 5 * 60,
+    },
+    # Sprint 11B — daily materialization of planned/recurring occurrences
+    # and ticket spawning. Task is created in Batch 2; referenced by string.
+    "generate-planned-occurrences": {
+        "task": "planned_work.tasks.run_daily_planned_work",
+        "schedule": 24 * 60 * 60,
     },
 }
 

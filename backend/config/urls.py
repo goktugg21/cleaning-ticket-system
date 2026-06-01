@@ -38,6 +38,10 @@ urlpatterns = [
     # Service CRUD). Per-customer pricing rows are under
     # /api/customers/<id>/pricing/ — see customers/urls.py.
     path("api/services/", include("extra_work.urls_catalog")),
+    # Sprint 11B Batch 3 — provider-only recurring-job templates +
+    # materialized planned occurrences. STAFF / CUSTOMER_USER are 403'd
+    # by the viewset permission classes.
+    path("api/planned-work/", include("planned_work.urls")),
     path("api/reports/", include("reports.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),

@@ -236,6 +236,22 @@ class Ticket(models.Model):
         default=None,
     )
 
+    # Sprint 11B origin link — the operational Ticket spawned from a
+    # recurring / planned occurrence. OneToOne so one occurrence has at
+    # most one ticket (idempotency, DB-enforced) and `occurrence.ticket`
+    # resolves the reverse. SET_NULL so the ticket survives if the
+    # occurrence is hard-deleted. This is the THIRD origin axis next to
+    # `extra_work_request` for report separation (planned vs ad-hoc vs
+    # Extra Work).
+    planned_occurrence = models.OneToOneField(
+        "planned_work.PlannedOccurrence",
+        on_delete=models.SET_NULL,
+        related_name="ticket",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
     # SLA tracking. Engine lives in backend/sla/. sla_first_breached_at is a
     # permanent marker that survives reopens; the rest are recomputed by the
     # engine and the periodic reconciliation task.

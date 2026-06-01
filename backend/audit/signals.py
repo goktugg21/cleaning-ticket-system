@@ -57,6 +57,11 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
+from planned_work.models import (
+    RecurringJob,
+    RecurringJobDefaultManager,
+    RecurringJobDefaultStaff,
+)
 from tickets.models import (
     StaffAssignmentRequest,
     TicketManagerAssignment,
@@ -679,6 +684,13 @@ def _connect():
         # changes and workflow transitions.
         Proposal,
         ProposalLine,
+        # Sprint 11B — recurring-job templates (full CRUD; editable fields).
+        #
+        # NB: `PlannedOccurrence` and `PlannedOccurrenceStatusHistory` are
+        # intentionally NOT registered — the status-history row IS the H-11
+        # workflow audit trail for planned work; registering it in the
+        # generic AuditLog would double-write the same fact.
+        RecurringJob,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -703,6 +715,11 @@ def _connect():
         # `changes` payload — byte-identical audit behaviour to staff
         # assignments.
         TicketManagerAssignment,
+        # Sprint 11B — recurring-job default crew (membership-shape
+        # CREATE/DELETE, no UPDATE diff; the RecurringJob entity has no
+        # .name, identical to TicketStaffAssignment).
+        RecurringJobDefaultStaff,
+        RecurringJobDefaultManager,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).
