@@ -123,6 +123,20 @@ class InvitationCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"customer_ids": "CUSTOMER_USER invitations must specify at least one customer."}
                 )
+            # Sprint 12C — one customer-user belongs to exactly one
+            # customer (locked product invariant). An invitation may not
+            # bind a customer user to multiple customers at once.
+            if len(set(customer_ids)) != 1:
+                raise serializers.ValidationError(
+                    {
+                        "customer_ids": [
+                            serializers.ErrorDetail(
+                                "A customer user must belong to exactly one customer.",
+                                code="customer_user_cross_customer_forbidden",
+                            )
+                        ]
+                    }
+                )
             if company_ids or building_ids:
                 raise serializers.ValidationError(
                     "CUSTOMER_USER invitations only carry a customer scope."
@@ -317,6 +331,12 @@ class InvitationAcceptSerializer(serializers.Serializer):
         invitation: Invitation = self.validated_data["invitation"]
         new_password: str = self.validated_data["new_password"]
 
+        # Sprint 12C note: the User model carries no phone field — a
+        # customer user's phone lives on the linked Contact (validated +
+        # normalised to E.164 by the promote service before the invite
+        # was created). Contact.phone stays the source of truth and is
+        # kept linked via Contact.user below; there is nothing to copy
+        # onto the User here.
         user = User.objects.create_user(
             email=invitation.email,
             password=new_password,

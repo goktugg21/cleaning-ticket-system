@@ -329,6 +329,27 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        # Sprint 12C — customer-safe schedule visibility. A CUSTOMER_USER
+        # keeps the operational schedule (`scheduled_start_at` /
+        # `scheduled_end_at` / `time_window_label` / `schedule_status` —
+        # so they still see the current date/window and that the work was
+        # rescheduled), but NOT the provider-internal reschedule audit
+        # fields: `reschedule_reason` (the operator's internal
+        # explanation — `tickets/models.py` documents it as the operator
+        # explanation) and `rescheduled_from` (the prior operational
+        # date). Provider-side roles (incl. STAFF) keep the full fields.
+        # The staff "unable to complete" reason and other internal notes
+        # ride on `status_history` rows and are already redacted by
+        # `TicketStatusHistorySerializer.to_representation`.
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        if getattr(viewer, "role", None) == UserRole.CUSTOMER_USER:
+            data["reschedule_reason"] = ""
+            data["rescheduled_from"] = None
+        return data
+
     def _resolve_allowed_next_statuses(self, obj):
         """Single computation shared by the top-level
         `allowed_next_statuses` field and the `actions` block. We cache

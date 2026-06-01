@@ -71,8 +71,15 @@ class PromoteContactFixtureMixin(TenantFixtureMixin):
     # ---- fixture helpers --------------------------------------------------
 
     def make_contact(self, customer=None, **fields) -> Contact:
-        """Create a `Contact` directly (phone-book path, not promote)."""
+        """Create a `Contact` directly (phone-book path, not promote).
+
+        Sprint 12C — promotion now requires a valid NL phone on the
+        contact, so the fixture seeds a valid default phone unless the
+        caller overrides it. Tests for the missing/invalid-phone guards
+        pass `phone=""` / `phone="<garbage>"` explicitly.
+        """
         customer = customer or self.customer
+        fields.setdefault("phone", "+31612345678")
         return Contact.objects.create(customer=customer, **fields)
 
     # ---- URL builders -----------------------------------------------------

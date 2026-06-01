@@ -39,6 +39,7 @@ from .models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from .phone import normalize_nl_phone
 
 
 class PromotionError(Exception):
@@ -60,6 +61,7 @@ def promote_contact(
     actor,
     access_role: Optional[str] = None,
     building_ids: Optional[list[int]] = None,
+    phone: Optional[str] = None,
 ) -> dict:
     AccessRole = CustomerUserBuildingAccess.AccessRole
 
@@ -72,6 +74,33 @@ def promote_contact(
         raise PromotionError(
             "Contact has no email to promote.", "contact_email_required"
         )
+
+    # Sprint 12C — phone hardening. A plain Contact may carry a blank
+    # phone, but promoting/linking/inviting it to a customer User
+    # REQUIRES a valid Dutch phone number. An explicit `phone` argument
+    # (supplied on the promote request) takes precedence over the
+    # contact's stored phone. The resolved number is validated and
+    # normalised to E.164, then persisted on the Contact — the source of
+    # truth (the User model carries no phone field; the promoted User is
+    # linked to this Contact via Contact.user). All of this runs inside
+    # the outer @transaction.atomic, so a later guard failure rolls the
+    # phone write back with everything else.
+    phone_arg = "" if phone is None else str(phone).strip()
+    resolved_phone = phone_arg or (contact.phone or "").strip()
+    if not resolved_phone:
+        raise PromotionError(
+            "A phone number is required to promote a contact to a user.",
+            "contact_phone_required",
+        )
+    normalized_phone = normalize_nl_phone(resolved_phone)
+    if normalized_phone is None:
+        raise PromotionError(
+            "Phone number is not a valid Dutch (NL) number.",
+            "contact_phone_invalid",
+        )
+    if (contact.phone or "") != normalized_phone:
+        contact.phone = normalized_phone
+        contact.save(update_fields=["phone", "updated_at"])
 
     # Resolve target building ids: explicit list, else the union of the
     # contact's multi-building links + the legacy single-building anchor.
@@ -187,6 +216,21 @@ def promote_contact(
         raise PromotionError(
             "Contact is already promoted to a different user.",
             "contact_already_promoted",
+        )
+
+    # Sprint 12C — one customer-user belongs to exactly one customer
+    # (locked product invariant). A user already linked to a DIFFERENT
+    # customer must not be linked into this one. A membership for THIS
+    # customer is fine (idempotent re-promote / re-link).
+    if (
+        CustomerUserMembership.objects.filter(user=existing)
+        .exclude(customer=customer)
+        .exists()
+    ):
+        raise PromotionError(
+            "User is already a customer user of a different customer.",
+            "customer_user_cross_customer_forbidden",
+            status_code=409,
         )
 
     membership, _ = CustomerUserMembership.objects.get_or_create(

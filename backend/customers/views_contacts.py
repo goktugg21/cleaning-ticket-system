@@ -169,6 +169,11 @@ class CustomerContactPromoteView(views.APIView):
 
         access_role = request.data.get("access_role")
         building_ids = request.data.get("building_ids")
+        # Sprint 12C — optional phone supplied at promote time. When
+        # absent the service falls back to the contact's stored phone;
+        # either way a valid NL phone is REQUIRED to promote (the
+        # service raises `contact_phone_required` / `contact_phone_invalid`).
+        phone = request.data.get("phone")
         if building_ids is not None:
             if not isinstance(building_ids, list) or not all(
                 isinstance(b, int) and not isinstance(b, bool)
@@ -186,6 +191,7 @@ class CustomerContactPromoteView(views.APIView):
                 actor=request.user,
                 access_role=access_role,
                 building_ids=building_ids,
+                phone=phone,
             )
         except PromotionError as exc:
             return Response(
