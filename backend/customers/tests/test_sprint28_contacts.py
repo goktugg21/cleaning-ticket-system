@@ -380,11 +380,18 @@ class ContactIsNotAUserTests(TenantFixtureMixin, APITestCase):
     list_url_tmpl = "/api/customers/{customer_id}/contacts/"
     detail_url_tmpl = "/api/customers/{customer_id}/contacts/{contact_id}/"
 
+    # Sprint 12B (Batch 1/2) added the read-only `user` bridge FK to the
+    # ContactSerializer — the promote-to-user link target. It is therefore
+    # NO LONGER a forbidden key: it is an intended, read-only, pk-only field
+    # (NULL until the contact is promoted). What stays forbidden is every
+    # genuinely auth-shaped attribute that would leak credentials or the
+    # role/permission surface of a User. The `user` value is separately
+    # asserted to be a bare pk (int) or None — never a nested auth object —
+    # by `_assert_user_is_pk_only`.
     FORBIDDEN_KEYS = (
         "password",
         "role",
         "is_active",
-        "user",
         "user_id",
         "permission_overrides",
         "last_login",
@@ -402,6 +409,19 @@ class ContactIsNotAUserTests(TenantFixtureMixin, APITestCase):
                 key,
                 self.FORBIDDEN_KEYS,
                 f"Auth-shaped key {key!r} leaked into contact serialization.",
+            )
+        self._assert_user_is_pk_only(payload)
+
+    def _assert_user_is_pk_only(self, payload):
+        # The `user` bridge FK is allowed, but only as a bare pk (or None).
+        # A nested object here would mean the serializer leaked the User's
+        # auth-shaped fields through the relation.
+        if "user" in payload:
+            self.assertIsInstance(
+                payload["user"],
+                (int, type(None)),
+                "Contact.user must serialize as a bare pk or None, never a "
+                "nested auth object.",
             )
 
     def test_create_response_carries_no_auth_keys(self):

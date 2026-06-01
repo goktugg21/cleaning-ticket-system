@@ -77,6 +77,25 @@ class Invitation(models.Model):
         related_name="revoked_invitations",
     )
 
+    # Sprint 12B — back-ref to the Contact this invite was seeded from
+    # (promote-to-user, invite mode). On accept the handler links Contact.user.
+    contact = models.ForeignKey(
+        "customers.Contact",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invitations",
+    )
+    # Sprint 12B — desired CustomerUserBuildingAccess.access_role for
+    # CUSTOMER_USER invites (values mirror
+    # customers.CustomerUserBuildingAccess.AccessRole; validated in the
+    # serializer/service, no choices here to avoid an import cycle).
+    # Blank/"" => default CUSTOMER_USER at accept time.
+    customer_access_role = models.CharField(max_length=32, blank=True, default="")
+    # Sprint 12B — optional CUBA permission_overrides applied at accept time
+    # for invite-mode promotion.
+    permission_overrides = models.JSONField(default=dict, blank=True)
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [

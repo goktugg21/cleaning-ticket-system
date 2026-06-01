@@ -6,7 +6,12 @@ from rest_framework import serializers
 
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 
 from .invitations import (
     Invitation,
@@ -326,9 +331,45 @@ class InvitationAcceptSerializer(serializers.Serializer):
             for building in invitation.buildings.all():
                 BuildingManagerAssignment.objects.get_or_create(user=user, building=building)
         elif invitation.role == UserRole.CUSTOMER_USER:
+            # Sprint 12B — in addition to the membership row, materialise
+            # per-building CUBA rows for any buildings the invitation
+            # carried (promote-to-user invite mode sets these). A legacy
+            # CUSTOMER_USER invite carries no buildings → no CUBA is
+            # created, preserving today's behaviour. The per-building
+            # access_role comes from `customer_access_role`
+            # (default CUSTOMER_USER) and overrides from
+            # `permission_overrides`.
+            role_value = (
+                invitation.customer_access_role
+                or CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER
+            )
             for customer in invitation.customers.all():
-                CustomerUserMembership.objects.get_or_create(user=user, customer=customer)
+                membership, _ = CustomerUserMembership.objects.get_or_create(
+                    user=user, customer=customer
+                )
+                for building in invitation.buildings.all():
+                    if CustomerBuildingMembership.objects.filter(
+                        customer=customer, building=building
+                    ).exists():
+                        CustomerUserBuildingAccess.objects.get_or_create(
+                            membership=membership,
+                            building=building,
+                            defaults={
+                                "access_role": role_value,
+                                "permission_overrides": (
+                                    invitation.permission_overrides or {}
+                                ),
+                            },
+                        )
         # SUPER_ADMIN: no scope rows; the role itself is global.
+
+        # Sprint 12B — link the originating Contact (promote-to-user
+        # invite mode) to the freshly created User, if not already linked.
+        if invitation.contact_id:
+            contact = invitation.contact
+            if contact is not None and contact.user_id is None:
+                contact.user = user
+                contact.save(update_fields=["user", "updated_at"])
 
         now = timezone.now()
         invitation.accepted_at = now

@@ -11,6 +11,7 @@ from .views import CustomerViewSet
 from .views_contacts import (
     CustomerContactDetailView,
     CustomerContactListCreateView,
+    CustomerContactPromoteView,
 )
 from .views_memberships import (
     CustomerBuildingDeleteView,
@@ -76,6 +77,12 @@ urlpatterns = [
         "<int:customer_id>/contacts/<int:contact_id>/",
         CustomerContactDetailView.as_view(),
         name="customer-contact-detail",
+    ),
+    # Sprint 12B — promote a Contact into an authenticated customer User.
+    path(
+        "<int:customer_id>/contacts/<int:contact_id>/promote-to-user/",
+        CustomerContactPromoteView.as_view(),
+        name="customer-contact-promote",
     ),
     # Sprint 28 Batch 5 — per-customer service contract prices.
     # View classes live in extra_work/views_pricing.py (the model

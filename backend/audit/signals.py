@@ -43,6 +43,7 @@ from buildings.models import (
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Contact,
+    ContactBuildingLink,
     Customer,
     CustomerBuildingMembership,
     CustomerCompanyPolicy,
@@ -720,6 +721,10 @@ def _connect():
         # .name, identical to TicketStaffAssignment).
         RecurringJobDefaultStaff,
         RecurringJobDefaultManager,
+        # Sprint 12B — contact↔building links (membership-shape
+        # CREATE/DELETE). Contact itself stays in the full-CRUD trio; the
+        # new user/contact_type/is_primary fields are auto-introspected.
+        ContactBuildingLink,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).
