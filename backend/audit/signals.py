@@ -57,7 +57,11 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
-from tickets.models import StaffAssignmentRequest, TicketStaffAssignment
+from tickets.models import (
+    StaffAssignmentRequest,
+    TicketManagerAssignment,
+    TicketStaffAssignment,
+)
 
 from . import context
 from .diff import (
@@ -690,6 +694,15 @@ def _connect():
         # fields.
         BuildingStaffVisibility,
         TicketStaffAssignment,
+        # Sprint 10B — explicit per-ticket responsible-manager M:N.
+        # Same lightweight CREATE/DELETE shape as TicketStaffAssignment
+        # (no editable fields, no UPDATE diff). Not added to
+        # `_MEMBERSHIP_ENTITY_ATTR` for the same reason TicketStaffAssignment
+        # is not: the `Ticket` entity has no `.name`, so the row is audited
+        # with the correct target_model / target_id / actor and an empty
+        # `changes` payload — byte-identical audit behaviour to staff
+        # assignments.
+        TicketManagerAssignment,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).

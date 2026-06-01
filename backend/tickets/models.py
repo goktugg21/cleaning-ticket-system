@@ -461,6 +461,65 @@ class TicketStaffAssignment(models.Model):
         return f"{self.user.email} → {self.ticket}"
 
 
+class TicketManagerAssignment(models.Model):
+    """
+    Sprint 10B — EXPLICIT per-ticket responsible-manager M:N (SoT §4.2).
+
+    Mirrors `TicketStaffAssignment` exactly: a ticket may carry more
+    than one responsible BUILDING_MANAGER at the same time, with each
+    assignment recording who made it and when.
+
+    Relationship to the two neighbouring concepts (do NOT conflate):
+
+      * `Ticket.assigned_to` stays the LEGACY / compat single "primary
+        manager" pointer. This new table does not change its meaning,
+        does not remove it, and is not a replacement for it — the two
+        coexist (the single pointer is still what the existing UI and
+        the `assign` endpoint read/write).
+      * `BuildingManagerAssignment` (buildings app) remains the
+        BUILDING-LEVEL authority / visibility grant. Holding it is the
+        eligibility precondition for being added here, but it is NOT
+        itself per-ticket responsibility — a BM can be authoritative on
+        a building without being a named responsible manager on a given
+        ticket.
+
+    Removal is a hard delete (mirrors `TicketStaffAssignment`): there is
+    no soft-remove column, matching the existing membership pattern.
+
+    Validation (enforced at the endpoint / serializer layer, not via a
+    DB check, mirroring `TicketStaffAssignment`):
+      - user.role MUST be UserRole.BUILDING_MANAGER.
+      - The user MUST hold a `BuildingManagerAssignment` for
+        ticket.building.
+    """
+
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="manager_assignments",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ticket_manager_assignments",
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manager_assignments_made",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("ticket", "user")]
+        indexes = [models.Index(fields=["ticket", "user"])]
+
+    def __str__(self):
+        return f"{self.user.email} ⇒ {self.ticket}"
+
+
 class AssignmentRequestStatus(models.TextChoices):
     """Sprint 23A — lifecycle of a staff-initiated assignment request."""
 

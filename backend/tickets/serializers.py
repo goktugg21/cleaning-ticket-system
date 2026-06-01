@@ -244,6 +244,15 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     # flags so the customer never sees fields the policy hides.
     # See _assigned_staff_payload() below.
     assigned_staff = serializers.SerializerMethodField()
+    # Sprint 10B — explicit per-ticket responsible managers via
+    # TicketManagerAssignment (the M:N counterpart of assigned_staff).
+    # The existing single `assigned_to` pointer is preserved untouched
+    # (frontend compat); this is the multi-manager list. For a
+    # CUSTOMER_USER caller the SAME Customer.show_assigned_staff_*
+    # flags gate the output, so customer-side redaction of "who is
+    # working on this" stays consistent across staff and managers.
+    # See _assigned_managers_payload() below.
+    assigned_managers = serializers.SerializerMethodField()
     # Sprint 28 Batch 11 — per-current-user "is this caller listed
     # on TicketStaffAssignment for this ticket?" flag. The frontend
     # completion-modal logic uses this to decide whether to render the
@@ -282,6 +291,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "assigned_to",
             "assigned_to_email",
             "assigned_staff",
+            "assigned_managers",
             "is_assigned_staff",
             "created_at",
             "updated_at",
@@ -464,6 +474,11 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         viewer = getattr(request, "user", None) if request else None
         return _assigned_staff_payload(obj, viewer)
+
+    def get_assigned_managers(self, obj):
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        return _assigned_managers_payload(obj, viewer)
 
     def get_is_assigned_staff(self, obj):
         """
@@ -656,6 +671,56 @@ def _assigned_staff_payload(ticket, viewer):
     """
     assignments = list(
         ticket.staff_assignments.select_related("user", "user__staff_profile")
+        .order_by("assigned_at")
+    )
+    if not assignments:
+        return []
+
+    is_customer = getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+    customer = ticket.customer
+    if is_customer:
+        show_name = bool(customer.show_assigned_staff_name)
+        show_email = bool(customer.show_assigned_staff_email)
+        show_phone = bool(customer.show_assigned_staff_phone)
+        if not (show_name or show_email or show_phone):
+            return [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}]
+    else:
+        show_name = show_email = show_phone = True
+
+    out = []
+    for a in assignments:
+        user = a.user
+        entry = {"id": user.id}
+        if show_name:
+            entry["full_name"] = user.full_name or user.email.split("@")[0]
+        if show_email:
+            entry["email"] = user.email
+        if show_phone:
+            profile = getattr(user, "staff_profile", None)
+            entry["phone"] = profile.phone if profile else ""
+        out.append(entry)
+    return out
+
+
+def _assigned_managers_payload(ticket, viewer):
+    """
+    Sprint 10B — render the list of responsible managers assigned to a
+    ticket via TicketManagerAssignment.
+
+    Identical redaction policy to `_assigned_staff_payload`: OSIUS-side
+    viewers (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER / STAFF) get
+    the full record; a CUSTOMER_USER viewer is filtered through the SAME
+    Customer.show_assigned_staff_{name,email,phone} flags so customer-
+    side redaction of "who is working on this" stays consistent between
+    staff and managers. When all three flags are False the payload
+    collapses to the same anonymous label key the staff payload uses.
+
+    BUILDING_MANAGER users do not carry a StaffProfile, so the `phone`
+    field (when the flag allows it) resolves to "" rather than raising —
+    the wire shape stays identical to the staff payload.
+    """
+    assignments = list(
+        ticket.manager_assignments.select_related("user", "user__staff_profile")
         .order_by("assigned_at")
     )
     if not assignments:

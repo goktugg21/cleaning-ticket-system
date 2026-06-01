@@ -33,11 +33,13 @@ from .models import (
     TicketMessage,
     TicketMessageType,
     TicketScheduleStatus,
+    TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
 )
 from buildings.models import BuildingManagerAssignment
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
+from .state_machine import TransitionError, apply_transition
 from .serializers import (
     TicketAssignableManagerSerializer,
     TicketAssignSerializer,
@@ -668,6 +670,114 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["post"], url_path="unable-to-complete")
+    def unable_to_complete(self, request, pk=None):
+        """
+        Sprint 10B — a STAFF member assigned to the ticket reports they
+        could NOT complete the work. This is a thin wrapper over the
+        EXISTING state machine: it always drives
+        `IN_PROGRESS -> WAITING_MANAGER_REVIEW` with an "[UNABLE TO
+        COMPLETE]" note so the responsible manager picks it up and
+        reschedules / reassigns via the existing flows.
+
+        It never marks the ticket completed and never sends it to
+        customer approval — WAITING_MANAGER_REVIEW is the only target.
+
+        The resulting `TicketStatusHistory` row written by
+        `apply_transition` IS the audit/history record (actor =
+        changed_by, the unable reason in `note`, old -> new status); we
+        do not write a second row.
+
+        Body: {"reason": "...", "evidence_attachment_id": <optional>}.
+
+        Evidence: in Sprint 10B we do NOT build a new upload path. If an
+        `evidence_attachment_id` is supplied AND it already references a
+        visible `TicketAttachment` on THIS ticket, its filename is woven
+        into the note for traceability; otherwise it is ignored. The
+        shipped behaviour is reason-only — a photo can be uploaded
+        separately through the existing attachment endpoint and referred
+        to in the reason text.
+        """
+        ticket = self.get_object()
+
+        if request.user.role != UserRole.STAFF:
+            return Response(
+                {
+                    "detail": "Only assigned staff can report an inability to complete.",
+                    "code": "unable_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not TicketStaffAssignment.objects.filter(
+            ticket=ticket, user=request.user
+        ).exists():
+            return Response(
+                {
+                    "detail": "You are not assigned to this ticket.",
+                    "code": "unable_not_assigned",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if str(ticket.status) != str(TicketStatus.IN_PROGRESS):
+            return Response(
+                {
+                    "detail": "This ticket is not in progress.",
+                    "code": "unable_invalid_state",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {
+                    "detail": "A reason is required when reporting an inability to complete.",
+                    "code": "unable_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Optional evidence reference (NOT a new upload path). Only an
+        # existing, visible attachment already on THIS ticket is woven
+        # into the note; anything else is silently ignored so a bad id
+        # can't 400 a legitimate unable-to-complete.
+        note = f"[UNABLE TO COMPLETE] {reason}"
+        evidence_id = request.data.get("evidence_attachment_id")
+        if evidence_id is not None:
+            attachment = TicketAttachment.objects.filter(
+                pk=evidence_id, ticket=ticket, is_hidden=False
+            ).first()
+            if attachment is not None:
+                note = f"{note} (evidence: {attachment.original_filename})"
+
+        old_status = ticket.status
+        try:
+            # WAITING_MANAGER_REVIEW is the ONLY target. The non-blank
+            # `note` satisfies the staff COMPLETION_EVIDENCE_TRANSITIONS
+            # gate for the (IN_PROGRESS, WAITING_MANAGER_REVIEW) leg.
+            updated = apply_transition(
+                ticket=ticket,
+                user=request.user,
+                to_status=TicketStatus.WAITING_MANAGER_REVIEW,
+                note=note,
+            )
+        except TransitionError as exc:
+            return Response(
+                {"detail": str(exc), "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        send_ticket_status_changed_email(
+            updated,
+            old_status=old_status,
+            new_status=updated.status,
+            actor=request.user,
+            is_admin_override=False,
+        )
+        return Response(
+            TicketDetailSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):

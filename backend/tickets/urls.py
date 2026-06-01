@@ -7,6 +7,10 @@ from .views import (
     TicketMessageListCreateView,
     TicketViewSet,
 )
+from .views_manager_assignments import (
+    TicketManagerAssignmentDeleteView,
+    TicketManagerAssignmentListCreateView,
+)
 from .views_staff_assignments import (
     TicketStaffAssignmentDeleteView,
     TicketStaffAssignmentListCreateView,
@@ -57,5 +61,18 @@ urlpatterns = [
         "<int:ticket_id>/staff-assignments/<int:user_id>/",
         TicketStaffAssignmentDeleteView.as_view(),
         name="ticket-staff-assignment-delete",
+    ),
+    # Sprint 10B — explicit per-ticket responsible-manager M:N. Same
+    # hand-mounted shape as the staff-assignment endpoints above (the
+    # DELETE `<user_id>` path arg is awkward through a DRF action).
+    path(
+        "<int:ticket_id>/manager-assignments/",
+        TicketManagerAssignmentListCreateView.as_view(),
+        name="ticket-manager-assignments",
+    ),
+    path(
+        "<int:ticket_id>/manager-assignments/<int:user_id>/",
+        TicketManagerAssignmentDeleteView.as_view(),
+        name="ticket-manager-assignment-delete",
     ),
 ] + router.urls
