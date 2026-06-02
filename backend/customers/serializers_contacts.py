@@ -82,7 +82,34 @@ class ContactSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "customer", "user", "created_at", "updated_at"]
 
     def get_linked_building_ids(self, obj):
-        return list(obj.building_links.values_list("building_id", flat=True))
+        ids = list(obj.building_links.values_list("building_id", flat=True))
+        # Sprint 14G — a BUILDING_MANAGER reader must never see building
+        # associations outside the buildings they manage. The view puts
+        # the manager's allowed building-id set in the serializer context
+        # (`bm_allowed_building_ids`); when it is None (SUPER_ADMIN /
+        # COMPANY_ADMIN — who see everything) the projection is unfiltered.
+        allowed = self.context.get("bm_allowed_building_ids")
+        if allowed is not None:
+            ids = [bid for bid in ids if bid in allowed]
+        return ids
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Sprint 14G — also redact the legacy single-building `building`
+        # FK for a BUILDING_MANAGER when it points at a building they do
+        # not manage (the contact is only visible to them because of a
+        # DIFFERENT, managed link). Same leak class as
+        # `linked_building_ids`; closing both keeps the contract
+        # consistent. SUPER_ADMIN / COMPANY_ADMIN (allowed is None) are
+        # untouched.
+        allowed = self.context.get("bm_allowed_building_ids")
+        if (
+            allowed is not None
+            and data.get("building") is not None
+            and data["building"] not in allowed
+        ):
+            data["building"] = None
+        return data
 
     def get_promotion_status(self, obj):
         if obj.user_id:

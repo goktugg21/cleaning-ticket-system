@@ -28,19 +28,63 @@ target a contact from another customer by URL-mismatch
 (`/customers/<A>/contacts/<id-of-B-contact>/`). On mismatch we return
 404 — never silently mutate the other customer's row.
 """
+from django.db.models import Exists, OuterRef, Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status, views
 from rest_framework.response import Response
 
+from accounts.models import UserRole
 from accounts.permissions import (
     IsSuperAdminOrCompanyAdminForCompany,
     IsSuperAdminOrCompanyAdminOrBuildingManagerReadCustomer,
 )
+from accounts.scoping import building_ids_for
 from config.pagination import UnboundedPagination
 
-from .models import Contact, Customer
+from .models import Contact, ContactBuildingLink, Customer
 from .promotion import PromotionError, promote_contact
 from .serializers_contacts import ContactSerializer
+
+
+def bm_allowed_building_ids(user):
+    """Sprint 14G — the building-id set a reader may see contact building
+    associations for, or None when the reader sees everything.
+
+    Only BUILDING_MANAGER is narrowed: a BM can read a multi-building
+    customer's contacts (Sprint 28 Batch 12) but must NOT see building
+    associations for buildings outside `building_ids_for(BM)`, nor
+    contacts that are linked ONLY to buildings they do not manage.
+    SUPER_ADMIN / COMPANY_ADMIN return None (no narrowing). CUSTOMER_USER
+    / STAFF never reach the contact views (the permission gate rejects
+    them), so they are not special-cased here.
+    """
+    if getattr(user, "role", None) == UserRole.BUILDING_MANAGER:
+        return set(building_ids_for(user))
+    return None
+
+
+def scope_contacts_for_reader(queryset, user):
+    """Narrow a contact queryset for a BUILDING_MANAGER reader.
+
+    Keeps: contacts with NO building links (customer-level phone-book
+    entries — no association to leak, and BM read access to them is the
+    existing Batch-12 behaviour) AND contacts with at least one link in
+    the manager's allowed buildings. Hides: contacts that ARE
+    building-linked but to NONE of the manager's buildings. No-op for
+    SUPER_ADMIN / COMPANY_ADMIN.
+    """
+    allowed = bm_allowed_building_ids(user)
+    if allowed is None:
+        return queryset
+    has_any_link = ContactBuildingLink.objects.filter(contact=OuterRef("pk"))
+    has_managed_link = ContactBuildingLink.objects.filter(
+        contact=OuterRef("pk"), building_id__in=allowed
+    )
+    return queryset.annotate(
+        _has_any_link=Exists(has_any_link),
+        _has_managed_link=Exists(has_managed_link),
+    ).filter(Q(_has_managed_link=True) | Q(_has_any_link=False))
 
 
 class CustomerContactListCreateView(generics.ListCreateAPIView):
@@ -66,11 +110,14 @@ class CustomerContactListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         customer = self._get_customer()
-        return (
+        qs = (
             Contact.objects.filter(customer=customer)
             .select_related("building")
             .order_by("full_name", "id")
         )
+        # Sprint 14G — narrow contacts linked only to buildings a
+        # BUILDING_MANAGER does not manage (no-op for SA / CA).
+        return scope_contacts_for_reader(qs, self.request.user)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -81,6 +128,11 @@ class CustomerContactListCreateView(generics.ListCreateAPIView):
             context["customer"] = self._get_customer()
         except Exception:  # pragma: no cover — defensive
             pass
+        # Sprint 14G — the BM building-id allow-list the serializer uses
+        # to narrow `linked_building_ids` + the legacy `building` field.
+        context["bm_allowed_building_ids"] = bm_allowed_building_ids(
+            self.request.user
+        )
         return context
 
     def perform_create(self, serializer):
@@ -112,6 +164,20 @@ class CustomerContactDetailView(generics.RetrieveUpdateDestroyAPIView):
         contact = get_object_or_404(
             Contact, pk=self.kwargs["contact_id"], customer=customer
         )
+        # Sprint 14G — a BUILDING_MANAGER must not retrieve a contact that
+        # is building-linked ONLY to buildings they do not manage (it
+        # would otherwise leak both the contact and its associations). A
+        # contact with no links at all stays visible (existing Batch-12
+        # behaviour). 404 (not 403) so the contact's existence is not
+        # revealed across building scopes. No-op for SA / CA.
+        allowed = bm_allowed_building_ids(self.request.user)
+        if allowed is not None:
+            has_any_link = contact.building_links.exists()
+            has_managed_link = contact.building_links.filter(
+                building_id__in=allowed
+            ).exists()
+            if has_any_link and not has_managed_link:
+                raise Http404("Contact not found.")
         return contact
 
     def get_serializer_context(self):
@@ -120,6 +186,10 @@ class CustomerContactDetailView(generics.RetrieveUpdateDestroyAPIView):
             context["customer"] = self._get_customer()
         except Exception:  # pragma: no cover — defensive
             pass
+        # Sprint 14G — BM building-id allow-list for serializer narrowing.
+        context["bm_allowed_building_ids"] = bm_allowed_building_ids(
+            self.request.user
+        )
         return context
 
     def delete(self, request, *args, **kwargs):
