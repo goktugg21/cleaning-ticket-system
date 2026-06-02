@@ -375,3 +375,34 @@ class CanManageUser(IsAuthenticatedAndActive):
         from .scoping import _user_in_actor_company
 
         return _user_in_actor_company(actor, obj)
+
+
+class IsProviderRosterReader(IsAuthenticatedAndActive):
+    """
+    Sprint 13C — read gate for the provider-side STAFF roster
+    (Employees page backend, `GET /api/staff/`).
+
+    Admits the three provider-management roles:
+      - SUPER_ADMIN  — sees every STAFF user across all providers.
+      - COMPANY_ADMIN — sees STAFF visible in their company's buildings.
+      - BUILDING_MANAGER — sees STAFF visible in their assigned
+        building(s).
+
+    Rejects (403):
+      - CUSTOMER_USER — never reads the provider roster.
+      - STAFF — no existing rule lets a field worker list the roster;
+        they read their own profile via `/api/auth/me/`.
+
+    The viewer-scope narrowing (which STAFF rows are returned, and which
+    `building_visibility` sub-rows are exposed) is enforced in the view
+    layer via `building_ids_for`; this class only decides admittance.
+    """
+
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        return request.user.role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        )

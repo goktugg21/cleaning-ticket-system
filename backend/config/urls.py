@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from accounts.views_roster import StaffRosterView
 from accounts.views_staff import (
     BuildingStaffVisibilityDetailView,
     BuildingStaffVisibilityListCreateView,
@@ -64,6 +65,13 @@ urlpatterns = [
         BuildingStaffVisibilityDetailView.as_view(),
         name="user-staff-visibility-detail",
     ),
+    # Sprint 13C — provider/BM-scoped STAFF roster (Employees page
+    # backend). Read-only LIST; admits BUILDING_MANAGER with a
+    # building-scoped queryset (unlike the SA/CA-only UserViewSet).
+    # Mounted before the staff-assignment-requests router; the two
+    # prefixes (`staff/` vs `staff-assignment-requests/`) do not
+    # collide.
+    path("api/staff/", StaffRosterView.as_view(), name="staff-roster"),
     # Sprint 23A — staff-initiated "I want to do this work" review
     # queue. The viewset returns no results for CUSTOMER_USER so
     # the resource is invisible on the customer side.

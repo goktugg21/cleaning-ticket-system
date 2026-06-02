@@ -48,6 +48,11 @@ class TicketFilter(df.FilterSet):
         ],
     )
 
+    # Sprint 13C — staff "My Jobs" filter. OPT-IN; runs on top of the
+    # already-`scope_tickets_for`-narrowed queryset, so it composes
+    # naturally with the scheduled_*/agenda filters.
+    my_jobs = df.BooleanFilter(method="filter_my_jobs")
+
     class Meta:
         model = Ticket
         fields = {
@@ -93,3 +98,19 @@ class TicketFilter(df.FilterSet):
         if value == "unscheduled":
             return queryset.filter(scheduled_start_at__isnull=True)
         return queryset
+
+    def filter_my_jobs(self, queryset, name, value):
+        # Sprint 13C — narrow to tickets where the current user holds a
+        # TicketStaffAssignment. This uses the M:N TicketStaffAssignment
+        # (reverse relation `staff_assignments`), NOT the legacy
+        # `assigned_to` FK. For a BUILDING_READ staff it narrows the
+        # building-wide agenda down to only-assigned-to-me; for an
+        # ASSIGNED_ONLY staff it is consistent with their already-narrow
+        # scope. Opt-in only — a falsy value leaves the queryset untouched.
+        if not value:
+            return queryset
+        if getattr(self, "request", None) is None:
+            return queryset
+        return queryset.filter(
+            staff_assignments__user=self.request.user
+        ).distinct()
