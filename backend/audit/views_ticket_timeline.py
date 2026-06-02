@@ -128,7 +128,12 @@ class TicketAuditTimelineView(APIView):
         # those is out of scope for this bounded read-side aggregation.
         from audit.models import AuditLog
         from django.db.models import Q
-        from tickets.models import TicketManagerAssignment, TicketStaffAssignment
+        from tickets.models import (
+            TicketAttachment,
+            TicketManagerAssignment,
+            TicketMessage,
+            TicketStaffAssignment,
+        )
 
         staff_pks = list(
             TicketStaffAssignment.objects.filter(ticket_id=ticket_id).values_list(
@@ -137,6 +142,17 @@ class TicketAuditTimelineView(APIView):
         )
         manager_pks = list(
             TicketManagerAssignment.objects.filter(ticket_id=ticket_id).values_list(
+                "id", flat=True
+            )
+        )
+        # Sprint 14E — ticket-anchored note + attachment audit rows.
+        message_pks = list(
+            TicketMessage.objects.filter(ticket_id=ticket_id).values_list(
+                "id", flat=True
+            )
+        )
+        attachment_pks = list(
+            TicketAttachment.objects.filter(ticket_id=ticket_id).values_list(
                 "id", flat=True
             )
         )
@@ -151,6 +167,16 @@ class TicketAuditTimelineView(APIView):
             audit_filter |= Q(
                 target_model="tickets.TicketManagerAssignment",
                 target_id__in=manager_pks,
+            )
+        if message_pks:
+            audit_filter |= Q(
+                target_model="tickets.TicketMessage",
+                target_id__in=message_pks,
+            )
+        if attachment_pks:
+            audit_filter |= Q(
+                target_model="tickets.TicketAttachment",
+                target_id__in=attachment_pks,
             )
 
         for log in (

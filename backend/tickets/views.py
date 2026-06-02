@@ -169,6 +169,44 @@ class TicketViewSet(
         ticket = serializer.save()
         send_ticket_created_email(ticket, actor=self.request.user)
 
+        # Sprint 14E — audit ticket creation as an explicit business
+        # event (SoT §9.1 "ticket created"). View-level, not a signal,
+        # so only genuine API creates are logged: EW-spawned tickets
+        # carry their own EW / proposal audit trail and must not be
+        # double-counted as "created" here. This does NOT touch status
+        # (TicketStatusHistory owns the lifecycle), so H-11 holds.
+        # NB: there is no generic ticket-edit endpoint (the viewset has
+        # no UpdateModelMixin), so "field updated" has no surface to
+        # audit; if one is added later it should be audited there.
+        try:
+            _scope = audit_context.get_current_actor_scope() or {}
+            if not _scope:
+                _scope = (
+                    audit_context.snapshot_actor_scope(self.request.user) or {}
+                )
+            AuditLog.objects.create(
+                actor=self.request.user,
+                action=AuditAction.CREATE,
+                target_model="tickets.Ticket",
+                target_id=ticket.id,
+                changes={
+                    "ticket_no": {"before": None, "after": ticket.ticket_no},
+                    "title": {"before": None, "after": ticket.title},
+                    "type": {"before": None, "after": ticket.type},
+                    "priority": {"before": None, "after": ticket.priority},
+                    "building_id": {"before": None, "after": ticket.building_id},
+                    "customer_id": {"before": None, "after": ticket.customer_id},
+                },
+                request_ip=audit_context.get_current_request_ip(),
+                request_id=audit_context.get_current_request_id(),
+                reason=audit_context.get_current_reason(),
+                actor_scope=_scope,
+            )
+        except Exception:  # pragma: no cover — audit must not block create
+            _audit_logger.exception(
+                "audit: failed to record ticket create #%s", ticket.id
+            )
+
     def destroy(self, request, *args, **kwargs):
         """
         Sprint 12 — soft-delete an accidentally-opened ticket.

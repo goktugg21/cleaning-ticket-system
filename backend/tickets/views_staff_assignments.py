@@ -422,18 +422,26 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
             allowed_fields=allowed,
         )
         ser.is_valid(raise_exception=True)
-        updated = ser.save()
 
         # Completion side-effects (assignment-level only — the ticket
         # state machine is NOT touched; the manager double-check flow
-        # still owns ticket completion).
+        # still owns ticket completion). Applied as save() kwargs so the
+        # whole PATCH is ONE row write -> exactly ONE audit UPDATE row
+        # (Sprint 14E audit-coverage contract), not a status row + a
+        # follow-up completed_at row.
+        save_extra = {}
+        new_status = ser.validated_data.get(
+            "slot_status", assignment.slot_status
+        )
         if (
-            updated.slot_status == StaffAssignmentSlotStatus.COMPLETED
-            and updated.completed_at is None
+            new_status == StaffAssignmentSlotStatus.COMPLETED
+            and assignment.completed_at is None
         ):
-            updated.completed_at = timezone.now()
-            updated.completed_by = request.user
-            updated.save(update_fields=["completed_at", "completed_by"])
+            save_extra = {
+                "completed_at": timezone.now(),
+                "completed_by": request.user,
+            }
+        updated = ser.save(**save_extra)
 
         return Response(_TicketStaffAssignmentSerializer(updated).data)
 
