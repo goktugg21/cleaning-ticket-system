@@ -49,6 +49,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.response import Response
 
@@ -58,7 +59,33 @@ from accounts.permissions_v2 import user_has_osius_permission
 from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
 
-from .models import Ticket, TicketStaffAssignment
+from .models import (
+    StaffAssignmentSlotStatus,
+    Ticket,
+    TicketStaffAssignment,
+)
+
+
+# Sprint 14E — writable slot fields, split by who may write them.
+#  * On CREATE / manager PATCH: schedule + window + note + status +
+#    completion evidence.
+#  * On STAFF self-PATCH: only the slot's own status + completion
+#    evidence (a staff member reports their own work; they cannot
+#    reschedule themselves or edit the manager's assignment note).
+_MANAGER_SLOT_WRITE_FIELDS = (
+    "scheduled_start_at",
+    "scheduled_end_at",
+    "time_window_label",
+    "assignment_note",
+    "slot_status",
+    "completion_note",
+    "unable_to_complete_reason",
+)
+_STAFF_SELF_SLOT_WRITE_FIELDS = (
+    "slot_status",
+    "completion_note",
+    "unable_to_complete_reason",
+)
 
 
 class _TicketStaffAssignmentSerializer(serializers.ModelSerializer):
@@ -74,6 +101,10 @@ class _TicketStaffAssignmentSerializer(serializers.ModelSerializer):
         source="assigned_by.email", read_only=True, default=None
     )
 
+    completed_by_id = serializers.IntegerField(
+        source="completed_by.id", read_only=True, default=None
+    )
+
     class Meta:
         model = TicketStaffAssignment
         fields = [
@@ -85,6 +116,110 @@ class _TicketStaffAssignmentSerializer(serializers.ModelSerializer):
             "assigned_by_id",
             "assigned_by_email",
             "assigned_at",
+            # Sprint 14E — dated slot metadata.
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "assignment_note",
+            "slot_status",
+            "completion_note",
+            "completed_at",
+            "completed_by_id",
+            "unable_to_complete_reason",
+        ]
+        read_only_fields = fields
+
+
+class _SlotWriteSerializer(serializers.ModelSerializer):
+    """Sprint 14E — validates writable slot fields. The view chooses
+    the field allow-list (manager vs staff-self) via `fields` kwarg so
+    a STAFF member can only touch their own status/completion, never
+    reschedule themselves or edit the manager's assignment note."""
+
+    class Meta:
+        model = TicketStaffAssignment
+        fields = list(_MANAGER_SLOT_WRITE_FIELDS)
+
+    def __init__(self, *args, allowed_fields=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if allowed_fields is not None:
+            for name in set(self.fields) - set(allowed_fields):
+                self.fields.pop(name)
+
+    def validate(self, attrs):
+        # Resolve the post-write status to validate completion evidence.
+        new_status = attrs.get(
+            "slot_status",
+            getattr(self.instance, "slot_status", None),
+        )
+        if new_status == StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE:
+            reason = attrs.get(
+                "unable_to_complete_reason",
+                getattr(self.instance, "unable_to_complete_reason", ""),
+            )
+            if not (reason or "").strip():
+                raise serializers.ValidationError(
+                    {
+                        "unable_to_complete_reason": (
+                            "A reason is required when marking a slot "
+                            "unable to complete."
+                        )
+                    },
+                    code="slot_unable_reason_required",
+                )
+        start = attrs.get(
+            "scheduled_start_at",
+            getattr(self.instance, "scheduled_start_at", None),
+        )
+        end = attrs.get(
+            "scheduled_end_at",
+            getattr(self.instance, "scheduled_end_at", None),
+        )
+        if start and end and end < start:
+            raise serializers.ValidationError(
+                {
+                    "scheduled_end_at": (
+                        "scheduled_end_at cannot be before scheduled_start_at."
+                    )
+                },
+                code="slot_window_invalid",
+            )
+        return attrs
+
+
+class _MySlotSerializer(serializers.ModelSerializer):
+    """Sprint 14E — STAFF agenda row: the slot plus a compact ticket
+    summary so the frontend can render a card without a detail fetch."""
+
+    ticket_id = serializers.IntegerField(source="ticket.id", read_only=True)
+    ticket_no = serializers.CharField(source="ticket.ticket_no", read_only=True)
+    ticket_title = serializers.CharField(source="ticket.title", read_only=True)
+    ticket_status = serializers.CharField(source="ticket.status", read_only=True)
+    building_id = serializers.IntegerField(
+        source="ticket.building_id", read_only=True
+    )
+    building_name = serializers.CharField(
+        source="ticket.building.name", read_only=True
+    )
+
+    class Meta:
+        model = TicketStaffAssignment
+        fields = [
+            "id",
+            "ticket_id",
+            "ticket_no",
+            "ticket_title",
+            "ticket_status",
+            "building_id",
+            "building_name",
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "assignment_note",
+            "slot_status",
+            "completion_note",
+            "completed_at",
+            "unable_to_complete_reason",
         ]
         read_only_fields = fields
 
@@ -208,13 +343,29 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         if target_check is not None:
             return target_check
 
+        # Sprint 14E — optional dated slot metadata on create. The
+        # completion fields are PATCH-only (a slot is created ASSIGNED,
+        # then completed later); create accepts only schedule + window
+        # + note. Validated (window order) before the row is written.
+        slot_ser = _SlotWriteSerializer(
+            data=request.data,
+            allowed_fields=(
+                "scheduled_start_at",
+                "scheduled_end_at",
+                "time_window_label",
+                "assignment_note",
+            ),
+        )
+        slot_ser.is_valid(raise_exception=True)
+
         # Idempotent: re-POSTing an existing pairing returns 200 with
         # the existing row, mirroring Sprint 23B's approve-path
-        # `get_or_create`.
+        # `get_or_create`. Slot metadata is applied only on first
+        # create; updating an existing slot is a PATCH.
         assignment, created = TicketStaffAssignment.objects.get_or_create(
             ticket=ticket,
             user=target,
-            defaults={"assigned_by": request.user},
+            defaults={"assigned_by": request.user, **slot_ser.validated_data},
         )
         return Response(
             self.get_serializer(assignment).data,
@@ -224,12 +375,67 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         )
 
 
-class TicketStaffAssignmentDeleteView(generics.GenericAPIView):
+class TicketStaffAssignmentDetailView(generics.GenericAPIView):
     """
-    DELETE /api/tickets/<id>/staff-assignments/<user_id>/
+    PATCH  /api/tickets/<id>/staff-assignments/<user_id>/  update slot
+    DELETE /api/tickets/<id>/staff-assignments/<user_id>/  remove slot
+
+    Sprint 14E — PATCH supports two actors:
+      * Manager / admin (the existing `_gate_actor` gate): may edit the
+        full slot (schedule, window, note, status, completion).
+      * The assigned STAFF member themselves: may update only their OWN
+        slot's status + completion evidence (report done / unable). They
+        cannot reschedule themselves or edit the manager's note.
+    DELETE stays manager/admin-only. Deleting one slot never touches a
+    sibling slot on the same ticket (separate rows).
     """
 
     permission_classes = [IsAuthenticatedAndActive]
+
+    @transaction.atomic
+    def patch(self, request, ticket_id, user_id):
+        ticket = _resolve_ticket(request, ticket_id)
+        assignment = TicketStaffAssignment.objects.filter(
+            ticket=ticket, user_id=user_id
+        ).first()
+        if assignment is None:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        is_self_staff = (
+            request.user.role == UserRole.STAFF
+            and request.user.id == int(user_id)
+        )
+        if is_self_staff:
+            allowed = _STAFF_SELF_SLOT_WRITE_FIELDS
+        else:
+            gate = _gate_actor(request, ticket)
+            if gate is not None:
+                return gate
+            allowed = _MANAGER_SLOT_WRITE_FIELDS
+
+        ser = _SlotWriteSerializer(
+            assignment,
+            data=request.data,
+            partial=True,
+            allowed_fields=allowed,
+        )
+        ser.is_valid(raise_exception=True)
+        updated = ser.save()
+
+        # Completion side-effects (assignment-level only — the ticket
+        # state machine is NOT touched; the manager double-check flow
+        # still owns ticket completion).
+        if (
+            updated.slot_status == StaffAssignmentSlotStatus.COMPLETED
+            and updated.completed_at is None
+        ):
+            updated.completed_at = timezone.now()
+            updated.completed_by = request.user
+            updated.save(update_fields=["completed_at", "completed_by"])
+
+        return Response(_TicketStaffAssignmentSerializer(updated).data)
 
     @transaction.atomic
     def delete(self, request, ticket_id, user_id):
@@ -245,6 +451,37 @@ class TicketStaffAssignmentDeleteView(generics.GenericAPIView):
                 {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class StaffAssignmentSlotAgendaView(generics.ListAPIView):
+    """
+    GET /api/tickets/my-slots/
+
+    Sprint 14E — the caller's OWN dated assignment slots (the staff
+    agenda the transcript asks for: "each staff sees their own assigned
+    dated job"). Returns one row per `TicketStaffAssignment` the caller
+    holds, ordered by scheduled start, with a compact ticket summary so
+    the frontend renders cards without a per-ticket detail fetch.
+
+    Inherently caller-scoped: a user only ever has assignment rows on
+    tickets they were assigned to, so there is no cross-tenant surface.
+    Soft-deleted tickets are filtered out. A manager/admin who wants to
+    see ALL slots on a ticket uses
+    `GET /api/tickets/<id>/staff-assignments/`.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+    serializer_class = _MySlotSerializer
+
+    def get_queryset(self):
+        return (
+            TicketStaffAssignment.objects.filter(
+                user=self.request.user,
+                ticket__deleted_at__isnull=True,
+            )
+            .select_related("ticket", "ticket__building")
+            .order_by("scheduled_start_at", "id")
+        )
 
 
 def assignable_staff_view(request, ticket: Ticket):

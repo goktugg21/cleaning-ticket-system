@@ -431,6 +431,26 @@ class TicketStatusHistory(models.Model):
         return f"{self.ticket}: {self.old_status} → {self.new_status}"
 
 
+class StaffAssignmentSlotStatus(models.TextChoices):
+    """
+    Sprint 14E — per-assignment operational slot lifecycle.
+
+    Additive to the ticket's `TicketStatus` workflow: a slot is one
+    staff member's dated/time-windowed piece of work on a ticket. Slot
+    status is NOT a ticket status — completing a slot does NOT move the
+    ticket through its own state machine. The ticket still completes via
+    the existing STAFF-completion -> manager-review double-check flow
+    (the safer workflow per SoT §4.4 + the transcript "menajer kontrol
+    ettim" double-check). Slot status is operational metadata the
+    frontend renders per card.
+    """
+
+    ASSIGNED = "ASSIGNED", "Assigned"
+    COMPLETED = "COMPLETED", "Completed"
+    UNABLE_TO_COMPLETE = "UNABLE_TO_COMPLETE", "Unable to complete"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
 class TicketStaffAssignment(models.Model):
     """
     Sprint 23A — additive M:N between Ticket and STAFF user.
@@ -440,9 +460,20 @@ class TicketStaffAssignment(models.Model):
     through-style table lets a ticket carry multiple assigned
     staff at the same time (per the OSIUS workflow: "a job may have
     multiple staff; any one completing it moves it to manager
-    review"). The workflow change is staged for Sprint 23B — in
-    23A the rows are informational only and the existing state
-    machine is unchanged.
+    review").
+
+    Sprint 14E — DATED OPERATIONAL SLOTS (transcript: same planned
+    work/day may carry a morning task for Ahmet and an evening task for
+    Mehmet; each staff sees their own dated job, and the manager can
+    split work into dated/time-window staff assignments). Each row now
+    carries optional schedule metadata (`scheduled_start_at` /
+    `scheduled_end_at` / `time_window_label`), an `assignment_note`, an
+    assignment-level `slot_status`, and assignment-level completion
+    evidence (`completion_note` / `completed_at` / `completed_by` /
+    `unable_to_complete_reason`). `unique_together(ticket, user)` is
+    PRESERVED: Ahmet and Mehmet are different users, so two slots on the
+    same ticket/date are two rows — backward compatible with every
+    existing flow that reads ticket-level assignments.
 
     Validation (enforced at serializer level, not via a DB check):
       - user.role MUST be UserRole.STAFF.
@@ -469,9 +500,44 @@ class TicketStaffAssignment(models.Model):
     )
     assigned_at = models.DateTimeField(auto_now_add=True)
 
+    # Sprint 14E — optional dated slot metadata. NULL/blank preserves the
+    # pre-14E "flat assignment" semantics for every existing row + flow.
+    scheduled_start_at = models.DateTimeField(null=True, blank=True, default=None)
+    scheduled_end_at = models.DateTimeField(null=True, blank=True, default=None)
+    time_window_label = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Free-text window hint, e.g. morning / afternoon / evening / 08:00-10:00.",
+    )
+    assignment_note = models.TextField(blank=True, default="")
+
+    # Assignment-level lifecycle + completion evidence (additive; does
+    # NOT drive the ticket state machine).
+    slot_status = models.CharField(
+        max_length=24,
+        choices=StaffAssignmentSlotStatus.choices,
+        default=StaffAssignmentSlotStatus.ASSIGNED,
+    )
+    completion_note = models.TextField(blank=True, default="")
+    completed_at = models.DateTimeField(null=True, blank=True, default=None)
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="staff_slots_completed",
+    )
+    unable_to_complete_reason = models.TextField(blank=True, default="")
+
     class Meta:
         unique_together = [("ticket", "user")]
-        indexes = [models.Index(fields=["ticket", "user"])]
+        indexes = [
+            models.Index(fields=["ticket", "user"]),
+            # Sprint 14E — the staff agenda / "my slots" query is
+            # (user, scheduled_start_at); index it.
+            models.Index(fields=["user", "scheduled_start_at"]),
+        ]
 
     def __str__(self):
         return f"{self.user.email} → {self.ticket}"
