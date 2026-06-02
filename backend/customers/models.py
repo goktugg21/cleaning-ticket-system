@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class Customer(models.Model):
@@ -284,6 +285,13 @@ class CustomerCompanyPolicy(models.Model):
         return f"Policy for {self.customer}"
 
 
+class ContactType(models.TextChoices):
+    GENERAL = "GENERAL", "General"
+    OPERATIONS = "OPERATIONS", "Operations"
+    BILLING = "BILLING", "Billing"
+    EMERGENCY = "EMERGENCY", "Emergency"
+
+
 class Contact(models.Model):
     """
     Sprint 28 Batch 4 — customer-side phone-book entry.
@@ -316,6 +324,8 @@ class Contact(models.Model):
         on_delete=models.CASCADE,
         related_name="contacts",
     )
+    # Sprint 12B — DEPRECATED single-building anchor; multi-building is now
+    # ContactBuildingLink. Kept (nullable) for back-compat + the 12B backfill source.
     building = models.ForeignKey(
         "buildings.Building",
         on_delete=models.SET_NULL,
@@ -330,11 +340,67 @@ class Contact(models.Model):
     role_label = models.CharField(max_length=128, blank=True, default="")
     notes = models.TextField(blank=True, default="")
 
+    # Sprint 12B — contact taxonomy + primary flag.
+    contact_type = models.CharField(
+        max_length=16,
+        choices=ContactType.choices,
+        default=ContactType.GENERAL,
+    )
+    is_primary = models.BooleanField(default=False)
+
+    # Sprint 12B promote-to-user bridge. NULL = not promoted. SET_NULL so
+    # deleting the User leaves the person record intact. Set ONLY by the
+    # promote/link flow, never by a plain Contact edit (the serializer keeps
+    # it read-only).
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="customer_contacts",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["full_name", "id"]
+        constraints = [
+            # One Contact per User within a customer. Postgres allows many
+            # NULLs so unpromoted contacts are unconstrained.
+            models.UniqueConstraint(
+                fields=["customer", "user"],
+                condition=Q(user__isnull=False),
+                name="uniq_contact_user_per_customer",
+            ),
+        ]
 
     def __str__(self):
         return self.full_name
+
+
+class ContactBuildingLink(models.Model):
+    """Sprint 12B — M:N Contact↔Building. One contact can serve multiple
+    buildings under the same customer. Mirrors CustomerBuildingMembership.
+    Backfilled from the legacy Contact.building."""
+
+    contact = models.ForeignKey(
+        Contact,
+        on_delete=models.CASCADE,
+        related_name="building_links",
+    )
+    building = models.ForeignKey(
+        "buildings.Building",
+        on_delete=models.PROTECT,
+        related_name="contact_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("contact", "building")]
+        indexes = [
+            models.Index(fields=["contact", "building"]),
+        ]
+
+    def __str__(self):
+        return f"{self.contact} ↔ {self.building}"

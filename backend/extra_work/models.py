@@ -204,6 +204,20 @@ def _two_places(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
+def compute_line_amounts(quantity, unit_price, vat_pct):
+    """Pure money calculator for a single proposal line.
+
+    Returns (line_subtotal, line_vat, line_total) all quantized to
+    two places. Shared by `ProposalLine.save()` (persisted path) and
+    the compute-only line-preview endpoint so the live preview is
+    byte-equal to what gets stored.
+    """
+    line_subtotal = _two_places(quantity * unit_price)
+    line_vat = _two_places(line_subtotal * vat_pct / Decimal("100"))
+    line_total = _two_places(line_subtotal + line_vat)
+    return line_subtotal, line_vat, line_total
+
+
 class ExtraWorkRequest(models.Model):
     """
     The single entity a customer-side user creates and a provider-
@@ -233,6 +247,27 @@ class ExtraWorkRequest(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="created_extra_work_requests",
+    )
+
+    # Sprint 7B — the original normal Ticket this Extra Work request was
+    # converted FROM. Populated only by the conversion flow
+    # (`extra_work.conversion.convert_ticket_to_extra_work`); NULL for
+    # every other creation path. SET_NULL so the EW survives if the
+    # source ticket is later hard-deleted.
+    #
+    # DISTINCT from `tickets.Ticket.extra_work_request` (the reverse of
+    # `related_name="operational_tickets"`): that FK means "this ticket
+    # is the operational ticket SPAWNED from an EW" and is the
+    # spawn-idempotency anchor. `source_ticket` is the opposite
+    # direction — "this EW was born from that pre-existing ticket". Do
+    # NOT overload one for the other.
+    source_ticket = models.ForeignKey(
+        "tickets.Ticket",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="converted_extra_work_requests",
+        default=None,
     )
 
     title = models.CharField(max_length=255)
@@ -365,6 +400,36 @@ class ExtraWorkRequest(models.Model):
     pricing_proposed_at = models.DateTimeField(null=True, blank=True)
     customer_decided_at = models.DateTimeField(null=True, blank=True)
 
+    # Sprint 8B — final billable amounts. Distinct from the
+    # `subtotal_amount` / `vat_amount` / `total_amount` quote/cache
+    # above: those mirror the proposed (or contract) line prices at the
+    # quantities the customer ordered. The `final_*` columns are the
+    # ACTUAL amounts after hourly lines have their `actual_hours`
+    # entered by the provider, and are FROZEN when the operational
+    # ticket reaches customer approval (APPROVED). NULL until the first
+    # `recompute_final_amounts` call. See `extra_work.final_amounts`.
+    final_subtotal_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    final_vat_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    final_total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+    )
+
     class Meta:
         ordering = ["-requested_at"]
         indexes = [
@@ -402,6 +467,18 @@ class ExtraWorkRequest(models.Model):
                 "updated_at",
             ]
         )
+
+    def recompute_final_amounts(self) -> None:
+        """Sprint 8B — recompute and persist the `final_*` amounts from
+        the active priced-line set (proposal / cart / legacy), honouring
+        `actual_hours` on hourly lines. Delegates to
+        `extra_work.final_amounts.recompute_final_amounts` so the
+        line-set resolution + billable-quantity rules live in one
+        module. Imported locally to avoid an import cycle
+        (final_amounts imports from this module)."""
+        from .final_amounts import recompute_final_amounts
+
+        recompute_final_amounts(self)
 
 
 class ExtraWorkPricingLineItem(models.Model):
@@ -878,6 +955,30 @@ class ExtraWorkRequestItem(models.Model):
         ),
     )
 
+    # Sprint 8B — actual hours worked on an HOURS-unit cart line. Entered
+    # provider-side after the work is done (before customer approval of
+    # the operational ticket); drives `final_*` on the parent EW. NULL
+    # for non-hourly lines and for hourly lines not yet finalised. NEVER
+    # overwrites `quantity` (the ordered amount); `final_amounts`
+    # substitutes `actual_hours` for `quantity` only when computing the
+    # final billable total.
+    actual_hours = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_hours_entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    actual_hours_entered_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1149,6 +1250,28 @@ class ProposalLine(models.Model):
     line_vat = models.DecimalField(max_digits=12, decimal_places=2)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
 
+    # Sprint 8B — actual hours worked on an HOURS-unit proposal line.
+    # Mirror of `ExtraWorkRequestItem.actual_hours`: entered
+    # provider-side after the work is done, drives the parent EW's
+    # `final_*`, NEVER overwrites `quantity` / `unit_price`. NULL for
+    # non-hourly lines and for hourly lines not yet finalised.
+    actual_hours = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_hours_entered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    actual_hours_entered_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1173,12 +1296,16 @@ class ProposalLine(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        # Stored totals always recomputed from the inputs.
-        self.line_subtotal = _two_places(self.quantity * self.unit_price)
-        self.line_vat = _two_places(
-            self.line_subtotal * self.vat_pct / Decimal("100")
+        # Stored totals always recomputed from the inputs via the
+        # shared pure helper so the live-preview endpoint and the
+        # persisted row never diverge.
+        (
+            self.line_subtotal,
+            self.line_vat,
+            self.line_total,
+        ) = compute_line_amounts(
+            self.quantity, self.unit_price, self.vat_pct
         )
-        self.line_total = _two_places(self.line_subtotal + self.line_vat)
         super().save(*args, **kwargs)
 
 

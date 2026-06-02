@@ -528,6 +528,43 @@ Need implementation design:
 - Proposal/agreed price should distinguish fixed quantity vs actual-hours finalization.
 - Completion flow may require actual hours before work can be marked ready for customer approval.
 
+Implemented (Sprint 8B) — locked decisions:
+
+- `actual_hours` is a nullable column on BOTH the cart line
+  (`ExtraWorkRequestItem`) and the proposal line (`ProposalLine`).
+  Entering it NEVER overwrites the ordered `quantity` or the
+  snapshotted/quoted unit price — the final amount substitutes
+  `actual_hours` for `quantity` only on HOURS-unit lines; every other
+  unit type (fixed / item / m²) bills the ordered quantity.
+- Entry is **provider-only** (SUPER_ADMIN / COMPANY_ADMIN /
+  BUILDING_MANAGER, scoped to the EW's building):
+  `POST /api/extra-work/<id>/actual-hours/`. STAFF and customer-side
+  roles get HTTP 403 `actual_hours_forbidden`.
+- The parent EW carries `final_subtotal_amount` / `final_vat_amount` /
+  `final_total_amount` (nullable, NULL until the first entry). They are
+  recomputed on every actual-hours entry from the active priced-line
+  set (approved proposal lines → cart lines → legacy pricing lines).
+- **Completion gate**: an Extra Work operational ticket cannot move to
+  `WAITING_CUSTOMER_APPROVAL` while any hourly line is missing
+  `actual_hours` (HTTP 400 `actual_hours_required`). Fixed-price and
+  non-EW tickets are unaffected.
+- **Freeze**: `final_*` is frozen when the operational ticket reaches
+  customer approval (`APPROVED`). After the operational ticket is
+  `APPROVED`/`CLOSED` the final amount is **locked** — further
+  actual-hours entry returns HTTP 400 `final_amount_locked`; a reopen
+  (CLOSED → REOPENED_BY_ADMIN → IN_PROGRESS) re-enables editing.
+- The customer (and provider) sees `final_*` + per-line `actual_hours`
+  on the EW detail, and `final_total_amount` on the ticket
+  `extra_work_origin` metadata. STAFF is gated OUT of the commercial
+  `final_total_amount` (staff-privacy floor) and sees only the safe
+  `actual_hours_required` workflow flag on `extra_work_origin` — no
+  amount, no provider-internal fields.
+- Audit: the line `actual_hours` change auto-diffs through the existing
+  generic AuditLog full-CRUD coverage of `ExtraWorkRequestItem` /
+  `ProposalLine`; each actual-hours call also writes one
+  `ExtraWorkStatusHistory` annotation row (old==new status) capturing
+  actor + per-line old→new hours + old→new `final_total_amount`.
+
 ---
 
 ## 6. Ticket ↔ Extra Work conversion / linking

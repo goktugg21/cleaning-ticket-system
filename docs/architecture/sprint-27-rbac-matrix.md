@@ -690,3 +690,60 @@ Production change summary:
   * No model fields added → no migration. No audit-signal change
     → no `_*_TRACKED_FIELDS` edit. No new permission key in
     `OSIUS_PERMISSION_KEYS` or `CUSTOMER_PERMISSION_KEYS`.
+
+## N. Test footprint (Sprint 6A delta)
+
+Sprint 6A — Extra Work submit/spawn lifecycle foundation: collapse
+operational spawn to EXACTLY ONE `tickets.Ticket` per
+`ExtraWorkRequest`. Not an RBAC change — no H-1..H-11 invariant moves,
+no permission key added. The H-11 dual-note privacy guarantee is
+preserved (proposal `internal_note` is still never serialized into the
+spawned ticket description). No new generic-AuditLog registration for
+`TicketStatusHistory` / `ExtraWorkStatusHistory` (H-11 separation
+intact).
+
+New test class file:
+[`backend/extra_work/tests/test_sprint6_one_ticket_per_request.py`](../../backend/extra_work/tests/test_sprint6_one_ticket_per_request.py)
+— 9 tests, 2 classes (`InstantOneTicketTests`,
+`ProposalOneTicketTests`). Drives the direct/instant and Request-Quote
+proposal flows end-to-end through the real create serializer +
+state-machine transitions so the spawn helpers are exercised the way
+production reaches them. Locks: instant 2-line cart -> 1 ticket;
+canonical `Ticket.extra_work_request` link; origin payload (INSTANT /
+PROPOSAL / None); idempotent create+retry; 3-line regression -> 1
+ticket; multi-line proposal -> 1 ticket; proposal reject -> 0 tickets;
+spawn-endpoint retry -> `already_spawned: true` (no duplicate).
+
+Production change summary:
+  * `backend/tickets/models.py` — new canonical
+    `Ticket.extra_work_request` FK (`SET_NULL`,
+    `related_name="operational_tickets"`, nullable). Legacy
+    `extra_work_request_item` / `proposal_line` FKs retained as
+    back-compat origin-payload anchors only.
+  * `backend/tickets/migrations/0012_ticket_extra_work_request.py` —
+    `AddField` + a `RunPython` data backfill (reverse = `noop`) that
+    links every existing ticket to its parent EW via whichever legacy
+    chain it carries. No DB unique constraint (historical multi-ticket
+    rows would fail it); idempotency enforced in code + tests.
+  * `backend/extra_work/instant_tickets.py`,
+    `backend/extra_work/proposal_tickets.py` — the three spawn helpers
+    (`spawn_tickets_for_request`, `spawn_tickets_for_proposal`,
+    `spawn_tickets_for_extra_work_request`) now create exactly one
+    ticket per request, summarizing all lines in the title +
+    description; idempotency anchored on
+    `Ticket.objects.filter(extra_work_request=<ew>).exists()`. Public
+    names / signatures / `List[Ticket]` returns unchanged.
+  * `backend/tickets/state_machine.py` — parent-EW auto-sync hook
+    resolves `ew_id` from the canonical FK first; Rule-2 sibling union
+    includes `extra_work_request_id` alongside the two legacy chains.
+  * `backend/tickets/serializers.py` —
+    `TicketDetailSerializer.get_extra_work_origin` resolves the parent
+    EW via the canonical FK first (legacy chains as fallback) and
+    classifies `origin` from `ExtraWorkRequest.routing_decision`.
+  * `backend/tickets/filters.py` — `TicketFilter.extra_work_request`
+    union now anchors on the canonical FK.
+  * `backend/extra_work/views.py` — the `spawn` retry action returns
+    HTTP 200 `{already_spawned: true, ...}` (was 400
+    `spawn_already_done`) when a ticket already exists for the request.
+  * Auto-start (`AUTO_START_AFTER_PRICING` spawn) intentionally NOT
+    implemented in 6A — deferred to a dedicated 6B design.

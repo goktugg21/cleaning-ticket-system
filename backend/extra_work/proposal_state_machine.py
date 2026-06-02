@@ -54,6 +54,7 @@ from customers.permissions import user_can
 
 from .models import (
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
@@ -241,6 +242,7 @@ def _advance_parent_on_customer_decision(
     to_status: str,
     is_override: bool,
     override_reason: str,
+    note: Optional[str] = None,
 ) -> None:
     """Idempotent parent-EW advancement on customer approve / reject.
 
@@ -270,18 +272,100 @@ def _advance_parent_on_customer_decision(
             ["override_by", "override_reason", "override_at"]
         )
     request.save(update_fields=update_fields)
-    note_verb = (
-        "approved" if to_status == ProposalStatus.CUSTOMER_APPROVED
-        else "rejected"
-    )
+    if note is not None:
+        history_note = note
+    else:
+        note_verb = (
+            "approved" if to_status == ProposalStatus.CUSTOMER_APPROVED
+            else "rejected"
+        )
+        history_note = f"Proposal #{proposal_id} {note_verb}."
     ExtraWorkStatusHistory.objects.create(
         extra_work=request,
         old_status=old_status,
         new_status=to_status,
         changed_by=actor,
-        note=f"Proposal #{proposal_id} {note_verb}.",
+        note=history_note,
         is_override=is_override,
     )
+
+
+def _auto_start_after_pricing(proposal: Proposal, *, actor) -> None:
+    """Sprint 6B — system auto-approval for AUTO_START_AFTER_PRICING.
+
+    Called at the end of a successful DRAFT->SENT transition when the
+    parent EW's `request_intent` is `AUTO_START_AFTER_PRICING`. The
+    customer pre-authorised at CREATION that operational work starts
+    once the provider finalises pricing, so there is NO customer
+    accept/reject step: the system advances the proposal
+    SENT -> CUSTOMER_APPROVED, advances the parent EW, and spawns the
+    single operational ticket via the Sprint 6A one-ticket helper.
+
+    This is a SYSTEM action triggered by the customer's pre-
+    authorisation — it is NOT a provider override. `is_override` stays
+    False and no `override_*` fields are written. That is precisely
+    what separates auto-start from the dangerous quote-bypass
+    (direct-publish), which DOES record an override + reason. Auto-
+    start is only ever reachable because the customer set the intent
+    themselves at creation; a REQUEST_QUOTE proposal never reaches
+    this helper (the intent guard at the call site excludes it) and
+    still requires a real customer decision.
+
+    Idempotent: if the proposal is no longer SENT (already auto-
+    approved on a previous call) this is a no-op. The downstream spawn
+    helper is itself idempotent on `Ticket.extra_work_request`.
+    """
+    if proposal.status != ProposalStatus.SENT:
+        return
+
+    now = timezone.now()
+    old_status = proposal.status
+    proposal.status = ProposalStatus.CUSTOMER_APPROVED
+    proposal.customer_decided_at = now
+    proposal.save(
+        update_fields=["status", "customer_decided_at", "updated_at"]
+    )
+
+    auto_note = (
+        "Auto-start after pricing: customer pre-authorised at creation "
+        "(request_intent=AUTO_START_AFTER_PRICING); operational work "
+        "starts without a customer approval step."
+    )
+    ProposalStatusHistory.objects.create(
+        proposal=proposal,
+        old_status=old_status,
+        new_status=ProposalStatus.CUSTOMER_APPROVED,
+        changed_by=actor,
+        note=auto_note,
+        is_override=False,
+        override_reason="",
+    )
+    emit_proposal_event(
+        proposal,
+        event_type=ProposalTimelineEventType.CUSTOMER_APPROVED,
+        actor=actor,
+        customer_visible=True,
+        metadata={"auto_start": True},
+    )
+
+    _advance_parent_on_customer_decision(
+        proposal.extra_work_request,
+        actor=actor,
+        proposal_id=proposal.pk,
+        to_status=ProposalStatus.CUSTOMER_APPROVED,
+        is_override=False,
+        override_reason="",
+        note=(
+            "Auto-start after pricing (request_intent="
+            "AUTO_START_AFTER_PRICING); operational ticket spawned "
+            "without a customer approval step."
+        ),
+    )
+
+    # Sprint 6A one-ticket-per-request spawn helper (idempotent).
+    from .proposal_tickets import spawn_tickets_for_proposal
+
+    spawn_tickets_for_proposal(proposal, actor=actor)
 
 
 def _validate_proposal_covers_cart(proposal: Proposal) -> None:
@@ -696,6 +780,22 @@ def apply_proposal_transition(
         from .proposal_tickets import spawn_tickets_for_proposal
 
         spawn_tickets_for_proposal(locked, actor=user)
+
+    # Sprint 6B — AUTO_START_AFTER_PRICING. When the parent EW carries
+    # this intent, a provider SEND finalises pricing (the B2 SEND gate
+    # above already proved every line is priced) and the system
+    # immediately auto-approves the proposal + spawns the operational
+    # ticket, with NO customer accept/reject step. The customer
+    # pre-authorised this at creation, so it is NOT a provider override
+    # and NOT the dangerous quote-bypass. REQUEST_QUOTE proposals carry
+    # a different intent and are untouched here — they still require a
+    # real customer decision.
+    if (
+        to_status == ProposalStatus.SENT
+        and locked.extra_work_request.request_intent
+        == ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING
+    ):
+        _auto_start_after_pricing(locked, actor=user)
 
     return locked
 

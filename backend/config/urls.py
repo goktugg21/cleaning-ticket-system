@@ -4,11 +4,13 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from accounts.views_roster import StaffRosterView
 from accounts.views_staff import (
     BuildingStaffVisibilityDetailView,
     BuildingStaffVisibilityListCreateView,
     StaffProfileView,
 )
+from accounts.views_permission_matrix import PermissionMatrixView
 from accounts.views_users import UserViewSet
 from config.health import liveness, readiness
 from tickets.urls import staff_request_router
@@ -38,6 +40,10 @@ urlpatterns = [
     # Service CRUD). Per-customer pricing rows are under
     # /api/customers/<id>/pricing/ — see customers/urls.py.
     path("api/services/", include("extra_work.urls_catalog")),
+    # Sprint 11B Batch 3 — provider-only recurring-job templates +
+    # materialized planned occurrences. STAFF / CUSTOMER_USER are 403'd
+    # by the viewset permission classes.
+    path("api/planned-work/", include("planned_work.urls")),
     path("api/reports/", include("reports.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),
@@ -59,6 +65,21 @@ urlpatterns = [
         "api/users/<int:user_id>/staff-visibility/<int:building_id>/",
         BuildingStaffVisibilityDetailView.as_view(),
         name="user-staff-visibility-detail",
+    ),
+    # Sprint 13C — provider/BM-scoped STAFF roster (Employees page
+    # backend). Read-only LIST; admits BUILDING_MANAGER with a
+    # building-scoped queryset (unlike the SA/CA-only UserViewSet).
+    # Mounted before the staff-assignment-requests router; the two
+    # prefixes (`staff/` vs `staff-assignment-requests/`) do not
+    # collide.
+    path("api/staff/", StaffRosterView.as_view(), name="staff-roster"),
+    # Sprint 14B — read-only permission-matrix contract. Additive; does
+    # not disturb the existing /api/users/<id>/effective-permissions/
+    # endpoint. Admits SA / CA / BM; STAFF + CUSTOMER_USER are 403'd.
+    path(
+        "api/permissions/matrix/",
+        PermissionMatrixView.as_view(),
+        name="permission-matrix",
     ),
     # Sprint 23A — staff-initiated "I want to do this work" review
     # queue. The viewset returns no results for CUSTOMER_USER so

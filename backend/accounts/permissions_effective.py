@@ -66,7 +66,9 @@ from typing import Optional
 
 from accounts.permissions_v2 import (
     OSIUS_PERMISSION_KEYS,
+    PROVIDER_DANGEROUS_PERMISSION_KEYS,
     user_has_osius_permission,
+    user_has_provider_dangerous_permission,
 )
 from customers.permissions import (
     CUSTOMER_PERMISSION_KEYS,
@@ -108,6 +110,14 @@ def has_permission(
     if key in OSIUS_PERMISSION_KEYS:
         return user_has_osius_permission(user, key, building_id=building_id)
 
+    if key in PROVIDER_DANGEROUS_PERMISSION_KEYS:
+        # Sprint 14E — dangerous provider keys (e.g. the quote-bypass).
+        # The composer has no company context, so resolve against ANY
+        # provider company the actor belongs to / manages (company_id
+        # None). The per-record gate in the direct-publish view passes
+        # the Extra Work's company_id explicitly for the precise check.
+        return user_has_provider_dangerous_permission(user, key)
+
     if key in CUSTOMER_PERMISSION_KEYS:
         if customer_id is None:
             return False
@@ -124,7 +134,8 @@ def effective_permissions(
 ) -> dict[str, bool]:
     """
     Return a `{key: bool}` dict covering every known permission
-    key (`OSIUS_PERMISSION_KEYS` ∪ `CUSTOMER_PERMISSION_KEYS`).
+    key (`OSIUS_PERMISSION_KEYS` ∪ `PROVIDER_DANGEROUS_PERMISSION_KEYS`
+    ∪ `CUSTOMER_PERMISSION_KEYS`).
 
     The value for each key is exactly what `has_permission` would
     return for that (user, key, customer_id, building_id) tuple,
@@ -136,6 +147,10 @@ def effective_permissions(
     """
     result: dict[str, bool] = {}
     for key in OSIUS_PERMISSION_KEYS:
+        result[key] = has_permission(
+            user, key, customer_id=customer_id, building_id=building_id
+        )
+    for key in PROVIDER_DANGEROUS_PERMISSION_KEYS:
         result[key] = has_permission(
             user, key, customer_id=customer_id, building_id=building_id
         )

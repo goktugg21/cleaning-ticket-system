@@ -198,6 +198,7 @@ def validate_intent_for_cart(
     intent: str,
     cart: CartClassification,
     actor_kind: str,
+    is_conversion: bool = False,
 ) -> None:
     """Validate a caller-supplied `request_intent` against the cart
     and actor. Raises `IntentValidationError` on rejection.
@@ -219,6 +220,15 @@ def validate_intent_for_cart(
             not ask itself for a quote).
           - STAFF is forbidden.
           - allowed for all customer-side actors.
+
+    `is_conversion` (Sprint 7B): when True, the REQUEST_QUOTE
+    provider-forbidden rule is SKIPPED. A provider converting a
+    customer's existing ticket into an Extra Work request IS quoting
+    the customer — that is legitimate and is the one place a provider
+    may drive REQUEST_QUOTE. The flag defaults to False so the two
+    existing callers (preview view + create serializer) are byte-
+    identical; only the conversion service passes True. Every other
+    rule is unchanged.
     """
     if intent == ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER:
         if not cart.line_classifications:
@@ -280,6 +290,14 @@ def validate_intent_for_cart(
                 "agreed-price order.",
             )
         if actor_kind == ACTOR_PROVIDER:
+            if is_conversion:
+                # Sprint 7B — a provider CONVERTING a customer's ticket
+                # into Extra Work IS quoting the customer. This is the
+                # one legitimate provider-side REQUEST_QUOTE and is fully
+                # allowed (the convert endpoint already gated the role /
+                # scope before reaching here). The normal provider create
+                # path passes is_conversion=False and is rejected below.
+                return
             raise IntentValidationError(
                 "intent_forbidden_for_provider",
                 "Provider cannot use Request a quote for itself.",

@@ -30,15 +30,26 @@ from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 
+from .classification import (
+    IntentValidationError,
+    classify_cart,
+    classify_line,
+    derive_default_intent,
+    validate_intent_for_cart,
+)
 from .filters import ExtraWorkRequestFilter
 from .models import (
+    ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
 )
 from .scoping import scope_extra_work_for
 from .serializers import (
+    ActualHoursEntrySerializer,
+    ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
     ExtraWorkPricingLineItemSerializer,
     ExtraWorkRequestCreateSerializer,
@@ -46,8 +57,25 @@ from .serializers import (
     ExtraWorkRequestListSerializer,
     ExtraWorkStatusHistorySerializer,
     ExtraWorkTransitionSerializer,
+    derive_actor_kind,
 )
 from .state_machine import TransitionError, apply_transition
+
+
+# Sprint 5 — stable order of intents in the preview `allowed_intents`
+# list. Matches the enum declaration order in models.py.
+_PREVIEW_INTENT_ORDER = (
+    ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER,
+    ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING,
+    ExtraWorkRequestIntent.REQUEST_QUOTE,
+)
+
+
+def _decimal_str(value) -> str | None:
+    """Render a Decimal like DRF's DecimalField (str, 2dp); None-safe."""
+    if value is None:
+        return None
+    return f"{value:.2f}"
 
 
 PROVIDER_ROLES = {
@@ -119,6 +147,126 @@ class ExtraWorkRequestViewSet(
         )
         return Response(detail.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["post"], url_path="preview")
+    def preview(self, request):
+        """
+        Sprint 5 — non-mutating cart preview / classification.
+
+        Mirrors the create cart's scope + permission gate and the
+        single source of truth in `extra_work.classification`. Zero DB
+        writes: no ExtraWorkRequest / ExtraWorkRequestItem is created.
+
+        HARD INVARIANT: provider default prices NEVER appear. Only the
+        customer's OWN agreed contract price (the classification
+        snapshot) is returned, and only for AGREED_CUSTOMER_PRICE
+        lines. NEEDS_PROVIDER_PRICING / AD_HOC lines carry
+        agreed_unit_price=null, agreed_vat_pct=null.
+        """
+        serializer = ExtraWorkPreviewSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        customer = data["customer"]
+        building = data["building"]
+        line_items = data["line_items"]
+        supplied_intent = data.get("request_intent")
+
+        actor_kind = derive_actor_kind(request.user, customer, building)
+
+        per_line = [
+            classify_line(
+                service=line.get("service"),
+                customer=customer,
+                requested_date=line["requested_date"],
+                custom_description=(line.get("custom_description") or ""),
+            )
+            for line in line_items
+        ]
+        cart = classify_cart(per_line)
+
+        lines_payload = []
+        for index, (line, classification) in enumerate(
+            zip(line_items, per_line)
+        ):
+            service = line.get("service")
+            is_agreed = (
+                classification.source
+                == ExtraWorkLinePriceSource.AGREED_CUSTOMER_PRICE
+            )
+            lines_payload.append(
+                {
+                    "index": index,
+                    "service": service.id if service is not None else None,
+                    "custom_description": (
+                        line.get("custom_description") or ""
+                    ),
+                    "requested_date": line["requested_date"],
+                    "quantity": _decimal_str(line["quantity"]),
+                    "price_source": classification.source,
+                    "service_name": classification.snapshot_service_name,
+                    "service_category_name": (
+                        classification.snapshot_service_category_name
+                    ),
+                    # Customer's OWN agreed price only — provider default
+                    # prices are never serialized here.
+                    "agreed_unit_price": (
+                        _decimal_str(classification.snapshot_unit_price)
+                        if is_agreed
+                        else None
+                    ),
+                    "agreed_vat_pct": (
+                        _decimal_str(classification.snapshot_vat_pct)
+                        if is_agreed
+                        else None
+                    ),
+                }
+            )
+
+        allowed_intents = []
+        for intent in _PREVIEW_INTENT_ORDER:
+            try:
+                validate_intent_for_cart(
+                    intent=intent, cart=cart, actor_kind=actor_kind
+                )
+            except IntentValidationError:
+                continue
+            allowed_intents.append(intent)
+
+        payload = {
+            "customer": customer.id,
+            "building": building.id,
+            "actor_kind": actor_kind,
+            "lines": lines_payload,
+            "cart": {
+                "all_agreed": cart.all_agreed,
+                "has_non_agreed": cart.has_non_agreed,
+                "has_ad_hoc": cart.has_ad_hoc,
+            },
+            "allowed_intents": allowed_intents,
+            "default_intent": derive_default_intent(cart),
+        }
+
+        if supplied_intent:
+            payload["requested_intent"] = supplied_intent
+            try:
+                validate_intent_for_cart(
+                    intent=supplied_intent,
+                    cart=cart,
+                    actor_kind=actor_kind,
+                )
+            except IntentValidationError as exc:
+                payload["requested_intent_allowed"] = False
+                payload["requested_intent_error"] = {
+                    "code": exc.code,
+                    "detail": exc.message,
+                }
+            else:
+                payload["requested_intent_allowed"] = True
+
+        return Response(payload, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="transition")
     def transition(self, request, pk=None):
         extra_work = self.get_object()  # 404 if out-of-scope
@@ -181,6 +329,209 @@ class ExtraWorkRequestViewSet(
             ExtraWorkRequestDetailSerializer(
                 updated, context={"request": request}
             ).data
+        )
+
+    @action(detail=True, methods=["post"], url_path="actual-hours")
+    def actual_hours(self, request, pk=None):
+        """
+        Sprint 8B — provider-only entry of actual hours on hourly Extra
+        Work lines.
+
+        Body: ``{"lines": [{"line_id": <id>, "actual_hours": "3.50"}, ...]}``
+
+        Role gate runs BEFORE the object lookup so STAFF / customer-side
+        actors get a stable 403 `actual_hours_forbidden` instead of a
+        scope-driven 404 (STAFF scopes to `.none()`, so a post-lookup
+        check would 404). Mirrors the Sprint 7B conversion endpoint
+        shape.
+
+        On success: stamps `actual_hours` + entered_by/at on each named
+        line, recomputes the parent EW's `final_*`, writes one
+        `ExtraWorkStatusHistory` annotation row, and returns the EW
+        through the role-aware detail serializer (now carrying the
+        `final_*` fields). Idempotent — re-submitting overwrites until
+        the operational ticket is APPROVED/CLOSED (then 400
+        `final_amount_locked`).
+        """
+        from decimal import Decimal, InvalidOperation
+
+        from django.db import transaction
+        from django.utils import timezone
+
+        from rest_framework.exceptions import ErrorDetail
+
+        from tickets.models import Ticket, TicketStatus
+
+        from .final_amounts import active_priced_lines
+        from .models import ExtraWorkPricingUnitType, ExtraWorkStatusHistory
+
+        user = request.user
+
+        # Role gate FIRST (before get_object) — blocks STAFF +
+        # customer-side with a stable 403.
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot enter actual hours.",
+                    "code": "actual_hours_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope
+
+        # Provider scope: SUPER_ADMIN passes; COMPANY_ADMIN /
+        # BUILDING_MANAGER must hold provider-side building scope.
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for "
+                    "this Extra Work request.",
+                    "code": "actual_hours_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Lock: once the operational ticket is APPROVED/CLOSED, the
+        # final amount is frozen. Reopen required to edit further.
+        locked_statuses = {
+            str(TicketStatus.APPROVED),
+            str(TicketStatus.CLOSED),
+        }
+        if (
+            Ticket.objects.filter(extra_work_request=extra_work)
+            .filter(status__in=list(locked_statuses))
+            .exists()
+        ):
+            return Response(
+                {
+                    "detail": "Final amount is locked: the operational "
+                    "ticket has been approved or closed. Reopen it to "
+                    "edit actual hours.",
+                    "code": "final_amount_locked",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = ActualHoursEntrySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        body_lines = payload.validated_data["lines"]
+
+        # Resolve the active priced-line set; index by id for O(1)
+        # membership + target lookup.
+        kind, active_lines = active_priced_lines(extra_work)
+        by_id = {line.id: line for line in active_lines}
+
+        # Validate every body line against the active set BEFORE
+        # mutating anything (all-or-nothing).
+        targets: list = []
+        for entry in body_lines:
+            line_id = entry["line_id"]
+            target = by_id.get(line_id)
+            if target is None:
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} is not part of this Extra "
+                            "Work request's active priced lines.",
+                            code="actual_hours_invalid",
+                        ),
+                        "code": "actual_hours_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if str(target.unit_type) != ExtraWorkPricingUnitType.HOURS:
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} is not an hourly line; "
+                            "actual hours cannot be entered.",
+                            code="actual_hours_not_hourly",
+                        ),
+                        "code": "actual_hours_not_hourly",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            hours = entry["actual_hours"]
+            try:
+                hours = Decimal(hours)
+            except (InvalidOperation, TypeError):
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} actual_hours is not a valid "
+                            "number.",
+                            code="actual_hours_invalid",
+                        ),
+                        "code": "actual_hours_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if hours <= Decimal("0"):
+                return Response(
+                    {
+                        "detail": ErrorDetail(
+                            f"Line {line_id} actual_hours must be greater "
+                            "than zero.",
+                            code="actual_hours_invalid",
+                        ),
+                        "code": "actual_hours_invalid",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            targets.append((target, hours))
+
+        now = timezone.now()
+        old_final_total = extra_work.final_total_amount
+        trace_parts: list[str] = []
+        with transaction.atomic():
+            for target, hours in targets:
+                old_hours = target.actual_hours
+                target.actual_hours = hours
+                target.actual_hours_entered_by = user
+                target.actual_hours_entered_at = now
+                target.save(
+                    update_fields=[
+                        "actual_hours",
+                        "actual_hours_entered_by",
+                        "actual_hours_entered_at",
+                        "updated_at",
+                    ]
+                )
+                trace_parts.append(
+                    f"line {target.id}: "
+                    f"{old_hours if old_hours is not None else '-'} -> "
+                    f"{hours}"
+                )
+
+            extra_work.recompute_final_amounts()
+            extra_work.refresh_from_db(fields=["final_total_amount"])
+
+            note = (
+                f"Actual hours entered by {user.email} "
+                f"({kind} lines): " + "; ".join(trace_parts) + ". "
+                f"final_total_amount "
+                f"{old_final_total if old_final_total is not None else '-'} "
+                f"-> {extra_work.final_total_amount}."
+            )
+            ExtraWorkStatusHistory.objects.create(
+                extra_work=extra_work,
+                old_status=extra_work.status,
+                new_status=extra_work.status,
+                changed_by=user,
+                note=note,
+                is_override=False,
+            )
+
+        return Response(
+            ExtraWorkRequestDetailSerializer(
+                extra_work, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=True, methods=["get"], url_path="status-history")
@@ -261,29 +612,25 @@ class ExtraWorkRequestViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from django.db.models import Q
         from tickets.models import Ticket
 
-        existing_count = (
+        # Sprint 6A — request-level idempotency. A request spawns
+        # exactly ONE operational Ticket; when it already exists, return
+        # 200 with the existing id(s) instead of a 400 error so the
+        # retry endpoint is safe to re-fire.
+        existing_ids = list(
             Ticket.objects.filter(
-                Q(extra_work_request_item__extra_work_request_id=extra_work.id)
-                | Q(
-                    proposal_line__proposal__extra_work_request_id=extra_work.id
-                )
-            )
-            .distinct()
-            .count()
+                extra_work_request=extra_work
+            ).values_list("id", flat=True)
         )
-        if existing_count > 0:
+        if existing_ids:
             return Response(
                 {
-                    "detail": (
-                        "Extra Work request already has spawned tickets "
-                        f"(count={existing_count}); refusing to spawn again."
-                    ),
-                    "code": "spawn_already_done",
+                    "spawned_ticket_ids": existing_ids,
+                    "count": len(existing_ids),
+                    "already_spawned": True,
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_200_OK,
             )
 
         # Lazy import to keep view-module import cheap and avoid
@@ -301,6 +648,7 @@ class ExtraWorkRequestViewSet(
             {
                 "spawned_ticket_ids": [t.id for t in tickets],
                 "count": len(tickets),
+                "already_spawned": False,
             },
             status=status.HTTP_200_OK,
         )

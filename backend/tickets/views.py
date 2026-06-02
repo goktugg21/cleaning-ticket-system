@@ -1,5 +1,6 @@
 import logging
 
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
@@ -26,19 +27,51 @@ from notifications.services import (
 )
 
 from .filters import TicketFilter
-from .models import Ticket, TicketAttachment, TicketMessage, TicketMessageType
+from .models import (
+    Ticket,
+    TicketAttachment,
+    TicketMessage,
+    TicketMessageType,
+    TicketScheduleStatus,
+    TicketStaffAssignment,
+    TicketStatus,
+    TicketStatusHistory,
+)
 from buildings.models import BuildingManagerAssignment
 from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
+from .state_machine import TransitionError, apply_transition
 from .serializers import (
     TicketAssignableManagerSerializer,
     TicketAssignSerializer,
     TicketAttachmentSerializer,
+    TicketConvertToExtraWorkSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
     TicketListSerializer,
     TicketMessageSerializer,
+    TicketScheduleInputSerializer,
     TicketStatusChangeSerializer,
 )
+
+
+# Sprint 9B — terminal statuses for the schedule endpoint guard.
+# A converted / closed / decided ticket has left every operational
+# queue and cannot be scheduled or rescheduled.
+_SCHEDULE_TERMINAL_STATUSES = {
+    TicketStatus.APPROVED,
+    TicketStatus.REJECTED,
+    TicketStatus.CLOSED,
+    TicketStatus.CONVERTED_TO_EXTRA_WORK,
+}
+
+# Sprint 9B — provider-management roles permitted to mutate a ticket's
+# schedule. STAFF + customer-side roles can still READ the schedule via
+# the list / agenda / detail endpoints; they just cannot set it.
+_SCHEDULE_ALLOWED_ROLES = {
+    UserRole.SUPER_ADMIN,
+    UserRole.COMPANY_ADMIN,
+    UserRole.BUILDING_MANAGER,
+}
 
 
 _audit_logger = logging.getLogger(__name__)
@@ -135,6 +168,44 @@ class TicketViewSet(
     def perform_create(self, serializer):
         ticket = serializer.save()
         send_ticket_created_email(ticket, actor=self.request.user)
+
+        # Sprint 14E — audit ticket creation as an explicit business
+        # event (SoT §9.1 "ticket created"). View-level, not a signal,
+        # so only genuine API creates are logged: EW-spawned tickets
+        # carry their own EW / proposal audit trail and must not be
+        # double-counted as "created" here. This does NOT touch status
+        # (TicketStatusHistory owns the lifecycle), so H-11 holds.
+        # NB: there is no generic ticket-edit endpoint (the viewset has
+        # no UpdateModelMixin), so "field updated" has no surface to
+        # audit; if one is added later it should be audited there.
+        try:
+            _scope = audit_context.get_current_actor_scope() or {}
+            if not _scope:
+                _scope = (
+                    audit_context.snapshot_actor_scope(self.request.user) or {}
+                )
+            AuditLog.objects.create(
+                actor=self.request.user,
+                action=AuditAction.CREATE,
+                target_model="tickets.Ticket",
+                target_id=ticket.id,
+                changes={
+                    "ticket_no": {"before": None, "after": ticket.ticket_no},
+                    "title": {"before": None, "after": ticket.title},
+                    "type": {"before": None, "after": ticket.type},
+                    "priority": {"before": None, "after": ticket.priority},
+                    "building_id": {"before": None, "after": ticket.building_id},
+                    "customer_id": {"before": None, "after": ticket.customer_id},
+                },
+                request_ip=audit_context.get_current_request_ip(),
+                request_id=audit_context.get_current_request_id(),
+                reason=audit_context.get_current_reason(),
+                actor_scope=_scope,
+            )
+        except Exception:  # pragma: no cover — audit must not block create
+            _audit_logger.exception(
+                "audit: failed to record ticket create #%s", ticket.id
+            )
 
     def destroy(self, request, *args, **kwargs):
         """
@@ -248,6 +319,329 @@ class TicketViewSet(
         )
 
 
+    @action(detail=True, methods=["post"], url_path="convert-to-extra-work")
+    def convert_to_extra_work(self, request, pk=None):
+        """
+        Sprint 7B — convert a normal ticket / melding into a new Extra
+        Work request. The source ticket is superseded to the terminal
+        status CONVERTED_TO_EXTRA_WORK; a NEW operational ticket is
+        spawned by the existing Sprint 6A/6B machinery (immediately on
+        the INSTANT route, later via the proposal flow on the PROPOSAL
+        route). The original ticket is NOT reused.
+
+        Provider-only (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER).
+        All three EW intents are allowed on conversion, including
+        REQUEST_QUOTE, which the normal provider create path forbids.
+        """
+        user = request.user
+
+        # Role gate FIRST — before the object lookup — so STAFF and every
+        # customer-side role get a stable 403 `conversion_forbidden_for_role`
+        # rather than a scope-driven 404 (the convert action is a
+        # provider-management capability; the role check does not depend on
+        # the specific ticket).
+        if user.role not in {
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        }:
+            return Response(
+                {
+                    "detail": "This role cannot convert tickets to Extra Work.",
+                    "code": "conversion_forbidden_for_role",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # `get_object()` runs through `scope_tickets_for` — out-of-scope
+        # / soft-deleted tickets 404 before the scope/convertibility gates.
+        ticket = self.get_object()
+
+        # Scope gate: SUPER_ADMIN is global; COMPANY_ADMIN /
+        # BUILDING_MANAGER must hold provider-side building scope.
+        if user.role != UserRole.SUPER_ADMIN:
+            from accounts.permissions_v2 import user_has_osius_permission
+
+            if not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=ticket.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": "You do not have provider-side scope to "
+                        "convert this ticket.",
+                        "code": "conversion_forbidden_scope",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Convertibility gate.
+        if ticket.status == TicketStatus.CONVERTED_TO_EXTRA_WORK:
+            return Response(
+                {
+                    "detail": "This ticket has already been converted to "
+                    "Extra Work.",
+                    "code": "ticket_already_converted",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if ticket.status not in {
+            TicketStatus.OPEN,
+            TicketStatus.IN_PROGRESS,
+            TicketStatus.REOPENED_BY_ADMIN,
+        }:
+            return Response(
+                {
+                    "detail": "This ticket is not in a convertible status.",
+                    "code": "ticket_not_convertible",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = TicketConvertToExtraWorkSerializer(
+            data=request.data,
+            context={"request": request, "ticket": ticket},
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        from extra_work.classification import IntentValidationError
+        from extra_work.conversion import convert_ticket_to_extra_work
+        from extra_work.serializers import ExtraWorkRequestDetailSerializer
+
+        try:
+            ew, spawned = convert_ticket_to_extra_work(
+                ticket,
+                actor=user,
+                request_intent=data["request_intent"],
+                line_items_data=data["line_items"],
+                customer_visible_note=data.get("customer_visible_note", ""),
+                internal_note=data.get("internal_note", ""),
+            )
+        except IntentValidationError as exc:
+            return Response(
+                {"request_intent": [exc.message], "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ticket.refresh_from_db()
+        return Response(
+            {
+                "extra_work_request": ExtraWorkRequestDetailSerializer(
+                    ew, context={"request": request}
+                ).data,
+                "source_ticket": {
+                    "id": ticket.id,
+                    "ticket_no": ticket.ticket_no,
+                    "status": ticket.status,
+                },
+                "operational_ticket_ids": [t.id for t in spawned],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    def _schedule_history_note(
+        self, *, action: str, old_start, new_start, window_label, reason
+    ) -> str:
+        """Sprint 9B — compose the TicketStatusHistory annotation-row note
+        summarizing a schedule set / reschedule / clear."""
+        def _fmt(dt):
+            return dt.isoformat() if dt is not None else "—"
+
+        if action == "clear":
+            return f"Schedule cleared (was {_fmt(old_start)})."
+        parts = [f"Schedule {action}: {_fmt(old_start)} -> {_fmt(new_start)}"]
+        if window_label:
+            parts.append(f"window={window_label}")
+        if reason:
+            parts.append(f"reason={reason}")
+        return "; ".join(parts)
+
+    @action(detail=True, methods=["post", "delete"], url_path="schedule")
+    def schedule(self, request, pk=None):
+        """
+        Sprint 9B — set / reschedule (POST) or clear (DELETE) a ticket's
+        operational schedule. Additive: never changes the workflow
+        `status` and never disturbs SLA (the save uses an explicit
+        `update_fields` set that excludes `status`, so the SLA post_save
+        signal sees no status change).
+
+        Provider-management only (SUPER_ADMIN / COMPANY_ADMIN /
+        BUILDING_MANAGER). STAFF + customer-side roles can READ the
+        schedule via list / agenda / detail but get a stable 403
+        `schedule_forbidden_for_role` here.
+        """
+        user = request.user
+
+        # Role gate FIRST — before the object lookup — mirrors the
+        # `convert_to_extra_work` shape so STAFF / customer roles get a
+        # stable 403 rather than a scope-driven 404.
+        if user.role not in _SCHEDULE_ALLOWED_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot schedule tickets.",
+                    "code": "schedule_forbidden_for_role",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # `get_object()` runs through `scope_tickets_for` — out-of-scope
+        # / soft-deleted tickets 404 before the scope / terminal gates.
+        ticket = self.get_object()
+
+        # Scope gate: SUPER_ADMIN is global; CA / BM must hold
+        # provider-side building scope for this ticket's building.
+        if user.role != UserRole.SUPER_ADMIN:
+            from accounts.permissions_v2 import user_has_osius_permission
+
+            if not user_has_osius_permission(
+                user,
+                "osius.ticket.view_building",
+                building_id=ticket.building_id,
+            ):
+                return Response(
+                    {
+                        "detail": "You do not have provider-side scope to "
+                        "schedule this ticket.",
+                        "code": "schedule_forbidden_scope",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        # Terminal guard — applies to BOTH POST and DELETE.
+        if ticket.status in _SCHEDULE_TERMINAL_STATUSES:
+            return Response(
+                {
+                    "detail": "This ticket is in a terminal status and "
+                    "cannot be scheduled.",
+                    "code": "schedule_not_allowed_terminal",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.method == "DELETE":
+            return self._schedule_clear(request, ticket)
+        return self._schedule_set(request, ticket)
+
+    def _schedule_set(self, request, ticket):
+        serializer = TicketScheduleInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        old_start = ticket.scheduled_start_at
+        is_reschedule = (
+            ticket.schedule_status != TicketScheduleStatus.UNSCHEDULED
+        )
+        reason = (data.get("reschedule_reason") or "").strip()
+
+        if is_reschedule and not reason:
+            return Response(
+                {
+                    "detail": "A reschedule reason is required when "
+                    "changing an existing schedule.",
+                    "code": "reschedule_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            ticket.scheduled_start_at = data["scheduled_start_at"]
+            ticket.scheduled_end_at = data.get("scheduled_end_at")
+            ticket.time_window_label = data.get("time_window_label", "")
+            if is_reschedule:
+                ticket.schedule_status = TicketScheduleStatus.RESCHEDULED
+                ticket.rescheduled_from = old_start
+                ticket.reschedule_reason = reason
+                history_action = "rescheduled"
+            else:
+                ticket.schedule_status = TicketScheduleStatus.SCHEDULED
+                # First scheduling leaves rescheduled_from /
+                # reschedule_reason empty.
+                ticket.rescheduled_from = None
+                ticket.reschedule_reason = ""
+                history_action = "set"
+
+            # Explicit update_fields EXCLUDES `status` so the SLA
+            # post_save signal sees no status change.
+            ticket.save(
+                update_fields=[
+                    "scheduled_start_at",
+                    "scheduled_end_at",
+                    "time_window_label",
+                    "schedule_status",
+                    "rescheduled_from",
+                    "reschedule_reason",
+                    "updated_at",
+                ]
+            )
+
+            # Sprint 8B annotation-row pattern: old_status == new_status
+            # == ticket.status; is_override=False. This IS the audit
+            # trail for the schedule change (no generic AuditLog row).
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=request.user,
+                note=self._schedule_history_note(
+                    action=history_action,
+                    old_start=old_start,
+                    new_start=ticket.scheduled_start_at,
+                    window_label=ticket.time_window_label,
+                    reason=reason,
+                ),
+                is_override=False,
+                override_reason="",
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def _schedule_clear(self, request, ticket):
+        old_start = ticket.scheduled_start_at
+
+        with transaction.atomic():
+            ticket.scheduled_start_at = None
+            ticket.scheduled_end_at = None
+            ticket.time_window_label = ""
+            ticket.rescheduled_from = None
+            ticket.reschedule_reason = ""
+            ticket.schedule_status = TicketScheduleStatus.UNSCHEDULED
+            ticket.save(
+                update_fields=[
+                    "scheduled_start_at",
+                    "scheduled_end_at",
+                    "time_window_label",
+                    "schedule_status",
+                    "rescheduled_from",
+                    "reschedule_reason",
+                    "updated_at",
+                ]
+            )
+            TicketStatusHistory.objects.create(
+                ticket=ticket,
+                old_status=ticket.status,
+                new_status=ticket.status,
+                changed_by=request.user,
+                note=self._schedule_history_note(
+                    action="clear",
+                    old_start=old_start,
+                    new_start=None,
+                    window_label="",
+                    reason="",
+                ),
+                is_override=False,
+                override_reason="",
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
         ticket = self.get_object()
@@ -314,6 +708,114 @@ class TicketViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["post"], url_path="unable-to-complete")
+    def unable_to_complete(self, request, pk=None):
+        """
+        Sprint 10B — a STAFF member assigned to the ticket reports they
+        could NOT complete the work. This is a thin wrapper over the
+        EXISTING state machine: it always drives
+        `IN_PROGRESS -> WAITING_MANAGER_REVIEW` with an "[UNABLE TO
+        COMPLETE]" note so the responsible manager picks it up and
+        reschedules / reassigns via the existing flows.
+
+        It never marks the ticket completed and never sends it to
+        customer approval — WAITING_MANAGER_REVIEW is the only target.
+
+        The resulting `TicketStatusHistory` row written by
+        `apply_transition` IS the audit/history record (actor =
+        changed_by, the unable reason in `note`, old -> new status); we
+        do not write a second row.
+
+        Body: {"reason": "...", "evidence_attachment_id": <optional>}.
+
+        Evidence: in Sprint 10B we do NOT build a new upload path. If an
+        `evidence_attachment_id` is supplied AND it already references a
+        visible `TicketAttachment` on THIS ticket, its filename is woven
+        into the note for traceability; otherwise it is ignored. The
+        shipped behaviour is reason-only — a photo can be uploaded
+        separately through the existing attachment endpoint and referred
+        to in the reason text.
+        """
+        ticket = self.get_object()
+
+        if request.user.role != UserRole.STAFF:
+            return Response(
+                {
+                    "detail": "Only assigned staff can report an inability to complete.",
+                    "code": "unable_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not TicketStaffAssignment.objects.filter(
+            ticket=ticket, user=request.user
+        ).exists():
+            return Response(
+                {
+                    "detail": "You are not assigned to this ticket.",
+                    "code": "unable_not_assigned",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if str(ticket.status) != str(TicketStatus.IN_PROGRESS):
+            return Response(
+                {
+                    "detail": "This ticket is not in progress.",
+                    "code": "unable_invalid_state",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = (request.data.get("reason") or "").strip()
+        if not reason:
+            return Response(
+                {
+                    "detail": "A reason is required when reporting an inability to complete.",
+                    "code": "unable_reason_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Optional evidence reference (NOT a new upload path). Only an
+        # existing, visible attachment already on THIS ticket is woven
+        # into the note; anything else is silently ignored so a bad id
+        # can't 400 a legitimate unable-to-complete.
+        note = f"[UNABLE TO COMPLETE] {reason}"
+        evidence_id = request.data.get("evidence_attachment_id")
+        if evidence_id is not None:
+            attachment = TicketAttachment.objects.filter(
+                pk=evidence_id, ticket=ticket, is_hidden=False
+            ).first()
+            if attachment is not None:
+                note = f"{note} (evidence: {attachment.original_filename})"
+
+        old_status = ticket.status
+        try:
+            # WAITING_MANAGER_REVIEW is the ONLY target. The non-blank
+            # `note` satisfies the staff COMPLETION_EVIDENCE_TRANSITIONS
+            # gate for the (IN_PROGRESS, WAITING_MANAGER_REVIEW) leg.
+            updated = apply_transition(
+                ticket=ticket,
+                user=request.user,
+                to_status=TicketStatus.WAITING_MANAGER_REVIEW,
+                note=note,
+            )
+        except TransitionError as exc:
+            return Response(
+                {"detail": str(exc), "code": exc.code},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        send_ticket_status_changed_email(
+            updated,
+            old_status=old_status,
+            new_status=updated.status,
+            actor=request.user,
+            is_admin_override=False,
+        )
+        return Response(
+            TicketDetailSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=["get"], url_path="stats")
     def stats(self, request):
@@ -322,7 +824,10 @@ class TicketViewSet(
         status_counts = {row["status"]: row["c"] for row in scoped.values("status").annotate(c=Count("id"))}
         priority_counts = {row["priority"]: row["c"] for row in scoped.values("priority").annotate(c=Count("id"))}
 
-        closed_states = {"CLOSED", "APPROVED", "REJECTED"}
+        # Sprint 7B — CONVERTED_TO_EXTRA_WORK is terminal: a converted
+        # ticket has left every operational queue and must not count as
+        # open / urgent.
+        closed_states = {"CLOSED", "APPROVED", "REJECTED", "CONVERTED_TO_EXTRA_WORK"}
         my_open = sum(c for s, c in status_counts.items() if s not in closed_states)
         waiting_customer_approval = status_counts.get("WAITING_CUSTOMER_APPROVAL", 0)
         urgent = scoped.exclude(status__in=closed_states).filter(priority="URGENT").count()
@@ -343,7 +848,8 @@ class TicketViewSet(
     @action(detail=False, methods=["get"], url_path="stats/by-building")
     def stats_by_building(self, request):
         scoped = scope_tickets_for(request.user)
-        closed_states = ["CLOSED", "APPROVED", "REJECTED"]
+        # Sprint 7B — CONVERTED_TO_EXTRA_WORK is terminal (see `stats`).
+        closed_states = ["CLOSED", "APPROVED", "REJECTED", "CONVERTED_TO_EXTRA_WORK"]
 
         rows = (
             scoped.values("building_id", "building__name")

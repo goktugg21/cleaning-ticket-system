@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from extra_work.views_pricing import (
+    CustomerServicePriceCopyFromDefaultView,
     CustomerServicePriceDetailView,
     CustomerServicePriceListCreateView,
 )
@@ -10,6 +11,7 @@ from .views import CustomerViewSet
 from .views_contacts import (
     CustomerContactDetailView,
     CustomerContactListCreateView,
+    CustomerContactPromoteView,
 )
 from .views_memberships import (
     CustomerBuildingDeleteView,
@@ -76,6 +78,12 @@ urlpatterns = [
         CustomerContactDetailView.as_view(),
         name="customer-contact-detail",
     ),
+    # Sprint 12B — promote a Contact into an authenticated customer User.
+    path(
+        "<int:customer_id>/contacts/<int:contact_id>/promote-to-user/",
+        CustomerContactPromoteView.as_view(),
+        name="customer-contact-promote",
+    ),
     # Sprint 28 Batch 5 — per-customer service contract prices.
     # View classes live in extra_work/views_pricing.py (the model
     # app owns the views); the URL anchor is here so the path is
@@ -90,5 +98,13 @@ urlpatterns = [
         "<int:customer_id>/pricing/<int:price_id>/",
         CustomerServicePriceDetailView.as_view(),
         name="customer-pricing-detail",
+    ),
+    # Sprint 4B — bulk seed CSP rows from Service.default_unit_price /
+    # default_vat_pct. Provider-side action (SA always; CA when the
+    # customer-price toggle is True).
+    path(
+        "<int:customer_id>/pricing/copy-from-default/",
+        CustomerServicePriceCopyFromDefaultView.as_view(),
+        name="customer-pricing-copy-from-default",
     ),
 ] + router.urls

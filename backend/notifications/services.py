@@ -100,11 +100,20 @@ _STATUS_LABEL_NL = {
     TicketStatus.OPEN: "Open",
     TicketStatus.IN_PROGRESS: "In behandeling",
     TicketStatus.WAITING_CUSTOMER_APPROVAL: "Wacht op goedkeuring",
+    TicketStatus.WAITING_MANAGER_REVIEW: "Wacht op controle beheerder",
     TicketStatus.REJECTED: "Afgewezen",
     TicketStatus.APPROVED: "Goedgekeurd",
     TicketStatus.CLOSED: "Gesloten",
     TicketStatus.REOPENED_BY_ADMIN: "Heropend",
 }
+
+
+# WAITING_MANAGER_REVIEW is an internal provider/manager-review state (the
+# STAFF default-completion route and the unable-to-complete target). Customers
+# must never be emailed about it: the unable / manager-review issue notifies
+# the provider/manager side, not the customer (Ramazan). Customer-facing
+# states (WAITING_CUSTOMER_APPROVAL / APPROVED / REJECTED) are unaffected.
+_CUSTOMER_HIDDEN_STATUSES = {str(TicketStatus.WAITING_MANAGER_REVIEW)}
 
 
 _ROLE_LABEL_NL = {
@@ -374,7 +383,11 @@ def send_ticket_status_changed_email(
 
     users = []
     users.extend(list(_ticket_staff_users(ticket)))
-    users.extend(_ticket_customer_users(ticket))
+
+    # Provider-internal states never reach the customer side. The manager /
+    # assigned-to (provider-side) recipients below stay unchanged.
+    if str(new_status) not in _CUSTOMER_HIDDEN_STATUSES:
+        users.extend(_ticket_customer_users(ticket))
 
     if ticket.assigned_to_id:
         users.append(ticket.assigned_to)

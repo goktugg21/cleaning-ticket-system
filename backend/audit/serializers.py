@@ -25,6 +25,9 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "request_id",
             "reason",
             "actor_scope",
+            # Sprint 14E — severity / red-flag + structured event metadata.
+            "severity",
+            "metadata",
         ]
         read_only_fields = fields
 

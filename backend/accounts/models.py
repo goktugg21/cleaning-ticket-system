@@ -116,6 +116,16 @@ class StaffProfile(models.Model):
     revoked per-building via BuildingStaffVisibility.
     """
 
+    class EmploymentType(models.TextChoices):
+        # Sprint 13C — provider field-worker employment category. The
+        # default `INTERNAL_STAFF` preserves existing behaviour (every
+        # pre-13C StaffProfile is backfilled as internal by the column
+        # default, so the migration is a plain AddField with no data
+        # backfill needed).
+        INTERNAL_STAFF = "INTERNAL_STAFF", "Internal staff"
+        ZZP = "ZZP", "ZZP (self-employed)"
+        INHUUR = "INHUUR", "Inhuur (hired-in)"
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -125,6 +135,15 @@ class StaffProfile(models.Model):
     internal_note = models.TextField(blank=True)
     can_request_assignment = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
+    # Sprint 13C — employee category. DRF derives a strict ChoiceField
+    # from these choices on the write serializer, so an out-of-enum value
+    # returns the standard 400. Default INTERNAL_STAFF backfills every
+    # existing row via the column default.
+    employment_type = models.CharField(
+        max_length=20,
+        choices=EmploymentType.choices,
+        default=EmploymentType.INTERNAL_STAFF,
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

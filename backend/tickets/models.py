@@ -20,6 +20,24 @@ class TicketPriority(models.TextChoices):
     URGENT = "URGENT", "Urgent"
 
 
+class TicketScheduleStatus(models.TextChoices):
+    """
+    Sprint 9B — operational scheduling lifecycle on a Ticket.
+
+    Additive to the existing `TicketStatus` workflow: scheduling is an
+    orthogonal axis (when is the work planned) that never changes the
+    workflow status and never disturbs SLA (SLA stays anchored on
+    `created_at`). A ticket is UNSCHEDULED until a provider operator
+    sets a `scheduled_start_at`; rescheduling an already-scheduled
+    ticket records the prior start + a mandatory reason and lands the
+    row in RESCHEDULED. Clearing the schedule returns it to UNSCHEDULED.
+    """
+
+    UNSCHEDULED = "UNSCHEDULED", "Unscheduled"
+    SCHEDULED = "SCHEDULED", "Scheduled"
+    RESCHEDULED = "RESCHEDULED", "Rescheduled"
+
+
 class TicketStatus(models.TextChoices):
     OPEN = "OPEN", "Open"
     IN_PROGRESS = "IN_PROGRESS", "In Progress"
@@ -35,6 +53,14 @@ class TicketStatus(models.TextChoices):
     APPROVED = "APPROVED", "Approved"
     CLOSED = "CLOSED", "Closed"
     REOPENED_BY_ADMIN = "REOPENED_BY_ADMIN", "Reopened by Admin"
+    # Sprint 7B — terminal status for a normal ticket that a provider
+    # converted into an Extra Work request. The original ticket is
+    # SUPERSEDED (it leaves every operational queue); a NEW operational
+    # ticket is spawned later by the Sprint 6A/6B machinery anchored to
+    # the new ExtraWorkRequest — the original is NOT reused. This status
+    # is intentionally absent from `ALLOWED_TRANSITIONS` in
+    # `state_machine.py`, keeping it terminal: no transition leaves it.
+    CONVERTED_TO_EXTRA_WORK = "CONVERTED_TO_EXTRA_WORK", "Converted to Extra Work"
 
 
 class TicketMessageType(models.TextChoices):
@@ -176,10 +202,51 @@ class Ticket(models.Model):
     # surface. SET_NULL so a Ticket survives if the proposal / line
     # is later deleted — the operational job has audit history we
     # don't want to lose.
+    #
+    # Sprint 6A — retained for back-compat of the origin payload's
+    # `extra_work_request_item_id` / `service_name` keys. NOT the
+    # canonical EW link anymore: a request now spawns exactly ONE
+    # ticket and the canonical parent is `extra_work_request` below.
+    # The instant / legacy helpers set `extra_work_request_item` to the
+    # FIRST cart line; the proposal helper sets `proposal_line` to the
+    # FIRST is_approved_for_spawn line — purely so the origin payload
+    # can surface a representative service name.
     proposal_line = models.ForeignKey(
         "extra_work.ProposalLine",
         on_delete=models.SET_NULL,
         related_name="spawned_tickets_for_proposal_line",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    # Sprint 6A — CANONICAL parent Extra Work request. One
+    # ExtraWorkRequest spawns exactly ONE operational Ticket; this FK
+    # is that link. SET_NULL so the operational job survives if the
+    # parent EW is later soft/hard-deleted. No DB unique constraint:
+    # historical data carries multiple tickets per request, so a
+    # unique index would fail the backfill. Idempotency
+    # (one-ticket-per-request) is enforced in the spawn helpers + tests.
+    extra_work_request = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.SET_NULL,
+        related_name="operational_tickets",
+        null=True,
+        blank=True,
+        default=None,
+    )
+
+    # Sprint 11B origin link — the operational Ticket spawned from a
+    # recurring / planned occurrence. OneToOne so one occurrence has at
+    # most one ticket (idempotency, DB-enforced) and `occurrence.ticket`
+    # resolves the reverse. SET_NULL so the ticket survives if the
+    # occurrence is hard-deleted. This is the THIRD origin axis next to
+    # `extra_work_request` for report separation (planned vs ad-hoc vs
+    # Extra Work).
+    planned_occurrence = models.OneToOneField(
+        "planned_work.PlannedOccurrence",
+        on_delete=models.SET_NULL,
+        related_name="ticket",
         null=True,
         blank=True,
         default=None,
@@ -206,6 +273,30 @@ class Ticket(models.Model):
         default="ON_TRACK",
         db_index=True,
     )
+
+    # Sprint 9B — operational scheduling (additive; orthogonal to the
+    # workflow `status` field and to SLA). `scheduled_start_at` is the
+    # planned start of the on-site work; `scheduled_end_at` is the
+    # optional planned end; `time_window_label` is a free-text window
+    # hint ("morning", "08:00-10:00"). `schedule_status` tracks the
+    # UNSCHEDULED / SCHEDULED / RESCHEDULED lifecycle. On a reschedule,
+    # `rescheduled_from` keeps the prior start and `reschedule_reason`
+    # holds the mandatory operator explanation. SLA is NOT affected:
+    # the schedule endpoints save with an explicit `update_fields` set
+    # that excludes `status`, so the SLA post_save signal sees no
+    # status change and never recomputes `sla_*`.
+    scheduled_start_at = models.DateTimeField(
+        null=True, blank=True, db_index=True, default=None
+    )
+    scheduled_end_at = models.DateTimeField(null=True, blank=True, default=None)
+    time_window_label = models.CharField(max_length=64, blank=True, default="")
+    schedule_status = models.CharField(
+        max_length=16,
+        choices=TicketScheduleStatus.choices,
+        default=TicketScheduleStatus.UNSCHEDULED,
+    )
+    rescheduled_from = models.DateTimeField(null=True, blank=True, default=None)
+    reschedule_reason = models.TextField(blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -340,6 +431,26 @@ class TicketStatusHistory(models.Model):
         return f"{self.ticket}: {self.old_status} → {self.new_status}"
 
 
+class StaffAssignmentSlotStatus(models.TextChoices):
+    """
+    Sprint 14E — per-assignment operational slot lifecycle.
+
+    Additive to the ticket's `TicketStatus` workflow: a slot is one
+    staff member's dated/time-windowed piece of work on a ticket. Slot
+    status is NOT a ticket status — completing a slot does NOT move the
+    ticket through its own state machine. The ticket still completes via
+    the existing STAFF-completion -> manager-review double-check flow
+    (the safer workflow per SoT §4.4 + the transcript "menajer kontrol
+    ettim" double-check). Slot status is operational metadata the
+    frontend renders per card.
+    """
+
+    ASSIGNED = "ASSIGNED", "Assigned"
+    COMPLETED = "COMPLETED", "Completed"
+    UNABLE_TO_COMPLETE = "UNABLE_TO_COMPLETE", "Unable to complete"
+    CANCELLED = "CANCELLED", "Cancelled"
+
+
 class TicketStaffAssignment(models.Model):
     """
     Sprint 23A — additive M:N between Ticket and STAFF user.
@@ -349,9 +460,20 @@ class TicketStaffAssignment(models.Model):
     through-style table lets a ticket carry multiple assigned
     staff at the same time (per the OSIUS workflow: "a job may have
     multiple staff; any one completing it moves it to manager
-    review"). The workflow change is staged for Sprint 23B — in
-    23A the rows are informational only and the existing state
-    machine is unchanged.
+    review").
+
+    Sprint 14E — DATED OPERATIONAL SLOTS (transcript: same planned
+    work/day may carry a morning task for Ahmet and an evening task for
+    Mehmet; each staff sees their own dated job, and the manager can
+    split work into dated/time-window staff assignments). Each row now
+    carries optional schedule metadata (`scheduled_start_at` /
+    `scheduled_end_at` / `time_window_label`), an `assignment_note`, an
+    assignment-level `slot_status`, and assignment-level completion
+    evidence (`completion_note` / `completed_at` / `completed_by` /
+    `unable_to_complete_reason`). `unique_together(ticket, user)` is
+    PRESERVED: Ahmet and Mehmet are different users, so two slots on the
+    same ticket/date are two rows — backward compatible with every
+    existing flow that reads ticket-level assignments.
 
     Validation (enforced at serializer level, not via a DB check):
       - user.role MUST be UserRole.STAFF.
@@ -378,12 +500,106 @@ class TicketStaffAssignment(models.Model):
     )
     assigned_at = models.DateTimeField(auto_now_add=True)
 
+    # Sprint 14E — optional dated slot metadata. NULL/blank preserves the
+    # pre-14E "flat assignment" semantics for every existing row + flow.
+    scheduled_start_at = models.DateTimeField(null=True, blank=True, default=None)
+    scheduled_end_at = models.DateTimeField(null=True, blank=True, default=None)
+    time_window_label = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Free-text window hint, e.g. morning / afternoon / evening / 08:00-10:00.",
+    )
+    assignment_note = models.TextField(blank=True, default="")
+
+    # Assignment-level lifecycle + completion evidence (additive; does
+    # NOT drive the ticket state machine).
+    slot_status = models.CharField(
+        max_length=24,
+        choices=StaffAssignmentSlotStatus.choices,
+        default=StaffAssignmentSlotStatus.ASSIGNED,
+    )
+    completion_note = models.TextField(blank=True, default="")
+    completed_at = models.DateTimeField(null=True, blank=True, default=None)
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="staff_slots_completed",
+    )
+    unable_to_complete_reason = models.TextField(blank=True, default="")
+
+    class Meta:
+        unique_together = [("ticket", "user")]
+        indexes = [
+            models.Index(fields=["ticket", "user"]),
+            # Sprint 14E — the staff agenda / "my slots" query is
+            # (user, scheduled_start_at); index it.
+            models.Index(fields=["user", "scheduled_start_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} → {self.ticket}"
+
+
+class TicketManagerAssignment(models.Model):
+    """
+    Sprint 10B — EXPLICIT per-ticket responsible-manager M:N (SoT §4.2).
+
+    Mirrors `TicketStaffAssignment` exactly: a ticket may carry more
+    than one responsible BUILDING_MANAGER at the same time, with each
+    assignment recording who made it and when.
+
+    Relationship to the two neighbouring concepts (do NOT conflate):
+
+      * `Ticket.assigned_to` stays the LEGACY / compat single "primary
+        manager" pointer. This new table does not change its meaning,
+        does not remove it, and is not a replacement for it — the two
+        coexist (the single pointer is still what the existing UI and
+        the `assign` endpoint read/write).
+      * `BuildingManagerAssignment` (buildings app) remains the
+        BUILDING-LEVEL authority / visibility grant. Holding it is the
+        eligibility precondition for being added here, but it is NOT
+        itself per-ticket responsibility — a BM can be authoritative on
+        a building without being a named responsible manager on a given
+        ticket.
+
+    Removal is a hard delete (mirrors `TicketStaffAssignment`): there is
+    no soft-remove column, matching the existing membership pattern.
+
+    Validation (enforced at the endpoint / serializer layer, not via a
+    DB check, mirroring `TicketStaffAssignment`):
+      - user.role MUST be UserRole.BUILDING_MANAGER.
+      - The user MUST hold a `BuildingManagerAssignment` for
+        ticket.building.
+    """
+
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="manager_assignments",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ticket_manager_assignments",
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="manager_assignments_made",
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
     class Meta:
         unique_together = [("ticket", "user")]
         indexes = [models.Index(fields=["ticket", "user"])]
 
     def __str__(self):
-        return f"{self.user.email} → {self.ticket}"
+        return f"{self.user.email} ⇒ {self.ticket}"
 
 
 class AssignmentRequestStatus(models.TextChoices):

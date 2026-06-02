@@ -43,6 +43,7 @@ from buildings.models import (
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Contact,
+    ContactBuildingLink,
     Customer,
     CustomerBuildingMembership,
     CustomerCompanyPolicy,
@@ -57,13 +58,25 @@ from extra_work.models import (
     Service,
     ServiceCategory,
 )
-from tickets.models import StaffAssignmentRequest, TicketStaffAssignment
+from planned_work.models import (
+    RecurringJob,
+    RecurringJobDefaultManager,
+    RecurringJobDefaultStaff,
+)
+from tickets.models import (
+    StaffAssignmentRequest,
+    TicketAttachment,
+    TicketManagerAssignment,
+    TicketMessage,
+    TicketStaffAssignment,
+)
 
 from . import context
 from .diff import (
     compute_create_changes,
     compute_delete_changes,
     compute_update_changes,
+    serialize_value,
     snapshot_for_pre_save,
 )
 from .models import AuditAction, AuditLog
@@ -257,9 +270,17 @@ def _on_membership_post_save(sender, instance, created, **kwargs):
         # new `permission_overrides` JSONField. Skip the same way so
         # an override flip lands as exactly one AuditLog UPDATE row,
         # not two.
+        # Sprint 14E: `TicketStaffAssignment` now carries editable slot
+        # fields (schedule / window / status / completion). Its UPDATE
+        # diff is owned by the dedicated handler
+        # (`_on_ticket_staff_assignment_post_save_update`) below — skip
+        # the membership-fallback UPDATE here so a slot edit lands as
+        # exactly one AuditLog row, not two. CREATE / DELETE still flow
+        # through the membership handlers (the shape is unchanged).
         if sender.__name__ in {
             "BuildingStaffVisibility",
             "BuildingManagerAssignment",
+            "TicketStaffAssignment",
         }:
             return
 
@@ -615,6 +636,84 @@ def _on_building_staff_visibility_post_save_update(
         )
 
 
+# Sprint 14E — `TicketStaffAssignment` slot fields. The model is on the
+# membership-style CREATE / DELETE handlers (the slot CREATE = "staff
+# assigned"; DELETE = "slot removed"). This pair adds the UPDATE-diff
+# coverage for the new dated-slot fields (schedule / window / note /
+# status / completion). Mirrors the BMA / BSV UPDATE-only pattern, but
+# uses `serialize_value` because the tracked tuple includes datetimes
+# and a FK id that are not natively JSON-serialisable.
+_TSA_TRACKED_FIELDS = (
+    "scheduled_start_at",
+    "scheduled_end_at",
+    "time_window_label",
+    "assignment_note",
+    "slot_status",
+    "completion_note",
+    "completed_at",
+    "completed_by_id",
+    "unable_to_complete_reason",
+)
+
+
+def _tsa_snapshot_for_pre_save(instance):
+    if instance.pk is None:
+        return None
+    from tickets.models import TicketStaffAssignment
+
+    try:
+        previous = TicketStaffAssignment.objects.get(pk=instance.pk)
+    except TicketStaffAssignment.DoesNotExist:
+        return None
+    return {
+        field: serialize_value(getattr(previous, field))
+        for field in _TSA_TRACKED_FIELDS
+    }
+
+
+def _on_ticket_staff_assignment_pre_save(sender, instance, **kwargs):
+    try:
+        snapshot = _tsa_snapshot_for_pre_save(instance)
+        _state_map()[
+            ("tickets.TicketStaffAssignment", instance.pk)
+        ] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: TicketStaffAssignment pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_ticket_staff_assignment_post_save_update(
+    sender, instance, created, **kwargs
+):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of the
+    tracked slot fields. CREATE is a no-op here — the membership handler
+    already emits the CREATE payload."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("tickets.TicketStaffAssignment", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _TSA_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: TicketStaffAssignment post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _connect():
     User = _user_model()
     # Lazy import: StaffProfile lives in accounts and would create a
@@ -675,6 +774,30 @@ def _connect():
         # changes and workflow transitions.
         Proposal,
         ProposalLine,
+        # Sprint 11B — recurring-job templates (full CRUD; editable fields).
+        #
+        # NB: `PlannedOccurrence` and `PlannedOccurrenceStatusHistory` are
+        # intentionally NOT registered — the status-history row IS the H-11
+        # workflow audit trail for planned work; registering it in the
+        # generic AuditLog would double-write the same fact.
+        RecurringJob,
+        # Sprint 14E — ticket notes + attachments. TicketMessage CREATE =
+        # "note added (with type)"; UPDATE = a future hide/edit; DELETE =
+        # a future hard delete. TicketAttachment CREATE = "attachment
+        # uploaded"; DELETE = a future remove. Both carry editable fields
+        # that produce meaningful diffs. Audit reads are SUPER_ADMIN-only
+        # (AuditLogViewSet) / provider-only (ticket timeline), so internal
+        # note bodies never reach a customer-visible audit surface
+        # (there is none). GET / download endpoints write NO audit — read
+        # access logging is deliberately not added (SoT §9.1 marks it
+        # "where relevant"; the default is no-write-on-read).
+        #
+        # NB: `TicketStatusHistory` is intentionally NOT registered — it
+        # IS the H-11 workflow audit trail (status + is_override +
+        # override_reason live on the row); a generic AuditLog
+        # registration would double-write the lifecycle fact.
+        TicketMessage,
+        TicketAttachment,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -690,6 +813,24 @@ def _connect():
         # fields.
         BuildingStaffVisibility,
         TicketStaffAssignment,
+        # Sprint 10B — explicit per-ticket responsible-manager M:N.
+        # Same lightweight CREATE/DELETE shape as TicketStaffAssignment
+        # (no editable fields, no UPDATE diff). Not added to
+        # `_MEMBERSHIP_ENTITY_ATTR` for the same reason TicketStaffAssignment
+        # is not: the `Ticket` entity has no `.name`, so the row is audited
+        # with the correct target_model / target_id / actor and an empty
+        # `changes` payload — byte-identical audit behaviour to staff
+        # assignments.
+        TicketManagerAssignment,
+        # Sprint 11B — recurring-job default crew (membership-shape
+        # CREATE/DELETE, no UPDATE diff; the RecurringJob entity has no
+        # .name, identical to TicketStaffAssignment).
+        RecurringJobDefaultStaff,
+        RecurringJobDefaultManager,
+        # Sprint 12B — contact↔building links (membership-shape
+        # CREATE/DELETE). Contact itself stays in the full-CRUD trio; the
+        # new user/contact_type/is_primary fields are auto-introspected.
+        ContactBuildingLink,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).
@@ -778,6 +919,24 @@ def _connect():
         sender=BuildingManagerAssignment,
         weak=False,
         dispatch_uid="audit:bma:post_update:BuildingManagerAssignment",
+    )
+
+    # Sprint 14E: UPDATE-diff handler for the new dated-slot fields on
+    # TicketStaffAssignment. CREATE/DELETE shape stays on the membership
+    # handlers registered above (the membership UPDATE-fallback now skips
+    # TicketStaffAssignment, see _on_membership_post_save) so each slot
+    # edit lands as exactly one AuditLog UPDATE row.
+    pre_save.connect(
+        _on_ticket_staff_assignment_pre_save,
+        sender=TicketStaffAssignment,
+        weak=False,
+        dispatch_uid="audit:tsa:pre:TicketStaffAssignment",
+    )
+    post_save.connect(
+        _on_ticket_staff_assignment_post_save_update,
+        sender=TicketStaffAssignment,
+        weak=False,
+        dispatch_uid="audit:tsa:post_update:TicketStaffAssignment",
     )
 
 

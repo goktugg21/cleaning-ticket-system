@@ -7,8 +7,13 @@ from .views import (
     TicketMessageListCreateView,
     TicketViewSet,
 )
+from .views_manager_assignments import (
+    TicketManagerAssignmentDeleteView,
+    TicketManagerAssignmentListCreateView,
+)
 from .views_staff_assignments import (
-    TicketStaffAssignmentDeleteView,
+    StaffAssignmentSlotAgendaView,
+    TicketStaffAssignmentDetailView,
     TicketStaffAssignmentListCreateView,
 )
 from .views_staff_requests import StaffAssignmentRequestViewSet
@@ -28,6 +33,14 @@ staff_request_router.register(
 )
 
 urlpatterns = [
+    # Sprint 14E — STAFF agenda of their own dated assignment slots.
+    # Listed before the router so the `my-slots` literal is not eaten by
+    # the router's `<pk>` detail pattern.
+    path(
+        "my-slots/",
+        StaffAssignmentSlotAgendaView.as_view(),
+        name="ticket-my-slots",
+    ),
     path(
         "<int:ticket_id>/attachments/<int:attachment_id>/download/",
         TicketAttachmentDownloadView.as_view(),
@@ -55,7 +68,20 @@ urlpatterns = [
     ),
     path(
         "<int:ticket_id>/staff-assignments/<int:user_id>/",
-        TicketStaffAssignmentDeleteView.as_view(),
-        name="ticket-staff-assignment-delete",
+        TicketStaffAssignmentDetailView.as_view(),
+        name="ticket-staff-assignment-detail",
+    ),
+    # Sprint 10B — explicit per-ticket responsible-manager M:N. Same
+    # hand-mounted shape as the staff-assignment endpoints above (the
+    # DELETE `<user_id>` path arg is awkward through a DRF action).
+    path(
+        "<int:ticket_id>/manager-assignments/",
+        TicketManagerAssignmentListCreateView.as_view(),
+        name="ticket-manager-assignments",
+    ),
+    path(
+        "<int:ticket_id>/manager-assignments/<int:user_id>/",
+        TicketManagerAssignmentDeleteView.as_view(),
+        name="ticket-manager-assignment-delete",
     ),
 ] + router.urls

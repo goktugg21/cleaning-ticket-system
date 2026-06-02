@@ -29,6 +29,13 @@ from .models import (
 from .permissions import user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 
+# Sprint 7B — reuse the Extra Work cart-line input contract for the
+# convert-to-extra-work endpoint. `extra_work.serializers` does NOT
+# import `tickets.serializers` at module level, so this import is
+# cycle-safe.
+from extra_work.models import ExtraWorkRequestIntent
+from extra_work.serializers import ExtraWorkPreviewLineSerializer
+
 
 def _sla_display_state(obj):
     """Mirror of frontend getSLADisplayState — paused overrides underlying state."""
@@ -194,6 +201,12 @@ class TicketListSerializer(serializers.ModelSerializer):
             "sla_is_paused",
             "sla_remaining_business_seconds",
             "sla_display_state",
+            # Sprint 9B — scheduling fields on the list serializer too so
+            # the agenda view can render them without a detail fetch.
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "schedule_status",
         ]
         read_only_fields = fields
 
@@ -231,6 +244,15 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     # flags so the customer never sees fields the policy hides.
     # See _assigned_staff_payload() below.
     assigned_staff = serializers.SerializerMethodField()
+    # Sprint 10B — explicit per-ticket responsible managers via
+    # TicketManagerAssignment (the M:N counterpart of assigned_staff).
+    # The existing single `assigned_to` pointer is preserved untouched
+    # (frontend compat); this is the multi-manager list. For a
+    # CUSTOMER_USER caller the SAME Customer.show_assigned_staff_*
+    # flags gate the output, so customer-side redaction of "who is
+    # working on this" stays consistent across staff and managers.
+    # See _assigned_managers_payload() below.
+    assigned_managers = serializers.SerializerMethodField()
     # Sprint 28 Batch 11 — per-current-user "is this caller listed
     # on TicketStaffAssignment for this ticket?" flag. The frontend
     # completion-modal logic uses this to decide whether to render the
@@ -269,6 +291,7 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "assigned_to",
             "assigned_to_email",
             "assigned_staff",
+            "assigned_managers",
             "is_assigned_staff",
             "created_at",
             "updated_at",
@@ -293,8 +316,39 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "sla_remaining_business_seconds",
             "sla_display_state",
             "extra_work_origin",
+            # Sprint 9B — operational scheduling (read-only here; mutated
+            # via the dedicated POST/DELETE schedule endpoint). These are
+            # operational (no amounts), safe for every role that already
+            # sees ticket detail.
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "schedule_status",
+            "rescheduled_from",
+            "reschedule_reason",
         ]
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        # Sprint 12C — customer-safe schedule visibility. A CUSTOMER_USER
+        # keeps the operational schedule (`scheduled_start_at` /
+        # `scheduled_end_at` / `time_window_label` / `schedule_status` —
+        # so they still see the current date/window and that the work was
+        # rescheduled), but NOT the provider-internal reschedule audit
+        # fields: `reschedule_reason` (the operator's internal
+        # explanation — `tickets/models.py` documents it as the operator
+        # explanation) and `rescheduled_from` (the prior operational
+        # date). Provider-side roles (incl. STAFF) keep the full fields.
+        # The staff "unable to complete" reason and other internal notes
+        # ride on `status_history` rows and are already redacted by
+        # `TicketStatusHistorySerializer.to_representation`.
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        if getattr(viewer, "role", None) == UserRole.CUSTOMER_USER:
+            data["reschedule_reason"] = ""
+            data["rescheduled_from"] = None
+        return data
 
     def _resolve_allowed_next_statuses(self, obj):
         """Single computation shared by the top-level
@@ -442,6 +496,11 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         viewer = getattr(request, "user", None) if request else None
         return _assigned_staff_payload(obj, viewer)
 
+    def get_assigned_managers(self, obj):
+        request = self.context.get("request")
+        viewer = getattr(request, "user", None) if request else None
+        return _assigned_managers_payload(obj, viewer)
+
     def get_is_assigned_staff(self, obj):
         """
         Sprint 28 Batch 11 — True iff the requesting user is listed on
@@ -468,52 +527,152 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         provider-only-field stripping; this serializer never carries
         those fields in the first place).
 
-        Origin resolution:
-          * `extra_work_request_item` set, `proposal_line` null
-              -> INSTANT-route spawn (`extra_work.instant_tickets`).
-          * `proposal_line` set (with or without `extra_work_request_
-            item`) -> PROPOSAL-route spawn
-            (`extra_work.proposal_tickets`). The parent EW + item id
-            are walked back through `proposal_line.proposal.
-            extra_work_request`.
-          * Neither -> None.
+        Sprint 6A — origin resolution:
+          * Resolve the parent EW via the CANONICAL
+            `obj.extra_work_request` FK first; fall back to the legacy
+            `proposal_line` / `extra_work_request_item` chains only
+            when the canonical FK is null (historical rows).
+          * Classify `origin` from the resolved EW's
+            `routing_decision`: INSTANT -> "INSTANT", else "PROPOSAL".
+          * `extra_work_request_item_id` + `service_name` come from the
+            representative linked line (the FIRST line the spawn helper
+            stamped on the back-compat FK).
+          * Return None only when NO EW can be resolved by any path.
         """
+        from extra_work.final_amounts import ew_has_unfinalized_hourly_lines
+        from extra_work.models import ExtraWorkRoutingDecision
+
         item = obj.extra_work_request_item
         proposal_line = obj.proposal_line
 
+        # Canonical resolution.
+        ew_request = obj.extra_work_request
+        if ew_request is None:
+            # Legacy fallback: proposal chain, then cart-item chain.
+            if proposal_line is not None:
+                ew_request = proposal_line.proposal.extra_work_request
+            elif item is not None:
+                ew_request = item.extra_work_request
+
+        if ew_request is None:
+            return None
+
+        # Representative line for the back-compat payload keys. The
+        # proposal helper stamps `proposal_line`; the instant / legacy
+        # helpers stamp `extra_work_request_item`.
         if proposal_line is not None:
-            # PROPOSAL-route. Walk back to the parent EW request via
-            # the proposal chain. `extra_work_request_item` is normally
-            # None on this path (the proposal spawn helper does not set
-            # it), but we still surface the line item id if the FK was
-            # populated by some future code path.
-            proposal = proposal_line.proposal
-            ew_request = proposal.extra_work_request
             service = proposal_line.service
-            return {
-                "extra_work_request_id": ew_request.id,
-                "extra_work_request_title": ew_request.title,
-                "extra_work_request_status": ew_request.status,
-                "extra_work_request_item_id": item.id if item is not None else None,
-                "service_name": service.name if service is not None else None,
-                "origin": "PROPOSAL",
-            }
-
-        if item is not None:
-            # INSTANT-route. The cart line carries the parent EW
-            # request and the service catalog row directly.
-            ew_request = item.extra_work_request
+            item_id = item.id if item is not None else None
+        elif item is not None:
             service = item.service
-            return {
-                "extra_work_request_id": ew_request.id,
-                "extra_work_request_title": ew_request.title,
-                "extra_work_request_status": ew_request.status,
-                "extra_work_request_item_id": item.id,
-                "service_name": service.name if service is not None else None,
-                "origin": "INSTANT",
-            }
+            item_id = item.id
+        else:
+            service = None
+            item_id = None
 
-        return None
+        origin = (
+            "INSTANT"
+            if ew_request.routing_decision == ExtraWorkRoutingDecision.INSTANT
+            else "PROPOSAL"
+        )
+
+        payload = {
+            "extra_work_request_id": ew_request.id,
+            "extra_work_request_title": ew_request.title,
+            "extra_work_request_status": ew_request.status,
+            "extra_work_request_item_id": item_id,
+            "service_name": service.name if service is not None else None,
+            "origin": origin,
+            # Sprint 8B — `actual_hours_required` flags an EW-origin
+            # ticket that cannot yet be sent for customer approval
+            # because an hourly line is missing its actual hours. It is
+            # a workflow boolean (no money / rate), safe for every role
+            # including STAFF.
+            "actual_hours_required": ew_has_unfinalized_hourly_lines(
+                ew_request
+            ),
+        }
+        # Sprint 8B — `final_total_amount` is a COMMERCIAL amount. The
+        # staff-privacy floor forbids STAFF from seeing price/amount
+        # data, so it is gated OUT for STAFF viewers (who can reach this
+        # ticket-detail endpoint operationally). Provider + customer see
+        # it (the customer must see the final amount at completion
+        # approval, SoT §5.12). NULL until actual hours are entered /
+        # frozen at customer approval.
+        request = self.context.get("request") if self.context else None
+        viewer = getattr(request, "user", None) if request else None
+        if getattr(viewer, "role", None) != UserRole.STAFF:
+            payload["final_total_amount"] = (
+                f"{ew_request.final_total_amount:.2f}"
+                if ew_request.final_total_amount is not None
+                else None
+            )
+        return payload
+
+
+class TicketConvertToExtraWorkSerializer(serializers.Serializer):
+    """
+    Sprint 7B — input contract for
+    `POST /api/tickets/<pk>/convert-to-extra-work/`.
+
+    Reuses `extra_work.serializers.ExtraWorkPreviewLineSerializer` for
+    the cart lines (service-XOR-custom_description with code
+    `line_requires_service_or_description`, quantity > 0, inactive
+    service rejected). The cross-company service guard
+    (`line_service_company_mismatch`) is enforced here against the
+    source ticket's customer company. Role / scope / convertibility
+    gates live in the view; intent validation lives in the conversion
+    service.
+    """
+
+    request_intent = serializers.ChoiceField(
+        choices=ExtraWorkRequestIntent.choices
+    )
+    line_items = ExtraWorkPreviewLineSerializer(many=True)
+    customer_visible_note = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+    internal_note = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+    def validate_line_items(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "At least one line item is required."
+            )
+        return value
+
+    def validate(self, attrs):
+        ticket = self.context["ticket"]
+        company_id = ticket.customer.company_id
+        for index, line in enumerate(attrs.get("line_items", []) or []):
+            line_service = line.get("service")
+            if line_service is None:
+                continue
+            if line_service.company_id != company_id:
+                raise serializers.ValidationError(
+                    {
+                        "line_items": [
+                            {
+                                "service": [
+                                    serializers.ErrorDetail(
+                                        "Service belongs to a different "
+                                        "provider company than the "
+                                        "customer.",
+                                        code="line_service_company_mismatch",
+                                    )
+                                ]
+                            }
+                            if i == index
+                            else {}
+                            for i, _ in enumerate(
+                                attrs.get("line_items", []) or []
+                            )
+                        ]
+                    }
+                )
+        return attrs
 
 
 def _assigned_staff_payload(ticket, viewer):
@@ -533,6 +692,56 @@ def _assigned_staff_payload(ticket, viewer):
     """
     assignments = list(
         ticket.staff_assignments.select_related("user", "user__staff_profile")
+        .order_by("assigned_at")
+    )
+    if not assignments:
+        return []
+
+    is_customer = getattr(viewer, "role", None) == UserRole.CUSTOMER_USER
+    customer = ticket.customer
+    if is_customer:
+        show_name = bool(customer.show_assigned_staff_name)
+        show_email = bool(customer.show_assigned_staff_email)
+        show_phone = bool(customer.show_assigned_staff_phone)
+        if not (show_name or show_email or show_phone):
+            return [{"anonymous": True, "label_key": "tickets.assigned_team_anonymous"}]
+    else:
+        show_name = show_email = show_phone = True
+
+    out = []
+    for a in assignments:
+        user = a.user
+        entry = {"id": user.id}
+        if show_name:
+            entry["full_name"] = user.full_name or user.email.split("@")[0]
+        if show_email:
+            entry["email"] = user.email
+        if show_phone:
+            profile = getattr(user, "staff_profile", None)
+            entry["phone"] = profile.phone if profile else ""
+        out.append(entry)
+    return out
+
+
+def _assigned_managers_payload(ticket, viewer):
+    """
+    Sprint 10B — render the list of responsible managers assigned to a
+    ticket via TicketManagerAssignment.
+
+    Identical redaction policy to `_assigned_staff_payload`: OSIUS-side
+    viewers (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER / STAFF) get
+    the full record; a CUSTOMER_USER viewer is filtered through the SAME
+    Customer.show_assigned_staff_{name,email,phone} flags so customer-
+    side redaction of "who is working on this" stays consistent between
+    staff and managers. When all three flags are False the payload
+    collapses to the same anonymous label key the staff payload uses.
+
+    BUILDING_MANAGER users do not carry a StaffProfile, so the `phone`
+    field (when the flag allows it) resolves to "" rather than raising —
+    the wire shape stays identical to the staff payload.
+    """
+    assignments = list(
+        ticket.manager_assignments.select_related("user", "user__staff_profile")
         .order_by("assigned_at")
     )
     if not assignments:
@@ -1038,3 +1247,39 @@ class TicketAssignSerializer(serializers.Serializer):
         ticket.assigned_to = self.validated_data["assigned_to"]
         ticket.save(update_fields=["assigned_to", "updated_at"])
         return ticket
+
+
+class TicketScheduleInputSerializer(serializers.Serializer):
+    """
+    Sprint 9B — validate the POST /api/tickets/<pk>/schedule/ body.
+
+    `scheduled_start_at` is required; `scheduled_end_at` is optional and,
+    when present, must not be before the start (HTTP 400 with stable code
+    `schedule_invalid`). `time_window_label` and `reschedule_reason` are
+    optional free text. The reschedule-reason REQUIREMENT (when the
+    ticket is already scheduled) is enforced in the view, not here, so
+    the first-scheduling path does not need a reason.
+    """
+
+    scheduled_start_at = serializers.DateTimeField(required=True)
+    scheduled_end_at = serializers.DateTimeField(
+        required=False, allow_null=True, default=None
+    )
+    time_window_label = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=64
+    )
+    reschedule_reason = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
+
+    def validate(self, attrs):
+        start = attrs.get("scheduled_start_at")
+        end = attrs.get("scheduled_end_at")
+        if end is not None and start is not None and end < start:
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "scheduled_end_at cannot be before scheduled_start_at.",
+                    code="schedule_invalid",
+                )
+            )
+        return attrs

@@ -110,9 +110,13 @@ class CustomerServicePriceCrudTests(PricingApiFixtureMixin, APITestCase):
 
         delete = self.client.delete(detail_url(self.customer.id, price_id))
         self.assertEqual(delete.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(
+        # Sprint 4B — public DELETE now soft-archives: row is kept
+        # but `is_active` flips to False.
+        self.assertTrue(
             CustomerServicePrice.objects.filter(pk=price_id).exists()
         )
+        archived = CustomerServicePrice.objects.get(pk=price_id)
+        self.assertFalse(archived.is_active)
 
     def test_company_admin_b_cannot_create_price_for_company_a_customer(self):
         # other_company_admin is bound to other_company via
@@ -209,20 +213,42 @@ class CustomerServicePriceScopeIsolationTests(
             CustomerServicePrice.objects.filter(pk=self.price_b.id).exists()
         )
 
-    def test_customer_user_blocked_on_every_endpoint(self):
+    def test_customer_user_read_only_on_pricing_endpoint(self):
+        # Sprint 4B — customer-side actors with active building
+        # access can READ their own customer's active/current
+        # pricing, but every write method stays 403. (Pre-Sprint-4B
+        # this test asserted 403 across the board.)
         self.authenticate(self.customer_user)
         list_resp = self.client.get(list_url(self.customer.id))
-        self.assertEqual(list_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
+
         retrieve_resp = self.client.get(
             detail_url(self.customer.id, self.price_a.id)
         )
-        self.assertEqual(retrieve_resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(retrieve_resp.status_code, status.HTTP_200_OK)
+
         patch_resp = self.client.patch(
             detail_url(self.customer.id, self.price_a.id),
             {"unit_price": "99.99"},
             format="json",
         )
         self.assertEqual(patch_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        post_resp = self.client.post(
+            list_url(self.customer.id),
+            {
+                "service": self.service.id,
+                "unit_price": "1.00",
+                "valid_from": "2026-01-01",
+            },
+            format="json",
+        )
+        self.assertEqual(post_resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        delete_resp = self.client.delete(
+            detail_url(self.customer.id, self.price_a.id)
+        )
+        self.assertEqual(delete_resp.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_building_manager_blocked_on_every_endpoint(self):
         self.authenticate(self.manager)

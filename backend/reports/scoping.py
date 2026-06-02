@@ -160,6 +160,48 @@ def tickets_for_scope(actor, scope: ResolvedScope):
     return Ticket.objects.none()
 
 
+def extra_work_for_scope(actor, scope: ResolvedScope):
+    """
+    Returns an ExtraWorkRequest queryset filtered to the resolved scope,
+    mirroring `tickets_for_scope` but on the Extra Work domain. Falls back
+    to the actor's full allowed scope when neither company nor building is
+    specified.
+
+    Soft-deleted rows (deleted_at IS NOT NULL) are always excluded so they
+    do not contribute to any revenue figure. STAFF / CUSTOMER_USER resolve
+    to an empty queryset here, but the revenue endpoint also denies them at
+    the permission layer (commercial amounts must never reach STAFF or
+    customer-side roles) — this branch is defence-in-depth.
+    """
+    from extra_work.models import ExtraWorkRequest
+
+    base = ExtraWorkRequest.objects.filter(deleted_at__isnull=True)
+
+    if scope.building is not None:
+        return base.filter(building_id=scope.building.id)
+
+    if scope.company is not None:
+        return base.filter(company_id=scope.company.id)
+
+    if actor.role == UserRole.SUPER_ADMIN:
+        return base
+    if actor.role == UserRole.COMPANY_ADMIN:
+        company_ids = list(
+            CompanyUserMembership.objects.filter(user=actor).values_list(
+                "company_id", flat=True
+            )
+        )
+        return base.filter(company_id__in=company_ids)
+    if actor.role == UserRole.BUILDING_MANAGER:
+        building_ids = list(
+            BuildingManagerAssignment.objects.filter(user=actor).values_list(
+                "building_id", flat=True
+            )
+        )
+        return base.filter(building_id__in=building_ids)
+    return base.none()
+
+
 def _parse_date(raw, field_name) -> date:
     try:
         return datetime.strptime(raw, "%Y-%m-%d").date()

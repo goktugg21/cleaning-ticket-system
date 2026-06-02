@@ -2,6 +2,9 @@ from django.urls import path
 
 from .views import (
     AgeBucketsView,
+    ExtraWorkRevenueCSVView,
+    ExtraWorkRevenuePDFView,
+    ExtraWorkRevenueView,
     ManagerThroughputView,
     SLABreachRateOverTimeView,
     SLADistributionView,
@@ -12,6 +15,9 @@ from .views import (
     TicketsByCustomerCSVView,
     TicketsByCustomerPDFView,
     TicketsByCustomerView,
+    TicketsByOriginCSVView,
+    TicketsByOriginPDFView,
+    TicketsByOriginView,
     TicketsByTypeCSVView,
     TicketsByTypePDFView,
     TicketsByTypeView,
@@ -95,5 +101,37 @@ urlpatterns = [
         "tickets-by-building/export.pdf",
         TicketsByBuildingPDFView.as_view(),
         name="reports-tickets-by-building-pdf",
+    ),
+    # ---- Sprint 14A: ticket origin separation -------------------------
+    path(
+        "tickets-by-origin/",
+        TicketsByOriginView.as_view(),
+        name="reports-tickets-by-origin",
+    ),
+    path(
+        "tickets-by-origin/export.csv",
+        TicketsByOriginCSVView.as_view(),
+        name="reports-tickets-by-origin-csv",
+    ),
+    path(
+        "tickets-by-origin/export.pdf",
+        TicketsByOriginPDFView.as_view(),
+        name="reports-tickets-by-origin-pdf",
+    ),
+    # ---- Sprint 14A: Extra Work revenue states ------------------------
+    path(
+        "extra-work-revenue/",
+        ExtraWorkRevenueView.as_view(),
+        name="reports-extra-work-revenue",
+    ),
+    path(
+        "extra-work-revenue/export.csv",
+        ExtraWorkRevenueCSVView.as_view(),
+        name="reports-extra-work-revenue-csv",
+    ),
+    path(
+        "extra-work-revenue/export.pdf",
+        ExtraWorkRevenuePDFView.as_view(),
+        name="reports-extra-work-revenue-pdf",
     ),
 ]

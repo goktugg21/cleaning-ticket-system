@@ -66,6 +66,74 @@ def build_tickets_by_type_csv(payload: dict) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
+# ---- CSV: tickets-by-origin (Sprint 14A) -----------------------------------
+
+
+ORIGIN_CSV_COLUMNS = (
+    "origin",
+    "origin_label",
+    "count",
+    "period_from",
+    "period_to",
+)
+
+
+def build_tickets_by_origin_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(ORIGIN_CSV_COLUMNS)
+    period_from = payload["from"]
+    period_to = payload["to"]
+    for bucket in payload["buckets"]:
+        writer.writerow(
+            {
+                "origin": bucket["origin"],
+                "origin_label": bucket["origin_label"],
+                "count": bucket["count"],
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+# ---- CSV: extra-work-revenue (Sprint 14A) ----------------------------------
+
+
+EXTRA_WORK_REVENUE_CSV_COLUMNS = (
+    "state",
+    "count",
+    "subtotal",
+    "vat",
+    "total",
+    "period_from",
+    "period_to",
+)
+
+# Stable row order — one row per revenue state, always emitted (even at
+# count 0) so the CSV shape is fixed regardless of which states have data.
+_REVENUE_CSV_STATE_ORDER = ("earned", "in_progress", "quoted_pipeline", "lost")
+
+
+def build_extra_work_revenue_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EXTRA_WORK_REVENUE_CSV_COLUMNS)
+    period_from = payload["from"]
+    period_to = payload["to"]
+    states = payload["states"]
+    for state in _REVENUE_CSV_STATE_ORDER:
+        row = states[state]
+        writer.writerow(
+            {
+                "state": state,
+                "count": row["count"],
+                "subtotal": row["subtotal"],
+                "vat": row["vat"],
+                "total": row["total"],
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
 # ---- CSV: tickets-by-customer ----------------------------------------------
 
 
@@ -217,6 +285,24 @@ def build_tickets_by_type_pdf(payload: dict) -> bytes:
     return _pdf_bytes(pdf)
 
 
+# ---- PDF: tickets-by-origin (Sprint 14A) -----------------------------------
+
+
+def build_tickets_by_origin_pdf(payload: dict) -> bytes:
+    pdf = _new_pdf("Tickets by origin", payload)
+    rows = [
+        [b["origin_label"], b["origin"], b["count"]]
+        for b in payload["buckets"]
+    ]
+    _draw_table(
+        pdf,
+        headers=["Origin label", "Origin code", "Count"],
+        widths=[80, 60, 30],
+        rows=rows,
+    )
+    return _pdf_bytes(pdf)
+
+
 # ---- PDF: tickets-by-customer ----------------------------------------------
 
 
@@ -253,6 +339,76 @@ def build_tickets_by_building_pdf(payload: dict) -> bytes:
         pdf,
         headers=["Building", "Company", "Count"],
         widths=[80, 70, 30],
+        rows=rows,
+    )
+    return _pdf_bytes(pdf)
+
+
+# ---- PDF: extra-work-revenue (Sprint 14D) ----------------------------------
+# Mirrors the JSON / CSV revenue report (same states, same money totals from
+# `compute_extra_work_revenue`) so the three formats cannot drift. Closes the
+# transcript-backed PDF-export gap (transkript.txt:65 "Bunu bir pdf yapip
+# cakiyoruz" / :415 "csv veya pdf"): per-state count + revenue answers
+# "kac ekstra is yapmis, ne kadar tutmus".
+#
+# The revenue payload shape differs from the dimension reports' (it carries a
+# `totals` dict + a `states` map, not a flat `buckets` list + int `total`), so
+# this builder constructs its own header instead of reusing `_new_pdf`, while
+# still sharing `_scope_summary_lines` / `_draw_table` / `_pdf_bytes`.
+_REVENUE_STATE_PDF_LABELS = {
+    "earned": "Earned (closed)",
+    "in_progress": "In progress",
+    "quoted_pipeline": "Quoted pipeline",
+    "lost": "Lost",
+}
+
+
+def build_extra_work_revenue_pdf(payload: dict) -> bytes:
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    pdf.set_font("helvetica", "B", 16)
+    pdf.cell(0, 10, "Extra Work Revenue", ln=1)
+
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"Period: {payload['from']} -- {payload['to']}", ln=1)
+    pdf.cell(0, 6, f"Generated at: {payload['generated_at']}", ln=1)
+    for line in _scope_summary_lines(payload["scope"]):
+        pdf.cell(0, 6, line, ln=1)
+    totals = payload["totals"]
+    pdf.cell(
+        0,
+        6,
+        f"Total: {totals['count']} request(s) / {totals['total']} revenue",
+        ln=1,
+    )
+    pdf.ln(2)
+
+    states = payload["states"]
+    rows = [
+        [
+            _REVENUE_STATE_PDF_LABELS.get(state, state),
+            states[state]["count"],
+            states[state]["subtotal"],
+            states[state]["vat"],
+            states[state]["total"],
+        ]
+        for state in _REVENUE_CSV_STATE_ORDER
+    ]
+    rows.append(
+        [
+            "TOTAL",
+            totals["count"],
+            totals["subtotal"],
+            totals["vat"],
+            totals["total"],
+        ]
+    )
+    _draw_table(
+        pdf,
+        headers=["State", "Count", "Subtotal", "VAT", "Total"],
+        widths=[52, 24, 34, 34, 34],
         rows=rows,
     )
     return _pdf_bytes(pdf)

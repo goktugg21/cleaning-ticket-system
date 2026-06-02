@@ -8,8 +8,9 @@ Covers the four behaviours wired in 30.1:
   2. The new retry-spawn endpoint POST /api/extra-work/<id>/spawn/
      recovers an EW that landed in CUSTOMER_APPROVED with zero
      tickets (pre-fix data).
-  3. The retry endpoint refuses with a stable 400 when spawn has
-     already happened (idempotency at the API layer).
+  3. The retry endpoint is idempotent: when a ticket already exists
+     for the request it returns 200 with `already_spawned: true` and
+     the existing id(s), creating no duplicate (Sprint 6A contract).
   4. The retry endpoint refuses CUSTOMER_USER callers with 403 —
      not customer-callable per the brief.
   5. The new TicketFilter.extra_work_request param returns ONLY the
@@ -259,19 +260,21 @@ class RetrySpawnEndpointRecoversStuckEwTests(
 # ---------------------------------------------------------------------------
 # Test 3 — retry refuses when tickets already exist
 # ---------------------------------------------------------------------------
-class RetrySpawnRejectsWhenAlreadySpawnedTests(
+class RetrySpawnIdempotentWhenAlreadySpawnedTests(
     Sprint30Batch30_1FixtureMixin, TestCase
 ):
     @classmethod
     def setUpTestData(cls):
         cls._setup_fixture()
 
-    def test_retry_spawn_rejects_when_already_spawned(self):
+    def test_retry_spawn_idempotent_when_already_spawned(self):
+        # Sprint 6A — when a ticket already exists for the request, the
+        # retry endpoint returns 200 `already_spawned` (no duplicate).
         ew = self._make_ew(status=ExtraWorkStatus.CUSTOMER_APPROVED)
         cart_item = ew.line_items.get()
-        # Manually create one ticket linked to the cart item so the
-        # retry endpoint sees existing spawned tickets.
-        Ticket.objects.create(
+        # Manually create one ticket linked to the request (canonical)
+        # so the retry endpoint sees an existing spawned ticket.
+        existing = Ticket.objects.create(
             company=ew.company,
             building=ew.building,
             customer=ew.customer,
@@ -279,14 +282,20 @@ class RetrySpawnRejectsWhenAlreadySpawnedTests(
             title="Pre-existing ticket",
             description="already spawned",
             status=TicketStatus.OPEN,
+            extra_work_request=ew,
             extra_work_request_item=cart_item,
         )
 
+        before = Ticket.objects.count()
         response = self._api(self.super_admin).post(
             SPAWN_URL.format(ew_id=ew.id)
         )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertEqual(response.data["code"], "spawn_already_done")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data["already_spawned"])
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["spawned_ticket_ids"], [existing.id])
+        # No duplicate created.
+        self.assertEqual(Ticket.objects.count(), before)
 
 
 # ---------------------------------------------------------------------------

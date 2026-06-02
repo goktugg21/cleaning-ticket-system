@@ -255,11 +255,9 @@ class RoutingAllContractTests(_B2Fixture):
         )
         self.assertEqual(ew.routing_decision, ExtraWorkRoutingDecision.INSTANT)
         self.assertEqual(ew.status, ExtraWorkStatus.CUSTOMER_APPROVED)
-        # Tickets spawned (one per cart line).
-        ticket_count = Ticket.objects.filter(
-            extra_work_request_item__extra_work_request=ew
-        ).count()
-        self.assertEqual(ticket_count, 2)
+        # Sprint 6A — exactly ONE ticket spawned for the whole request.
+        ticket_count = Ticket.objects.filter(extra_work_request=ew).count()
+        self.assertEqual(ticket_count, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -676,7 +674,7 @@ class ProposalNonContractPriceRequiredTests(_B2Fixture):
 # 8. Post-approval spawn — customer approval spawns one ticket per line.
 # ---------------------------------------------------------------------------
 class ProposalApprovalSpawnTests(_B2Fixture):
-    def test_customer_approval_spawns_one_ticket_per_line(self):
+    def test_customer_approval_spawns_one_ticket_per_request(self):
         ew = self._submit_cart(
             [
                 {
@@ -719,13 +717,13 @@ class ProposalApprovalSpawnTests(_B2Fixture):
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertEqual(Ticket.objects.count(), before + 2)
-        # Each ticket links back to its proposal line, not to a cart item.
+        # Sprint 6A — exactly ONE ticket for the whole request.
+        self.assertEqual(Ticket.objects.count(), before + 1)
+        ticket = Ticket.objects.get(extra_work_request=ew)
+        # Back-compat link is the FIRST approved-for-spawn proposal line.
         proposal = Proposal.objects.get(pk=proposal_id)
-        for line in proposal.lines.all():
-            self.assertEqual(
-                Ticket.objects.filter(proposal_line=line).count(), 1
-            )
+        first_line = proposal.lines.order_by("id").first()
+        self.assertEqual(ticket.proposal_line_id, first_line.id)
 
 
 # ---------------------------------------------------------------------------

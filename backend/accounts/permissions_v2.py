@@ -22,7 +22,7 @@ from buildings.models import (
     BuildingManagerAssignment,
     BuildingStaffVisibility,
 )
-from companies.models import CompanyUserMembership
+from companies.models import Company, CompanyUserMembership
 
 from .models import UserRole
 
@@ -112,6 +112,85 @@ def _company_admin_has_management_key(
     return Building.objects.filter(
         id=building_id, company_id__in=actor_company_ids
     ).exists()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 14E — DANGEROUS provider-side quote-bypass permission.
+#
+# Distinct namespace (`provider.*`) from the operational `osius.*` keys
+# because this is a SoT §5.5 dangerous capability with its own grant
+# surface, default-OFF semantics, and HIGH-severity audit. It is
+# explicitly NOT in `OSIUS_PERMISSION_KEYS`, so the generic osius
+# resolver / matrix never grants it and holding the generic B6
+# `osius.building_manager.override_customer_decision` key can never
+# imply it (matrix H-11 + SoT §5.5 "this is dangerous").
+#
+# Grant model: a single Super-Admin-controlled boolean on the provider
+# `Company` (`provider_admin_may_quote_override_start`, default False).
+#   * SUPER_ADMIN          -> always True (omnipotent + the grant
+#                             authority). Use is still HIGH-audited.
+#   * COMPANY_ADMIN        -> True iff a provider company they belong to
+#                             (CompanyUserMembership) has the grant ON.
+#   * BUILDING_MANAGER     -> True iff a provider company that owns a
+#                             building they manage has the grant ON.
+#   * STAFF / CUSTOMER_USER-> always False.
+#
+# Even CA / BM need the dedicated grant — neither silently bypasses
+# (SoT §2.1 "dangerous permissions default OFF").
+# ---------------------------------------------------------------------------
+PROVIDER_DANGEROUS_PERMISSION_KEYS: frozenset[str] = frozenset(
+    {
+        "provider.extra_work.quote_override_start",
+    }
+)
+
+
+def user_has_provider_dangerous_permission(
+    user,
+    permission_key: str,
+    *,
+    company_id: Optional[int] = None,
+) -> bool:
+    """Resolve a `provider.*` dangerous permission for `user`.
+
+    When `company_id` is given the grant is checked against THAT
+    provider company (the canonical call from the direct-publish view,
+    anchored on the Extra Work's company). When it is None the key
+    resolves True if ANY provider company the actor belongs to / manages
+    has the grant ON (the surface used by the effective-permissions
+    composer, which has no company context).
+    """
+    if user is None or not user.is_authenticated:
+        return False
+    if permission_key not in PROVIDER_DANGEROUS_PERMISSION_KEYS:
+        return False
+    if user.role == UserRole.SUPER_ADMIN:
+        return True
+
+    if user.role == UserRole.COMPANY_ADMIN:
+        granted = Company.objects.filter(
+            user_memberships__user=user,
+            provider_admin_may_quote_override_start=True,
+        )
+        if company_id is not None:
+            granted = granted.filter(id=company_id)
+        return granted.exists()
+
+    if user.role == UserRole.BUILDING_MANAGER:
+        # BM is in scope of a company iff they manage one of its
+        # buildings. The grant is company-level, so a BM at a granted
+        # company inherits it (still narrowed to their assigned
+        # buildings' company).
+        granted = Company.objects.filter(
+            buildings__manager_assignments__user=user,
+            provider_admin_may_quote_override_start=True,
+        )
+        if company_id is not None:
+            granted = granted.filter(id=company_id)
+        return granted.exists()
+
+    # STAFF / CUSTOMER_USER: never.
+    return False
 
 
 def user_has_osius_permission(
