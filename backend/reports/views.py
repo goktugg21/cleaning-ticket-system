@@ -5,6 +5,7 @@ from django.db.models import Count
 from django.db.models.functions import TruncDate
 from django.http import HttpResponse
 from django.utils import timezone
+from rest_framework import status as http_status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,19 +17,25 @@ from tickets.models import TicketStatus
 
 from .dimensions import (
     DimensionFilters,
+    OriginInvalid,
+    compute_extra_work_revenue,
     compute_tickets_by_building,
     compute_tickets_by_customer,
+    compute_tickets_by_origin,
     compute_tickets_by_type,
 )
 from .exports import (
+    build_extra_work_revenue_csv,
     build_tickets_by_building_csv,
     build_tickets_by_building_pdf,
     build_tickets_by_customer_csv,
     build_tickets_by_customer_pdf,
+    build_tickets_by_origin_csv,
+    build_tickets_by_origin_pdf,
     build_tickets_by_type_csv,
     build_tickets_by_type_pdf,
 )
-from .permissions import IsReportsConsumer
+from .permissions import IsReportsConsumer, IsRevenueReportConsumer
 from .scoping import (
     date_range_to_aware_bounds,
     parse_date_range,
@@ -498,6 +505,17 @@ class _DimensionView(_ReportView):
             accept_type=self.accept_type,
         )
 
+    def handle_exception(self, exc):
+        # Render the ?origin= validation error as a clean 400 body with a
+        # stable plain-string `code` (DRF's ValidationError would wrap dict
+        # values in lists, mangling `code`).
+        if isinstance(exc, OriginInvalid):
+            return Response(
+                {"detail": str(exc), "code": exc.code},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        return super().handle_exception(exc)
+
 
 # ---- tickets-by-type --------------------------------------------------------
 
@@ -601,4 +619,72 @@ class TicketsByBuildingPDFView(_DimensionView):
         return _pdf_response(
             f"tickets-by-building_{payload['from']}_{payload['to']}.pdf",
             build_tickets_by_building_pdf(payload),
+        )
+
+
+# ===========================================================================
+# Sprint 14A — Part A: tickets-by-origin (NORMAL / EXTRA_WORK / CONVERTED /
+# PLANNED). JSON + CSV + PDF, sharing the same compute payload.
+# ===========================================================================
+
+
+class TicketsByOriginView(_DimensionView):
+    accept_customer = True
+    accept_type = True
+
+    def get(self, request):
+        return Response(compute_tickets_by_origin(self._filters(request)))
+
+
+class TicketsByOriginCSVView(_DimensionView):
+    accept_customer = True
+    accept_type = True
+
+    def get(self, request):
+        payload = compute_tickets_by_origin(self._filters(request))
+        return _csv_response(
+            f"tickets-by-origin_{payload['from']}_{payload['to']}.csv",
+            build_tickets_by_origin_csv(payload),
+        )
+
+
+class TicketsByOriginPDFView(_DimensionView):
+    accept_customer = True
+    accept_type = True
+
+    def get(self, request):
+        payload = compute_tickets_by_origin(self._filters(request))
+        return _pdf_response(
+            f"tickets-by-origin_{payload['from']}_{payload['to']}.pdf",
+            build_tickets_by_origin_pdf(payload),
+        )
+
+
+# ===========================================================================
+# Sprint 14A — Part B: Extra Work revenue states. JSON + CSV.
+#
+# PERMISSION: provider-management only (SUPER_ADMIN / COMPANY_ADMIN /
+# BUILDING_MANAGER). STAFF + CUSTOMER_USER are DENIED — the report exposes
+# commercial amounts (privacy floor). PDF is deferred (multi-column money
+# table); JSON + CSV cover the contract.
+# ===========================================================================
+
+
+class ExtraWorkRevenueView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        return Response(
+            compute_extra_work_revenue(request.user, request.query_params)
+        )
+
+
+class ExtraWorkRevenueCSVView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        payload = compute_extra_work_revenue(request.user, request.query_params)
+        return _csv_response(
+            f"extra-work-revenue_{payload['from']}_{payload['to']}.csv",
+            build_extra_work_revenue_csv(payload),
         )

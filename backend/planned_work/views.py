@@ -10,16 +10,20 @@ the ticket viewset's action shape.
 """
 from __future__ import annotations
 
+import datetime
+
+from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .constants import DEFAULT_GENERATION_DAYS_AHEAD, MAX_GENERATION_DAYS_AHEAD
 from .errors import PlannedWorkError
 from .generation import generate_occurrences
 from .lifecycle import cancel_occurrence, skip_occurrence
-from .models import RecurringJob
+from .models import PlannedOccurrenceStatus, RecurringJob
 from .permissions import CanManagePlannedOccurrence, CanManageRecurringJob
 from .scoping import scope_planned_occurrences_for, scope_recurring_jobs_for
 from .serializers import (
@@ -28,6 +32,37 @@ from .serializers import (
     RecurringJobReadSerializer,
     RecurringJobWriteSerializer,
 )
+
+
+# All seven PlannedOccurrenceStatus values, in enum order. The rollup pads
+# its histogram with these keys so the response shape is stable even when a
+# status has zero rows in scope.
+_ALL_OCCURRENCE_STATUSES = [s.value for s in PlannedOccurrenceStatus]
+
+
+def _parse_rollup_date(raw: str, field_name: str) -> datetime.date:
+    try:
+        return datetime.datetime.strptime(raw, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise ValidationError(
+            {
+                "detail": "Invalid date for '%s'. Expected YYYY-MM-DD."
+                % field_name,
+                "code": "invalid_date",
+            }
+        )
+
+
+def _parse_rollup_id(raw: str, field_name: str) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            {
+                "detail": "'%s' must be an integer." % field_name,
+                "code": "invalid_id",
+            }
+        )
 
 
 class RecurringJobViewSet(viewsets.ModelViewSet):
@@ -174,6 +209,111 @@ class PlannedOccurrenceViewSet(viewsets.ReadOnlyModelViewSet):
             PlannedOccurrenceSerializer(
                 occurrence, context={"request": request}
             ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="stats")
+    def stats(self, request):
+        """Sprint 14A — planned-occurrence status rollup.
+
+        Aggregates the scoped occurrence set by status over an optional
+        `planned_date` window (date_from / date_to, inclusive), with
+        optional building_id / customer_id narrowing. The window and the
+        id filters are applied INSIDE `scope_planned_occurrences_for`, so a
+        foreign / out-of-scope id can only ever yield zero rows — it can
+        never 403 or leak another tenant's data (H-1 / H-2).
+
+        `by_status` always carries all seven PlannedOccurrenceStatus keys
+        (zero-padded). STAFF / CUSTOMER_USER never reach this code — the
+        IsProviderManager permission 403s them before dispatch (the
+        planned-work surface is provider-only).
+
+        Answers "this month, how many planned jobs completed / missed /
+        rescheduled?" via date_from / date_to on the immutable
+        planned_date + by_status.
+        """
+        params = request.query_params
+
+        date_from = None
+        raw_from = params.get("date_from")
+        if raw_from:
+            date_from = _parse_rollup_date(raw_from, "date_from")
+
+        date_to = None
+        raw_to = params.get("date_to")
+        if raw_to:
+            date_to = _parse_rollup_date(raw_to, "date_to")
+
+        if date_from is not None and date_to is not None and date_from > date_to:
+            raise ValidationError(
+                {
+                    "detail": "date_from must not be after date_to.",
+                    "code": "invalid_date_range",
+                }
+            )
+
+        building_id = None
+        raw_building = params.get("building_id")
+        if raw_building:
+            building_id = _parse_rollup_id(raw_building, "building_id")
+
+        customer_id = None
+        raw_customer = params.get("customer_id")
+        if raw_customer:
+            customer_id = _parse_rollup_id(raw_customer, "customer_id")
+
+        # Anchor on the scoped queryset — never on a caller-supplied id —
+        # so the filters narrow WITHIN the actor's visibility envelope.
+        qs = scope_planned_occurrences_for(request.user)
+        if date_from is not None:
+            qs = qs.filter(planned_date__gte=date_from)
+        if date_to is not None:
+            qs = qs.filter(planned_date__lte=date_to)
+        if building_id is not None:
+            qs = qs.filter(building_id=building_id)
+        if customer_id is not None:
+            qs = qs.filter(customer_id=customer_id)
+
+        by_status = {s: 0 for s in _ALL_OCCURRENCE_STATUSES}
+        for row in qs.values("status").annotate(c=Count("id")):
+            by_status[row["status"]] = row["c"]
+        total = sum(by_status.values())
+
+        # Per-building breakdown: one GROUP BY with conditional counts per
+        # status. Buildings with no rows in scope are skipped naturally
+        # (no padding rows), but every row that DOES appear carries all
+        # seven status keys for a stable per-row shape.
+        status_aggregates = {
+            "count_%s" % s: Count("id", filter=Q(status=s))
+            for s in _ALL_OCCURRENCE_STATUSES
+        }
+        by_building = [
+            {
+                "building_id": row["building_id"],
+                "building_name": row["building__name"],
+                "total": row["row_total"],
+                "by_status": {
+                    s: row["count_%s" % s] for s in _ALL_OCCURRENCE_STATUSES
+                },
+            }
+            for row in qs.values("building_id", "building__name")
+            .annotate(row_total=Count("id"), **status_aggregates)
+            .order_by("building__name", "building_id")
+        ]
+
+        return Response(
+            {
+                "from": date_from.isoformat() if date_from else None,
+                "to": date_to.isoformat() if date_to else None,
+                "filters": {
+                    "building_id": building_id,
+                    "customer_id": customer_id,
+                },
+                "by_status": by_status,
+                "total": total,
+                "by_building": by_building,
+                "generated_at": timezone.now().isoformat(),
+            },
             status=status.HTTP_200_OK,
         )
 

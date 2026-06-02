@@ -66,6 +66,74 @@ def build_tickets_by_type_csv(payload: dict) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
+# ---- CSV: tickets-by-origin (Sprint 14A) -----------------------------------
+
+
+ORIGIN_CSV_COLUMNS = (
+    "origin",
+    "origin_label",
+    "count",
+    "period_from",
+    "period_to",
+)
+
+
+def build_tickets_by_origin_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(ORIGIN_CSV_COLUMNS)
+    period_from = payload["from"]
+    period_to = payload["to"]
+    for bucket in payload["buckets"]:
+        writer.writerow(
+            {
+                "origin": bucket["origin"],
+                "origin_label": bucket["origin_label"],
+                "count": bucket["count"],
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+# ---- CSV: extra-work-revenue (Sprint 14A) ----------------------------------
+
+
+EXTRA_WORK_REVENUE_CSV_COLUMNS = (
+    "state",
+    "count",
+    "subtotal",
+    "vat",
+    "total",
+    "period_from",
+    "period_to",
+)
+
+# Stable row order — one row per revenue state, always emitted (even at
+# count 0) so the CSV shape is fixed regardless of which states have data.
+_REVENUE_CSV_STATE_ORDER = ("earned", "in_progress", "quoted_pipeline", "lost")
+
+
+def build_extra_work_revenue_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(EXTRA_WORK_REVENUE_CSV_COLUMNS)
+    period_from = payload["from"]
+    period_to = payload["to"]
+    states = payload["states"]
+    for state in _REVENUE_CSV_STATE_ORDER:
+        row = states[state]
+        writer.writerow(
+            {
+                "state": state,
+                "count": row["count"],
+                "subtotal": row["subtotal"],
+                "vat": row["vat"],
+                "total": row["total"],
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
 # ---- CSV: tickets-by-customer ----------------------------------------------
 
 
@@ -211,6 +279,24 @@ def build_tickets_by_type_pdf(payload: dict) -> bytes:
     _draw_table(
         pdf,
         headers=["Type label", "Type code", "Count"],
+        widths=[80, 60, 30],
+        rows=rows,
+    )
+    return _pdf_bytes(pdf)
+
+
+# ---- PDF: tickets-by-origin (Sprint 14A) -----------------------------------
+
+
+def build_tickets_by_origin_pdf(payload: dict) -> bytes:
+    pdf = _new_pdf("Tickets by origin", payload)
+    rows = [
+        [b["origin_label"], b["origin"], b["count"]]
+        for b in payload["buckets"]
+    ]
+    _draw_table(
+        pdf,
+        headers=["Origin label", "Origin code", "Count"],
         widths=[80, 60, 30],
         rows=rows,
     )
