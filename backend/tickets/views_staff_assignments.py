@@ -64,6 +64,7 @@ from .models import (
     Ticket,
     TicketStaffAssignment,
 )
+from .serializers import PHOTO_MIME_TYPES
 
 
 # Sprint 14E — writable slot fields, split by who may write them.
@@ -166,6 +167,35 @@ class _SlotWriteSerializer(serializers.ModelSerializer):
                         )
                     },
                     code="slot_unable_reason_required",
+                )
+        if new_status == StaffAssignmentSlotStatus.COMPLETED:
+            # Sprint 12 — completing a slot requires evidence: a non-empty
+            # completion_note OR at least one non-hidden linked PHOTO (image
+            # only — a PDF does not count). The photo is linked via the
+            # two-step flow: upload an attachment with staff_assignment_id,
+            # then PATCH slot_status=COMPLETED. Mirrors the ticket-level
+            # STAFF completion-evidence rule (state_machine.py) but on the
+            # per-staff dated-slot surface, which does NOT drive the ticket
+            # state machine.
+            note = attrs.get(
+                "completion_note",
+                getattr(self.instance, "completion_note", "") or "",
+            )
+            has_note = bool((note or "").strip())
+            has_photo = bool(
+                self.instance is not None
+                and self.instance.attachments.filter(
+                    is_hidden=False, mime_type__in=PHOTO_MIME_TYPES
+                ).exists()
+            )
+            if not (has_note or has_photo):
+                raise serializers.ValidationError(
+                    {
+                        "completion_note": (
+                            "Completing a slot requires a note or a photo."
+                        )
+                    },
+                    code="completion_evidence_required",
                 )
         start = attrs.get(
             "scheduled_start_at",

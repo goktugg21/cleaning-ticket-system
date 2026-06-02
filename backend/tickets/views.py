@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ErrorDetail, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
@@ -1124,6 +1125,51 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
         context["ticket"] = self._get_ticket()
         return context
 
+    def _resolve_evidence_slot(self, ticket, user, slot_id):
+        """Sprint 12 — resolve + scope-check an optional completion-evidence
+        slot link. CUSTOMER_USER may never link to an internal staff slot;
+        the slot must belong to THIS ticket; STAFF may link only their OWN
+        slot; provider managers/admins may link any in-scope slot (the
+        ticket is already scoped by `_get_ticket`)."""
+        if user.role == UserRole.CUSTOMER_USER:
+            raise ValidationError(
+                {
+                    "staff_assignment_id": [
+                        ErrorDetail(
+                            "Customers cannot link evidence to a staff slot.",
+                            code="slot_link_forbidden",
+                        )
+                    ]
+                }
+            )
+        slot = TicketStaffAssignment.objects.filter(pk=slot_id).first()
+        if slot is None or slot.ticket_id != ticket.id:
+            raise ValidationError(
+                {
+                    "staff_assignment_id": [
+                        ErrorDetail(
+                            "The staff slot does not belong to this ticket.",
+                            code="slot_ticket_mismatch",
+                        )
+                    ]
+                }
+            )
+        # Only the STAFF worker is restricted to their OWN slot; provider
+        # managers/admins (is_staff_role would also be True for them) may
+        # link any in-scope slot, so check the concrete STAFF role here.
+        if user.role == UserRole.STAFF and slot.user_id != user.id:
+            raise ValidationError(
+                {
+                    "staff_assignment_id": [
+                        ErrorDetail(
+                            "Staff may only attach evidence to their own slot.",
+                            code="slot_not_owned",
+                        )
+                    ]
+                }
+            )
+        return slot
+
     def perform_create(self, serializer):
         ticket = self._get_ticket()
         user = self.request.user
@@ -1131,9 +1177,19 @@ class TicketAttachmentListCreateView(generics.ListCreateAPIView):
 
         is_hidden = serializer.validated_data.get("is_hidden", False)
 
+        # Sprint 12 — optional per-slot evidence link (pop the write-only
+        # input so it is not double-applied via validated_data).
+        slot_id = serializer.validated_data.pop("staff_assignment_id", None)
+        slot = (
+            self._resolve_evidence_slot(ticket, user, slot_id)
+            if slot_id is not None
+            else None
+        )
+
         serializer.save(
             ticket=ticket,
             uploaded_by=user,
+            staff_assignment=slot,
             original_filename=uploaded_file.name,
             mime_type=getattr(uploaded_file, "content_type", "") or "application/octet-stream",
             file_size=getattr(uploaded_file, "size", 0),

@@ -92,6 +92,29 @@ ALLOWED_ATTACHMENT_MESSAGE = (
     "Only JPG, JPEG, PNG, WEBP, PDF, HEIC, and HEIF attachments are allowed."
 )
 
+# Sprint 12 — "photo" for slot completion evidence means an IMAGE only.
+# PDF is an allowed attachment type generally, but it does NOT satisfy the
+# completion-photo evidence rule (a scanned document is not proof the work
+# was done). This is the image subset of ALLOWED_ATTACHMENT_* minus pdf.
+PHOTO_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+
+
+def is_photo_attachment(attachment) -> bool:
+    """True iff the attachment is an image (not a PDF), by mime type or
+    filename extension. Used by the slot completion-evidence gate."""
+    if attachment.mime_type in PHOTO_MIME_TYPES:
+        return True
+    return FilePath(attachment.original_filename or "").suffix.lower() in (
+        PHOTO_EXTENSIONS
+    )
+
 
 class TicketStatusHistorySerializer(serializers.ModelSerializer):
     changed_by_email = serializers.CharField(source="changed_by.email", read_only=True)
@@ -971,6 +994,14 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
     uploaded_by_email = serializers.CharField(source="uploaded_by.email", read_only=True)
     file = serializers.FileField(write_only=True)
     file_url = serializers.SerializerMethodField()
+    # Sprint 12 — optional slot evidence link. `staff_assignment` is the
+    # read-side slot id (or null); `staff_assignment_id` is the write-only
+    # input. The view (perform_create) enforces scope: the slot must belong
+    # to the same ticket, STAFF may link only their OWN slot, and
+    # CUSTOMER_USER may not link evidence to an internal staff slot.
+    staff_assignment_id = serializers.IntegerField(
+        write_only=True, required=False, allow_null=True
+    )
 
     class Meta:
         model = TicketAttachment
@@ -978,6 +1009,8 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "id",
             "ticket",
             "message",
+            "staff_assignment",
+            "staff_assignment_id",
             "uploaded_by",
             "uploaded_by_email",
             "file",
@@ -992,6 +1025,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "id",
             "ticket",
             "message",
+            "staff_assignment",
             "uploaded_by",
             "uploaded_by_email",
             "file_url",
