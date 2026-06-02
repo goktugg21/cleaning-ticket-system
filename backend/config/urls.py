@@ -10,6 +10,7 @@ from accounts.views_staff import (
     BuildingStaffVisibilityListCreateView,
     StaffProfileView,
 )
+from accounts.views_permission_matrix import PermissionMatrixView
 from accounts.views_users import UserViewSet
 from config.health import liveness, readiness
 from tickets.urls import staff_request_router
@@ -72,6 +73,14 @@ urlpatterns = [
     # prefixes (`staff/` vs `staff-assignment-requests/`) do not
     # collide.
     path("api/staff/", StaffRosterView.as_view(), name="staff-roster"),
+    # Sprint 14B — read-only permission-matrix contract. Additive; does
+    # not disturb the existing /api/users/<id>/effective-permissions/
+    # endpoint. Admits SA / CA / BM; STAFF + CUSTOMER_USER are 403'd.
+    path(
+        "api/permissions/matrix/",
+        PermissionMatrixView.as_view(),
+        name="permission-matrix",
+    ),
     # Sprint 23A — staff-initiated "I want to do this work" review
     # queue. The viewset returns no results for CUSTOMER_USER so
     # the resource is invisible on the customer side.
