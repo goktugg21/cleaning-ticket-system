@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     AgeBucketsView,
     ExtraWorkRevenueCSVView,
+    ExtraWorkRevenuePDFView,
     ExtraWorkRevenueView,
     ManagerThroughputView,
     SLABreachRateOverTimeView,
@@ -127,5 +128,10 @@ urlpatterns = [
         "extra-work-revenue/export.csv",
         ExtraWorkRevenueCSVView.as_view(),
         name="reports-extra-work-revenue-csv",
+    ),
+    path(
+        "extra-work-revenue/export.pdf",
+        ExtraWorkRevenuePDFView.as_view(),
+        name="reports-extra-work-revenue-pdf",
     ),
 ]

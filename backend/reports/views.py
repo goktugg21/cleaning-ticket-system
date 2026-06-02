@@ -26,6 +26,7 @@ from .dimensions import (
 )
 from .exports import (
     build_extra_work_revenue_csv,
+    build_extra_work_revenue_pdf,
     build_tickets_by_building_csv,
     build_tickets_by_building_pdf,
     build_tickets_by_customer_csv,
@@ -687,4 +688,18 @@ class ExtraWorkRevenueCSVView(APIView):
         return _csv_response(
             f"extra-work-revenue_{payload['from']}_{payload['to']}.csv",
             build_extra_work_revenue_csv(payload),
+        )
+
+
+class ExtraWorkRevenuePDFView(APIView):
+    # Sprint 14D — PDF export of the Extra Work revenue-state report.
+    # Reuses the SAME compute path (scope, filters, date range, states,
+    # money totals) as the JSON / CSV views; writes nothing.
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        payload = compute_extra_work_revenue(request.user, request.query_params)
+        return _pdf_response(
+            "extra-work-revenue.pdf",
+            build_extra_work_revenue_pdf(payload),
         )

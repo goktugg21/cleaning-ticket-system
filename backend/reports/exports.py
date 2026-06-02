@@ -342,3 +342,73 @@ def build_tickets_by_building_pdf(payload: dict) -> bytes:
         rows=rows,
     )
     return _pdf_bytes(pdf)
+
+
+# ---- PDF: extra-work-revenue (Sprint 14D) ----------------------------------
+# Mirrors the JSON / CSV revenue report (same states, same money totals from
+# `compute_extra_work_revenue`) so the three formats cannot drift. Closes the
+# transcript-backed PDF-export gap (transkript.txt:65 "Bunu bir pdf yapip
+# cakiyoruz" / :415 "csv veya pdf"): per-state count + revenue answers
+# "kac ekstra is yapmis, ne kadar tutmus".
+#
+# The revenue payload shape differs from the dimension reports' (it carries a
+# `totals` dict + a `states` map, not a flat `buckets` list + int `total`), so
+# this builder constructs its own header instead of reusing `_new_pdf`, while
+# still sharing `_scope_summary_lines` / `_draw_table` / `_pdf_bytes`.
+_REVENUE_STATE_PDF_LABELS = {
+    "earned": "Earned (closed)",
+    "in_progress": "In progress",
+    "quoted_pipeline": "Quoted pipeline",
+    "lost": "Lost",
+}
+
+
+def build_extra_work_revenue_pdf(payload: dict) -> bytes:
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    pdf.set_font("helvetica", "B", 16)
+    pdf.cell(0, 10, "Extra Work Revenue", ln=1)
+
+    pdf.set_font("helvetica", "", 10)
+    pdf.cell(0, 6, f"Period: {payload['from']} -- {payload['to']}", ln=1)
+    pdf.cell(0, 6, f"Generated at: {payload['generated_at']}", ln=1)
+    for line in _scope_summary_lines(payload["scope"]):
+        pdf.cell(0, 6, line, ln=1)
+    totals = payload["totals"]
+    pdf.cell(
+        0,
+        6,
+        f"Total: {totals['count']} request(s) / {totals['total']} revenue",
+        ln=1,
+    )
+    pdf.ln(2)
+
+    states = payload["states"]
+    rows = [
+        [
+            _REVENUE_STATE_PDF_LABELS.get(state, state),
+            states[state]["count"],
+            states[state]["subtotal"],
+            states[state]["vat"],
+            states[state]["total"],
+        ]
+        for state in _REVENUE_CSV_STATE_ORDER
+    ]
+    rows.append(
+        [
+            "TOTAL",
+            totals["count"],
+            totals["subtotal"],
+            totals["vat"],
+            totals["total"],
+        ]
+    )
+    _draw_table(
+        pdf,
+        headers=["State", "Count", "Subtotal", "VAT", "Total"],
+        widths=[52, 24, 34, 34, 34],
+        rows=rows,
+    )
+    return _pdf_bytes(pdf)
