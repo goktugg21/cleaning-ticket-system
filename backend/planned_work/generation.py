@@ -45,9 +45,13 @@ def spawn_ticket_for_occurrence(occurrence: PlannedOccurrence, *, actor=None) ->
     creator = actor or job.created_by
 
     # Seed scheduled_start_at from the occurrence's planned_date combined
-    # with the job's preferred_start_time (midnight when none), made
-    # timezone-aware. Mirrors instant_tickets.earliest_requested_start.
-    start_time = job.preferred_start_time or datetime.time.min
+    # with the OCCURRENCE's snapshotted preferred_start_time (midnight when
+    # none), made timezone-aware. The occurrence snapshot is the
+    # planned-work calendar source of truth (Sprint 12); it equals the
+    # job's value at generation time but honours any per-occurrence
+    # override applied before the ticket is spawned. Mirrors
+    # instant_tickets.earliest_requested_start.
+    start_time = occurrence.preferred_start_time or datetime.time.min
     naive_start = datetime.datetime.combine(occurrence.planned_date, start_time)
     scheduled_start_at = timezone.make_aware(naive_start)
 
@@ -202,6 +206,17 @@ def generate_occurrences(
                         "building": job.building,
                         "customer": job.customer,
                         "status": PlannedOccurrenceStatus.PLANNED,
+                        # Sprint 12 — snapshot the job's pricing + schedule
+                        # window onto the occurrence at materialization
+                        # time. `defaults` only applies on CREATE, so an
+                        # existing occurrence keeps its frozen snapshot when
+                        # the parent job is later edited; only freshly
+                        # generated future occurrences pick up new values.
+                        "pricing_mode": job.pricing_mode,
+                        "fixed_price": job.fixed_price,
+                        "vat_pct": job.vat_pct,
+                        "preferred_start_time": job.preferred_start_time,
+                        "time_window_label": job.time_window_label,
                     },
                 )
                 if created:

@@ -187,6 +187,34 @@ class PlannedOccurrence(models.Model):
     skipped_at = models.DateTimeField(null=True, blank=True)
     generated_at = models.DateTimeField(null=True, blank=True)  # when ticket spawned
 
+    # ------------------------------------------------------------------
+    # Sprint 12 — per-occurrence pricing + schedule snapshot.
+    #
+    # Snapshotted from the parent RecurringJob at MATERIALIZATION time
+    # (generation get_or_create defaults) and then FROZEN: a later
+    # template edit must NOT silently rewrite a price/window already
+    # planned. Existing occurrences keep their snapshot; only newly
+    # generated future occurrences pick up the new job values. A provider
+    # manager may override these per occurrence via the `override` action
+    # (e.g. "this specific date after 09:00"). `fixed_price` is the
+    # VAT-EXCLUSIVE amount; VAT is computed on top. CONTRACT_INCLUDED /
+    # HOURLY occurrences carry no separate billable amount (the read
+    # serializer returns null totals for them).
+    # ------------------------------------------------------------------
+    pricing_mode = models.CharField(
+        max_length=24,
+        choices=PricingMode.choices,
+        default=PricingMode.CONTRACT_INCLUDED,
+    )
+    fixed_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    vat_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("21.00")
+    )
+    preferred_start_time = models.TimeField(null=True, blank=True)
+    time_window_label = models.CharField(max_length=64, blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
