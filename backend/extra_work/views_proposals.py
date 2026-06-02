@@ -33,10 +33,17 @@ from rest_framework.response import Response
 
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
-from accounts.permissions_v2 import user_has_osius_permission
+from accounts.permissions_v2 import (
+    user_has_osius_permission,
+    user_has_provider_dangerous_permission,
+)
+from audit import context as audit_context
+from audit.models import AuditAction, AuditLog, AuditSeverity
 
 from .models import (
     ExtraWorkPricingUnitType,
+    ExtraWorkRequestIntent,
+    ExtraWorkStatus,
     Proposal,
     ProposalLine,
     ProposalStatus,
@@ -603,7 +610,8 @@ class ProposalDirectPublishView(views.APIView):
     parent EW + spawn-tickets side effects fire from the existing
     approval path inside `apply_proposal_transition`.
 
-    Permission gate:
+    Permission gate (Sprint 14E — this IS the SoT §5.5 dangerous
+    quote-bypass; the gating is layered):
       * Provider operator in scope on the parent EW's customer /
         building (SA / CA via `osius.ticket.view_building` / BM in
         assigned building).
@@ -611,9 +619,22 @@ class ProposalDirectPublishView(views.APIView):
         `osius.building_manager.prepare_extra_work_proposal` AND
         `osius.building_manager.override_customer_decision` at the
         EW's building. Either revoked -> 403.
-      * CUSTOMER_USER / STAFF -> 403.
+      * THEN the dedicated DANGEROUS grant
+        `provider.extra_work.quote_override_start` must resolve True
+        for the EW's company (SA always; CA / BM only when their
+        provider company's `provider_admin_may_quote_override_start`
+        Super-Admin grant is ON). Holding the generic B6 override key
+        is NOT sufficient — a CA / BM at a non-granted company gets
+        403 `quote_override_not_permitted`. This closes SoT §5.5:
+        "SA/CA can silently bypass" is no longer true.
+      * CUSTOMER_USER / STAFF -> 403 / 404.
 
     Other preconditions:
+      * The parent Extra Work `request_intent` MUST be REQUEST_QUOTE
+        (the only intent where the customer normally still has to
+        approve). DIRECT_AGREED_PRICE_ORDER / AUTO_START_AFTER_PRICING
+        never reach a customer-approval step, so a bypass is
+        meaningless there -> 400 `quote_bypass_requires_quote_request`.
       * Proposal MUST be in DRAFT -> 400 with code
         `direct_publish_requires_draft` otherwise.
       * `override_reason` MUST be non-blank in the payload -> 400
@@ -676,6 +697,49 @@ class ProposalDirectPublishView(views.APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+        # Sprint 14E — DEDICATED dangerous quote-bypass grant. Layered
+        # ON TOP of the scope / prep / override gates above so their
+        # stable codes still fire first for a BM with a revoked B6 key.
+        # SA always resolves True; CA / BM only when their provider
+        # company carries the Super-Admin `quote_override_start` grant.
+        # Holding the generic B6 override key is NOT sufficient (SoT
+        # §5.5 — "this is dangerous"; matrix H-11 — separate concept).
+        if not user_has_provider_dangerous_permission(
+            request.user,
+            "provider.extra_work.quote_override_start",
+            company_id=extra_work.company_id,
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Quote-bypass (starting work without customer "
+                        "approval) requires the dedicated dangerous "
+                        "permission, which a Super Admin grants per "
+                        "provider company. It is off by default."
+                    ),
+                    "code": "quote_override_not_permitted",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Sprint 14E — the bypass is only meaningful for REQUEST_QUOTE
+        # requests, where the customer normally still has to approve the
+        # quote. DIRECT_AGREED_PRICE_ORDER spawns immediately and
+        # AUTO_START_AFTER_PRICING auto-approves on SEND, so neither has
+        # a customer-decision step to override.
+        if extra_work.request_intent != ExtraWorkRequestIntent.REQUEST_QUOTE:
+            return Response(
+                {
+                    "detail": (
+                        "Quote-bypass is only allowed for a Request-a-"
+                        "Quote Extra Work request, where the customer "
+                        "would normally approve the quote."
+                    ),
+                    "code": "quote_bypass_requires_quote_request",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # DRAFT-only precondition. Catching it explicitly here lets
         # the frontend distinguish "not DRAFT" from a generic
         # `forbidden_transition` raised inside the state machine.
@@ -723,6 +787,7 @@ class ProposalDirectPublishView(views.APIView):
         # encompasses both legs correctly. If the second leg raises,
         # the first leg's status mutation + ProposalStatusHistory row +
         # parent-EW advance + timeline event all roll back together.
+        ew_status_before = extra_work.status
         try:
             with transaction.atomic():
                 apply_proposal_transition(
@@ -757,6 +822,50 @@ class ProposalDirectPublishView(views.APIView):
                         is_override=True,
                         override_reason=override_reason,
                     )
+
+                # Sprint 14E — DANGEROUS-event audit (SoT §9.1 "quote-
+                # bypass used" + §9.2 red/high-severity). This is a
+                # DISTINCT security-event fact from the workflow-override
+                # `ProposalStatusHistory` row (which records the status
+                # transition): it records that a SA-granted dangerous
+                # CAPABILITY was exercised. It is therefore NOT a
+                # double-write of the status-history row (matrix H-11) —
+                # different fact, different surface. Written inside the
+                # atomic block so a downstream spawn failure rolls it
+                # back with everything else (no false "bypass succeeded"
+                # row). The generic `Proposal` CRUD audit rows stay at
+                # NORMAL severity; THIS row is the red-flag marker.
+                extra_work.refresh_from_db()
+                AuditLog.objects.create(
+                    actor=request.user,
+                    action=AuditAction.UPDATE,
+                    target_model="extra_work.ExtraWorkRequest",
+                    target_id=extra_work.id,
+                    changes={
+                        "status": {
+                            "before": ew_status_before,
+                            "after": extra_work.status,
+                        },
+                    },
+                    severity=AuditSeverity.HIGH,
+                    reason=override_reason,
+                    metadata={
+                        "event": "quote_override_start",
+                        "proposal_id": updated.id,
+                        "extra_work_id": extra_work.id,
+                        "request_intent": extra_work.request_intent,
+                        "building_id": extra_work.building_id,
+                        "customer_id": extra_work.customer_id,
+                        "quoted_total": str(
+                            getattr(updated, "total_amount", "")
+                        ),
+                    },
+                    request_ip=audit_context.get_current_request_ip(),
+                    request_id=audit_context.get_current_request_id(),
+                    actor_scope=audit_context.snapshot_actor_scope(
+                        request.user
+                    ),
+                )
         except TransitionError as exc:
             return Response(
                 {"detail": str(exc), "code": exc.code},

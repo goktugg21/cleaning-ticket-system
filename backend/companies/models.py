@@ -87,6 +87,42 @@ class Company(models.Model):
         ),
     )
 
+    # Sprint 14E — DANGEROUS Super Admin-controlled grant. Backs the
+    # `provider.extra_work.quote_override_start` permission key
+    # (`accounts.permissions_v2.user_has_provider_dangerous_permission`).
+    #
+    # When True: a COMPANY_ADMIN / BUILDING_MANAGER of this provider
+    # company MAY directly publish a REQUEST_QUOTE Extra Work proposal
+    # (DRAFT -> CUSTOMER_APPROVED) WITHOUT the customer's approval, via
+    # the `proposals/<pid>/direct-publish/` endpoint, after entering
+    # pricing. This is the SoT §5.5 dangerous quote-bypass.
+    #
+    # When False (default — DANGEROUS, so OFF by default per SoT §2.1):
+    # only SUPER_ADMIN may quote-bypass. A Provider Admin / Building
+    # Manager is blocked even if they hold the generic B6
+    # `osius.building_manager.override_customer_decision` key — the
+    # dedicated dangerous grant is REQUIRED and is separate from the
+    # generic override. Every successful bypass writes a HIGH-severity
+    # AuditLog row (`audit.models.AuditLog.severity`).
+    #
+    # Only SUPER_ADMIN may write this field — `CompanySerializer`'s
+    # `validate_provider_admin_may_quote_override_start` rejects writes
+    # from any other actor. The field is part of `Company`'s full-CRUD
+    # audit coverage, so every grant / revoke lands on the AuditLog.
+    provider_admin_may_quote_override_start = models.BooleanField(
+        default=False,
+        help_text=(
+            "Sprint 14E — DANGEROUS Super Admin-controlled grant "
+            "(default OFF). When True, a Provider Company Admin / "
+            "Building Manager of this provider company may bypass "
+            "customer quote approval and start work from a "
+            "REQUEST_QUOTE proposal after entering pricing "
+            "(direct-publish). When False, only Super Admin may. "
+            "Backs the provider.extra_work.quote_override_start "
+            "permission key; every use is HIGH-severity audited."
+        ),
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -33,6 +33,7 @@ from typing import Optional
 from accounts.models import UserRole
 from accounts.permissions_v2 import (
     BM_REVOCABLE_PERMISSION_KEYS,
+    PROVIDER_DANGEROUS_PERMISSION_KEYS,
     user_has_osius_permission,
 )
 from customers.permissions import (
@@ -83,7 +84,9 @@ BM_MATRIX_KEYS: tuple[str, ...] = tuple(
 def _category_for(key: str) -> str:
     if key.startswith("customer.ticket.") or key.startswith("osius.ticket."):
         return "tickets"
-    if key.startswith("customer.extra_work."):
+    if key.startswith("customer.extra_work.") or key.startswith(
+        "provider.extra_work."
+    ):
         return "extra_work"
     if key.startswith("customer.users."):
         return "users"
@@ -203,23 +206,43 @@ _CATALOG_TEXT: dict[str, tuple[str, str]] = {
         "Prepare extra-work proposal",
         "Create and edit extra-work proposals at the assigned building.",
     ),
+    # provider.* — Sprint 14E DANGEROUS keys.
+    "provider.extra_work.quote_override_start": (
+        "Quote-bypass: start work without customer approval",
+        "DANGEROUS. Directly publish a Request-a-Quote Extra Work "
+        "proposal and start operational work WITHOUT the customer's "
+        "approval. Super Admin-granted per provider company; default "
+        "off; every use is high-severity audited.",
+    ),
 }
 
 
-def _catalog_entry(key: str) -> dict[str, str]:
+# Sprint 14E — keys the UI must render with a danger / locked treatment.
+DANGEROUS_PERMISSION_KEYS: frozenset[str] = PROVIDER_DANGEROUS_PERMISSION_KEYS
+
+
+def _catalog_entry(key: str) -> dict:
     label, description = _CATALOG_TEXT.get(key, (key, ""))
     return {
         "label": label,
         "category": _category_for(key),
         "description": description,
+        # Sprint 14E — frontend renders dangerous keys with a red /
+        # locked treatment (SoT §9.2 / §5.5).
+        "dangerous": key in DANGEROUS_PERMISSION_KEYS,
     }
 
 
-# Public read-only catalog: key -> {label, category, description} for every
-# customer matrix key AND every BM matrix key.
-CATALOG: dict[str, dict[str, str]] = {
+# Public read-only catalog: key -> {label, category, description, dangerous}
+# for every customer matrix key, every BM matrix key, AND every provider
+# dangerous key.
+CATALOG: dict[str, dict] = {
     key: _catalog_entry(key)
-    for key in tuple(CUSTOMER_MATRIX_KEYS) + tuple(BM_MATRIX_KEYS)
+    for key in (
+        tuple(CUSTOMER_MATRIX_KEYS)
+        + tuple(BM_MATRIX_KEYS)
+        + tuple(sorted(PROVIDER_DANGEROUS_PERMISSION_KEYS))
+    )
 }
 
 

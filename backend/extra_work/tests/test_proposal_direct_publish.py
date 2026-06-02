@@ -44,10 +44,12 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from audit.models import AuditLog, AuditSeverity
 from extra_work.models import (
     ExtraWorkCategory,
     ExtraWorkPricingUnitType,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkRequestItem,
     ExtraWorkStatus,
     Proposal,
@@ -164,7 +166,21 @@ class _DirectPublishFixtureMixin:
         c.force_authenticate(user=user)
         return c
 
-    def _make_ew_under_review(self, *, cart_qty=Decimal("2.00")) -> ExtraWorkRequest:
+    def _grant_quote_override(self, on: bool = True):
+        """Sprint 14E — flip the company-level dangerous quote-bypass
+        grant. Default fixture state is OFF (dangerous, default-off)."""
+        self.company.refresh_from_db()
+        self.company.provider_admin_may_quote_override_start = on
+        self.company.save(
+            update_fields=["provider_admin_may_quote_override_start"]
+        )
+
+    def _make_ew_under_review(
+        self,
+        *,
+        cart_qty=Decimal("2.00"),
+        request_intent=ExtraWorkRequestIntent.REQUEST_QUOTE,
+    ) -> ExtraWorkRequest:
         ew = ExtraWorkRequest.objects.create(
             company=self.company,
             building=self.building,
@@ -174,6 +190,7 @@ class _DirectPublishFixtureMixin:
             description="parent description",
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=ExtraWorkStatus.UNDER_REVIEW,
+            request_intent=request_intent,
         )
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
@@ -278,6 +295,7 @@ class DirectPublishHappyPathTests(_DirectPublishFixtureMixin, TestCase):
         self.assertEqual(spawned.building_id, self.building.id)
 
     def test_company_admin_can_direct_publish(self):
+        self._grant_quote_override(True)
         ew = self._make_ew_under_review()
         proposal = self._make_draft_proposal(ew)
         response = self._api(self.admin).post(
@@ -290,7 +308,9 @@ class DirectPublishHappyPathTests(_DirectPublishFixtureMixin, TestCase):
         self.assertEqual(proposal.status, ProposalStatus.CUSTOMER_APPROVED)
 
     def test_bm_with_both_keys_can_direct_publish(self):
-        # Default: BMA has empty overrides -> both keys resolve True.
+        # Default: BMA has empty overrides -> both B6 keys resolve True.
+        # Sprint 14E: the dedicated dangerous grant is ALSO required.
+        self._grant_quote_override(True)
         ew = self._make_ew_under_review()
         proposal = self._make_draft_proposal(ew)
         response = self._api(self.bm).post(
@@ -538,3 +558,179 @@ class DirectPublishDoesNotBreakTransitionEndpointTests(
             new_status=ProposalStatus.CUSTOMER_APPROVED,
         )
         self.assertFalse(history_row.is_override)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 14E — dedicated dangerous quote-bypass grant
+# ---------------------------------------------------------------------------
+class DirectPublishDangerousGrantTests(_DirectPublishFixtureMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup()
+
+    def test_company_admin_without_grant_forbidden(self):
+        # Default fixture: company grant is OFF. A CA in scope (and who
+        # would have silently bypassed pre-14E) is now blocked.
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        response = self._api(self.admin).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "Trying without the dangerous grant."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(response.data["code"], "quote_override_not_permitted")
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, ProposalStatus.DRAFT)
+
+    def test_bm_with_b6_keys_but_no_grant_forbidden(self):
+        # The generic B6 override key is NOT sufficient (matrix H-11 /
+        # SoT §5.5). BM has both B6 keys by default but no dangerous
+        # grant -> the dedicated gate fires after the B6 gates pass.
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        response = self._api(self.bm).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "B6 override key is not enough."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertEqual(response.data["code"], "quote_override_not_permitted")
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, ProposalStatus.DRAFT)
+
+    def test_super_admin_does_not_need_grant(self):
+        # SA is omnipotent + the grant authority; the grant stays OFF.
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        response = self._api(self.super_admin).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "SA acts directly."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, ProposalStatus.CUSTOMER_APPROVED)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 14E — REQUEST_QUOTE-only intent gate
+# ---------------------------------------------------------------------------
+class DirectPublishIntentGateTests(_DirectPublishFixtureMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup()
+
+    def test_direct_agreed_price_order_cannot_be_bypassed(self):
+        # SA so the permission gate is out of the way — isolate the
+        # intent gate.
+        ew = self._make_ew_under_review(
+            request_intent=ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER
+        )
+        proposal = self._make_draft_proposal(ew)
+        response = self._api(self.super_admin).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "Should be blocked by intent gate."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(
+            response.data["code"], "quote_bypass_requires_quote_request"
+        )
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, ProposalStatus.DRAFT)
+
+    def test_auto_start_after_pricing_cannot_be_bypassed(self):
+        ew = self._make_ew_under_review(
+            request_intent=ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING
+        )
+        proposal = self._make_draft_proposal(ew)
+        response = self._api(self.super_admin).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "Auto-start has no customer step."},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(
+            response.data["code"], "quote_bypass_requires_quote_request"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 14E — HIGH-severity / red-flag audit on a successful bypass
+# ---------------------------------------------------------------------------
+class DirectPublishHighSeverityAuditTests(
+    _DirectPublishFixtureMixin, TestCase
+):
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup()
+
+    def test_successful_bypass_writes_high_severity_audit_row(self):
+        self._grant_quote_override(True)
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        reason = "Customer approved verbally; crew already on site."
+
+        response = self._api(self.admin).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": reason},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
+        high_rows = AuditLog.objects.filter(
+            severity=AuditSeverity.HIGH,
+            target_model="extra_work.ExtraWorkRequest",
+            target_id=ew.id,
+        )
+        self.assertEqual(high_rows.count(), 1, "exactly one HIGH-severity row")
+        row = high_rows.first()
+        self.assertEqual(row.metadata.get("event"), "quote_override_start")
+        self.assertEqual(row.metadata.get("proposal_id"), proposal.id)
+        self.assertEqual(row.reason, reason)
+        self.assertEqual(row.actor_id, self.admin.id)
+        # The dangerous row carries the actor's scope snapshot.
+        self.assertEqual(row.actor_scope.get("role"), UserRole.COMPANY_ADMIN)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 14E — out-of-scope provider cannot reach the endpoint
+# ---------------------------------------------------------------------------
+class DirectPublishOutOfScopeProviderTests(
+    _DirectPublishFixtureMixin, TestCase
+):
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup()
+        # A second, unrelated provider company + its COMPANY_ADMIN.
+        cls.other_company = Company.objects.create(
+            name="Other Provider", slug="other-prov-dp"
+        )
+        # The other company HAS the dangerous grant on — proving scope,
+        # not the grant, is what blocks the cross-company actor.
+        cls.other_company.provider_admin_may_quote_override_start = True
+        cls.other_company.save(
+            update_fields=["provider_admin_may_quote_override_start"]
+        )
+        cls.other_admin = _mk(
+            "other-admin-dp@example.com", UserRole.COMPANY_ADMIN
+        )
+        CompanyUserMembership.objects.create(
+            user=cls.other_admin, company=cls.other_company
+        )
+
+    def test_cross_company_admin_cannot_direct_publish(self):
+        ew = self._make_ew_under_review()
+        proposal = self._make_draft_proposal(ew)
+        response = self._api(self.other_admin).post(
+            self._publish_url(ew.id, proposal.id),
+            {"override_reason": "Cross-company attempt."},
+            format="json",
+        )
+        # The EW is outside the actor's scope -> 404 (existence not
+        # leaked). 200 is the only forbidden outcome.
+        self.assertNotEqual(response.status_code, 200, response.data)
+        self.assertIn(response.status_code, (403, 404))
+        proposal.refresh_from_db()
+        self.assertEqual(proposal.status, ProposalStatus.DRAFT)

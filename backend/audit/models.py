@@ -8,6 +8,21 @@ class AuditAction(models.TextChoices):
     DELETE = "DELETE", "Delete"
 
 
+class AuditSeverity(models.TextChoices):
+    """Sprint 14E — audit severity / red-flag marker.
+
+    The vast majority of audit rows are NORMAL operational mutations.
+    HIGH marks a dangerous / red-flag business event the SoT §9.2
+    wants visually distinguished — currently the dangerous Extra Work
+    quote-bypass (`provider.extra_work.quote_override_start`). The
+    enum leaves room for future dangerous events (price edits on
+    closed work, broad permission grants) without a schema change.
+    """
+
+    NORMAL = "NORMAL", "Normal"
+    HIGH = "HIGH", "High / red-flag"
+
+
 class AuditLog(models.Model):
     """
     Immutable record of a mutation against a tracked admin model.
@@ -78,6 +93,34 @@ class AuditLog(models.Model):
             "Snapshot of the actor's role + scope anchors at write time. "
             "Shape: role / user_id / company_ids / customer_id / building_id. "
             "Empty dict for anonymous or system writes."
+        ),
+    )
+    # Sprint 14E (SoT §9.2): severity / red-flag marker. Defaults to
+    # NORMAL for every existing and signal-driven write; explicit
+    # callers (the dangerous quote-bypass view) set HIGH so the audit
+    # feed can render the row red. Indexed so a "show me the dangerous
+    # events" filter is cheap.
+    severity = models.CharField(
+        max_length=8,
+        choices=AuditSeverity.choices,
+        default=AuditSeverity.NORMAL,
+        db_index=True,
+        help_text=(
+            "NORMAL for routine mutations; HIGH for dangerous / "
+            "red-flag business events (e.g. the Extra Work quote-bypass)."
+        ),
+    )
+    # Sprint 14E: structured, non-diff metadata for a business event
+    # (e.g. {"event": "quote_override_start", "proposal_id": 9,
+    # "extra_work_id": 3, "quoted_total": "121.00"}). Distinct from
+    # `changes` (a field diff) and `reason` (free text). Empty dict for
+    # ordinary CRUD rows.
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Structured business-event metadata (e.g. the dangerous "
+            "event name + anchors). Empty for ordinary CRUD rows."
         ),
     )
 

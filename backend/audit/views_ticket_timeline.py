@@ -167,6 +167,8 @@ class TicketAuditTimelineView(APIView):
                     "action": log.action,
                     "changes": log.changes,
                     "reason": log.reason,
+                    "severity": log.severity,
+                    "metadata": log.metadata,
                     "actor_email": log.actor.email if log.actor_id else None,
                 }
             )

@@ -40,6 +40,7 @@ class CompanySerializer(serializers.ModelSerializer):
             "provider_admin_may_manage_customer_company_admins",
             "provider_admin_may_manage_catalog",
             "provider_admin_may_manage_customer_prices",
+            "provider_admin_may_quote_override_start",
             "created_at",
             "updated_at",
         ]
@@ -75,5 +76,15 @@ class CompanySerializer(serializers.ModelSerializer):
         management toggle."""
         self._require_super_admin(
             "provider_admin_may_manage_customer_prices"
+        )
+        return value
+
+    def validate_provider_admin_may_quote_override_start(self, value):
+        """Sprint 14E — only Super Admin may flip the DANGEROUS
+        quote-bypass grant (SoT §2.1 / §5.5). A Provider Company Admin
+        with PATCH access to the rest of the Company row cannot
+        self-grant this capability."""
+        self._require_super_admin(
+            "provider_admin_may_quote_override_start"
         )
         return value
