@@ -58,6 +58,7 @@ from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
 from accounts.permissions_v2 import user_has_osius_permission
 from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
+from notifications.services import send_slot_unable_to_complete_email
 
 from .models import (
     StaffAssignmentSlotStatus,
@@ -459,10 +460,9 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
         # whole PATCH is ONE row write -> exactly ONE audit UPDATE row
         # (Sprint 14E audit-coverage contract), not a status row + a
         # follow-up completed_at row.
+        prev_status = assignment.slot_status
         save_extra = {}
-        new_status = ser.validated_data.get(
-            "slot_status", assignment.slot_status
-        )
+        new_status = ser.validated_data.get("slot_status", prev_status)
         if (
             new_status == StaffAssignmentSlotStatus.COMPLETED
             and assignment.completed_at is None
@@ -472,6 +472,19 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
                 "completed_by": request.user,
             }
         updated = ser.save(**save_extra)
+
+        # Sprint 12 — notify the provider/manager side when a slot is newly
+        # reported unable-to-complete so a manager can reschedule / reassign.
+        # The slot does NOT change ticket status, so the status-change email
+        # never fires; this is the only manager signal. Only on the
+        # transition INTO unable (not a re-PATCH of an already-unable slot).
+        if (
+            new_status == StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE
+            and prev_status != StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE
+        ):
+            send_slot_unable_to_complete_email(
+                ticket, updated, actor=request.user
+            )
 
         return Response(_TicketStaffAssignmentSerializer(updated).data)
 

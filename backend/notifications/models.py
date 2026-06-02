@@ -8,6 +8,14 @@ class NotificationEventType(models.TextChoices):
     TICKET_STATUS_CHANGED = "TICKET_STATUS_CHANGED", "Ticket status changed"
     TICKET_ASSIGNED = "TICKET_ASSIGNED", "Ticket assigned"
     TICKET_UNASSIGNED = "TICKET_UNASSIGNED", "Ticket unassigned"
+    # Sprint 12 — a staff member reported a dated SLOT as unable-to-complete
+    # (slot_status=UNABLE_TO_COMPLETE on the slot PATCH). Unlike the
+    # ticket-level unable flow this does NOT change ticket status, so the
+    # status-change email never fires; the provider managers are notified
+    # via a dedicated event so they can reschedule. Deliberately NOT in
+    # USER_MUTABLE_EVENT_TYPES — operational follow-up must always reach
+    # the managers.
+    TICKET_SLOT_UNABLE = "TICKET_SLOT_UNABLE", "Staff slot unable to complete"
     PASSWORD_RESET = "PASSWORD_RESET", "Password reset"
     INVITATION_SENT = "INVITATION_SENT", "Invitation sent"
 
