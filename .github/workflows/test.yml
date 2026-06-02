@@ -21,13 +21,18 @@ jobs:
   backend-test:
     name: Backend (Django, Postgres, Redis)
     runs-on: ubuntu-latest
-    # Sprint 25A — the full Django regression (385+ tests, including
-    # 14+ new Sprint 25A direct-staff-assignment cases) approaches
-    # the 20-minute job ceiling on GitHub-hosted ubuntu-latest
-    # runners. Raising to 40 minutes so a still-running valid test
-    # suite cannot be killed mid-stream by the job timeout while
-    # we keep the full regression as the required PR gate.
-    timeout-minutes: 40
+    # The full Django regression has grown to ~2000+ hermetic tests
+    # and no longer fits a SERIAL run under the old 40-minute ceiling
+    # on GitHub-hosted ubuntu-latest runners (the ceiling was sized
+    # for the ~385-test Sprint 25A suite and the suite has grown many
+    # sprints since, deterministically timing the job out mid-stream).
+    # The "Run test suite" step now passes `--parallel`, fanning the
+    # hermetic suite across the runner's CPUs (~3-4x faster). The
+    # tests are hermetic (APITestCase with per-test data, real
+    # Postgres) so parallel DB-cloning is safe. timeout-minutes is
+    # kept at 50 as a safety margin so a still-running valid suite is
+    # never killed mid-stream. Full regression stays the required PR gate.
+    timeout-minutes: 50
 
     services:
       db:
@@ -105,7 +110,11 @@ jobs:
 
       - name: Run test suite
         working-directory: backend
-        run: python manage.py test --noinput --verbosity=1
+        # `--parallel` fans the hermetic suite across the runner's CPUs
+        # (Django clones the test DB per worker). Keeps the full
+        # regression as the required gate while finishing well under
+        # the job timeout. See the timeout-minutes note above.
+        run: python manage.py test --noinput --verbosity=1 --parallel
 
   frontend-build:
     name: Frontend (lint, tsc, vite build)
