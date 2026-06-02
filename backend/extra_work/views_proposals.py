@@ -22,6 +22,8 @@ line CRUD endpoints.
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
@@ -34,12 +36,15 @@ from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 
 from .models import (
+    ExtraWorkPricingUnitType,
     Proposal,
     ProposalLine,
     ProposalStatus,
     ProposalStatusHistory,
     ProposalTimelineEvent,
     ProposalTimelineEventType,
+    _two_places,
+    compute_line_amounts,
 )
 from .proposal_pdf import render_proposal_pdf
 from .proposal_state_machine import (
@@ -58,6 +63,7 @@ from .serializers import (
     ProposalTimelineEventAdminSerializer,
     ProposalTimelineEventCustomerSerializer,
     ProposalTransitionSerializer,
+    _decimal_str,
 )
 
 
@@ -403,6 +409,133 @@ class ProposalLineDetailView(views.APIView):
         line.delete()
         proposal.recompute_totals()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Proposal line live preview (Sprint 13B — compute-only, persists nothing)
+# ---------------------------------------------------------------------------
+class ProposalLinePreviewView(views.APIView):
+    """
+    POST /api/extra-work/<ew_id>/proposals/<pid>/lines/preview/
+
+    Pure calculator for the proposal-line editor's live total. Takes a
+    list of unsaved lines and returns per-line + aggregate money using
+    the SAME `compute_line_amounts` helper `ProposalLine.save()` calls,
+    so the preview is byte-equal to what a subsequent create would
+    persist. Writes nothing: no row, no recompute, no status-history,
+    no audit.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def post(self, request, ew_id: int, pid: int):
+        extra_work, proposal = _resolve_proposal_or_404(request, ew_id, pid)
+        guard = _require_provider_in_scope(request, extra_work)
+        if guard is not None:
+            return guard
+        # Deliberately NOT gated on proposal.status == DRAFT: this is a
+        # read-only calculator that mutates nothing, so previewing
+        # against a SENT / approved proposal is harmless.
+
+        lines = request.data.get("lines")
+        if not isinstance(lines, list) or len(lines) == 0:
+            return Response(
+                {
+                    "detail": "At least one line is required.",
+                    "code": "preview_lines_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        valid_unit_types = set(ExtraWorkPricingUnitType.values)
+        per_line: list[dict] = []
+        subtotal = Decimal("0.00")
+        vat_total = Decimal("0.00")
+        total = Decimal("0.00")
+
+        for index, raw in enumerate(lines):
+            raw = raw if isinstance(raw, dict) else {}
+
+            def _err(code: str) -> Response:
+                return Response(
+                    {
+                        "detail": "Invalid preview line.",
+                        "code": code,
+                        "index": index,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # quantity > 0
+            try:
+                quantity = Decimal(str(raw.get("quantity")))
+            except (InvalidOperation, TypeError, ValueError):
+                return _err("quantity_invalid")
+            if quantity <= Decimal("0"):
+                return _err("quantity_invalid")
+
+            # unit_price >= 0
+            try:
+                unit_price = Decimal(str(raw.get("unit_price")))
+            except (InvalidOperation, TypeError, ValueError):
+                return _err("unit_price_invalid")
+            if unit_price < Decimal("0"):
+                return _err("unit_price_invalid")
+
+            # vat_pct defaults to 21.00 when omitted / blank
+            raw_vat = raw.get("vat_pct", None)
+            if raw_vat is None or (
+                isinstance(raw_vat, str) and not raw_vat.strip()
+            ):
+                vat_pct = Decimal("21.00")
+            else:
+                try:
+                    vat_pct = Decimal(str(raw_vat))
+                except (InvalidOperation, TypeError, ValueError):
+                    return _err("vat_invalid")
+            if vat_pct < Decimal("0") or vat_pct > Decimal("100"):
+                return _err("vat_invalid")
+
+            # unit_type must be a known choice
+            if raw.get("unit_type") not in valid_unit_types:
+                return _err("unit_type_invalid")
+
+            # service id OR non-blank custom description required
+            service = raw.get("service", None)
+            description = raw.get("description", "") or ""
+            custom_description = raw.get("custom_description", "") or ""
+            has_service = service is not None and service != ""
+            has_description = bool(
+                (description or custom_description or "").strip()
+            )
+            if not has_service and not has_description:
+                return _err("preview_line_invalid")
+
+            line_subtotal, line_vat, line_total = compute_line_amounts(
+                quantity, unit_price, vat_pct
+            )
+            subtotal += line_subtotal
+            vat_total += line_vat
+            total += line_total
+            per_line.append(
+                {
+                    "index": index,
+                    "line_subtotal": _decimal_str(line_subtotal),
+                    "line_vat": _decimal_str(line_vat),
+                    "line_total": _decimal_str(line_total),
+                }
+            )
+
+        return Response(
+            {
+                "lines": per_line,
+                "totals": {
+                    "subtotal": _decimal_str(_two_places(subtotal)),
+                    "vat": _decimal_str(_two_places(vat_total)),
+                    "total": _decimal_str(_two_places(total)),
+                },
+            }
+        )
 
 
 # ---------------------------------------------------------------------------

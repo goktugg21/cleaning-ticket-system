@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from buildings.models import Building, BuildingManagerAssignment
+from buildings.models import Building, BuildingManagerAssignment, BuildingStaffVisibility
 from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Customer,
@@ -19,7 +19,7 @@ from .invitations import (
     generate_invitation_token,
     hash_invitation_token,
 )
-from .models import User, UserRole
+from .models import StaffProfile, User, UserRole
 from .scoping import (
     building_ids_for,
     company_ids_for,
@@ -140,6 +140,21 @@ class InvitationCreateSerializer(serializers.ModelSerializer):
             if company_ids or building_ids:
                 raise serializers.ValidationError(
                     "CUSTOMER_USER invitations only carry a customer scope."
+                )
+        elif role == UserRole.STAFF:
+            # Sprint 13B — STAFF invites mirror the BUILDING_MANAGER
+            # shape: a STAFF user is scoped purely by buildings. The
+            # actor-scope loop below validates these building_ids against
+            # a COMPANY_ADMIN actor's scope, and save_with_token binds
+            # invitation.buildings — so the accept path can materialise
+            # the StaffProfile + per-building BuildingStaffVisibility rows.
+            if not building_ids:
+                raise serializers.ValidationError(
+                    {"building_ids": "STAFF invitations must specify at least one building."}
+                )
+            if company_ids or customer_ids:
+                raise serializers.ValidationError(
+                    "STAFF invitations only carry a building scope."
                 )
 
         # Resolve and authorize against actor scope.
@@ -381,6 +396,33 @@ class InvitationAcceptSerializer(serializers.Serializer):
                                 ),
                             },
                         )
+        elif invitation.role == UserRole.STAFF:
+            # Sprint 13B — materialise the STAFF artefacts the rest of the
+            # system keys off: a StaffProfile (one-to-one, all non-user
+            # fields default) and a BuildingStaffVisibility row per invited
+            # building. Without these the accepted user is an orphan —
+            # invisible to direct-assignment eligibility and unable to be
+            # assigned to tickets.
+            #
+            # Onboarding default = ASSIGNED_ONLY (NOT the model default
+            # BUILDING_READ). Per the Ramazan transcript
+            # (docs/transkript.txt lines 27/31/35) a newly-onboarded STAFF
+            # sees ONLY their assigned tickets; a BM/admin explicitly
+            # widens to building-read later. ASSIGNED_ONLY recognises the
+            # staff at the building for direct-assignment eligibility while
+            # the H-4 floor (sees own assigned tickets) stays preserved by
+            # scope_tickets_for.
+            StaffProfile.objects.get_or_create(user=user)
+            for building in invitation.buildings.all():
+                BuildingStaffVisibility.objects.get_or_create(
+                    building=building,
+                    user=user,
+                    defaults={
+                        "visibility_level": (
+                            BuildingStaffVisibility.VisibilityLevel.ASSIGNED_ONLY
+                        ),
+                    },
+                )
         # SUPER_ADMIN: no scope rows; the role itself is global.
 
         # Sprint 12B — link the originating Contact (promote-to-user

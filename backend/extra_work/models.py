@@ -204,6 +204,20 @@ def _two_places(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
+def compute_line_amounts(quantity, unit_price, vat_pct):
+    """Pure money calculator for a single proposal line.
+
+    Returns (line_subtotal, line_vat, line_total) all quantized to
+    two places. Shared by `ProposalLine.save()` (persisted path) and
+    the compute-only line-preview endpoint so the live preview is
+    byte-equal to what gets stored.
+    """
+    line_subtotal = _two_places(quantity * unit_price)
+    line_vat = _two_places(line_subtotal * vat_pct / Decimal("100"))
+    line_total = _two_places(line_subtotal + line_vat)
+    return line_subtotal, line_vat, line_total
+
+
 class ExtraWorkRequest(models.Model):
     """
     The single entity a customer-side user creates and a provider-
@@ -1282,12 +1296,16 @@ class ProposalLine(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        # Stored totals always recomputed from the inputs.
-        self.line_subtotal = _two_places(self.quantity * self.unit_price)
-        self.line_vat = _two_places(
-            self.line_subtotal * self.vat_pct / Decimal("100")
+        # Stored totals always recomputed from the inputs via the
+        # shared pure helper so the live-preview endpoint and the
+        # persisted row never diverge.
+        (
+            self.line_subtotal,
+            self.line_vat,
+            self.line_total,
+        ) = compute_line_amounts(
+            self.quantity, self.unit_price, self.vat_pct
         )
-        self.line_total = _two_places(self.line_subtotal + self.line_vat)
         super().save(*args, **kwargs)
 
 

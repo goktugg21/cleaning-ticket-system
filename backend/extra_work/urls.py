@@ -11,6 +11,7 @@ from .views_proposals import (
     ProposalDirectPublishView,
     ProposalLineDetailView,
     ProposalLineListCreateView,
+    ProposalLinePreviewView,
     ProposalListCreateView,
     ProposalPdfView,
     ProposalStatusHistoryView,
@@ -65,6 +66,12 @@ urlpatterns = [
         "<int:ew_id>/proposals/<int:pid>/lines/",
         ProposalLineListCreateView.as_view(),
         name="extra-work-proposal-line-list",
+    ),
+    # Sprint 13B — compute-only line preview (persists nothing).
+    path(
+        "<int:ew_id>/proposals/<int:pid>/lines/preview/",
+        ProposalLinePreviewView.as_view(),
+        name="extra-work-proposal-line-preview",
     ),
     path(
         "<int:ew_id>/proposals/<int:pid>/lines/<int:lid>/",
