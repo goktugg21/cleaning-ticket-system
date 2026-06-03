@@ -7,6 +7,7 @@ import type {
   StatusDistributionResponse,
   TicketsByBuildingResponse,
   TicketsByCustomerResponse,
+  TicketsByOriginResponse,
   TicketsByTypeResponse,
   TicketsOverTimeResponse,
 } from "./reports.types";
@@ -119,6 +120,18 @@ export async function fetchTicketsByBuilding(
   return data;
 }
 
+// Sprint 14A — tickets grouped by origin axis (Normal / Extra Work /
+// Converted / Planned). Backend report shipped in Sprint 14A.
+export async function fetchTicketsByOrigin(
+  filters: ReportFilters,
+): Promise<TicketsByOriginResponse> {
+  const { data } = await api.get<TicketsByOriginResponse>(
+    "/reports/tickets-by-origin/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
 // Export download helpers. Each returns the URL the browser should
 // hit; the chart card's button just sets `window.location.href` so
 // the existing axios auth header is bypassed and the browser receives
@@ -135,10 +148,19 @@ const EXPORT_PATHS = {
   type: "/reports/tickets-by-type",
   customer: "/reports/tickets-by-customer",
   building: "/reports/tickets-by-building",
+  // Sprint 14A — tickets-by-origin CSV/PDF (export views shipped with
+  // the report). `downloadDimensionExport`'s `dimension` union is
+  // `keyof typeof EXPORT_PATHS`, so adding the key here widens it.
+  origin: "/reports/tickets-by-origin",
 } as const;
 
+// Sprint 14A — the export-dimension union, derived from the path map so
+// the two can never drift. Consumed by `downloadDimensionExport` and the
+// `ExportButtons` component's `dimension` prop.
+export type ExportDimension = keyof typeof EXPORT_PATHS;
+
 export async function downloadDimensionExport(
-  dimension: keyof typeof EXPORT_PATHS,
+  dimension: ExportDimension,
   format: DimensionExportFormat,
   filters: ReportFilters,
 ): Promise<void> {

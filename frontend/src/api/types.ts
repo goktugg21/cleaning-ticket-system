@@ -158,6 +158,12 @@ export interface TicketList {
   sla_is_paused: boolean;
   sla_remaining_business_seconds: number | null;
   sla_display_state: SLADisplayState;
+  // Sprint 14A (frontend Part A2) — spawned-from-EW anchor surfaced on
+  // the LIST serializer too (previously detail-only). Non-null only for
+  // tickets created from an ExtraWorkRequest line; the ticket list
+  // renders a small "Extra Work" route badge that deep-links to the
+  // parent EW. Mirrors backend `TicketListSerializer.extra_work_origin`.
+  extra_work_origin: TicketExtraWorkOrigin | null;
 }
 
 export interface TicketStatusHistory {
@@ -277,7 +283,8 @@ export interface TicketDetail extends TicketList {
   // Sprint 28 Batch 15.4 — non-null when this ticket was spawned by
   // an ExtraWorkRequest line. The frontend renders a "Spawned from"
   // panel in the ticket detail header that links back to the EW.
-  extra_work_origin: TicketExtraWorkOrigin | null;
+  // (Sprint 14A frontend Part A2 — declaration moved up to `TicketList`,
+  // which `TicketDetail` extends; the field is inherited from there.)
   // Sprint 28 Batch 11 — timestamp the ticket entered
   // WAITING_MANAGER_REVIEW (null until STAFF marks the work as
   // completed on the manager-review default route). Mirrored from

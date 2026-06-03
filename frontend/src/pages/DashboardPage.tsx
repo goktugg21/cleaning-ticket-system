@@ -20,6 +20,7 @@ import type {
   TicketStatus,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { RouteBadge } from "../components/RouteBadge";
 import { SLABadge } from "../components/sla/SLABadge";
 
 type SLAFilterValue =
@@ -1016,6 +1017,18 @@ export function DashboardPage() {
                             >
                               {ticket.ticket_no}
                             </Link>
+                            {ticket.extra_work_origin && (
+                              <Link
+                                to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+                                className="ticket-row-ew-origin-link"
+                                style={{ marginLeft: 8 }}
+                                title={t("ticket_row_extra_work_origin_title")}
+                                data-testid="ticket-row-extra-work-origin"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <RouteBadge value={ticket.extra_work_origin.origin} />
+                              </Link>
+                            )}
                           </td>
                           <td className="td-subject">
                             <Link to={`/tickets/${ticket.id}`}>
@@ -1139,6 +1152,23 @@ export function DashboardPage() {
                           </div>
                         </dl>
                       </Link>
+                      {/* Sprint 14A (frontend Part A2) — Extra Work origin
+                          deep-link. Rendered as a SIBLING of the card-wide
+                          `ticket-card-link` (never nested) so we don't put
+                          an <a> inside an <a>; the stopPropagation guard is
+                          belt-and-braces since it is already outside the
+                          card link's hit area. */}
+                      {ticket.extra_work_origin && (
+                        <Link
+                          to={`/extra-work/${ticket.extra_work_origin.extra_work_request_id}`}
+                          className="ticket-card-ew-origin-link"
+                          title={t("ticket_row_extra_work_origin_title")}
+                          data-testid="ticket-card-extra-work-origin"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <RouteBadge value={ticket.extra_work_origin.origin} />
+                        </Link>
+                      )}
                     </li>
                   ))}
                 </ul>

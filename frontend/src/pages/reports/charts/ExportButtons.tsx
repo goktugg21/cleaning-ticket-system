@@ -3,11 +3,12 @@ import { useTranslation } from "react-i18next";
 import {
   downloadDimensionExport,
   type DimensionExportFormat,
+  type ExportDimension,
   type ReportFilters,
 } from "../../../api/reports";
 
 export interface ExportButtonsProps {
-  dimension: "type" | "customer" | "building";
+  dimension: ExportDimension;
   filters: ReportFilters;
   disabled?: boolean;
 }

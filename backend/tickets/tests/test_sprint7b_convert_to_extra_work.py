@@ -256,6 +256,37 @@ class ConvertFixtureMixin:
         assert resp.status_code == 201, resp.data
         proposal_id = resp.data["id"]
 
+        # Add the custom / no-contract cart lines the auto-seed skipped.
+        # Auto-seed (2026-06-03 owner decision) only seeds AGREED-priced
+        # cart lines; non-contract lines are added by the operator via
+        # the composer. Mirror that here so an all-unpriced converted
+        # cart still yields a sendable proposal.
+        seeded = api.get(
+            f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
+        ).data
+        seeded_service_ids = {
+            line.get("service") for line in seeded if line.get("service")
+        }
+        for item in ew.line_items.all().order_by("id"):
+            if item.service_id and item.service_id in seeded_service_ids:
+                continue
+            body = {
+                "quantity": str(item.quantity),
+                "unit_type": item.unit_type,
+                "unit_price": "55.00",
+                "vat_pct": "21.00",
+            }
+            if item.service_id:
+                body["service"] = item.service_id
+            else:
+                body["description"] = "Provider-priced custom line"
+            add = api.post(
+                f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/",
+                body,
+                format="json",
+            )
+            assert add.status_code == 201, add.data
+
         lines = api.get(
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
         ).data

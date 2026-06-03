@@ -124,6 +124,12 @@ export interface DimensionScope extends ReportScope {
   customer_name: string | null;
   type: string | null;
   status: string | null;
+  // Sprint 14A — the dimension `scope_summary()` also echoes the
+  // optional `?origin=` filter alongside customer/type/status. Null
+  // when no origin filter is applied. Surfaced here so the shared
+  // DimensionScope honestly reflects the backend wire shape used by
+  // the tickets-by-origin report (and every other dimension report).
+  origin: string | null;
 }
 
 export interface TicketsByTypeBucket {
@@ -173,6 +179,29 @@ export interface TicketsByBuildingResponse {
   to: string;
   scope: DimensionScope;
   buckets: TicketsByBuildingBucket[];
+  total: number;
+  generated_at: string;
+}
+
+// Sprint 14A — tickets-by-origin. The backend classifies every in-scope
+// ticket into exactly one origin axis (see backend/reports/dimensions.py
+// `_origin_case`): NORMAL, EXTRA_WORK (spawned from an EW request line),
+// CONVERTED (ticket converted into an EW request), or PLANNED (spawned
+// from a planned/recurring occurrence). Buckets are emitted in the
+// pinned ORIGIN_ORDER and only non-zero origins appear.
+export type TicketOrigin = "NORMAL" | "EXTRA_WORK" | "CONVERTED" | "PLANNED";
+
+export interface TicketsByOriginBucket {
+  origin: TicketOrigin;
+  origin_label: string;
+  count: number;
+}
+
+export interface TicketsByOriginResponse {
+  from: string;
+  to: string;
+  scope: DimensionScope;
+  buckets: TicketsByOriginBucket[];
   total: number;
   generated_at: string;
 }

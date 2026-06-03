@@ -132,6 +132,25 @@ class TicketViewSet(
         if self.action == "retrieve":
             qs = qs.prefetch_related("status_history", "status_history__changed_by")
         if self.action == "list":
+            # Eager-load the Extra Work origin chain the list serializer's
+            # `extra_work_origin` field reads (`resolve_extra_work_origin_core`).
+            # All three links + their nested reads are forward FKs, so a
+            # single multi-join select_related keeps the list query count
+            # flat regardless of how many EW-spawned rows the page holds
+            # (no N+1):
+            #   * extra_work_request          -> canonical parent EW
+            #   * extra_work_request_item     -> service + legacy-fallback EW
+            #   * proposal_line               -> service + proposal -> EW
+            qs = qs.select_related(
+                "extra_work_request",
+                "extra_work_request_item",
+                "extra_work_request_item__service",
+                "extra_work_request_item__extra_work_request",
+                "proposal_line",
+                "proposal_line__service",
+                "proposal_line__proposal",
+                "proposal_line__proposal__extra_work_request",
+            )
             qs = self._apply_sla_filter(qs)
         return qs
 
