@@ -938,6 +938,12 @@ export interface ExtraWorkRequestCartCreatePayload {
   category_other_text?: string;
   urgency: string;
   preferred_date?: string | null;
+  // Sprint 5 (frontend) — the create page now sends the customer's
+  // chosen INTENT (driven by the preview endpoint's `allowed_intents`
+  // / `default_intent`). Optional: the backend derives a safe default
+  // (`derive_default_intent`) when omitted, so older callers and the
+  // graceful-degradation path (preview unavailable) stay valid.
+  request_intent?: ExtraWorkRequestIntent;
   line_items: Array<{
     service: number;
     // Decimal as string per DRF convention.
@@ -945,6 +951,123 @@ export interface ExtraWorkRequestCartCreatePayload {
     requested_date: string;
     customer_note?: string;
   }>;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 5 (frontend) — Extra Work create INTENT layer + non-mutating
+// cart preview (POST /extra-work/preview/). Mirrors
+// backend/extra_work/{models,classification,serializers,views}.py. The
+// frontend MUST NOT re-derive intent eligibility — the preview's
+// backend-gated `allowed_intents` / `default_intent` is the authority
+// (SoT §11.4).
+// ---------------------------------------------------------------------------
+
+// The customer/provider's declared intent for a cart at create time.
+// Distinct from the per-line price source and the parent's
+// `routing_decision`. Wire values mirror backend `ExtraWorkRequestIntent`.
+export type ExtraWorkRequestIntent =
+  | "DIRECT_AGREED_PRICE_ORDER"
+  | "AUTO_START_AFTER_PRICING"
+  | "REQUEST_QUOTE";
+
+// Per-line price classification returned by the PREVIEW endpoint. This
+// is a DIFFERENT vocabulary from the persisted-line `PriceSource`
+// (CONTRACT / CUSTOM / NEEDS_PROPOSAL): preview speaks the
+// `ExtraWorkLinePriceSource` enum.
+//   * AGREED_CUSTOMER_PRICE  — resolved to the customer's OWN contract
+//     price; `agreed_unit_price` + `agreed_vat_pct` are populated.
+//   * NEEDS_PROVIDER_PRICING — catalog service with no agreed price.
+//   * AD_HOC                 — free-text line (no service FK).
+// Provider DEFAULT prices are NEVER returned — only the customer's own
+// agreed price, and only on AGREED_CUSTOMER_PRICE lines.
+export type ExtraWorkPreviewPriceSource =
+  | "AGREED_CUSTOMER_PRICE"
+  | "NEEDS_PROVIDER_PRICING"
+  | "AD_HOC";
+
+// Coarse actor classification echoed by the preview endpoint. Surfaced
+// for completeness; intent eligibility comes from `allowed_intents`,
+// never re-derived from this.
+export type ExtraWorkPreviewActorKind =
+  | "PROVIDER"
+  | "STAFF"
+  | "CUSTOMER_USER"
+  | "CUSTOMER_LOCATION_MANAGER"
+  | "CUSTOMER_COMPANY_ADMIN";
+
+// Stable intent-rejection codes from the backend intent validator
+// (backend/extra_work/classification.py). The PREVIEW endpoint returns
+// these reliably in `requested_intent_error.code`. (On the CREATE
+// endpoint the same rejection arrives as a `request_intent` field
+// error whose stable code is NOT serialized on the wire — DRF drops
+// `ErrorDetail.code` — so the preview surface is the reliable code
+// source.)
+export type ExtraWorkIntentErrorCode =
+  | "intent_requires_all_agreed"
+  | "intent_requires_non_agreed_line"
+  | "intent_forbidden_for_role"
+  | "intent_forbidden_for_provider"
+  | "intent_required";
+
+// One draft cart line sent to the preview endpoint. `service` XOR
+// `custom_description` (mirrors `ExtraWorkPreviewLineSerializer`).
+export interface ExtraWorkPreviewLinePayload {
+  service?: number | null;
+  custom_description?: string;
+  // Decimal as string per DRF convention.
+  quantity: string;
+  requested_date: string;
+  customer_note?: string;
+}
+
+// Request body for POST /extra-work/preview/.
+export interface ExtraWorkPreviewPayload {
+  building: number;
+  customer: number;
+  // Optional candidate intent. When present the response carries
+  // `requested_intent_allowed` (+ `requested_intent_error` on rejection).
+  request_intent?: ExtraWorkRequestIntent | null;
+  line_items: ExtraWorkPreviewLinePayload[];
+}
+
+// One classified line in the preview response. Decimal-as-string per
+// DRF convention; `agreed_*` are null on non-agreed lines.
+export interface ExtraWorkPreviewLine {
+  index: number;
+  service: number | null;
+  custom_description: string;
+  requested_date: string;
+  quantity: string;
+  price_source: ExtraWorkPreviewPriceSource;
+  service_name: string;
+  service_category_name: string;
+  agreed_unit_price: string | null;
+  agreed_vat_pct: string | null;
+}
+
+// Cart-level classification booleans.
+export interface ExtraWorkPreviewCart {
+  all_agreed: boolean;
+  has_non_agreed: boolean;
+  has_ad_hoc: boolean;
+}
+
+// Response body for POST /extra-work/preview/. The `requested_intent*`
+// fields are present only when the request carried `request_intent`.
+export interface ExtraWorkPreviewResponse {
+  customer: number;
+  building: number;
+  actor_kind: ExtraWorkPreviewActorKind;
+  lines: ExtraWorkPreviewLine[];
+  cart: ExtraWorkPreviewCart;
+  allowed_intents: ExtraWorkRequestIntent[];
+  default_intent: ExtraWorkRequestIntent;
+  requested_intent?: ExtraWorkRequestIntent;
+  requested_intent_allowed?: boolean;
+  requested_intent_error?: {
+    code: ExtraWorkIntentErrorCode | string;
+    detail: string;
+  };
 }
 
 // Sprint 28 Batch 15.4 — minimal frontend shape for a Proposal row.
