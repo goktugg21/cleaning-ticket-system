@@ -59,6 +59,7 @@ from extra_work.models import (
     ServiceCategory,
 )
 from planned_work.models import (
+    PlannedOccurrence,
     RecurringJob,
     RecurringJobDefaultManager,
     RecurringJobDefaultStaff,
@@ -714,6 +715,79 @@ def _on_ticket_staff_assignment_post_save_update(
         )
 
 
+# ===========================================================================
+# Sprint 12 — PlannedOccurrence per-occurrence price / schedule-window
+# override. The occurrence is intentionally NOT in the generic CRUD trio:
+# its STATUS lifecycle (PLANNED/TICKET_CREATED/COMPLETED/...) is the H-11
+# workflow trail recorded on PlannedOccurrenceStatusHistory, and generation
+# CREATEs are system writes we don't want to spam the audit feed with. This
+# dedicated UPDATE-ONLY handler tracks ONLY the manager-editable pricing +
+# window fields, so a per-occurrence override lands as exactly one AuditLog
+# UPDATE row, while status/date changes (generation, reconcile) never emit a
+# generic CRUD row here (they own the status-history trail). No double-write.
+# ===========================================================================
+_PO_TRACKED_FIELDS = (
+    "pricing_mode",
+    "fixed_price",
+    "vat_pct",
+    "preferred_start_time",
+    "time_window_label",
+)
+
+
+def _po_snapshot_for_pre_save(instance):
+    if instance.pk is None:
+        return None
+    try:
+        previous = PlannedOccurrence.objects.get(pk=instance.pk)
+    except PlannedOccurrence.DoesNotExist:
+        return None
+    return {
+        field: serialize_value(getattr(previous, field))
+        for field in _PO_TRACKED_FIELDS
+    }
+
+
+def _on_planned_occurrence_pre_save(sender, instance, **kwargs):
+    try:
+        snapshot = _po_snapshot_for_pre_save(instance)
+        _state_map()[("planned_work.PlannedOccurrence", instance.pk)] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: PlannedOccurrence pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_planned_occurrence_post_save_update(sender, instance, created, **kwargs):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of the
+    tracked pricing/window fields. CREATE (generation) is a no-op; status /
+    date changes (reconcile) leave the tracked fields untouched so the diff
+    is empty and no row is written."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("planned_work.PlannedOccurrence", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _PO_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: PlannedOccurrence post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _connect():
     User = _user_model()
     # Lazy import: StaffProfile lives in accounts and would create a
@@ -937,6 +1011,26 @@ def _connect():
         sender=TicketStaffAssignment,
         weak=False,
         dispatch_uid="audit:tsa:post_update:TicketStaffAssignment",
+    )
+
+    # Sprint 12: UPDATE-diff handler for the per-occurrence price / window
+    # override fields on PlannedOccurrence. The occurrence is NOT in the
+    # generic CRUD trio (its status lifecycle is the H-11 status-history
+    # trail), so this UPDATE-only pair is the ONLY generic-AuditLog coverage
+    # for it — a manager price/window override lands as one AuditLog UPDATE
+    # row; generation CREATEs and reconcile status/date writes never emit
+    # one (the tracked fields don't change there).
+    pre_save.connect(
+        _on_planned_occurrence_pre_save,
+        sender=PlannedOccurrence,
+        weak=False,
+        dispatch_uid="audit:po:pre:PlannedOccurrence",
+    )
+    post_save.connect(
+        _on_planned_occurrence_post_save_update,
+        sender=PlannedOccurrence,
+        weak=False,
+        dispatch_uid="audit:po:post_update:PlannedOccurrence",
     )
 
 

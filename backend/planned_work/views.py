@@ -28,6 +28,7 @@ from .permissions import CanManagePlannedOccurrence, CanManageRecurringJob
 from .scoping import scope_planned_occurrences_for, scope_recurring_jobs_for
 from .serializers import (
     OccurrenceActionSerializer,
+    PlannedOccurrenceOverrideSerializer,
     PlannedOccurrenceSerializer,
     RecurringJobReadSerializer,
     RecurringJobWriteSerializer,
@@ -333,6 +334,43 @@ class PlannedOccurrenceViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": str(exc), "code": exc.code},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        return Response(
+            PlannedOccurrenceSerializer(
+                occurrence, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["patch"], url_path="override")
+    def override(self, request, pk=None):
+        """Sprint 12 — provider-manager per-occurrence override of the
+        snapshotted pricing + schedule window (e.g. "this date after
+        09:00", or a one-off custom price).
+
+        Provider-only: `CanManagePlannedOccurrence` already 403s STAFF /
+        CUSTOMER_USER (has_permission) and object-scopes to the actor's
+        visibility (`get_object` -> scoped queryset -> 404 out-of-scope).
+        Only the five pricing/window fields are writable; status / date /
+        identity fields are not. A CANCELLED occurrence is frozen. The
+        price/window diff lands as a targeted AuditLog UPDATE row via the
+        dedicated `_PO_TRACKED_FIELDS` audit handler — NOT a status-history
+        row (H-11: status changes belong to PlannedOccurrenceStatusHistory;
+        this is a price/window edit, a separate fact).
+        """
+        occurrence = self.get_object()
+        if occurrence.status == PlannedOccurrenceStatus.CANCELLED:
+            return Response(
+                {
+                    "detail": "A cancelled occurrence cannot be edited.",
+                    "code": "occurrence_override_forbidden_state",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = PlannedOccurrenceOverrideSerializer(
+            occurrence, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(
             PlannedOccurrenceSerializer(
                 occurrence, context={"request": request}

@@ -10,6 +10,8 @@ with per-building eligibility validation.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from accounts.models import UserRole
@@ -24,6 +26,13 @@ from .models import (
     RecurringJobDefaultManager,
     RecurringJobDefaultStaff,
 )
+
+
+def _two_places(value):
+    """Quantize to 2 decimal places — consistent with
+    `extra_work.models._two_places` so planned-work money math matches the
+    Extra Work / proposal money math exactly."""
+    return value.quantize(Decimal("0.01"))
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +379,13 @@ class PlannedOccurrenceSerializer(serializers.ModelSerializer):
         source="customer.name", read_only=True
     )
     ticket_id = serializers.SerializerMethodField()
+    # Sprint 12 — per-occurrence billable amounts derived from the
+    # snapshotted price fields. Null unless the occurrence is FIXED-priced
+    # with a fixed_price set (CONTRACT_INCLUDED / HOURLY carry no separate
+    # per-occurrence billing). `fixed_price` is VAT-exclusive.
+    subtotal_ex_vat = serializers.SerializerMethodField()
+    vat_amount = serializers.SerializerMethodField()
+    total_inc_vat = serializers.SerializerMethodField()
 
     class Meta:
         model = PlannedOccurrence
@@ -386,6 +402,15 @@ class PlannedOccurrenceSerializer(serializers.ModelSerializer):
             "actual_date",
             "status",
             "ticket_id",
+            # Sprint 12 — per-occurrence pricing + schedule snapshot.
+            "pricing_mode",
+            "fixed_price",
+            "vat_pct",
+            "preferred_start_time",
+            "time_window_label",
+            "subtotal_ex_vat",
+            "vat_amount",
+            "total_inc_vat",
             "completed_at",
             "missed_at",
             "cancelled_at",
@@ -406,6 +431,82 @@ class PlannedOccurrenceSerializer(serializers.ModelSerializer):
             .values_list("id", flat=True)
             .first()
         )
+
+    def _amounts(self, obj):
+        """(subtotal, vat, total) as quantized Decimals, or three Nones
+        when the occurrence is not separately billable."""
+        if obj.pricing_mode != PricingMode.FIXED or obj.fixed_price is None:
+            return None, None, None
+        subtotal = _two_places(obj.fixed_price)
+        vat = _two_places(obj.fixed_price * obj.vat_pct / Decimal("100"))
+        total = _two_places(subtotal + vat)
+        return subtotal, vat, total
+
+    def get_subtotal_ex_vat(self, obj):
+        subtotal, _, _ = self._amounts(obj)
+        return str(subtotal) if subtotal is not None else None
+
+    def get_vat_amount(self, obj):
+        _, vat, _ = self._amounts(obj)
+        return str(vat) if vat is not None else None
+
+    def get_total_inc_vat(self, obj):
+        _, _, total = self._amounts(obj)
+        return str(total) if total is not None else None
+
+
+# ---------------------------------------------------------------------------
+# PlannedOccurrence — override (provider manager per-occurrence price /
+# schedule-window override). Identity / status / date fields are NOT
+# writable here; only the snapshotted pricing + window fields.
+# ---------------------------------------------------------------------------
+class PlannedOccurrenceOverrideSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlannedOccurrence
+        fields = [
+            "pricing_mode",
+            "fixed_price",
+            "vat_pct",
+            "preferred_start_time",
+            "time_window_label",
+        ]
+
+    def validate(self, attrs):
+        instance = self.instance
+        effective_mode = attrs.get(
+            "pricing_mode", getattr(instance, "pricing_mode", None)
+        )
+
+        # 11B/12: planned work ships NO hourly finalization.
+        if (
+            "pricing_mode" in attrs
+            and attrs["pricing_mode"] == PricingMode.HOURLY
+        ):
+            raise serializers.ValidationError(
+                {
+                    "pricing_mode": serializers.ErrorDetail(
+                        "Hourly planned work is not supported yet.",
+                        code="pricing_mode_not_supported",
+                    )
+                }
+            )
+
+        effective_fixed_price = attrs.get(
+            "fixed_price", getattr(instance, "fixed_price", None)
+        )
+        if (
+            effective_mode == PricingMode.FIXED
+            and effective_fixed_price is None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "fixed_price": serializers.ErrorDetail(
+                        "Fixed-price occurrences require a fixed_price.",
+                        code="fixed_price_required",
+                    )
+                }
+            )
+        return attrs
 
 
 # ---------------------------------------------------------------------------

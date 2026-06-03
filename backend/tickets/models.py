@@ -374,6 +374,19 @@ class TicketAttachment(models.Model):
         blank=True,
         related_name="attachments",
     )
+    # Sprint 12 — optional link to a specific staff slot, so a completion
+    # PHOTO can serve as per-slot evidence (the slot completion gate accepts
+    # a non-empty completion_note OR a linked non-hidden photo). String
+    # forward-ref because TicketStaffAssignment is defined later in this
+    # module. SET_NULL: removing a slot must not delete the customer's
+    # uploaded evidence (the attachment stays on the ticket).
+    staff_assignment = models.ForeignKey(
+        "TicketStaffAssignment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="attachments",
+    )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

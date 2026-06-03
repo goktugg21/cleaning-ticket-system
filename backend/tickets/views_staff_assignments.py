@@ -58,12 +58,14 @@ from accounts.permissions import IsAuthenticatedAndActive, is_staff_role
 from accounts.permissions_v2 import user_has_osius_permission
 from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
+from notifications.services import send_slot_unable_to_complete_email
 
 from .models import (
     StaffAssignmentSlotStatus,
     Ticket,
     TicketStaffAssignment,
 )
+from .serializers import is_photo_attachment
 
 
 # Sprint 14E — writable slot fields, split by who may write them.
@@ -166,6 +168,41 @@ class _SlotWriteSerializer(serializers.ModelSerializer):
                         )
                     },
                     code="slot_unable_reason_required",
+                )
+        if new_status == StaffAssignmentSlotStatus.COMPLETED:
+            # Sprint 12 — completing a slot requires evidence: a non-empty
+            # completion_note OR at least one non-hidden linked PHOTO (image
+            # only — a PDF does not count). The photo is linked via the
+            # two-step flow: upload an attachment with staff_assignment_id,
+            # then PATCH slot_status=COMPLETED. Mirrors the ticket-level
+            # STAFF completion-evidence rule (state_machine.py) but on the
+            # per-staff dated-slot surface, which does NOT drive the ticket
+            # state machine.
+            note = attrs.get(
+                "completion_note",
+                getattr(self.instance, "completion_note", "") or "",
+            )
+            has_note = bool((note or "").strip())
+            # A linked photo must be a GENUINE image: both an image MIME type
+            # AND an image extension (is_photo_attachment). A MIME-only check
+            # would let historical bad data (proof.pdf stored as image/jpeg)
+            # satisfy the gate, so verify each non-hidden linked attachment in
+            # Python rather than with a mime_type__in queryset filter.
+            has_photo = bool(
+                self.instance is not None
+                and any(
+                    is_photo_attachment(att)
+                    for att in self.instance.attachments.filter(is_hidden=False)
+                )
+            )
+            if not (has_note or has_photo):
+                raise serializers.ValidationError(
+                    {
+                        "completion_note": (
+                            "Completing a slot requires a note or a photo."
+                        )
+                    },
+                    code="completion_evidence_required",
                 )
         start = attrs.get(
             "scheduled_start_at",
@@ -429,10 +466,9 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
         # whole PATCH is ONE row write -> exactly ONE audit UPDATE row
         # (Sprint 14E audit-coverage contract), not a status row + a
         # follow-up completed_at row.
+        prev_status = assignment.slot_status
         save_extra = {}
-        new_status = ser.validated_data.get(
-            "slot_status", assignment.slot_status
-        )
+        new_status = ser.validated_data.get("slot_status", prev_status)
         if (
             new_status == StaffAssignmentSlotStatus.COMPLETED
             and assignment.completed_at is None
@@ -442,6 +478,19 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
                 "completed_by": request.user,
             }
         updated = ser.save(**save_extra)
+
+        # Sprint 12 — notify the provider/manager side when a slot is newly
+        # reported unable-to-complete so a manager can reschedule / reassign.
+        # The slot does NOT change ticket status, so the status-change email
+        # never fires; this is the only manager signal. Only on the
+        # transition INTO unable (not a re-PATCH of an already-unable slot).
+        if (
+            new_status == StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE
+            and prev_status != StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE
+        ):
+            send_slot_unable_to_complete_email(
+                ticket, updated, actor=request.user
+            )
 
         return Response(_TicketStaffAssignmentSerializer(updated).data)
 

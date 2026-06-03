@@ -92,6 +92,52 @@ ALLOWED_ATTACHMENT_MESSAGE = (
     "Only JPG, JPEG, PNG, WEBP, PDF, HEIC, and HEIF attachments are allowed."
 )
 
+# Sprint 12 — the extension MUST agree with the declared MIME type. Without
+# this, a file named proof.pdf could be uploaded with content_type
+# image/jpeg and stored as an image, letting a non-photo masquerade as
+# completion-photo evidence. Each allowed extension maps to the single MIME
+# type it is permitted to carry.
+ALLOWED_EXTENSION_MIME_MAP = {
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".png": {"image/png"},
+    ".webp": {"image/webp"},
+    ".pdf": {"application/pdf"},
+    ".heic": {"image/heic"},
+    ".heif": {"image/heif"},
+}
+ALLOWED_ATTACHMENT_MIME_PAIR_MESSAGE = (
+    "The file extension does not match its content type."
+)
+
+# Sprint 12 — "photo" for slot completion evidence means an IMAGE only.
+# PDF is an allowed attachment type generally, but it does NOT satisfy the
+# completion-photo evidence rule (a scanned document is not proof the work
+# was done). This is the image subset of ALLOWED_ATTACHMENT_* minus pdf.
+PHOTO_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+}
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"}
+
+
+def is_photo_attachment(attachment) -> bool:
+    """True iff the attachment is genuinely a photo: it must carry BOTH an
+    image MIME type AND an image filename extension. Requiring both blocks a
+    mislabelled file (e.g. proof.pdf stored with mime_type image/jpeg from
+    historical bad data, or a .jpg stored as application/pdf) from
+    satisfying the slot completion-photo evidence rule. PDF never qualifies.
+    """
+    mime_ok = (attachment.mime_type or "") in PHOTO_MIME_TYPES
+    ext_ok = (
+        FilePath(attachment.original_filename or "").suffix.lower()
+        in PHOTO_EXTENSIONS
+    )
+    return mime_ok and ext_ok
+
 
 class TicketStatusHistorySerializer(serializers.ModelSerializer):
     changed_by_email = serializers.CharField(source="changed_by.email", read_only=True)
@@ -971,6 +1017,14 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
     uploaded_by_email = serializers.CharField(source="uploaded_by.email", read_only=True)
     file = serializers.FileField(write_only=True)
     file_url = serializers.SerializerMethodField()
+    # Sprint 12 — optional slot evidence link. `staff_assignment` is the
+    # read-side slot id (or null); `staff_assignment_id` is the write-only
+    # input. The view (perform_create) enforces scope: the slot must belong
+    # to the same ticket, STAFF may link only their OWN slot, and
+    # CUSTOMER_USER may not link evidence to an internal staff slot.
+    staff_assignment_id = serializers.IntegerField(
+        write_only=True, required=False, allow_null=True
+    )
 
     class Meta:
         model = TicketAttachment
@@ -978,6 +1032,8 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "id",
             "ticket",
             "message",
+            "staff_assignment",
+            "staff_assignment_id",
             "uploaded_by",
             "uploaded_by_email",
             "file",
@@ -992,6 +1048,7 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
             "id",
             "ticket",
             "message",
+            "staff_assignment",
             "uploaded_by",
             "uploaded_by_email",
             "file_url",
@@ -1028,6 +1085,15 @@ class TicketAttachmentSerializer(serializers.ModelSerializer):
         if mime_type not in allowed_mime_types:
             raise serializers.ValidationError(
                 ALLOWED_ATTACHMENT_MESSAGE
+            )
+
+        # Sprint 12 — the extension and MIME type must agree, so a
+        # mislabelled upload (e.g. proof.pdf sent as image/jpeg) cannot be
+        # stored as an image and later pass the slot completion-photo gate.
+        if mime_type not in ALLOWED_EXTENSION_MIME_MAP.get(extension, set()):
+            raise serializers.ValidationError(
+                ALLOWED_ATTACHMENT_MIME_PAIR_MESSAGE,
+                code="invalid_file_mime_pair",
             )
 
         return value

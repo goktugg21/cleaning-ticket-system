@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db.models import Q
+from django.utils import timezone
 
 from accounts.models import User, UserRole
 from tickets.models import TicketPriority, TicketStatus, TicketType
@@ -24,6 +25,7 @@ __all__ = (
     "send_ticket_status_changed_email",
     "send_ticket_assigned_email",
     "send_ticket_unassigned_email",
+    "send_slot_unable_to_complete_email",
     "send_password_reset_email",
     "send_invitation_email",
 )
@@ -454,6 +456,70 @@ def send_ticket_unassigned_email(ticket, recipient_user, actor=None):
         ticket=ticket,
         users=[recipient_user],
         event_type=NotificationEventType.TICKET_UNASSIGNED,
+        subject=subject,
+        body=body,
+        actor=actor,
+    )
+
+
+def send_slot_unable_to_complete_email(ticket, assignment, actor=None):
+    """Sprint 12 — notify the provider/manager side that a staff member
+    reported a dated SLOT as unable to complete, so a manager can
+    reschedule / reassign.
+
+    Unlike the ticket-level unable flow (which moves the ticket to
+    WAITING_MANAGER_REVIEW and rides the status-change email), completing or
+    failing a SLOT does not change ticket status, so this dedicated email is
+    the only manager signal. Recipients are the provider/manager side only
+    (`_ticket_staff_users` = company admins + the building's managers);
+    customers are never notified (provider-internal operational follow-up),
+    mirroring the unable / manager-review recipient rule.
+    """
+    staff_user = assignment.user
+    staff_label = (
+        (staff_user.full_name or staff_user.email)
+        if staff_user
+        else "een medewerker"
+    )
+
+    window_bits = []
+    if assignment.scheduled_start_at:
+        window_bits.append(
+            timezone.localtime(assignment.scheduled_start_at).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        )
+    if assignment.time_window_label:
+        window_bits.append(assignment.time_window_label)
+    window = " / ".join(window_bits) if window_bits else "geen specifiek tijdvak"
+
+    reason = assignment.unable_to_complete_reason or "(geen reden opgegeven)"
+
+    subject = f"[{ticket.ticket_no}] Taak niet afgerond door {staff_label}"
+    body = "\n".join(
+        [
+            f"{staff_label} heeft een geplande taak gemarkeerd als "
+            "'niet afgerond'.",
+            "",
+            f"Tijdvak: {window}",
+            f"Reden: {reason}",
+            "",
+            "Plan deze taak opnieuw in of wijs een andere medewerker toe.",
+            "",
+            _ticket_summary(ticket),
+            "",
+            "Met vriendelijke groet,",
+            "het CleanOps-team",
+            "",
+            "Deze e-mail is automatisch verzonden. U kunt niet rechtstreeks "
+            "reageren op dit bericht.",
+        ]
+    )
+
+    return _send_to_users(
+        ticket=ticket,
+        users=list(_ticket_staff_users(ticket)),
+        event_type=NotificationEventType.TICKET_SLOT_UNABLE,
         subject=subject,
         body=body,
         actor=actor,
