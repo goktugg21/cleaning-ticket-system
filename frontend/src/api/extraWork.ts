@@ -370,7 +370,16 @@ export async function deleteProposalLine(
 export async function transitionProposal(
   ewId: number | string,
   proposalId: number,
-  payload: { to_status: ProposalStatus; note?: string },
+  payload: {
+    to_status: ProposalStatus;
+    note?: string;
+    // Provider-driven SENT -> CUSTOMER_APPROVED / CUSTOMER_REJECTED is an
+    // override: the backend coerces is_override and REQUIRES a non-blank
+    // override_reason (400 `override_reason_required`). Customer-driven
+    // decisions omit both.
+    is_override?: boolean;
+    override_reason?: string;
+  },
 ): Promise<Proposal> {
   const response = await api.post<Proposal>(
     `/extra-work/${ewId}/proposals/${proposalId}/transition/`,

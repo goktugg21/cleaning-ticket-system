@@ -34,7 +34,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Check, FileSearch, FileText } from "lucide-react";
+import { FileSearch, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -42,9 +42,7 @@ import axios from "axios";
 import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
 import {
-  createExtraWorkPricingItem,
   createProposal,
-  deleteExtraWorkPricingItem,
   directPublishProposal,
   fetchProposalPdf,
   getProposalDetail,
@@ -60,30 +58,24 @@ import type {
   ExtraWorkCategory,
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
-  ExtraWorkUnitType,
   ExtraWorkUrgency,
   Proposal,
   ProposalDetail,
   Role,
-  ServiceUnitType,
   TicketList,
   TicketStatus,
 } from "../api/types";
 import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
-import {
-  InvoiceLineRow,
-  InvoiceLineTotalsRow,
-} from "../components/InvoiceLineRow";
+import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
-import { NoteEditorDialog } from "../components/NoteEditorDialog";
 import { PageHeader } from "../components/PageHeader";
 import { ProposalBuilder } from "../components/ProposalBuilder";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
+import { formatDate, formatDateTime } from "../lib/intl";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
 // any of these is considered "done" for the cancel-warning gate; only
@@ -149,24 +141,6 @@ const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
   URGENT: "urgency.urgent",
 };
 
-// Sprint 26C ExtraWorkUnitType and Sprint 28 B5 ServiceUnitType
-// share the same storage values; one i18n map covers both.
-const UNIT_TYPE_I18N_KEY: Record<ExtraWorkUnitType | ServiceUnitType, string> = {
-  HOURS: "unit_type.hours",
-  SQUARE_METERS: "unit_type.square_meters",
-  FIXED: "unit_type.fixed",
-  ITEM: "unit_type.item",
-  OTHER: "unit_type.other",
-};
-
-const UNIT_TYPE_VALUES: ExtraWorkUnitType[] = [
-  "HOURS",
-  "SQUARE_METERS",
-  "FIXED",
-  "ITEM",
-  "OTHER",
-];
-
 const PROVIDER_ROLES: Set<Role> = new Set([
   "SUPER_ADMIN",
   "COMPANY_ADMIN",
@@ -217,61 +191,6 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
   return "spawn_generic";
 }
 
-// Sprint 5 (frontend) — DISPLAY-ONLY live line totals for the pricing
-// composer. Mirrors the backend per-line computation
-// (backend/extra_work/models.py::ExtraWorkPricingLineItem.save +
-// _two_places): round the subtotal to 2dp FIRST, then derive VAT from
-// the ROUNDED subtotal, then the total — and use the SAME rounding MODE
-// the backend uses (Decimal.quantize's default = ROUND_HALF_EVEN /
-// banker's rounding), so the preview equals the value the line shows
-// once added, including on exact half-cent ties (e.g. 0.125 -> 0.12,
-// 0.135 -> 0.14). Empty / non-numeric inputs collapse to 0, never NaN.
-// Display goes through the same `formatMoney` formatter the table uses.
-function round2(n: number): number {
-  // Round to 2 decimals with ROUND_HALF_EVEN to match Decimal.quantize.
-  // No +EPSILON nudge: that biased exact ties upward (e.g. 2.525 -> 2.53
-  // where the backend yields 2.52). All inputs here are >= 0 (the
-  // backend's MinValueValidator(0)), so a floor-based split is safe.
-  // Operates on IEEE-754 floats, so it is not byte-identical to Decimal
-  // in pathological float-representation cases, but matches for every
-  // realistic money value; the backend stays authoritative on add. The
-  // small tolerance absorbs binary-float error around the .5 boundary.
-  const scaled = n * 100;
-  const floor = Math.floor(scaled);
-  const frac = scaled - floor;
-  let cents: number;
-  if (Math.abs(frac - 0.5) < 1e-9) {
-    // Exact half — round to the even neighbour (banker's rounding).
-    cents = floor % 2 === 0 ? floor : floor + 1;
-  } else {
-    cents = Math.round(scaled);
-  }
-  return cents / 100;
-}
-
-interface LineTotals {
-  subtotal: number;
-  vat: number;
-  total: number;
-}
-
-function computeLineTotals(
-  quantity: string,
-  unitPrice: string,
-  vatRate: string,
-): LineTotals {
-  const q = Number(quantity);
-  const u = Number(unitPrice);
-  const v = Number(vatRate);
-  const qty = Number.isFinite(q) ? q : 0;
-  const unit = Number.isFinite(u) ? u : 0;
-  const vatPct = Number.isFinite(v) ? v : 0;
-  const subtotal = round2(qty * unit);
-  const vat = round2((subtotal * vatPct) / 100);
-  const total = round2(subtotal + vat);
-  return { subtotal, vat, total };
-}
-
 
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
@@ -290,25 +209,6 @@ export function ExtraWorkDetailPage() {
   const canSeeCustomerContacts =
     me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
   const [customerContacts, setCustomerContacts] = useState<Contact[]>([]);
-
-  // Pricing-line-item form (provider only).
-  const [pricingForm, setPricingForm] = useState({
-    description: "",
-    unit_type: "FIXED" as ExtraWorkUnitType,
-    quantity: "1.00",
-    unit_price: "0.00",
-    vat_rate: "21.00",
-    customer_visible_note: "",
-    internal_cost_note: "",
-  });
-  const [pricingBusy, setPricingBusy] = useState(false);
-  const [pricingError, setPricingError] = useState("");
-  // Sprint 5 (frontend) — which composer note is being edited in the
-  // modal (the two free-text notes moved out of the inline row to make
-  // space for the live SUBTOTAL / VAT / TOTAL columns). null = closed.
-  const [noteModal, setNoteModal] = useState<"customer" | "internal" | null>(
-    null,
-  );
 
   // Transition buttons (any role; the backend computes
   // allowed_next_statuses per actor).
@@ -447,15 +347,22 @@ export function ExtraWorkDetailPage() {
   // wire shape that carries it. Silently collapses to `null` on 403/
   // not-found (e.g. customer-side caller cannot see DRAFT proposals).
   const draftProposal = proposals.find((p) => p.status === "DRAFT") ?? null;
-  const draftProposalId = draftProposal?.id ?? null;
   // Sprint 31 — one open proposal at a time (DRAFT or SENT). When none
   // is open the provider sees the "Prepare proposal" CTA instead.
   const hasOpenProposal = proposals.some(
     (p) => p.status === "DRAFT" || p.status === "SENT",
   );
+  // Sprint 31 — the proposal currently in play: a DRAFT being built or a
+  // SENT one awaiting the customer's decision. Its detail (lines +
+  // actions) drives the proposal builder (edit/send for DRAFT,
+  // approve/reject for SENT). `draftProposal` (DRAFT only) stays for the
+  // direct-publish button, which is DRAFT-only.
+  const openProposal =
+    proposals.find((p) => p.status === "DRAFT" || p.status === "SENT") ?? null;
+  const openProposalId = openProposal?.id ?? null;
   useEffect(() => {
     let cancelled = false;
-    if (ewId === null || draftProposalId === null) {
+    if (ewId === null || openProposalId === null) {
       queueMicrotask(() => {
         if (!cancelled) setDraftProposalDetail(null);
       });
@@ -463,7 +370,7 @@ export function ExtraWorkDetailPage() {
         cancelled = true;
       };
     }
-    getProposalDetail(ewId, draftProposalId)
+    getProposalDetail(ewId, openProposalId)
       .then((detail) => {
         if (!cancelled) setDraftProposalDetail(detail);
       })
@@ -473,7 +380,7 @@ export function ExtraWorkDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [ewId, draftProposalId]);
+  }, [ewId, openProposalId]);
 
   // Sprint 30 Batch 30.1 — spawned tickets fetch using the new
   // server-side `extra_work_request` filter (walks both the cart-item
@@ -539,25 +446,27 @@ export function ExtraWorkDetailPage() {
   // customer sees plain Approve/Reject and the provider sees the
   // override-arming flow. Absent `actions` falls through to false.
   const ewActions = ew.actions;
-  const canApproveAsCustomer = !isProvider && ewActions?.can_approve === true;
-  const canRejectAsCustomer = !isProvider && ewActions?.can_reject === true;
+  // Sprint 31 — the canonical Proposal builder is the single customer-decision
+  // surface (its own Approve / Reject / override live on the proposal). Once a
+  // proposal is open the legacy EW-level decision + override buttons must step
+  // aside, so every EW-level decision const is gated on `!hasOpenProposal`.
+  const canApproveAsCustomer =
+    !isProvider && ewActions?.can_approve === true && !hasOpenProposal;
+  const canRejectAsCustomer =
+    !isProvider && ewActions?.can_reject === true && !hasOpenProposal;
   const providerOverrideAvailable =
-    ewActions?.can_override_customer_decision === true;
+    ewActions?.can_override_customer_decision === true && !hasOpenProposal;
   // Sprint 31 — AUTO_START "Start work": a provider can start a
   // PRICING_PROPOSED request that the customer pre-authorized
   // (request_intent == AUTO_START_AFTER_PRICING) without approval or an
   // override reason. When present, it REPLACES the override-approve
   // button (approving an auto-start request is not an override); the
   // override-reject button stays (rejection is always reasoned).
-  const canAutoStart = isProvider && ewActions?.can_auto_start === true;
-  // Pricing visibility + PDF read are now action-driven so a customer
-  // without approve rights doesn't see pricing rows AND a BM with the
-  // prep key revoked STILL sees pricing + PDF (backend invariant).
-  // Absent `actions` (older response) falls back to the prior
-  // is-provider check so the page doesn't go blank.
-  const canViewEwPricing = ewActions
-    ? ewActions.can_view_pricing
-    : isProvider;
+  const canAutoStart =
+    isProvider && ewActions?.can_auto_start === true && !hasOpenProposal;
+  // PDF read is action-driven so a BM with the prep key revoked STILL
+  // sees the proposal PDF (backend invariant). Absent `actions` (older
+  // response) falls back to the prior is-provider check.
   const canViewProposalPdf = ewActions
     ? ewActions.can_view_proposal_pdf
     : isProvider;
@@ -568,20 +477,27 @@ export function ExtraWorkDetailPage() {
     ? ewActions.can_prepare_extra_work_proposal
     : isProvider;
 
-  // Sprint 5 (frontend) — live, display-only line totals for the
-  // composer row, recomputed each render from the numeric inputs and
-  // mirroring the backend's per-line rounding (see computeLineTotals).
-  const liveTotals = computeLineTotals(
-    pricingForm.quantity,
-    pricingForm.unit_price,
-    pricingForm.vat_rate,
-  );
-
-  // Provider workflow buttons exclude the override targets — those
-  // route through the dedicated override block below.
-  const providerWorkflowTargets = allowed.filter(
-    (s) => s !== "CUSTOMER_APPROVED" && s !== "CUSTOMER_REJECTED",
-  );
+  // Provider workflow buttons exclude the override targets (routed through
+  // the dedicated override block below) AND PRICING_PROPOSED: pricing is now
+  // driven exclusively by the canonical Proposal builder (its Send advances
+  // the request to PRICING_PROPOSED), so a raw "propose price" status button
+  // would be a second, conflicting pricing surface.
+  const providerWorkflowTargets = allowed.filter((s) => {
+    if (s === "CUSTOMER_APPROVED" || s === "CUSTOMER_REJECTED") return false;
+    if (s === "PRICING_PROPOSED") return false;
+    // With an open proposal, "Revise pricing" (PRICING_PROPOSED ->
+    // UNDER_REVIEW) would desync the request from its still-SENT proposal.
+    // Revision in the proposal flow runs through reject -> revise-after-
+    // reject instead; keep this button only for legacy (no-proposal) EWs.
+    if (
+      s === "UNDER_REVIEW" &&
+      ew.status === "PRICING_PROPOSED" &&
+      hasOpenProposal
+    ) {
+      return false;
+    }
+    return true;
+  });
 
   // Sprint 31 — an AUTO_START request is pre-authorized by the customer,
   // so the workflow must NOT frame the pricing step as "propose to
@@ -593,15 +509,6 @@ export function ExtraWorkDetailPage() {
   // button (falls back to the generic "Move to <status>").
   const providerActionLabel = (target: ExtraWorkStatus): string => {
     if (target === "CANCELLED") return t("detail.action_cancel");
-    // AUTO_START: finishing the review just confirms the price (the
-    // customer already authorized the start) — it is not a proposal.
-    if (
-      isAutoStart &&
-      ew.status === "UNDER_REVIEW" &&
-      target === "PRICING_PROPOSED"
-    ) {
-      return t("detail.action_confirm_pricing");
-    }
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
     return key
       ? t(key)
@@ -662,13 +569,24 @@ export function ExtraWorkDetailPage() {
     try {
       const list = await listProposalsForEw(ewId);
       setProposals(list);
-      const draft = list.find((p) => p.status === "DRAFT");
-      if (draft) {
-        const detail = await getProposalDetail(ewId, draft.id);
+      const open = list.find(
+        (p) => p.status === "DRAFT" || p.status === "SENT",
+      );
+      if (open) {
+        const detail = await getProposalDetail(ewId, open.id);
         setDraftProposalDetail(detail);
       } else {
         setDraftProposalDetail(null);
       }
+      // A proposal transition (Send / Approve / Reject) can advance the
+      // parent EW + spawn tickets — refresh both.
+      try {
+        const fresh = await getExtraWork(ewId);
+        setEw(fresh);
+      } catch {
+        // keep current ew on transient failure
+      }
+      await reloadSpawnedTickets();
     } catch {
       // Soft — keep current proposal state on a transient failure.
     }
@@ -821,53 +739,6 @@ export function ExtraWorkDetailPage() {
       setOverrideError(getApiError(err));
     } finally {
       setOverrideBusy(false);
-    }
-  }
-
-  async function handleAddPricingItem(event: FormEvent) {
-    event.preventDefault();
-    if (!id) return;
-    if (!pricingForm.description.trim()) {
-      setPricingError(t("detail.pricing_error_description_required"));
-      return;
-    }
-    setPricingError("");
-    setPricingBusy(true);
-    try {
-      await createExtraWorkPricingItem(id, {
-        description: pricingForm.description.trim(),
-        unit_type: pricingForm.unit_type,
-        quantity: pricingForm.quantity,
-        unit_price: pricingForm.unit_price,
-        vat_rate: pricingForm.vat_rate,
-        customer_visible_note: pricingForm.customer_visible_note,
-        internal_cost_note: pricingForm.internal_cost_note,
-      });
-      setPricingForm({
-        description: "",
-        unit_type: "FIXED",
-        quantity: "1.00",
-        unit_price: "0.00",
-        vat_rate: "21.00",
-        customer_visible_note: "",
-        internal_cost_note: "",
-      });
-      await refresh();
-    } catch (err) {
-      setPricingError(getApiError(err));
-    } finally {
-      setPricingBusy(false);
-    }
-  }
-
-  async function handleDeletePricingItem(itemId: number) {
-    if (!id) return;
-    setPricingError("");
-    try {
-      await deleteExtraWorkPricingItem(id, itemId);
-      await refresh();
-    } catch (err) {
-      setPricingError(getApiError(err));
     }
   }
 
@@ -1498,353 +1369,6 @@ export function ExtraWorkDetailPage() {
             </div>
           </div>
 
-          {/* ----- Pricing line items ----- */}
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="form-section">
-              <div className="form-section-title">
-                {t("detail.pricing_section_title")}
-              </div>
-              {canViewEwPricing && ew.pricing_line_items.length === 0 && (
-                <div className="muted small">{t("detail.pricing_empty")}</div>
-              )}
-              {canViewEwPricing && ew.pricing_line_items.length > 0 && (
-                <table className="data-table ew-pricing-table">
-                  <thead>
-                    <tr>
-                      {INVOICE_LINE_COLUMN_KEYS.map((key) => (
-                        <th key={key}>{t(key)}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ew.pricing_line_items.map((item) => {
-                      const showInternalNote =
-                        isProvider && !!item.internal_cost_note;
-                      const showCustomerNote = !!item.customer_visible_note;
-                      return (
-                        <InvoiceLineRow
-                          key={item.id}
-                          lineKind="pricing"
-                          line={item}
-                          editable={canPrepareProposal}
-                          onRemove={() => handleDeletePricingItem(item.id)}
-                          subLabel={
-                            showCustomerNote || showInternalNote ? (
-                              <>
-                                {showCustomerNote && (
-                                  <span className="muted small">
-                                    {item.customer_visible_note}
-                                  </span>
-                                )}
-                                {showInternalNote && (
-                                  <span
-                                    className="muted small"
-                                    style={{ fontStyle: "italic" }}
-                                  >
-                                    internal: {item.internal_cost_note}
-                                  </span>
-                                )}
-                              </>
-                            ) : undefined
-                          }
-                        />
-                      );
-                    })}
-                    <InvoiceLineTotalsRow
-                      subtotal={ew.subtotal_amount}
-                      vatAmount={ew.vat_amount}
-                      total={ew.total_amount}
-                    />
-                  </tbody>
-                </table>
-              )}
-
-              {canPrepareProposal && (
-                <>
-                  {pricingError && (
-                    <div
-                      className="alert-error"
-                      style={{ marginTop: 12 }}
-                      role="alert"
-                    >
-                      {pricingError}
-                    </div>
-                  )}
-                  <form
-                    onSubmit={handleAddPricingItem}
-                    className="ew-pricing-add-form"
-                    style={{ marginTop: 12 }}
-                  >
-                    {/* Single invoice-style row: Description | Unit |
-                        Quantity | Unit price | VAT % | Customer note |
-                        Internal note | [Add button]. Description and
-                        the two free-text notes grow; the four
-                        numeric/unit fields stay narrow. The existing
-                        .ew-line-row helper wraps each field to its own
-                        100%-wide row on <=760px (mobile). Every binding
-                        + the submit payload are byte-identical to the
-                        previous three-tier layout — only arrangement
-                        changes. */}
-                    <div className="ew-line-row">
-                      <div className="field ew-line-field-grow">
-                        <label
-                          className="field-label"
-                          htmlFor="pricing-description"
-                        >
-                          {t("detail.pricing_form_description")}
-                        </label>
-                        <input
-                          id="pricing-description"
-                          className="field-input"
-                          type="text"
-                          value={pricingForm.description}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              description: event.target.value,
-                            }))
-                          }
-                          placeholder={t(
-                            "detail.pricing_form_description_placeholder",
-                          )}
-                          required
-                        />
-                      </div>
-                      <div className="field ew-line-field-medium">
-                        <label
-                          className="field-label"
-                          htmlFor="pricing-unit-type"
-                        >
-                          {t("detail.pricing_form_unit")}
-                        </label>
-                        <select
-                          id="pricing-unit-type"
-                          className="field-select"
-                          value={pricingForm.unit_type}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              unit_type: event.target
-                                .value as ExtraWorkUnitType,
-                            }))
-                          }
-                        >
-                          {UNIT_TYPE_VALUES.map((value) => (
-                            <option key={value} value={value}>
-                              {t(UNIT_TYPE_I18N_KEY[value])}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="field ew-line-field-compact">
-                        <label className="field-label" htmlFor="pricing-qty">
-                          {t("detail.pricing_form_quantity")}
-                        </label>
-                        <input
-                          id="pricing-qty"
-                          className="field-input"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={pricingForm.quantity}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              quantity: event.target.value,
-                            }))
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="field ew-line-field-compact">
-                        <label
-                          className="field-label"
-                          htmlFor="pricing-unit-price"
-                        >
-                          {t("detail.pricing_form_unit_price")}
-                        </label>
-                        <input
-                          id="pricing-unit-price"
-                          className="field-input"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={pricingForm.unit_price}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              unit_price: event.target.value,
-                            }))
-                          }
-                          required
-                        />
-                      </div>
-                      <div className="field ew-line-field-compact">
-                        <label className="field-label" htmlFor="pricing-vat">
-                          {t("detail.pricing_form_vat")}
-                        </label>
-                        <input
-                          id="pricing-vat"
-                          className="field-input"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={pricingForm.vat_rate}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              vat_rate: event.target.value,
-                            }))
-                          }
-                          required
-                        />
-                      </div>
-                      {/* Live, display-only line totals — replace the two
-                          inline note inputs (now behind modal buttons),
-                          freeing the row width. Mirrors the backend's
-                          per-line rounding so the preview equals the line
-                          once added. Aligned to the table's
-                          SUBTOTAL / VAT / TOTAL money columns. */}
-                      <div className="field ew-line-field-money">
-                        <span className="field-label">
-                          {t("invoice_row.col_subtotal")}
-                        </span>
-                        <div
-                          className="field-input"
-                          data-testid="pricing-live-subtotal"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {formatMoney(liveTotals.subtotal)}
-                        </div>
-                      </div>
-                      <div className="field ew-line-field-money">
-                        <span className="field-label">
-                          {t("invoice_row.col_vat")}
-                        </span>
-                        <div
-                          className="field-input"
-                          data-testid="pricing-live-vat"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {formatMoney(liveTotals.vat)}
-                        </div>
-                      </div>
-                      <div className="field ew-line-field-money">
-                        <span className="field-label">
-                          {t("invoice_row.col_total")}
-                        </span>
-                        <div
-                          className="field-input"
-                          data-testid="pricing-live-total"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "flex-end",
-                            fontWeight: 600,
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {formatMoney(liveTotals.total)}
-                        </div>
-                      </div>
-
-                      {/* The two free-text notes live behind buttons
-                          styled as field boxes (same 38px height as the
-                          inputs, so they align in the row). Values stay
-                          in pricingForm and are sent unchanged on add.
-                          The internal-cost-note box is provider-only,
-                          mirroring the table's
-                          `isProvider && item.internal_cost_note` gating. */}
-                      <div className="field ew-line-field-note">
-                        <span className="field-label">
-                          {t("detail.pricing_customer_note_button")}
-                        </span>
-                        <button
-                          type="button"
-                          className="field-input ew-pricing-note-box"
-                          data-testid="pricing-customer-note-button"
-                          data-filled={
-                            pricingForm.customer_visible_note.trim()
-                              ? "true"
-                              : "false"
-                          }
-                          title={pricingForm.customer_visible_note || undefined}
-                          onClick={() => setNoteModal("customer")}
-                        >
-                          {pricingForm.customer_visible_note.trim() ? (
-                            <>
-                              <Check size={13} strokeWidth={2.5} aria-hidden />
-                              <span className="ew-pricing-note-box-text">
-                                {pricingForm.customer_visible_note}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="muted">
-                              {t("detail.empty_dash")}
-                            </span>
-                          )}
-                        </button>
-                      </div>
-                      {isProvider && (
-                        <div className="field ew-line-field-note">
-                          <span className="field-label">
-                            {t("detail.pricing_internal_note_button")}
-                          </span>
-                          <button
-                            type="button"
-                            className="field-input ew-pricing-note-box"
-                            data-testid="pricing-internal-note-button"
-                            data-filled={
-                              pricingForm.internal_cost_note.trim()
-                                ? "true"
-                                : "false"
-                            }
-                            title={pricingForm.internal_cost_note || undefined}
-                            onClick={() => setNoteModal("internal")}
-                          >
-                            {pricingForm.internal_cost_note.trim() ? (
-                              <>
-                                <Check size={13} strokeWidth={2.5} aria-hidden />
-                                <span className="ew-pricing-note-box-text">
-                                  {pricingForm.internal_cost_note}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="muted">
-                                {t("detail.empty_dash")}
-                              </span>
-                            )}
-                          </button>
-                        </div>
-                      )}
-                      <div className="ew-line-row-actions">
-                        <button
-                          type="submit"
-                          className="btn btn-primary btn-sm"
-                          disabled={pricingBusy}
-                        >
-                          {pricingBusy
-                            ? t("detail.pricing_form_submitting")
-                            : t("detail.pricing_form_submit")}
-                        </button>
-                      </div>
-                    </div>
-                  </form>
-                </>
-              )}
-            </div>
-          </div>
-
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record
               `can_view_proposal_pricing` action so a viewer who cannot
@@ -1976,41 +1500,6 @@ export function ExtraWorkDetailPage() {
           void handleCustomerDecision("CUSTOMER_REJECTED", reason);
         }}
       />
-
-      {/* Sprint 5 (frontend) — composer note editors. Mounted only while
-          open so each open re-seeds from the current pricingForm value.
-          Save writes back to pricingForm (sent unchanged on add); the
-          internal-note editor is additionally provider-gated. */}
-      {noteModal === "customer" && (
-        <NoteEditorDialog
-          testId="pricing-customer-note-modal"
-          title={t("detail.pricing_customer_note_modal_title")}
-          initialValue={pricingForm.customer_visible_note}
-          placeholder={t("detail.pricing_form_customer_note_placeholder")}
-          saveLabel={t("detail.note_modal_save")}
-          cancelLabel={t("detail.note_modal_cancel")}
-          onSave={(value) => {
-            setPricingForm((c) => ({ ...c, customer_visible_note: value }));
-            setNoteModal(null);
-          }}
-          onCancel={() => setNoteModal(null)}
-        />
-      )}
-      {noteModal === "internal" && isProvider && (
-        <NoteEditorDialog
-          testId="pricing-internal-note-modal"
-          title={t("detail.pricing_internal_note_modal_title")}
-          initialValue={pricingForm.internal_cost_note}
-          placeholder={t("detail.pricing_form_internal_note_placeholder")}
-          saveLabel={t("detail.note_modal_save")}
-          cancelLabel={t("detail.note_modal_cancel")}
-          onSave={(value) => {
-            setPricingForm((c) => ({ ...c, internal_cost_note: value }));
-            setNoteModal(null);
-          }}
-          onCancel={() => setNoteModal(null)}
-        />
-      )}
 
       {/* Direct-publish confirmation. Renders a prominent warning
           ("bypasses customer approval, opens tickets immediately") plus

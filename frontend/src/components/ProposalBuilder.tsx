@@ -22,6 +22,7 @@ import {
   updateProposalLine,
   type ProposalLineWritePayload,
 } from "../api/extraWork";
+import { useAuth } from "../auth/AuthContext";
 import type { ExtraWorkUnitType, ProposalDetail, ProposalLine } from "../api/types";
 import { formatMoney } from "../lib/intl";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
@@ -330,9 +331,28 @@ export function ProposalBuilder({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  // Provider override-decision modal (SENT proposal). A customer decides
+  // without a reason; a PROVIDER driving the customer decision is an
+  // override and the backend coerces is_override + REQUIRES a non-blank
+  // override_reason (400 `override_reason_required`). null = closed.
+  const [overridePrompt, setOverridePrompt] = useState<
+    "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED" | null
+  >(null);
+  const [overrideReason, setOverrideReason] = useState("");
+
+  const { me } = useAuth();
+  const isProvider =
+    me?.role === "SUPER_ADMIN" ||
+    me?.role === "COMPANY_ADMIN" ||
+    me?.role === "BUILDING_MANAGER";
 
   const canEdit = proposal.actions?.can_edit_lines === true;
   const canSend = proposal.actions?.can_send === true;
+  // Sprint 31 — customer decision on a SENT proposal (and provider
+  // override). The backend syncs the parent EW + spawns from the
+  // proposal lines on approve.
+  const canApprove = proposal.actions?.can_approve === true;
+  const canReject = proposal.actions?.can_reject === true;
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -358,6 +378,41 @@ export function ProposalBuilder({
     });
   const send = () =>
     void run(() => transitionProposal(ewId, proposal.id, { to_status: "SENT" }));
+  const approve = () => {
+    if (isProvider) {
+      // Provider approval of a SENT proposal is an override — collect the
+      // mandatory reason before firing the transition.
+      setOverrideReason("");
+      setOverridePrompt("CUSTOMER_APPROVED");
+      return;
+    }
+    void run(() =>
+      transitionProposal(ewId, proposal.id, { to_status: "CUSTOMER_APPROVED" }),
+    );
+  };
+  const reject = () => {
+    if (isProvider) {
+      setOverrideReason("");
+      setOverridePrompt("CUSTOMER_REJECTED");
+      return;
+    }
+    void run(() =>
+      transitionProposal(ewId, proposal.id, { to_status: "CUSTOMER_REJECTED" }),
+    );
+  };
+  const submitOverride = () => {
+    const to = overridePrompt;
+    if (to === null || overrideReason.trim() === "") return;
+    void run(async () => {
+      await transitionProposal(ewId, proposal.id, {
+        to_status: to,
+        is_override: true,
+        override_reason: overrideReason.trim(),
+      });
+      setOverridePrompt(null);
+      setOverrideReason("");
+    });
+  };
 
   return (
     <div
@@ -467,6 +522,93 @@ export function ProposalBuilder({
             <p className="muted small" style={{ margin: "6px 0 0" }}>
               {t("detail.proposal_send_hint")}
             </p>
+          </div>
+        )}
+
+        {(canApprove || canReject) && (
+          <div
+            style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}
+            data-testid="extra-work-proposal-decision"
+          >
+            {canApprove && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={busy}
+                onClick={approve}
+                data-testid="extra-work-proposal-approve"
+              >
+                {t("detail.proposal_approve")}
+              </button>
+            )}
+            {canReject && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={busy}
+                onClick={reject}
+                data-testid="extra-work-proposal-reject"
+              >
+                {t("detail.proposal_reject")}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Provider override-decision modal. The confirm button stays
+            disabled until a non-blank reason is typed, mirroring the
+            backend's `override_reason_required` guard. */}
+        {overridePrompt !== null && (
+          <div
+            className="reject-modal-backdrop"
+            data-testid="extra-work-proposal-override-dialog"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="reject-modal">
+              <h3 className="reject-modal-title">
+                {overridePrompt === "CUSTOMER_APPROVED"
+                  ? t("detail.proposal_override_approve_title")
+                  : t("detail.proposal_override_reject_title")}
+              </h3>
+              <p className="reject-modal-desc">
+                {t("detail.proposal_override_desc")}
+              </p>
+              <textarea
+                className="field-textarea reject-modal-textarea"
+                data-testid="extra-work-proposal-override-reason"
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder={t("detail.proposal_override_reason_placeholder")}
+                rows={4}
+                autoFocus
+              />
+              <div className="reject-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setOverridePrompt(null);
+                    setOverrideReason("");
+                  }}
+                  data-testid="extra-work-proposal-override-cancel"
+                >
+                  {t("detail.note_modal_cancel")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={busy || overrideReason.trim() === ""}
+                  onClick={submitOverride}
+                  data-testid="extra-work-proposal-override-confirm"
+                >
+                  {busy
+                    ? t("detail.proposal_override_submitting")
+                    : t("detail.proposal_override_confirm")}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
