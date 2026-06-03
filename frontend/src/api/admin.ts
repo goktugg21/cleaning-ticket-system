@@ -172,6 +172,38 @@ export async function reactivateBuilding(id: number): Promise<BuildingAdmin> {
   return response.data;
 }
 
+// ---- Building-scoped eligible crew (planned work) ---------------------
+//
+// GET /api/buildings/<id>/eligible-crew/ → the STAFF + BUILDING_MANAGER
+// users eligible to be a recurring job's default crew for this building,
+// BEFORE any ticket exists. Mirrors the recurring-job write validation:
+//   staff    = role=STAFF with BuildingStaffVisibility on the building.
+//   managers = role=BUILDING_MANAGER with BuildingManagerAssignment on it.
+// Permission `IsProviderRosterReader`: SUPER_ADMIN / COMPANY_ADMIN /
+// in-scope BUILDING_MANAGER (STAFF + CUSTOMER_USER → 403). An out-of-scope
+// building → 404. Unlike the old `listUsers({role})` workaround this is
+// building-scoped AND reachable by an in-scope BM.
+
+export interface CrewUser {
+  id: number;
+  full_name: string;
+  email: string;
+}
+
+export interface BuildingEligibleCrew {
+  staff: CrewUser[];
+  managers: CrewUser[];
+}
+
+export async function getBuildingEligibleCrew(
+  buildingId: number,
+): Promise<BuildingEligibleCrew> {
+  const response = await api.get<BuildingEligibleCrew>(
+    `/buildings/${buildingId}/eligible-crew/`,
+  );
+  return response.data;
+}
+
 // ---- Customers --------------------------------------------------------
 
 export interface CustomerWritePayload {

@@ -8,11 +8,12 @@
 //
 // Option sources reuse the established conventions:
 //   - buildings / customers : GET /buildings/ + /customers/ (CreateTicketPage)
-//   - default staff / managers : listUsers({role}) (BuildingFormPage manager picker)
-// listUsers is gated to SUPER_ADMIN / COMPANY_ADMIN; a BUILDING_MANAGER
-// gets 403, so the crew section degrades to an explanatory hint and the
-// job is still creatable without crew defaults (assignable per ticket
-// after generation). Backend validates per-building crew eligibility.
+//   - default staff / managers : GET /buildings/<id>/eligible-crew/
+// The eligible-crew endpoint is building-scoped and reachable by an
+// in-scope BUILDING_MANAGER, so the crew pickers work for every provider
+// role (it replaced the earlier listUsers({role}) workaround that 403'd
+// BMs). Crew is fetched per selected building; the backend still validates
+// per-building eligibility on write.
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -20,8 +21,8 @@ import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { api, getApiError } from "../../api/client";
-import { extractAdminFieldErrors, listUsers } from "../../api/admin";
-import type { AdminFieldErrors } from "../../api/admin";
+import { extractAdminFieldErrors, getBuildingEligibleCrew } from "../../api/admin";
+import type { AdminFieldErrors, CrewUser } from "../../api/admin";
 import {
   createRecurringJob,
   getRecurringJob,
@@ -32,12 +33,7 @@ import type {
   RecurringJobWritePayload,
   SelectablePricingMode,
 } from "../../api/plannedWork.types";
-import type {
-  Building,
-  Customer,
-  PaginatedResponse,
-  UserAdmin,
-} from "../../api/types";
+import type { Building, Customer, PaginatedResponse } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
@@ -60,9 +56,16 @@ export function RecurringJobFormPage() {
   // Option lists.
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [staffCandidates, setStaffCandidates] = useState<UserAdmin[]>([]);
-  const [managerCandidates, setManagerCandidates] = useState<UserAdmin[]>([]);
-  const [crewAvailable, setCrewAvailable] = useState(false);
+  // Eligible crew for the SELECTED building (building-scoped endpoint).
+  const [eligibleStaff, setEligibleStaff] = useState<CrewUser[]>([]);
+  const [eligibleManagers, setEligibleManagers] = useState<CrewUser[]>([]);
+  const [crewLoading, setCrewLoading] = useState(false);
+  const [crewError, setCrewError] = useState(false);
+  // True once a successful eligible-crew fetch has resolved for the
+  // current building. Gates whether the crew lists are sent on submit:
+  // if the fetch failed (or no building yet) we OMIT the crew keys so an
+  // edit never wipes a job's existing crew on a transient error.
+  const [crewLoaded, setCrewLoaded] = useState(false);
 
   // Form fields.
   const [building, setBuilding] = useState<number | "">("");
@@ -114,23 +117,9 @@ export function RecurringJobFormPage() {
         setBuildings(buildingsResp.data.results);
         setCustomers(customersResp.data.results);
 
-        // Crew candidate lists are best-effort: listUsers 403s a BM.
-        const [staffResult, managerResult] = await Promise.allSettled([
-          listUsers({ role: "STAFF", page_size: 200 }),
-          listUsers({ role: "BUILDING_MANAGER", page_size: 200 }),
-        ]);
-        if (cancelled) return;
-        let anyCrew = false;
-        if (staffResult.status === "fulfilled") {
-          setStaffCandidates(staffResult.value.results);
-          anyCrew = true;
-        }
-        if (managerResult.status === "fulfilled") {
-          setManagerCandidates(managerResult.value.results);
-          anyCrew = true;
-        }
-        setCrewAvailable(anyCrew);
-
+        // Eligible crew is loaded per-building by the [building] effect
+        // below; in edit mode that effect fires once `building` is set
+        // from the loaded job here.
         if (!isCreate && id !== undefined) {
           const job = await getRecurringJob(id);
           if (cancelled) return;
@@ -169,6 +158,45 @@ export function RecurringJobFormPage() {
       cancelled = true;
     };
   }, [id, isCreate]);
+
+  // Load the building-scoped eligible crew whenever the selected building
+  // changes. Fires on a manual building pick AND on the initial edit load
+  // (once the job's building is applied above). With no building selected
+  // the lists clear and the pickers show a "select a building" placeholder.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCrew() {
+      if (building === "") {
+        setEligibleStaff([]);
+        setEligibleManagers([]);
+        setCrewLoaded(false);
+        setCrewError(false);
+        setCrewLoading(false);
+        return;
+      }
+      setCrewLoading(true);
+      setCrewError(false);
+      try {
+        const crew = await getBuildingEligibleCrew(Number(building));
+        if (cancelled) return;
+        setEligibleStaff(crew.staff);
+        setEligibleManagers(crew.managers);
+        setCrewLoaded(true);
+      } catch {
+        if (cancelled) return;
+        setEligibleStaff([]);
+        setEligibleManagers([]);
+        setCrewLoaded(false);
+        setCrewError(true);
+      } finally {
+        if (!cancelled) setCrewLoading(false);
+      }
+    }
+    loadCrew();
+    return () => {
+      cancelled = true;
+    };
+  }, [building]);
 
   const filteredCustomers = useMemo(() => {
     if (building === "") return customers;
@@ -224,11 +252,20 @@ export function RecurringJobFormPage() {
       vat_pct: vatPct || "21",
       fixed_price: pricingMode === "FIXED" ? fixedPrice.trim() : null,
     };
-    // Only touch crew when the candidate lists were reachable, so a BM
-    // editing a job does not wipe its existing crew (omitted = untouched).
-    if (crewAvailable) {
-      payload.default_staff_ids = defaultStaffIds;
-      payload.default_manager_ids = defaultManagerIds;
+    // Only touch crew when eligible crew loaded for this building, so a
+    // transient fetch error on edit does not wipe the job's existing crew
+    // (omitted key = untouched). Send only ids still in the eligible lists:
+    // a pre-selected default that lost eligibility is dropped rather than
+    // re-sent (the backend would reject re-adding it).
+    if (crewLoaded) {
+      const staffIds = new Set(eligibleStaff.map((u) => u.id));
+      const managerIds = new Set(eligibleManagers.map((u) => u.id));
+      payload.default_staff_ids = defaultStaffIds.filter((uid) =>
+        staffIds.has(uid),
+      );
+      payload.default_manager_ids = defaultManagerIds.filter((uid) =>
+        managerIds.has(uid),
+      );
     }
     return payload;
   }
@@ -628,8 +665,14 @@ export function RecurringJobFormPage() {
             <div className="form-section-helper">
               {t("form.section_crew_desc")}
             </div>
-            {!crewAvailable ? (
-              <p className="muted small">{t("form.crew_unavailable")}</p>
+            {building === "" ? (
+              <p className="muted small">
+                {t("form.crew_select_building_first")}
+              </p>
+            ) : crewLoading ? (
+              <p className="muted small">{t("form.crew_loading")}</p>
+            ) : crewError ? (
+              <p className="muted small">{t("form.crew_load_failed")}</p>
             ) : (
               <div className="form-2col">
                 <div className="field">
@@ -640,7 +683,7 @@ export function RecurringJobFormPage() {
                     {t("form.field_default_staff_hint")}
                   </div>
                   <CrewPicker
-                    candidates={staffCandidates}
+                    candidates={eligibleStaff}
                     selected={defaultStaffIds}
                     onToggle={(uid) =>
                       setDefaultStaffIds((prev) => toggleId(prev, uid))
@@ -665,7 +708,7 @@ export function RecurringJobFormPage() {
                     {t("form.field_default_managers_hint")}
                   </div>
                   <CrewPicker
-                    candidates={managerCandidates}
+                    candidates={eligibleManagers}
                     selected={defaultManagerIds}
                     onToggle={(uid) =>
                       setDefaultManagerIds((prev) => toggleId(prev, uid))
@@ -717,7 +760,7 @@ function CrewPicker({
   selectedLabel,
   testId,
 }: {
-  candidates: UserAdmin[];
+  candidates: CrewUser[];
   selected: number[];
   onToggle: (userId: number) => void;
   emptyLabel: string;
