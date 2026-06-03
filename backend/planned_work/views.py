@@ -123,6 +123,22 @@ class RecurringJobViewSet(viewsets.ModelViewSet):
         spawn their operational tickets. Idempotent. Returns counts.
         """
         job = self.get_object()
+        # Refuse generation on an archived job. This per-job action passes
+        # an explicit `jobs=` queryset to generate_occurrences, which
+        # BYPASSES the is_active / archived_at filter that the daily
+        # generator applies only when `jobs is None` — so without this
+        # guard a generate on an archived job would spawn occurrences +
+        # tickets for archived work. The frontend hides the trigger for
+        # archived jobs; this is the authoritative server-side guard.
+        if not job.is_active or job.archived_at is not None:
+            return Response(
+                {
+                    "detail": "Cannot generate occurrences for an archived "
+                    "recurring job.",
+                    "code": "recurring_job_archived",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         # Coerce + bound days_ahead: an uncast value reaches
         # `today + timedelta(days=...)` and a string would 500; an
         # unbounded huge int would mass-materialize occurrences + tickets.
