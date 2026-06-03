@@ -176,6 +176,12 @@ export function canAccessReports(role: Role | null | undefined): boolean {
   return isProviderManagementRole(role);
 }
 
+// `/planned-work` — provider-only recurring/planned work. Backend:
+// `planned_work.permissions.IsProviderManager` admits SUPER_ADMIN /
+// COMPANY_ADMIN / scoped BUILDING_MANAGER and 403s STAFF + CUSTOMER_USER
+// on every route (including reads). Mirrors the backend role set exactly.
+export const canAccessPlannedWork = isProviderManagementRole;
+
 // `/admin/staff-assignment-requests` — backend admits the BM for the
 // queue covering their assigned buildings, on top of the provider-admin
 // pair. STAFF requests assignment via the ticket-detail button instead.
