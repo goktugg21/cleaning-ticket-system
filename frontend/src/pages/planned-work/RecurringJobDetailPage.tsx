@@ -260,15 +260,30 @@ export function RecurringJobDetailPage() {
               {t("detail.edit")}
             </Link>
             {job.is_active ? (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => archiveRef.current?.open()}
-                disabled={actionBusy}
-                data-testid="recurring-job-archive"
-              >
-                {t("detail.archive")}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => archiveRef.current?.open()}
+                  disabled={actionBusy}
+                  data-testid="recurring-job-archive"
+                >
+                  {t("detail.archive")}
+                </button>
+                {/* Codex P1 — Generate only on an ACTIVE job. An archived
+                    job must not spawn occurrences/tickets, so its trigger
+                    is hidden (a backend guard on the generate action is a
+                    separate follow-up). */}
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => generateRef.current?.open()}
+                  disabled={actionBusy}
+                  data-testid="recurring-job-generate"
+                >
+                  {t("detail.generate")}
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -280,15 +295,6 @@ export function RecurringJobDetailPage() {
                 {t("detail.unarchive")}
               </button>
             )}
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => generateRef.current?.open()}
-              disabled={actionBusy}
-              data-testid="recurring-job-generate"
-            >
-              {t("detail.generate")}
-            </button>
           </>
         }
       />

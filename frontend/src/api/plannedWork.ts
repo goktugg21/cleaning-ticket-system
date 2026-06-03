@@ -36,13 +36,31 @@ function cleanParams(
 // The list viewset does NOT filter server-side (no filterset_fields); the
 // active/archived + scope narrowing happens client-side. We pull a
 // generous page so a tenant's job set lands in one request.
+// Codex P2 — page through ALL pages before returning so the list page's
+// client-side filter/search sees the full set. The backend caps page_size
+// at 200 (== max_page_size); a single fetch silently dropped jobs 201+.
+// We accumulate page=1,2,… at page_size 200 until `next` is null (or a
+// short page), with a hard safety cap so a backend paging bug can't loop
+// forever. `count` stays the server total; `next`/`previous` are null
+// because every page is merged into `results`.
+const _LIST_PAGE_SIZE = 200;
+const _LIST_MAX_PAGES = 25; // 25 * 200 = 5000 jobs — far beyond any tenant.
+
 export async function listRecurringJobs(
   params: ListRecurringJobsParams = {},
 ): Promise<PaginatedResponse<RecurringJob>> {
-  const response = await api.get<PaginatedResponse<RecurringJob>>(JOBS_URL, {
-    params: cleanParams({ page_size: 200, ...params }),
-  });
-  return response.data;
+  const results: RecurringJob[] = [];
+  let count = 0;
+  for (let page = 1; page <= _LIST_MAX_PAGES; page += 1) {
+    const response = await api.get<PaginatedResponse<RecurringJob>>(JOBS_URL, {
+      params: cleanParams({ ...params, page_size: _LIST_PAGE_SIZE, page }),
+    });
+    const data = response.data;
+    count = data.count;
+    results.push(...data.results);
+    if (!data.next || data.results.length < _LIST_PAGE_SIZE) break;
+  }
+  return { count, next: null, previous: null, results };
 }
 
 export async function getRecurringJob(
