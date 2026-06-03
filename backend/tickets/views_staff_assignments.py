@@ -65,7 +65,7 @@ from .models import (
     Ticket,
     TicketStaffAssignment,
 )
-from .serializers import PHOTO_MIME_TYPES
+from .serializers import is_photo_attachment
 
 
 # Sprint 14E — writable slot fields, split by who may write them.
@@ -183,11 +183,17 @@ class _SlotWriteSerializer(serializers.ModelSerializer):
                 getattr(self.instance, "completion_note", "") or "",
             )
             has_note = bool((note or "").strip())
+            # A linked photo must be a GENUINE image: both an image MIME type
+            # AND an image extension (is_photo_attachment). A MIME-only check
+            # would let historical bad data (proof.pdf stored as image/jpeg)
+            # satisfy the gate, so verify each non-hidden linked attachment in
+            # Python rather than with a mime_type__in queryset filter.
             has_photo = bool(
                 self.instance is not None
-                and self.instance.attachments.filter(
-                    is_hidden=False, mime_type__in=PHOTO_MIME_TYPES
-                ).exists()
+                and any(
+                    is_photo_attachment(att)
+                    for att in self.instance.attachments.filter(is_hidden=False)
+                )
             )
             if not (has_note or has_photo):
                 raise serializers.ValidationError(

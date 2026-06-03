@@ -130,6 +130,68 @@ class SlotCompletionEvidenceTests(TenantFixtureMixin, APITestCase):
             resp.data["completion_note"][0].code, "completion_evidence_required"
         )
 
+    def test_completed_with_linked_png_photo_ok(self):
+        # A genuine PNG (image MIME + image extension) is valid evidence.
+        self.authenticate(self.staff)
+        up = self.upload(
+            name="ev.png",
+            content=b"\x89PNG\r\n\x1a\n",
+            content_type="image/png",
+            staff_assignment_id=self.slot.id,
+        )
+        self.assertEqual(up.status_code, status.HTTP_201_CREATED, up.data)
+        resp = self.patch_slot(slot_status=StaffAssignmentSlotStatus.COMPLETED)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+
+    # ---- P2 #2: extension/MIME pairing + spoof-proof photo evidence ------
+    def test_upload_pdf_with_image_mime_rejected(self):
+        # A file named proof.pdf MUST NOT be uploadable as image/jpeg — the
+        # extension and content type must agree, or a fake photo could be
+        # stored and later satisfy the completion-photo gate.
+        self.authenticate(self.staff)
+        up = self.upload(
+            name="proof.pdf",
+            content=b"%PDF-1.4",
+            content_type="image/jpeg",
+            staff_assignment_id=self.slot.id,
+        )
+        self.assertEqual(up.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(up.data["file"][0].code, "invalid_file_mime_pair")
+
+    def test_upload_jpg_with_pdf_mime_rejected(self):
+        self.authenticate(self.staff)
+        up = self.upload(
+            name="photo.jpg",
+            content=b"\xff\xd8\xff\xe0",
+            content_type="application/pdf",
+        )
+        self.assertEqual(up.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(up.data["file"][0].code, "invalid_file_mime_pair")
+
+    def test_historical_bad_pdf_row_does_not_satisfy_photo_evidence(self):
+        # Simulate historical bad data that bypassed validate_file: a row
+        # whose filename is proof.pdf but whose stored mime_type is
+        # image/jpeg, linked to the slot. A MIME-only check would wrongly
+        # accept it; the extension (.pdf) must disqualify it.
+        TicketAttachment.objects.create(
+            ticket=self.ticket,
+            staff_assignment=self.slot,
+            uploaded_by=self.staff,
+            file=SimpleUploadedFile(
+                "proof.pdf", b"%PDF-1.4", content_type="image/jpeg"
+            ),
+            original_filename="proof.pdf",
+            mime_type="image/jpeg",
+            file_size=8,
+            is_hidden=False,
+        )
+        self.authenticate(self.staff)
+        resp = self.patch_slot(slot_status=StaffAssignmentSlotStatus.COMPLETED)
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            resp.data["completion_note"][0].code, "completion_evidence_required"
+        )
+
     # ---- evidence-link scope rules ---------------------------------------
     def test_staff_cannot_link_to_another_staffs_slot(self):
         self.authenticate(self.staff)

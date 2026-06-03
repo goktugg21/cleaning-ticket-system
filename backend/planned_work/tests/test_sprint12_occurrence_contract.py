@@ -22,8 +22,10 @@ Covers:
 from __future__ import annotations
 
 import datetime
+import importlib
 from decimal import Decimal
 
+from django.apps import apps as global_apps
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -334,3 +336,85 @@ class OccurrenceOverrideAuditTests(_Sprint12Base):
         # handler must emit no occurrence CRUD rows.
         generate_occurrences(days_ahead=7, today=TODAY)
         self.assertEqual(self._po_audit_updates().count(), 0)
+
+
+class OccurrenceSnapshotBackfillMigrationTests(_Sprint12Base):
+    """Codex P2 #1 — the 0002 data migration must copy each pre-existing
+    occurrence's snapshot from its parent RecurringJob, so historical
+    fixed-price occurrences do not serialise with null billable totals."""
+
+    def _backfill(self):
+        # The migration module name starts with a digit, so import it by
+        # path and run the named backfill function against the real apps
+        # registry (the function only uses apps.get_model + .save()).
+        module = importlib.import_module(
+            "planned_work.migrations."
+            "0002_plannedoccurrence_fixed_price_and_more"
+        )
+        module.backfill_occurrence_snapshots(global_apps, None)
+
+    def test_backfill_copies_price_and_window_from_job(self):
+        job = self.make_fixed_job(
+            fixed_price="120.00",
+            vat_pct="9.00",
+            preferred_start_time=datetime.time(14, 30),
+            time_window_label="afternoon",
+        )
+        # An occurrence as it would exist BEFORE the snapshot fields were
+        # backfilled: AddField defaults (CONTRACT_INCLUDED / null / 21.00 /
+        # null / "") rather than the job's real values.
+        occ = PlannedOccurrence.objects.create(
+            recurring_job=job,
+            company=job.company,
+            building=job.building,
+            customer=job.customer,
+            planned_date=TODAY,
+            status=PlannedOccurrenceStatus.TICKET_CREATED,
+            pricing_mode=PricingMode.CONTRACT_INCLUDED,
+            fixed_price=None,
+            vat_pct=Decimal("21.00"),
+            preferred_start_time=None,
+            time_window_label="",
+        )
+
+        self._backfill()
+
+        occ.refresh_from_db()
+        self.assertEqual(occ.pricing_mode, PricingMode.FIXED)
+        self.assertEqual(occ.fixed_price, Decimal("120.00"))
+        self.assertEqual(occ.vat_pct, Decimal("9.00"))
+        self.assertEqual(occ.preferred_start_time, datetime.time(14, 30))
+        self.assertEqual(occ.time_window_label, "afternoon")
+
+    def test_backfill_is_idempotent_and_matches_contract_job(self):
+        # A contract-included job's occurrence stays contract-included (no
+        # fixed_price invented), and a second run changes nothing.
+        contract_job = RecurringJob.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            title="Contract clean",
+            frequency=Frequency.WEEKLY,
+            start_date=TODAY,
+            pricing_mode=PricingMode.CONTRACT_INCLUDED,
+            preferred_start_time=datetime.time(8, 0),
+            time_window_label="ochtend",
+            created_by=self.super_admin,
+        )
+        occ = PlannedOccurrence.objects.create(
+            recurring_job=contract_job,
+            company=contract_job.company,
+            building=contract_job.building,
+            customer=contract_job.customer,
+            planned_date=TODAY,
+            status=PlannedOccurrenceStatus.PLANNED,
+        )
+
+        self._backfill()
+        self._backfill()
+
+        occ.refresh_from_db()
+        self.assertEqual(occ.pricing_mode, PricingMode.CONTRACT_INCLUDED)
+        self.assertIsNone(occ.fixed_price)
+        self.assertEqual(occ.preferred_start_time, datetime.time(8, 0))
+        self.assertEqual(occ.time_window_label, "ochtend")
