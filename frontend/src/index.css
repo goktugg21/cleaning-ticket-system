@@ -3453,10 +3453,29 @@ table.data-table {
   border: 1px solid rgba(95,212,153,0.25);
 }
 
+/* SoT §1.4 + §7.1 — Extra Work-origin tickets "must not disappear into
+   the normal ticket list" and the dashboard "must make Extra Work origin
+   impossible to miss". A SOLID, saturated blue fill with white bold text
+   (the base .work-type-pill is font-weight 700) makes it unmistakable
+   next to the pale-green "Ticket" pill — not a faint tint that blends
+   into the surface. */
 .work-type-pill-extra-work {
-  background: rgba(95,141,212,0.10);
-  color: #3a5a8a;
-  border: 1px solid rgba(95,141,212,0.25);
+  background: #3b6fb5;
+  color: #ffffff;
+  border: 1px solid #2f5d9e;
+}
+
+/* The dashboard EW-origin pill is ALSO a deep-link to the parent Extra
+   Work request: strip the anchor underline + cursor/hover so it reads as
+   a tappable pill (not body text) across the queue, table, and cards. */
+.work-type-pill-link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.work-type-pill-extra-work.work-type-pill-link:hover {
+  background: #2f5d9e;
+  border-color: #264c82;
 }
 
 .recent-ops-extra-work-row {
