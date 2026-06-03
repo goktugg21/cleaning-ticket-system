@@ -714,7 +714,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             _target_provider_in_scope,
         )
 
-        from .models import ExtraWorkStatus
+        from .models import ExtraWorkRequestIntent, ExtraWorkStatus
 
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
@@ -724,6 +724,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
                 "allowed_next_statuses": [],
                 "can_prepare_extra_work_proposal": False,
                 "can_override_customer_decision": False,
+                "can_auto_start": False,
                 "can_view_pricing": False,
                 "can_view_proposal_pdf": False,
                 "can_approve": False,
@@ -776,6 +777,20 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             and obj.status == ExtraWorkStatus.PRICING_PROPOSED
         )
 
+        # Sprint 31 — AUTO_START "Start work" affordance. A provider
+        # operator in scope may start a PRICING_PROPOSED request that was
+        # created with the AUTO_START_AFTER_PRICING intent WITHOUT a
+        # customer approval or an override reason (the customer
+        # pre-authorised it). This is NOT an override (is_override stays
+        # False) so it is independent of the BM override-key — any
+        # in-scope provider operator qualifies.
+        can_auto_start = (
+            (is_super or is_ca_in or is_bm_in)
+            and obj.status == ExtraWorkStatus.PRICING_PROPOSED
+            and obj.request_intent
+            == ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING
+        )
+
         # Pricing visibility. Provider operators in scope see prices
         # regardless of the B6 prep override (B6 only revokes the
         # ability to SEND a proposal, not to view prices). Customer
@@ -826,6 +841,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "allowed_next_statuses": list(allowed),
             "can_prepare_extra_work_proposal": can_prepare_extra_work_proposal,
             "can_override_customer_decision": can_override_customer_decision,
+            "can_auto_start": can_auto_start,
             "can_view_pricing": can_view_pricing,
             "can_view_proposal_pdf": can_view_proposal_pdf,
             "can_approve": can_approve,

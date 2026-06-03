@@ -196,6 +196,9 @@
   "detail.workflow_move_to": "Naar {{label}}",
   "detail.workflow_working": "Bezig…",
   "detail.workflow_no_transitions": "Er zijn geen verdere overgangen beschikbaar voor u in deze status.",
+  "detail.auto_start_button": "Werk starten",
+  "detail.auto_start_busy": "Starten…",
+  "detail.auto_start_hint": "De klant heeft dit vooraf goedgekeurd. Starten slaat de klantgoedkeuring over en maakt de tickets direct aan.",
 
   "detail.override_section_title": "Aanbieder-override",
   "detail.override_warning_title": "Override de klantbeslissing.",

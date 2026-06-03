@@ -196,6 +196,9 @@
   "detail.workflow_move_to": "Move to {{label}}",
   "detail.workflow_working": "Working…",
   "detail.workflow_no_transitions": "No further transitions are available to you in this status.",
+  "detail.auto_start_button": "Start work",
+  "detail.auto_start_busy": "Starting…",
+  "detail.auto_start_hint": "The customer pre-authorized this. Starting skips customer approval and creates the tickets right away.",
 
   "detail.override_section_title": "Provider override",
   "detail.override_warning_title": "Override the customer decision.",

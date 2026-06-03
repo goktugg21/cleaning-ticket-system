@@ -509,6 +509,13 @@ export function ExtraWorkDetailPage() {
   const canRejectAsCustomer = !isProvider && ewActions?.can_reject === true;
   const providerOverrideAvailable =
     ewActions?.can_override_customer_decision === true;
+  // Sprint 31 — AUTO_START "Start work": a provider can start a
+  // PRICING_PROPOSED request that the customer pre-authorized
+  // (request_intent == AUTO_START_AFTER_PRICING) without approval or an
+  // override reason. When present, it REPLACES the override-approve
+  // button (approving an auto-start request is not an override); the
+  // override-reject button stays (rejection is always reasoned).
+  const canAutoStart = isProvider && ewActions?.can_auto_start === true;
   // Pricing visibility + PDF read are now action-driven so a customer
   // without approve rights doesn't see pricing rows AND a BM with the
   // prep key revoked STILL sees pricing + PDF (backend invariant).
@@ -989,6 +996,27 @@ export function ExtraWorkDetailPage() {
                 {t("detail.actions_workflow_title")}
               </div>
               <div className="ew-workflow-actions">
+                {canAutoStart && (
+                  <div
+                    className="ew-auto-start"
+                    data-testid="extra-work-auto-start"
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={transitionBusy !== null}
+                      onClick={() => handleTransition("CUSTOMER_APPROVED")}
+                      data-testid="extra-work-auto-start-button"
+                    >
+                      {transitionBusy === "CUSTOMER_APPROVED"
+                        ? t("detail.auto_start_busy")
+                        : t("detail.auto_start_button")}
+                    </button>
+                    <p className="muted small" style={{ margin: "6px 0 0" }}>
+                      {t("detail.auto_start_hint")}
+                    </p>
+                  </div>
+                )}
                 {canApproveAsCustomer && (
                   <button
                     type="button"
@@ -1051,6 +1079,12 @@ export function ExtraWorkDetailPage() {
                 {providerOverrideAvailable &&
                   (["CUSTOMER_APPROVED", "CUSTOMER_REJECTED"] as const)
                     .filter((target) => allowed.includes(target))
+                    // AUTO_START replaces the override-approve with the
+                    // no-reason "Start work" button above; keep reject.
+                    .filter(
+                      (target) =>
+                        !(canAutoStart && target === "CUSTOMER_APPROVED"),
+                    )
                     .map((target) => {
                       const isArmed = overrideDecision === target;
                       return (

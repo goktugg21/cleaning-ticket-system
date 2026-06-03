@@ -923,6 +923,11 @@ export interface ExtraWorkActions {
   allowed_next_statuses: ExtraWorkStatus[];
   can_prepare_extra_work_proposal: boolean;
   can_override_customer_decision: boolean;
+  // Sprint 31 — AUTO_START "Start work": provider may start a
+  // PRICING_PROPOSED request created with AUTO_START_AFTER_PRICING
+  // without customer approval or an override reason (pre-authorized).
+  // Optional so older responses (pre-31) typecheck as absent/false.
+  can_auto_start?: boolean;
   can_view_pricing: boolean;
   can_view_proposal_pdf: boolean;
   can_approve: boolean;
