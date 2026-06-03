@@ -12,14 +12,13 @@
 // components); the row/add-line helpers stay local to this file.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Plus } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
   createProposalLine,
   deleteProposalLine,
   transitionProposal,
-  updateProposalLine,
   type ProposalLineWritePayload,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
@@ -158,33 +157,7 @@ function NoteBox({
   );
 }
 
-// Read-only note display for the saved-line card: same field-box look as
-// NoteBox but non-interactive (no modal). Shows a check + text when filled,
-// a muted dash when empty.
-function ReadonlyNote({ label, value }: { label: string; value: string }) {
-  const { t } = useTranslation(["extra_work", "common"]);
-  const filled = value.trim() !== "";
-  return (
-    <div className="field ew-line-field-note">
-      <span className="field-label">{label}</span>
-      <div
-        className="field-input ew-pricing-note-box ew-line-readonly"
-        data-filled={filled ? "true" : "false"}
-      >
-        {filled ? (
-          <>
-            <Check size={13} strokeWidth={2.4} />
-            <span className="ew-pricing-note-box-text">{value}</span>
-          </>
-        ) : (
-          <span className="muted">{t("detail.empty_dash")}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Shared field cluster for both the edit and add forms.
+// Shared field cluster for the add-line form.
 function LineFields({
   form,
   setForm,
@@ -335,182 +308,6 @@ function payloadFromForm(
   };
 }
 
-// One editable existing line. Seeded from the line on mount; the parent
-// keys it by `${id}:${updated_at}` so a Save (which bumps updated_at)
-// remounts it with the persisted values.
-function ProposalLineEditor({
-  line,
-  disabled,
-  onSave,
-  onCancel,
-  onRemove,
-}: {
-  line: ProposalLine;
-  disabled: boolean;
-  onSave: (payload: ProposalLineWritePayload) => void;
-  onCancel: () => void;
-  onRemove: () => void;
-}) {
-  const { t } = useTranslation(["extra_work", "common"]);
-  const showInternal = Object.prototype.hasOwnProperty.call(
-    line,
-    "internal_note",
-  );
-  const [form, setForm] = useState<LineFormState>({
-    description: line.description,
-    unit_type: line.unit_type,
-    quantity: line.quantity,
-    unit_price: line.unit_price,
-    vat_pct: line.vat_pct,
-    customer_explanation: line.customer_explanation,
-    internal_note: line.internal_note ?? "",
-  });
-  return (
-    <div
-      className="ew-line-row ew-line-row-card"
-      data-testid="proposal-line-editor"
-      data-line-id={line.id}
-    >
-      <LineFields
-        form={form}
-        setForm={setForm}
-        disabled={disabled}
-        showInternal={showInternal}
-      />
-      <div className="ew-line-row-actions" style={{ display: "flex", gap: 8 }}>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          disabled={disabled || !form.description.trim()}
-          onClick={() => onSave(payloadFromForm(form, showInternal))}
-          data-testid="proposal-line-save"
-        >
-          {t("common:save")}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={disabled}
-          onClick={onCancel}
-          data-testid="proposal-line-cancel"
-        >
-          {t("common:cancel")}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={disabled}
-          onClick={onRemove}
-          data-testid="proposal-line-remove"
-        >
-          <Trash2 size={13} strokeWidth={2} />
-          {t("detail.pricing_remove_button")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// A SAVED line, collapsed to a non-editable card (mirrors the editor's
-// column layout but read-only). The persisted backend totals are shown
-// verbatim. "Edit" reopens the line in ProposalLineEditor; "Remove"
-// deletes it.
-function ProposalLineCard({
-  line,
-  disabled,
-  onEdit,
-  onRemove,
-}: {
-  line: ProposalLine;
-  disabled: boolean;
-  onEdit: () => void;
-  onRemove: () => void;
-}) {
-  const { t } = useTranslation(["extra_work", "common"]);
-  const showInternal = Object.prototype.hasOwnProperty.call(
-    line,
-    "internal_note",
-  );
-  return (
-    <div
-      className="ew-line-row ew-line-row-card"
-      data-testid="proposal-line-card"
-      data-line-id={line.id}
-    >
-      <div className="field ew-line-field-grow">
-        <span className="field-label">{t("detail.pricing_form_description")}</span>
-        <div className="field-input ew-line-readonly">
-          {line.description || line.service_name || t("detail.empty_dash")}
-        </div>
-      </div>
-      <div className="field ew-line-field-medium">
-        <span className="field-label">{t("detail.pricing_form_unit")}</span>
-        <div className="field-input ew-line-readonly">
-          {t(UNIT_TYPE_KEY[line.unit_type])}
-        </div>
-      </div>
-      <div className="field ew-line-field-compact">
-        <span className="field-label">{t("detail.pricing_form_quantity")}</span>
-        <div className="field-input ew-line-readonly">{line.quantity}</div>
-      </div>
-      <div className="field ew-line-field-compact">
-        <span className="field-label">{t("detail.pricing_form_unit_price")}</span>
-        <div className="field-input ew-line-readonly">
-          {formatMoney(Number(line.unit_price))}
-        </div>
-      </div>
-      <div className="field ew-line-field-compact">
-        <span className="field-label">{t("detail.pricing_form_vat")}</span>
-        <div className="field-input ew-line-readonly">{line.vat_pct}</div>
-      </div>
-      <MoneyBox
-        label={t("detail.pricing_column_subtotal")}
-        value={Number(line.line_subtotal)}
-      />
-      <MoneyBox
-        label={t("detail.pricing_column_vat")}
-        value={Number(line.line_vat)}
-      />
-      <MoneyBox
-        label={t("detail.pricing_column_total")}
-        value={Number(line.line_total)}
-      />
-      <ReadonlyNote
-        label={t("detail.pricing_customer_note_button")}
-        value={line.customer_explanation}
-      />
-      {showInternal && (
-        <ReadonlyNote
-          label={t("detail.pricing_internal_note_button")}
-          value={line.internal_note ?? ""}
-        />
-      )}
-      <div className="ew-line-row-actions" style={{ display: "flex", gap: 8 }}>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          disabled={disabled}
-          onClick={onEdit}
-          data-testid="proposal-line-edit"
-        >
-          <Pencil size={13} strokeWidth={2} />
-          {t("common:edit")}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={disabled}
-          onClick={onRemove}
-          data-testid="proposal-line-card-remove"
-        >
-          <Trash2 size={13} strokeWidth={2} />
-          {t("detail.pricing_remove_button")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function ProposalAddLine({
   disabled,
   onAdd,
@@ -578,10 +375,6 @@ export function ProposalBuilder({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  // Which saved line is currently open in the editor. null = every line
-  // shows as a read-only card; clicking a card's "Edit" opens it here, and
-  // a successful Save (or Cancel) collapses it back to the card.
-  const [editingId, setEditingId] = useState<number | null>(null);
   // Provider override-decision modal (SENT proposal). A customer decides
   // without a reason; a PROVIDER driving the customer decision is an
   // override and the backend coerces is_override + REQUIRES a non-blank
@@ -605,25 +398,19 @@ export function ProposalBuilder({
   const canApprove = proposal.actions?.can_approve === true;
   const canReject = proposal.actions?.can_reject === true;
 
-  // Returns true on success so callers (e.g. the line editor) can collapse
-  // back to the read-only card only when the save actually landed.
-  async function run(fn: () => Promise<unknown>): Promise<boolean> {
+  async function run(fn: () => Promise<unknown>) {
     setBusy(true);
     setError("");
     try {
       await fn();
       await onChanged();
-      return true;
     } catch (err) {
       setError(getApiError(err));
-      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  const saveLine = (lineId: number, payload: ProposalLineWritePayload) =>
-    run(() => updateProposalLine(ewId, proposal.id, lineId, payload));
   const removeLine = (lineId: number) =>
     void run(() => deleteProposalLine(ewId, proposal.id, lineId));
   const addLine = (payload: ProposalLineWritePayload) =>
@@ -669,6 +456,29 @@ export function ProposalBuilder({
     });
   };
 
+  // Per-line notes shown under the service label in the read-only table
+  // (mirrors the cart table's "date + customer note" sub-line). Internal
+  // note appears only when the serializer included it (provider reads).
+  const renderNoteSub = (line: ProposalLine) => {
+    const showInternal = Object.prototype.hasOwnProperty.call(
+      line,
+      "internal_note",
+    );
+    const cust = line.customer_explanation.trim();
+    const intl = showInternal ? (line.internal_note ?? "").trim() : "";
+    if (!cust && !intl) return undefined;
+    return (
+      <>
+        {cust && <div className="muted small">{cust}</div>}
+        {intl && (
+          <div className="muted small" style={{ fontStyle: "italic" }}>
+            {t("detail.pricing_internal_note_button")}: {intl}
+          </div>
+        )}
+      </>
+    );
+  };
+
   return (
     <div
       className="card"
@@ -688,35 +498,48 @@ export function ProposalBuilder({
           </div>
         )}
 
-        {canEdit ? (
-          <div className="ew-pricing-add-form">
-            {proposal.lines.length === 0 && (
-              <p className="muted small">{t("detail.proposal_builder_empty")}</p>
-            )}
-            {proposal.lines.map((line) =>
-              editingId === line.id ? (
-                <ProposalLineEditor
-                  key={`${line.id}:${line.updated_at}`}
-                  line={line}
-                  disabled={busy}
-                  onSave={(payload) => {
-                    void saveLine(line.id, payload).then((ok) => {
-                      if (ok) setEditingId(null);
-                    });
-                  }}
-                  onCancel={() => setEditingId(null)}
-                  onRemove={() => removeLine(line.id)}
-                />
-              ) : (
-                <ProposalLineCard
+        {/* Saved proposal lines render read-only in the same table layout
+            as the cart's "Requested services" (InvoiceLineRow). When the
+            viewer can edit, each row carries a Remove action — there is no
+            inline edit; a line is changed by removing it and re-adding it
+            through the composer below (legacy composer behavior). */}
+        {proposal.lines.length === 0 ? (
+          <p className="muted small">{t("detail.proposal_builder_empty")}</p>
+        ) : (
+          <table className="data-table ew-pricing-table">
+            <thead>
+              <tr>
+                {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                  <th key={key}>{t(key)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {proposal.lines.map((line) => (
+                <InvoiceLineRow
                   key={line.id}
+                  lineKind="proposal"
                   line={line}
-                  disabled={busy}
-                  onEdit={() => setEditingId(line.id)}
-                  onRemove={() => removeLine(line.id)}
+                  editable={canEdit}
+                  onRemove={canEdit ? () => removeLine(line.id) : undefined}
+                  rowTestId="extra-work-proposal-line-row"
+                  subLabel={renderNoteSub(line)}
                 />
-              ),
-            )}
+              ))}
+              <InvoiceLineTotalsRow
+                subtotal={proposal.subtotal_amount}
+                vatAmount={proposal.vat_amount}
+                total={proposal.total_amount}
+              />
+            </tbody>
+          </table>
+        )}
+
+        {/* Add-line composer — the ONLY editing surface. Live per-line
+            Subtotal / VAT / Total + the note modals live in here; on save
+            the line drops into the read-only table above. */}
+        {canEdit && (
+          <div className="ew-pricing-add-form">
             {addOpen ? (
               <ProposalAddLine
                 disabled={busy}
@@ -733,36 +556,12 @@ export function ProposalBuilder({
                 data-testid="proposal-add-line-toggle"
               >
                 <Plus size={14} strokeWidth={2.2} />
-                <span style={{ marginLeft: 6 }}>{t("detail.proposal_add_line")}</span>
+                <span style={{ marginLeft: 6 }}>
+                  {t("detail.proposal_add_line")}
+                </span>
               </button>
             )}
           </div>
-        ) : (
-          <table className="data-table ew-pricing-table">
-            <thead>
-              <tr>
-                {INVOICE_LINE_COLUMN_KEYS.map((key) => (
-                  <th key={key}>{t(key)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {proposal.lines.map((line) => (
-                <InvoiceLineRow
-                  key={line.id}
-                  lineKind="proposal"
-                  line={line}
-                  editable={false}
-                  rowTestId="extra-work-proposal-line-row"
-                />
-              ))}
-              <InvoiceLineTotalsRow
-                subtotal={proposal.subtotal_amount}
-                vatAmount={proposal.vat_amount}
-                total={proposal.total_amount}
-              />
-            </tbody>
-          </table>
         )}
 
         <div

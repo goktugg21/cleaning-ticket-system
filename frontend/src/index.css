@@ -5749,18 +5749,6 @@ table.data-table {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Saved-line card: a persisted proposal line collapses to a non-editable
-   card after Save ("Edit" reopens the editor). Field values render in muted,
-   non-interactive boxes so the card reads as read-only, distinct from the
-   editor's live inputs. */
-.ew-pricing-add-form .ew-line-readonly {
-  background: var(--surface-2);
-  color: var(--text);
-  cursor: default;
-}
-.ew-pricing-add-form .ew-pricing-note-box.ew-line-readonly {
-  cursor: default;
-}
 @media (max-width: 760px) {
   .ew-pricing-add-form .ew-line-row > .field.ew-line-field-money,
   .ew-pricing-add-form .ew-line-row > .field.ew-line-field-note {
