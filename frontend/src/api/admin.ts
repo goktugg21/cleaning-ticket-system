@@ -888,6 +888,14 @@ export interface AssignableStaff {
   role: "STAFF";
 }
 
+// Sprint 12/14E — dated staff SLOT lifecycle. A slot is one
+// TicketStaffAssignment row; a ticket may carry several (the AM/PM split).
+export type SlotStatus =
+  | "ASSIGNED"
+  | "COMPLETED"
+  | "UNABLE_TO_COMPLETE"
+  | "CANCELLED";
+
 export interface TicketStaffAssignmentAdmin {
   id: number;
   ticket: number;
@@ -897,6 +905,59 @@ export interface TicketStaffAssignmentAdmin {
   assigned_by_id: number | null;
   assigned_by_email: string | null;
   assigned_at: string;
+  // Dated slot metadata + completion evidence (read side).
+  scheduled_start_at: string | null;
+  scheduled_end_at: string | null;
+  time_window_label: string;
+  assignment_note: string;
+  slot_status: SlotStatus;
+  completion_note: string;
+  completed_at: string | null;
+  completed_by_id: number | null;
+  unable_to_complete_reason: string;
+}
+
+// Optional dated fields accepted on slot create (POST). user_id is passed
+// separately by addTicketStaffAssignment.
+export interface StaffSlotCreatePayload {
+  scheduled_start_at?: string | null;
+  scheduled_end_at?: string | null;
+  time_window_label?: string;
+  assignment_note?: string;
+}
+
+// PATCH surface. Manager may write schedule/window/note/status/completion;
+// a STAFF self-PATCH may write only slot_status + completion_note +
+// unable_to_complete_reason (the backend silently drops schedule fields for
+// staff, so the staff UI never renders them).
+export interface StaffSlotPatch {
+  scheduled_start_at?: string | null;
+  scheduled_end_at?: string | null;
+  time_window_label?: string;
+  assignment_note?: string;
+  slot_status?: SlotStatus;
+  completion_note?: string;
+  unable_to_complete_reason?: string;
+}
+
+// Caller-scoped staff agenda row (_MySlotSerializer). Safe for any role;
+// non-assignees get an empty list.
+export interface MySlot {
+  id: number;
+  ticket_id: number;
+  ticket_no: string;
+  ticket_title: string;
+  ticket_status: string;
+  building_id: number;
+  building_name: string;
+  scheduled_start_at: string | null;
+  scheduled_end_at: string | null;
+  time_window_label: string;
+  assignment_note: string;
+  slot_status: SlotStatus;
+  completion_note: string;
+  completed_at: string | null;
+  unable_to_complete_reason: string;
 }
 
 export async function listAssignableStaff(
@@ -920,10 +981,26 @@ export async function listTicketStaffAssignments(
 export async function addTicketStaffAssignment(
   ticketId: number,
   userId: number,
+  slot: StaffSlotCreatePayload = {},
 ): Promise<TicketStaffAssignmentAdmin> {
   const response = await api.post<TicketStaffAssignmentAdmin>(
     `/tickets/${ticketId}/staff-assignments/`,
-    { user_id: userId },
+    { user_id: userId, ...slot },
+  );
+  return response.data;
+}
+
+// PATCH /tickets/<id>/staff-assignments/<userId>/ — keyed by the slot's
+// assignee user id. Managers pass the slot's user_id; a STAFF self-update
+// passes their own id.
+export async function updateStaffSlot(
+  ticketId: number,
+  userId: number,
+  patch: StaffSlotPatch,
+): Promise<TicketStaffAssignmentAdmin> {
+  const response = await api.patch<TicketStaffAssignmentAdmin>(
+    `/tickets/${ticketId}/staff-assignments/${userId}/`,
+    patch,
   );
   return response.data;
 }
@@ -933,6 +1010,29 @@ export async function removeTicketStaffAssignment(
   userId: number,
 ): Promise<void> {
   await api.delete(`/tickets/${ticketId}/staff-assignments/${userId}/`);
+}
+
+// GET /tickets/my-slots/ — the caller's own dated assignment slots (the
+// "My Work" agenda). Paginated envelope. A personal agenda accumulates
+// every dated slot over time, so page through ALL pages and return the
+// merged list rather than only the first 200 (pre-empts the #68-style
+// first-page-only cap). Stop when a short page / null `next` is seen, with
+// a hard safety cap so a backend paging bug can't loop forever.
+const _MY_SLOTS_PAGE_SIZE = 200;
+const _MY_SLOTS_MAX_PAGES = 25; // 25 * 200 = 5000 slots — far beyond any agenda.
+
+export async function getMySlots(): Promise<MySlot[]> {
+  const results: MySlot[] = [];
+  for (let page = 1; page <= _MY_SLOTS_MAX_PAGES; page += 1) {
+    const response = await api.get<PaginatedResponse<MySlot>>(
+      "/tickets/my-slots/",
+      { params: { page_size: _MY_SLOTS_PAGE_SIZE, page } },
+    );
+    const data = response.data;
+    results.push(...data.results);
+    if (!data.next || data.results.length < _MY_SLOTS_PAGE_SIZE) break;
+  }
+  return results;
 }
 
 // ---- Sprint 28 Batch 11 — Staff completion routing helper -------------

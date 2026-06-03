@@ -14,6 +14,7 @@ import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
 import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
+import { AgendaPage } from "./pages/AgendaPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExtraWorkDetailPage } from "./pages/ExtraWorkDetailPage";
 import { ExtraWorkListPage } from "./pages/ExtraWorkListPage";
@@ -145,6 +146,18 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* Phase B — staff "My Work" agenda. Caller-scoped (my-slots is
+              empty for non-assignees), so it sits behind the plain
+              ProtectedRoute; the nav entry is gated to STAFF + provider
+              management. */}
+          <Route
+            path="/agenda"
+            element={
+              <ProtectedRoute>
+                <AgendaPage />
               </ProtectedRoute>
             }
           />
