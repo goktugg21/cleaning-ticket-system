@@ -8,10 +8,16 @@ Pins the canonical §7.0 (system-business-logic-and-workflows.md):
   2. Mixed cart (any non-contract line) -> PROPOSAL path. Whole cart
      goes through the proposal builder.
   3. POST /api/extra-work/<id>/proposals/ with `lines=[]` or no
-     `lines` key auto-seeds one ProposalLine per ExtraWorkRequestItem.
-     Contract-priced lines get `unit_price` + `vat_pct` pre-filled
-     from the resolver; non-contract lines start at 0 and the
-     operator may fill them in before SEND.
+     `lines` key auto-seeds ProposalLine rows ONLY for AGREED-priced
+     (contract) cart items, pre-filling `unit_price` + `vat_pct` from
+     the resolver. Non-contract (custom / needs-proposal) cart items
+     are SKIPPED — the operator adds them deliberately via the
+     composer (2026-06-03 owner decision; auto-seeding a custom line
+     at 0.00 forced a remove + re-add because saved lines are
+     read-only in the UI). A mixed cart therefore seeds exactly the
+     contract lines; an all-custom cart seeds ZERO lines (empty DRAFT
+     proposal — the existing `proposal_lines_required` SEND gate
+     blocks sending it).
   4. POST with explicit `lines` still works.
   5. SEND succeeds with explicit lines (any priced shape).
   6. SEND succeeds with FREE-FORM proposal lines that do NOT mirror
@@ -286,7 +292,10 @@ class RoutingMixedCartTests(_B2Fixture):
 
 
 # ---------------------------------------------------------------------------
-# 3. Auto-seed: POST proposal with omitted lines mirrors the cart.
+# 3. Auto-seed: POST proposal with omitted lines seeds ONLY the
+#    AGREED-priced (contract) cart lines. Non-contract lines are
+#    SKIPPED (2026-06-03 owner decision) — the operator adds them via
+#    the composer.
 # ---------------------------------------------------------------------------
 class ProposalAutoSeedTests(_B2Fixture):
     def _build_mixed_cart(self) -> ExtraWorkRequest:
@@ -307,7 +316,22 @@ class ProposalAutoSeedTests(_B2Fixture):
         self._move_ew_to_under_review(ew)
         return ew
 
-    def test_omitted_lines_payload_auto_seeds_from_cart(self):
+    def _build_all_custom_cart(self) -> ExtraWorkRequest:
+        # Single no-contract service -> routes to PROPOSAL with an
+        # all-custom cart.
+        ew = self._submit_cart(
+            [
+                {
+                    "service": self.svc_grass.id,
+                    "quantity": "100",
+                    "requested_date": "2026-06-01",
+                },
+            ]
+        )
+        self._move_ew_to_under_review(ew)
+        return ew
+
+    def test_omitted_lines_payload_auto_seeds_only_contract_lines(self):
         ew = self._build_mixed_cart()
         response = self._api(self.admin).post(
             self._proposals_url(ew.id),
@@ -321,29 +345,24 @@ class ProposalAutoSeedTests(_B2Fixture):
                 "id"
             )
         )
-        # One line per cart item, same multiset.
-        self.assertEqual(len(seeded), 2)
-        services = {line.service_id for line in seeded}
-        self.assertEqual(
-            services, {self.svc_window.id, self.svc_grass.id}
-        )
+        # Only the AGREED-priced (window) cart line is auto-seeded; the
+        # non-contract (grass) cart line is skipped.
+        self.assertEqual(len(seeded), 1)
+        window_line = seeded[0]
+        self.assertEqual(window_line.service_id, self.svc_window.id)
         # Contract-priced line auto-filled from CustomerServicePrice.
-        window_line = next(
-            line for line in seeded if line.service_id == self.svc_window.id
-        )
         self.assertEqual(window_line.unit_price, Decimal("5.00"))
         self.assertEqual(window_line.vat_pct, Decimal("21.00"))
-        # Non-contract line defaults to zero, awaiting operator fill.
-        grass_line = next(
-            line for line in seeded if line.service_id == self.svc_grass.id
-        )
-        self.assertEqual(grass_line.unit_price, Decimal("0.00"))
-        # customer_explanation must NOT be used as a metadata marker —
-        # both lines should be empty by default.
+        # customer_explanation must NOT be used as a metadata marker.
         self.assertEqual(window_line.customer_explanation, "")
-        self.assertEqual(grass_line.customer_explanation, "")
+        # The non-contract grass line was NOT auto-seeded.
+        self.assertFalse(
+            ProposalLine.objects.filter(
+                proposal_id=proposal_id, service_id=self.svc_grass.id
+            ).exists()
+        )
 
-    def test_empty_lines_array_also_auto_seeds(self):
+    def test_empty_lines_array_also_auto_seeds_only_contract_lines(self):
         ew = self._build_mixed_cart()
         response = self._api(self.admin).post(
             self._proposals_url(ew.id),
@@ -351,11 +370,29 @@ class ProposalAutoSeedTests(_B2Fixture):
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
+        seeded = ProposalLine.objects.filter(
+            proposal_id=response.data["id"]
+        )
+        self.assertEqual(seeded.count(), 1)
+        self.assertEqual(seeded.get().service_id, self.svc_window.id)
+
+    def test_all_custom_cart_auto_seeds_zero_lines(self):
+        # An all-custom cart yields an empty DRAFT proposal — no
+        # ProposalLine is seeded. The existing SEND gate
+        # (`proposal_lines_required`) blocks sending it; auto-seed adds
+        # no new gate of its own.
+        ew = self._build_all_custom_cart()
+        response = self._api(self.admin).post(
+            self._proposals_url(ew.id),
+            {},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(
             ProposalLine.objects.filter(
                 proposal_id=response.data["id"]
             ).count(),
-            2,
+            0,
         )
 
 
@@ -520,18 +557,28 @@ class ProposalApprovalSpawnTests(_B2Fixture):
             ]
         )
         self._move_ew_to_under_review(ew)
-        # Auto-seed from cart then fill the non-contract line price.
+        # Auto-seed from cart (seeds ONLY the contract window line);
+        # the operator then ADDS the non-contract grass line via the
+        # composer (2026-06-03 owner decision: custom lines are not
+        # auto-seeded).
         response = self._api(self.admin).post(
             self._proposals_url(ew.id), {}, format="json"
         )
         self.assertEqual(response.status_code, 201)
         proposal_id = response.data["id"]
-        # Find the non-contract line and set its price.
-        grass_line = ProposalLine.objects.get(
-            proposal_id=proposal_id, service_id=self.svc_grass.id
+        # The non-contract grass line was not auto-seeded — add it.
+        add = self._api(self.admin).post(
+            f"{self._proposals_url(ew.id)}{proposal_id}/lines/",
+            {
+                "service": self.svc_grass.id,
+                "quantity": "100",
+                "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
+                "unit_price": "2.50",
+                "vat_pct": "21.00",
+            },
+            format="json",
         )
-        grass_line.unit_price = Decimal("2.50")
-        grass_line.save(update_fields=["unit_price"])
+        self.assertEqual(add.status_code, 201, add.data)
         # SEND.
         response = self._api(self.admin).post(
             self._proposal_transition_url(ew.id, proposal_id),

@@ -189,8 +189,15 @@ class AutoStartFixtureMixin:
     # -- provider pricing finalize (auto-seed + price + SEND) -------------
     def _enter_pricing_and_send(self, ew, *, actor=None):
         """Provider moves the EW to UNDER_REVIEW, auto-seeds a proposal
-        from the cart, fills any non-contract (zero-priced) line, and
-        SENDs it. Returns (proposal_id, send_response)."""
+        from the cart, adds + prices the non-contract cart lines via the
+        composer, and SENDs it. Returns (proposal_id, send_response).
+
+        Auto-seed (2026-06-03 owner decision) ONLY seeds agreed-priced
+        cart lines; custom / no-contract cart lines are added
+        deliberately by the operator via the line composer. This helper
+        mirrors that by adding a priced proposal line for every cart
+        item the auto-seed skipped.
+        """
         actor = actor or self.admin
         api = self._api(actor)
 
@@ -202,13 +209,40 @@ class AutoStartFixtureMixin:
         )
         assert resp.status_code == 200, resp.data
 
-        # Auto-seed a proposal (one line per cart item, contract prices
-        # pre-filled, non-contract lines at 0.00).
+        # Auto-seed a proposal (one line per AGREED-priced cart item,
+        # contract prices pre-filled; non-contract cart lines skipped).
         resp = api.post(
             f"/api/extra-work/{ew.id}/proposals/", {}, format="json"
         )
         assert resp.status_code == 201, resp.data
         proposal_id = resp.data["id"]
+
+        # Add the custom / no-contract cart lines the auto-seed skipped.
+        seeded = api.get(
+            f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
+        ).data
+        seeded_service_ids = {
+            line.get("service") for line in seeded if line.get("service")
+        }
+        for item in ew.line_items.all().order_by("id"):
+            if item.service_id and item.service_id in seeded_service_ids:
+                continue
+            body = {
+                "quantity": str(item.quantity),
+                "unit_type": item.unit_type,
+                "unit_price": "55.00",
+                "vat_pct": "21.00",
+            }
+            if item.service_id:
+                body["service"] = item.service_id
+            else:
+                body["description"] = "Provider-priced custom line"
+            add = api.post(
+                f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/",
+                body,
+                format="json",
+            )
+            assert add.status_code == 201, add.data
 
         # Price every non-contract line (>0) so the B2 SEND gate passes.
         lines = api.get(
