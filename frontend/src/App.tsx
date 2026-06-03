@@ -6,6 +6,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { AdminRoute } from "./components/AdminRoute";
 import { CustomerReadRoute } from "./components/CustomerReadRoute";
 import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
+import { PlannedWorkRoute } from "./components/PlannedWorkRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
@@ -16,6 +17,9 @@ import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExtraWorkDetailPage } from "./pages/ExtraWorkDetailPage";
 import { ExtraWorkListPage } from "./pages/ExtraWorkListPage";
+import { PlannedWorkListPage } from "./pages/planned-work/PlannedWorkListPage";
+import { RecurringJobDetailPage } from "./pages/planned-work/RecurringJobDetailPage";
+import { RecurringJobFormPage } from "./pages/planned-work/RecurringJobFormPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -170,6 +174,41 @@ export default function App() {
               <ExtraWorkRoute>
                 <ExtraWorkDetailPage />
               </ExtraWorkRoute>
+            }
+          />
+          {/* Sprint 11/12 — provider-only planned / recurring work.
+              PlannedWorkRoute gates STAFF + CUSTOMER_USER out (the
+              backend viewsets 403 them on every route). */}
+          <Route
+            path="/planned-work"
+            element={
+              <PlannedWorkRoute>
+                <PlannedWorkListPage />
+              </PlannedWorkRoute>
+            }
+          />
+          <Route
+            path="/planned-work/new"
+            element={
+              <PlannedWorkRoute>
+                <RecurringJobFormPage />
+              </PlannedWorkRoute>
+            }
+          />
+          <Route
+            path="/planned-work/:id/edit"
+            element={
+              <PlannedWorkRoute>
+                <RecurringJobFormPage />
+              </PlannedWorkRoute>
+            }
+          />
+          <Route
+            path="/planned-work/:id"
+            element={
+              <PlannedWorkRoute>
+                <RecurringJobDetailPage />
+              </PlannedWorkRoute>
             }
           />
           <Route
