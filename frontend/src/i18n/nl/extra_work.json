@@ -57,6 +57,8 @@
   "create.line_field_requested_date": "Gewenste datum",
   "create.line_field_customer_note": "Opmerking (optioneel)",
   "create.line_field_customer_note_placeholder": "Wat de aanbieder over deze regel moet weten",
+  "create.line_custom_option": "Aangepast…",
+  "create.line_custom_placeholder": "Omschrijf de gewenste dienst",
   "create.prices.section_title": "Afgesproken prijzen voor deze klant",
   "create.prices.helper": "Klik op een dienst om die aan uw aanvraag toe te voegen. Diensten zonder afgesproken prijs worden door de provider geprijsd nadat u de aanvraag indient.",
   "create.prices.loading": "Prijzen laden…",
@@ -79,6 +81,7 @@
   "create.error_duplicate_service": "Elke dienst mag slechts één keer in het winkelmandje voorkomen. Verwijder het duplicaat.",
   "create.error_inactive_service": "Deze dienst is niet meer beschikbaar.",
   "create.error_line_service_required": "Selecteer een dienst voor elke regel.",
+  "create.error_line_custom_required": "Omschrijf de aangepaste dienst of kies er een uit de lijst.",
   "create.error_line_quantity_invalid": "Aantal moet groter zijn dan 0.",
   "create.error_line_requested_date_required": "Gewenste datum is verplicht voor elke regel.",
 

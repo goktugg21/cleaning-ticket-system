@@ -56,10 +56,21 @@ interface ParentFormState {
 interface CartLineState {
   tempId: string;
   serviceId: string;
+  // Free-text service description, used ONLY when serviceId ===
+  // CUSTOM_SERVICE_VALUE. A custom line is submitted with this text as
+  // `custom_description` (and NO `service`); the backend treats it as
+  // needs-provider-pricing and routes the request to a proposal.
+  customDescription: string;
   quantity: string;
   requestedDate: string;
   customerNote: string;
 }
+
+// Sentinel serviceId for the "Custom…" option in the per-line service
+// dropdown. A cart line is "custom" iff line.serviceId === this value.
+// It is never a real service id (numeric), so it never collides with a
+// catalog service or the agreed-price lookups.
+const CUSTOM_SERVICE_VALUE = "__custom__";
 
 const EMPTY_PARENT: ParentFormState = {
   building: "",
@@ -142,6 +153,7 @@ function emptyCartLine(): CartLineState {
   return {
     tempId: nextTempId(),
     serviceId: "",
+    customDescription: "",
     quantity: "1",
     requestedDate: todayISO(),
     customerNote: "",
@@ -436,7 +448,14 @@ export function CreateExtraWorkPage() {
     if (!form.building || !form.customer) return false;
     if (cartLines.length === 0) return false;
     return cartLines.every((line) => {
-      if (!line.serviceId) return false;
+      // A line is previewable when it is a catalog service (a chosen
+      // numeric serviceId) OR a custom line with non-empty text. An
+      // empty line, or a custom line with blank text, is not.
+      if (line.serviceId === CUSTOM_SERVICE_VALUE) {
+        if (!line.customDescription.trim()) return false;
+      } else if (!line.serviceId) {
+        return false;
+      }
       const q = Number(line.quantity);
       if (!Number.isFinite(q) || q <= 0) return false;
       return Boolean(line.requestedDate);
@@ -453,11 +472,15 @@ export function CreateExtraWorkPage() {
     return JSON.stringify({
       b: Number(form.building),
       c: Number(form.customer),
-      l: cartLines.map((line) => ({
-        s: Number(line.serviceId),
-        q: line.quantity,
-        d: line.requestedDate,
-      })),
+      l: cartLines.map((line) => {
+        const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+        return {
+          s: isCustom ? null : Number(line.serviceId),
+          c: isCustom ? line.customDescription.trim() : null,
+          q: line.quantity,
+          d: line.requestedDate,
+        };
+      }),
     });
   }, [previewable, form.building, form.customer, cartLines]);
 
@@ -468,7 +491,7 @@ export function CreateExtraWorkPage() {
     const parsed = JSON.parse(previewKey) as {
       b: number;
       c: number;
-      l: { s: number; q: string; d: string }[];
+      l: { s: number | null; c: string | null; q: string; d: string }[];
     };
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -478,11 +501,22 @@ export function CreateExtraWorkPage() {
             building: parsed.b,
             customer: parsed.c,
             request_intent: selectedIntent ?? undefined,
-            line_items: parsed.l.map((line) => ({
-              service: line.s,
-              quantity: line.q,
-              requested_date: line.d,
-            })),
+            // Catalog lines send `service`; custom lines send
+            // `custom_description` (and omit `service`). The preview
+            // serializer accepts service XOR custom_description.
+            line_items: parsed.l.map((line) =>
+              line.c !== null
+                ? {
+                    custom_description: line.c,
+                    quantity: line.q,
+                    requested_date: line.d,
+                  }
+                : {
+                    service: line.s ?? undefined,
+                    quantity: line.q,
+                    requested_date: line.d,
+                  },
+            ),
           });
           if (cancelled) return;
           setPreview({ key: previewKey, data });
@@ -715,16 +749,27 @@ export function CreateExtraWorkPage() {
     }
     const seenServiceIds = new Set<number>();
     for (const line of cartLines) {
-      if (!line.serviceId) {
-        setError(t("create.error_line_service_required"));
-        return;
+      const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+      if (isCustom) {
+        // Custom line: require non-empty free-text. Custom lines are
+        // never deduped against catalog services and skip the
+        // inactive-service check (they have no service FK).
+        if (!line.customDescription.trim()) {
+          setError(t("create.error_line_custom_required"));
+          return;
+        }
+      } else {
+        if (!line.serviceId) {
+          setError(t("create.error_line_service_required"));
+          return;
+        }
+        const svcId = Number(line.serviceId);
+        if (seenServiceIds.has(svcId)) {
+          setError(t("create.error_duplicate_service"));
+          return;
+        }
+        seenServiceIds.add(svcId);
       }
-      const svcId = Number(line.serviceId);
-      if (seenServiceIds.has(svcId)) {
-        setError(t("create.error_duplicate_service"));
-        return;
-      }
-      seenServiceIds.add(svcId);
       const qtyNum = Number(line.quantity);
       if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
         setError(t("create.error_line_quantity_invalid"));
@@ -734,10 +779,12 @@ export function CreateExtraWorkPage() {
         setError(t("create.error_line_requested_date_required"));
         return;
       }
-      const svc = services.find((s) => s.id === svcId);
-      if (svc && !svc.is_active) {
-        setError(t("create.error_inactive_service"));
-        return;
+      if (!isCustom) {
+        const svc = services.find((s) => s.id === Number(line.serviceId));
+        if (svc && !svc.is_active) {
+          setError(t("create.error_inactive_service"));
+          return;
+        }
       }
     }
 
@@ -796,12 +843,24 @@ export function CreateExtraWorkPage() {
         // backend then derives a safe default — identical to the
         // pre-intent-layer graceful-degradation behaviour.
         ...(intentToSend ? { request_intent: intentToSend } : {}),
-        line_items: cartLines.map((line) => ({
-          service: Number(line.serviceId),
-          quantity: line.quantity,
-          requested_date: line.requestedDate,
-          customer_note: line.customerNote.trim() || undefined,
-        })),
+        // Catalog lines send `service`; custom lines send
+        // `custom_description` (and omit `service`) — service XOR
+        // custom_description, validated above.
+        line_items: cartLines.map((line) =>
+          line.serviceId === CUSTOM_SERVICE_VALUE
+            ? {
+                custom_description: line.customDescription.trim(),
+                quantity: line.quantity,
+                requested_date: line.requestedDate,
+                customer_note: line.customerNote.trim() || undefined,
+              }
+            : {
+                service: Number(line.serviceId),
+                quantity: line.quantity,
+                requested_date: line.requestedDate,
+                customer_note: line.customerNote.trim() || undefined,
+              },
+        ),
       });
       setResult(created);
     } catch (err) {
@@ -1380,7 +1439,33 @@ export function CreateExtraWorkPage() {
                         </option>
                       );
                     })}
+                    {/* Custom line: no agreed-price suffix — it has no
+                        catalog service to price against. Re-picking a
+                        catalog service from this still-visible dropdown
+                        switches back. */}
+                    <option value={CUSTOM_SERVICE_VALUE}>
+                      {t("create.line_custom_option")}
+                    </option>
                   </select>
+                  {line.serviceId === CUSTOM_SERVICE_VALUE && (
+                    <input
+                      data-testid={`extra-work-create-line-custom-${index}`}
+                      className="field-input"
+                      style={{ marginTop: 8 }}
+                      type="text"
+                      maxLength={255}
+                      placeholder={t("create.line_custom_placeholder")}
+                      value={line.customDescription}
+                      onChange={(event) =>
+                        updateCartLine(
+                          line.tempId,
+                          "customDescription",
+                          event.target.value,
+                        )
+                      }
+                      required
+                    />
+                  )}
                 </div>
                 <div className="field ew-line-field-compact">
                   <label

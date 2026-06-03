@@ -998,8 +998,15 @@ export interface ExtraWorkRequestCartCreatePayload {
   // (`derive_default_intent`) when omitted, so older callers and the
   // graceful-degradation path (preview unavailable) stay valid.
   request_intent?: ExtraWorkRequestIntent;
+  // Each line is either a catalog service (`service`) OR a free-text
+  // custom line (`custom_description`) — XOR, the create form guarantees
+  // exactly one is set. A custom line carries no `service`; the backend
+  // treats it as needs-provider-pricing and routes the request to a
+  // proposal. Mirrors the cart-create line serializer + the preview
+  // line serializer (both accept service XOR custom_description).
   line_items: Array<{
-    service: number;
+    service?: number;
+    custom_description?: string;
     // Decimal as string per DRF convention.
     quantity: string;
     requested_date: string;
