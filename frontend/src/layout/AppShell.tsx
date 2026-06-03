@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
   Building2,
+  CalendarClock,
   ChevronLeft,
   ClipboardList,
   LayoutGrid,
@@ -28,6 +29,7 @@ import {
   canAccessAdminArea,
   canAccessAuditLogs,
   canAccessExtraWork,
+  canAccessPlannedWork,
   canAccessReports,
   canAccessStaffRequestReview,
   isBuildingManager,
@@ -339,6 +341,18 @@ export function AppShell({ children }: AppShellProps) {
                     <Receipt size={16} strokeWidth={2} />
                   </span>
                   {t("nav.extra_work")}
+                </NavLink>
+              )}
+              {canAccessPlannedWork(me?.role) && (
+                <NavLink
+                  to="/planned-work"
+                  className={navClass}
+                  data-testid="sidebar-planned-work"
+                >
+                  <span className="nav-icon">
+                    <CalendarClock size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.planned_work")}
                 </NavLink>
               )}
               {canAccessReports(me?.role) && (
