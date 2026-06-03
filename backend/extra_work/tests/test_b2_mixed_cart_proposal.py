@@ -11,28 +11,21 @@ Pins the canonical §7.0 (system-business-logic-and-workflows.md):
      `lines` key auto-seeds one ProposalLine per ExtraWorkRequestItem.
      Contract-priced lines get `unit_price` + `vat_pct` pre-filled
      from the resolver; non-contract lines start at 0 and the
-     operator must fill them in before SEND.
-  4. POST with explicit `lines` still works as long as the lines
-     cover the cart's (service_id, unit_type, quantity) multiset.
-  5. SEND refuses an incomplete proposal — every cart item must be
-     represented by a proposal line. Error: proposal_does_not_cover_cart.
-  6. SEND refuses an extra proposal line that does not correspond to
-     a cart item (no surprise charges). Error: proposal_has_extra_line.
-  7. SEND refuses a contract-priced line that has been altered away
-     from the contract's unit_price / vat_pct. Error:
-     proposal_contract_price_drift.
-  8. SEND refuses a non-contract line at unit_price=0 unconditionally.
-     Error: proposal_custom_line_missing_price. `customer_explanation`
-     is NOT a rescue for a zero price — that loophole was deliberately
-     rejected in the 2026-05-24 clarification.
-  9. A non-contract line priced > 0 passes SEND. (Positive shape
-     replacing the now-deleted "zero-with-explanation" test.)
-  10. Customer approval after a clean SEND spawns one operational
-      ticket per proposal line, linked through Ticket.proposal_line.
-  11. STAFF still cannot reach any EW or Proposal endpoint
-      (cross-reference to test_staff_privacy_p0.py — re-asserted
-      lightly here so a future scope refactor cannot quietly
-      regress that on the B2 surface).
+     operator may fill them in before SEND.
+  4. POST with explicit `lines` still works.
+  5. SEND succeeds with explicit lines (any priced shape).
+  6. SEND succeeds with FREE-FORM proposal lines that do NOT mirror
+     the submitted cart 1:1 — extra lines, a changed unit_type, and
+     contract-service lines priced differently from the contract.
+     (Owner decision 2026-06-03: the cart-coverage + contract-price-
+     floor SEND gate was REMOVED. The proposal is the provider's
+     quote and need not mirror the cart.)
+  7. Customer approval after a clean SEND spawns one operational
+     ticket for the whole request, linked through Ticket.proposal_line.
+  8. STAFF still cannot reach any EW or Proposal endpoint
+     (cross-reference to test_staff_privacy_p0.py — re-asserted
+     lightly here so a future scope refactor cannot quietly
+     regress that on the B2 surface).
 
 No migrations. No new permission keys. No frontend.
 """
@@ -64,7 +57,6 @@ from extra_work.models import (
     ExtraWorkCategory,
     ExtraWorkPricingUnitType,
     ExtraWorkRequest,
-    ExtraWorkRequestItem,
     ExtraWorkRoutingDecision,
     ExtraWorkStatus,
     Proposal,
@@ -423,176 +415,36 @@ class ProposalExplicitLinesCoveringCartTests(_B2Fixture):
 
 
 # ---------------------------------------------------------------------------
-# 5. Incomplete proposal cannot be SENT.
-# ---------------------------------------------------------------------------
-class ProposalIncompleteCoverageTests(_B2Fixture):
-    def test_missing_cart_line_blocks_send(self):
-        ew = self._submit_cart(
-            [
-                {
-                    "service": self.svc_window.id,
-                    "quantity": "50",
-                    "requested_date": "2026-06-01",
-                },
-                {
-                    "service": self.svc_grass.id,
-                    "quantity": "100",
-                    "requested_date": "2026-06-01",
-                },
-            ]
-        )
-        self._move_ew_to_under_review(ew)
-        # Operator builds a proposal that only covers ONE of the two
-        # cart lines.
-        response = self._api(self.admin).post(
-            self._proposals_url(ew.id),
-            {
-                "lines": [
-                    {
-                        "service": self.svc_window.id,
-                        "quantity": "50",
-                        "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
-                        "unit_price": "5.00",
-                        "vat_pct": "21.00",
-                    },
-                ]
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        proposal_id = response.data["id"]
-        response = self._api(self.admin).post(
-            self._proposal_transition_url(ew.id, proposal_id),
-            {"to_status": ProposalStatus.SENT},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertEqual(
-            response.data["code"], "proposal_does_not_cover_cart"
-        )
-
-    def test_extra_proposal_line_not_in_cart_blocks_send(self):
-        ew = self._submit_cart(
-            [
-                {
-                    "service": self.svc_window.id,
-                    "quantity": "50",
-                    "requested_date": "2026-06-01",
-                },
-            ]
-        )
-        self._move_ew_to_under_review(ew)
-        # Operator adds a surprise grass-cutting line that the customer
-        # never put in the cart.
-        response = self._api(self.admin).post(
-            self._proposals_url(ew.id),
-            {
-                "lines": [
-                    {
-                        "service": self.svc_window.id,
-                        "quantity": "50",
-                        "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
-                        "unit_price": "5.00",
-                        "vat_pct": "21.00",
-                    },
-                    {
-                        "service": self.svc_grass.id,
-                        "quantity": "200",
-                        "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
-                        "unit_price": "3.00",
-                        "vat_pct": "21.00",
-                    },
-                ]
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        proposal_id = response.data["id"]
-        response = self._api(self.admin).post(
-            self._proposal_transition_url(ew.id, proposal_id),
-            {"to_status": ProposalStatus.SENT},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertEqual(response.data["code"], "proposal_has_extra_line")
-
-
-# ---------------------------------------------------------------------------
-# 6. Contract-priced line drift blocks SEND.
-# ---------------------------------------------------------------------------
-class ProposalContractPriceFloorTests(_B2Fixture):
-    def test_altered_contract_price_blocks_send(self):
-        ew = self._submit_cart(
-            [
-                {
-                    "service": self.svc_window.id,
-                    "quantity": "50",
-                    "requested_date": "2026-06-01",
-                },
-                # Force routing PROPOSAL by also adding a non-contract
-                # line so the contract-only auto-route doesn't fire.
-                {
-                    "service": self.svc_grass.id,
-                    "quantity": "100",
-                    "requested_date": "2026-06-01",
-                },
-            ]
-        )
-        self._move_ew_to_under_review(ew)
-        # Operator alters the window line price away from the contract
-        # (5.00 -> 4.50).
-        response = self._api(self.admin).post(
-            self._proposals_url(ew.id),
-            {
-                "lines": [
-                    {
-                        "service": self.svc_window.id,
-                        "quantity": "50",
-                        "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
-                        "unit_price": "4.50",
-                        "vat_pct": "21.00",
-                    },
-                    {
-                        "service": self.svc_grass.id,
-                        "quantity": "100",
-                        "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
-                        "unit_price": "3.00",
-                        "vat_pct": "21.00",
-                    },
-                ]
-            },
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201, response.data)
-        proposal_id = response.data["id"]
-        response = self._api(self.admin).post(
-            self._proposal_transition_url(ew.id, proposal_id),
-            {"to_status": ProposalStatus.SENT},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertEqual(
-            response.data["code"], "proposal_contract_price_drift"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 7. Non-contract lines must be priced before SEND.
+# 5. Free-form proposal lines — SEND no longer requires the proposal to
+#    mirror the submitted cart.
 #
-# Per the 2026-05-24 B2 clarification, a non-contract line at
-# unit_price=0 is rejected at SEND unconditionally — `customer_
-# explanation` is NOT a rescue. Free / promo / compensation lines are
-# deliberately deferred to a future separate-line-type feature.
+# Owner decision (2026-06-03): the cart-coverage + contract-price-floor
+# SEND gate (`_validate_proposal_covers_cart`, codes
+# proposal_has_extra_line / proposal_does_not_cover_cart /
+# proposal_contract_price_drift / proposal_custom_line_missing_price)
+# was REMOVED. A single Extra Work event may legitimately need multiple
+# custom-priced lines and fees that do NOT mirror the cart 1:1. The
+# proposal is the provider's quote and need not match the cart.
 # ---------------------------------------------------------------------------
-class ProposalNonContractPriceRequiredTests(_B2Fixture):
-    def _build_mixed_cart_for_zero_price_test(
-        self,
-        *,
-        line_unit_price: str,
-        line_customer_explanation: str = "",
-    ) -> tuple[ExtraWorkRequest, int]:
+class ProposalFreeFormLinesSendTests(_B2Fixture):
+    def test_free_form_proposal_lines_pass_send(self):
+        # Mixed cart routes to PROPOSAL. The cart has TWO lines
+        # (window 50 m², grass 100 m²) but the provider composes a
+        # quote that does NOT mirror it:
+        #   * window cleaning is RE-priced away from the EUR 5.00
+        #     contract (no contract-price-floor anymore),
+        #   * with a CHANGED unit_type (FIXED instead of SQUARE_METERS),
+        #   * the grass cart line is DROPPED entirely,
+        #   * a brand-new travel-fee line the customer never put in the
+        #     cart is ADDED (would previously trip
+        #     `proposal_has_extra_line`).
         ew = self._submit_cart(
             [
+                {
+                    "service": self.svc_window.id,
+                    "quantity": "50",
+                    "requested_date": "2026-06-01",
+                },
                 {
                     "service": self.svc_grass.id,
                     "quantity": "100",
@@ -600,78 +452,56 @@ class ProposalNonContractPriceRequiredTests(_B2Fixture):
                 },
             ]
         )
+        self.assertEqual(
+            ew.routing_decision, ExtraWorkRoutingDecision.PROPOSAL
+        )
         self._move_ew_to_under_review(ew)
         response = self._api(self.admin).post(
             self._proposals_url(ew.id),
             {
                 "lines": [
+                    # Contract service, re-priced + unit_type changed.
                     {
-                        "service": self.svc_grass.id,
-                        "quantity": "100",
-                        "unit_type": ExtraWorkPricingUnitType.SQUARE_METERS,
-                        "unit_price": line_unit_price,
+                        "service": self.svc_window.id,
+                        "quantity": "1",
+                        "unit_type": ExtraWorkPricingUnitType.FIXED,
+                        "unit_price": "300.00",
                         "vat_pct": "21.00",
-                        "customer_explanation": line_customer_explanation,
+                        "customer_explanation": "Fixed package price.",
+                    },
+                    # Free-form travel fee with no cart counterpart and
+                    # no service FK.
+                    {
+                        "description": "Travel and material surcharge",
+                        "quantity": "1",
+                        "unit_type": ExtraWorkPricingUnitType.FIXED,
+                        "unit_price": "45.00",
+                        "vat_pct": "21.00",
+                        "customer_explanation": "One-off surcharge.",
                     },
                 ]
             },
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
-        return ew, response.data["id"]
-
-    def test_non_contract_zero_price_blocks_send_blank_explanation(self):
-        ew, proposal_id = self._build_mixed_cart_for_zero_price_test(
-            line_unit_price="0",
-            line_customer_explanation="",
-        )
-        response = self._api(self.admin).post(
-            self._proposal_transition_url(ew.id, proposal_id),
-            {"to_status": ProposalStatus.SENT},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertEqual(
-            response.data["code"],
-            "proposal_custom_line_missing_price",
-        )
-
-    def test_non_contract_zero_price_blocks_send_with_explanation_too(self):
-        # B2 clarification (2026-05-24): customer_explanation is NOT a
-        # rescue for a zero price on a non-contract line. The gate
-        # must fire regardless of the explanation field.
-        ew, proposal_id = self._build_mixed_cart_for_zero_price_test(
-            line_unit_price="0",
-            line_customer_explanation=(
-                "Goodwill — first-time customer; no charge."
-            ),
-        )
-        response = self._api(self.admin).post(
-            self._proposal_transition_url(ew.id, proposal_id),
-            {"to_status": ProposalStatus.SENT},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 400, response.data)
-        self.assertEqual(
-            response.data["code"],
-            "proposal_custom_line_missing_price",
-        )
-
-    def test_non_contract_priced_proposal_passes_send(self):
-        ew, proposal_id = self._build_mixed_cart_for_zero_price_test(
-            line_unit_price="2.50",
-            line_customer_explanation="",
-        )
+        proposal_id = response.data["id"]
+        # SEND succeeds: the cart-coverage / contract-price-floor gate
+        # is gone, so a free-form quote is accepted.
         response = self._api(self.admin).post(
             self._proposal_transition_url(ew.id, proposal_id),
             {"to_status": ProposalStatus.SENT},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
+        proposal = Proposal.objects.get(pk=proposal_id)
+        self.assertEqual(proposal.status, ProposalStatus.SENT)
+        # Parent EW advanced to PRICING_PROPOSED on SEND.
+        ew.refresh_from_db()
+        self.assertEqual(ew.status, ExtraWorkStatus.PRICING_PROPOSED)
 
 
 # ---------------------------------------------------------------------------
-# 8. Post-approval spawn — customer approval spawns one ticket per line.
+# 6. Post-approval spawn — customer approval spawns one ticket.
 # ---------------------------------------------------------------------------
 class ProposalApprovalSpawnTests(_B2Fixture):
     def test_customer_approval_spawns_one_ticket_per_request(self):
@@ -727,7 +557,7 @@ class ProposalApprovalSpawnTests(_B2Fixture):
 
 
 # ---------------------------------------------------------------------------
-# 9. STAFF still cannot reach proposal endpoints (B2 surface re-pin).
+# 7. STAFF still cannot reach proposal endpoints (B2 surface re-pin).
 # ---------------------------------------------------------------------------
 class StaffStillBlockedFromProposalsTests(_B2Fixture):
     def test_staff_cannot_reach_proposal_list(self):

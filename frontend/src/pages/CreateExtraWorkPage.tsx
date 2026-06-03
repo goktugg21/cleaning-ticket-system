@@ -618,6 +618,30 @@ export function CreateExtraWorkPage() {
     });
   }, [agreedPrices, priceSearch, serviceById]);
 
+  // Owner request: surface each service's AGREED/contract price inline in
+  // the cart's service-select option label. Built from the SAME currently-
+  // valid agreed rows the browse panel shows (active + in-window for the
+  // selected customer). Empty when no customer is selected or prices are
+  // still loading, so the select falls back to plain service names.
+  const agreedPriceByServiceId = useMemo(
+    () => new Map(agreedPrices.map((p) => [p.service, p])),
+    [agreedPrices],
+  );
+
+  // Compose the " — €29,00 / m²" suffix for a service that has an agreed
+  // price, reusing the existing money + unit-type formatting. Returns "" so
+  // services without an agreed price show the plain name.
+  const agreedPriceSuffix = (serviceId: number): string => {
+    const price = agreedPriceByServiceId.get(serviceId);
+    if (!price) return "";
+    const svc = serviceById.get(serviceId);
+    const unitLabel = svc ? t(UNIT_TYPE_I18N_KEY[svc.unit_type]) : "";
+    const money = formatMoney(price.unit_price);
+    return unitLabel
+      ? ` — ${money} / ${unitLabel}`
+      : ` — ${money}`;
+  };
+
   function update<K extends keyof ParentFormState>(
     name: K,
     value: ParentFormState[K],
@@ -981,30 +1005,11 @@ export function CreateExtraWorkPage() {
             <div className="form-section-title">
               {t("create.parent_section_title")}
             </div>
+            {/* Owner request: Customer leads (left column), Building
+                follows (right column). The customer-drives-building
+                filtering, auto-select, and disabled/required logic are
+                unchanged — only the visual order is swapped. */}
             <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="ew-building">
-                  {t("create.field_building")}
-                </label>
-                <select
-                  id="ew-building"
-                  data-testid="extra-work-create-building"
-                  className="field-select"
-                  value={form.building}
-                  onChange={(event) => update("building", event.target.value)}
-                  disabled={filteredBuildings.length === 0}
-                  required
-                >
-                  <option value="" disabled>
-                    {t("create.field_building_placeholder")}
-                  </option>
-                  {filteredBuildings.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
               <div className="field">
                 <label className="field-label" htmlFor="ew-customer">
                   {t("create.field_customer")}
@@ -1024,6 +1029,29 @@ export function CreateExtraWorkPage() {
                   {filteredCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="ew-building">
+                  {t("create.field_building")}
+                </label>
+                <select
+                  id="ew-building"
+                  data-testid="extra-work-create-building"
+                  className="field-select"
+                  value={form.building}
+                  onChange={(event) => update("building", event.target.value)}
+                  disabled={filteredBuildings.length === 0}
+                  required
+                >
+                  <option value="" disabled>
+                    {t("create.field_building_placeholder")}
+                  </option>
+                  {filteredBuildings.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
                     </option>
                   ))}
                 </select>
@@ -1342,13 +1370,16 @@ export function CreateExtraWorkPage() {
                     <option value="" disabled>
                       {t("create.line_field_service_placeholder")}
                     </option>
-                    {services.map((svc) => (
-                      <option key={svc.id} value={svc.id}>
-                        {svc.category_name
-                          ? `${svc.category_name} — ${svc.name}`
-                          : svc.name}
-                      </option>
-                    ))}
+                    {services.map((svc) => {
+                      const baseLabel = svc.category_name
+                        ? `${svc.category_name} — ${svc.name}`
+                        : svc.name;
+                      return (
+                        <option key={svc.id} value={svc.id}>
+                          {`${baseLabel}${agreedPriceSuffix(svc.id)}`}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div className="field ew-line-field-compact">

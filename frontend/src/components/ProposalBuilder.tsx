@@ -12,7 +12,7 @@
 // components); the row/add-line helpers stay local to this file.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Trash2 } from "lucide-react";
+import { Check, Plus, Trash2 } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
@@ -27,6 +27,7 @@ import type { ExtraWorkUnitType, ProposalDetail, ProposalLine } from "../api/typ
 import { formatMoney } from "../lib/intl";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "./invoiceLineColumns";
+import { NoteEditorDialog } from "./NoteEditorDialog";
 
 const UNIT_TYPE_VALUES: ExtraWorkUnitType[] = [
   "HOURS",
@@ -43,15 +44,45 @@ const UNIT_TYPE_KEY: Record<ExtraWorkUnitType, string> = {
   OTHER: "unit_type.other",
 };
 
-// Display-only live total for the editor row (the persisted line's
-// backend totals appear after Save reloads the proposal).
-function liveLineTotal(quantity: string, unitPrice: string, vatPct: string): string {
+// Banker's rounding (ROUND_HALF_EVEN) to 2dp — mirrors the backend
+// Decimal quantisation so the live editor boxes match the persisted
+// totals byte-for-byte. (Ported from the legacy ExtraWorkDetailPage
+// `round2`: scale by 100, snap exact halves to the nearest even, else
+// Math.round, then unscale.)
+function round2(n: number): number {
+  const scaled = n * 100;
+  const floor = Math.floor(scaled);
+  const frac = scaled - floor;
+  let rounded: number;
+  if (Math.abs(frac - 0.5) < 1e-9) {
+    // Exact half: round to the nearest even integer.
+    rounded = floor % 2 === 0 ? floor : floor + 1;
+  } else {
+    rounded = Math.round(scaled);
+  }
+  return rounded / 100;
+}
+
+// Display-only live subtotal / VAT / total for the editor row (the
+// persisted line's backend totals appear after Save reloads the
+// proposal). Empty / non-numeric inputs collapse to 0. The subtotal is
+// rounded FIRST, then VAT and total are derived from the rounded
+// subtotal — matching the backend's staged quantisation.
+function liveLineMoney(
+  quantity: string,
+  unitPrice: string,
+  vatPct: string,
+): { subtotal: number; vat: number; total: number } {
   const q = Number(quantity);
   const u = Number(unitPrice);
   const v = Number(vatPct);
-  if (![q, u, v].every((n) => Number.isFinite(n))) return formatMoney(0);
-  const sub = q * u;
-  return formatMoney(sub + (sub * v) / 100);
+  const qn = Number.isFinite(q) ? q : 0;
+  const un = Number.isFinite(u) ? u : 0;
+  const vn = Number.isFinite(v) ? v : 0;
+  const subtotal = round2(qn * un);
+  const vat = round2((subtotal * vn) / 100);
+  const total = round2(subtotal + vat);
+  return { subtotal, vat, total };
 }
 
 interface LineFormState {
@@ -62,6 +93,69 @@ interface LineFormState {
   vat_pct: string;
   customer_explanation: string;
   internal_note: string;
+}
+
+// A money box: display-only, right-aligned, tabular numbers. Mirrors the
+// legacy composer's three live boxes (Subtotal / VAT / Total).
+function MoneyBox({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="field ew-line-field-money">
+      <span className="field-label">{label}</span>
+      <div
+        className="field-input"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {formatMoney(value)}
+      </div>
+    </div>
+  );
+}
+
+// A note trigger: a button styled as a field box. Shows a check + the
+// note text when filled, a muted dash when empty. Clicking opens the
+// shared NoteEditorDialog (caller wires onOpen).
+function NoteBox({
+  label,
+  value,
+  onOpen,
+  disabled,
+  testId,
+}: {
+  label: string;
+  value: string;
+  onOpen: () => void;
+  disabled: boolean;
+  testId: string;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const filled = value.trim() !== "";
+  return (
+    <div className="field ew-line-field-note">
+      <span className="field-label">{label}</span>
+      <button
+        type="button"
+        className="field-input ew-pricing-note-box"
+        onClick={onOpen}
+        disabled={disabled}
+        data-testid={testId}
+        data-filled={filled ? "true" : "false"}
+      >
+        {filled ? (
+          <>
+            <Check size={13} strokeWidth={2.4} />
+            <span className="ew-pricing-note-box-text">{value}</span>
+          </>
+        ) : (
+          <span className="muted">{t("detail.empty_dash")}</span>
+        )}
+      </button>
+    </div>
+  );
 }
 
 // Shared field cluster for both the edit and add forms.
@@ -77,8 +171,13 @@ function LineFields({
   showInternal: boolean;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
+  // Which note modal (if any) is open for THIS line editor instance.
+  const [noteModal, setNoteModal] = useState<"customer" | "internal" | null>(
+    null,
+  );
   const set = <K extends keyof LineFormState>(key: K, value: LineFormState[K]) =>
     setForm({ ...form, [key]: value });
+  const money = liveLineMoney(form.quantity, form.unit_price, form.vat_pct);
   return (
     <>
       <div className="field ew-line-field-grow">
@@ -142,43 +241,54 @@ function LineFields({
           disabled={disabled}
         />
       </div>
-      <div className="field ew-line-field-compact">
-        <span className="field-label">{t("invoice_row.col_total")}</span>
-        <div
-          className="field-input"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {liveLineTotal(form.quantity, form.unit_price, form.vat_pct)}
-        </div>
-      </div>
-      <div className="field ew-line-field-grow">
-        <span className="field-label">{t("detail.pricing_form_customer_note")}</span>
-        <input
-          className="field-input"
-          type="text"
-          value={form.customer_explanation}
-          onChange={(e) => set("customer_explanation", e.target.value)}
-          placeholder={t("detail.pricing_form_customer_note_placeholder")}
-          disabled={disabled}
-        />
-      </div>
+      <MoneyBox label={t("detail.pricing_column_subtotal")} value={money.subtotal} />
+      <MoneyBox label={t("detail.pricing_column_vat")} value={money.vat} />
+      <MoneyBox label={t("detail.pricing_column_total")} value={money.total} />
+      <NoteBox
+        label={t("detail.pricing_customer_note_button")}
+        value={form.customer_explanation}
+        onOpen={() => setNoteModal("customer")}
+        disabled={disabled}
+        testId="proposal-line-customer-note-box"
+      />
       {showInternal && (
-        <div className="field ew-line-field-grow">
-          <span className="field-label">{t("detail.pricing_form_internal_note")}</span>
-          <input
-            className="field-input"
-            type="text"
-            value={form.internal_note}
-            onChange={(e) => set("internal_note", e.target.value)}
-            placeholder={t("detail.pricing_form_internal_note_placeholder")}
-            disabled={disabled}
-          />
-        </div>
+        <NoteBox
+          label={t("detail.pricing_internal_note_button")}
+          value={form.internal_note}
+          onOpen={() => setNoteModal("internal")}
+          disabled={disabled}
+          testId="proposal-line-internal-note-box"
+        />
+      )}
+      {noteModal === "customer" && (
+        <NoteEditorDialog
+          title={t("detail.pricing_customer_note_modal_title")}
+          initialValue={form.customer_explanation}
+          placeholder={t("detail.pricing_form_customer_note_placeholder")}
+          saveLabel={t("detail.note_modal_save")}
+          cancelLabel={t("detail.note_modal_cancel")}
+          onSave={(value) => {
+            set("customer_explanation", value);
+            setNoteModal(null);
+          }}
+          onCancel={() => setNoteModal(null)}
+          testId="proposal-line-customer-note-dialog"
+        />
+      )}
+      {showInternal && noteModal === "internal" && (
+        <NoteEditorDialog
+          title={t("detail.pricing_internal_note_modal_title")}
+          initialValue={form.internal_note}
+          placeholder={t("detail.pricing_form_internal_note_placeholder")}
+          saveLabel={t("detail.note_modal_save")}
+          cancelLabel={t("detail.note_modal_cancel")}
+          onSave={(value) => {
+            set("internal_note", value);
+            setNoteModal(null);
+          }}
+          onCancel={() => setNoteModal(null)}
+          testId="proposal-line-internal-note-dialog"
+        />
       )}
     </>
   );

@@ -160,14 +160,11 @@ class ProposalFixtureMixin:
             category=ExtraWorkCategory.DEEP_CLEANING,
             status=status,
         )
-        # B2 (system-business-logic-and-workflows.md §7.0) — the SEND
-        # gate validates that proposal lines cover the cart's
-        # (service, unit_type, quantity) multiset. The legacy
-        # Sprint 28 line payload (`_line_payload`) carries
-        # quantity="2.00", so the cart item below must also be 2.00
-        # for the existing Sprint 28 happy-path tests to pass the
-        # new SEND validation. No test in this file asserts cart
-        # quantity directly, so the bump is safe.
+        # A cart item is seeded so the EW looks like a real cart-first
+        # request. NOTE: the B2 SEND-time cart-coverage gate was REMOVED
+        # on 2026-06-03 (owner decision) — proposal lines no longer have
+        # to mirror the cart, so this item is no longer load-bearing for
+        # SEND. It is kept so the fixture stays realistic.
         ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
             service=self.service,
@@ -186,10 +183,10 @@ class ProposalFixtureMixin:
         unit_type: str = ExtraWorkPricingUnitType.HOURS,
         requested_date=date(2026, 6, 15),
     ) -> ExtraWorkRequestItem:
-        """B2 helper — extend the cart so the proposal can carry an
-        additional line that still passes the SEND coverage check.
-        Each test that adds a second ProposalLine via the lines
-        endpoint must also add a matching cart item.
+        """Extend the cart with an additional item. Historically this
+        kept the proposal within the (now-removed, 2026-06-03) B2 SEND
+        coverage gate; it is retained only to keep the fixtures
+        realistic — SEND no longer requires cart coverage.
         """
         return ExtraWorkRequestItem.objects.create(
             extra_work_request=ew,
@@ -470,9 +467,9 @@ class CustomerApproveSpawnTests(ProposalFixtureMixin, TestCase):
         # Sprint 6A — a multi-line proposal spawns EXACTLY ONE ticket
         # for the parent request (collapsed from one-per-line).
         ew = self._make_ew()
-        # B2 — extend the cart so the second proposal line below has
-        # a matching cart item; otherwise the SEND coverage gate
-        # `proposal_has_extra_line` would fire.
+        # Extend the cart so the fixture stays realistic. (The SEND
+        # cart-coverage gate was removed 2026-06-03, so a second
+        # proposal line no longer requires a matching cart item.)
         self._add_cart_item(ew, quantity=Decimal("1.00"))
         proposal = self._create_proposal(ew)
         # Add a second line.
@@ -620,8 +617,8 @@ class AtomicityTests(ProposalFixtureMixin, TestCase):
         # The transaction owned by apply_proposal_transition rolls
         # every side effect (status update + history + timeline) back.
         ew = self._make_ew()
-        # B2 — second cart item so SEND coverage permits the second
-        # proposal line.
+        # Second cart item to keep the fixture realistic (the SEND
+        # cart-coverage gate was removed 2026-06-03).
         self._add_cart_item(ew, quantity=Decimal("1.00"))
         proposal = self._create_proposal(ew)
         self._api(self.admin).post(

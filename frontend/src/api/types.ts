@@ -190,6 +190,47 @@ export interface TicketStatusChangePayload {
   override_reason?: string;
 }
 
+// Sprint 7B (frontend) — request body for
+// POST /tickets/{id}/convert-to-extra-work/. Mirrors backend
+// `tickets/serializers.py::TicketConvertToExtraWorkSerializer`, which
+// reuses `ExtraWorkPreviewLineSerializer` for each cart line
+// (service XOR custom_description; quantity > 0; requested_date;
+// optional customer_note). The line's `unit_type` is NOT sent — the
+// backend denormalises it from the chosen Service (or OTHER for a
+// custom line). The convert endpoint is provider-only and the wire
+// shape is identical to the create-cart line.
+export interface TicketConvertLinePayload {
+  // A catalog service id XOR a custom_description (exactly one).
+  service?: number | null;
+  custom_description?: string;
+  // Decimal as string per DRF convention.
+  quantity: string;
+  requested_date: string;
+  customer_note?: string;
+}
+
+export interface TicketConvertToExtraWorkPayload {
+  request_intent: ExtraWorkRequestIntent;
+  line_items: TicketConvertLinePayload[];
+  customer_visible_note?: string;
+  internal_note?: string;
+}
+
+// Response body for POST /tickets/{id}/convert-to-extra-work/. The
+// backend supersedes the source ticket to CONVERTED_TO_EXTRA_WORK and
+// returns the freshly-created ExtraWorkRequest (the page navigates to
+// its detail) plus the source-ticket echo and any operational tickets
+// spawned immediately on the INSTANT route.
+export interface TicketConvertToExtraWorkResponse {
+  extra_work_request: ExtraWorkRequestDetail;
+  source_ticket: {
+    id: number;
+    ticket_no: string | null;
+    status: TicketStatus;
+  };
+  operational_ticket_ids: number[];
+}
+
 // Sprint 23B — list of staff currently assigned to a ticket via
 // TicketStaffAssignment. The backend serializer gates this list
 // through Customer.show_assigned_staff_* flags before returning
