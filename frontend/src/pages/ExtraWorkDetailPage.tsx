@@ -43,6 +43,7 @@ import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
 import {
   createExtraWorkPricingItem,
+  createProposal,
   deleteExtraWorkPricingItem,
   directPublishProposal,
   fetchProposalPdf,
@@ -77,6 +78,7 @@ import {
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { NoteEditorDialog } from "../components/NoteEditorDialog";
 import { PageHeader } from "../components/PageHeader";
+import { ProposalBuilder } from "../components/ProposalBuilder";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
@@ -335,6 +337,9 @@ export function ExtraWorkDetailPage() {
   // separately for the draft when one exists.
   const [draftProposalDetail, setDraftProposalDetail] =
     useState<ProposalDetail | null>(null);
+  // Sprint 31 — proposal builder: create CTA busy/error.
+  const [proposalBusy, setProposalBusy] = useState(false);
+  const [proposalError, setProposalError] = useState("");
   // Direct-publish flow state.
   const [directPublishOpen, setDirectPublishOpen] = useState(false);
   const [directPublishReason, setDirectPublishReason] = useState("");
@@ -443,6 +448,11 @@ export function ExtraWorkDetailPage() {
   // not-found (e.g. customer-side caller cannot see DRAFT proposals).
   const draftProposal = proposals.find((p) => p.status === "DRAFT") ?? null;
   const draftProposalId = draftProposal?.id ?? null;
+  // Sprint 31 — one open proposal at a time (DRAFT or SENT). When none
+  // is open the provider sees the "Prepare proposal" CTA instead.
+  const hasOpenProposal = proposals.some(
+    (p) => p.status === "DRAFT" || p.status === "SENT",
+  );
   useEffect(() => {
     let cancelled = false;
     if (ewId === null || draftProposalId === null) {
@@ -573,17 +583,35 @@ export function ExtraWorkDetailPage() {
     (s) => s !== "CUSTOMER_APPROVED" && s !== "CUSTOMER_REJECTED",
   );
 
+  // Sprint 31 — an AUTO_START request is pre-authorized by the customer,
+  // so the workflow must NOT frame the pricing step as "propose to
+  // customer". The labels/hints below switch accordingly.
+  const isAutoStart =
+    ew.request_intent === "AUTO_START_AFTER_PRICING";
+
   // Sprint 31 — meaningful, step-aware label for each provider workflow
   // button (falls back to the generic "Move to <status>").
   const providerActionLabel = (target: ExtraWorkStatus): string => {
     if (target === "CANCELLED") return t("detail.action_cancel");
+    // AUTO_START: finishing the review just confirms the price (the
+    // customer already authorized the start) — it is not a proposal.
+    if (
+      isAutoStart &&
+      ew.status === "UNDER_REVIEW" &&
+      target === "PRICING_PROPOSED"
+    ) {
+      return t("detail.action_confirm_pricing");
+    }
     const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
     return key
       ? t(key)
       : t("detail.workflow_move_to", { label: t(STATUS_I18N_KEY[target]) });
   };
   // One-line provider guidance for the current step (early steps only).
-  const stepHintKey = PROVIDER_STEP_HINT_I18N[ew.status];
+  const stepHintKey =
+    isAutoStart && ew.status === "UNDER_REVIEW"
+      ? "detail.step_hint_under_review_auto_start"
+      : PROVIDER_STEP_HINT_I18N[ew.status];
 
   // Sprint 29 Batch 29.8 — non-terminal spawned tickets that will
   // outlive a CANCELLED transition (the EW cancel does not propagate
@@ -626,6 +654,56 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  // Sprint 31 — refetch proposals + DRAFT detail after a builder
+  // mutation. Line edits don't change the proposal id (the id-keyed
+  // effect won't refire), so we refetch the detail explicitly.
+  async function reloadProposals() {
+    if (ewId === null) return;
+    try {
+      const list = await listProposalsForEw(ewId);
+      setProposals(list);
+      const draft = list.find((p) => p.status === "DRAFT");
+      if (draft) {
+        const detail = await getProposalDetail(ewId, draft.id);
+        setDraftProposalDetail(detail);
+      } else {
+        setDraftProposalDetail(null);
+      }
+    } catch {
+      // Soft — keep current proposal state on a transient failure.
+    }
+  }
+
+  // Sprint 31 — refetch spawned tickets after a transition that may
+  // have spawned them (CUSTOMER_APPROVED). The load effect is keyed on
+  // ewId only, so it never refires on a status change; without this the
+  // "Spawned tickets" panel stays empty until a full page reload.
+  async function reloadSpawnedTickets() {
+    if (ewId === null) return;
+    try {
+      const list = await listSpawnedTickets(ewId);
+      setSpawnedTickets(list);
+    } catch {
+      // Soft — keep the current list on a transient failure.
+    }
+  }
+
+  async function handlePrepareProposal() {
+    if (ewId === null) return;
+    setProposalBusy(true);
+    setProposalError("");
+    try {
+      // Empty body — the backend auto-seeds one ProposalLine per cart
+      // item, pre-filling contract prices (SoT §8.3).
+      await createProposal(ewId);
+      await reloadProposals();
+    } catch (err) {
+      setProposalError(getApiError(err));
+    } finally {
+      setProposalBusy(false);
+    }
+  }
+
   async function handleTransition(target: ExtraWorkStatus) {
     if (!id) return;
     setError("");
@@ -633,6 +711,10 @@ export function ExtraWorkDetailPage() {
     try {
       const updated = await transitionExtraWork(id, { to_status: target });
       setEw(updated);
+      // Reaching CUSTOMER_APPROVED (incl. the AUTO_START "Start work")
+      // spawns operational tickets — refresh the panel so they appear
+      // without a page reload.
+      void reloadSpawnedTickets();
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -658,6 +740,7 @@ export function ExtraWorkDetailPage() {
           : {}),
       });
       setEw(updated);
+      void reloadSpawnedTickets();
       // Sprint 30 Batch 30.1 — customer-side approve confirmation toast.
       // The backend auto-spawns tickets on this transition (when every
       // line resolves to an agreed price); the toast tells the customer
@@ -732,6 +815,8 @@ export function ExtraWorkDetailPage() {
       setEw(updated);
       setOverrideDecision(null);
       setOverrideReason("");
+      // Override-approve reaches CUSTOMER_APPROVED → tickets spawn.
+      void reloadSpawnedTickets();
     } catch (err) {
       setOverrideError(getApiError(err));
     } finally {
@@ -1771,86 +1856,60 @@ export function ExtraWorkDetailPage() {
               absence: ProposalLineCustomerSerializer omits the field,
               so `"internal_note" in line` is the visibility signal,
               NOT a truthiness check on the value. */}
-          {draftProposalDetail !== null &&
+          {/* Sprint 31 — provider proposal builder (editable + removable
+              lines, auto-seeded from the cart with contract prices) —
+              replaces the old read-only draft-lines display. The builder
+              itself falls back to a read-only table when the viewer can
+              view pricing but not edit (e.g. a BM with prep revoked). */}
+          {ewId !== null &&
+            draftProposalDetail !== null &&
             draftProposalDetail.actions?.can_view_proposal_pricing ===
-              true &&
-            draftProposalDetail.lines.length > 0 && (
+              true && (
+              <ProposalBuilder
+                ewId={ewId}
+                proposal={draftProposalDetail}
+                onChanged={reloadProposals}
+              />
+            )}
+
+          {/* Prepare-proposal CTA — no open proposal yet and the provider
+              may prepare one. Creating it auto-seeds the cart lines with
+              their contract prices; the builder above then appears. */}
+          {canPrepareProposal &&
+            !hasOpenProposal &&
+            (ew.status === "REQUESTED" || ew.status === "UNDER_REVIEW") && (
               <div
                 className="card"
                 style={{ marginBottom: 16 }}
-                data-testid="extra-work-proposal-lines-section"
+                data-testid="extra-work-prepare-proposal"
               >
                 <div className="form-section">
                   <div className="form-section-title">
-                    {t("detail.proposal_lines_section_title")}
+                    {t("detail.proposal_builder_title")}
                   </div>
-                  <table className="data-table ew-pricing-table">
-                    <thead>
-                      <tr>
-                        {INVOICE_LINE_COLUMN_KEYS.map((key) => (
-                          <th key={key}>{t(key)}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {draftProposalDetail.lines.map((line) => {
-                        // Presence (not truthiness) is the role
-                        // discriminator: the customer serializer omits
-                        // `internal_note` entirely, so the key being
-                        // absent means we're on a customer payload and
-                        // must not render the field. When the key IS
-                        // present we still skip rendering when the
-                        // string is empty (cosmetic — an "internal: "
-                        // label with no content reads as broken).
-                        const adminPayload =
-                          Object.prototype.hasOwnProperty.call(
-                            line,
-                            "internal_note",
-                          );
-                        const internalNoteText = adminPayload
-                          ? line.internal_note ?? ""
-                          : "";
-                        const showInternalNote =
-                          adminPayload &&
-                          internalNoteText.trim().length > 0;
-                        const showExplanation =
-                          line.customer_explanation.trim().length > 0;
-                        return (
-                          <InvoiceLineRow
-                            key={line.id}
-                            lineKind="proposal"
-                            line={line}
-                            editable={false}
-                            rowTestId="extra-work-proposal-line-row"
-                            subLabel={
-                              showExplanation || showInternalNote ? (
-                                <>
-                                  {showExplanation && (
-                                    <span className="muted small">
-                                      {line.customer_explanation}
-                                    </span>
-                                  )}
-                                  {showInternalNote && (
-                                    <span
-                                      className="muted small"
-                                      style={{ fontStyle: "italic" }}
-                                    >
-                                      internal: {internalNoteText}
-                                    </span>
-                                  )}
-                                </>
-                              ) : undefined
-                            }
-                          />
-                        );
-                      })}
-                      <InvoiceLineTotalsRow
-                        subtotal={draftProposalDetail.subtotal_amount}
-                        vatAmount={draftProposalDetail.vat_amount}
-                        total={draftProposalDetail.total_amount}
-                      />
-                    </tbody>
-                  </table>
+                  <p className="muted small" style={{ marginTop: 0 }}>
+                    {t("detail.proposal_prepare_helper")}
+                  </p>
+                  {proposalError && (
+                    <div
+                      className="alert-error"
+                      role="alert"
+                      style={{ marginBottom: 12 }}
+                    >
+                      {proposalError}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={proposalBusy}
+                    onClick={handlePrepareProposal}
+                    data-testid="extra-work-prepare-proposal-button"
+                  >
+                    {proposalBusy
+                      ? t("detail.proposal_preparing")
+                      : t("detail.proposal_prepare")}
+                  </button>
                 </div>
               </div>
             )}

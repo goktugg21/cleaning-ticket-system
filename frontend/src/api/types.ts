@@ -891,6 +891,10 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   preferred_date: string | null;
   customer_visible_note: string;
   pricing_note: string;
+  // Sprint 31 — the customer's declared intent (drives intent-aware
+  // workflow labels: an AUTO_START request is not "proposed" to the
+  // customer). Serialized on the detail wire; optional for safety.
+  request_intent?: ExtraWorkRequestIntent;
   // Provider-only fields — optional because the API strips them
   // for CUSTOMER_USER actors.
   manager_note?: string;
