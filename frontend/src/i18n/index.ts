@@ -9,6 +9,7 @@ import nlTicketDetail from "./nl/ticket_detail.json";
 import nlCreateTicket from "./nl/create_ticket.json";
 import nlReports from "./nl/reports.json";
 import nlExtraWork from "./nl/extra_work.json";
+import nlPlannedWork from "./nl/planned_work.json";
 import enCommon from "./en/common.json";
 import enLogin from "./en/login.json";
 import enSettings from "./en/settings.json";
@@ -17,6 +18,7 @@ import enTicketDetail from "./en/ticket_detail.json";
 import enCreateTicket from "./en/create_ticket.json";
 import enReports from "./en/reports.json";
 import enExtraWork from "./en/extra_work.json";
+import enPlannedWork from "./en/planned_work.json";
 
 // Default language is "nl" so unauthenticated routes (Login) render in Dutch.
 // Once the user is authenticated, useLanguageSync re-fires changeLanguage
@@ -33,6 +35,7 @@ i18n.use(initReactI18next).init({
       create_ticket: nlCreateTicket,
       reports: nlReports,
       extra_work: nlExtraWork,
+      planned_work: nlPlannedWork,
     },
     en: {
       common: enCommon,
@@ -43,6 +46,7 @@ i18n.use(initReactI18next).init({
       create_ticket: enCreateTicket,
       reports: enReports,
       extra_work: enExtraWork,
+      planned_work: enPlannedWork,
     },
   },
   lng: "nl",
@@ -57,6 +61,7 @@ i18n.use(initReactI18next).init({
     "create_ticket",
     "reports",
     "extra_work",
+    "planned_work",
   ],
   interpolation: {
     escapeValue: false,
