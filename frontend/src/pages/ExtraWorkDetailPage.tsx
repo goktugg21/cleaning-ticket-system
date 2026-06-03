@@ -105,6 +105,30 @@ const STATUS_I18N_KEY: Record<ExtraWorkStatus, string> = {
   CANCELLED: "status.cancelled",
 };
 
+// Sprint 31 — meaningful provider action labels per transition so the
+// EW workflow reads as a guided flow (Start review -> Propose price ->
+// Start work / decide) instead of generic "Move to <status>" buttons.
+// Keyed `${from}->${to}`; unmapped transitions fall back to the generic
+// label. CANCELLED has its own label (it routes through the dialog).
+const PROVIDER_ACTION_I18N: Record<string, string> = {
+  "REQUESTED->UNDER_REVIEW": "detail.action_start_review",
+  "UNDER_REVIEW->PRICING_PROPOSED": "detail.action_propose_price",
+  "PRICING_PROPOSED->UNDER_REVIEW": "detail.action_revise_pricing",
+  "CUSTOMER_REJECTED->UNDER_REVIEW": "detail.action_revise_after_reject",
+  "CUSTOMER_APPROVED->IN_PROGRESS": "detail.action_mark_in_progress",
+  "IN_PROGRESS->COMPLETED": "detail.action_mark_completed",
+  "COMPLETED->IN_PROGRESS": "detail.action_reopen",
+};
+
+// Sprint 31 — one-line "what to do at this step" hint for providers,
+// shown above the workflow buttons for the early steps users found
+// confusing. Other statuses rely on the buttons + the dedicated
+// auto-start / override hints.
+const PROVIDER_STEP_HINT_I18N: Partial<Record<ExtraWorkStatus, string>> = {
+  REQUESTED: "detail.step_hint_requested",
+  UNDER_REVIEW: "detail.step_hint_under_review",
+};
+
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   DEEP_CLEANING: "category.deep_cleaning",
   WINDOW_CLEANING: "category.window_cleaning",
@@ -548,6 +572,18 @@ export function ExtraWorkDetailPage() {
   const providerWorkflowTargets = allowed.filter(
     (s) => s !== "CUSTOMER_APPROVED" && s !== "CUSTOMER_REJECTED",
   );
+
+  // Sprint 31 — meaningful, step-aware label for each provider workflow
+  // button (falls back to the generic "Move to <status>").
+  const providerActionLabel = (target: ExtraWorkStatus): string => {
+    if (target === "CANCELLED") return t("detail.action_cancel");
+    const key = PROVIDER_ACTION_I18N[`${ew.status}->${target}`];
+    return key
+      ? t(key)
+      : t("detail.workflow_move_to", { label: t(STATUS_I18N_KEY[target]) });
+  };
+  // One-line provider guidance for the current step (early steps only).
+  const stepHintKey = PROVIDER_STEP_HINT_I18N[ew.status];
 
   // Sprint 29 Batch 29.8 — non-terminal spawned tickets that will
   // outlive a CANCELLED transition (the EW cancel does not propagate
@@ -995,6 +1031,15 @@ export function ExtraWorkDetailPage() {
               <div className="ew-detail-actions-section-title">
                 {t("detail.actions_workflow_title")}
               </div>
+              {isProvider && stepHintKey && (
+                <p
+                  className="muted small"
+                  style={{ margin: "0 0 10px" }}
+                  data-testid="extra-work-workflow-step-hint"
+                >
+                  {t(stepHintKey)}
+                </p>
+              )}
               <div className="ew-workflow-actions">
                 {canAutoStart && (
                   <div
@@ -1071,9 +1116,7 @@ export function ExtraWorkDetailPage() {
                     >
                       {transitionBusy === target
                         ? t("detail.workflow_working")
-                        : t("detail.workflow_move_to", {
-                            label: t(STATUS_I18N_KEY[target]),
-                          })}
+                        : providerActionLabel(target)}
                     </button>
                   ))}
                 {providerOverrideAvailable &&

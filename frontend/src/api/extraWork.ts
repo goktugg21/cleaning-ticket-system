@@ -16,9 +16,12 @@ import type {
   ExtraWorkStatsByBuildingResponse,
   ExtraWorkStatus,
   ExtraWorkStatusHistoryEntry,
+  ExtraWorkUnitType,
   PaginatedResponse,
   Proposal,
   ProposalDetail,
+  ProposalLine,
+  ProposalStatus,
   TicketList,
 } from "./types";
 
@@ -285,6 +288,93 @@ export async function retrySpawnTicketsForExtraWork(
 ): Promise<SpawnTicketsResponse> {
   const response = await api.post<SpawnTicketsResponse>(
     `/extra-work/${ewId}/spawn/`,
+  );
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 31 (frontend) — proposal builder write helpers. Read helpers
+// (listProposalsForEw / getProposalDetail) already exist above. On
+// create with no `lines`, the backend auto-seeds one ProposalLine per
+// cart item, pre-filling contract prices (SoT §8.3); the provider then
+// edits the custom lines and sends. All line CRUD is DRAFT-only +
+// provider-only (backend-enforced).
+// ---------------------------------------------------------------------------
+
+export interface ProposalLineWritePayload {
+  // A catalog line (`service` set) or a custom/ad-hoc line. Omitted on
+  // PATCH leaves the field unchanged.
+  service?: number | null;
+  description: string;
+  quantity: string;
+  unit_type: ExtraWorkUnitType;
+  unit_price: string;
+  vat_pct: string;
+  customer_explanation?: string;
+  internal_note?: string;
+  is_approved_for_spawn?: boolean;
+}
+
+// POST /extra-work/<ew>/proposals/ — provider-only create. With an
+// empty body the backend auto-seeds lines from the cart. Returns the
+// full ProposalDetail (lines + per-record actions).
+export async function createProposal(
+  ewId: number | string,
+  payload: { lines?: ProposalLineWritePayload[] } = {},
+): Promise<ProposalDetail> {
+  const response = await api.post<ProposalDetail>(
+    `/extra-work/${ewId}/proposals/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function createProposalLine(
+  ewId: number | string,
+  proposalId: number,
+  payload: ProposalLineWritePayload,
+): Promise<ProposalLine> {
+  const response = await api.post<ProposalLine>(
+    `/extra-work/${ewId}/proposals/${proposalId}/lines/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function updateProposalLine(
+  ewId: number | string,
+  proposalId: number,
+  lineId: number,
+  payload: Partial<ProposalLineWritePayload>,
+): Promise<ProposalLine> {
+  const response = await api.patch<ProposalLine>(
+    `/extra-work/${ewId}/proposals/${proposalId}/lines/${lineId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteProposalLine(
+  ewId: number | string,
+  proposalId: number,
+  lineId: number,
+): Promise<void> {
+  await api.delete(
+    `/extra-work/${ewId}/proposals/${proposalId}/lines/${lineId}/`,
+  );
+}
+
+// POST /extra-work/<ew>/proposals/<id>/transition/ — DRAFT -> SENT (and
+// other proposal transitions). SEND-time preconditions (every custom
+// line priced, cart coverage) are validated backend-side.
+export async function transitionProposal(
+  ewId: number | string,
+  proposalId: number,
+  payload: { to_status: ProposalStatus; note?: string },
+): Promise<Proposal> {
+  const response = await api.post<Proposal>(
+    `/extra-work/${ewId}/proposals/${proposalId}/transition/`,
+    payload,
   );
   return response.data;
 }
