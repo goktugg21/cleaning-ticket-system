@@ -1,9 +1,14 @@
+from django.http import Http404
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.response import Response
 
 from accounts.models import User, UserRole
-from accounts.permissions import IsSuperAdminOrCompanyAdminForCompany
+from accounts.permissions import (
+    IsProviderRosterReader,
+    IsSuperAdminOrCompanyAdminForCompany,
+)
+from accounts.scoping import scope_buildings_for
 from config.pagination import UnboundedPagination
 
 from .models import Building, BuildingManagerAssignment
@@ -105,5 +110,85 @@ class BuildingManagerDeleteView(generics.GenericAPIView):
         assignment.refresh_from_db()
         return Response(
             BuildingManagerAssignmentSerializer(assignment).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class EligibleCrewUserSerializer(serializers.ModelSerializer):
+    """Compact crew row: id + display name + email. Used only by the
+    eligible-crew endpoint below; no customer-side fields are exposed."""
+
+    class Meta:
+        model = User
+        fields = ["id", "full_name", "email"]
+        read_only_fields = fields
+
+
+class BuildingEligibleCrewView(generics.GenericAPIView):
+    """
+    GET /api/buildings/<building_id>/eligible-crew/
+
+    Read-only. Returns the STAFF + BUILDING_MANAGER users eligible to be
+    a recurring job's default crew for this building, BEFORE any ticket
+    exists. The frontend planned-work form needs this to populate its
+    default_staff_ids / default_manager_ids pickers; the per-ticket
+    `assignable-staff` / `assignable-managers` endpoints require an
+    existing ticket and so cannot serve the template-authoring screen.
+
+    Eligibility mirrors the recurring-job write validation in
+    `planned_work.serializers.RecurringJobWriteSerializer.validate`
+    exactly, so every user offered here passes the write:
+      * staff    = role=STAFF users with a BuildingStaffVisibility row
+                   for this building (else staff_not_eligible on write).
+      * managers = role=BUILDING_MANAGER users with a
+                   BuildingManagerAssignment for this building (else
+                   manager_not_eligible on write).
+
+    Permissions: provider-management only. `IsProviderRosterReader`
+    403s STAFF and CUSTOMER_USER (same admit set as the staff roster).
+    The building is resolved through `scope_buildings_for`, so a provider
+    actor out of scope for the building (a BUILDING_MANAGER not assigned
+    to it, or a COMPANY_ADMIN of another company) gets a 404 — the
+    anti-enumeration shape used by the ticket staff-assignment endpoints
+    (`_resolve_ticket`) — rather than a 403 that would confirm the
+    building exists. Customer users are never exposed.
+    """
+
+    permission_classes = [IsProviderRosterReader]
+    serializer_class = EligibleCrewUserSerializer
+
+    def get(self, request, building_id):
+        building = (
+            scope_buildings_for(request.user).filter(pk=building_id).first()
+        )
+        if building is None:
+            raise Http404("Building not found.")
+
+        staff = (
+            User.objects.filter(
+                role=UserRole.STAFF,
+                is_active=True,
+                deleted_at__isnull=True,
+                building_visibility__building_id=building.id,
+            )
+            .order_by("email")
+            .distinct()
+        )
+        managers = (
+            User.objects.filter(
+                role=UserRole.BUILDING_MANAGER,
+                is_active=True,
+                deleted_at__isnull=True,
+                building_assignments__building_id=building.id,
+            )
+            .order_by("email")
+            .distinct()
+        )
+
+        return Response(
+            {
+                "staff": EligibleCrewUserSerializer(staff, many=True).data,
+                "managers": EligibleCrewUserSerializer(managers, many=True).data,
+            },
             status=status.HTTP_200_OK,
         )
