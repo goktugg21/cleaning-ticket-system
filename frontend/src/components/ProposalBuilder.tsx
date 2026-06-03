@@ -12,7 +12,7 @@
 // components); the row/add-line helpers stay local to this file.
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Plus, Trash2 } from "lucide-react";
+import { Check, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
@@ -154,6 +154,32 @@ function NoteBox({
           <span className="muted">{t("detail.empty_dash")}</span>
         )}
       </button>
+    </div>
+  );
+}
+
+// Read-only note display for the saved-line card: same field-box look as
+// NoteBox but non-interactive (no modal). Shows a check + text when filled,
+// a muted dash when empty.
+function ReadonlyNote({ label, value }: { label: string; value: string }) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const filled = value.trim() !== "";
+  return (
+    <div className="field ew-line-field-note">
+      <span className="field-label">{label}</span>
+      <div
+        className="field-input ew-pricing-note-box ew-line-readonly"
+        data-filled={filled ? "true" : "false"}
+      >
+        {filled ? (
+          <>
+            <Check size={13} strokeWidth={2.4} />
+            <span className="ew-pricing-note-box-text">{value}</span>
+          </>
+        ) : (
+          <span className="muted">{t("detail.empty_dash")}</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -316,11 +342,13 @@ function ProposalLineEditor({
   line,
   disabled,
   onSave,
+  onCancel,
   onRemove,
 }: {
   line: ProposalLine;
   disabled: boolean;
   onSave: (payload: ProposalLineWritePayload) => void;
+  onCancel: () => void;
   onRemove: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
@@ -363,8 +391,117 @@ function ProposalLineEditor({
           type="button"
           className="btn btn-ghost btn-sm"
           disabled={disabled}
+          onClick={onCancel}
+          data-testid="proposal-line-cancel"
+        >
+          {t("common:cancel")}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={disabled}
           onClick={onRemove}
           data-testid="proposal-line-remove"
+        >
+          <Trash2 size={13} strokeWidth={2} />
+          {t("detail.pricing_remove_button")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// A SAVED line, collapsed to a non-editable card (mirrors the editor's
+// column layout but read-only). The persisted backend totals are shown
+// verbatim. "Edit" reopens the line in ProposalLineEditor; "Remove"
+// deletes it.
+function ProposalLineCard({
+  line,
+  disabled,
+  onEdit,
+  onRemove,
+}: {
+  line: ProposalLine;
+  disabled: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const showInternal = Object.prototype.hasOwnProperty.call(
+    line,
+    "internal_note",
+  );
+  return (
+    <div
+      className="ew-line-row ew-line-row-card"
+      data-testid="proposal-line-card"
+      data-line-id={line.id}
+    >
+      <div className="field ew-line-field-grow">
+        <span className="field-label">{t("detail.pricing_form_description")}</span>
+        <div className="field-input ew-line-readonly">
+          {line.description || line.service_name || t("detail.empty_dash")}
+        </div>
+      </div>
+      <div className="field ew-line-field-medium">
+        <span className="field-label">{t("detail.pricing_form_unit")}</span>
+        <div className="field-input ew-line-readonly">
+          {t(UNIT_TYPE_KEY[line.unit_type])}
+        </div>
+      </div>
+      <div className="field ew-line-field-compact">
+        <span className="field-label">{t("detail.pricing_form_quantity")}</span>
+        <div className="field-input ew-line-readonly">{line.quantity}</div>
+      </div>
+      <div className="field ew-line-field-compact">
+        <span className="field-label">{t("detail.pricing_form_unit_price")}</span>
+        <div className="field-input ew-line-readonly">
+          {formatMoney(Number(line.unit_price))}
+        </div>
+      </div>
+      <div className="field ew-line-field-compact">
+        <span className="field-label">{t("detail.pricing_form_vat")}</span>
+        <div className="field-input ew-line-readonly">{line.vat_pct}</div>
+      </div>
+      <MoneyBox
+        label={t("detail.pricing_column_subtotal")}
+        value={Number(line.line_subtotal)}
+      />
+      <MoneyBox
+        label={t("detail.pricing_column_vat")}
+        value={Number(line.line_vat)}
+      />
+      <MoneyBox
+        label={t("detail.pricing_column_total")}
+        value={Number(line.line_total)}
+      />
+      <ReadonlyNote
+        label={t("detail.pricing_customer_note_button")}
+        value={line.customer_explanation}
+      />
+      {showInternal && (
+        <ReadonlyNote
+          label={t("detail.pricing_internal_note_button")}
+          value={line.internal_note ?? ""}
+        />
+      )}
+      <div className="ew-line-row-actions" style={{ display: "flex", gap: 8 }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={disabled}
+          onClick={onEdit}
+          data-testid="proposal-line-edit"
+        >
+          <Pencil size={13} strokeWidth={2} />
+          {t("common:edit")}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={disabled}
+          onClick={onRemove}
+          data-testid="proposal-line-card-remove"
         >
           <Trash2 size={13} strokeWidth={2} />
           {t("detail.pricing_remove_button")}
@@ -441,6 +578,10 @@ export function ProposalBuilder({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  // Which saved line is currently open in the editor. null = every line
+  // shows as a read-only card; clicking a card's "Edit" opens it here, and
+  // a successful Save (or Cancel) collapses it back to the card.
+  const [editingId, setEditingId] = useState<number | null>(null);
   // Provider override-decision modal (SENT proposal). A customer decides
   // without a reason; a PROVIDER driving the customer decision is an
   // override and the backend coerces is_override + REQUIRES a non-blank
@@ -464,21 +605,25 @@ export function ProposalBuilder({
   const canApprove = proposal.actions?.can_approve === true;
   const canReject = proposal.actions?.can_reject === true;
 
-  async function run(fn: () => Promise<unknown>) {
+  // Returns true on success so callers (e.g. the line editor) can collapse
+  // back to the read-only card only when the save actually landed.
+  async function run(fn: () => Promise<unknown>): Promise<boolean> {
     setBusy(true);
     setError("");
     try {
       await fn();
       await onChanged();
+      return true;
     } catch (err) {
       setError(getApiError(err));
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
   const saveLine = (lineId: number, payload: ProposalLineWritePayload) =>
-    void run(() => updateProposalLine(ewId, proposal.id, lineId, payload));
+    run(() => updateProposalLine(ewId, proposal.id, lineId, payload));
   const removeLine = (lineId: number) =>
     void run(() => deleteProposalLine(ewId, proposal.id, lineId));
   const addLine = (payload: ProposalLineWritePayload) =>
@@ -548,15 +693,30 @@ export function ProposalBuilder({
             {proposal.lines.length === 0 && (
               <p className="muted small">{t("detail.proposal_builder_empty")}</p>
             )}
-            {proposal.lines.map((line) => (
-              <ProposalLineEditor
-                key={`${line.id}:${line.updated_at}`}
-                line={line}
-                disabled={busy}
-                onSave={(payload) => saveLine(line.id, payload)}
-                onRemove={() => removeLine(line.id)}
-              />
-            ))}
+            {proposal.lines.map((line) =>
+              editingId === line.id ? (
+                <ProposalLineEditor
+                  key={`${line.id}:${line.updated_at}`}
+                  line={line}
+                  disabled={busy}
+                  onSave={(payload) => {
+                    void saveLine(line.id, payload).then((ok) => {
+                      if (ok) setEditingId(null);
+                    });
+                  }}
+                  onCancel={() => setEditingId(null)}
+                  onRemove={() => removeLine(line.id)}
+                />
+              ) : (
+                <ProposalLineCard
+                  key={line.id}
+                  line={line}
+                  disabled={busy}
+                  onEdit={() => setEditingId(line.id)}
+                  onRemove={() => removeLine(line.id)}
+                />
+              ),
+            )}
             {addOpen ? (
               <ProposalAddLine
                 disabled={busy}
