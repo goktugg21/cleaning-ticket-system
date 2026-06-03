@@ -88,6 +88,7 @@
   "workflow_customer_reject_warning": "If you reject this ticket, please write the reason in the status note field first.",
   "workflow_customer_rejection_required": "Please write the rejection reason in the status note field first.",
   "workflow_move_to": "Move to {{status}}",
+  "workflow_convert_to_extra_work": "Convert to Extra Work",
   "workflow_correction_actions_show": "Show correction actions",
   "workflow_correction_actions_hide": "Hide correction actions",
   "workflow_correction_actions_help": "These are correction transitions outside the normal flow. The backend has permitted each one for you on this ticket; use them only when the standard next step doesn't apply.",

@@ -34,7 +34,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { FileSearch, FileText } from "lucide-react";
+import { Check, FileSearch, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import axios from "axios";
@@ -75,12 +75,13 @@ import {
   InvoiceLineTotalsRow,
 } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
+import { NoteEditorDialog } from "../components/NoteEditorDialog";
 import { PageHeader } from "../components/PageHeader";
 import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatDateTime } from "../lib/intl";
+import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
 // any of these is considered "done" for the cancel-warning gate; only
@@ -190,6 +191,61 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
   return "spawn_generic";
 }
 
+// Sprint 5 (frontend) — DISPLAY-ONLY live line totals for the pricing
+// composer. Mirrors the backend per-line computation
+// (backend/extra_work/models.py::ExtraWorkPricingLineItem.save +
+// _two_places): round the subtotal to 2dp FIRST, then derive VAT from
+// the ROUNDED subtotal, then the total — and use the SAME rounding MODE
+// the backend uses (Decimal.quantize's default = ROUND_HALF_EVEN /
+// banker's rounding), so the preview equals the value the line shows
+// once added, including on exact half-cent ties (e.g. 0.125 -> 0.12,
+// 0.135 -> 0.14). Empty / non-numeric inputs collapse to 0, never NaN.
+// Display goes through the same `formatMoney` formatter the table uses.
+function round2(n: number): number {
+  // Round to 2 decimals with ROUND_HALF_EVEN to match Decimal.quantize.
+  // No +EPSILON nudge: that biased exact ties upward (e.g. 2.525 -> 2.53
+  // where the backend yields 2.52). All inputs here are >= 0 (the
+  // backend's MinValueValidator(0)), so a floor-based split is safe.
+  // Operates on IEEE-754 floats, so it is not byte-identical to Decimal
+  // in pathological float-representation cases, but matches for every
+  // realistic money value; the backend stays authoritative on add. The
+  // small tolerance absorbs binary-float error around the .5 boundary.
+  const scaled = n * 100;
+  const floor = Math.floor(scaled);
+  const frac = scaled - floor;
+  let cents: number;
+  if (Math.abs(frac - 0.5) < 1e-9) {
+    // Exact half — round to the even neighbour (banker's rounding).
+    cents = floor % 2 === 0 ? floor : floor + 1;
+  } else {
+    cents = Math.round(scaled);
+  }
+  return cents / 100;
+}
+
+interface LineTotals {
+  subtotal: number;
+  vat: number;
+  total: number;
+}
+
+function computeLineTotals(
+  quantity: string,
+  unitPrice: string,
+  vatRate: string,
+): LineTotals {
+  const q = Number(quantity);
+  const u = Number(unitPrice);
+  const v = Number(vatRate);
+  const qty = Number.isFinite(q) ? q : 0;
+  const unit = Number.isFinite(u) ? u : 0;
+  const vatPct = Number.isFinite(v) ? v : 0;
+  const subtotal = round2(qty * unit);
+  const vat = round2((subtotal * vatPct) / 100);
+  const total = round2(subtotal + vat);
+  return { subtotal, vat, total };
+}
+
 
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
@@ -221,6 +277,12 @@ export function ExtraWorkDetailPage() {
   });
   const [pricingBusy, setPricingBusy] = useState(false);
   const [pricingError, setPricingError] = useState("");
+  // Sprint 5 (frontend) — which composer note is being edited in the
+  // modal (the two free-text notes moved out of the inline row to make
+  // space for the live SUBTOTAL / VAT / TOTAL columns). null = closed.
+  const [noteModal, setNoteModal] = useState<"customer" | "internal" | null>(
+    null,
+  );
 
   // Transition buttons (any role; the backend computes
   // allowed_next_statuses per actor).
@@ -464,6 +526,15 @@ export function ExtraWorkDetailPage() {
   const canPrepareProposal = ewActions
     ? ewActions.can_prepare_extra_work_proposal
     : isProvider;
+
+  // Sprint 5 (frontend) — live, display-only line totals for the
+  // composer row, recomputed each render from the numeric inputs and
+  // mirroring the backend's per-line rounding (see computeLineTotals).
+  const liveTotals = computeLineTotals(
+    pricingForm.quantity,
+    pricingForm.unit_price,
+    pricingForm.vat_rate,
+  );
 
   // Provider workflow buttons exclude the override targets — those
   // route through the dedicated override block below.
@@ -1466,52 +1537,134 @@ export function ExtraWorkDetailPage() {
                           required
                         />
                       </div>
-                      <div className="field ew-line-field-grow">
-                        <label
-                          className="field-label"
-                          htmlFor="pricing-customer-note"
-                        >
-                          {t("detail.pricing_form_customer_note")}
-                        </label>
-                        <input
-                          id="pricing-customer-note"
+                      {/* Live, display-only line totals — replace the two
+                          inline note inputs (now behind modal buttons),
+                          freeing the row width. Mirrors the backend's
+                          per-line rounding so the preview equals the line
+                          once added. Aligned to the table's
+                          SUBTOTAL / VAT / TOTAL money columns. */}
+                      <div className="field ew-line-field-money">
+                        <span className="field-label">
+                          {t("invoice_row.col_subtotal")}
+                        </span>
+                        <div
                           className="field-input"
-                          type="text"
-                          value={pricingForm.customer_visible_note}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              customer_visible_note: event.target.value,
-                            }))
-                          }
-                          placeholder={t(
-                            "detail.pricing_form_customer_note_placeholder",
-                          )}
-                        />
-                      </div>
-                      <div className="field ew-line-field-grow">
-                        <label
-                          className="field-label"
-                          htmlFor="pricing-internal-note"
+                          data-testid="pricing-live-subtotal"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
                         >
-                          {t("detail.pricing_form_internal_note")}
-                        </label>
-                        <input
-                          id="pricing-internal-note"
-                          className="field-input"
-                          type="text"
-                          value={pricingForm.internal_cost_note}
-                          onChange={(event) =>
-                            setPricingForm((c) => ({
-                              ...c,
-                              internal_cost_note: event.target.value,
-                            }))
-                          }
-                          placeholder={t(
-                            "detail.pricing_form_internal_note_placeholder",
-                          )}
-                        />
+                          {formatMoney(liveTotals.subtotal)}
+                        </div>
                       </div>
+                      <div className="field ew-line-field-money">
+                        <span className="field-label">
+                          {t("invoice_row.col_vat")}
+                        </span>
+                        <div
+                          className="field-input"
+                          data-testid="pricing-live-vat"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {formatMoney(liveTotals.vat)}
+                        </div>
+                      </div>
+                      <div className="field ew-line-field-money">
+                        <span className="field-label">
+                          {t("invoice_row.col_total")}
+                        </span>
+                        <div
+                          className="field-input"
+                          data-testid="pricing-live-total"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            fontWeight: 600,
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {formatMoney(liveTotals.total)}
+                        </div>
+                      </div>
+
+                      {/* The two free-text notes live behind buttons
+                          styled as field boxes (same 38px height as the
+                          inputs, so they align in the row). Values stay
+                          in pricingForm and are sent unchanged on add.
+                          The internal-cost-note box is provider-only,
+                          mirroring the table's
+                          `isProvider && item.internal_cost_note` gating. */}
+                      <div className="field ew-line-field-note">
+                        <span className="field-label">
+                          {t("detail.pricing_customer_note_button")}
+                        </span>
+                        <button
+                          type="button"
+                          className="field-input ew-pricing-note-box"
+                          data-testid="pricing-customer-note-button"
+                          data-filled={
+                            pricingForm.customer_visible_note.trim()
+                              ? "true"
+                              : "false"
+                          }
+                          title={pricingForm.customer_visible_note || undefined}
+                          onClick={() => setNoteModal("customer")}
+                        >
+                          {pricingForm.customer_visible_note.trim() ? (
+                            <>
+                              <Check size={13} strokeWidth={2.5} aria-hidden />
+                              <span className="ew-pricing-note-box-text">
+                                {pricingForm.customer_visible_note}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="muted">
+                              {t("detail.empty_dash")}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                      {isProvider && (
+                        <div className="field ew-line-field-note">
+                          <span className="field-label">
+                            {t("detail.pricing_internal_note_button")}
+                          </span>
+                          <button
+                            type="button"
+                            className="field-input ew-pricing-note-box"
+                            data-testid="pricing-internal-note-button"
+                            data-filled={
+                              pricingForm.internal_cost_note.trim()
+                                ? "true"
+                                : "false"
+                            }
+                            title={pricingForm.internal_cost_note || undefined}
+                            onClick={() => setNoteModal("internal")}
+                          >
+                            {pricingForm.internal_cost_note.trim() ? (
+                              <>
+                                <Check size={13} strokeWidth={2.5} aria-hidden />
+                                <span className="ew-pricing-note-box-text">
+                                  {pricingForm.internal_cost_note}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="muted">
+                                {t("detail.empty_dash")}
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                      )}
                       <div className="ew-line-row-actions">
                         <button
                           type="submit"
@@ -1687,6 +1840,41 @@ export function ExtraWorkDetailPage() {
           void handleCustomerDecision("CUSTOMER_REJECTED", reason);
         }}
       />
+
+      {/* Sprint 5 (frontend) — composer note editors. Mounted only while
+          open so each open re-seeds from the current pricingForm value.
+          Save writes back to pricingForm (sent unchanged on add); the
+          internal-note editor is additionally provider-gated. */}
+      {noteModal === "customer" && (
+        <NoteEditorDialog
+          testId="pricing-customer-note-modal"
+          title={t("detail.pricing_customer_note_modal_title")}
+          initialValue={pricingForm.customer_visible_note}
+          placeholder={t("detail.pricing_form_customer_note_placeholder")}
+          saveLabel={t("detail.note_modal_save")}
+          cancelLabel={t("detail.note_modal_cancel")}
+          onSave={(value) => {
+            setPricingForm((c) => ({ ...c, customer_visible_note: value }));
+            setNoteModal(null);
+          }}
+          onCancel={() => setNoteModal(null)}
+        />
+      )}
+      {noteModal === "internal" && isProvider && (
+        <NoteEditorDialog
+          testId="pricing-internal-note-modal"
+          title={t("detail.pricing_internal_note_modal_title")}
+          initialValue={pricingForm.internal_cost_note}
+          placeholder={t("detail.pricing_form_internal_note_placeholder")}
+          saveLabel={t("detail.note_modal_save")}
+          cancelLabel={t("detail.note_modal_cancel")}
+          onSave={(value) => {
+            setPricingForm((c) => ({ ...c, internal_cost_note: value }));
+            setNoteModal(null);
+          }}
+          onCancel={() => setNoteModal(null)}
+        />
+      )}
 
       {/* Direct-publish confirmation. Renders a prominent warning
           ("bypasses customer approval, opens tickets immediately") plus

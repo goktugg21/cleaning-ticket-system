@@ -88,6 +88,7 @@
   "workflow_customer_reject_warning": "Als u dit ticket afwijst, schrijf dan eerst de reden in het statusnotitieveld.",
   "workflow_customer_rejection_required": "Schrijf eerst de afwijzingsreden in het statusnotitieveld.",
   "workflow_move_to": "Wijzig naar {{status}}",
+  "workflow_convert_to_extra_work": "Converteer naar Extra Werk",
   "workflow_correction_actions_show": "Correctieacties tonen",
   "workflow_correction_actions_hide": "Correctieacties verbergen",
   "workflow_correction_actions_help": "Dit zijn correctieovergangen buiten de normale werkstroom. De backend heeft elke optie hier voor jou toegestaan op dit ticket; gebruik ze alleen wanneer de gebruikelijke volgende stap niet van toepassing is.",

@@ -22,7 +22,11 @@ export type TicketStatus =
   | "APPROVED"
   | "REJECTED"
   | "CLOSED"
-  | "REOPENED_BY_ADMIN";
+  | "REOPENED_BY_ADMIN"
+  // Sprint 7B — terminal status for a ticket that has been converted
+  // into an Extra Work request. Emitted by the backend ticket state
+  // machine (tickets/models.py); surfaced as a transition target.
+  | "CONVERTED_TO_EXTRA_WORK";
 
 // B7 four-tier note taxonomy. Source of truth:
 // backend/tickets/models.py::TicketMessageType.

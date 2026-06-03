@@ -57,6 +57,12 @@
   "create.line_field_requested_date": "Gewenste datum",
   "create.line_field_customer_note": "Opmerking (optioneel)",
   "create.line_field_customer_note_placeholder": "Wat de aanbieder over deze regel moet weten",
+  "create.prices.section_title": "Afgesproken prijzen voor deze klant",
+  "create.prices.helper": "Klik op een dienst om die aan uw aanvraag toe te voegen. Diensten zonder afgesproken prijs worden door de provider geprijsd nadat u de aanvraag indient.",
+  "create.prices.loading": "Prijzen laden…",
+  "create.prices.empty": "Nog geen afgesproken contractprijzen voor deze klant. Alle diensten worden door de provider geprijsd.",
+  "create.prices.search_placeholder": "Zoek een dienst…",
+  "create.prices.no_match": "Geen dienst gevonden.",
 
   "create.submit_button": "Aanvraag indienen",
   "create.submitting": "Indienen…",
@@ -112,6 +118,7 @@
   "create.intent.error.forbidden_for_provider": "Een provider kan voor zichzelf geen offerte aanvragen.",
   "create.intent.error.required": "Selecteer hoe u wilt doorgaan.",
   "create.intent.error.rejected_generic": "De gekozen optie is niet meer geldig voor dit winkelmandje. Controleer het prijsoverzicht en kies een toegestane optie.",
+  "create.intent.error.none_selected": "Kies hoe u wilt doorgaan voordat u de aanvraag indient.",
 
   "result.heading": "Aanvraag ingediend",
   "result.instant_processing": "Uw bestelling wordt verwerkt — operationele tickets worden binnenkort aangemaakt.",
@@ -173,6 +180,12 @@
   "detail.pricing_form_submit": "Prijsregel toevoegen",
   "detail.pricing_form_submitting": "Toevoegen…",
   "detail.pricing_error_description_required": "Omschrijving is verplicht.",
+  "detail.pricing_customer_note_button": "Klanttoelichting",
+  "detail.pricing_internal_note_button": "Interne notitie",
+  "detail.pricing_customer_note_modal_title": "Voor klant zichtbare toelichting",
+  "detail.pricing_internal_note_modal_title": "Interne kostenopmerking (alleen aanbieder)",
+  "detail.note_modal_save": "Opslaan",
+  "detail.note_modal_cancel": "Annuleren",
 
   "detail.workflow_section_title": "Workflow",
   "detail.workflow_customer_decision_helper": "De aanbieder heeft een prijs voorgesteld. Beoordeel de regels hierboven en keur goed of af.",

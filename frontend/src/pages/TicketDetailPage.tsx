@@ -152,6 +152,8 @@ const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   REJECTED: ["IN_PROGRESS"],
   CLOSED: [],
   REOPENED_BY_ADMIN: ["IN_PROGRESS"],
+  // Terminal — no further status moves once converted to Extra Work.
+  CONVERTED_TO_EXTRA_WORK: [],
 };
 
 function partitionTransitions(
@@ -2248,7 +2250,11 @@ export function TicketDetailPage() {
                           t("updating")
                         ) : (
                           <>
-                            {t("workflow_move_to", { status: tStatus(status) })}
+                            {status === "CONVERTED_TO_EXTRA_WORK"
+                              ? t("workflow_convert_to_extra_work")
+                              : t("workflow_move_to", {
+                                  status: tStatus(status),
+                                })}
                             <span className="status-btn-arrow">→</span>
                           </>
                         )}

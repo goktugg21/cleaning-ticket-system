@@ -142,6 +142,7 @@
   "status.rejected": "Afgewezen",
   "status.closed": "Gesloten",
   "status.reopened_by_admin": "Heropend",
+  "status.converted_to_extra_work": "Geconverteerd naar Extra Werk",
 
   "priority.normal": "Normaal",
   "priority.high": "Hoog",

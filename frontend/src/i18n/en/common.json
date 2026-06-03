@@ -142,6 +142,7 @@
   "status.rejected": "Rejected",
   "status.closed": "Closed",
   "status.reopened_by_admin": "Reopened",
+  "status.converted_to_extra_work": "Converted to Extra Work",
 
   "priority.normal": "Normal",
   "priority.high": "High",

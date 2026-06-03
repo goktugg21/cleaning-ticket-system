@@ -5720,6 +5720,103 @@ table.data-table {
   margin-top: 10px;
 }
 
+/* Sprint 5 — pricing-proposal composer: live SUBTOTAL/VAT/TOTAL boxes +
+   the two note triggers (modal buttons styled as field boxes) + the Add
+   button all sit on ONE row on the detail column. flex-basis 0 + grow
+   weights, with min-widths summing under the column width, keep the line
+   from wrapping; it still stacks under 760px. Scoped to
+   .ew-pricing-add-form so the CreateExtraWorkPage cart line (which reuses
+   .ew-line-field-* but is NOT inside this form) is untouched. */
+.ew-pricing-add-form .ew-line-row { gap: 10px; }
+.ew-pricing-add-form .ew-line-row > .field.ew-line-field-grow { flex: 2.2 1 0; min-width: 100px; }
+.ew-pricing-add-form .ew-line-row > .field.ew-line-field-medium { flex: 1.4 1 0; min-width: 88px; }
+.ew-pricing-add-form .ew-line-row > .field.ew-line-field-compact { flex: 0.8 1 0; min-width: 60px; }
+.ew-pricing-add-form .ew-line-row > .field.ew-line-field-money { flex: 1 1 0; min-width: 84px; }
+.ew-pricing-add-form .ew-line-row > .field.ew-line-field-note { flex: 1.2 1 0; min-width: 92px; }
+/* Note trigger: a button that looks like a field box (.field-input) so it
+   aligns with the inputs; left-aligned, truncates a set note. */
+.ew-pricing-add-form .ew-pricing-note-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ew-pricing-note-box-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .ew-pricing-add-form .ew-line-row > .field.ew-line-field-money,
+  .ew-pricing-add-form .ew-line-row > .field.ew-line-field-note {
+    flex: 1 1 100%;
+  }
+}
+
+/* Sprint 5 — agreed-prices dropdown on the Extra Work create page: a
+   collapsible, searchable, scrollable picker that scales to long
+   contract lists; clicking a row adds that service to the cart. */
+.ew-agreed-prices {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  background: var(--surface);
+}
+.ew-agreed-prices-summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ew-agreed-prices-body > .field-input {
+  margin-top: 8px;
+}
+.ew-agreed-prices-list {
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+}
+.ew-agreed-price-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.ew-agreed-price-item:hover:not(:disabled) {
+  background: rgba(11, 107, 66, 0.06);
+  border-color: var(--border);
+}
+.ew-agreed-price-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.ew-agreed-price-item-price {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+}
+
 /* ----- "Show technical keys" toggle (Permissions page) ------------ */
 /* Sprint 29 Batch 29.1 — scoped to the PolicyToggleGrid's affects-
    line render. Default-off; persists via localStorage; does NOT

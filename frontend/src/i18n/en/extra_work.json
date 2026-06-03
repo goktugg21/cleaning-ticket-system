@@ -57,6 +57,12 @@
   "create.line_field_requested_date": "Requested date",
   "create.line_field_customer_note": "Note (optional)",
   "create.line_field_customer_note_placeholder": "Anything the provider should know about this line",
+  "create.prices.section_title": "Agreed prices for this customer",
+  "create.prices.helper": "Click a service to add it to your request. Services without an agreed price are priced by the provider after you submit.",
+  "create.prices.loading": "Loading prices…",
+  "create.prices.empty": "No agreed contract prices for this customer yet. All services are priced by the provider.",
+  "create.prices.search_placeholder": "Search a service…",
+  "create.prices.no_match": "No matching service.",
 
   "create.submit_button": "Submit request",
   "create.submitting": "Submitting…",
@@ -112,6 +118,7 @@
   "create.intent.error.forbidden_for_provider": "A provider can't request a quote from itself.",
   "create.intent.error.required": "Please choose how to proceed.",
   "create.intent.error.rejected_generic": "The selected option is no longer valid for this cart. Review the pricing preview and choose an allowed option.",
+  "create.intent.error.none_selected": "Choose how to proceed before submitting the request.",
 
   "result.heading": "Request submitted",
   "result.instant_processing": "Your order is being processed — operational tickets will be created shortly.",
@@ -173,6 +180,12 @@
   "detail.pricing_form_submit": "Add pricing line",
   "detail.pricing_form_submitting": "Adding…",
   "detail.pricing_error_description_required": "Description is required.",
+  "detail.pricing_customer_note_button": "Customer note",
+  "detail.pricing_internal_note_button": "Internal note",
+  "detail.pricing_customer_note_modal_title": "Customer-visible explanation",
+  "detail.pricing_internal_note_modal_title": "Internal cost note (provider-only)",
+  "detail.note_modal_save": "Save",
+  "detail.note_modal_cancel": "Cancel",
 
   "detail.workflow_section_title": "Workflow",
   "detail.workflow_customer_decision_helper": "The provider has proposed pricing. Please review the lines above and approve or reject.",
