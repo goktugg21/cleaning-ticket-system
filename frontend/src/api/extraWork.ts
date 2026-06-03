@@ -6,6 +6,8 @@
 // the `/api` prefix).
 import { api } from "./client";
 import type {
+  ExtraWorkPreviewPayload,
+  ExtraWorkPreviewResponse,
   ExtraWorkPricingLineItem,
   ExtraWorkRequestCartCreatePayload,
   ExtraWorkRequestDetail,
@@ -65,6 +67,25 @@ export async function createExtraWork(
 ): Promise<ExtraWorkRequestDetail> {
   const response = await api.post<ExtraWorkRequestDetail>(
     "/extra-work/",
+    payload,
+  );
+  return response.data;
+}
+
+// Sprint 5 (frontend) — non-mutating cart preview / classification.
+// COMPUTE-ONLY: the backend persists NO ExtraWorkRequest. Returns the
+// per-line price classification (the customer's OWN agreed price only —
+// provider defaults never leak), cart-level flags, and the
+// backend-gated `allowed_intents` + `default_intent` that drive the
+// create page's intent selector. When `payload.request_intent` is set,
+// the response also carries `requested_intent_allowed`
+// (+ `requested_intent_error` on rejection). Mirrors the create cart's
+// scope + permission gate (`backend/extra_work/views.py::preview`).
+export async function getExtraWorkPreview(
+  payload: ExtraWorkPreviewPayload,
+): Promise<ExtraWorkPreviewResponse> {
+  const response = await api.post<ExtraWorkPreviewResponse>(
+    "/extra-work/preview/",
     payload,
   );
   return response.data;

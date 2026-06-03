@@ -20,18 +20,24 @@ import { useTranslation } from "react-i18next";
 
 import { listServices } from "../api/admin";
 import { api, getApiError } from "../api/client";
-import { createExtraWork } from "../api/extraWork";
+import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
 import type {
   Building,
   Customer,
   ExtraWorkCategory,
+  ExtraWorkIntentErrorCode,
+  ExtraWorkPreviewLine,
+  ExtraWorkPreviewPriceSource,
+  ExtraWorkPreviewResponse,
   ExtraWorkRequestDetail,
+  ExtraWorkRequestIntent,
   ExtraWorkUrgency,
   PaginatedResponse,
   Service,
 } from "../api/types";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
+import { formatMoney, formatNumber } from "../lib/intl";
 
 
 interface ParentFormState {
@@ -131,6 +137,106 @@ function emptyCartLine(): CartLineState {
   };
 }
 
+// Sprint 5 (frontend) — debounce window for the live preview re-fetch.
+const PREVIEW_DEBOUNCE_MS = 350;
+
+// i18n keys for the intent options. The set of options actually shown
+// is driven ENTIRELY by the backend's `allowed_intents`; these maps
+// only provide the label/description copy for whichever intents the
+// backend allows.
+const INTENT_LABEL_KEY: Record<ExtraWorkRequestIntent, string> = {
+  DIRECT_AGREED_PRICE_ORDER: "create.intent.direct.label",
+  AUTO_START_AFTER_PRICING: "create.intent.auto_start.label",
+  REQUEST_QUOTE: "create.intent.request_quote.label",
+};
+const INTENT_DESC_KEY: Record<ExtraWorkRequestIntent, string> = {
+  DIRECT_AGREED_PRICE_ORDER: "create.intent.direct.desc",
+  AUTO_START_AFTER_PRICING: "create.intent.auto_start.desc",
+  REQUEST_QUOTE: "create.intent.request_quote.desc",
+};
+
+// Per-line price-source badge copy (preview vocabulary).
+const PREVIEW_SOURCE_KEY: Record<ExtraWorkPreviewPriceSource, string> = {
+  AGREED_CUSTOMER_PRICE: "create.preview.source_agreed",
+  NEEDS_PROVIDER_PRICING: "create.preview.source_needs_pricing",
+  AD_HOC: "create.preview.source_ad_hoc",
+};
+// Reuse InvoiceLineRow's existing source-pill CSS by mapping the
+// preview vocabulary onto the closest persisted-line modifier class.
+// This is purely a colour choice for a backend-provided source — NOT
+// client-side inference of the source itself.
+const PREVIEW_SOURCE_TAG: Record<ExtraWorkPreviewPriceSource, string> = {
+  AGREED_CUSTOMER_PRICE: "contract",
+  NEEDS_PROVIDER_PRICING: "needs_proposal",
+  AD_HOC: "custom",
+};
+
+// Stable backend intent-rejection code -> i18n key. Unknown codes fall
+// back to the backend-supplied `detail` string (see intentErrorText).
+const INTENT_ERROR_KEY: Record<ExtraWorkIntentErrorCode, string> = {
+  intent_requires_all_agreed: "create.intent.error.requires_all_agreed",
+  intent_requires_non_agreed_line:
+    "create.intent.error.requires_non_agreed_line",
+  intent_forbidden_for_role: "create.intent.error.forbidden_for_role",
+  intent_forbidden_for_provider: "create.intent.error.forbidden_for_provider",
+  intent_required: "create.intent.error.required",
+};
+
+interface AgreedTotals {
+  subtotal: number;
+  vat: number;
+  total: number;
+  agreedCount: number;
+  unpricedCount: number;
+}
+
+// DISPLAY-ONLY cosmetic arithmetic over the backend-provided agreed
+// prices. NOT business logic: it never decides routing/intent and never
+// touches non-agreed lines (those carry no price and are shown as
+// "to be priced by the provider"). If the preview endpoint later
+// returns server-computed totals, switch to those.
+function computeAgreedTotals(lines: ExtraWorkPreviewLine[]): AgreedTotals {
+  let subtotal = 0;
+  let vat = 0;
+  let agreedCount = 0;
+  let unpricedCount = 0;
+  for (const line of lines) {
+    const qty = Number(line.quantity);
+    const unit =
+      line.agreed_unit_price !== null ? Number(line.agreed_unit_price) : null;
+    if (
+      line.price_source === "AGREED_CUSTOMER_PRICE" &&
+      unit !== null &&
+      Number.isFinite(qty) &&
+      Number.isFinite(unit)
+    ) {
+      const lineSubtotal = qty * unit;
+      const pct =
+        line.agreed_vat_pct !== null ? Number(line.agreed_vat_pct) : 0;
+      subtotal += lineSubtotal;
+      vat += Number.isFinite(pct) ? lineSubtotal * (pct / 100) : 0;
+      agreedCount += 1;
+    } else {
+      unpricedCount += 1;
+    }
+  }
+  return { subtotal, vat, total: subtotal + vat, agreedCount, unpricedCount };
+}
+
+// True when a create rejection is an intent rejection. The backend
+// emits `{ "request_intent": ["<message>"] }`; DRF does not serialize
+// the stable error code on the wire, so we can only detect the field
+// and fall back to a friendly generic message (the precise codes are
+// surfaced via the preview channel).
+function isIntentSubmitError(err: unknown): boolean {
+  const data = (err as { response?: { data?: unknown } } | null)?.response
+    ?.data;
+  return (
+    !!data &&
+    typeof data === "object" &&
+    "request_intent" in (data as Record<string, unknown>)
+  );
+}
 
 export function CreateExtraWorkPage() {
   const { t } = useTranslation(["extra_work", "common"]);
@@ -154,6 +260,19 @@ export function CreateExtraWorkPage() {
   // Post-submit result state — once present, the form is collapsed
   // into a read-only confirmation panel.
   const [result, setResult] = useState<ExtraWorkRequestDetail | null>(null);
+
+  // Sprint 5 (frontend) — intent layer. `selectedIntent` is seeded from
+  // the preview's `default_intent` and only ever holds an intent the
+  // backend currently allows (reconciled on every preview). `preview`
+  // is tagged with the cart `key` it was computed for so a stale
+  // response is never rendered against a changed cart.
+  const [selectedIntent, setSelectedIntent] =
+    useState<ExtraWorkRequestIntent | null>(null);
+  const [preview, setPreview] = useState<
+    | { key: string; data: ExtraWorkPreviewResponse }
+    | { key: string; error: string }
+    | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,6 +405,123 @@ export function CreateExtraWorkPage() {
     }
   }, [filteredBuildings, form.building]);
 
+  // The cart is "previewable" once a building + customer are chosen and
+  // every line carries a service, a positive quantity, and a date —
+  // exactly what the preview serializer requires.
+  const previewable = useMemo(() => {
+    if (!form.building || !form.customer) return false;
+    if (cartLines.length === 0) return false;
+    return cartLines.every((line) => {
+      if (!line.serviceId) return false;
+      const q = Number(line.quantity);
+      if (!Number.isFinite(q) || q <= 0) return false;
+      return Boolean(line.requestedDate);
+    });
+  }, [form.building, form.customer, cartLines]);
+
+  // Stable signature of ONLY the pricing-relevant fields (note text is
+  // excluded so editing a note never re-fetches). `null` when the cart
+  // is not previewable. The effect re-fetches exactly when this value
+  // changes; the payload is reconstructed by parsing it, so the effect
+  // reads no other reactive cart state.
+  const previewKey = useMemo(() => {
+    if (!previewable) return null;
+    return JSON.stringify({
+      b: Number(form.building),
+      c: Number(form.customer),
+      l: cartLines.map((line) => ({
+        s: Number(line.serviceId),
+        q: line.quantity,
+        d: line.requestedDate,
+      })),
+    });
+  }, [previewable, form.building, form.customer, cartLines]);
+
+  // Debounced live preview. All state writes happen inside the timer's
+  // async callback (deferred), never synchronously in the effect body.
+  useEffect(() => {
+    if (!previewKey) return;
+    const parsed = JSON.parse(previewKey) as {
+      b: number;
+      c: number;
+      l: { s: number; q: string; d: string }[];
+    };
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const data = await getExtraWorkPreview({
+            building: parsed.b,
+            customer: parsed.c,
+            request_intent: selectedIntent ?? undefined,
+            line_items: parsed.l.map((line) => ({
+              service: line.s,
+              quantity: line.q,
+              requested_date: line.d,
+            })),
+          });
+          if (cancelled) return;
+          setPreview({ key: previewKey, data });
+          // Reconcile the selection against what the backend allows for
+          // the (possibly changed) cart: keep the current pick if still
+          // allowed, otherwise fall back to the backend default. This
+          // can trigger at most ONE extra debounced re-fetch (the new
+          // selection is re-validated) — bounded and acceptable.
+          // Defensive: only adopt `default_intent` when the backend
+          // actually lists it as allowed (it always should per the
+          // contract); otherwise keep the current value rather than
+          // selecting an option the backend would reject.
+          setSelectedIntent((current) => {
+            if (current && data.allowed_intents.includes(current)) {
+              return current;
+            }
+            if (data.allowed_intents.includes(data.default_intent)) {
+              return data.default_intent;
+            }
+            return current;
+          });
+        } catch (err) {
+          if (cancelled) return;
+          setPreview({ key: previewKey, error: getApiError(err) });
+        }
+      })();
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [previewKey, selectedIntent]);
+
+  // Render-time derived preview view-state. A `preview` is only honoured
+  // when its `key` matches the CURRENT cart, so a stale response is
+  // never shown (or acted on) against a changed cart.
+  const previewData =
+    previewable && preview !== null && preview.key === previewKey && "data" in preview
+      ? preview.data
+      : null;
+  const previewErrorMsg =
+    previewable &&
+    preview !== null &&
+    preview.key === previewKey &&
+    "error" in preview
+      ? preview.error
+      : null;
+  const previewLoading =
+    previewable && (preview === null || preview.key !== previewKey);
+
+  // Stable backend code -> localized text, falling back to the backend
+  // detail string for any code we don't have copy for yet.
+  const intentErrorText = (err: { code: string; detail: string }): string => {
+    const key = INTENT_ERROR_KEY[err.code as ExtraWorkIntentErrorCode];
+    return key ? t(key) : err.detail;
+  };
+
+  // DISPLAY-ONLY cart total over the agreed-price lines (see
+  // computeAgreedTotals). Recomputed each render; trivially cheap.
+  const previewTotals = previewData
+    ? computeAgreedTotals(previewData.lines)
+    : null;
+
   function update<K extends keyof ParentFormState>(
     name: K,
     value: ParentFormState[K],
@@ -366,6 +602,19 @@ export function CreateExtraWorkPage() {
       }
     }
 
+    // If the live preview already knows the chosen intent is invalid for
+    // this cart, surface the precise (backend-coded) reason rather than
+    // letting the create call fail with an un-localized field error.
+    if (
+      previewData &&
+      previewData.requested_intent === selectedIntent &&
+      previewData.requested_intent_allowed === false &&
+      previewData.requested_intent_error
+    ) {
+      setError(intentErrorText(previewData.requested_intent_error));
+      return;
+    }
+
     setSubmitting(true);
     try {
       const created = await createExtraWork({
@@ -378,6 +627,11 @@ export function CreateExtraWorkPage() {
           form.category === "OTHER" ? form.category_other_text.trim() : "",
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
+        // Send the chosen intent (driven by the preview's
+        // allowed_intents/default_intent). Omitted when preview never
+        // ran (e.g. unavailable): the backend then derives a safe
+        // default — identical to the pre-intent-layer behaviour.
+        ...(selectedIntent ? { request_intent: selectedIntent } : {}),
         line_items: cartLines.map((line) => ({
           service: Number(line.serviceId),
           quantity: line.quantity,
@@ -387,7 +641,14 @@ export function CreateExtraWorkPage() {
       });
       setResult(created);
     } catch (err) {
-      setError(getApiError(err));
+      // Intent rejections (the backend code is not on the wire) get a
+      // friendly localized message; everything else surfaces the DRF
+      // field/detail message verbatim as before.
+      if (isIntentSubmitError(err)) {
+        setError(t("create.intent.error.rejected_generic"));
+      } else {
+        setError(getApiError(err));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -921,6 +1182,226 @@ export function CreateExtraWorkPage() {
               </div>
             ))}
           </div>
+
+          {/* ----- Pricing preview + intent (Sprint 5, SoT §5.1–5.4) ----- */}
+          {previewable && (
+            <>
+              <div
+                className="form-section"
+                data-testid="extra-work-create-preview"
+              >
+                <div className="form-section-title">
+                  {t("create.preview.section_title")}
+                </div>
+                <div className="muted small" style={{ marginBottom: 12 }}>
+                  {t("create.preview.helper")}
+                </div>
+
+                {previewLoading && (
+                  <div
+                    className="muted small"
+                    role="status"
+                    data-testid="extra-work-create-preview-loading"
+                  >
+                    {t("create.preview.loading")}
+                  </div>
+                )}
+
+                {previewErrorMsg && (
+                  <div
+                    className="alert-warning"
+                    role="status"
+                    data-testid="extra-work-create-preview-unavailable"
+                  >
+                    {t("create.preview.unavailable")}
+                  </div>
+                )}
+
+                {previewData && (
+                  <div className="table-wrap">
+                    <table
+                      className="data-table ew-pricing-table"
+                      data-testid="extra-work-create-preview-table"
+                    >
+                      <thead>
+                        <tr>
+                          <th>{t("create.preview.col_service")}</th>
+                          <th>{t("create.preview.col_source")}</th>
+                          <th>{t("create.preview.col_quantity")}</th>
+                          <th>{t("create.preview.col_unit_price")}</th>
+                          <th>{t("create.preview.col_vat_pct")}</th>
+                          <th>{t("create.preview.col_line_total")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewData.lines.map((line) => {
+                          const unit =
+                            line.agreed_unit_price !== null
+                              ? Number(line.agreed_unit_price)
+                              : null;
+                          const pct =
+                            line.agreed_vat_pct !== null
+                              ? Number(line.agreed_vat_pct)
+                              : null;
+                          const qty = Number(line.quantity);
+                          const isAgreed =
+                            line.price_source === "AGREED_CUSTOMER_PRICE" &&
+                            unit !== null &&
+                            Number.isFinite(unit);
+                          const lineTotal =
+                            isAgreed && unit !== null && Number.isFinite(qty)
+                              ? qty * unit * (1 + (pct ?? 0) / 100)
+                              : null;
+                          const serviceLabel = line.service_category_name
+                            ? `${line.service_category_name} — ${line.service_name}`
+                            : line.service_name ||
+                              line.custom_description ||
+                              "—";
+                          return (
+                            <tr
+                              key={line.index}
+                              data-testid="extra-work-create-preview-row"
+                              data-price-source={line.price_source}
+                            >
+                              <td>{serviceLabel}</td>
+                              <td>
+                                <span
+                                  className={`invoice-line-row-source-tag invoice-line-row-source-${PREVIEW_SOURCE_TAG[line.price_source]}`}
+                                  data-testid="extra-work-create-preview-source"
+                                >
+                                  {t(PREVIEW_SOURCE_KEY[line.price_source])}
+                                </span>
+                              </td>
+                              <td>
+                                {formatNumber(line.quantity, {
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                              <td>{isAgreed ? formatMoney(unit) : "—"}</td>
+                              <td>
+                                {isAgreed && pct !== null
+                                  ? `${formatNumber(pct, {
+                                      maximumFractionDigits: 2,
+                                    })}%`
+                                  : "—"}
+                              </td>
+                              <td>
+                                {isAgreed ? (
+                                  formatMoney(lineTotal)
+                                ) : (
+                                  <span className="muted small">
+                                    {t("create.preview.to_be_priced")}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {previewData && previewTotals && (
+                  <div
+                    className="alert-info"
+                    style={{ marginTop: 12 }}
+                    data-testid="extra-work-create-preview-totals"
+                  >
+                    <div
+                      className="form-section-title"
+                      style={{ margin: 0 }}
+                    >
+                      {t("create.preview.totals_title")}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      {t("create.preview.totals_subtotal")}:{" "}
+                      {formatMoney(previewTotals.subtotal)} ·{" "}
+                      {t("create.preview.totals_vat")}:{" "}
+                      {formatMoney(previewTotals.vat)} ·{" "}
+                      {t("create.preview.totals_total")}:{" "}
+                      <strong>{formatMoney(previewTotals.total)}</strong>
+                    </div>
+                    {previewTotals.unpricedCount > 0 && (
+                      <div className="muted small" style={{ marginTop: 6 }}>
+                        {t("create.preview.totals_unpriced", {
+                          count: previewTotals.unpricedCount,
+                        })}
+                      </div>
+                    )}
+                    <div className="muted small" style={{ marginTop: 6 }}>
+                      {t("create.preview.totals_display_only")}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {previewData && previewData.allowed_intents.length > 0 && (
+                <div
+                  className="form-section"
+                  data-testid="extra-work-create-intent"
+                >
+                  <div className="form-section-title">
+                    {t("create.intent.section_title")}
+                  </div>
+                  <div className="muted small" style={{ marginBottom: 12 }}>
+                    {t("create.intent.section_helper")}
+                  </div>
+                  <div
+                    role="radiogroup"
+                    aria-label={t("create.intent.section_title")}
+                  >
+                    {previewData.allowed_intents.map((intent) => (
+                      <label
+                        key={intent}
+                        className="ew-intent-option"
+                        data-testid={`extra-work-create-intent-${intent}`}
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "flex-start",
+                          marginBottom: 10,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="ew-request-intent"
+                          value={intent}
+                          checked={selectedIntent === intent}
+                          onChange={() => setSelectedIntent(intent)}
+                          style={{ marginTop: 3 }}
+                        />
+                        <span>
+                          <span
+                            className="field-label"
+                            style={{ display: "block", marginBottom: 2 }}
+                          >
+                            {t(INTENT_LABEL_KEY[intent])}
+                          </span>
+                          <span className="muted small">
+                            {t(INTENT_DESC_KEY[intent])}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {previewData.requested_intent === selectedIntent &&
+                    previewData.requested_intent_allowed === false &&
+                    previewData.requested_intent_error && (
+                      <div
+                        className="alert-warning"
+                        style={{ marginTop: 8 }}
+                        role="status"
+                        data-testid="extra-work-create-intent-error"
+                      >
+                        {intentErrorText(previewData.requested_intent_error)}
+                      </div>
+                    )}
+                </div>
+              )}
+            </>
+          )}
 
           <div
             className="form-actions"
