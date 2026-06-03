@@ -1013,14 +1013,26 @@ export async function removeTicketStaffAssignment(
 }
 
 // GET /tickets/my-slots/ — the caller's own dated assignment slots (the
-// "My Work" agenda). Paginated envelope; pull a generous page so a staff
-// member's slots land in one request.
+// "My Work" agenda). Paginated envelope. A personal agenda accumulates
+// every dated slot over time, so page through ALL pages and return the
+// merged list rather than only the first 200 (pre-empts the #68-style
+// first-page-only cap). Stop when a short page / null `next` is seen, with
+// a hard safety cap so a backend paging bug can't loop forever.
+const _MY_SLOTS_PAGE_SIZE = 200;
+const _MY_SLOTS_MAX_PAGES = 25; // 25 * 200 = 5000 slots — far beyond any agenda.
+
 export async function getMySlots(): Promise<MySlot[]> {
-  const response = await api.get<PaginatedResponse<MySlot>>(
-    "/tickets/my-slots/",
-    { params: { page_size: 200 } },
-  );
-  return response.data.results;
+  const results: MySlot[] = [];
+  for (let page = 1; page <= _MY_SLOTS_MAX_PAGES; page += 1) {
+    const response = await api.get<PaginatedResponse<MySlot>>(
+      "/tickets/my-slots/",
+      { params: { page_size: _MY_SLOTS_PAGE_SIZE, page } },
+    );
+    const data = response.data;
+    results.push(...data.results);
+    if (!data.next || data.results.length < _MY_SLOTS_PAGE_SIZE) break;
+  }
+  return results;
 }
 
 // ---- Sprint 28 Batch 11 — Staff completion routing helper -------------
