@@ -182,6 +182,12 @@ export function canAccessReports(role: Role | null | undefined): boolean {
 // on every route (including reads). Mirrors the backend role set exactly.
 export const canAccessPlannedWork = isProviderManagementRole;
 
+// `/agenda` (My Work) — the staff slot agenda. Provider-side actors:
+// SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER / STAFF. CUSTOMER_USER is
+// excluded; the my-slots endpoint is caller-scoped (empty for them) but the
+// nav entry stays hidden anyway.
+export const canAccessAgenda = isStaffRole;
+
 // `/admin/staff-assignment-requests` — backend admits the BM for the
 // queue covering their assigned buildings, on top of the provider-admin
 // pair. STAFF requests assignment via the ticket-detail button instead.

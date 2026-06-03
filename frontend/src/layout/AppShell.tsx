@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
   Building2,
+  CalendarCheck,
   CalendarClock,
   ChevronLeft,
   ClipboardList,
@@ -27,6 +28,7 @@ import { useTranslation } from "react-i18next";
 import { useAuth } from "../auth/AuthContext";
 import {
   canAccessAdminArea,
+  canAccessAgenda,
   canAccessAuditLogs,
   canAccessExtraWork,
   canAccessPlannedWork,
@@ -335,6 +337,18 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.new_ticket")}
               </NavLink>
+              {canAccessAgenda(me?.role) && (
+                <NavLink
+                  to="/agenda"
+                  className={navClass}
+                  data-testid="sidebar-agenda"
+                >
+                  <span className="nav-icon">
+                    <CalendarCheck size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.my_work")}
+                </NavLink>
+              )}
               {canAccessExtraWork(me?.role) && (
                 <NavLink to="/extra-work" className={navClass}>
                   <span className="nav-icon">
