@@ -195,6 +195,36 @@
   "convert.submit_button": "Convert to Extra Work",
   "convert.submitting": "Converting…",
 
-  "detail.spawned_from_label": "Spawned from extra work"
+  "detail.spawned_from_label": "Spawned from extra work",
+
+  "schedule.card_title": "Scheduling",
+  "schedule.current_date_label": "Scheduled date",
+  "schedule.not_scheduled": "Not scheduled yet",
+  "schedule.window_label": "Time window",
+  "schedule.status_label": "Status",
+  "schedule.status_unscheduled": "Not scheduled",
+  "schedule.status_scheduled": "Scheduled",
+  "schedule.status_rescheduled": "Rescheduled",
+  "schedule.set_button": "Set date",
+  "schedule.change_button": "Change date",
+  "schedule.clear_button": "Clear schedule",
+  "schedule.date_field_label": "Scheduled date",
+  "schedule.window_field_label": "Time window (optional)",
+  "schedule.window_field_placeholder": "e.g. Morning, 09:00–12:00",
+  "schedule.reason_field_label": "Reason for change",
+  "schedule.reason_field_placeholder": "Why is this schedule changing?",
+  "schedule.save_button": "Save",
+  "schedule.saving": "Saving…",
+  "schedule.cancel_button": "Cancel",
+  "schedule.clear_dialog_title": "Clear schedule?",
+  "schedule.clear_dialog_body": "The scheduled date will be removed and the ticket returns to unscheduled.",
+  "schedule.clear_confirm": "Clear",
+  "schedule.clearing": "Clearing…",
+  "schedule.error_required": "Pick a scheduled date.",
+  "schedule.error_reason_required": "Provide a reason for changing the schedule.",
+  "schedule.error_terminal": "This ticket is finished and can no longer be scheduled.",
+  "schedule.error_forbidden_scope": "You do not have permission to schedule this ticket.",
+  "schedule.error_forbidden_role": "Your role cannot schedule tickets.",
+  "schedule.error_invalid": "The schedule is invalid."
 }
 
