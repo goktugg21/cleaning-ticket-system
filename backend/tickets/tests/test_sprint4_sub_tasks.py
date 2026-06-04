@@ -334,6 +334,32 @@ class SubTaskPlacementTests(SubTaskFixture):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["sub_task"][0].code, "sub_task_ticket_terminal")
 
+    def test_sub_task_replacement_is_audited(self):
+        # A manager PATCH that only re-places a slot's sub_task emits exactly
+        # one tickets.TicketStaffAssignment UPDATE audit row carrying the FK-id
+        # before/after (sub_task is a tracked slot field).
+        st1 = SubTask.objects.create(ticket=self.ticket_a, title="A")
+        st2 = SubTask.objects.create(ticket=self.ticket_a, title="B")
+        slot = self._mk_slot(self.ticket_a, sub_task=st1, slot_status=ASSIGNED)
+        before = AuditLog.objects.filter(
+            target_model="tickets.TicketStaffAssignment",
+            action=AuditAction.UPDATE, target_id=slot.id,
+        ).count()
+        resp = self._api(self.admin_a).patch(
+            self._slot_detail_url(self.ticket_a, slot.id),
+            {"sub_task": st2.id}, format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = AuditLog.objects.filter(
+            target_model="tickets.TicketStaffAssignment",
+            action=AuditAction.UPDATE, target_id=slot.id,
+        )
+        self.assertEqual(rows.count() - before, 1)
+        self.assertEqual(
+            rows.latest("id").changes["sub_task_id"],
+            {"before": st1.id, "after": st2.id},
+        )
+
 
 # ===========================================================================
 # Completion roll-up matrix
@@ -404,6 +430,26 @@ class SubTaskRollUpTests(SubTaskFixture):
         # NO sub-tasks; a single loose slot.
         loose = self._mk_slot(self.ticket_a, sub_task=None, slot_status=ASSIGNED)
         self._complete_slot_via_api(self.ticket_a, loose)
+        self.ticket_a.refresh_from_db()
+        self.assertEqual(self.ticket_a.status, TicketStatus.IN_PROGRESS)
+
+    def test_rollup_failure_does_not_break_slot_completion(self):
+        # Best-effort: if the roll-up's apply_transition raises (here the
+        # completing STAFF routes to customer-approval, so a
+        # WAITING_MANAGER_REVIEW target mismatches), the error is swallowed
+        # and the slot still completes — no transaction corruption.
+        from buildings.models import BuildingStaffVisibility
+
+        BuildingStaffVisibility.objects.filter(
+            user=self.staff_a, building=self.building_a
+        ).update(staff_completion_routes_to_customer=True)
+        self._enable_flag(self.ticket_a)
+        st = SubTask.objects.create(ticket=self.ticket_a, title="A")
+        slot = self._mk_slot(self.ticket_a, sub_task=st, slot_status=ASSIGNED)
+        resp = self._complete_slot_via_api(self.ticket_a, slot)
+        self.assertEqual(resp.status_code, 200, resp.data)
+        slot.refresh_from_db()
+        self.assertEqual(slot.slot_status, COMPLETED)
         self.ticket_a.refresh_from_db()
         self.assertEqual(self.ticket_a.status, TicketStatus.IN_PROGRESS)
 

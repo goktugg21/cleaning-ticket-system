@@ -656,6 +656,10 @@ _TSA_TRACKED_FIELDS = (
     "completed_at",
     "completed_by_id",
     "unable_to_complete_reason",
+    # Sprint 4 — `sub_task` is now a manager-writable PATCH field; track its
+    # FK id (JSON-safe via serialize_value, like completed_by_id) so a
+    # re-placement / detach lands as a TicketStaffAssignment UPDATE row.
+    "sub_task_id",
 )
 
 
