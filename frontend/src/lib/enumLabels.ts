@@ -104,6 +104,29 @@ export function accessRoleLabelKey(value: AccessRoleValue | string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Employment type (StaffProfile.EmploymentType) — STAFF-only classification
+// surfaced by the Employees directory. Labels live under
+// `employment_type.*` in `i18n/{en,nl}/common.json`.
+// ---------------------------------------------------------------------------
+
+export type EmploymentTypeValue = "INTERNAL_STAFF" | "ZZP" | "INHUUR";
+
+export function employmentTypeLabelKey(
+  value: EmploymentTypeValue | string,
+): string {
+  switch (value) {
+    case "INTERNAL_STAFF":
+      return "employment_type.internal_staff";
+    case "ZZP":
+      return "employment_type.zzp";
+    case "INHUUR":
+      return "employment_type.inhuur";
+    default:
+      return "employment_type.fallback";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Building staff visibility level
 // ---------------------------------------------------------------------------
 

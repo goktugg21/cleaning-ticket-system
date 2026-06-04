@@ -1,6 +1,9 @@
 from rest_framework import serializers
 
 from accounts.models import UserRole
+# Reuse the #74 effective-access-role ranking verbatim so the Employees
+# directory and the global Users list never drift on "which grant wins".
+from accounts.serializers_users import _ACCESS_ROLE_RANK
 
 from .models import (
     Customer,
@@ -57,6 +60,51 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
         return compute_customer_actions(user, obj.customer)
+
+
+class CustomerEmployeeSerializer(serializers.ModelSerializer):
+    """Employees-directory row for a SINGLE customer's people
+    (`GET /api/customers/<cid>/employees/`).
+
+    Operates on a CustomerUserMembership and surfaces the linked user plus
+    their EFFECTIVE access role for THIS customer (CUSTOMER_COMPANY_ADMIN >
+    CUSTOMER_LOCATION_MANAGER > CUSTOMER_USER), computed over the
+    membership's ACTIVE building-access rows using the shared #74 ranking.
+
+    Privacy floor: only id / name / email / effective access role / active
+    flag — never `permission_overrides` or any per-building internals.
+    `building_access` is prefetched by the view, so the in-Python max below
+    touches no extra queries.
+    """
+
+    id = serializers.IntegerField(source="user.id", read_only=True)
+    full_name = serializers.CharField(source="user.full_name", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    is_active = serializers.BooleanField(source="user.is_active", read_only=True)
+    customer_access_role = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomerUserMembership
+        fields = [
+            "id",
+            "full_name",
+            "email",
+            "customer_access_role",
+            "is_active",
+        ]
+        read_only_fields = fields
+
+    def get_customer_access_role(self, obj):
+        best_role = None
+        best_rank = 0
+        for access in obj.building_access.all():
+            if not access.is_active:
+                continue
+            rank = _ACCESS_ROLE_RANK.get(access.access_role, 0)
+            if rank > best_rank:
+                best_rank = rank
+                best_role = access.access_role
+        return best_role
 
 
 class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):

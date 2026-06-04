@@ -747,3 +747,72 @@ Production change summary:
     `spawn_already_done`) when a ticket already exists for the request.
   * Auto-start (`AUTO_START_AFTER_PRICING` spawn) intentionally NOT
     implemented in 6A — deferred to a dedicated 6B design.
+
+## 17. Test footprint (Employees directory — frontend delta)
+
+Frontend-only feature on `feature/employees-directory`. Two read-only
+directory surfaces over two already-shipped backend endpoints
+(`GET /api/employees/`, `GET /api/customers/<cid>/employees/`). View-first
+per `docs/product/meeting-2026-05-15-system-requirements.md` §3 — the
+tables load read-only; mutation is via explicit affordances that mirror
+the existing edit patterns.
+
+### Surfaces
+
+- **Provider directory** — `EmployeesAdminPage` at `/admin/employees`,
+  wrapped in `<CustomerReadRoute>` (admits SA / CA / BM; BM read-only).
+  Columns: Name, Email, Role (`<RoleBadge>`), Employment type
+  (Internal / ZZP / Inhuur; em-dash for PA/BM rows), Active. Filters:
+  role + employment_type dropdowns (sent as `?role=` / `?employment_type=`;
+  the 400 `role_invalid` / `employment_type_invalid` codes surface via
+  the standard error banner). SA / CA get an inline employment-type edit
+  on **STAFF rows only** (`updateStaffProfile(id, {employment_type})`);
+  BM sees no edit control. Every row links to `/admin/users/<id>`
+  ("Manage account").
+- **Customer directory** — one shared `CustomerEmployeesDirectory`
+  component, two entry points: provider-admin
+  `CustomerEmployeesPage` at `/admin/customers/:id/employees`
+  (`<AdminRoute>`, `CustomerSubPageHeader`), and customer-facing
+  `MyEmployeesPage` at `/my/employees` (`<ProtectedRoute>`, resolves
+  `me.customer_ids[0]`, friendly empty state when no customer scope).
+  Columns: Name, Email, Access role (CCA/CLM/CU), Active + an
+  access-role filter. Edit affordance ("Edit access role") opens a modal
+  that GETs `listCustomerUserAccess` and PATCHes
+  `updateCustomerUserAccessRole` per building; backend 400/403 (e.g.
+  CCA-grant policy block, self-edit) surface inline. `canEdit` = SA / CA,
+  OR a CUSTOMER_USER whose own directory row carries
+  `customer_access_role === "CUSTOMER_COMPANY_ADMIN"`; CLM / CU / BM
+  never see the affordance. The backend re-checks every PATCH.
+
+### Playwright
+
+[`frontend/tests/e2e/sprint31a_employees_directory.spec.ts`](../../frontend/tests/e2e/sprint31a_employees_directory.spec.ts)
+— four cases:
+
+| # | Case | Asserts |
+|---|---|---|
+| 1 | SUPER_ADMIN provider directory | rows render; every row has a `/admin/users/<id>` Manage account link; a STAFF row exposes the inline employment-type edit which opens a `<select>` |
+| 2 | BUILDING_MANAGER provider directory | reaches `/admin/employees` via its own `sidebar-employees-bm` entry; rows render; zero inline employment-type edit controls (read-only) |
+| 3 | CUSTOMER_USER `/my/employees` | reaches the page via `sidebar-my-employees`; the shared directory renders; a non-CCA customer user has zero "Edit access role" affordances |
+| 4 | SUPER_ADMIN customer-scoped directory | enters a customer scope, opens the `sidebar-customer-employees` submenu entry, lands on `/admin/customers/:id/employees`; the edit affordance opens the access-role modal |
+
+### Production change summary (frontend only)
+
+- `frontend/src/api/types.ts` — `EmploymentType` union; `ProviderEmployee`
+  + `CustomerEmployee` row interfaces.
+- `frontend/src/api/admin.ts` — `listProviderEmployees` /
+  `listCustomerEmployees` typed clients; `employment_type` added to the
+  existing `StaffProfileUpdatePayload` (reuses `updateStaffProfile` /
+  `listCustomerUserAccess` / `updateCustomerUserAccessRole`).
+- `frontend/src/lib/enumLabels.ts` — `employmentTypeLabelKey` resolver.
+- `frontend/src/pages/admin/EmployeesAdminPage.tsx`,
+  `frontend/src/components/CustomerEmployeesDirectory.tsx`,
+  `frontend/src/pages/admin/customer/CustomerEmployeesPage.tsx`,
+  `frontend/src/pages/MyEmployeesPage.tsx` — the four UI surfaces.
+- `frontend/src/App.tsx` — three routes registered.
+- `frontend/src/layout/AppShell.tsx` — provider admin-group entry (SA/CA)
+  after Users, BM-only entry next to staff requests, CUSTOMER_USER entry,
+  and the customer-scoped submenu entry after the customer Users link.
+- `frontend/src/i18n/{en,nl}/common.json` — `nav.employees`,
+  `nav.customer_submenu.employees`, `employment_type.*`, `employees.*`,
+  `customer_employees.*`, `my_employees.*` (en + nl in lockstep).

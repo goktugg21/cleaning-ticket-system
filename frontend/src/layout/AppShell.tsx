@@ -8,6 +8,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ClipboardList,
+  Contact,
   LayoutGrid,
   Mail,
   MailPlus,
@@ -266,6 +267,18 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.customer_submenu.users")}
                   </NavLink>
+                  {/* Employees directory — customer-scoped, provider-admin
+                      entry. Same admin-only gate as the Users entry. */}
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/employees`}
+                    className={navClass}
+                    data-testid="sidebar-customer-employees"
+                  >
+                    <span className="nav-icon">
+                      <Contact size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.employees")}
+                  </NavLink>
                   <NavLink
                     to={`/admin/customers/${sidebar.customerId}/permissions`}
                     className={navClass}
@@ -424,6 +437,19 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.users")}
                   </NavLink>
+                  {/* Employees directory — provider-wide. Shown to
+                      SA / CA inside the admin group; BUILDING_MANAGER
+                      gets its own entry below (BM has no admin group). */}
+                  <NavLink
+                    to="/admin/employees"
+                    className={navClass}
+                    data-testid="sidebar-employees"
+                  >
+                    <span className="nav-icon">
+                      <Contact size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.employees")}
+                  </NavLink>
                   <NavLink to="/admin/invitations" className={navClass}>
                     <span className="nav-icon">
                       <MailPlus size={16} strokeWidth={2} />
@@ -463,6 +489,40 @@ export function AppShell({ children }: AppShellProps) {
                     <ClipboardList size={16} strokeWidth={2} />
                   </span>
                   {t("nav.staff_requests")}
+                </NavLink>
+              )}
+
+              {/* Employees directory — BM read-only entry. BM does not
+                  see the admin group above, so the link lives here next
+                  to the staff-requests queue (the other BM-visible
+                  provider surface). SA / CA already have it in the
+                  admin group, so this entry is BM-only. */}
+              {isBuildingManager(me?.role) && (
+                <NavLink
+                  to="/admin/employees"
+                  className={navClass}
+                  data-testid="sidebar-employees-bm"
+                >
+                  <span className="nav-icon">
+                    <Contact size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.employees")}
+                </NavLink>
+              )}
+
+              {/* Employees directory — customer-facing entry. Customer
+                  users get a limited nav; this is their telephone-book
+                  view of the colleagues at their own customer. */}
+              {me?.role === "CUSTOMER_USER" && (
+                <NavLink
+                  to="/my/employees"
+                  className={navClass}
+                  data-testid="sidebar-my-employees"
+                >
+                  <span className="nav-icon">
+                    <Contact size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.employees")}
                 </NavLink>
               )}
             </>

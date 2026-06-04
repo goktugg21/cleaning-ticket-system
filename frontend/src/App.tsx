@@ -22,6 +22,7 @@ import { PlannedWorkListPage } from "./pages/planned-work/PlannedWorkListPage";
 import { RecurringJobDetailPage } from "./pages/planned-work/RecurringJobDetailPage";
 import { RecurringJobFormPage } from "./pages/planned-work/RecurringJobFormPage";
 import { LoginPage } from "./pages/LoginPage";
+import { MyEmployeesPage } from "./pages/MyEmployeesPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
@@ -37,6 +38,7 @@ import { CompanyDetailPage } from "./pages/admin/CompanyDetailPage";
 import { CompanyFormPage } from "./pages/admin/CompanyFormPage";
 import { CustomerContactsPage } from "./pages/admin/CustomerContactsPage";
 import { CustomerFormPage } from "./pages/admin/CustomerFormPage";
+import { EmployeesAdminPage } from "./pages/admin/EmployeesAdminPage";
 import { CustomerPricingPage } from "./pages/admin/CustomerPricingPage";
 import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // Sprint 28 Batch 13 — view-first refactor of the customer detail
@@ -46,6 +48,7 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // create flow (`/admin/customers/new`) and as the basics editor
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
+import { CustomerEmployeesPage } from "./pages/admin/customer/CustomerEmployeesPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
@@ -158,6 +161,18 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <AgendaPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* Employees directory — customer-facing entry point.
+              Caller-scoped via me.customer_ids[0]; the backend
+              re-gates the customer-employees endpoint, so a plain
+              ProtectedRoute is sufficient. */}
+          <Route
+            path="/my/employees"
+            element={
+              <ProtectedRoute>
+                <MyEmployeesPage />
               </ProtectedRoute>
             }
           />
@@ -369,6 +384,17 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* Employees directory — provider-admin entry point
+              (customer-scoped). SA / CA only; the customer-scoped
+              sidebar submenu surfaces the nav link. */}
+          <Route
+            path="/admin/customers/:id/employees"
+            element={
+              <AdminRoute>
+                <CustomerEmployeesPage />
+              </AdminRoute>
+            }
+          />
           <Route
             path="/admin/customers/:id/permissions"
             element={
@@ -453,6 +479,17 @@ export default function App() {
               <AdminRoute>
                 <UserDetailPage />
               </AdminRoute>
+            }
+          />
+          {/* Employees directory — provider-wide. CustomerReadRoute
+              admits SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
+              (BM read-only); STAFF / CUSTOMER_USER are bounced. */}
+          <Route
+            path="/admin/employees"
+            element={
+              <CustomerReadRoute>
+                <EmployeesAdminPage />
+              </CustomerReadRoute>
             }
           />
           <Route

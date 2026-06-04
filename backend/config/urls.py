@@ -4,7 +4,7 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from accounts.views_roster import StaffRosterView
+from accounts.views_roster import ProviderEmployeesView, StaffRosterView
 from accounts.views_staff import (
     BuildingStaffVisibilityDetailView,
     BuildingStaffVisibilityListCreateView,
@@ -73,6 +73,13 @@ urlpatterns = [
     # prefixes (`staff/` vs `staff-assignment-requests/`) do not
     # collide.
     path("api/staff/", StaffRosterView.as_view(), name="staff-roster"),
+    # Employees directory — multi-role provider workforce (PA/BM/STAFF),
+    # scoped per viewer. Distinct from the STAFF-only /api/staff/ roster.
+    path(
+        "api/employees/",
+        ProviderEmployeesView.as_view(),
+        name="provider-employees",
+    ),
     # Sprint 14B — read-only permission-matrix contract. Additive; does
     # not disturb the existing /api/users/<id>/effective-permissions/
     # endpoint. Admits SA / CA / BM; STAFF + CUSTOMER_USER are 403'd.

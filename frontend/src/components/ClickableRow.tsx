@@ -30,6 +30,8 @@ export interface ClickableRowProps {
   /** Pass-through aria-label for screen readers. */
   ariaLabel?: string;
   testId?: string;
+  /** Optional `data-role` attribute on the row (some listings/e2e key on it). */
+  dataRole?: string;
   children: ReactNode;
 }
 
@@ -40,6 +42,7 @@ export function ClickableRow({
   className,
   ariaLabel,
   testId,
+  dataRole,
   children,
 }: ClickableRowProps) {
   const navigate = useNavigate();
@@ -92,6 +95,7 @@ export function ClickableRow({
       onClick={interactive ? handleClick : undefined}
       onKeyDown={interactive ? handleKey : undefined}
       data-testid={testId}
+      data-role={dataRole}
     >
       {children}
     </tr>

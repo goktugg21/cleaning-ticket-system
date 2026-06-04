@@ -17,6 +17,7 @@ from .views_memberships import (
     CustomerBuildingDeleteView,
     CustomerBuildingListCreateView,
     CustomerCompanyPolicyView,
+    CustomerEmployeesView,
     CustomerUserAccessDeleteView,
     CustomerUserAccessListCreateView,
     CustomerUserDeleteView,
@@ -29,6 +30,15 @@ router.register(r"", CustomerViewSet, basename="customer")
 
 
 urlpatterns = [
+    # Employees directory — a single customer's people with their
+    # effective access role (read-first). Distinct from /users/ (the
+    # membership-management surface): SA / PA / CCA-CLM-CU read; the
+    # access-role edit reuses the existing /access/ endpoints.
+    path(
+        "<int:customer_id>/employees/",
+        CustomerEmployeesView.as_view(),
+        name="customer-employees",
+    ),
     path(
         "<int:customer_id>/users/",
         CustomerUserListCreateView.as_view(),

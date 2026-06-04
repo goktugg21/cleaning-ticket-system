@@ -212,3 +212,38 @@ class StaffRosterSerializer(serializers.ModelSerializer):
                 }
             )
         return rows
+
+
+class ProviderEmployeeSerializer(serializers.ModelSerializer):
+    """Employees-directory row for the multi-role provider workforce
+    (`GET /api/employees/`).
+
+    Distinct from StaffRosterSerializer (STAFF-only): this directory lists
+    COMPANY_ADMIN / BUILDING_MANAGER / STAFF rows. `employment_type` is the
+    StaffProfile category for STAFF rows and ``None`` for PA/BM (who hold no
+    profile). Privacy floor: this is the same provider read surface as the
+    roster — it MUST NOT leak `internal_note`, `phone`, customer linkage, or
+    any pricing field; only name / email / role / employment category /
+    active flag are exposed.
+    """
+
+    full_name = serializers.CharField(read_only=True)
+    employment_type = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "full_name",
+            "email",
+            "role",
+            "employment_type",
+            "is_active",
+        ]
+        read_only_fields = fields
+
+    def get_employment_type(self, obj):
+        # OneToOne reverse accessor; present only for STAFF rows (PA/BM have
+        # no StaffProfile, so the category is null for them).
+        profile = getattr(obj, "staff_profile", None)
+        return profile.employment_type if profile is not None else None
