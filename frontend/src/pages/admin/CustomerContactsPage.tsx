@@ -27,6 +27,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
 import { accessRoleLabelKey } from "../../lib/enumLabels";
+import { ContactPermissionsPanel } from "./ContactPermissionsPanel";
 
 /**
  * Sprint 28 Batch 4 — Customer Contacts page (per-customer phone book).
@@ -117,6 +118,11 @@ export function CustomerContactsPage() {
   // expanded into the detail view. Editing toggles `editing=true` and
   // pre-populates `form`.
   const [selected, setSelected] = useState<Contact | null>(null);
+
+  // Sprint 2 — in-place permission editor toggle for a LINKED contact's
+  // user. Collapsed by default; reset whenever a different contact is
+  // selected so the panel never lingers on the wrong user.
+  const [permissionsPanelOpen, setPermissionsPanelOpen] = useState(false);
 
   // Create / edit modal state. `mode` is "create" when adding a new
   // contact and "edit" when modifying `selected`. Mutually exclusive
@@ -480,7 +486,10 @@ export function CustomerContactsPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => setSelected(contact)}
+                        onClick={() => {
+                          setSelected(contact);
+                          setPermissionsPanelOpen(false);
+                        }}
                         style={{
                           width: "100%",
                           textAlign: "left",
@@ -690,29 +699,45 @@ export function CustomerContactsPage() {
                         </span>
                       </span>
                     </div>
-                    {/* Sprint 2b — a LINKED contact resolves to a real
-                        customer user; deep-link to that user's row in the
-                        per-customer permission matrix (the sanctioned
-                        ?focus_user= pattern). An "invited" contact has no
-                        user yet, so no editing surface is offered. The
-                        matrix's override editor covers all 16 customer.*
-                        keys including customer.users.invite. */}
+                    {/* Sprint 2 — a LINKED contact resolves to a real
+                        customer user. The "Manage permissions" affordance
+                        is now an IN-PLACE toggle that expands the override
+                        editor downward under the user entry (no navigation
+                        away). The panel reuses the matrix modal verbatim;
+                        adding/removing buildings still lives on the full
+                        matrix (a secondary link inside the panel). An
+                        "invited" contact has no user yet, so nothing is
+                        offered. */}
                     {selected.promotion_status === "linked" &&
-                      selected.user !== null && (
+                      selected.user !== null &&
+                      numericId !== null && (
                         <div style={{ marginTop: 12 }}>
-                          <Link
-                            to={`/admin/customers/${numericId}/permissions?focus_user=${selected.user}`}
+                          <button
+                            type="button"
                             className="btn btn-secondary btn-sm"
-                            data-testid="customer-contact-manage-permissions"
+                            data-testid="contact-permissions-toggle"
+                            aria-expanded={permissionsPanelOpen}
+                            onClick={() =>
+                              setPermissionsPanelOpen((open) => !open)
+                            }
                           >
-                            {t("customer_contacts.manage_permissions_button")}
-                          </Link>
+                            {permissionsPanelOpen
+                              ? t("customer_contacts.permissions_panel_hide")
+                              : t("customer_contacts.manage_permissions_button")}
+                          </button>
                           <div
                             className="muted small"
                             style={{ marginTop: 6 }}
                           >
                             {t("customer_contacts.manage_permissions_hint")}
                           </div>
+                          {permissionsPanelOpen && (
+                            <ContactPermissionsPanel
+                              key={selected.user}
+                              customerId={numericId}
+                              userId={selected.user}
+                            />
+                          )}
                         </div>
                       )}
                   </>
