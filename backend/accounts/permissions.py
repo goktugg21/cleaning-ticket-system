@@ -342,6 +342,41 @@ class CanManageCustomerSideUsers(IsAuthenticatedAndActive):
         return False
 
 
+class CanReadCustomerEmployees(IsAuthenticatedAndActive):
+    """
+    Read gate for the customer Employees directory
+    (`GET /api/customers/<cid>/employees/`).
+
+    Admits the roles that may VIEW a customer's people:
+      - SUPER_ADMIN  — any customer.
+      - COMPANY_ADMIN — customers in their provider company.
+      - CUSTOMER_USER — a customer they belong to. ALL customer access
+        roles (CCA / CLM / CU) may READ the directory; CLM / CU are
+        read-only on the UI, and the access-role EDIT is gated separately by
+        `CanManageCustomerSideUsers` (which only a CCA passes), so admitting
+        CUSTOMER_USER here grants read, never write.
+
+    Rejects (403): BUILDING_MANAGER and STAFF — they are provider field
+    roles, not customer-side people, and have no business reading a
+    customer's directory (the Employees RBAC matrix excludes them).
+
+    The per-customer object scope (which <cid> is visible) is enforced in
+    the view via `get_object_or_404(scope_customers_for(viewer), pk=cid)`,
+    so a cross-tenant <cid> transparently 404s (no 403 leak) — a
+    COMPANY_ADMIN cannot reach a customer outside their company and a
+    CUSTOMER_USER cannot reach any customer but their own.
+    """
+
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        return request.user.role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.CUSTOMER_USER,
+        )
+
+
 class CanManageUser(IsAuthenticatedAndActive):
     """
     Permission for User write operations.

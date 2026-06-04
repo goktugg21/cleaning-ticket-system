@@ -16,10 +16,13 @@ import type {
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
+  CustomerEmployee,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
+  EmploymentType,
   InvitationAdmin,
   PaginatedResponse,
+  ProviderEmployee,
   PromoteContactPayload,
   PromoteContactResponse,
   Role,
@@ -309,6 +312,52 @@ export async function deactivateUser(id: number): Promise<void> {
 
 export async function reactivateUser(id: number): Promise<UserAdminDetail> {
   const response = await api.post<UserAdminDetail>(`/users/${id}/reactivate/`);
+  return response.data;
+}
+
+// ---- Employees directory ----------------------------------------------
+//
+// Two read-only directory endpoints (paginated UnboundedPagination
+// envelope).
+//
+// Provider directory — GET /api/employees/
+//   Admits SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER (BM is
+//   read-only). STAFF / CUSTOMER_USER get 403. Optional filters
+//   ?role= and ?employment_type=; a bad value returns 400 with a
+//   stable {code} ("role_invalid" / "employment_type_invalid").
+//
+// Customer directory — GET /api/customers/<cid>/employees/
+//   Admits SUPER_ADMIN / COMPANY_ADMIN / CUSTOMER_USER. BM / STAFF
+//   get 403; a cross-tenant cid 404s. Optional ?access_role= filter;
+//   a bad value returns 400 {code: "access_role_invalid"}.
+
+export interface ProviderEmployeeListParams {
+  role?: Role;
+  employment_type?: EmploymentType;
+}
+
+export async function listProviderEmployees(
+  params: ProviderEmployeeListParams = {},
+): Promise<PaginatedResponse<ProviderEmployee>> {
+  const response = await api.get<PaginatedResponse<ProviderEmployee>>(
+    "/employees/",
+    { params: cleanParams(params as AdminListParams) },
+  );
+  return response.data;
+}
+
+export interface CustomerEmployeeListParams {
+  access_role?: CustomerAccessRole;
+}
+
+export async function listCustomerEmployees(
+  customerId: number,
+  params: CustomerEmployeeListParams = {},
+): Promise<PaginatedResponse<CustomerEmployee>> {
+  const response = await api.get<PaginatedResponse<CustomerEmployee>>(
+    `/customers/${customerId}/employees/`,
+    { params: cleanParams(params as AdminListParams) },
+  );
   return response.data;
 }
 
@@ -744,6 +793,12 @@ export interface StaffProfileUpdatePayload {
   internal_note?: string;
   can_request_assignment?: boolean;
   is_active?: boolean;
+  // Employees directory — STAFF employment classification. The
+  // backend StaffProfile serializer accepts this field on PATCH; the
+  // Employees admin page uses it for the inline STAFF employment-type
+  // edit. Provider-admin / building-manager rows have no profile to
+  // PATCH (their directory `employment_type` is null).
+  employment_type?: EmploymentType;
 }
 
 export async function getStaffProfile(

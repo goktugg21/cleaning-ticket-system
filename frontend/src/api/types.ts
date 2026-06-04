@@ -7,6 +7,12 @@ export type Role =
   | "STAFF"
   | "CUSTOMER_USER";
 
+// Employees directory — STAFF employment classification. Mirrors the
+// backend `StaffProfile.EmploymentType` enum. Only STAFF rows carry a
+// value; provider admins (SUPER_ADMIN / COMPANY_ADMIN) and building
+// managers report `null` on the directory endpoint.
+export type EmploymentType = "INTERNAL_STAFF" | "ZZP" | "INHUUR";
+
 // Sprint 28 Batch 11 — new ticket status for the staff-completion
 // default route: STAFF marks done -> here -> BM accepts (forward to
 // WAITING_CUSTOMER_APPROVAL) or rejects (back to IN_PROGRESS). The
@@ -633,6 +639,31 @@ export interface UserAdminDetail extends UserAdmin {
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
+}
+
+// Employees directory (provider side) — one row from GET /api/employees/.
+// Admits SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER. `employment_type`
+// is non-null only for STAFF rows; provider-admin and building-manager
+// rows report null.
+export interface ProviderEmployee {
+  id: number;
+  full_name: string;
+  email: string;
+  role: Role;
+  employment_type: EmploymentType | null;
+  is_active: boolean;
+}
+
+// Employees directory (customer side) — one row from
+// GET /api/customers/<cid>/employees/. `id` is the USER id.
+// `customer_access_role` is the highest effective access role the user
+// holds at this customer (null when none is active).
+export interface CustomerEmployee {
+  id: number;
+  full_name: string;
+  email: string;
+  customer_access_role: CustomerAccessRole | null;
+  is_active: boolean;
 }
 
 export interface InvitationAdmin {

@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -6,8 +7,10 @@ from rest_framework.response import Response
 from accounts.models import User, UserRole
 from accounts.permissions import (
     CanManageCustomerSideUsers,
+    CanReadCustomerEmployees,
     IsSuperAdminOrCompanyAdminForCompany,
 )
+from accounts.scoping import scope_customers_for
 from buildings.models import Building
 from config.pagination import UnboundedPagination
 
@@ -22,6 +25,7 @@ from .permissions import user_can
 from .serializers_memberships import (
     CustomerBuildingMembershipSerializer,
     CustomerCompanyPolicySerializer,
+    CustomerEmployeeSerializer,
     CustomerUserBuildingAccessSerializer,
     CustomerUserBuildingAccessUpdateSerializer,
     CustomerUserMembershipSerializer,
@@ -758,3 +762,110 @@ class CustomerCompanyPolicyView(generics.GenericAPIView):
             CustomerCompanyPolicySerializer(policy).data,
             status=status.HTTP_200_OK,
         )
+
+
+# ===========================================================================
+# Employees directory — a single customer's people (read-first)
+# ===========================================================================
+
+
+class CustomerEmployeesView(generics.ListAPIView):
+    """GET /api/customers/<customer_id>/employees/ — a customer's people.
+
+    Lists the customer's users with their EFFECTIVE access role
+    (CUSTOMER_COMPANY_ADMIN > CUSTOMER_LOCATION_MANAGER > CUSTOMER_USER),
+    scoped per the Employees RBAC matrix:
+
+      - SUPER_ADMIN: any customer.
+      - COMPANY_ADMIN: only customers in their provider company.
+      - CUSTOMER_USER (CCA / CLM / CU): only a customer they belong to.
+
+    Cross-tenant isolation: the customer is resolved through
+    `scope_customers_for(viewer)`, so a `<customer_id>` the viewer cannot
+    reach 404s (a COMPANY_ADMIN never sees a customer outside their company;
+    a CUSTOMER_USER never sees any customer but their own) — never a 403
+    that would confirm the row exists. BUILDING_MANAGER / STAFF are refused
+    at the permission layer (`CanReadCustomerEmployees`).
+
+    Optional ?access_role=<CUSTOMER_USER|CUSTOMER_LOCATION_MANAGER|
+    CUSTOMER_COMPANY_ADMIN> filters on the EFFECTIVE role (single value,
+    scoped to this customer); out-of-enum -> stable 400 access_role_invalid.
+
+    READ-ONLY. The access-role EDIT reuses the existing
+    PATCH /api/customers/<cid>/users/<uid>/access/<bid>/ endpoint
+    (`CanManageCustomerSideUsers`), which already admits SA / COMPANY_ADMIN
+    and a CCA on their own customer.
+    """
+
+    permission_classes = [CanReadCustomerEmployees]
+    serializer_class = CustomerEmployeeSerializer
+    pagination_class = UnboundedPagination
+
+    def _get_customer(self):
+        # Scoped lookup -> a cross-tenant id 404s for COMPANY_ADMIN /
+        # CUSTOMER_USER (SUPER_ADMIN sees all). This is the cross-tenant
+        # isolation floor for this endpoint.
+        return get_object_or_404(
+            scope_customers_for(self.request.user),
+            pk=self.kwargs["customer_id"],
+        )
+
+    def _access_role_filter(self):
+        raw = self.request.query_params.get("access_role")
+        if raw in (None, ""):
+            return None, None
+        if raw not in CustomerUserBuildingAccess.AccessRole.values:
+            return None, Response(
+                {
+                    "detail": "Unknown access_role.",
+                    "code": "access_role_invalid",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return raw, None
+
+    def get_queryset(self):
+        customer = self._get_customer()
+        AR = CustomerUserBuildingAccess.AccessRole
+
+        def grant(role):
+            # Effective-role building blocks, mirroring the #74 Users-list
+            # filter: an Exists keyed on the membership pk so the
+            # building_access fan-out cannot duplicate membership rows.
+            return Exists(
+                CustomerUserBuildingAccess.objects.filter(
+                    membership_id=OuterRef("pk"),
+                    is_active=True,
+                    access_role=role,
+                )
+            )
+
+        qs = (
+            CustomerUserMembership.objects.filter(customer=customer)
+            .select_related("user")
+            .prefetch_related("building_access")
+            .annotate(
+                _has_cca=grant(AR.CUSTOMER_COMPANY_ADMIN),
+                _has_clm=grant(AR.CUSTOMER_LOCATION_MANAGER),
+                _has_cu=grant(AR.CUSTOMER_USER),
+            )
+        )
+
+        access_role, _early = self._access_role_filter()
+        if access_role == AR.CUSTOMER_COMPANY_ADMIN:
+            qs = qs.filter(_has_cca=True)
+        elif access_role == AR.CUSTOMER_LOCATION_MANAGER:
+            qs = qs.filter(_has_clm=True, _has_cca=False)
+        elif access_role == AR.CUSTOMER_USER:
+            qs = qs.filter(_has_cu=True, _has_clm=False, _has_cca=False)
+
+        return qs.order_by("user__email").distinct()
+
+    def list(self, request, *args, **kwargs):
+        # Validate the optional filter before touching the queryset so an
+        # out-of-enum value returns the stable 400 code rather than an
+        # empty 200.
+        _access_role, early = self._access_role_filter()
+        if early is not None:
+            return early
+        return super().list(request, *args, **kwargs)
