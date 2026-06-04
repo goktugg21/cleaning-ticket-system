@@ -45,6 +45,7 @@ from .serializers import (
     TicketAssignableManagerSerializer,
     TicketAssignSerializer,
     TicketAttachmentSerializer,
+    TicketAutoCompleteFlagSerializer,
     TicketConvertToExtraWorkSerializer,
     TicketCreateSerializer,
     TicketDetailSerializer,
@@ -130,7 +131,16 @@ class TicketViewSet(
             "company", "building", "customer", "created_by", "assigned_to"
         )
         if self.action == "retrieve":
-            qs = qs.prefetch_related("status_history", "status_history__changed_by")
+            qs = qs.prefetch_related(
+                "status_history",
+                "status_history__changed_by",
+                # Sprint 4 — the detail serializer's `sub_tasks` field nests
+                # each sub-task's staff assignments + a computed is_done;
+                # prefetch the chain so the render stays N+1-free.
+                "sub_tasks",
+                "sub_tasks__staff_assignments",
+                "sub_tasks__staff_assignments__user",
+            )
         if self.action == "list":
             # Eager-load the Extra Work origin chain the list serializer's
             # `extra_work_origin` field reads (`resolve_extra_work_origin_core`).
@@ -686,6 +696,102 @@ class TicketViewSet(
             TicketDetailSerializer(ticket, context={"request": request}).data,
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["patch"], url_path="auto-complete-flag")
+    def auto_complete_flag(self, request, pk=None):
+        """
+        Sprint 4 — set the per-ticket `auto_complete_on_subtasks` opt-in.
+
+        PA / SA only (COMPANY_ADMIN / SUPER_ADMIN). BUILDING_MANAGER, STAFF,
+        and customer roles may READ the flag on the detail but get a stable
+        403 `auto_complete_flag_forbidden` here. Blocked on a terminal ticket
+        (mirrors the schedule guard). COMPANY_ADMIN is implicitly scoped to
+        their own company because `get_object()` runs through the scoped
+        queryset (a cross-company ticket 404s). On a real change, an explicit
+        AuditLog UPDATE row is written (Ticket is not signal-audited).
+        """
+        # Role gate FIRST — before the object lookup — so a wrong role gets a
+        # clean 403 rather than a scope-driven 404 (mirrors the schedule /
+        # convert actions).
+        if request.user.role not in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+        ):
+            return Response(
+                {
+                    "detail": "Only a provider admin can change the "
+                    "sub-task auto-complete setting.",
+                    "code": "auto_complete_flag_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        ticket = self.get_object()
+
+        if ticket.status in _SCHEDULE_TERMINAL_STATUSES:
+            return Response(
+                {
+                    "detail": "This ticket is in a terminal status; the "
+                    "auto-complete setting cannot be changed.",
+                    "code": "auto_complete_flag_not_allowed_terminal",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = TicketAutoCompleteFlagSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_value = ser.validated_data["auto_complete_on_subtasks"]
+        old_value = ticket.auto_complete_on_subtasks
+
+        if new_value != old_value:
+            ticket.auto_complete_on_subtasks = new_value
+            # Explicit update_fields EXCLUDES `status` so the SLA post_save
+            # signal sees no status change (mirrors the schedule endpoint).
+            ticket.save(
+                update_fields=["auto_complete_on_subtasks", "updated_at"]
+            )
+            self._audit_auto_complete_flag(
+                request, ticket, old_value, new_value
+            )
+
+        return Response(
+            TicketDetailSerializer(ticket, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def _audit_auto_complete_flag(self, request, ticket, old_value, new_value):
+        """Sprint 4 — explicit AuditLog UPDATE row for the flag flip. Ticket
+        is NOT signal-audited (audit/signals.py registers only its
+        sub-models), so the flip is recorded here, mirroring the
+        perform_create / destroy explicit-audit blocks. Best-effort: a
+        failure is logged but never blocks the flip."""
+        try:
+            _scope = audit_context.get_current_actor_scope() or {}
+            if not _scope:
+                _scope = (
+                    audit_context.snapshot_actor_scope(request.user) or {}
+                )
+            AuditLog.objects.create(
+                actor=request.user,
+                action=AuditAction.UPDATE,
+                target_model="tickets.Ticket",
+                target_id=ticket.id,
+                changes={
+                    "auto_complete_on_subtasks": {
+                        "before": old_value,
+                        "after": new_value,
+                    }
+                },
+                request_ip=audit_context.get_current_request_ip(),
+                request_id=audit_context.get_current_request_id(),
+                reason=audit_context.get_current_reason(),
+                actor_scope=_scope,
+            )
+        except Exception:  # pragma: no cover — audit must not block the flip
+            _audit_logger.exception(
+                "audit: failed to record ticket auto_complete flag flip #%s",
+                ticket.id,
+            )
 
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):

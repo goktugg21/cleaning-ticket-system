@@ -17,6 +17,10 @@ from .views_staff_assignments import (
     TicketStaffAssignmentListCreateView,
 )
 from .views_staff_requests import StaffAssignmentRequestViewSet
+from .views_sub_tasks import (
+    TicketSubTaskDetailView,
+    TicketSubTaskListCreateView,
+)
 
 
 router = DefaultRouter()
@@ -86,5 +90,18 @@ urlpatterns = [
         "<int:ticket_id>/manager-assignments/<int:user_id>/",
         TicketManagerAssignmentDeleteView.as_view(),
         name="ticket-manager-assignment-delete",
+    ),
+    # Sprint 4 — SubTask CRUD nested under the ticket (same hand-mounted
+    # shape as the staff-assignment endpoints; keyed by the sub-task's own
+    # id on the detail route).
+    path(
+        "<int:ticket_id>/sub-tasks/",
+        TicketSubTaskListCreateView.as_view(),
+        name="ticket-sub-tasks",
+    ),
+    path(
+        "<int:ticket_id>/sub-tasks/<int:sub_task_id>/",
+        TicketSubTaskDetailView.as_view(),
+        name="ticket-sub-task-detail",
     ),
 ] + router.urls

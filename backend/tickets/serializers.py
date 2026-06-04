@@ -19,10 +19,12 @@ from customers.models import (
 from sla import business_hours
 
 from .models import (
+    SubTask,
     Ticket,
     TicketAttachment,
     TicketMessage,
     TicketMessageType,
+    TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
 )
@@ -357,6 +359,86 @@ class TicketListSerializer(serializers.ModelSerializer):
         return resolve_extra_work_origin_core(obj)
 
 
+# Sprint 4 — sub-task serializers.
+class SubTaskAssignmentSerializer(serializers.ModelSerializer):
+    """Compact read-only view of a staff slot, nested under its SubTask on
+    the ticket detail. (The full slot surface lives on the
+    /staff-assignments/ endpoint; this is the per-sub-task grouping.)"""
+
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_full_name = serializers.CharField(
+        source="user.full_name", read_only=True
+    )
+
+    class Meta:
+        model = TicketStaffAssignment
+        fields = [
+            "id",
+            "user_id",
+            "user_email",
+            "user_full_name",
+            "scheduled_start_at",
+            "scheduled_end_at",
+            "time_window_label",
+            "assignment_note",
+            "slot_status",
+            "completion_note",
+            "completed_at",
+            "unable_to_complete_reason",
+        ]
+        read_only_fields = fields
+
+
+class SubTaskSerializer(serializers.ModelSerializer):
+    """Read serializer for a SubTask: its config + its staff assignments +
+    a computed `is_done`. Used both as the nested `sub_tasks` field on the
+    ticket detail and as the response shape of the SubTask CRUD endpoints."""
+
+    created_by_email = serializers.CharField(
+        source="created_by.email", read_only=True, default=None
+    )
+    is_done = serializers.SerializerMethodField()
+    staff_assignments = SubTaskAssignmentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SubTask
+        fields = [
+            "id",
+            "ticket",
+            "title",
+            "description",
+            "ordering",
+            "created_by",
+            "created_by_email",
+            "created_at",
+            "updated_at",
+            "is_done",
+            "staff_assignments",
+        ]
+        read_only_fields = fields
+
+    def get_is_done(self, obj) -> bool:
+        return obj.is_done()
+
+
+class SubTaskWriteSerializer(serializers.ModelSerializer):
+    """Validates the operator-editable SubTask fields on create / patch.
+    `ticket` and `created_by` are set by the view, not the caller."""
+
+    class Meta:
+        model = SubTask
+        fields = ["title", "description", "ordering"]
+
+
+class TicketAutoCompleteFlagSerializer(serializers.Serializer):
+    """Sprint 4 — input for the dedicated PA/SA auto-complete-flag action.
+    A required boolean; DRF parses "true"/"false"/true/false and 400s on a
+    non-boolean."""
+
+    auto_complete_on_subtasks = serializers.BooleanField()
+
+
 class TicketDetailSerializer(serializers.ModelSerializer):
     building_name = serializers.CharField(source="building.name", read_only=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -405,6 +487,10 @@ class TicketDetailSerializer(serializers.ModelSerializer):
     # caller must hit `/api/extra-work/<id>/` for that, where the
     # role-aware serializer enforces visibility.
     extra_work_origin = serializers.SerializerMethodField()
+    # Sprint 4 — the ticket's named sub-tasks (each with its staff
+    # assignments + a computed is_done). Read-only here; sub-tasks are
+    # mutated via the SubTask CRUD endpoints. Purely additive.
+    sub_tasks = SubTaskSerializer(many=True, read_only=True)
 
     class Meta:
         model = Ticket
@@ -463,6 +549,9 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             "schedule_status",
             "rescheduled_from",
             "reschedule_reason",
+            # Sprint 4 — sub-tasks + auto-complete opt-in (additive).
+            "sub_tasks",
+            "auto_complete_on_subtasks",
         ]
         read_only_fields = fields
 

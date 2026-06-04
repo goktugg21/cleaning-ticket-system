@@ -67,6 +67,7 @@ from planned_work.models import (
 )
 from tickets.models import (
     StaffAssignmentRequest,
+    SubTask,
     TicketAttachment,
     TicketManagerAssignment,
     TicketMessage,
@@ -880,6 +881,14 @@ def _connect():
         # registration would double-write the lifecycle fact.
         TicketMessage,
         TicketAttachment,
+        # Sprint 4 — sub-tasks. Editable fields (title / description /
+        # ordering) produce meaningful UPDATE diffs, so the full CRUD trio
+        # is the right shape: CREATE / UPDATE / DELETE each emit one
+        # AuditLog row with automatic field diffing. (The parent Ticket
+        # stays unregistered — its CREATE/DELETE audit is hand-written in
+        # tickets/views.py and the auto_complete_on_subtasks flip writes its
+        # own explicit row; no double-write.)
+        SubTask,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
