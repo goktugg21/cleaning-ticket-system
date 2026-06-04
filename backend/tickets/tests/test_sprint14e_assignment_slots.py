@@ -117,9 +117,11 @@ class _SlotFixture(TestCase):
         tid = ticket_id or self.ticket.id
         return f"/api/tickets/{tid}/staff-assignments/"
 
-    def _slot_detail_url(self, user_id, ticket_id=None):
+    def _slot_detail_url(self, slot_id, ticket_id=None):
+        # Multi-slot per staff — the detail endpoint is keyed by the slot's
+        # own id (assignment id), not by user_id.
         tid = ticket_id or self.ticket.id
-        return f"/api/tickets/{tid}/staff-assignments/{user_id}/"
+        return f"/api/tickets/{tid}/staff-assignments/{slot_id}/"
 
     def _add_slot(self, actor, staff, **slot):
         return self._api(actor).post(
@@ -225,10 +227,12 @@ class SlotVisibilityTests(_SlotFixture):
 
 class SlotDeleteTests(_SlotFixture):
     def test_delete_one_slot_keeps_the_other(self):
-        self._add_slot(self.admin, self.ahmet, time_window_label="morning")
+        ahmet_slot = self._add_slot(
+            self.admin, self.ahmet, time_window_label="morning"
+        ).data["id"]
         self._add_slot(self.admin, self.mehmet, time_window_label="evening")
 
-        resp = self._api(self.admin).delete(self._slot_detail_url(self.ahmet.id))
+        resp = self._api(self.admin).delete(self._slot_detail_url(ahmet_slot))
         self.assertEqual(resp.status_code, 204, getattr(resp, "data", None))
 
         remaining = TicketStaffAssignment.objects.filter(ticket=self.ticket)
@@ -238,15 +242,15 @@ class SlotDeleteTests(_SlotFixture):
 
 class SlotCompletionTests(_SlotFixture):
     def setUp(self):
-        self._add_slot(
+        self.ahmet_slot = self._add_slot(
             self.admin, self.ahmet,
             time_window_label="morning",
             scheduled_start_at=self.morning,
-        )
+        ).data["id"]
 
     def test_staff_completes_own_slot(self):
         resp = self._api(self.ahmet).patch(
-            self._slot_detail_url(self.ahmet.id),
+            self._slot_detail_url(self.ahmet_slot),
             {
                 "slot_status": StaffAssignmentSlotStatus.COMPLETED,
                 "completion_note": "Done, photo on file.",
@@ -267,7 +271,7 @@ class SlotCompletionTests(_SlotFixture):
 
     def test_staff_unable_without_reason_rejected(self):
         resp = self._api(self.ahmet).patch(
-            self._slot_detail_url(self.ahmet.id),
+            self._slot_detail_url(self.ahmet_slot),
             {"slot_status": StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE},
             format="json",
         )
@@ -275,7 +279,7 @@ class SlotCompletionTests(_SlotFixture):
 
     def test_staff_unable_with_reason_ok(self):
         resp = self._api(self.ahmet).patch(
-            self._slot_detail_url(self.ahmet.id),
+            self._slot_detail_url(self.ahmet_slot),
             {
                 "slot_status": StaffAssignmentSlotStatus.UNABLE_TO_COMPLETE,
                 "unable_to_complete_reason": "Door was locked; no key.",
@@ -291,10 +295,14 @@ class SlotCompletionTests(_SlotFixture):
         )
 
     def test_staff_cannot_patch_another_staff_slot(self):
-        # Add Mehmet's slot, then Ahmet tries to PATCH it.
-        self._add_slot(self.admin, self.mehmet, time_window_label="evening")
+        # Add Mehmet's slot, then Ahmet tries to PATCH it BY ITS SLOT ID.
+        # Multi-slot per staff — the self-gate keys off the resolved slot's
+        # owner, so a non-owner STAFF falls through to the manager gate → 403.
+        mehmet_slot = self._add_slot(
+            self.admin, self.mehmet, time_window_label="evening"
+        ).data["id"]
         resp = self._api(self.ahmet).patch(
-            self._slot_detail_url(self.mehmet.id),
+            self._slot_detail_url(mehmet_slot),
             {"slot_status": StaffAssignmentSlotStatus.COMPLETED},
             format="json",
         )
@@ -302,7 +310,7 @@ class SlotCompletionTests(_SlotFixture):
 
     def test_manager_patches_slot_schedule(self):
         resp = self._api(self.admin).patch(
-            self._slot_detail_url(self.ahmet.id),
+            self._slot_detail_url(self.ahmet_slot),
             {"time_window_label": "afternoon", "scheduled_start_at": self.evening},
             format="json",
         )
@@ -316,7 +324,7 @@ class SlotCompletionTests(_SlotFixture):
         # STAFF self-PATCH allow-list excludes schedule fields, so the
         # window label is silently ignored (not written).
         resp = self._api(self.ahmet).patch(
-            self._slot_detail_url(self.ahmet.id),
+            self._slot_detail_url(self.ahmet_slot),
             {
                 "slot_status": StaffAssignmentSlotStatus.COMPLETED,
                 "completion_note": "done",
@@ -329,3 +337,171 @@ class SlotCompletionTests(_SlotFixture):
             ticket=self.ticket, user=self.ahmet
         )
         self.assertEqual(slot.time_window_label, "morning")
+
+
+class MultiSlotPerStaffTests(_SlotFixture):
+    """Multi-slot per staff — the SAME staff member may hold several dated
+    slots on one ticket (transcript: Ahmet 09:00-11:00 AND Ahmet
+    15:00-17:00). Each slot is its own row keyed by id; PATCH / DELETE are
+    addressed by the slot id and only ever touch that one row."""
+
+    def test_same_staff_two_slots_two_rows(self):
+        r1 = self._add_slot(
+            self.admin, self.ahmet,
+            time_window_label="morning",
+            scheduled_start_at=self.morning,
+            scheduled_end_at=self.morning_end,
+        )
+        r2 = self._add_slot(
+            self.admin, self.ahmet,
+            time_window_label="afternoon",
+            scheduled_start_at=self.evening,
+        )
+        self.assertEqual(r1.status_code, 201, r1.data)
+        self.assertEqual(r2.status_code, 201, r2.data)
+        self.assertNotEqual(r1.data["id"], r2.data["id"])
+        self.assertEqual(
+            TicketStaffAssignment.objects.filter(
+                ticket=self.ticket, user=self.ahmet
+            ).count(),
+            2,
+        )
+
+    def test_patch_one_slot_leaves_sibling_unchanged(self):
+        s1 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="morning"
+        ).data["id"]
+        s2 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="afternoon"
+        ).data["id"]
+        resp = self._api(self.admin).patch(
+            self._slot_detail_url(s1),
+            {"time_window_label": "EARLY"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(
+            TicketStaffAssignment.objects.get(pk=s1).time_window_label,
+            "EARLY",
+        )
+        # The sibling slot is untouched.
+        self.assertEqual(
+            TicketStaffAssignment.objects.get(pk=s2).time_window_label,
+            "afternoon",
+        )
+
+    def test_delete_one_of_two_same_staff_slots_keeps_sibling(self):
+        s1 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="morning"
+        ).data["id"]
+        s2 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="afternoon"
+        ).data["id"]
+        resp = self._api(self.admin).delete(self._slot_detail_url(s1))
+        self.assertEqual(resp.status_code, 204, getattr(resp, "data", None))
+        self.assertFalse(TicketStaffAssignment.objects.filter(pk=s1).exists())
+        self.assertTrue(TicketStaffAssignment.objects.filter(pk=s2).exists())
+
+    def test_staff_completes_one_of_two_own_slots_independently(self):
+        s1 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="morning"
+        ).data["id"]
+        s2 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="afternoon"
+        ).data["id"]
+        resp = self._api(self.ahmet).patch(
+            self._slot_detail_url(s1),
+            {
+                "slot_status": StaffAssignmentSlotStatus.COMPLETED,
+                "completion_note": "Morning done.",
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(
+            TicketStaffAssignment.objects.get(pk=s1).slot_status,
+            StaffAssignmentSlotStatus.COMPLETED,
+        )
+        # The other slot stays ASSIGNED — each completes independently.
+        self.assertEqual(
+            TicketStaffAssignment.objects.get(pk=s2).slot_status,
+            StaffAssignmentSlotStatus.ASSIGNED,
+        )
+
+    def test_complete_without_evidence_rejected_per_slot(self):
+        s1 = self._add_slot(
+            self.admin, self.ahmet, time_window_label="morning"
+        ).data["id"]
+        resp = self._api(self.ahmet).patch(
+            self._slot_detail_url(s1),
+            {"slot_status": StaffAssignmentSlotStatus.COMPLETED},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400, resp.data)
+
+    def test_my_slots_returns_both_of_a_users_slots(self):
+        self._add_slot(
+            self.admin, self.ahmet,
+            time_window_label="morning",
+            scheduled_start_at=self.morning,
+        )
+        self._add_slot(
+            self.admin, self.ahmet,
+            time_window_label="afternoon",
+            scheduled_start_at=self.evening,
+        )
+        resp = self._api(self.ahmet).get("/api/tickets/my-slots/")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        rows = resp.data["results"] if isinstance(resp.data, dict) else resp.data
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            sorted(r["time_window_label"] for r in rows),
+            ["afternoon", "morning"],
+        )
+
+    def test_slot_id_from_another_ticket_returns_404(self):
+        # A slot id that exists but on a DIFFERENT ticket must 404 when
+        # addressed under self.ticket (the lookup is scoped to the ticket).
+        other_ticket = Ticket.objects.create(
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            created_by=self.admin,
+            title="Other slot ticket",
+            description="desc",
+            status="IN_PROGRESS",
+        )
+        other_slot = TicketStaffAssignment.objects.create(
+            ticket=other_ticket, user=self.ahmet, assigned_by=self.admin
+        )
+        patch = self._api(self.admin).patch(
+            self._slot_detail_url(other_slot.id),  # URL uses self.ticket.id
+            {"time_window_label": "x"},
+            format="json",
+        )
+        self.assertEqual(patch.status_code, 404, getattr(patch, "data", None))
+        delete = self._api(self.admin).delete(
+            self._slot_detail_url(other_slot.id)
+        )
+        self.assertEqual(delete.status_code, 404)
+        # The slot is untouched on its real ticket.
+        self.assertTrue(
+            TicketStaffAssignment.objects.filter(pk=other_slot.id).exists()
+        )
+
+    def test_assigned_staff_roster_dedups_by_user(self):
+        # Two slots for Ahmet on one ticket -> the read-only assigned_staff
+        # roster on the ticket detail lists him exactly ONCE (the roster is
+        # "who is on this ticket"; per-slot detail is a separate endpoint).
+        # Without dedup the same user.id would repeat once per slot and the
+        # frontend would render duplicate React keys.
+        self._add_slot(self.admin, self.ahmet, time_window_label="morning")
+        self._add_slot(self.admin, self.ahmet, time_window_label="afternoon")
+        detail = self._api(self.admin).get(f"/api/tickets/{self.ticket.id}/")
+        self.assertEqual(detail.status_code, 200, detail.data)
+        ahmet_entries = [
+            e
+            for e in detail.data["assigned_staff"]
+            if e.get("id") == self.ahmet.id
+        ]
+        self.assertEqual(len(ahmet_entries), 1)

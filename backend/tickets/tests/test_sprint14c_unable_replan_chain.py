@@ -40,7 +40,7 @@ class UnableToCompleteReplanReassignChainTests(_Sprint10BFixture):
         # will hit the wall.
         self.ticket_a.status = TicketStatus.IN_PROGRESS
         self.ticket_a.save(update_fields=["status"])
-        TicketStaffAssignment.objects.create(
+        self.slot_a = TicketStaffAssignment.objects.create(
             ticket=self.ticket_a, user=self.staff_a, assigned_by=self.admin_a
         )
 
@@ -50,8 +50,9 @@ class UnableToCompleteReplanReassignChainTests(_Sprint10BFixture):
     def _staff_list_url(self):
         return f"/api/tickets/{self.ticket_a.id}/staff-assignments/"
 
-    def _staff_detail_url(self, user):
-        return f"/api/tickets/{self.ticket_a.id}/staff-assignments/{user.id}/"
+    def _staff_detail_url(self, slot_id):
+        # Multi-slot per staff — the detail endpoint is keyed by the slot id.
+        return f"/api/tickets/{self.ticket_a.id}/staff-assignments/{slot_id}/"
 
     def test_unable_to_complete_replan_reassign_chain(self):
         admin = self._api(self.admin_a)
@@ -119,7 +120,7 @@ class UnableToCompleteReplanReassignChainTests(_Sprint10BFixture):
             format="json",
         )
         self.assertEqual(resp.status_code, 201, resp.data)
-        resp = admin.delete(self._staff_detail_url(self.staff_a))
+        resp = admin.delete(self._staff_detail_url(self.slot_a.id))
         self.assertEqual(resp.status_code, 204, getattr(resp, "data", None))
 
         membership = set(

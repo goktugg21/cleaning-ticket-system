@@ -1029,7 +1029,7 @@ class TicketViewSet(
         """
         Sprint 25A — eligible STAFF users for direct admin/manager
         assignment to this ticket. The matching add/remove endpoints
-        live at `/api/tickets/<id>/staff-assignments/[/<user_id>/]`
+        live at `/api/tickets/<id>/staff-assignments/[/<assignment_id>/]`
         (see `views_staff_assignments.py`). Eligibility is:
           - role=STAFF
           - active StaffProfile

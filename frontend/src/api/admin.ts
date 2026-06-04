@@ -1015,16 +1015,17 @@ export async function addTicketStaffAssignment(
   return response.data;
 }
 
-// PATCH /tickets/<id>/staff-assignments/<userId>/ — keyed by the slot's
-// assignee user id. Managers pass the slot's user_id; a STAFF self-update
-// passes their own id.
+// PATCH /tickets/<id>/staff-assignments/<slotId>/ — keyed by the slot's
+// OWN id (assignment id), not the user: a staff member may hold several
+// dated slots on one ticket. Managers may edit any slot; a STAFF
+// self-update is gated server-side to slots they own.
 export async function updateStaffSlot(
   ticketId: number,
-  userId: number,
+  slotId: number,
   patch: StaffSlotPatch,
 ): Promise<TicketStaffAssignmentAdmin> {
   const response = await api.patch<TicketStaffAssignmentAdmin>(
-    `/tickets/${ticketId}/staff-assignments/${userId}/`,
+    `/tickets/${ticketId}/staff-assignments/${slotId}/`,
     patch,
   );
   return response.data;
@@ -1032,9 +1033,9 @@ export async function updateStaffSlot(
 
 export async function removeTicketStaffAssignment(
   ticketId: number,
-  userId: number,
+  slotId: number,
 ): Promise<void> {
-  await api.delete(`/tickets/${ticketId}/staff-assignments/${userId}/`);
+  await api.delete(`/tickets/${ticketId}/staff-assignments/${slotId}/`);
 }
 
 // GET /tickets/my-slots/ — the caller's own dated assignment slots (the

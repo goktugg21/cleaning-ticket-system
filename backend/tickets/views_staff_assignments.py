@@ -16,9 +16,10 @@ ticket detail card) until Sprint 25A.
 
 This module ships the minimum surface the pilot audit identified:
 
-  GET    /api/tickets/<id>/staff-assignments/            list current rows
-  POST   /api/tickets/<id>/staff-assignments/            {user_id} → add
-  DELETE /api/tickets/<id>/staff-assignments/<user_id>/  remove
+  GET    /api/tickets/<id>/staff-assignments/                 list current rows
+  POST   /api/tickets/<id>/staff-assignments/                 {user_id} → add slot
+  PATCH  /api/tickets/<id>/staff-assignments/<assignment_id>/ update one slot
+  DELETE /api/tickets/<id>/staff-assignments/<assignment_id>/ remove one slot
 
 Permission rules (preserved from Sprint 23B's approve flow):
   - Caller must be SUPER_ADMIN, COMPANY_ADMIN, or BUILDING_MANAGER
@@ -34,8 +35,10 @@ Permission rules (preserved from Sprint 23B's approve flow):
         `osius.staff.request_assignment` resolver, which is the only
         existing gate that already encodes "may operate at this
         building".
-  - Duplicates are idempotent: re-POSTing an existing row returns
-    `200` with the same payload.
+  - Multi-slot per staff: each POST creates a NEW slot row (`201`).
+    The same staff member may hold several dated slots on one ticket
+    (e.g. a 09:00-11:00 slot AND a 15:00-17:00 slot), so a re-POST is
+    no longer deduplicated by user — it adds another slot.
   - Audit logs are emitted by the existing
     `audit/signals.py::_on_membership_post_save` /
     `_on_membership_post_delete` handlers, which already track
@@ -395,34 +398,42 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
         )
         slot_ser.is_valid(raise_exception=True)
 
-        # Idempotent: re-POSTing an existing pairing returns 200 with
-        # the existing row, mirroring Sprint 23B's approve-path
-        # `get_or_create`. Slot metadata is applied only on first
-        # create; updating an existing slot is a PATCH.
-        assignment, created = TicketStaffAssignment.objects.get_or_create(
+        # Multi-slot per staff — every POST creates a NEW slot row, so the
+        # same staff member can be added again as another dated slot
+        # (Ahmet 09:00-11:00 AND Ahmet 15:00-17:00). There is no longer a
+        # (ticket, user) uniqueness constraint to dedupe against, so this
+        # always returns 201. A flat (no-schedule) add stays valid.
+        assignment = TicketStaffAssignment.objects.create(
             ticket=ticket,
             user=target,
-            defaults={"assigned_by": request.user, **slot_ser.validated_data},
+            assigned_by=request.user,
+            **slot_ser.validated_data,
         )
         return Response(
             self.get_serializer(assignment).data,
-            status=(
-                status.HTTP_201_CREATED if created else status.HTTP_200_OK
-            ),
+            status=status.HTTP_201_CREATED,
         )
 
 
 class TicketStaffAssignmentDetailView(generics.GenericAPIView):
     """
-    PATCH  /api/tickets/<id>/staff-assignments/<user_id>/  update slot
-    DELETE /api/tickets/<id>/staff-assignments/<user_id>/  remove slot
+    PATCH  /api/tickets/<id>/staff-assignments/<assignment_id>/  update slot
+    DELETE /api/tickets/<id>/staff-assignments/<assignment_id>/  remove slot
+
+    Multi-slot per staff — the slot is addressed by its OWN id
+    (`assignment_id`), not by user_id, because one staff member may hold
+    several slots on the same ticket. The lookup is scoped to the ticket
+    (`filter(ticket=ticket, pk=assignment_id)`), so a slot id belonging to
+    another ticket resolves to 404.
 
     Sprint 14E — PATCH supports two actors:
       * Manager / admin (the existing `_gate_actor` gate): may edit the
         full slot (schedule, window, note, status, completion).
-      * The assigned STAFF member themselves: may update only their OWN
+      * The assigned STAFF member themselves: may update only THEIR OWN
         slot's status + completion evidence (report done / unable). They
-        cannot reschedule themselves or edit the manager's note.
+        cannot reschedule themselves, edit the manager's note, or touch
+        another staff member's slot — a STAFF actor PATCHing a slot they
+        do not own falls through to the manager gate and gets 403.
     DELETE stays manager/admin-only. Deleting one slot never touches a
     sibling slot on the same ticket (separate rows).
     """
@@ -430,19 +441,24 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
     permission_classes = [IsAuthenticatedAndActive]
 
     @transaction.atomic
-    def patch(self, request, ticket_id, user_id):
+    def patch(self, request, ticket_id, assignment_id):
         ticket = _resolve_ticket(request, ticket_id)
         assignment = TicketStaffAssignment.objects.filter(
-            ticket=ticket, user_id=user_id
+            ticket=ticket, pk=assignment_id
         ).first()
         if assignment is None:
             return Response(
                 {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
             )
 
+        # Multi-slot per staff — the self-gate keys off the RESOLVED slot's
+        # owner, not the URL. A STAFF actor may self-update only a slot they
+        # own; a STAFF actor targeting another staff's slot id does NOT match
+        # here, falls through to `_gate_actor`, and is rejected 403 (STAFF
+        # never passes the manager gate).
         is_self_staff = (
             request.user.role == UserRole.STAFF
-            and request.user.id == int(user_id)
+            and request.user.id == assignment.user_id
         )
         if is_self_staff:
             allowed = _STAFF_SELF_SLOT_WRITE_FIELDS
@@ -495,13 +511,15 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
         return Response(_TicketStaffAssignmentSerializer(updated).data)
 
     @transaction.atomic
-    def delete(self, request, ticket_id, user_id):
+    def delete(self, request, ticket_id, assignment_id):
         ticket = _resolve_ticket(request, ticket_id)
         gate = _gate_actor(request, ticket)
         if gate is not None:
             return gate
+        # Multi-slot per staff — delete ONLY the addressed slot (by id,
+        # scoped to the ticket). Sibling slots for the same staff survive.
         deleted, _ = TicketStaffAssignment.objects.filter(
-            ticket=ticket, user_id=user_id
+            ticket=ticket, pk=assignment_id
         ).delete()
         if deleted == 0:
             return Response(

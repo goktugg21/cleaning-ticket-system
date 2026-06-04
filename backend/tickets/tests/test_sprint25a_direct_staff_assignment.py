@@ -10,8 +10,8 @@ request. Sprint 25A adds:
 
   GET    /api/tickets/<id>/assignable-staff/             (viewset action)
   GET    /api/tickets/<id>/staff-assignments/            list current rows
-  POST   /api/tickets/<id>/staff-assignments/  {user_id} → add
-  DELETE /api/tickets/<id>/staff-assignments/<user_id>/  remove
+  POST   /api/tickets/<id>/staff-assignments/  {user_id} → add slot
+  DELETE /api/tickets/<id>/staff-assignments/<slot_id>/  remove slot
 
 These tests pin the contract:
   - SUPER_ADMIN can assign anywhere.
@@ -20,8 +20,9 @@ These tests pin the contract:
   - STAFF cannot assign (self or others) → 403.
   - CUSTOMER_USER cannot assign → 404 (queryset hides the ticket).
   - Target must be STAFF with active profile + BuildingStaffVisibility.
-  - Duplicates are idempotent (POST returns 200 with existing row).
-  - Delete is idempotent only when the row existed (404 otherwise).
+  - Multi-slot per staff: each POST creates a NEW slot row (201); the
+    same staff member may hold several dated slots on one ticket.
+  - Delete is keyed by the slot id and 404s when no such slot exists.
   - Sprint 23B's approve flow remains functional alongside this path.
   - `ticket.assigned_staff` payload (used by the frontend) reflects
     new admin-driven assignments.
@@ -181,8 +182,10 @@ class DirectStaffAssignmentTests(TestCase):
     def _list_url(self, ticket):
         return f"/api/tickets/{ticket.id}/staff-assignments/"
 
-    def _detail_url(self, ticket, user):
-        return f"/api/tickets/{ticket.id}/staff-assignments/{user.id}/"
+    def _detail_url(self, ticket, slot_id):
+        # Multi-slot per staff — the detail endpoint is keyed by the slot's
+        # own id (assignment id), not by user_id.
+        return f"/api/tickets/{ticket.id}/staff-assignments/{slot_id}/"
 
     def _assignable_url(self, ticket):
         return f"/api/tickets/{ticket.id}/assignable-staff/"
@@ -207,7 +210,7 @@ class DirectStaffAssignmentTests(TestCase):
             ).exists()
         )
 
-        remove = client.delete(self._detail_url(self.ticket_a, self.staff_a))
+        remove = client.delete(self._detail_url(self.ticket_a, add.data["id"]))
         self.assertEqual(remove.status_code, 204)
         self.assertFalse(
             TicketStaffAssignment.objects.filter(
@@ -251,7 +254,10 @@ class DirectStaffAssignmentTests(TestCase):
         self.assertNotIn(self.admin_a.id, ids)
         self.assertNotIn(self.manager_a.id, ids)
 
-    def test_add_is_idempotent(self):
+    def test_re_post_creates_another_slot(self):
+        # Multi-slot per staff — re-POSTing the same staff is NO LONGER
+        # idempotent: each POST creates a NEW slot row (201), so one staff
+        # member can hold several dated slots on the ticket.
         client = self._api(self.admin_a)
         first = client.post(
             self._list_url(self.ticket_a),
@@ -264,18 +270,20 @@ class DirectStaffAssignmentTests(TestCase):
             {"user_id": self.staff_a.id},
             format="json",
         )
-        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.status_code, 201)
+        self.assertNotEqual(first.data["id"], second.data["id"])
         self.assertEqual(
             TicketStaffAssignment.objects.filter(
                 ticket=self.ticket_a, user=self.staff_a
             ).count(),
-            1,
+            2,
         )
 
     def test_delete_unknown_returns_404(self):
+        # No slot with this id exists on the ticket → 404.
         client = self._api(self.admin_a)
         response = client.delete(
-            self._detail_url(self.ticket_a, self.staff_a)
+            self._detail_url(self.ticket_a, 999999)
         )
         self.assertEqual(response.status_code, 404)
 

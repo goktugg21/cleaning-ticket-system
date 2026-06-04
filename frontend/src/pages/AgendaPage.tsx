@@ -119,7 +119,7 @@ export function AgendaPage() {
     setUnableTarget(null);
     if (!slot || !me) return;
     try {
-      await updateStaffSlot(slot.ticket_id, me.id, {
+      await updateStaffSlot(slot.ticket_id, slot.id, {
         slot_status: "UNABLE_TO_COMPLETE",
         unable_to_complete_reason: reason,
       });
@@ -266,7 +266,6 @@ export function AgendaPage() {
       {completionTarget && me && (
         <SlotCompletionDialog
           slot={completionTarget}
-          userId={me.id}
           onCancel={() => setCompletionTarget(null)}
           onDone={handleCompletionDone}
         />

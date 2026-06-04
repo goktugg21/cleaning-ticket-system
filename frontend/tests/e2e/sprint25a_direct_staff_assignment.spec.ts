@@ -166,16 +166,20 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
         `/api/tickets/${ticketId}/staff-assignments/`,
         { data: { user_id: staffId } },
       );
-      expect([200, 201]).toContain(add.status());
+      expect(add.status()).toBe(201);
       const addBody = await add.json();
       expect(addBody.user_id).toBe(staffId);
+      const slotId = addBody.id as number;
 
-      // Re-POST → idempotent 200, no duplicate row.
+      // Multi-slot per staff — a re-POST is NO LONGER idempotent: it
+      // creates a SECOND slot row (201) for the same staff.
       const dup = await admin.post(
         `/api/tickets/${ticketId}/staff-assignments/`,
         { data: { user_id: staffId } },
       );
-      expect(dup.status()).toBe(200);
+      expect(dup.status()).toBe(201);
+      const dupBody = await dup.json();
+      expect(dupBody.id).not.toBe(slotId);
 
       // Detail reflects the assignment.
       const detail = await admin.get(`/api/tickets/${ticketId}/`);
@@ -186,11 +190,13 @@ test.describe("Sprint 25A → direct staff assignment API gate", () => {
         .map((e) => (e as { id: number }).id);
       expect(assignedIds).toContain(staffId);
 
-      // Cleanup — remove the assignment.
-      const remove = await admin.delete(
-        `/api/tickets/${ticketId}/staff-assignments/${staffId}/`,
-      );
-      expect(remove.status()).toBe(204);
+      // Cleanup — remove BOTH slots, now keyed by the slot id.
+      for (const id of [slotId, dupBody.id as number]) {
+        const remove = await admin.delete(
+          `/api/tickets/${ticketId}/staff-assignments/${id}/`,
+        );
+        expect(remove.status()).toBe(204);
+      }
     } finally {
       await admin.dispose();
     }
@@ -343,12 +349,20 @@ test.describe("Sprint 25A → ticket detail admin block", () => {
         .filter({ hasText: DEMO_USERS.staffOsius.fullName }),
     ).toBeVisible({ timeout: 10_000 });
 
-    // Cleanup: remove the assignment via API so the demo state is bounded.
+    // Cleanup: remove the assignment(s) via API so the demo state is
+    // bounded. Multi-slot per staff — delete is keyed by the slot id, so
+    // list the rows and remove each one.
     const admin = await apiAs(baseURL!, DEMO_USERS.companyAdmin.email);
-    const remove = await admin.delete(
-      `/api/tickets/${ticketId}/staff-assignments/${staffId}/`,
+    const list = await admin.get(
+      `/api/tickets/${ticketId}/staff-assignments/`,
     );
-    expect(remove.status()).toBe(204);
+    const listBody = (await list.json()) as { results: { id: number }[] };
+    for (const row of listBody.results) {
+      const remove = await admin.delete(
+        `/api/tickets/${ticketId}/staff-assignments/${row.id}/`,
+      );
+      expect(remove.status()).toBe(204);
+    }
     await admin.dispose();
   });
 

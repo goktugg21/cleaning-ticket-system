@@ -121,8 +121,9 @@ class SlotUnableNotifyTests(TestCase):
         return c
 
     def _patch_slot(self, user, **body):
+        # Multi-slot per staff — PATCH is keyed by the slot's own id.
         return self._api(user).patch(
-            f"/api/tickets/{self.ticket.id}/staff-assignments/{self.staff.id}/",
+            f"/api/tickets/{self.ticket.id}/staff-assignments/{self.slot.id}/",
             body,
             format="json",
         )

@@ -182,7 +182,6 @@ class AttachmentAuditTests(_AuditFixture):
 class SlotAuditTests(_AuditFixture):
     def test_slot_create_update_delete_each_one_row(self):
         url = f"/api/tickets/{self.ticket.id}/staff-assignments/"
-        detail = f"{url}{self.staff.id}/"
 
         # CREATE -> one membership CREATE row.
         r = self._api(self.admin).post(
@@ -193,6 +192,8 @@ class SlotAuditTests(_AuditFixture):
         slot_id = TicketStaffAssignment.objects.get(
             ticket=self.ticket, user=self.staff
         ).id
+        # Multi-slot per staff — PATCH / DELETE are keyed by the slot id.
+        detail = f"{url}{slot_id}/"
         self.assertEqual(
             self._ticket_audit(
                 "tickets.TicketStaffAssignment",

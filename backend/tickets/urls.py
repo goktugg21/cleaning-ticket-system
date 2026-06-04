@@ -66,8 +66,11 @@ urlpatterns = [
         TicketStaffAssignmentListCreateView.as_view(),
         name="ticket-staff-assignments",
     ),
+    # Multi-slot per staff — keyed by the slot's OWN id (assignment id),
+    # not by user_id: a staff member can hold several slots on one ticket,
+    # so user_id no longer identifies a single row.
     path(
-        "<int:ticket_id>/staff-assignments/<int:user_id>/",
+        "<int:ticket_id>/staff-assignments/<int:assignment_id>/",
         TicketStaffAssignmentDetailView.as_view(),
         name="ticket-staff-assignment-detail",
     ),
