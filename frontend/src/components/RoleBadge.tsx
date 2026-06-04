@@ -13,11 +13,18 @@
  *     → teal-mint badge with a small "CUSTOMER" caption
  *
  * The component also exists in a `compact` form for table cells (no
- * side caption, just colored chip).
+ * side caption, just a colored dot + the role label).
+ *
+ * Visual language (UI-polish): a calm single-line chip — a small
+ * side-colored DOT (provider=green / customer=teal) + the label in
+ * near-body weight on a faint tint. Tables use the compact form so the
+ * PROVIDER/CUSTOMER caption is dropped (the role already implies the
+ * side); detail pages keep the caption.
  *
  * Tests:
- *   - The Users page Playwright spec only asserts on rendered text,
- *     not on classes, so the visual change is safe.
+ *   - The Users page Playwright spec asserts on rendered text and on the
+ *     `.role-badge-provider` / `.role-badge-customer` / `.role-badge-side`
+ *     class names — all preserved here — so the visual change is safe.
  */
 import { useTranslation } from "react-i18next";
 import type { Role } from "../api/types";
@@ -35,8 +42,16 @@ export function RoleBadge({ role, compact = false, testId }: RoleBadgeProps) {
 
   if (!role) {
     return (
-      <span className="role-badge role-badge-fallback" data-testid={testId}>
-        {t("roles.fallback")}
+      <span
+        className={`role-badge role-badge-fallback${
+          compact ? " role-badge-compact" : ""
+        }`}
+        data-testid={testId}
+      >
+        <span className="role-badge-dot" aria-hidden="true" />
+        <span className="role-badge-text">
+          <span className="role-badge-label">{t("roles.fallback")}</span>
+        </span>
       </span>
     );
   }
@@ -59,10 +74,13 @@ export function RoleBadge({ role, compact = false, testId }: RoleBadgeProps) {
       className={`role-badge ${sideClass}${compact ? " role-badge-compact" : ""}`}
       data-testid={testId}
     >
-      <span className="role-badge-label">{t(roleLabelKey(role))}</span>
-      {!compact && (
-        <span className="role-badge-side">{t(sideCaptionKey)}</span>
-      )}
+      <span className="role-badge-dot" aria-hidden="true" />
+      <span className="role-badge-text">
+        <span className="role-badge-label">{t(roleLabelKey(role))}</span>
+        {!compact && (
+          <span className="role-badge-side">{t(sideCaptionKey)}</span>
+        )}
+      </span>
     </span>
   );
 }

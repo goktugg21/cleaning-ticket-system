@@ -16,7 +16,9 @@ import type {
 import { useAuth } from "../auth/AuthContext";
 import { isProviderAdmin } from "../auth/permissions";
 import { accessRoleLabelKey } from "../lib/enumLabels";
+import { AccessRoleBadge } from "./AccessRoleBadge";
 import { EmptyState } from "./EmptyState";
+import { StatusBadge } from "./StatusBadge";
 
 /**
  * Shared customer-employees directory.
@@ -74,6 +76,12 @@ export function CustomerEmployeesDirectory({
     CustomerAccessRole | ""
   >("");
 
+  // Codex #1 (PR #76) — the viewer's OWN effective access role, resolved by
+  // a dedicated UNFILTERED lookup (effect below) so the table's access-role
+  // filter can never hide the viewer's own CCA row and strip edit rights.
+  const [viewerAccessRole, setViewerAccessRole] =
+    useState<CustomerAccessRole | null>(null);
+
   // Edit modal state.
   const [editTarget, setEditTarget] = useState<CustomerEmployee | null>(null);
   const [accessRows, setAccessRows] = useState<CustomerUserBuildingAccess[]>([]);
@@ -105,18 +113,37 @@ export function CustomerEmployeesDirectory({
     load(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [load]);
 
-  // The viewer's own row determines the CCA-self-edit path. We resolve
-  // it against the *unfiltered* identity (id) so an access-role filter
-  // does not hide the viewer's own row and silently strip edit rights.
-  const viewerIsCustomerCompanyAdmin = useMemo(() => {
-    if (me?.role !== "CUSTOMER_USER") return false;
-    const ownRow = employees.find((row) => row.id === me.id);
-    return ownRow?.customer_access_role === "CUSTOMER_COMPANY_ADMIN";
-  }, [employees, me]);
+  // Codex #1 — resolve the viewer's OWN effective access role from an
+  // UNFILTERED lookup, independent of `accessRoleFilter`. Only customer
+  // users need it (provider admins are always canEdit). Keyed on
+  // customer/identity, NOT on the filter, so filtering by CLM/CU can never
+  // strip a CCA's edit affordance. The directory endpoint admits the viewer
+  // to read their own customer regardless of access role, so a CLM/CU
+  // simply resolves to a non-CCA role here (no edit).
+  useEffect(() => {
+    if (me?.role !== "CUSTOMER_USER") {
+      setViewerAccessRole(null); // eslint-disable-line react-hooks/set-state-in-effect
+      return;
+    }
+    let cancelled = false;
+    listCustomerEmployees(customerId)
+      .then((resp) => {
+        if (cancelled) return;
+        const own = resp.results.find((row) => row.id === me.id);
+        setViewerAccessRole(own?.customer_access_role ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setViewerAccessRole(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId, me]);
 
   const canEdit =
     canEditOverride ??
-    (isProviderAdmin(me?.role) || viewerIsCustomerCompanyAdmin);
+    (isProviderAdmin(me?.role) ||
+      viewerAccessRole === "CUSTOMER_COMPANY_ADMIN");
 
   const hasActiveFilters = Boolean(accessRoleFilter);
 
@@ -258,28 +285,19 @@ export function CustomerEmployeesDirectory({
                 <td className="td-subject">{row.full_name || "—"}</td>
                 <td>{row.email}</td>
                 <td data-testid="customer-employee-access-role">
-                  {row.customer_access_role ? (
-                    <span
-                      className="badge badge-normal"
-                      data-access-role={row.customer_access_role}
-                    >
-                      {t(accessRoleLabelKey(row.customer_access_role))}
-                    </span>
-                  ) : (
-                    <span className="muted">—</span>
-                  )}
+                  <AccessRoleBadge accessRole={row.customer_access_role} />
                 </td>
                 <td>
-                  <span
-                    className={`cell-tag cell-tag-${
-                      row.is_active ? "open" : "closed"
-                    }`}
-                  >
-                    <i />
-                    {row.is_active
-                      ? t("admin.status_active")
-                      : t("admin.status_inactive")}
-                  </span>
+                  <StatusBadge
+                    variant="cell"
+                    status={{
+                      kind: "generic",
+                      tone: row.is_active ? "open" : "neutral",
+                      label: row.is_active
+                        ? t("admin.status_active")
+                        : t("admin.status_inactive"),
+                    }}
+                  />
                 </td>
                 {canEdit && (
                   <td>

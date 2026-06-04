@@ -3752,56 +3752,73 @@ table.data-table {
 .empty-state-v2-compact .empty-state-v2-desc { font-size: 12.5px; }
 .empty-state-v2-action { margin-top: 8px; }
 
-/* ----- RoleBadge ----- */
+/* ----- RoleBadge (UI-polish: calm dot + label chip) -----
+   Was a saturated two-tone box with a bold colored label + a
+   PROVIDER/CUSTOMER caption — it made people-listing tables read as a
+   wall of green rectangles. Now a quiet pill: a small side-colored dot
+   (the only accent) + the label in near-body weight on a faint tint.
+   The provider/customer/side/label/compact class names are preserved
+   (the Users e2e asserts on them). */
 .role-badge {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  line-height: 1.2;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.role-badge-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.role-badge-text {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  padding: 5px 10px;
-  border-radius: var(--r);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  line-height: 1.15;
-  max-width: 100%;
+  gap: 1px;
+  min-width: 0;
 }
 .role-badge-label {
   font-family: var(--f-head);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
   letter-spacing: -0.005em;
   white-space: nowrap;
 }
 .role-badge-side {
   font-family: var(--f-head);
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
+  color: var(--text-faint);
 }
 .role-badge-provider {
   background: var(--green-faint);
-  border-color: rgba(11, 107, 66, 0.18);
+  border-color: rgba(11, 107, 66, 0.16);
 }
-.role-badge-provider .role-badge-label { color: var(--green); }
-.role-badge-provider .role-badge-side { color: var(--green-2); }
+.role-badge-provider .role-badge-dot { background: var(--green); }
 .role-badge-customer {
   background: var(--teal-soft);
-  border-color: rgba(15, 107, 94, 0.18);
+  border-color: rgba(15, 107, 94, 0.16);
 }
-.role-badge-customer .role-badge-label { color: var(--teal); }
-.role-badge-customer .role-badge-side { color: var(--teal); }
+.role-badge-customer .role-badge-dot { background: var(--teal); }
 .role-badge-fallback {
   background: var(--surface-2);
   border-color: var(--border);
 }
 .role-badge-fallback .role-badge-label { color: var(--text-muted); }
 .role-badge-compact {
-  flex-direction: row;
-  align-items: center;
-  padding: 3px 8px;
-  height: 22px;
+  padding: 2px 9px 2px 7px;
 }
 .role-badge-compact .role-badge-label { font-size: 11px; }
 .role-badge-compact .role-badge-side { display: none; }

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { Contact, RefreshCw } from "lucide-react";
+import { Contact, Pencil, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -15,8 +14,10 @@ import type {
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { isProviderAdmin } from "../../auth/permissions";
+import { ClickableRow } from "../../components/ClickableRow";
 import { EmptyState } from "../../components/EmptyState";
 import { RoleBadge } from "../../components/RoleBadge";
+import { StatusBadge } from "../../components/StatusBadge";
 import {
   employmentTypeLabelKey,
   roleLabelKey,
@@ -26,15 +27,35 @@ import {
  * Employees directory (provider side).
  *
  * View-first per `docs/product/meeting-2026-05-15-system-requirements.md`
- * §3: the table loads read-only. SUPER_ADMIN / COMPANY_ADMIN get an
- * inline employment-type editor on STAFF rows only (revealed by an
- * explicit "Edit" affordance); BUILDING_MANAGER sees the directory
- * read-only with no edit control. Full account management still lives
- * on the Users page — each row links there via "Manage account".
+ * §3: the table loads read-only. The whole row is the click target — it
+ * navigates to the person's account page (/admin/users/<id>) for viewers
+ * who can open it (SUPER_ADMIN: any; COMPANY_ADMIN: only ACTIVE non-
+ * COMPANY_ADMIN rows — mirrors the backend CanManageUser rule and the
+ * scoped Users queryset, so the row never links to a 403/404;
+ * BUILDING_MANAGER: never — the directory is read-only for them).
+ * SUPER_ADMIN / COMPANY_ADMIN additionally get an unobtrusive pencil to
+ * edit a STAFF row's employment type in place (the control stops click
+ * propagation so editing never triggers row navigation).
  *
  * Backend: GET /api/employees/ (`CustomerReadRoute` admits SA / CA /
  * BM; STAFF / CUSTOMER_USER are bounced before reaching the page).
  */
+
+// Codex #2 (PR #76): only make a row open the Users admin surface when the
+// viewer can actually open that user, so the row never links to a 403/404.
+// SUPER_ADMIN may open anyone; a COMPANY_ADMIN may open only ACTIVE users
+// whose role is NOT COMPANY_ADMIN (CanManageUser rejects a peer admin and
+// the Users queryset hides inactive); BUILDING_MANAGER never opens accounts.
+function canOpenAccount(
+  viewerRole: Role | null | undefined,
+  row: ProviderEmployee,
+): boolean {
+  if (viewerRole === "SUPER_ADMIN") return true;
+  if (viewerRole === "COMPANY_ADMIN") {
+    return row.is_active && row.role !== "COMPANY_ADMIN";
+  }
+  return false;
+}
 
 // The three provider-side roles the directory can filter on. STAFF +
 // the two provider-admin roles + BUILDING_MANAGER are the only values
@@ -239,19 +260,32 @@ export function EmployeesAdminPage() {
                 <th>{t("employees.col_role")}</th>
                 <th>{t("employees.col_employment_type")}</th>
                 <th>{t("status")}</th>
-                <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
             <tbody>
               {employees.map((row) => {
                 const isStaff = row.role === "STAFF";
                 const isEditing = editingId === row.id;
+                const openable = canOpenAccount(me?.role, row);
                 return (
-                  <tr key={row.id} data-testid="employee-row" data-role={row.role}>
+                  <ClickableRow
+                    key={row.id}
+                    to={openable ? `/admin/users/${row.id}` : undefined}
+                    inert={!openable}
+                    dataRole={row.role}
+                    testId="employee-row"
+                    ariaLabel={
+                      openable
+                        ? t("employees.open_account", {
+                            name: row.full_name || row.email,
+                          })
+                        : undefined
+                    }
+                  >
                     <td className="td-subject">{row.full_name || "—"}</td>
                     <td>{row.email}</td>
                     <td data-testid="employee-row-role">
-                      <RoleBadge role={row.role} />
+                      <RoleBadge role={row.role} compact />
                     </td>
                     <td data-testid="employee-row-employment-type">
                       {isEditing ? (
@@ -270,6 +304,7 @@ export function EmployeesAdminPage() {
                             onChange={(event) =>
                               setEditValue(event.target.value as EmploymentType)
                             }
+                            onClick={(event) => event.stopPropagation()}
                             disabled={editBusy}
                           >
                             {EMPLOYMENT_TYPE_OPTIONS.map((value) => (
@@ -282,7 +317,10 @@ export function EmployeesAdminPage() {
                             type="button"
                             className="btn btn-primary btn-sm"
                             data-testid="employee-employment-type-save"
-                            onClick={() => saveEdit(row)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              saveEdit(row);
+                            }}
                             disabled={editBusy}
                           >
                             {editBusy
@@ -292,7 +330,10 @@ export function EmployeesAdminPage() {
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={cancelEdit}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              cancelEdit();
+                            }}
                             disabled={editBusy}
                           >
                             {t("employees.edit_cancel")}
@@ -307,53 +348,52 @@ export function EmployeesAdminPage() {
                             </span>
                           )}
                         </div>
-                      ) : row.employment_type ? (
-                        <span>{t(employmentTypeLabelKey(row.employment_type))}</span>
                       ) : (
-                        <span className="muted">—</span>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          {row.employment_type ? (
+                            <span>
+                              {t(employmentTypeLabelKey(row.employment_type))}
+                            </span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                          {canEdit && isStaff && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm icon-only"
+                              data-testid="employee-edit-employment-type"
+                              aria-label={t("employees.edit_employment_type")}
+                              title={t("employees.edit_employment_type")}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                startEdit(row);
+                              }}
+                            >
+                              <Pencil size={13} strokeWidth={2} />
+                            </button>
+                          )}
+                        </span>
                       )}
                     </td>
                     <td>
-                      <span
-                        className={`cell-tag cell-tag-${
-                          row.is_active ? "open" : "closed"
-                        }`}
-                      >
-                        <i />
-                        {row.is_active
-                          ? t("admin.status_active")
-                          : t("admin.status_inactive")}
-                      </span>
+                      <StatusBadge
+                        variant="cell"
+                        status={{
+                          kind: "generic",
+                          tone: row.is_active ? "open" : "neutral",
+                          label: row.is_active
+                            ? t("admin.status_active")
+                            : t("admin.status_inactive"),
+                        }}
+                      />
                     </td>
-                    <td>
-                      <div
-                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      >
-                        {canEdit && isStaff && !isEditing && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            data-testid="employee-edit-employment-type"
-                            onClick={() => startEdit(row)}
-                          >
-                            {t("employees.edit_employment_type")}
-                          </button>
-                        )}
-                        {/* The Users admin surface is SA/CA-only (AdminRoute),
-                            so only show the deep-link to viewers who can use
-                            it; a BUILDING_MANAGER would be bounced. */}
-                        {canEdit && (
-                          <Link
-                            className="btn btn-ghost btn-sm"
-                            to={`/admin/users/${row.id}`}
-                            data-testid="employee-manage-account"
-                          >
-                            {t("employees.manage_account")}
-                          </Link>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
+                  </ClickableRow>
                 );
               })}
             </tbody>

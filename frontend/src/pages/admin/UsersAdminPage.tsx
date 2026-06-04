@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { MailPlus, RefreshCw, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
@@ -13,8 +13,11 @@ import type {
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { AccessRoleBadge } from "../../components/AccessRoleBadge";
+import { ClickableRow } from "../../components/ClickableRow";
 import { EmptyState } from "../../components/EmptyState";
 import { RoleBadge } from "../../components/RoleBadge";
+import { StatusBadge } from "../../components/StatusBadge";
 import {
   accessRoleLabelKey,
   isProviderRole,
@@ -50,22 +53,6 @@ function ScopeChip({ summary }: { summary: UserScopeSummary }) {
   );
 }
 
-// Sprint 2c — read-only single badge = the user's highest EFFECTIVE
-// customer access role (the backend collapses per-building grants to one,
-// company-scoped to the viewer). Provider users / null render an em-dash.
-// Editing happens in the per-customer permission matrix, never here.
-function AccessRoleCell({ role }: { role: CustomerAccessRole | null }) {
-  const { t } = useTranslation("common");
-  if (!role) {
-    return <span className="muted">—</span>;
-  }
-  return (
-    <span className="badge badge-normal" data-access-role={role}>
-      {t(accessRoleLabelKey(role))}
-    </span>
-  );
-}
-
 // Sprint 2c — the three customer access roles for the read-only filter
 // toolbar (mirrors AccessRole on the backend). Labels reuse access_role.*.
 const ACCESS_ROLE_OPTIONS: CustomerAccessRole[] = [
@@ -89,7 +76,6 @@ const ALL_ROLES: Role[] = [
 
 export function UsersAdminPage() {
   const { me } = useAuth();
-  const navigate = useNavigate();
   const { t } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
@@ -207,59 +193,46 @@ export function UsersAdminPage() {
   // Sprint 28 Batch 15.3 — extracted so the two-group table body can
   // share the same row rendering for the provider and customer
   // partitions.
+  // UI-polish — the whole row is the click target -> the user detail
+  // page (which holds the Edit affordance). The per-row "Edit" text link
+  // is gone; the row never links to a 403/404 because the Users list is
+  // already scoped to users the viewer can open.
   function renderUserRow(user: UserAdmin) {
     const detailPath = `/admin/users/${user.id}`;
-    const editPath = `${detailPath}/edit`;
-    const openDetail = () => navigate(detailPath);
     return (
-      <tr
+      <ClickableRow
         key={user.id}
-        className="admin-row-clickable"
-        role="link"
-        tabIndex={0}
-        aria-label={t("admin.view") + ": " + user.email}
-        onClick={openDetail}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            openDetail();
-          }
-        }}
+        to={detailPath}
+        dataRole={user.role}
+        ariaLabel={t("admin.view") + ": " + user.email}
       >
         <td className="td-subject">
           <Link to={detailPath}>{user.email}</Link>
         </td>
         <td>{user.full_name || "—"}</td>
         <td data-testid="user-row-role" data-role={user.role}>
-          <RoleBadge role={user.role} />
+          <RoleBadge role={user.role} compact />
         </td>
         <td data-testid="user-row-access-role">
-          <AccessRoleCell role={user.customer_access_role} />
+          <AccessRoleBadge accessRole={user.customer_access_role} />
         </td>
         <td>{user.language}</td>
         <td data-testid="user-row-scope">
           <ScopeChip summary={user.scope_summary} />
         </td>
         <td>
-          <span
-            className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
-          >
-            <i />
-            {user.is_active
-              ? t("admin.status_active")
-              : t("admin.status_inactive")}
-          </span>
+          <StatusBadge
+            variant="cell"
+            status={{
+              kind: "generic",
+              tone: user.is_active ? "open" : "neutral",
+              label: user.is_active
+                ? t("admin.status_active")
+                : t("admin.status_inactive"),
+            }}
+          />
         </td>
-        <td>
-          <Link
-            className="btn btn-ghost btn-sm"
-            to={editPath}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {t("admin.edit")}
-          </Link>
-        </td>
-      </tr>
+      </ClickableRow>
     );
   }
 
@@ -418,7 +391,6 @@ export function UsersAdminPage() {
                 <th>{t("users.col_language")}</th>
                 <th>{t("users.col_scope")}</th>
                 <th>{t("status")}</th>
-                <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
             <tbody>
@@ -428,7 +400,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-provider"
                   >
-                    <td colSpan={8}>
+                    <td colSpan={7}>
                       <span className="users-group-header-label">
                         {t("users.group_provider")}
                       </span>
@@ -446,7 +418,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-customer"
                   >
-                    <td colSpan={8}>
+                    <td colSpan={7}>
                       <span className="users-group-header-label">
                         {t("users.group_customer")}
                       </span>
@@ -469,26 +441,28 @@ export function UsersAdminPage() {
           aria-label={t("nav.users")}
         >
           {visibleUsers.map((user) => {
-            const editPath = `/admin/users/${user.id}`;
+            const detailPath = `/admin/users/${user.id}`;
             return (
               <li key={user.id} className="admin-card">
                 <Link
-                  to={editPath}
+                  to={detailPath}
                   className="admin-card-link"
-                  aria-label={`${t("admin.edit")}: ${user.email}`}
+                  aria-label={`${t("admin.view")}: ${user.email}`}
                   data-testid="admin-user-card"
                   data-role={user.role}
                 >
                   <div className="admin-card-head">
                     <span className="admin-card-title">{user.email}</span>
-                    <span
-                      className={`cell-tag cell-tag-${user.is_active ? "open" : "closed"}`}
-                    >
-                      <i />
-                      {user.is_active
-                        ? t("admin.status_active")
-                        : t("admin.status_inactive")}
-                    </span>
+                    <StatusBadge
+                      variant="cell"
+                      status={{
+                        kind: "generic",
+                        tone: user.is_active ? "open" : "neutral",
+                        label: user.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive"),
+                      }}
+                    />
                   </div>
                   <dl className="admin-card-meta">
                     {user.full_name && (
@@ -508,7 +482,9 @@ export function UsersAdminPage() {
                         <div className="admin-card-meta-row">
                           <dt>{t("users.col_access_role")}</dt>
                           <dd>
-                            <AccessRoleCell role={user.customer_access_role} />
+                            <AccessRoleBadge
+                              accessRole={user.customer_access_role}
+                            />
                           </dd>
                         </div>
                       )}
@@ -525,7 +501,7 @@ export function UsersAdminPage() {
                   </dl>
                   <div className="admin-card-actions">
                     <span className="btn btn-ghost btn-sm">
-                      {t("admin.edit")}
+                      {t("admin.view")}
                     </span>
                   </div>
                 </Link>
