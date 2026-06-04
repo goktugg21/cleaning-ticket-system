@@ -162,6 +162,18 @@
   "timeline_ew_status_change": "Extra Work #{{id}}:",
   "timeline_occurrence_reference": "Originated from planned occurrence #{{id}} · {{date}}",
 
+  "resp_mgr.title": "Responsible managers",
+  "resp_mgr.desc": "Building managers jointly responsible for this ticket. This is separate from the primary assignee above.",
+  "resp_mgr.empty": "No responsible managers yet.",
+  "resp_mgr.add_label": "Add a responsible manager",
+  "resp_mgr.add_placeholder": "Select a manager",
+  "resp_mgr.add_button": "Add",
+  "resp_mgr.adding": "Adding…",
+  "resp_mgr.remove": "Remove",
+  "resp_mgr.no_candidates": "No eligible managers for this building.",
+  "resp_mgr.error_terminal": "This ticket is closed or decided; responsible managers can't be changed.",
+  "resp_mgr.error_not_eligible": "That manager isn't eligible for this building.",
+
   "convert.dialog_title": "Convert to Extra Work",
   "convert.dialog_desc": "Create a new Extra Work request from this ticket. This ticket will be marked as converted and a new request is created with the line items below.",
   "convert.intent_section_title": "How should this request be handled?",

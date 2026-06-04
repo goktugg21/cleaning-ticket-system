@@ -14,16 +14,27 @@ import {
   updateCompany,
 } from "../../api/admin";
 import type { CompanyWritePayload } from "../../api/admin";
-import type {
-  CompanyAdmin,
-  CompanyAdminMembership,
-  UserAdmin,
+import {
+  COMPANY_POLICY_FLAGS,
+  type CompanyAdmin,
+  type CompanyAdminMembership,
+  type CompanyPolicyFlag,
+  type UserAdmin,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+
+// Short i18n key alias per policy flag (keeps the common.json keys readable
+// vs. the long backend field names).
+const POLICY_KEY: Record<CompanyPolicyFlag, string> = {
+  provider_admin_may_manage_customer_company_admins: "manage_cca",
+  provider_admin_may_manage_catalog: "manage_catalog",
+  provider_admin_may_manage_customer_prices: "manage_prices",
+  provider_admin_may_quote_override_start: "quote_override",
+};
 
 export function CompanyFormPage() {
   const { id } = useParams();
@@ -48,6 +59,15 @@ export function CompanyFormPage() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [defaultLanguage, setDefaultLanguage] = useState("nl");
+  // Provider-policy flags. SUPER_ADMIN-only writable: a COMPANY_ADMIN sees
+  // them read-only and they are NEVER added to the PATCH payload for a
+  // non-SA (the backend validate_* would 400 the whole save if they were).
+  const [policy, setPolicy] = useState<Record<CompanyPolicyFlag, boolean>>({
+    provider_admin_may_manage_customer_company_admins: false,
+    provider_admin_may_manage_catalog: false,
+    provider_admin_may_manage_customer_prices: false,
+    provider_admin_may_quote_override_start: false,
+  });
 
   const form = useEntityForm<CompanyAdmin, CompanyWritePayload>({
     id,
@@ -64,12 +84,30 @@ export function CompanyFormPage() {
       } else if (isSuperAdmin) {
         payload.slug = slug.trim();
       }
+      // Provider-policy flags are SUPER_ADMIN-only writable. Include them
+      // ONLY for a SA editing an existing company — a COMPANY_ADMIN must
+      // never send them (the backend would 400 the whole PATCH).
+      if (!isCreate && isSuperAdmin) {
+        for (const flag of COMPANY_POLICY_FLAGS) {
+          payload[flag] = policy[flag];
+        }
+      }
       return payload;
     },
     applyEntity: (entity) => {
       setName(entity.name);
       setSlug(entity.slug);
       setDefaultLanguage(entity.default_language);
+      setPolicy({
+        provider_admin_may_manage_customer_company_admins:
+          entity.provider_admin_may_manage_customer_company_admins,
+        provider_admin_may_manage_catalog:
+          entity.provider_admin_may_manage_catalog,
+        provider_admin_may_manage_customer_prices:
+          entity.provider_admin_may_manage_customer_prices,
+        provider_admin_may_quote_override_start:
+          entity.provider_admin_may_quote_override_start,
+      });
     },
     successPath: (entity) => `/admin/companies/${entity.id}?saved=ok`,
     onEditSuccess: () => setSavedBanner(t("companies.banner_saved")),
@@ -306,6 +344,83 @@ export function CompanyFormPage() {
           </div>
 
           </div>
+
+          {/* Provider policy — SUPER_ADMIN-only writable grants. A
+              COMPANY_ADMIN sees them read-only (disabled) and they are
+              never added to the PATCH payload for a non-SA. */}
+          {!isCreate && (
+            <div className="form-section" data-testid="company-policy-section">
+              <div className="form-section-title">
+                {t("company_policy.section_title")}
+              </div>
+              <div className="form-section-helper">
+                {t("company_policy.section_desc")}
+              </div>
+              {!isSuperAdmin && (
+                <p
+                  className="muted small"
+                  style={{ marginBottom: 10 }}
+                  data-testid="company-policy-readonly-hint"
+                >
+                  {t("company_policy.readonly_hint")}
+                </p>
+              )}
+              <div className="settings-toggle-group">
+                {COMPANY_POLICY_FLAGS.map((flag) => {
+                  const dangerous =
+                    flag === "provider_admin_may_quote_override_start";
+                  const key = POLICY_KEY[flag];
+                  return (
+                    <div
+                      key={flag}
+                      className="field"
+                      style={{ marginBottom: 8 }}
+                    >
+                      <label className="settings-toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={policy[flag]}
+                          disabled={!isSuperAdmin || form.submitting}
+                          onChange={(event) =>
+                            setPolicy((prev) => ({
+                              ...prev,
+                              [flag]: event.target.checked,
+                            }))
+                          }
+                          data-testid={`company-policy-${flag}`}
+                        />
+                        <span>
+                          {t(`company_policy.${key}_label`)}
+                          {dangerous && (
+                            <span
+                              className="cell-tag cell-tag-rejected"
+                              style={{ marginLeft: 8 }}
+                              data-testid="company-policy-dangerous-badge"
+                            >
+                              <i />
+                              {t("company_policy.dangerous_badge")}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                      <p
+                        className="muted small"
+                        style={{
+                          margin: "2px 0 0 30px",
+                          ...(dangerous
+                            ? { color: "var(--red-1, #b42318)" }
+                            : {}),
+                        }}
+                      >
+                        {t(`company_policy.${key}_helper`)}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="form-actions">
             {!isCreate && numericId !== null && (
               <Link
