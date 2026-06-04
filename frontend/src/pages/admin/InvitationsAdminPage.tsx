@@ -407,6 +407,18 @@ export function InvitationsAdminPage() {
             <div className="invitation-form-fields">
               <div className="form-grid-2">
                 <div className="field">
+                  <label className="field-label" htmlFor="invite-full-name">
+                    {t("invitations.field_full_name")} {t("invitations.field_optional")}
+                  </label>
+                  <input
+                    id="invite-full-name"
+                    className="field-input"
+                    type="text"
+                    value={formFullName}
+                    onChange={(event) => setFormFullName(event.target.value)}
+                  />
+                </div>
+                <div className="field">
                   <label className="field-label" htmlFor="invite-email">
                     {t("invitations.field_email")} *
                   </label>
@@ -424,44 +436,9 @@ export function InvitationsAdminPage() {
                     </div>
                   )}
                 </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="invite-full-name">
-                    {t("invitations.field_full_name")} {t("invitations.field_optional")}
-                  </label>
-                  <input
-                    id="invite-full-name"
-                    className="field-input"
-                    type="text"
-                    value={formFullName}
-                    onChange={(event) => setFormFullName(event.target.value)}
-                  />
-                </div>
               </div>
 
               <div className="form-grid-2">
-                <div className="field">
-                  <label className="field-label" htmlFor="invite-role">
-                    {t("invitations.field_role")} *
-                  </label>
-                  <select
-                    id="invite-role"
-                    className="field-select"
-                    value={formRole}
-                    onChange={(event) => setFormRole(event.target.value as Role)}
-                  >
-                    {availableRoles.map((role) => (
-                      <option key={role} value={role}>
-                        {t(roleLabelKeyNs(role))}
-                      </option>
-                    ))}
-                  </select>
-                  {formFieldErrors.role && (
-                    <div className="alert-error login-error" role="alert">
-                      {formFieldErrors.role}
-                    </div>
-                  )}
-                </div>
-
                 {formRole !== "SUPER_ADMIN" && (
                   <div className="field">
                     <label className="field-label" htmlFor="invite-company">
@@ -497,6 +474,29 @@ export function InvitationsAdminPage() {
                     )}
                   </div>
                 )}
+
+                <div className="field">
+                  <label className="field-label" htmlFor="invite-role">
+                    {t("invitations.field_role")} *
+                  </label>
+                  <select
+                    id="invite-role"
+                    className="field-select"
+                    value={formRole}
+                    onChange={(event) => setFormRole(event.target.value as Role)}
+                  >
+                    {availableRoles.map((role) => (
+                      <option key={role} value={role}>
+                        {t(roleLabelKeyNs(role))}
+                      </option>
+                    ))}
+                  </select>
+                  {formFieldErrors.role && (
+                    <div className="alert-error login-error" role="alert">
+                      {formFieldErrors.role}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {formRole === "BUILDING_MANAGER" && (

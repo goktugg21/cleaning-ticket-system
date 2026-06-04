@@ -392,8 +392,11 @@ export function CustomerEmployeesDirectory({
                 {t("customer_employees.edit_no_access")}
               </p>
             ) : (
-              <div className="table-wrap">
-                <table className="data-table">
+              <div className="table-wrap" style={{ overflowX: "visible" }}>
+                {/* Override the global .data-table min-width (860px) so this
+                    2-column modal table fits the 560px modal without forcing
+                    a horizontal scrollbar. */}
+                <table className="data-table" style={{ minWidth: 0 }}>
                   <thead>
                     <tr>
                       <th>{t("customer_employees.col_building")}</th>

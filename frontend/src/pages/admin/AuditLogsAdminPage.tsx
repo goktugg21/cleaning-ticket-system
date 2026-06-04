@@ -321,7 +321,17 @@ export function AuditLogsAdminPage() {
       </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
-        <form className="filter-bar" onSubmit={applyFilters}>
+        {/* Auto-fit grid keeps all six controls (5 filters + actions) on one
+            row at desktop width and wraps them gracefully on narrow viewports,
+            replacing the shared 4-track .filter-bar grid that pushed From / To
+            / Apply onto a second line. */}
+        <form
+          className="filter-bar"
+          onSubmit={applyFilters}
+          style={{
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          }}
+        >
           <div className="filter-field">
             <span className="filter-label">
               {t("audit_logs.filter_target_model")}
