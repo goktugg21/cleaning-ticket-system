@@ -31,6 +31,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from accounts.invitations import Invitation, generate_invitation_token
 from accounts.models import StaffProfile, UserRole
 from accounts.scoping import scope_tickets_for
 from buildings.models import BuildingStaffVisibility
@@ -252,15 +253,19 @@ class StaffInvitationTests(TenantFixtureMixin, APITestCase):
     # ---- regression: CUSTOMER_USER path unchanged -------------------------
 
     def test_customer_user_invite_and_accept_still_works(self):
-        response, raw = self._create_invitation_and_capture_raw(
-            self.super_admin,
-            {
-                "email": "regression-cu@example.com",
-                "role": UserRole.CUSTOMER_USER,
-                "customer_ids": [self.customer.id],
-            },
+        # Sprint 3 — a CUSTOMER_USER can no longer be invited via the public
+        # endpoint (contact-first enforcement); the invitation is created
+        # MODEL-DIRECT by the promote-to-user flow. Mirror that here so the
+        # accept-side contract (membership created, no STAFF artefacts) stays
+        # pinned.
+        raw, token_hash = generate_invitation_token()
+        invitation = Invitation.objects.create(
+            email="regression-cu@example.com",
+            role=UserRole.CUSTOMER_USER,
+            token_hash=token_hash,
+            created_by=self.super_admin,
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        invitation.customers.set([self.customer])
         accept = self._accept(raw)
         self.assertEqual(accept.status_code, status.HTTP_201_CREATED, accept.data)
 

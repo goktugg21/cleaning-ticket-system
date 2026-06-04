@@ -119,28 +119,26 @@ class InvitationCreateSerializer(serializers.ModelSerializer):
                     "BUILDING_MANAGER invitations only carry a building scope."
                 )
         elif role == UserRole.CUSTOMER_USER:
-            if not customer_ids:
-                raise serializers.ValidationError(
-                    {"customer_ids": "CUSTOMER_USER invitations must specify at least one customer."}
-                )
-            # Sprint 12C — one customer-user belongs to exactly one
-            # customer (locked product invariant). An invitation may not
-            # bind a customer user to multiple customers at once.
-            if len(set(customer_ids)) != 1:
-                raise serializers.ValidationError(
-                    {
-                        "customer_ids": [
-                            serializers.ErrorDetail(
-                                "A customer user must belong to exactly one customer.",
-                                code="customer_user_cross_customer_forbidden",
-                            )
-                        ]
-                    }
-                )
-            if company_ids or building_ids:
-                raise serializers.ValidationError(
-                    "CUSTOMER_USER invitations only carry a customer scope."
-                )
+            # Sprint 3 — contact-first enforcement. A customer user WITH
+            # access may only be created by promoting a Contact:
+            # `customers/promotion.py` creates the CUSTOMER_USER invitation
+            # MODEL-DIRECT (Invitation.objects.create(..., contact=contact)),
+            # bypassing this public serializer entirely. The standalone
+            # invitations endpoint is for PROVIDER staff only, so a
+            # CUSTOMER_USER invite here is rejected outright with a stable
+            # code. (The one-customer cross-customer invariant for the
+            # promotion path is enforced in `customers/promotion.py`.)
+            raise serializers.ValidationError(
+                {
+                    "role": [
+                        serializers.ErrorDetail(
+                            "Customer users are created by promoting a "
+                            "contact, not via the invitations screen.",
+                            code="customer_user_must_come_from_contact",
+                        )
+                    ]
+                }
+            )
         elif role == UserRole.STAFF:
             # Sprint 13B — STAFF invites mirror the BUILDING_MANAGER
             # shape: a STAFF user is scoped purely by buildings. The
