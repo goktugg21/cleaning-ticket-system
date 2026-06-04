@@ -714,7 +714,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             _target_provider_in_scope,
         )
 
-        from .models import ExtraWorkStatus
+        from .models import ExtraWorkRequestIntent, ExtraWorkStatus
 
         request = self.context.get("request")
         user = getattr(request, "user", None) if request else None
@@ -724,6 +724,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
                 "allowed_next_statuses": [],
                 "can_prepare_extra_work_proposal": False,
                 "can_override_customer_decision": False,
+                "can_auto_start": False,
                 "can_view_pricing": False,
                 "can_view_proposal_pdf": False,
                 "can_approve": False,
@@ -776,6 +777,20 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             and obj.status == ExtraWorkStatus.PRICING_PROPOSED
         )
 
+        # Sprint 31 — AUTO_START "Start work" affordance. A provider
+        # operator in scope may start a PRICING_PROPOSED request that was
+        # created with the AUTO_START_AFTER_PRICING intent WITHOUT a
+        # customer approval or an override reason (the customer
+        # pre-authorised it). This is NOT an override (is_override stays
+        # False) so it is independent of the BM override-key — any
+        # in-scope provider operator qualifies.
+        can_auto_start = (
+            (is_super or is_ca_in or is_bm_in)
+            and obj.status == ExtraWorkStatus.PRICING_PROPOSED
+            and obj.request_intent
+            == ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING
+        )
+
         # Pricing visibility. Provider operators in scope see prices
         # regardless of the B6 prep override (B6 only revokes the
         # ability to SEND a proposal, not to view prices). Customer
@@ -826,6 +841,7 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "allowed_next_statuses": list(allowed),
             "can_prepare_extra_work_proposal": can_prepare_extra_work_proposal,
             "can_override_customer_decision": can_override_customer_decision,
+            "can_auto_start": can_auto_start,
             "can_view_pricing": can_view_pricing,
             "can_view_proposal_pdf": can_view_proposal_pdf,
             "can_approve": can_approve,
@@ -1717,18 +1733,25 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
 
     B2 (system-business-logic-and-workflows.md §7.0) — Extra Work is
     always a cart of line items. When the caller omits the `lines`
-    array (or sends `lines=[]`), the serializer auto-seeds one
-    `ProposalLine` per `ExtraWorkRequestItem` on the parent EW. For
-    each seeded line, the contract resolver
+    array (or sends `lines=[]`), the serializer auto-seeds
+    `ProposalLine` rows from the parent EW's cart. For each cart
+    item, the contract resolver
     (`extra_work.pricing.resolve_price`) is consulted with the cart
-    item's own `requested_date`; when a contract row is returned,
-    `unit_price` and `vat_pct` are pre-filled from it. For cart
-    lines without a contract row, both fields default to `0.00`
-    and the operator is expected to fill them in before SEND. No
-    metadata marker is written on the line (per the B2 spec —
-    `customer_explanation` is customer-visible business text, not
-    an internal flag; "is this line contract-priced" is derived
-    by re-calling `resolve_price` at validation / read time).
+    item's own `requested_date`. ONLY agreed-priced cart lines (a
+    contract row is returned) are auto-seeded, pre-filling
+    `unit_price` and `vat_pct` from the contract row. Non-contract
+    (custom / needs-proposal) cart lines are NOT auto-seeded; the
+    operator adds them deliberately via the composer (they would
+    otherwise seed at 0.00 and, since saved proposal lines are
+    read-only in the UI, force the operator to remove + re-add
+    them). An all-custom cart therefore auto-seeds zero lines and
+    yields an empty DRAFT proposal; the existing SEND gate
+    (`proposal_lines_required`) blocks sending an empty proposal.
+    No metadata marker is written on a seeded line (per the B2
+    spec — `customer_explanation` is customer-visible business
+    text, not an internal flag; "is this line contract-priced" is
+    derived by re-calling `resolve_price` at validation / read
+    time).
 
     When the caller sends explicit `lines`, the original behaviour
     is preserved: the serializer creates exactly the rows the
@@ -1819,23 +1842,22 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
                         customer,
                         on=item.requested_date,
                     )
-                    if contract is not None:
-                        unit_price = contract.unit_price
-                        vat_pct = contract.vat_pct
-                    else:
-                        # Custom line — operator must set the price
-                        # before SEND. The SEND-time gate refuses
-                        # unit_price=0 without a customer_explanation.
-                        unit_price = Decimal("0.00")
-                        vat_pct = Decimal("21.00")
+                    # Only auto-seed agreed-priced cart lines. A
+                    # non-contract (custom / needs-proposal) line is
+                    # skipped: the operator adds it deliberately (and
+                    # already priced) via the composer. Auto-seeding it
+                    # at 0.00 would force a remove + re-add because saved
+                    # proposal lines are read-only in the UI.
+                    if contract is None:
+                        continue
                     ProposalLine.objects.create(
                         proposal=proposal,
                         service=item.service,
                         description="",
                         quantity=item.quantity,
                         unit_type=item.unit_type,
-                        unit_price=unit_price,
-                        vat_pct=vat_pct,
+                        unit_price=contract.unit_price,
+                        vat_pct=contract.vat_pct,
                         customer_explanation="",
                         internal_note="",
                         is_approved_for_spawn=True,

@@ -2,6 +2,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  ArrowRightLeft,
   ChevronLeft,
   Clock,
   MapPin,
@@ -44,6 +45,7 @@ import {
 } from "../auth/permissions";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
+import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
@@ -152,6 +154,8 @@ const PRIMARY_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   REJECTED: ["IN_PROGRESS"],
   CLOSED: [],
   REOPENED_BY_ADMIN: ["IN_PROGRESS"],
+  // Terminal — no further status moves once converted to Extra Work.
+  CONVERTED_TO_EXTRA_WORK: [],
 };
 
 function partitionTransitions(
@@ -171,6 +175,16 @@ function partitionTransitions(
   const secondary = allowed.filter((s) => !primarySet.has(s));
   return { primary, secondary };
 }
+
+// Sprint 7B (frontend) — statuses from which a ticket may be converted
+// to a new Extra Work request. Mirrors the backend convertibility gate
+// in `tickets/views.py::convert_to_extra_work` (OPEN / IN_PROGRESS /
+// REOPENED_BY_ADMIN; CONVERTED_TO_EXTRA_WORK and every terminal status
+// are rejected). The convert flow is a DEDICATED endpoint, never a raw
+// status transition.
+const CONVERTIBLE_TICKET_STATUSES: ReadonlySet<TicketStatus> = new Set<
+  TicketStatus
+>(["OPEN", "IN_PROGRESS", "REOPENED_BY_ADMIN"]);
 
 const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
@@ -405,6 +419,14 @@ export function TicketDetailPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deletingTicket, setDeletingTicket] = useState(false);
 
+  // Sprint 7B (frontend) — Convert-to-Extra-Work dialog open state.
+  // Converting a ticket is a dedicated endpoint that creates a new
+  // ExtraWorkRequest; it is NOT the raw status transition to
+  // CONVERTED_TO_EXTRA_WORK (which would flip the status without ever
+  // creating the request). The button is gated below on
+  // `canConvertTicket`.
+  const [convertOpen, setConvertOpen] = useState(false);
+
   // Provider-management trio (SA + CA + BM). Drives note-author UI,
   // assignable-manager dropdown, etc. — the surface that may see+author
   // PROVIDER_INTERNAL notes (B7) and direct ticket assignment.
@@ -466,6 +488,25 @@ export function TicketDetailPage() {
     (me.role === "SUPER_ADMIN" ||
       me.role === "COMPANY_ADMIN" ||
       ticket.created_by === me.id);
+
+  // Sprint 7B (frontend) — mirrors the backend convert gate in
+  // `tickets/views.py::convert_to_extra_work`: provider-management role
+  // (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER) AND a convertible
+  // status. Backend stays the source of truth (scope + role + status);
+  // this is purely a UX gate so the prominent button only renders when
+  // the action will actually be accepted.
+  //
+  // Codex P2 (PR #72) — also hide the action for an EW-origin ticket
+  // (itself spawned from an Extra Work request): converting it would
+  // nest a second EW and break the one-operational-ticket-per-EW model.
+  // The backend rejects this with 400 `ticket_already_extra_work_origin`
+  // (the authority, §11.4); this `!extra_work_origin` check is the UI
+  // mirror so the button never even appears.
+  const canConvertTicket =
+    !!ticket &&
+    isProviderManagementRole(me?.role) &&
+    CONVERTIBLE_TICKET_STATUSES.has(ticket.status) &&
+    !ticket.extra_work_origin;
 
   const loadTicket = useCallback(async () => {
     if (!id) return;
@@ -1014,7 +1055,28 @@ export function TicketDetailPage() {
               ticket" button has been demoted to a small text link in the
               Details card footer (see the consolidated Details card
               below). The confirmation dialog and the delete behaviour
-              are unchanged; only the entry-point affordance moved. */}
+              are unchanged; only the entry-point affordance moved.
+
+              Sprint 7B (frontend) — prominent "Convert to Extra Work"
+              header action. Opens the dedicated convert dialog (which
+              POSTs to /tickets/<id>/convert-to-extra-work/ and creates
+              a NEW ExtraWorkRequest); it is NOT the raw status hop to
+              CONVERTED_TO_EXTRA_WORK. Gated on `canConvertTicket`
+              (provider-management role + convertible status), mirroring
+              the backend gate. */}
+          {canConvertTicket && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setConvertOpen(true)}
+              data-testid="ticket-convert-to-ew-button"
+            >
+              <ArrowRightLeft size={14} strokeWidth={2.2} />
+              <span style={{ marginLeft: 6 }}>
+                {t("workflow_convert_to_extra_work")}
+              </span>
+            </button>
+          )}
         </div>
         <div className="detail-header-meta">
           <span className="detail-header-no">{ticket.ticket_no}</span>
@@ -2248,7 +2310,14 @@ export function TicketDetailPage() {
                           t("updating")
                         ) : (
                           <>
-                            {t("workflow_move_to", { status: tStatus(status) })}
+                            {/* Sprint 7B (frontend) — CONVERTED_TO_EXTRA_WORK
+                                is filtered out of the render arrays above,
+                                so this only ever labels real status moves.
+                                Conversion lives on the dedicated header
+                                "Convert to Extra Work" button. */}
+                            {t("workflow_move_to", {
+                              status: tStatus(status),
+                            })}
                             <span className="status-btn-arrow">→</span>
                           </>
                         )}
@@ -2261,16 +2330,28 @@ export function TicketDetailPage() {
                     // never POSTs without an `override_reason` (the
                     // backend returns 400 `override_reason_required`
                     // on the empty-reason path).
-                    const primaryForRender = providerActsAsOverride
-                      ? primaryNextStatuses.filter(
-                          (s) => s !== "APPROVED" && s !== "REJECTED",
-                        )
-                      : primaryNextStatuses;
-                    const secondaryForRender = providerActsAsOverride
-                      ? secondaryNextStatuses.filter(
-                          (s) => s !== "APPROVED" && s !== "REJECTED",
-                        )
-                      : secondaryNextStatuses;
+                    // Sprint 7B (frontend) — NEVER render
+                    // CONVERTED_TO_EXTRA_WORK as a raw status-transition
+                    // button. That hop would flip the status WITHOUT
+                    // creating the ExtraWorkRequest; conversion now runs
+                    // through the dedicated convert endpoint + dialog
+                    // (the prominent header "Convert to Extra Work"
+                    // button). Drop it from both render groups so it can
+                    // never POST to /status/.
+                    const primaryForRender = (
+                      providerActsAsOverride
+                        ? primaryNextStatuses.filter(
+                            (s) => s !== "APPROVED" && s !== "REJECTED",
+                          )
+                        : primaryNextStatuses
+                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
+                    const secondaryForRender = (
+                      providerActsAsOverride
+                        ? secondaryNextStatuses.filter(
+                            (s) => s !== "APPROVED" && s !== "REJECTED",
+                          )
+                        : secondaryNextStatuses
+                    ).filter((s) => s !== "CONVERTED_TO_EXTRA_WORK");
                     // Override-arming targets — only the WCA decision
                     // targets the actor is actually allowed to drive.
                     const overrideTargets: TicketStatus[] =
@@ -2618,6 +2699,20 @@ export function TicketDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Sprint 7B (frontend) — Convert-to-Extra-Work dialog. Posts to
+          the dedicated convert endpoint and, on success, navigates to
+          the freshly-created ExtraWorkRequest detail page. */}
+      {convertOpen && (
+        <ConvertToExtraWorkDialog
+          ticketId={ticket.id}
+          onClose={() => setConvertOpen(false)}
+          onConverted={(extraWorkRequestId) => {
+            setConvertOpen(false);
+            navigate(`/extra-work/${extraWorkRequestId}`);
+          }}
+        />
+      )}
 
       <ConfirmDialog
         ref={deleteDialogRef}

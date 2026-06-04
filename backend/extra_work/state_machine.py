@@ -62,6 +62,7 @@ from customers.permissions import user_can
 from .models import (
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
+    ExtraWorkRequestIntent,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
 )
@@ -394,7 +395,22 @@ def apply_transition(
             ExtraWorkStatus.CUSTOMER_REJECTED,
         }
     )
-    if provider_driven_customer_decision:
+    # Sprint 31 — AUTO_START_AFTER_PRICING pre-authorised start. When the
+    # request carries the AUTO_START intent, a provider driving
+    # PRICING_PROPOSED -> CUSTOMER_APPROVED is exercising the customer's
+    # creation-time pre-authorisation, NOT overriding a customer
+    # decision: `is_override` stays False, no `override_reason` is
+    # required, and the BM override-key gate does not apply (it is not an
+    # override). Rejection is never auto — only the APPROVE direction is
+    # pre-authorised; PRICING_PROPOSED -> CUSTOMER_REJECTED remains a
+    # reasoned override for every intent (H-11).
+    auto_start_legitimate = (
+        provider_driven_customer_decision
+        and to_status == ExtraWorkStatus.CUSTOMER_APPROVED
+        and extra_work.request_intent
+        == ExtraWorkRequestIntent.AUTO_START_AFTER_PRICING
+    )
+    if provider_driven_customer_decision and not auto_start_legitimate:
         # B6 — BM customer-decision override on Extra Work requests is
         # revocable per-(BM, building) via `osius.building_manager.
         # override_customer_decision`. SA and COMPANY_ADMIN bypass.

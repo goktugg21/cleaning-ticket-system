@@ -551,7 +551,11 @@ function SlotFields({
   const { t } = useTranslation("staff_slots");
   return (
     <div style={{ marginTop: 6 }}>
-      <div className="form-2col">
+      {/* Single column: this editor lives in the narrow ticket-detail
+          sidebar, where two datetime-local inputs side-by-side cannot
+          shrink (grid min-width:auto) and the End field overflowed the
+          card. Stacking keeps both inputs full-width within the card. */}
+      <div className="form-2col" style={{ gridTemplateColumns: "1fr" }}>
         <div className="field">
           <label className="field-label" htmlFor={`${idPrefix}-start`}>
             {t("editor.field_start")}

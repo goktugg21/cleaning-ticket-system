@@ -59,6 +59,12 @@
   "tickets_by_type_empty": "No tickets in this range.",
   "tickets_by_type_tooltip_label": "Tickets",
 
+  "tickets_by_origin_title": "Tickets by origin",
+  "tickets_by_origin_subtitle": "Tickets created in the selected range, grouped by how they originated: normal, extra work, converted, or planned.",
+  "tickets_by_origin_total": "Total: {{count}}",
+  "tickets_by_origin_empty": "No tickets in this range.",
+  "tickets_by_origin_tooltip_label": "Tickets",
+
   "tickets_by_customer_title": "Tickets by customer",
   "tickets_by_customer_subtitle": "Tickets per customer location. Customers with the same name at different buildings are kept distinct.",
   "tickets_by_customer_total": "Total: {{count}}",

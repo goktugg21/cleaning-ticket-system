@@ -13,6 +13,7 @@ import { SLADistributionChart } from "./charts/SLADistributionChart";
 import { StatusDistributionChart } from "./charts/StatusDistributionChart";
 import { TicketsByBuildingChart } from "./charts/TicketsByBuildingChart";
 import { TicketsByCustomerChart } from "./charts/TicketsByCustomerChart";
+import { TicketsByOriginChart } from "./charts/TicketsByOriginChart";
 import { TicketsByTypeChart } from "./charts/TicketsByTypeChart";
 import { TicketsOverTimeChart } from "./charts/TicketsOverTimeChart";
 
@@ -267,6 +268,7 @@ export function ReportsPage() {
         <SLADistributionChart filters={apiFilters} refreshKey={refreshKey} />
         <SLABreachRateChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByTypeChart filters={apiFilters} refreshKey={refreshKey} />
+        <TicketsByOriginChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByCustomerChart filters={apiFilters} refreshKey={refreshKey} />
         <TicketsByBuildingChart filters={apiFilters} refreshKey={refreshKey} />
       </div>

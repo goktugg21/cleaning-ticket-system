@@ -22,7 +22,11 @@ export type TicketStatus =
   | "APPROVED"
   | "REJECTED"
   | "CLOSED"
-  | "REOPENED_BY_ADMIN";
+  | "REOPENED_BY_ADMIN"
+  // Sprint 7B — terminal status for a ticket that has been converted
+  // into an Extra Work request. Emitted by the backend ticket state
+  // machine (tickets/models.py); surfaced as a transition target.
+  | "CONVERTED_TO_EXTRA_WORK";
 
 // B7 four-tier note taxonomy. Source of truth:
 // backend/tickets/models.py::TicketMessageType.
@@ -154,6 +158,12 @@ export interface TicketList {
   sla_is_paused: boolean;
   sla_remaining_business_seconds: number | null;
   sla_display_state: SLADisplayState;
+  // Sprint 14A (frontend Part A2) — spawned-from-EW anchor surfaced on
+  // the LIST serializer too (previously detail-only). Non-null only for
+  // tickets created from an ExtraWorkRequest line; the ticket list
+  // renders a small "Extra Work" route badge that deep-links to the
+  // parent EW. Mirrors backend `TicketListSerializer.extra_work_origin`.
+  extra_work_origin: TicketExtraWorkOrigin | null;
 }
 
 export interface TicketStatusHistory {
@@ -184,6 +194,47 @@ export interface TicketStatusChangePayload {
   note?: string;
   is_override?: boolean;
   override_reason?: string;
+}
+
+// Sprint 7B (frontend) — request body for
+// POST /tickets/{id}/convert-to-extra-work/. Mirrors backend
+// `tickets/serializers.py::TicketConvertToExtraWorkSerializer`, which
+// reuses `ExtraWorkPreviewLineSerializer` for each cart line
+// (service XOR custom_description; quantity > 0; requested_date;
+// optional customer_note). The line's `unit_type` is NOT sent — the
+// backend denormalises it from the chosen Service (or OTHER for a
+// custom line). The convert endpoint is provider-only and the wire
+// shape is identical to the create-cart line.
+export interface TicketConvertLinePayload {
+  // A catalog service id XOR a custom_description (exactly one).
+  service?: number | null;
+  custom_description?: string;
+  // Decimal as string per DRF convention.
+  quantity: string;
+  requested_date: string;
+  customer_note?: string;
+}
+
+export interface TicketConvertToExtraWorkPayload {
+  request_intent: ExtraWorkRequestIntent;
+  line_items: TicketConvertLinePayload[];
+  customer_visible_note?: string;
+  internal_note?: string;
+}
+
+// Response body for POST /tickets/{id}/convert-to-extra-work/. The
+// backend supersedes the source ticket to CONVERTED_TO_EXTRA_WORK and
+// returns the freshly-created ExtraWorkRequest (the page navigates to
+// its detail) plus the source-ticket echo and any operational tickets
+// spawned immediately on the INSTANT route.
+export interface TicketConvertToExtraWorkResponse {
+  extra_work_request: ExtraWorkRequestDetail;
+  source_ticket: {
+    id: number;
+    ticket_no: string | null;
+    status: TicketStatus;
+  };
+  operational_ticket_ids: number[];
 }
 
 // Sprint 23B — list of staff currently assigned to a ticket via
@@ -232,7 +283,8 @@ export interface TicketDetail extends TicketList {
   // Sprint 28 Batch 15.4 — non-null when this ticket was spawned by
   // an ExtraWorkRequest line. The frontend renders a "Spawned from"
   // panel in the ticket detail header that links back to the EW.
-  extra_work_origin: TicketExtraWorkOrigin | null;
+  // (Sprint 14A frontend Part A2 — declaration moved up to `TicketList`,
+  // which `TicketDetail` extends; the field is inherited from there.)
   // Sprint 28 Batch 11 — timestamp the ticket entered
   // WAITING_MANAGER_REVIEW (null until STAFF marks the work as
   // completed on the manager-review default route). Mirrored from
@@ -887,6 +939,10 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   preferred_date: string | null;
   customer_visible_note: string;
   pricing_note: string;
+  // Sprint 31 — the customer's declared intent (drives intent-aware
+  // workflow labels: an AUTO_START request is not "proposed" to the
+  // customer). Serialized on the detail wire; optional for safety.
+  request_intent?: ExtraWorkRequestIntent;
   // Provider-only fields — optional because the API strips them
   // for CUSTOMER_USER actors.
   manager_note?: string;
@@ -919,6 +975,11 @@ export interface ExtraWorkActions {
   allowed_next_statuses: ExtraWorkStatus[];
   can_prepare_extra_work_proposal: boolean;
   can_override_customer_decision: boolean;
+  // Sprint 31 — AUTO_START "Start work": provider may start a
+  // PRICING_PROPOSED request created with AUTO_START_AFTER_PRICING
+  // without customer approval or an override reason (pre-authorized).
+  // Optional so older responses (pre-31) typecheck as absent/false.
+  can_auto_start?: boolean;
   can_view_pricing: boolean;
   can_view_proposal_pdf: boolean;
   can_approve: boolean;
@@ -944,8 +1005,15 @@ export interface ExtraWorkRequestCartCreatePayload {
   // (`derive_default_intent`) when omitted, so older callers and the
   // graceful-degradation path (preview unavailable) stay valid.
   request_intent?: ExtraWorkRequestIntent;
+  // Each line is either a catalog service (`service`) OR a free-text
+  // custom line (`custom_description`) — XOR, the create form guarantees
+  // exactly one is set. A custom line carries no `service`; the backend
+  // treats it as needs-provider-pricing and routes the request to a
+  // proposal. Mirrors the cart-create line serializer + the preview
+  // line serializer (both accept service XOR custom_description).
   line_items: Array<{
-    service: number;
+    service?: number;
+    custom_description?: string;
     // Decimal as string per DRF convention.
     quantity: string;
     requested_date: string;

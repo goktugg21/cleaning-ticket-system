@@ -800,6 +800,19 @@ Extra Work must support two different paths.
 
 ## 7.0 Extra Work is always a cart with line items
 
+> **2026-06-03 (owner decision) — SEND-time cart-coverage gate REMOVED.**
+> The B2 SEND-time validator that required a proposal to mirror the
+> submitted cart 1:1 (`_validate_proposal_covers_cart`, stable codes
+> `proposal_has_extra_line` / `proposal_does_not_cover_cart` /
+> `proposal_contract_price_drift` / `proposal_custom_line_missing_price`)
+> AND the contract-price floor have been **removed**. A single Extra
+> Work event may legitimately need multiple custom-priced lines and
+> fees that do not correspond to cart items. The proposal is the
+> provider's quote and **need not mirror the cart**. The only remaining
+> SEND preconditions are: at least one proposal line, and the parent EW
+> in `UNDER_REVIEW`. The cart-first routing rules below (instant vs
+> proposal) are unchanged.
+
 Extra Work is **always** a cart-like object at the business-logic level. The frontend may later display the cart compactly (e.g. as a one-line summary), but the backend must always represent it as one request containing **one or more line items**. There is no "single-line Extra Work request"; the single-item case is just a cart of length one.
 
 The canonical rules are:
@@ -1081,9 +1094,9 @@ The routing decision is computed at submission time across the whole cart, using
 When a proposal is created on a PROPOSAL-routed cart with no explicit `lines` payload (the auto-seed path in `ProposalCreateSerializer.create`), the serializer reads the parent EW's cart items and seeds one `ProposalLine` per `ExtraWorkRequestItem`:
 
 - For each cart line the resolver is called again with the cart item's own `requested_date`. If a contract row is returned, the seeded proposal line's `unit_price` and `vat_pct` are pre-filled from the contract row — contract-priced lines preserve their contract pricing into the proposal.
-- For cart lines without a contract row, `unit_price` defaults to `0.00` and `vat_pct` defaults to 21%. The operator MUST set a positive price before SEND — the SEND-time validator rejects custom lines whose `unit_price <= 0` with stable code `proposal_custom_line_missing_price`.
+- **Auto-seed = agreed-priced cart lines only (changed 2026-06-03).** Only cart lines that resolve to a contract row are auto-seeded (pre-filled from the contract). Non-contract (custom / needs-proposal) cart lines are NOT auto-seeded; the operator adds them deliberately (already priced) via the composer — auto-seeding a custom line at `0.00` forced a remove + re-add because saved proposal lines are read-only in the UI. An all-custom cart therefore auto-seeds zero lines (empty DRAFT proposal); the existing `proposal_lines_required` SEND gate blocks sending it. ~~For cart lines without a contract row, `unit_price` defaults to `0.00` and `vat_pct` defaults to 21%. The SEND-time validator rejects custom lines whose `unit_price <= 0` with stable code `proposal_custom_line_missing_price`.~~ **(0.00 custom auto-seed + SEND-time cart-coverage / price gate removed 2026-06-03 — see §7.0 note.)**
 
-When the caller sends explicit `lines` on proposal create, the serializer creates exactly those rows. SEND-time validation (`apply_proposal_transition`) is the safety net for the cart-coverage / contract-price-drift / custom-line-priced contract regardless of whether the lines were auto-seeded or hand-built.
+When the caller sends explicit `lines` on proposal create, the serializer creates exactly those rows. ~~SEND-time validation (`apply_proposal_transition`) is the safety net for the cart-coverage / contract-price-drift / custom-line-priced contract regardless of whether the lines were auto-seeded or hand-built.~~ **REMOVED 2026-06-03 (owner decision):** the proposal is the provider's free-form quote and no longer has to mirror the cart; the only remaining SEND preconditions are `>=1` proposal line and the parent EW in `UNDER_REVIEW`.
 
 ### 8.4 Per-line pricing source on Extra Work serializers
 

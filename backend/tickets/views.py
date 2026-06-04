@@ -132,6 +132,25 @@ class TicketViewSet(
         if self.action == "retrieve":
             qs = qs.prefetch_related("status_history", "status_history__changed_by")
         if self.action == "list":
+            # Eager-load the Extra Work origin chain the list serializer's
+            # `extra_work_origin` field reads (`resolve_extra_work_origin_core`).
+            # All three links + their nested reads are forward FKs, so a
+            # single multi-join select_related keeps the list query count
+            # flat regardless of how many EW-spawned rows the page holds
+            # (no N+1):
+            #   * extra_work_request          -> canonical parent EW
+            #   * extra_work_request_item     -> service + legacy-fallback EW
+            #   * proposal_line               -> service + proposal -> EW
+            qs = qs.select_related(
+                "extra_work_request",
+                "extra_work_request_item",
+                "extra_work_request_item__service",
+                "extra_work_request_item__extra_work_request",
+                "proposal_line",
+                "proposal_line__service",
+                "proposal_line__proposal",
+                "proposal_line__proposal__extra_work_request",
+            )
             qs = self._apply_sla_filter(qs)
         return qs
 
@@ -376,6 +395,31 @@ class TicketViewSet(
                     },
                     status=status.HTTP_403_FORBIDDEN,
                 )
+
+        # EW-origin guard (Codex P2 on PR #72). An EW-origin ticket
+        # (itself spawned from an Extra Work request) must NOT be
+        # re-converted: nesting a second EW would flip the original EW's
+        # single operational ticket to CONVERTED_TO_EXTRA_WORK and break
+        # the one-operational-ticket-per-EW model. This is intrinsic to
+        # the ticket (not its operational status), so it is checked
+        # BEFORE the status/convertibility gates. Resolved via the SAME
+        # path as the read-side `extra_work_origin` field (canonical
+        # extra_work_request FK + legacy proposal_line /
+        # extra_work_request_item fallbacks) so this guard and the UI
+        # mirror can never drift. Backend is the authority (SoT §11.4);
+        # the dashboard/detail UI also hides the action when
+        # `extra_work_origin` is set.
+        from .serializers import resolve_extra_work_origin_core
+
+        if resolve_extra_work_origin_core(ticket) is not None:
+            return Response(
+                {
+                    "detail": "This ticket was spawned from an Extra Work "
+                    "request and cannot be converted to Extra Work again.",
+                    "code": "ticket_already_extra_work_origin",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Convertibility gate.
         if ticket.status == TicketStatus.CONVERTED_TO_EXTRA_WORK:

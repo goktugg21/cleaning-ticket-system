@@ -256,6 +256,37 @@ class ConvertFixtureMixin:
         assert resp.status_code == 201, resp.data
         proposal_id = resp.data["id"]
 
+        # Add the custom / no-contract cart lines the auto-seed skipped.
+        # Auto-seed (2026-06-03 owner decision) only seeds AGREED-priced
+        # cart lines; non-contract lines are added by the operator via
+        # the composer. Mirror that here so an all-unpriced converted
+        # cart still yields a sendable proposal.
+        seeded = api.get(
+            f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
+        ).data
+        seeded_service_ids = {
+            line.get("service") for line in seeded if line.get("service")
+        }
+        for item in ew.line_items.all().order_by("id"):
+            if item.service_id and item.service_id in seeded_service_ids:
+                continue
+            body = {
+                "quantity": str(item.quantity),
+                "unit_type": item.unit_type,
+                "unit_price": "55.00",
+                "vat_pct": "21.00",
+            }
+            if item.service_id:
+                body["service"] = item.service_id
+            else:
+                body["description"] = "Provider-priced custom line"
+            add = api.post(
+                f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/",
+                body,
+                format="json",
+            )
+            assert add.status_code == 201, add.data
+
         lines = api.get(
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
         ).data
@@ -772,3 +803,68 @@ class ExtraWorkOriginLinkTests(ConvertFixtureMixin, TestCase):
         # EW links back to the original ticket.
         ew.refresh_from_db()
         self.assertEqual(ew.source_ticket_id, ticket.id)
+
+
+# ---------------------------------------------------------------------------
+# 10. EW-origin guard (Codex P2 on PR #72) — an EW-spawned ticket cannot
+#     itself be converted to Extra Work (would nest a second EW and break
+#     the one-operational-ticket-per-EW model).
+# ---------------------------------------------------------------------------
+class ConvertEwOriginGuardTests(ConvertFixtureMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    def test_converting_an_ew_origin_ticket_is_rejected_400(self):
+        # A normal ticket converts (DIRECT / all-agreed -> INSTANT) and
+        # spawns ONE operational ticket; that spawned ticket is EW-origin.
+        source = self._make_ticket()
+        resp = self._convert(
+            actor=self.admin,
+            ticket=source,
+            intent=ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER,
+            lines=[self._svc_line(self.service_agreed)],
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)
+        ew = ExtraWorkRequest.objects.get(
+            id=resp.data["extra_work_request"]["id"]
+        )
+        spawned = Ticket.objects.get(extra_work_request=ew)
+        self.assertIsNotNone(spawned.extra_work_request_id)
+
+        ew_count_before = ExtraWorkRequest.objects.count()
+        spawned_status_before = spawned.status
+
+        # Re-converting the SPAWNED (EW-origin) ticket is rejected 400
+        # with the stable code, regardless of its operational status.
+        resp2 = self._convert(
+            actor=self.admin,
+            ticket=spawned,
+            intent=ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER,
+            lines=[self._svc_line(self.service_agreed)],
+        )
+        self.assertEqual(resp2.status_code, 400, resp2.data)
+        self.assertEqual(
+            resp2.data.get("code"), "ticket_already_extra_work_origin"
+        )
+
+        # No NEW Extra Work was created and the spawned ticket's status is
+        # untouched (NOT flipped to CONVERTED_TO_EXTRA_WORK).
+        self.assertEqual(
+            ExtraWorkRequest.objects.count(), ew_count_before
+        )
+        spawned.refresh_from_db()
+        self.assertEqual(spawned.status, spawned_status_before)
+        self.assertNotEqual(
+            spawned.status, TicketStatus.CONVERTED_TO_EXTRA_WORK
+        )
+
+    def test_normal_ticket_without_ew_origin_still_converts(self):
+        ticket = self._make_ticket()
+        resp = self._convert(
+            actor=self.admin,
+            ticket=ticket,
+            intent=ExtraWorkRequestIntent.DIRECT_AGREED_PRICE_ORDER,
+            lines=[self._svc_line(self.service_agreed)],
+        )
+        self.assertEqual(resp.status_code, 201, resp.data)

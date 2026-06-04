@@ -219,8 +219,17 @@ class ActualHoursFixtureMixin:
         return Ticket.objects.filter(extra_work_request=ew).count()
 
     def _enter_pricing_and_send(self, ew, *, actor=None, unit_price="55.00"):
-        """Provider -> UNDER_REVIEW, auto-seed proposal, price non-
-        contract lines, SEND. Returns (proposal_id, send_response)."""
+        """Provider -> UNDER_REVIEW, auto-seed proposal, add + price the
+        non-contract cart lines via the composer, SEND. Returns
+        (proposal_id, send_response).
+
+        Auto-seed (2026-06-03 owner decision) ONLY seeds agreed-priced
+        cart lines. Custom / no-contract cart lines are NOT seeded; the
+        operator adds them deliberately via the line composer. This
+        helper mirrors that: it adds a priced proposal line for every
+        cart item the auto-seed skipped, then prices any seeded line
+        that came in at zero.
+        """
         actor = actor or self.admin
         api = self._api(actor)
 
@@ -237,6 +246,35 @@ class ActualHoursFixtureMixin:
         assert resp.status_code == 201, resp.data
         proposal_id = resp.data["id"]
 
+        # Cart items already covered by an auto-seeded (contract) line.
+        seeded = api.get(
+            f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
+        ).data
+        seeded_service_ids = {
+            line.get("service") for line in seeded if line.get("service")
+        }
+        # Add the custom / no-contract cart lines the auto-seed skipped.
+        for item in ew.line_items.all().order_by("id"):
+            if item.service_id and item.service_id in seeded_service_ids:
+                continue
+            body = {
+                "quantity": str(item.quantity),
+                "unit_type": item.unit_type,
+                "unit_price": unit_price,
+                "vat_pct": "21.00",
+            }
+            if item.service_id:
+                body["service"] = item.service_id
+            else:
+                body["description"] = "Provider-priced custom line"
+            add = api.post(
+                f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/",
+                body,
+                format="json",
+            )
+            assert add.status_code == 201, add.data
+
+        # Price any seeded line that came in at zero.
         lines = api.get(
             f"/api/extra-work/{ew.id}/proposals/{proposal_id}/lines/"
         ).data

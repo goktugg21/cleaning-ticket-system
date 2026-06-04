@@ -350,18 +350,25 @@ export function CreateTicketPage() {
             </div>
             <div className="form-2col">
               <div className="field">
-                <label className="field-label" htmlFor="f-type">
-                  {t("field_category_label")}
+                <label className="field-label" htmlFor="f-customer">
+                  {t("field_customer_label")}
                 </label>
                 <select
-                  id="f-type"
+                  id="f-customer"
                   className="field-select"
-                  value={form.type}
-                  onChange={(event) => update("type", event.target.value)}
+                  value={form.customer}
+                  onChange={(event) => update("customer", event.target.value)}
+                  disabled={filteredCustomers.length === 0}
+                  required
                 >
-                  {TICKET_TYPE_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {t(TICKET_TYPE_KEYS[value])}
+                  <option value="" disabled>
+                    {filteredCustomers.length === 0
+                      ? t("field_customer_no_options")
+                      : t("field_customer_placeholder")}
+                  </option>
+                  {filteredCustomers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
                     </option>
                   ))}
                 </select>
@@ -391,25 +398,18 @@ export function CreateTicketPage() {
             </div>
             <div className="form-2col">
               <div className="field">
-                <label className="field-label" htmlFor="f-customer">
-                  {t("field_customer_label")}
+                <label className="field-label" htmlFor="f-type">
+                  {t("field_category_label")}
                 </label>
                 <select
-                  id="f-customer"
+                  id="f-type"
                   className="field-select"
-                  value={form.customer}
-                  onChange={(event) => update("customer", event.target.value)}
-                  disabled={filteredCustomers.length === 0}
-                  required
+                  value={form.type}
+                  onChange={(event) => update("type", event.target.value)}
                 >
-                  <option value="" disabled>
-                    {filteredCustomers.length === 0
-                      ? t("field_customer_no_options")
-                      : t("field_customer_placeholder")}
-                  </option>
-                  {filteredCustomers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}
+                  {TICKET_TYPE_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {t(TICKET_TYPE_KEYS[value])}
                     </option>
                   ))}
                 </select>

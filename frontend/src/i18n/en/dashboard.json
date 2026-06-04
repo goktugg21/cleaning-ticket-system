@@ -28,6 +28,7 @@
   "empty_no_tickets_sub": "Create the first ticket to start tracking requests, complaints, and reports.",
   "clear_filters": "Clear filters",
   "create_ticket_cta": "Create ticket",
+  "ticket_row_extra_work_origin_title": "Spawned from an extra-work request — open it",
   "pagination_info": "Showing {{visible}} of {{count}} tickets · Page {{page}} of {{pages}}",
 
   "section_status_title": "Status breakdown",

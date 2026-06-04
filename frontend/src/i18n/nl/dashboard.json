@@ -28,6 +28,7 @@
   "empty_no_tickets_sub": "Maak het eerste ticket aan om verzoeken, klachten en meldingen vast te leggen.",
   "clear_filters": "Filters wissen",
   "create_ticket_cta": "Ticket aanmaken",
+  "ticket_row_extra_work_origin_title": "Voortgekomen uit een meerwerkaanvraag — open deze",
   "pagination_info": "{{visible}} van {{count}} tickets · pagina {{page}} van {{pages}}",
 
   "section_status_title": "Statusverdeling",

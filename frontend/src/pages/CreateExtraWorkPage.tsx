@@ -15,15 +15,16 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listServices } from "../api/admin";
+import { listCustomerPrices, listServices } from "../api/admin";
 import { api, getApiError } from "../api/client";
 import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
 import type {
   Building,
   Customer,
+  CustomerServicePrice,
   ExtraWorkCategory,
   ExtraWorkIntentErrorCode,
   ExtraWorkPreviewLine,
@@ -34,6 +35,7 @@ import type {
   ExtraWorkUrgency,
   PaginatedResponse,
   Service,
+  ServiceUnitType,
 } from "../api/types";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
@@ -54,10 +56,21 @@ interface ParentFormState {
 interface CartLineState {
   tempId: string;
   serviceId: string;
+  // Free-text service description, used ONLY when serviceId ===
+  // CUSTOM_SERVICE_VALUE. A custom line is submitted with this text as
+  // `custom_description` (and NO `service`); the backend treats it as
+  // needs-provider-pricing and routes the request to a proposal.
+  customDescription: string;
   quantity: string;
   requestedDate: string;
   customerNote: string;
 }
+
+// Sentinel serviceId for the "Custom…" option in the per-line service
+// dropdown. A cart line is "custom" iff line.serviceId === this value.
+// It is never a real service id (numeric), so it never collides with a
+// catalog service or the agreed-price lookups.
+const CUSTOM_SERVICE_VALUE = "__custom__";
 
 const EMPTY_PARENT: ParentFormState = {
   building: "",
@@ -102,6 +115,15 @@ const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
   URGENT: "urgency.urgent",
 };
 
+// Sprint 5 — service unit-type label keys for the agreed-prices panel.
+const UNIT_TYPE_I18N_KEY: Record<ServiceUnitType, string> = {
+  HOURS: "unit_type.hours",
+  SQUARE_METERS: "unit_type.square_meters",
+  FIXED: "unit_type.fixed",
+  ITEM: "unit_type.item",
+  OTHER: "unit_type.other",
+};
+
 // Sprint 14 helper — match a customer to a building via legacy
 // Customer.building OR the M:N linked_building_ids list.
 function customerMatchesBuilding(
@@ -131,6 +153,7 @@ function emptyCartLine(): CartLineState {
   return {
     tempId: nextTempId(),
     serviceId: "",
+    customDescription: "",
     quantity: "1",
     requestedDate: todayISO(),
     customerNote: "",
@@ -274,6 +297,19 @@ export function CreateExtraWorkPage() {
     | null
   >(null);
 
+  // Sprint 5 — the selected customer's agreed contract prices, shown
+  // upfront so the customer knows which services have an agreed price
+  // (and what it is) BEFORE composing the cart. Tagged with the
+  // customerId it was fetched for so a stale list is never shown.
+  const [customerPrices, setCustomerPrices] = useState<{
+    customerId: number;
+    rows: CustomerServicePrice[];
+  } | null>(null);
+  // Search filter for the agreed-prices dropdown (scales to long
+  // contract lists — the list scrolls and filters rather than dumping
+  // every row inline).
+  const [priceSearch, setPriceSearch] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -412,7 +448,14 @@ export function CreateExtraWorkPage() {
     if (!form.building || !form.customer) return false;
     if (cartLines.length === 0) return false;
     return cartLines.every((line) => {
-      if (!line.serviceId) return false;
+      // A line is previewable when it is a catalog service (a chosen
+      // numeric serviceId) OR a custom line with non-empty text. An
+      // empty line, or a custom line with blank text, is not.
+      if (line.serviceId === CUSTOM_SERVICE_VALUE) {
+        if (!line.customDescription.trim()) return false;
+      } else if (!line.serviceId) {
+        return false;
+      }
       const q = Number(line.quantity);
       if (!Number.isFinite(q) || q <= 0) return false;
       return Boolean(line.requestedDate);
@@ -429,11 +472,15 @@ export function CreateExtraWorkPage() {
     return JSON.stringify({
       b: Number(form.building),
       c: Number(form.customer),
-      l: cartLines.map((line) => ({
-        s: Number(line.serviceId),
-        q: line.quantity,
-        d: line.requestedDate,
-      })),
+      l: cartLines.map((line) => {
+        const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+        return {
+          s: isCustom ? null : Number(line.serviceId),
+          c: isCustom ? line.customDescription.trim() : null,
+          q: line.quantity,
+          d: line.requestedDate,
+        };
+      }),
     });
   }, [previewable, form.building, form.customer, cartLines]);
 
@@ -444,7 +491,7 @@ export function CreateExtraWorkPage() {
     const parsed = JSON.parse(previewKey) as {
       b: number;
       c: number;
-      l: { s: number; q: string; d: string }[];
+      l: { s: number | null; c: string | null; q: string; d: string }[];
     };
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -454,23 +501,42 @@ export function CreateExtraWorkPage() {
             building: parsed.b,
             customer: parsed.c,
             request_intent: selectedIntent ?? undefined,
-            line_items: parsed.l.map((line) => ({
-              service: line.s,
-              quantity: line.q,
-              requested_date: line.d,
-            })),
+            // Catalog lines send `service`; custom lines send
+            // `custom_description` (and omit `service`). The preview
+            // serializer accepts service XOR custom_description.
+            line_items: parsed.l.map((line) =>
+              line.c !== null
+                ? {
+                    custom_description: line.c,
+                    quantity: line.q,
+                    requested_date: line.d,
+                  }
+                : {
+                    service: line.s ?? undefined,
+                    quantity: line.q,
+                    requested_date: line.d,
+                  },
+            ),
           });
           if (cancelled) return;
           setPreview({ key: previewKey, data });
           // Reconcile the selection against what the backend allows for
-          // the (possibly changed) cart: keep the current pick if still
-          // allowed, otherwise fall back to the backend default. This
-          // can trigger at most ONE extra debounced re-fetch (the new
-          // selection is re-validated) — bounded and acceptable.
-          // Defensive: only adopt `default_intent` when the backend
-          // actually lists it as allowed (it always should per the
-          // contract); otherwise keep the current value rather than
-          // selecting an option the backend would reject.
+          // the (possibly changed) cart, in priority order:
+          //   1. keep the current pick if it is still allowed;
+          //   2. else the backend `default_intent` IF it is itself
+          //      allowed;
+          //   3. else the FIRST allowed intent — this is the PR #71
+          //      Codex P2 fix: when the derived default is forbidden
+          //      (e.g. provider + a non-agreed line ⇒ default_intent
+          //      = REQUEST_QUOTE but allowed_intents = [AUTO_START_
+          //      AFTER_PRICING]) we must still select an allowed
+          //      option rather than leaving the radio unchecked and
+          //      submitting with the backend's forbidden default;
+          //   4. else null, only when the backend allows nothing.
+          // Guarantees `selectedIntent` is always a member of
+          // allowed_intents whenever the backend allows ≥1, so the
+          // radio renders checked. Triggers at most ONE extra debounced
+          // re-fetch (the new selection is re-validated) — bounded.
           setSelectedIntent((current) => {
             if (current && data.allowed_intents.includes(current)) {
               return current;
@@ -478,7 +544,7 @@ export function CreateExtraWorkPage() {
             if (data.allowed_intents.includes(data.default_intent)) {
               return data.default_intent;
             }
-            return current;
+            return data.allowed_intents[0] ?? null;
           });
         } catch (err) {
           if (cancelled) return;
@@ -491,6 +557,26 @@ export function CreateExtraWorkPage() {
       clearTimeout(timer);
     };
   }, [previewKey, selectedIntent]);
+
+  // Fetch the selected customer's agreed contract prices. All state
+  // writes are inside the async resolution (deferred), never in the
+  // effect body, so this adds no set-state-in-effect violation. A 4xx
+  // (e.g. a role without price-read access) degrades to an empty list.
+  useEffect(() => {
+    const customerId = form.customer ? Number(form.customer) : null;
+    if (!customerId) return;
+    let cancelled = false;
+    listCustomerPrices(customerId)
+      .then((rows) => {
+        if (!cancelled) setCustomerPrices({ customerId, rows });
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerPrices({ customerId, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.customer]);
 
   // Render-time derived preview view-state. A `preview` is only honoured
   // when its `key` matches the CURRENT cart, so a stale response is
@@ -522,6 +608,74 @@ export function CreateExtraWorkPage() {
     ? computeAgreedTotals(previewData.lines)
     : null;
 
+  // Agreed-prices panel: catalog lookup (for category/unit labels the
+  // pricing endpoint doesn't carry) + the current customer's currently-
+  // valid agreed rows. We filter to active + in-window client-side so
+  // the list matches what a customer is shown regardless of viewer role
+  // (the backend already narrows for CUSTOMER_USER; providers get all
+  // rows, so we narrow here too for a consistent "current prices" view).
+  const serviceById = useMemo(
+    () => new Map(services.map((svc) => [svc.id, svc])),
+    [services],
+  );
+  const pricesLoading =
+    !!form.customer &&
+    (customerPrices === null ||
+      customerPrices.customerId !== Number(form.customer));
+  const agreedPrices = useMemo(() => {
+    if (
+      customerPrices === null ||
+      !form.customer ||
+      customerPrices.customerId !== Number(form.customer)
+    ) {
+      return [] as CustomerServicePrice[];
+    }
+    const today = todayISO();
+    return customerPrices.rows
+      .filter(
+        (p) =>
+          p.is_active &&
+          p.valid_from <= today &&
+          (p.valid_to === null || p.valid_to >= today),
+      )
+      .sort((a, b) => a.service_name.localeCompare(b.service_name));
+  }, [customerPrices, form.customer]);
+  const filteredAgreedPrices = useMemo(() => {
+    const q = priceSearch.trim().toLowerCase();
+    if (!q) return agreedPrices;
+    return agreedPrices.filter((p) => {
+      const svc = serviceById.get(p.service);
+      const label = svc
+        ? `${svc.category_name} ${svc.name}`
+        : p.service_name;
+      return label.toLowerCase().includes(q);
+    });
+  }, [agreedPrices, priceSearch, serviceById]);
+
+  // Owner request: surface each service's AGREED/contract price inline in
+  // the cart's service-select option label. Built from the SAME currently-
+  // valid agreed rows the browse panel shows (active + in-window for the
+  // selected customer). Empty when no customer is selected or prices are
+  // still loading, so the select falls back to plain service names.
+  const agreedPriceByServiceId = useMemo(
+    () => new Map(agreedPrices.map((p) => [p.service, p])),
+    [agreedPrices],
+  );
+
+  // Compose the " — €29,00 / m²" suffix for a service that has an agreed
+  // price, reusing the existing money + unit-type formatting. Returns "" so
+  // services without an agreed price show the plain name.
+  const agreedPriceSuffix = (serviceId: number): string => {
+    const price = agreedPriceByServiceId.get(serviceId);
+    if (!price) return "";
+    const svc = serviceById.get(serviceId);
+    const unitLabel = svc ? t(UNIT_TYPE_I18N_KEY[svc.unit_type]) : "";
+    const money = formatMoney(price.unit_price);
+    return unitLabel
+      ? ` — ${money} / ${unitLabel}`
+      : ` — ${money}`;
+  };
+
   function update<K extends keyof ParentFormState>(
     name: K,
     value: ParentFormState[K],
@@ -531,6 +685,25 @@ export function CreateExtraWorkPage() {
 
   function addCartLine() {
     setCartLines((current) => [...current, emptyCartLine()]);
+  }
+
+  // Add a service picked from the agreed-prices dropdown into the cart:
+  // fill the first empty line if there is one, otherwise append a new
+  // line. No-op when the service is already in the cart (the cart
+  // rejects duplicate services on submit).
+  function addServiceFromContract(serviceId: number) {
+    setCartLines((current) => {
+      if (current.some((l) => Number(l.serviceId) === serviceId)) {
+        return current;
+      }
+      const emptyIdx = current.findIndex((l) => !l.serviceId);
+      if (emptyIdx >= 0) {
+        return current.map((l, i) =>
+          i === emptyIdx ? { ...l, serviceId: String(serviceId) } : l,
+        );
+      }
+      return [...current, { ...emptyCartLine(), serviceId: String(serviceId) }];
+    });
   }
 
   function removeCartLine(tempId: string) {
@@ -576,16 +749,27 @@ export function CreateExtraWorkPage() {
     }
     const seenServiceIds = new Set<number>();
     for (const line of cartLines) {
-      if (!line.serviceId) {
-        setError(t("create.error_line_service_required"));
-        return;
+      const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+      if (isCustom) {
+        // Custom line: require non-empty free-text. Custom lines are
+        // never deduped against catalog services and skip the
+        // inactive-service check (they have no service FK).
+        if (!line.customDescription.trim()) {
+          setError(t("create.error_line_custom_required"));
+          return;
+        }
+      } else {
+        if (!line.serviceId) {
+          setError(t("create.error_line_service_required"));
+          return;
+        }
+        const svcId = Number(line.serviceId);
+        if (seenServiceIds.has(svcId)) {
+          setError(t("create.error_duplicate_service"));
+          return;
+        }
+        seenServiceIds.add(svcId);
       }
-      const svcId = Number(line.serviceId);
-      if (seenServiceIds.has(svcId)) {
-        setError(t("create.error_duplicate_service"));
-        return;
-      }
-      seenServiceIds.add(svcId);
       const qtyNum = Number(line.quantity);
       if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
         setError(t("create.error_line_quantity_invalid"));
@@ -595,11 +779,27 @@ export function CreateExtraWorkPage() {
         setError(t("create.error_line_requested_date_required"));
         return;
       }
-      const svc = services.find((s) => s.id === svcId);
-      if (svc && !svc.is_active) {
-        setError(t("create.error_inactive_service"));
-        return;
+      if (!isCustom) {
+        const svc = services.find((s) => s.id === Number(line.serviceId));
+        if (svc && !svc.is_active) {
+          setError(t("create.error_inactive_service"));
+          return;
+        }
       }
+    }
+
+    // PR #71 Codex P2 fix — when a fresh preview exists, REQUIRE a
+    // selected intent the backend currently allows. The reconcile keeps
+    // `selectedIntent` inside allowed_intents, so this only trips if the
+    // backend allowed nothing for this cart/actor; block with a friendly
+    // message rather than creating the request with the backend's
+    // (possibly forbidden) derived default.
+    if (
+      previewData &&
+      (!selectedIntent || !previewData.allowed_intents.includes(selectedIntent))
+    ) {
+      setError(t("create.intent.error.none_selected"));
+      return;
     }
 
     // If the live preview already knows the chosen intent is invalid for
@@ -615,6 +815,17 @@ export function CreateExtraWorkPage() {
       return;
     }
 
+    // Never send a `request_intent` that isn't in the LATEST preview's
+    // allowed_intents. When a fresh preview confirms the selection, send
+    // it; when no fresh preview exists (preview unavailable / a refetch
+    // is mid-flight), omit it and let the backend derive a safe default.
+    const intentToSend =
+      previewData &&
+      selectedIntent &&
+      previewData.allowed_intents.includes(selectedIntent)
+        ? selectedIntent
+        : undefined;
+
     setSubmitting(true);
     try {
       const created = await createExtraWork({
@@ -627,17 +838,29 @@ export function CreateExtraWorkPage() {
           form.category === "OTHER" ? form.category_other_text.trim() : "",
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
-        // Send the chosen intent (driven by the preview's
-        // allowed_intents/default_intent). Omitted when preview never
-        // ran (e.g. unavailable): the backend then derives a safe
-        // default — identical to the pre-intent-layer behaviour.
-        ...(selectedIntent ? { request_intent: selectedIntent } : {}),
-        line_items: cartLines.map((line) => ({
-          service: Number(line.serviceId),
-          quantity: line.quantity,
-          requested_date: line.requestedDate,
-          customer_note: line.customerNote.trim() || undefined,
-        })),
+        // Send the validated intent (a member of the latest preview's
+        // allowed_intents). Omitted when no fresh preview exists: the
+        // backend then derives a safe default — identical to the
+        // pre-intent-layer graceful-degradation behaviour.
+        ...(intentToSend ? { request_intent: intentToSend } : {}),
+        // Catalog lines send `service`; custom lines send
+        // `custom_description` (and omit `service`) — service XOR
+        // custom_description, validated above.
+        line_items: cartLines.map((line) =>
+          line.serviceId === CUSTOM_SERVICE_VALUE
+            ? {
+                custom_description: line.customDescription.trim(),
+                quantity: line.quantity,
+                requested_date: line.requestedDate,
+                customer_note: line.customerNote.trim() || undefined,
+              }
+            : {
+                service: Number(line.serviceId),
+                quantity: line.quantity,
+                requested_date: line.requestedDate,
+                customer_note: line.customerNote.trim() || undefined,
+              },
+        ),
       });
       setResult(created);
     } catch (err) {
@@ -841,30 +1064,11 @@ export function CreateExtraWorkPage() {
             <div className="form-section-title">
               {t("create.parent_section_title")}
             </div>
+            {/* Owner request: Customer leads (left column), Building
+                follows (right column). The customer-drives-building
+                filtering, auto-select, and disabled/required logic are
+                unchanged — only the visual order is swapped. */}
             <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="ew-building">
-                  {t("create.field_building")}
-                </label>
-                <select
-                  id="ew-building"
-                  data-testid="extra-work-create-building"
-                  className="field-select"
-                  value={form.building}
-                  onChange={(event) => update("building", event.target.value)}
-                  disabled={filteredBuildings.length === 0}
-                  required
-                >
-                  <option value="" disabled>
-                    {t("create.field_building_placeholder")}
-                  </option>
-                  {filteredBuildings.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
               <div className="field">
                 <label className="field-label" htmlFor="ew-customer">
                   {t("create.field_customer")}
@@ -884,6 +1088,29 @@ export function CreateExtraWorkPage() {
                   {filteredCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="ew-building">
+                  {t("create.field_building")}
+                </label>
+                <select
+                  id="ew-building"
+                  data-testid="extra-work-create-building"
+                  className="field-select"
+                  value={form.building}
+                  onChange={(event) => update("building", event.target.value)}
+                  disabled={filteredBuildings.length === 0}
+                  required
+                >
+                  <option value="" disabled>
+                    {t("create.field_building_placeholder")}
+                  </option>
+                  {filteredBuildings.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
                     </option>
                   ))}
                 </select>
@@ -1041,6 +1268,125 @@ export function CreateExtraWorkPage() {
               {t("create.cart_section_helper")}
             </div>
 
+            {/* Sprint 5 — agreed contract prices shown UPFRONT so the
+                customer knows which services have a pre-agreed price (and
+                what it is) before adding any line. Sourced from
+                GET /customers/<id>/pricing/ (customer-readable; backend
+                returns only the customer's OWN currently-valid rows for
+                customer-side actors). Provider rows are narrowed to
+                active + in-window here for a consistent "current" view. */}
+            {form.customer && (
+              <details
+                className="ew-agreed-prices"
+                data-testid="extra-work-create-agreed-prices"
+                open
+              >
+                <summary className="ew-agreed-prices-summary">
+                  <span className="form-section-title" style={{ margin: 0 }}>
+                    {t("create.prices.section_title")}
+                  </span>
+                  {!pricesLoading && agreedPrices.length > 0 && (
+                    <span className="muted small">({agreedPrices.length})</span>
+                  )}
+                </summary>
+                <div className="ew-agreed-prices-body">
+                  {pricesLoading ? (
+                    <div className="muted small">
+                      {t("create.prices.loading")}
+                    </div>
+                  ) : agreedPrices.length === 0 ? (
+                    <div
+                      className="muted small"
+                      data-testid="extra-work-create-agreed-prices-empty"
+                    >
+                      {t("create.prices.empty")}
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        className="field-input"
+                        data-testid="extra-work-create-agreed-prices-search"
+                        placeholder={t("create.prices.search_placeholder")}
+                        value={priceSearch}
+                        onChange={(event) => setPriceSearch(event.target.value)}
+                      />
+                      <div
+                        className="ew-agreed-prices-list"
+                        data-testid="extra-work-create-agreed-prices-list"
+                      >
+                        {filteredAgreedPrices.length === 0 ? (
+                          <div
+                            className="muted small"
+                            style={{ padding: "8px 10px" }}
+                          >
+                            {t("create.prices.no_match")}
+                          </div>
+                        ) : (
+                          filteredAgreedPrices.map((p) => {
+                            const svc = serviceById.get(p.service);
+                            const label = svc
+                              ? svc.category_name
+                                ? `${svc.category_name} — ${svc.name}`
+                                : svc.name
+                              : p.service_name;
+                            const unitLabel = svc
+                              ? t(UNIT_TYPE_I18N_KEY[svc.unit_type])
+                              : "";
+                            const inCart = cartLines.some(
+                              (l) => Number(l.serviceId) === p.service,
+                            );
+                            return (
+                              <button
+                                type="button"
+                                key={p.id}
+                                className="ew-agreed-price-item"
+                                data-testid="extra-work-create-agreed-price-item"
+                                data-in-cart={inCart ? "true" : "false"}
+                                disabled={inCart}
+                                onClick={() => addServiceFromContract(p.service)}
+                              >
+                                <span className="ew-agreed-price-item-label">
+                                  {label}
+                                  {unitLabel && (
+                                    <span className="muted small">
+                                      {" · "}
+                                      {unitLabel}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="ew-agreed-price-item-price">
+                                  {formatMoney(p.unit_price)}
+                                  <span className="muted small">
+                                    {" · "}
+                                    {formatNumber(p.vat_pct, {
+                                      maximumFractionDigits: 2,
+                                    })}
+                                    %
+                                  </span>
+                                  {inCart && (
+                                    <Check
+                                      size={14}
+                                      strokeWidth={2.5}
+                                      aria-hidden
+                                      style={{ marginLeft: 6 }}
+                                    />
+                                  )}
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                    </>
+                  )}
+                  <div className="muted small" style={{ marginTop: 8 }}>
+                    {t("create.prices.helper")}
+                  </div>
+                </div>
+              </details>
+            )}
+
             {cartLines.length === 0 && (
               <div
                 className="muted small"
@@ -1083,14 +1429,43 @@ export function CreateExtraWorkPage() {
                     <option value="" disabled>
                       {t("create.line_field_service_placeholder")}
                     </option>
-                    {services.map((svc) => (
-                      <option key={svc.id} value={svc.id}>
-                        {svc.category_name
-                          ? `${svc.category_name} — ${svc.name}`
-                          : svc.name}
-                      </option>
-                    ))}
+                    {services.map((svc) => {
+                      const baseLabel = svc.category_name
+                        ? `${svc.category_name} — ${svc.name}`
+                        : svc.name;
+                      return (
+                        <option key={svc.id} value={svc.id}>
+                          {`${baseLabel}${agreedPriceSuffix(svc.id)}`}
+                        </option>
+                      );
+                    })}
+                    {/* Custom line: no agreed-price suffix — it has no
+                        catalog service to price against. Re-picking a
+                        catalog service from this still-visible dropdown
+                        switches back. */}
+                    <option value={CUSTOM_SERVICE_VALUE}>
+                      {t("create.line_custom_option")}
+                    </option>
                   </select>
+                  {line.serviceId === CUSTOM_SERVICE_VALUE && (
+                    <input
+                      data-testid={`extra-work-create-line-custom-${index}`}
+                      className="field-input"
+                      style={{ marginTop: 8 }}
+                      type="text"
+                      maxLength={255}
+                      placeholder={t("create.line_custom_placeholder")}
+                      value={line.customDescription}
+                      onChange={(event) =>
+                        updateCartLine(
+                          line.tempId,
+                          "customDescription",
+                          event.target.value,
+                        )
+                      }
+                      required
+                    />
+                  )}
                 </div>
                 <div className="field ew-line-field-compact">
                   <label

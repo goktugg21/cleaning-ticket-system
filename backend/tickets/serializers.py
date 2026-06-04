@@ -139,6 +139,81 @@ def is_photo_attachment(attachment) -> bool:
     return mime_ok and ext_ok
 
 
+def resolve_extra_work_origin_core(ticket) -> dict | None:
+    """Shared Extra Work origin resolution for the ticket list + detail
+    serializers.
+
+    Returns the SIX keys the frontend `TicketExtraWorkOrigin` type
+    consumes, or None when no parent Extra Work request can be resolved
+    by any path:
+
+        extra_work_request_id, extra_work_request_title,
+        extra_work_request_status, extra_work_request_item_id,
+        service_name, origin
+
+    Resolution order (Sprint 6A):
+      * Resolve the parent EW via the CANONICAL `ticket.extra_work_request`
+        FK first; fall back to the legacy `proposal_line` /
+        `extra_work_request_item` chains only when the canonical FK is
+        null (historical rows).
+      * Classify `origin` from the resolved EW's `routing_decision`:
+        INSTANT -> "INSTANT", else "PROPOSAL".
+      * `extra_work_request_item_id` + `service_name` come from the
+        representative linked line (the FIRST line the spawn helper
+        stamped on the back-compat FK).
+
+    The detail serializer wraps this with two extra keys
+    (`actual_hours_required`, role-gated `final_total_amount`) that need
+    the heavier `active_priced_lines` query chain. The list serializer
+    deliberately stops here so a page of tickets stays N+1-free — see
+    `TicketListSerializer.get_extra_work_origin`.
+    """
+    from extra_work.models import ExtraWorkRoutingDecision
+
+    item = ticket.extra_work_request_item
+    proposal_line = ticket.proposal_line
+
+    # Canonical resolution.
+    ew_request = ticket.extra_work_request
+    if ew_request is None:
+        # Legacy fallback: proposal chain, then cart-item chain.
+        if proposal_line is not None:
+            ew_request = proposal_line.proposal.extra_work_request
+        elif item is not None:
+            ew_request = item.extra_work_request
+
+    if ew_request is None:
+        return None
+
+    # Representative line for the back-compat payload keys. The proposal
+    # helper stamps `proposal_line`; the instant / legacy helpers stamp
+    # `extra_work_request_item`.
+    if proposal_line is not None:
+        service = proposal_line.service
+        item_id = item.id if item is not None else None
+    elif item is not None:
+        service = item.service
+        item_id = item.id
+    else:
+        service = None
+        item_id = None
+
+    origin = (
+        "INSTANT"
+        if ew_request.routing_decision == ExtraWorkRoutingDecision.INSTANT
+        else "PROPOSAL"
+    )
+
+    return {
+        "extra_work_request_id": ew_request.id,
+        "extra_work_request_title": ew_request.title,
+        "extra_work_request_status": ew_request.status,
+        "extra_work_request_item_id": item_id,
+        "service_name": service.name if service is not None else None,
+        "origin": origin,
+    }
+
+
 class TicketStatusHistorySerializer(serializers.ModelSerializer):
     changed_by_email = serializers.CharField(source="changed_by.email", read_only=True)
 
@@ -224,6 +299,18 @@ class TicketListSerializer(serializers.ModelSerializer):
     sla_is_paused = serializers.SerializerMethodField()
     sla_remaining_business_seconds = serializers.SerializerMethodField()
     sla_display_state = serializers.SerializerMethodField()
+    # Surface the parent Extra Work request on the LIST too, so the
+    # ticket list / agenda can flag EW-spawned rows without a per-row
+    # detail fetch. Same JSON key + the SIX keys the frontend
+    # `TicketExtraWorkOrigin` type consumes, produced by the SAME shared
+    # resolver the detail serializer uses (`resolve_extra_work_origin_core`)
+    # so the contract matches exactly. The two detail-only extras
+    # (`actual_hours_required`, role-gated `final_total_amount`) are
+    # intentionally omitted here: they need the heavier
+    # `active_priced_lines` query chain that would re-introduce an N+1
+    # across a page of EW-spawned tickets. Callers needing them hit the
+    # ticket detail endpoint.
+    extra_work_origin = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -247,6 +334,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             "sla_is_paused",
             "sla_remaining_business_seconds",
             "sla_display_state",
+            "extra_work_origin",
             # Sprint 9B — scheduling fields on the list serializer too so
             # the agenda view can render them without a detail fetch.
             "scheduled_start_at",
@@ -264,6 +352,9 @@ class TicketListSerializer(serializers.ModelSerializer):
 
     def get_sla_display_state(self, obj):
         return _sla_display_state(obj)
+
+    def get_extra_work_origin(self, obj):
+        return resolve_extra_work_origin_core(obj)
 
 
 class TicketDetailSerializer(serializers.ModelSerializer):
@@ -586,58 +677,32 @@ class TicketDetailSerializer(serializers.ModelSerializer):
           * Return None only when NO EW can be resolved by any path.
         """
         from extra_work.final_amounts import ew_has_unfinalized_hourly_lines
-        from extra_work.models import ExtraWorkRoutingDecision
 
-        item = obj.extra_work_request_item
-        proposal_line = obj.proposal_line
+        payload = resolve_extra_work_origin_core(obj)
+        if payload is None:
+            return None
 
-        # Canonical resolution.
+        # Re-resolve the parent EW for the two detail-only keys below.
+        # `resolve_extra_work_origin_core` already proved it exists, so
+        # the same canonical/legacy fallback chain resolves it again.
         ew_request = obj.extra_work_request
         if ew_request is None:
-            # Legacy fallback: proposal chain, then cart-item chain.
+            proposal_line = obj.proposal_line
+            item = obj.extra_work_request_item
             if proposal_line is not None:
                 ew_request = proposal_line.proposal.extra_work_request
             elif item is not None:
                 ew_request = item.extra_work_request
 
-        if ew_request is None:
-            return None
-
-        # Representative line for the back-compat payload keys. The
-        # proposal helper stamps `proposal_line`; the instant / legacy
-        # helpers stamp `extra_work_request_item`.
-        if proposal_line is not None:
-            service = proposal_line.service
-            item_id = item.id if item is not None else None
-        elif item is not None:
-            service = item.service
-            item_id = item.id
-        else:
-            service = None
-            item_id = None
-
-        origin = (
-            "INSTANT"
-            if ew_request.routing_decision == ExtraWorkRoutingDecision.INSTANT
-            else "PROPOSAL"
+        # Sprint 8B — `actual_hours_required` flags an EW-origin ticket
+        # that cannot yet be sent for customer approval because an hourly
+        # line is missing its actual hours. It is a workflow boolean (no
+        # money / rate), safe for every role including STAFF. It needs the
+        # heavier `active_priced_lines` query chain, which is why the list
+        # serializer omits it.
+        payload["actual_hours_required"] = ew_has_unfinalized_hourly_lines(
+            ew_request
         )
-
-        payload = {
-            "extra_work_request_id": ew_request.id,
-            "extra_work_request_title": ew_request.title,
-            "extra_work_request_status": ew_request.status,
-            "extra_work_request_item_id": item_id,
-            "service_name": service.name if service is not None else None,
-            "origin": origin,
-            # Sprint 8B — `actual_hours_required` flags an EW-origin
-            # ticket that cannot yet be sent for customer approval
-            # because an hourly line is missing its actual hours. It is
-            # a workflow boolean (no money / rate), safe for every role
-            # including STAFF.
-            "actual_hours_required": ew_has_unfinalized_hourly_lines(
-                ew_request
-            ),
-        }
         # Sprint 8B — `final_total_amount` is a COMMERCIAL amount. The
         # staff-privacy floor forbids STAFF from seeing price/amount
         # data, so it is gated OUT for STAFF viewers (who can reach this

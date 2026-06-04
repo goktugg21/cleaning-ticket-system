@@ -59,6 +59,12 @@
   "tickets_by_type_empty": "Geen tickets in deze periode.",
   "tickets_by_type_tooltip_label": "Tickets",
 
+  "tickets_by_origin_title": "Tickets per oorsprong",
+  "tickets_by_origin_subtitle": "Aantal tickets aangemaakt in de periode, gegroepeerd op herkomst: normaal, meerwerk, geconverteerd of gepland.",
+  "tickets_by_origin_total": "Totaal: {{count}}",
+  "tickets_by_origin_empty": "Geen tickets in deze periode.",
+  "tickets_by_origin_tooltip_label": "Tickets",
+
   "tickets_by_customer_title": "Tickets per klant",
   "tickets_by_customer_subtitle": "Aantal tickets per klantlocatie. Klanten met dezelfde naam in verschillende gebouwen worden apart getoond.",
   "tickets_by_customer_total": "Totaal: {{count}}",

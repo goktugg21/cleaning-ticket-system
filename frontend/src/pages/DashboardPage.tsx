@@ -1,7 +1,7 @@
-import type { FormEvent } from "react";
+import type { CSSProperties, FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus, RefreshCw } from "lucide-react";
+import { Layers, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import {
@@ -100,6 +100,39 @@ function priorityCellClass(priority: string): string {
 
 function statusCellClass(status: TicketStatus): string {
   return `cell-tag cell-tag-${status.toLowerCase()}`;
+}
+
+// SoT (Osius_Source_of_Truth_FINAL_2026-05-30) §1.4 + §7.1 — an
+// Extra Work-origin ticket "must not disappear into the normal ticket
+// list" and the dashboard "must make Extra Work origin impossible to
+// miss". This single, prominent pill marks an EW-spawned ticket
+// identically in every dashboard rendering (the operational queue, the
+// fuller ticket table, the mobile cards) and deep-links to the parent
+// Extra Work request. `stopPropagation` keeps the click from also
+// triggering the row/card's own navigation to the ticket.
+function ExtraWorkOriginPill({
+  ewId,
+  testId,
+  style,
+}: {
+  ewId: number;
+  testId: string;
+  style?: CSSProperties;
+}) {
+  const { t } = useTranslation("dashboard");
+  return (
+    <Link
+      to={`/extra-work/${ewId}`}
+      className="work-type-pill work-type-pill-extra-work work-type-pill-link"
+      title={t("ticket_row_extra_work_origin_title")}
+      data-testid={testId}
+      style={style}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <Layers size={12} strokeWidth={2.5} aria-hidden />
+      {t("ops_type_extra_work")}
+    </Link>
+  );
 }
 
 /**
@@ -648,9 +681,19 @@ export function DashboardPage() {
                           }}
                         >
                           <td>
-                            <span className="work-type-pill work-type-pill-ticket">
-                              {t("ops_type_ticket")}
-                            </span>
+                            {ticket.extra_work_origin ? (
+                              <ExtraWorkOriginPill
+                                ewId={
+                                  ticket.extra_work_origin
+                                    .extra_work_request_id
+                                }
+                                testId="ticket-queue-extra-work-origin"
+                              />
+                            ) : (
+                              <span className="work-type-pill work-type-pill-ticket">
+                                {t("ops_type_ticket")}
+                              </span>
+                            )}
                           </td>
                           <td className="td-subject">
                             <Link to={`/tickets/${ticket.id}`}>
@@ -1016,6 +1059,16 @@ export function DashboardPage() {
                             >
                               {ticket.ticket_no}
                             </Link>
+                            {ticket.extra_work_origin && (
+                              <ExtraWorkOriginPill
+                                ewId={
+                                  ticket.extra_work_origin
+                                    .extra_work_request_id
+                                }
+                                testId="ticket-row-extra-work-origin"
+                                style={{ marginLeft: 8 }}
+                              />
+                            )}
                           </td>
                           <td className="td-subject">
                             <Link to={`/tickets/${ticket.id}`}>
@@ -1079,6 +1132,15 @@ export function DashboardPage() {
                 >
                   {tickets.map((ticket) => (
                     <li key={ticket.id} className="ticket-card">
+                      {ticket.extra_work_origin && (
+                        <ExtraWorkOriginPill
+                          ewId={
+                            ticket.extra_work_origin.extra_work_request_id
+                          }
+                          testId="ticket-card-extra-work-origin"
+                          style={{ marginBottom: 8 }}
+                        />
+                      )}
                       <Link
                         to={`/tickets/${ticket.id}`}
                         className="ticket-card-link"
