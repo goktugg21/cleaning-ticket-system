@@ -305,9 +305,20 @@ export function TicketDetailPage() {
   // keep the status-history-only activity card. `null` while loading or on
   // error -> the page falls back to the status-history rendering so the
   // activity card is never blank.
-  const [auditTimeline, setAuditTimeline] = useState<
-    TicketTimelineRow[] | null
-  >(null);
+  // Tagged with the ticket id the rows were fetched for, so a navigation
+  // A -> B (TicketDetailPage does NOT unmount) never renders A's audit feed
+  // under B during B's fetch — the render gate requires the tag to match the
+  // CURRENT ticket id.
+  const [auditTimeline, setAuditTimeline] = useState<{
+    ticketId: number;
+    rows: TicketTimelineRow[];
+  } | null>(null);
+  // Bumped on every ticket reload that follows an audited mutation (message,
+  // attachment, assignment, status/override, completion). Drives a timeline
+  // refetch so non-status audit rows appear without a full page reload, in
+  // addition to the status-history-length trigger. Only bumped from
+  // user-initiated reloads, so it never over-fetches.
+  const [auditReloadNonce, setAuditReloadNonce] = useState(0);
 
   // Sprint 23B — Request-assignment state for STAFF users on a
   // ticket they have building visibility for but aren't yet
@@ -535,6 +546,11 @@ export function TicketDetailPage() {
       setTicket(ticketResponse.data);
       setMessages(messageResponse.data.results);
       setAttachments(attachmentResponse.data.results);
+      // Signal the audit-timeline effect to refetch (batched with the
+      // setters above, so the effect runs once per reload). This is what
+      // surfaces message / attachment audit rows — they do not change the
+      // status-history length.
+      setAuditReloadNonce((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -551,9 +567,12 @@ export function TicketDetailPage() {
   // IsTicketAuditConsumer) get the UNIFIED audit timeline. STAFF /
   // CUSTOMER_USER are deliberately excluded: they must never call the
   // provider-audit endpoint (it 403s them) nor see audit_log / EW-internal /
-  // severity rows. Refetches whenever the status-history length changes (so a
-  // fresh override / transition lands in the feed). State is only set inside
-  // the async callbacks (never synchronously) and a failed fetch leaves
+  // severity rows. Refetches when the status-history length changes (a
+  // status / override transition — covers the direct-setTicket status path)
+  // OR when `auditReloadNonce` bumps (every other audited reload: message /
+  // attachment / assignment). State is only set inside the async callbacks
+  // (never synchronously in the effect body, so no set-state-in-effect), the
+  // rows are tagged with the fetched ticket id, and a failed fetch leaves
   // `auditTimeline` null, so the activity card falls back to the
   // status-history rendering rather than blanking.
   const isProviderAudit = isProviderManagementRole(me?.role);
@@ -564,7 +583,11 @@ export function TicketDetailPage() {
     let cancelled = false;
     getTicketAuditTimeline(auditTimelineTicketId)
       .then((data) => {
-        if (!cancelled) setAuditTimeline(data.timeline);
+        if (!cancelled)
+          setAuditTimeline({
+            ticketId: auditTimelineTicketId,
+            rows: data.timeline,
+          });
       })
       .catch(() => {
         if (!cancelled) setAuditTimeline(null);
@@ -572,7 +595,12 @@ export function TicketDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [isProviderAudit, auditTimelineTicketId, auditTimelineHistoryLen]);
+  }, [
+    isProviderAudit,
+    auditTimelineTicketId,
+    auditTimelineHistoryLen,
+    auditReloadNonce,
+  ]);
 
   useEffect(() => {
     setSelectedAssigneeId(
@@ -723,6 +751,9 @@ export function TicketDetailPage() {
         { assigned_to: assignedTo },
       );
       setTicket(response.data);
+      // Assignment changes emit an audit_log row but do NOT change the
+      // status-history length, so nudge the timeline to refetch.
+      setAuditReloadNonce((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -1178,8 +1209,9 @@ export function TicketDetailPage() {
                   is exactly as before. */}
               {isProviderAudit &&
               auditTimeline !== null &&
-              auditTimeline.length > 0 ? (
-                <UnifiedTimeline rows={auditTimeline} />
+              auditTimeline.ticketId === ticket.id &&
+              auditTimeline.rows.length > 0 ? (
+                <UnifiedTimeline rows={auditTimeline.rows} />
               ) : ticket.status_history.length === 0 ? (
                 <div className="timeline-row" data-color="green">
                   <div className="timeline-dot" />
