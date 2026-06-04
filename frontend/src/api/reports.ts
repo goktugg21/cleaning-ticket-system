@@ -6,6 +6,7 @@ import type {
   SLABreachRateOverTimeResponse,
   SLADistributionResponse,
   StatusDistributionResponse,
+  TicketOrigin,
   TicketsByBuildingResponse,
   TicketsByCustomerResponse,
   TicketsByOriginResponse,
@@ -18,6 +19,12 @@ export interface ReportFilters {
   to?: string;
   company?: number;
   building?: number;
+  // Sprint 14A (origin axis) — optional ?origin= narrowing. When set, the
+  // dimension reports (tickets-by-type/customer/building) AND their CSV/PDF
+  // exports return only tickets of that origin (e.g. EXTRA_WORK). Serialized
+  // by `paramsFor`, so the JSON fetch and `downloadDimensionExport` stay in
+  // lockstep. The standalone by-origin report does not use this.
+  origin?: TicketOrigin;
 }
 
 function paramsFor(filters: ReportFilters): Record<string, string> {
@@ -26,6 +33,7 @@ function paramsFor(filters: ReportFilters): Record<string, string> {
   if (filters.to) out.to = filters.to;
   if (filters.company !== undefined) out.company = String(filters.company);
   if (filters.building !== undefined) out.building = String(filters.building);
+  if (filters.origin) out.origin = filters.origin;
   return out;
 }
 

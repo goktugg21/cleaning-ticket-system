@@ -77,6 +77,11 @@
   "ew_revenue_incl_vat": "incl. VAT",
   "ew_revenue_tooltip_amount": "Billable",
 
+  "ew_by_building_title": "Extra Work by building",
+  "ew_by_building_subtitle": "Extra Work-origin tickets only, grouped by building in the selected range.",
+  "ew_by_customer_title": "Extra Work by customer",
+  "ew_by_customer_subtitle": "Extra Work-origin tickets only, grouped by customer location in the selected range.",
+
   "tickets_by_customer_title": "Tickets by customer",
   "tickets_by_customer_subtitle": "Tickets per customer location. Customers with the same name at different buildings are kept distinct.",
   "tickets_by_customer_total": "Total: {{count}}",

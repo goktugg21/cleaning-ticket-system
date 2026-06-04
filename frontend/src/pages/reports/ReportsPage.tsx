@@ -251,6 +251,33 @@ export function ReportsPage() {
           ticket-count charts. */}
       <ExtraWorkRevenueChart filters={apiFilters} refreshKey={refreshKey} />
 
+      {/* Extra Work by building / by customer — origin="EXTRA_WORK" narrows
+          to Extra Work-origin tickets only. Grouped here with the revenue
+          card as the dedicated Extra Work reporting block (SoT §7.2). The
+          GENERIC by-building / by-customer cards stay in the ticket-count
+          grid below, unchanged. */}
+      <div
+        className="reports-grid"
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(min(420px, 100%), 1fr))",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <TicketsByBuildingChart
+          origin="EXTRA_WORK"
+          filters={apiFilters}
+          refreshKey={refreshKey}
+        />
+        <TicketsByCustomerChart
+          origin="EXTRA_WORK"
+          filters={apiFilters}
+          refreshKey={refreshKey}
+        />
+      </div>
+
       <div
         // Sprint 20 follow-up: the previous template `minmax(420px, 1fr)`
         // forced every card to be at least 420px wide, which on a

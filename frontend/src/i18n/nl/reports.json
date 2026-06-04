@@ -77,6 +77,11 @@
   "ew_revenue_incl_vat": "incl. btw",
   "ew_revenue_tooltip_amount": "Facturabel",
 
+  "ew_by_building_title": "Meerwerk per gebouw",
+  "ew_by_building_subtitle": "Alleen tickets met oorsprong meerwerk, gegroepeerd per gebouw in de geselecteerde periode.",
+  "ew_by_customer_title": "Meerwerk per klant",
+  "ew_by_customer_subtitle": "Alleen tickets met oorsprong meerwerk, gegroepeerd per klantlocatie in de geselecteerde periode.",
+
   "tickets_by_customer_title": "Tickets per klant",
   "tickets_by_customer_subtitle": "Aantal tickets per klantlocatie. Klanten met dezelfde naam in verschillende gebouwen worden apart getoond.",
   "tickets_by_customer_total": "Totaal: {{count}}",

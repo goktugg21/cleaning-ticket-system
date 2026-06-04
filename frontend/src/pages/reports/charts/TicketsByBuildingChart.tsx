@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   Bar,
   BarChart,
@@ -10,19 +11,35 @@ import {
 import { useTranslation } from "react-i18next";
 import type { ReportFilters } from "../../../api/reports";
 import { fetchTicketsByBuilding } from "../../../api/reports";
+import type { TicketOrigin } from "../../../api/reports.types";
 import { useReport } from "../../../hooks/useReport";
 import { ExportButtons } from "./ExportButtons";
 
 export interface ChartProps {
   filters: ReportFilters;
   refreshKey: number;
+  // Sprint 14A — when set (EXTRA_WORK) the card shows only tickets of that
+  // origin and swaps to the EW title/subtitle. Undefined => the generic
+  // by-building card, byte-identical to before.
+  origin?: TicketOrigin;
 }
 
-export function TicketsByBuildingChart({ filters, refreshKey }: ChartProps) {
+export function TicketsByBuildingChart({
+  filters,
+  refreshKey,
+  origin,
+}: ChartProps) {
   const { t } = useTranslation("reports");
+  // Memoized so we don't hand useReport a fresh object every render (which
+  // would re-trigger its fetch effect). With no origin, `filters` passes
+  // through by reference so the generic path is unchanged.
+  const effectiveFilters = useMemo(
+    () => (origin ? { ...filters, origin } : filters),
+    [filters, origin],
+  );
   const { data, loading, error, retry } = useReport({
     fetcher: fetchTicketsByBuilding,
-    filters,
+    filters: effectiveFilters,
     refreshKey,
   });
 
@@ -40,11 +57,17 @@ export function TicketsByBuildingChart({ filters, refreshKey }: ChartProps) {
     <section
       className="card"
       style={{ padding: "20px 22px", minHeight: 360 }}
-      data-testid="chart-card-tickets-by-building"
+      data-testid={
+        origin
+          ? "chart-card-extra-work-by-building"
+          : "chart-card-tickets-by-building"
+      }
     >
-      <h3 className="section-title">{t("tickets_by_building_title")}</h3>
+      <h3 className="section-title">
+        {t(origin ? "ew_by_building_title" : "tickets_by_building_title")}
+      </h3>
       <p className="muted small" style={{ marginBottom: 8 }}>
-        {t("tickets_by_building_subtitle")}
+        {t(origin ? "ew_by_building_subtitle" : "tickets_by_building_subtitle")}
       </p>
 
       {loading && (
@@ -122,7 +145,7 @@ export function TicketsByBuildingChart({ filters, refreshKey }: ChartProps) {
       )}
       <ExportButtons
         dimension="building"
-        filters={filters}
+        filters={effectiveFilters}
         disabled={loading || !!error}
       />
     </section>
