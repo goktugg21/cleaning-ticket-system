@@ -65,6 +65,18 @@
   "tickets_by_origin_empty": "No tickets in this range.",
   "tickets_by_origin_tooltip_label": "Tickets",
 
+  "ew_revenue_title": "Extra Work revenue",
+  "ew_revenue_subtitle": "Billable value of Extra Work requested in the selected range, grouped by revenue state. Earned = the spawned ticket is closed; in progress = spawned but not yet closed.",
+  "ew_revenue_empty": "No Extra Work in this range.",
+  "ew_revenue_state_earned": "Earned",
+  "ew_revenue_state_in_progress": "In progress",
+  "ew_revenue_state_quoted_pipeline": "Quoted / pipeline",
+  "ew_revenue_state_lost": "Lost",
+  "ew_revenue_requests": "Requests: {{count}}",
+  "ew_revenue_total": "Total billable: {{amount}}",
+  "ew_revenue_incl_vat": "incl. VAT",
+  "ew_revenue_tooltip_amount": "Billable",
+
   "tickets_by_customer_title": "Tickets by customer",
   "tickets_by_customer_subtitle": "Tickets per customer location. Customers with the same name at different buildings are kept distinct.",
   "tickets_by_customer_total": "Total: {{count}}",

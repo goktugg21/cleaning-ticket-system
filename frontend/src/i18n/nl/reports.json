@@ -65,6 +65,18 @@
   "tickets_by_origin_empty": "Geen tickets in deze periode.",
   "tickets_by_origin_tooltip_label": "Tickets",
 
+  "ew_revenue_title": "Meerwerk-omzet",
+  "ew_revenue_subtitle": "Facturabele waarde van meerwerk aangevraagd in de geselecteerde periode, gegroepeerd op omzetstatus. Verdiend = het aangemaakte ticket is gesloten; onderhanden = aangemaakt maar nog niet gesloten.",
+  "ew_revenue_empty": "Geen meerwerk in deze periode.",
+  "ew_revenue_state_earned": "Verdiend",
+  "ew_revenue_state_in_progress": "Onderhanden",
+  "ew_revenue_state_quoted_pipeline": "Geoffreerd / pijplijn",
+  "ew_revenue_state_lost": "Verloren",
+  "ew_revenue_requests": "Aanvragen: {{count}}",
+  "ew_revenue_total": "Totaal facturabel: {{amount}}",
+  "ew_revenue_incl_vat": "incl. btw",
+  "ew_revenue_tooltip_amount": "Facturabel",
+
   "tickets_by_customer_title": "Tickets per klant",
   "tickets_by_customer_subtitle": "Aantal tickets per klantlocatie. Klanten met dezelfde naam in verschillende gebouwen worden apart getoond.",
   "tickets_by_customer_total": "Totaal: {{count}}",
