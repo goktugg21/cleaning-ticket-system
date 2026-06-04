@@ -495,10 +495,18 @@ export function TicketDetailPage() {
   // status. Backend stays the source of truth (scope + role + status);
   // this is purely a UX gate so the prominent button only renders when
   // the action will actually be accepted.
+  //
+  // Codex P2 (PR #72) — also hide the action for an EW-origin ticket
+  // (itself spawned from an Extra Work request): converting it would
+  // nest a second EW and break the one-operational-ticket-per-EW model.
+  // The backend rejects this with 400 `ticket_already_extra_work_origin`
+  // (the authority, §11.4); this `!extra_work_origin` check is the UI
+  // mirror so the button never even appears.
   const canConvertTicket =
     !!ticket &&
     isProviderManagementRole(me?.role) &&
-    CONVERTIBLE_TICKET_STATUSES.has(ticket.status);
+    CONVERTIBLE_TICKET_STATUSES.has(ticket.status) &&
+    !ticket.extra_work_origin;
 
   const loadTicket = useCallback(async () => {
     if (!id) return;
