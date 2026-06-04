@@ -4852,6 +4852,16 @@ table.data-table {
   background: var(--surface-2);
 }
 
+/* Sprint 2b — transient highlight when a ?focus_user deep-link lands on a
+   user's matrix rows (e.g. from a contact's "Manage permissions" action).
+   Targets every cell so the sticky User/Actions/Role columns highlight too;
+   the class is added on focus and removed by a ~2.4s timer. */
+.permissions-matrix-row-focus > th,
+.permissions-matrix-row-focus > td {
+  background: var(--amber-soft) !important;
+  transition: background-color 0.45s ease;
+}
+
 .permissions-matrix-user-name {
   font-family: var(--f-head);
   font-weight: 700;

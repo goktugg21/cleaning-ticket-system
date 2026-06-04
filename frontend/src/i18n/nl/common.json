@@ -658,6 +658,8 @@
   "customer_contacts.field_user_status": "Inlogtoegang",
   "customer_contacts.status_user": "Gebruiker",
   "customer_contacts.status_invited": "Uitgenodigd",
+  "customer_contacts.manage_permissions_button": "Rechten beheren",
+  "customer_contacts.manage_permissions_hint": "Bewerk de toegang en rechten per gebouw van deze gebruiker, inclusief of zij anderen mogen uitnodigen.",
   "customer_contacts.promote_modal_title": "Gebruiker maken / Uitnodiging sturen",
   "customer_contacts.promote_modal_subtitle": "Promoveer dit contact tot klantgebruiker. De contactgegevens blijven behouden; alleen inlogtoegang wordt toegevoegd.",
   "customer_contacts.promote_email_help": "Als er al een gebruiker met dit e-mailadres bestaat, wordt deze gekoppeld; anders wordt er een uitnodiging naar dit adres gestuurd.",

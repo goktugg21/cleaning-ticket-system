@@ -658,6 +658,8 @@
   "customer_contacts.field_user_status": "Login access",
   "customer_contacts.status_user": "User",
   "customer_contacts.status_invited": "Invited",
+  "customer_contacts.manage_permissions_button": "Manage permissions",
+  "customer_contacts.manage_permissions_hint": "Edit this user's per-building access and permissions, including whether they can invite others.",
   "customer_contacts.promote_modal_title": "Make user / Send invitation",
   "customer_contacts.promote_modal_subtitle": "Promote this contact to a customer user. Their contact details are kept; only login access is added.",
   "customer_contacts.promote_email_help": "If a user with this email already exists they are linked; otherwise an invitation email is sent to this address.",

@@ -669,26 +669,53 @@ export function CustomerContactsPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="detail-kv-row">
-                    <span className="detail-kv-label">
-                      {t("customer_contacts.field_user_status")}
-                    </span>
-                    <span className="detail-kv-val">
-                      <span
-                        className={
-                          selected.promotion_status === "linked"
-                            ? "badge badge-approved"
-                            : "badge badge-waiting_customer_approval"
-                        }
-                        data-testid="customer-contact-user-status"
-                        data-status={selected.promotion_status}
-                      >
-                        {selected.promotion_status === "linked"
-                          ? t("customer_contacts.status_user")
-                          : t("customer_contacts.status_invited")}
+                  <>
+                    <div className="detail-kv-row">
+                      <span className="detail-kv-label">
+                        {t("customer_contacts.field_user_status")}
                       </span>
-                    </span>
-                  </div>
+                      <span className="detail-kv-val">
+                        <span
+                          className={
+                            selected.promotion_status === "linked"
+                              ? "badge badge-approved"
+                              : "badge badge-waiting_customer_approval"
+                          }
+                          data-testid="customer-contact-user-status"
+                          data-status={selected.promotion_status}
+                        >
+                          {selected.promotion_status === "linked"
+                            ? t("customer_contacts.status_user")
+                            : t("customer_contacts.status_invited")}
+                        </span>
+                      </span>
+                    </div>
+                    {/* Sprint 2b — a LINKED contact resolves to a real
+                        customer user; deep-link to that user's row in the
+                        per-customer permission matrix (the sanctioned
+                        ?focus_user= pattern). An "invited" contact has no
+                        user yet, so no editing surface is offered. The
+                        matrix's override editor covers all 16 customer.*
+                        keys including customer.users.invite. */}
+                    {selected.promotion_status === "linked" &&
+                      selected.user !== null && (
+                        <div style={{ marginTop: 12 }}>
+                          <Link
+                            to={`/admin/customers/${numericId}/permissions?focus_user=${selected.user}`}
+                            className="btn btn-secondary btn-sm"
+                            data-testid="customer-contact-manage-permissions"
+                          >
+                            {t("customer_contacts.manage_permissions_button")}
+                          </Link>
+                          <div
+                            className="muted small"
+                            style={{ marginTop: 6 }}
+                          >
+                            {t("customer_contacts.manage_permissions_hint")}
+                          </div>
+                        </div>
+                      )}
+                  </>
                 )}
               </div>
             </section>
