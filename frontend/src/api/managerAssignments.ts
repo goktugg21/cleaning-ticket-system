@@ -23,13 +23,27 @@ export interface TicketManagerAssignment {
   assigned_at: string;
 }
 
+// The backend paginates this list (StandardResultsSetPagination, 25/page),
+// so a ticket with >25 responsible managers would silently drop the rest.
+// Page through `page=1,2,…` accumulating results until `next` is null (or a
+// short page), with a hard cap so a backend paging bug can't loop forever.
+// Mirrors the plannedWork / my-slots list helpers.
+const _LIST_MAX_PAGES = 40; // 40 * 25 = 1000 managers — far beyond any ticket.
+
 export async function listManagerAssignments(
   ticketId: number | string,
 ): Promise<TicketManagerAssignment[]> {
-  const response = await api.get<PaginatedResponse<TicketManagerAssignment>>(
-    `/tickets/${ticketId}/manager-assignments/`,
-  );
-  return response.data.results;
+  const results: TicketManagerAssignment[] = [];
+  for (let page = 1; page <= _LIST_MAX_PAGES; page += 1) {
+    const response = await api.get<PaginatedResponse<TicketManagerAssignment>>(
+      `/tickets/${ticketId}/manager-assignments/`,
+      { params: { page } },
+    );
+    const data = response.data;
+    results.push(...data.results);
+    if (!data.next || data.results.length === 0) break;
+  }
+  return results;
 }
 
 // Add one or more responsible managers in a single all-or-nothing POST.

@@ -1946,6 +1946,7 @@ export function TicketDetailPage() {
               management roles and hides on a LIST 403. onChanged reloads
               the ticket so the activity timeline picks up the audit row. */}
           <ResponsibleManagersSection
+            key={ticket.id}
             ticketId={ticket.id}
             canManage={isStaff}
             assignableManagers={assignableManagers}
