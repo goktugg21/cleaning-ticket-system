@@ -205,3 +205,49 @@ export interface TicketsByOriginResponse {
   total: number;
   generated_at: string;
 }
+
+// Sprint 14A (Part B) — Extra Work revenue states. Unlike the dimension
+// reports this is NOT a `buckets` list grouped by building/customer/month:
+// the backend (backend/reports/dimensions.py `compute_extra_work_revenue`)
+// classifies every in-scope ExtraWorkRequest into exactly ONE mutually
+// exclusive revenue STATE and sums its billable amounts:
+//   earned          -> the spawned operational ticket is CLOSED.
+//   in_progress     -> spawned ticket exists but is not yet terminal (or no
+//                      ticket yet and the EW is approved / in progress /
+//                      completed).
+//   quoted_pipeline -> no ticket yet; EW still requested / under review /
+//                      pricing proposed.
+//   lost            -> spawned ticket rejected / converted, or the EW was
+//                      customer-rejected / cancelled.
+// EARNED + IN_PROGRESS prefer the FINAL (post-approval) amounts and fall
+// back to the estimate; PIPELINE + LOST use the estimate. The date window
+// is anchored on `requested_at`. Provider-management only — STAFF and
+// CUSTOMER_USER get 403 (the report exposes commercial amounts).
+//
+// Money is serialized as 2-decimal STRINGS (Django Decimal), e.g. "242.00",
+// NOT numbers — keep them as strings and run them through `formatMoney`
+// (lib/intl) for display so locale + currency rendering stays consistent.
+export type ExtraWorkRevenueState =
+  | "earned"
+  | "in_progress"
+  | "quoted_pipeline"
+  | "lost";
+
+export interface ExtraWorkRevenueBucket {
+  count: number;
+  subtotal: string; // 2dp decimal string (excl. VAT)
+  vat: string; // 2dp decimal string
+  total: string; // 2dp decimal string (incl. VAT)
+}
+
+export interface ExtraWorkRevenueResponse {
+  from: string;
+  to: string;
+  // Plain company/building scope (the view uses `scope.to_dict()`, not the
+  // dimension reports' extended `scope_summary()`), so no customer / type /
+  // status / origin echo here.
+  scope: ReportScope;
+  states: Record<ExtraWorkRevenueState, ExtraWorkRevenueBucket>;
+  totals: ExtraWorkRevenueBucket;
+  generated_at: string;
+}

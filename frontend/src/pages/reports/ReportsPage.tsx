@@ -7,6 +7,7 @@ import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useReportsFilters } from "../../hooks/useReportsFilters";
 import { AgeBucketsChart } from "./charts/AgeBucketsChart";
+import { ExtraWorkRevenueChart } from "./charts/ExtraWorkRevenueChart";
 import { ManagerThroughputChart } from "./charts/ManagerThroughputChart";
 import { SLABreachRateChart } from "./charts/SLABreachRateChart";
 import { SLADistributionChart } from "./charts/SLADistributionChart";
@@ -244,6 +245,11 @@ export function ReportsPage() {
         </div>
 
       </section>
+
+      {/* Extra Work revenue is its own report (SoT §7.2), not a generic
+          ticket count — render it FIRST and full-width, above the grid of
+          ticket-count charts. */}
+      <ExtraWorkRevenueChart filters={apiFilters} refreshKey={refreshKey} />
 
       <div
         // Sprint 20 follow-up: the previous template `minmax(420px, 1fr)`
