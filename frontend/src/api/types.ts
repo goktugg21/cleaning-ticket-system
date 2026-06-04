@@ -1472,6 +1472,10 @@ export interface Contact {
 
 export interface ContactCreatePayload {
   building?: number | null;
+  // Write-only multi-building set (replaces the ContactBuildingLink set on
+  // the backend). Sending [] clears all links; preferred over the legacy
+  // single `building` FK. Read back via Contact.linked_building_ids.
+  building_ids?: number[];
   full_name: string;
   email?: string;
   phone?: string;

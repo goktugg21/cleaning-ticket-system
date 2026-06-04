@@ -86,6 +86,7 @@ Redesign the recurring job workflow to **calendar-tick** as the primary input (h
 - [ ] Backend recon + minimal design for explicit picked dates (if needed); migration back-compat with #77.
 - [ ] Calendar-tick form (primary) + optional weekday-rule generator; clearer per-date/window pricing.
 - [ ] Reschedule (Sprint 1) works naturally on a single ticked date; gates/e2e green; screenshots.
+- [ ] Swap the customer/building dropdown order on the recurring-job form (customer left, building right).
 
 ### Sprint 7 — Bulk select-and-approve
 The father's "select" button: confirm many completions at once.
