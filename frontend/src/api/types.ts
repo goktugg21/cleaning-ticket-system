@@ -509,7 +509,25 @@ export interface CompanyAdmin {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  // Provider-policy flags. All default false and are SUPER_ADMIN-only
+  // WRITABLE (the backend CompanySerializer.validate_* methods reject a
+  // non-SA writer); readable by anyone the CompanyViewSet admits. The
+  // last one is the DANGEROUS quote-bypass grant (SoT §2.1 / §5.5).
+  provider_admin_may_manage_customer_company_admins: boolean;
+  provider_admin_may_manage_catalog: boolean;
+  provider_admin_may_manage_customer_prices: boolean;
+  provider_admin_may_quote_override_start: boolean;
 }
+
+// The four SUPER_ADMIN-only provider-policy flags, in display order. The
+// quote-override grant is flagged dangerous so the UI can mark it.
+export const COMPANY_POLICY_FLAGS = [
+  "provider_admin_may_manage_customer_company_admins",
+  "provider_admin_may_manage_catalog",
+  "provider_admin_may_manage_customer_prices",
+  "provider_admin_may_quote_override_start",
+] as const;
+export type CompanyPolicyFlag = (typeof COMPANY_POLICY_FLAGS)[number];
 
 export interface BuildingAdmin {
   id: number;

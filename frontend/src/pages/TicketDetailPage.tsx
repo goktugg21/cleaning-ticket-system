@@ -24,6 +24,7 @@ import {
   listStaffAssignmentRequests,
 } from "../api/admin";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
+import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
 import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
 import type {
   AssignableManager,
@@ -1940,6 +1941,20 @@ export function TicketDetailPage() {
             {/* close Sprint 30 Batch 30.1.1 assigned-staff-card subsection wrapper */}
             </div>
           </div>
+
+          {/* #7 Part B — Responsible managers (M:N), distinct from the
+              primary "Assigned" field above. Self-gates to provider-
+              management roles and hides on a LIST 403. onChanged reloads
+              the ticket so the activity timeline picks up the audit row. */}
+          <ResponsibleManagersSection
+            key={ticket.id}
+            ticketId={ticket.id}
+            canManage={isStaff}
+            assignableManagers={assignableManagers}
+            onChanged={() => {
+              void loadTicket();
+            }}
+          />
 
           {/* Sprint 1 (frontend) — operational "Scheduled date" control.
               Surfaces the existing POST/DELETE /tickets/<id>/schedule/

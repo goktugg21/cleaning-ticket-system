@@ -93,6 +93,14 @@ export interface CompanyWritePayload {
   name?: string;
   slug?: string;
   default_language?: string;
+  // Provider-policy flags. SUPER_ADMIN-only writable — the caller MUST
+  // only include these when the actor is a SUPER_ADMIN, otherwise the
+  // backend validate_* methods reject the whole PATCH (400). A
+  // COMPANY_ADMIN edit must omit them entirely.
+  provider_admin_may_manage_customer_company_admins?: boolean;
+  provider_admin_may_manage_catalog?: boolean;
+  provider_admin_may_manage_customer_prices?: boolean;
+  provider_admin_may_quote_override_start?: boolean;
 }
 
 export async function listCompanies(
