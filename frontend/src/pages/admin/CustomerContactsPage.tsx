@@ -27,6 +27,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
 import { accessRoleLabelKey } from "../../lib/enumLabels";
+import { ContactPermissionsPanel } from "./ContactPermissionsPanel";
 
 /**
  * Sprint 28 Batch 4 — Customer Contacts page (per-customer phone book).
@@ -53,7 +54,8 @@ interface ContactFormState {
   phone: string;
   role_label: string;
   notes: string;
-  building: number | "";
+  // A contact may be linked to several buildings; empty = company-wide.
+  building_ids: number[];
 }
 
 const EMPTY_FORM: ContactFormState = {
@@ -62,7 +64,7 @@ const EMPTY_FORM: ContactFormState = {
   phone: "",
   role_label: "",
   notes: "",
-  building: "",
+  building_ids: [],
 };
 
 // Promote-to-user (Sprint 12B). The access-role options mirror the
@@ -117,6 +119,11 @@ export function CustomerContactsPage() {
   // expanded into the detail view. Editing toggles `editing=true` and
   // pre-populates `form`.
   const [selected, setSelected] = useState<Contact | null>(null);
+
+  // Sprint 2 — in-place permission editor toggle for a LINKED contact's
+  // user. Collapsed by default; reset whenever a different contact is
+  // selected so the panel never lingers on the wrong user.
+  const [permissionsPanelOpen, setPermissionsPanelOpen] = useState(false);
 
   // Create / edit modal state. `mode` is "create" when adding a new
   // contact and "edit" when modifying `selected`. Mutually exclusive
@@ -206,9 +213,21 @@ export function CustomerContactsPage() {
       phone: contact.phone,
       role_label: contact.role_label,
       notes: contact.notes,
-      building: contact.building ?? "",
+      building_ids: [...(contact.linked_building_ids ?? [])],
     });
     setFormError("");
+  }
+
+  function toggleFormBuilding(buildingId: number) {
+    setForm((prev) => {
+      const has = prev.building_ids.includes(buildingId);
+      return {
+        ...prev,
+        building_ids: has
+          ? prev.building_ids.filter((b) => b !== buildingId)
+          : [...prev.building_ids, buildingId],
+      };
+    });
   }
 
   function closeFormModal() {
@@ -232,7 +251,10 @@ export function CustomerContactsPage() {
       phone: form.phone.trim(),
       role_label: form.role_label.trim(),
       notes: form.notes,
-      building: form.building === "" ? null : Number(form.building),
+      // building_ids is the authority for the contact's building links
+      // (replace-set on the backend; [] = company-wide). We omit the legacy
+      // single `building` so it never silently re-injects an extra link.
+      building_ids: form.building_ids,
     };
     try {
       if (mode === "create") {
@@ -480,7 +502,10 @@ export function CustomerContactsPage() {
                     >
                       <button
                         type="button"
-                        onClick={() => setSelected(contact)}
+                        onClick={() => {
+                          setSelected(contact);
+                          setPermissionsPanelOpen(false);
+                        }}
                         style={{
                           width: "100%",
                           textAlign: "left",
@@ -601,16 +626,19 @@ export function CustomerContactsPage() {
                 </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
-                    {t("customer_contacts.field_building")}
+                    {t("customer_contacts.field_buildings")}
                   </span>
                   <span
                     className="detail-kv-val"
                     data-testid="customer-contact-detail-building"
                   >
-                    {selected.building === null
+                    {selected.linked_building_ids.length === 0
                       ? t("customer_contacts.building_company_wide")
-                      : buildingNameById.get(selected.building) ??
-                        `#${selected.building}`}
+                      : selected.linked_building_ids
+                          .map(
+                            (id) => buildingNameById.get(id) ?? `#${id}`,
+                          )
+                          .join(", ")}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -690,29 +718,45 @@ export function CustomerContactsPage() {
                         </span>
                       </span>
                     </div>
-                    {/* Sprint 2b — a LINKED contact resolves to a real
-                        customer user; deep-link to that user's row in the
-                        per-customer permission matrix (the sanctioned
-                        ?focus_user= pattern). An "invited" contact has no
-                        user yet, so no editing surface is offered. The
-                        matrix's override editor covers all 16 customer.*
-                        keys including customer.users.invite. */}
+                    {/* Sprint 2 — a LINKED contact resolves to a real
+                        customer user. The "Manage permissions" affordance
+                        is now an IN-PLACE toggle that expands the override
+                        editor downward under the user entry (no navigation
+                        away). The panel reuses the matrix modal verbatim;
+                        adding/removing buildings still lives on the full
+                        matrix (a secondary link inside the panel). An
+                        "invited" contact has no user yet, so nothing is
+                        offered. */}
                     {selected.promotion_status === "linked" &&
-                      selected.user !== null && (
+                      selected.user !== null &&
+                      numericId !== null && (
                         <div style={{ marginTop: 12 }}>
-                          <Link
-                            to={`/admin/customers/${numericId}/permissions?focus_user=${selected.user}`}
+                          <button
+                            type="button"
                             className="btn btn-secondary btn-sm"
-                            data-testid="customer-contact-manage-permissions"
+                            data-testid="contact-permissions-toggle"
+                            aria-expanded={permissionsPanelOpen}
+                            onClick={() =>
+                              setPermissionsPanelOpen((open) => !open)
+                            }
                           >
-                            {t("customer_contacts.manage_permissions_button")}
-                          </Link>
+                            {permissionsPanelOpen
+                              ? t("customer_contacts.permissions_panel_hide")
+                              : t("customer_contacts.manage_permissions_button")}
+                          </button>
                           <div
                             className="muted small"
                             style={{ marginTop: 6 }}
                           >
                             {t("customer_contacts.manage_permissions_hint")}
                           </div>
+                          {permissionsPanelOpen && (
+                            <ContactPermissionsPanel
+                              key={selected.user}
+                              customerId={numericId}
+                              userId={selected.user}
+                            />
+                          )}
                         </div>
                       )}
                   </>
@@ -857,32 +901,52 @@ export function CustomerContactsPage() {
             </div>
 
             <div className="field">
-              <label className="field-label" htmlFor="contact-building">
-                {t("customer_contacts.field_building")}
-              </label>
-              <select
-                id="contact-building"
-                className="field-select"
-                value={form.building === "" ? "" : String(form.building)}
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setForm((prev) => ({
-                    ...prev,
-                    building: v === "" ? "" : Number(v),
-                  }));
-                }}
-                data-testid="customer-contact-input-building"
-                disabled={formBusy}
-              >
-                <option value="">
-                  {t("customer_contacts.field_building_optional")}
-                </option>
-                {linkedBuildings.map((link) => (
-                  <option key={link.id} value={link.building_id}>
-                    {link.building_name}
-                  </option>
-                ))}
-              </select>
+              <span className="field-label">
+                {t("customer_contacts.field_buildings")}
+              </span>
+              {linkedBuildings.length === 0 ? (
+                <div className="muted small">
+                  {t("customer_contacts.promote_no_buildings")}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    maxHeight: 180,
+                    overflowY: "auto",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    padding: "8px 10px",
+                  }}
+                  data-testid="customer-contact-input-buildings"
+                >
+                  {linkedBuildings.map((link) => (
+                    <label
+                      key={link.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.building_ids.includes(link.building_id)}
+                        onChange={() => toggleFormBuilding(link.building_id)}
+                        disabled={formBusy}
+                        data-testid={`customer-contact-input-building-${link.building_id}`}
+                      />
+                      <span>{link.building_name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {t("customer_contacts.field_building_optional")}
+              </div>
             </div>
 
             <div className="field">

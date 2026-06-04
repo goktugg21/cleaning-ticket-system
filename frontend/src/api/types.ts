@@ -275,6 +275,16 @@ export interface TicketExtraWorkOrigin {
   origin: "INSTANT" | "PROPOSAL";
 }
 
+// Sprint 9B (backend) — operational schedule lifecycle on a ticket.
+// UNSCHEDULED until a provider operator sets a date; SCHEDULED on the
+// first set; RESCHEDULED once an existing schedule is changed; back to
+// UNSCHEDULED when cleared. Mirrors backend
+// `tickets/models.py::TicketScheduleStatus`.
+export type TicketScheduleStatus =
+  | "UNSCHEDULED"
+  | "SCHEDULED"
+  | "RESCHEDULED";
+
 export interface TicketDetail extends TicketList {
   description: string;
   room_label: string;
@@ -316,6 +326,20 @@ export interface TicketDetail extends TicketList {
   // actually assigned (and is STAFF). Backend enforces the same
   // gate on the status transition — this is purely a UX hint.
   is_assigned_staff: boolean;
+  // Sprint 9B (backend) — operational scheduling. Read-only on the
+  // detail serializer; mutated via the dedicated POST/DELETE
+  // /tickets/<id>/schedule/ endpoint (provider-management only,
+  // additive — never touches `status` or SLA). Every role that sees
+  // the detail reads these (operational, no amounts). For a
+  // CUSTOMER_USER the backend redacts the provider-internal reschedule
+  // audit fields: `reschedule_reason` -> "" and `rescheduled_from` ->
+  // null (the current date/window + schedule_status stay visible).
+  scheduled_start_at: string | null;
+  scheduled_end_at: string | null;
+  time_window_label: string;
+  schedule_status: TicketScheduleStatus;
+  rescheduled_from: string | null;
+  reschedule_reason: string;
   // Per-current-user, per-ticket capability block — backend
   // `TicketDetailSerializer.get_actions`. Optional so older list
   // serializers / pre-cherry-pick caches don't break typing; treat
@@ -1466,6 +1490,10 @@ export interface Contact {
 
 export interface ContactCreatePayload {
   building?: number | null;
+  // Write-only multi-building set (replaces the ContactBuildingLink set on
+  // the backend). Sending [] clears all links; preferred over the legacy
+  // single `building` FK. Read back via Contact.linked_building_ids.
+  building_ids?: number[];
   full_name: string;
   email?: string;
   phone?: string;

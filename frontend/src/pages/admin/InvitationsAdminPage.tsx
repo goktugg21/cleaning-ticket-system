@@ -8,7 +8,6 @@ import {
   extractAdminFieldErrors,
   listBuildings,
   listCompanies,
-  listCustomers,
   listInvitations,
   revokeInvitation,
 } from "../../api/admin";
@@ -16,7 +15,6 @@ import type { AdminFieldErrors, InvitationCreatePayload } from "../../api/admin"
 import type {
   BuildingAdmin,
   CompanyAdmin,
-  CustomerAdmin,
   InvitationAdmin,
   Role,
 } from "../../api/types";
@@ -78,15 +76,17 @@ export function InvitationsAdminPage() {
   const { t, i18n } = useTranslation("common");
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
-  // Available role choices for the create form. SUPER_ADMIN can pick any role
-  // (including SUPER_ADMIN, no scope). COMPANY_ADMIN can pick the three
-  // non-super-admin roles. The API enforces this; the UI hides forbidden
-  // options so an actor does not get a 400 from clicking.
+  // Available role choices for the create form. PROVIDER roles only — a
+  // CUSTOMER_USER may NOT be invited here (Sprint 3 contact-first
+  // enforcement: customer users are created by promoting a Contact). The
+  // backend rejects a CUSTOMER_USER invite with
+  // `customer_user_must_come_from_contact`; the UI drops the option so an
+  // actor never reaches that 400. SUPER_ADMIN can also invite SUPER_ADMIN.
   const availableRoles: Role[] = useMemo(
     () =>
       isSuperAdmin
-        ? ["SUPER_ADMIN", "COMPANY_ADMIN", "BUILDING_MANAGER", "CUSTOMER_USER"]
-        : ["COMPANY_ADMIN", "BUILDING_MANAGER", "CUSTOMER_USER"],
+        ? ["SUPER_ADMIN", "COMPANY_ADMIN", "BUILDING_MANAGER"]
+        : ["COMPANY_ADMIN", "BUILDING_MANAGER"],
     [isSuperAdmin],
   );
 
@@ -147,12 +147,10 @@ export function InvitationsAdminPage() {
   );
   const [formCompany, setFormCompany] = useState<number | "">("");
   const [formBuildings, setFormBuildings] = useState<number[]>([]);
-  const [formCustomers, setFormCustomers] = useState<number[]>([]);
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
   const [companiesLoaded, setCompaniesLoaded] = useState(false);
   const [buildingOptions, setBuildingOptions] = useState<BuildingAdmin[]>([]);
-  const [customerOptions, setCustomerOptions] = useState<CustomerAdmin[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [formGeneralError, setFormGeneralError] = useState("");
@@ -179,11 +177,10 @@ export function InvitationsAdminPage() {
     };
   }, []);
 
-  // Reload building/customer options whenever the company filter changes.
+  // Reload building options whenever the company filter changes.
   useEffect(() => {
     if (formCompany === "") {
       setBuildingOptions([]);
-      setCustomerOptions([]);
       return;
     }
     let cancelled = false;
@@ -194,13 +191,6 @@ export function InvitationsAdminPage() {
       .catch(() => {
         if (!cancelled) setBuildingOptions([]);
       });
-    listCustomers({ is_active: "true", page_size: 200, company: formCompany })
-      .then((response) => {
-        if (!cancelled) setCustomerOptions(response.results);
-      })
-      .catch(() => {
-        if (!cancelled) setCustomerOptions([]);
-      });
     return () => {
       cancelled = true;
     };
@@ -209,7 +199,6 @@ export function InvitationsAdminPage() {
   // When the role changes, drop scope selections that no longer apply.
   useEffect(() => {
     setFormBuildings([]);
-    setFormCustomers([]);
     setFormFieldErrors({});
   }, [formRole]);
 
@@ -218,12 +207,6 @@ export function InvitationsAdminPage() {
   function toggleBuilding(id: number) {
     setFormBuildings((current) =>
       current.includes(id) ? current.filter((b) => b !== id) : [...current, id],
-    );
-  }
-
-  function toggleCustomer(id: number) {
-    setFormCustomers((current) =>
-      current.includes(id) ? current.filter((c) => c !== id) : [...current, id],
     );
   }
 
@@ -241,9 +224,6 @@ export function InvitationsAdminPage() {
     if (formRole === "BUILDING_MANAGER" && formBuildings.length === 0) {
       errs.building_ids = "Pick at least one building.";
     }
-    if (formRole === "CUSTOMER_USER" && formCustomers.length === 0) {
-      errs.customer_ids = "Pick at least one customer.";
-    }
     if (Object.keys(errs).length > 0) {
       setFormFieldErrors(errs);
       return;
@@ -260,9 +240,6 @@ export function InvitationsAdminPage() {
     if (formRole === "BUILDING_MANAGER") {
       payload.building_ids = formBuildings;
     }
-    if (formRole === "CUSTOMER_USER") {
-      payload.customer_ids = formCustomers;
-    }
 
     setSubmitting(true);
     try {
@@ -271,7 +248,6 @@ export function InvitationsAdminPage() {
       setFormEmail("");
       setFormFullName("");
       setFormBuildings([]);
-      setFormCustomers([]);
       // Reload the list. Reset to page 1 so the new invitation is on top.
       if (page !== 1) {
         setPage(1);
@@ -407,6 +383,18 @@ export function InvitationsAdminPage() {
             <div className="invitation-form-fields">
               <div className="form-grid-2">
                 <div className="field">
+                  <label className="field-label" htmlFor="invite-full-name">
+                    {t("invitations.field_full_name")} {t("invitations.field_optional")}
+                  </label>
+                  <input
+                    id="invite-full-name"
+                    className="field-input"
+                    type="text"
+                    value={formFullName}
+                    onChange={(event) => setFormFullName(event.target.value)}
+                  />
+                </div>
+                <div className="field">
                   <label className="field-label" htmlFor="invite-email">
                     {t("invitations.field_email")} *
                   </label>
@@ -424,44 +412,9 @@ export function InvitationsAdminPage() {
                     </div>
                   )}
                 </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="invite-full-name">
-                    {t("invitations.field_full_name")} {t("invitations.field_optional")}
-                  </label>
-                  <input
-                    id="invite-full-name"
-                    className="field-input"
-                    type="text"
-                    value={formFullName}
-                    onChange={(event) => setFormFullName(event.target.value)}
-                  />
-                </div>
               </div>
 
               <div className="form-grid-2">
-                <div className="field">
-                  <label className="field-label" htmlFor="invite-role">
-                    {t("invitations.field_role")} *
-                  </label>
-                  <select
-                    id="invite-role"
-                    className="field-select"
-                    value={formRole}
-                    onChange={(event) => setFormRole(event.target.value as Role)}
-                  >
-                    {availableRoles.map((role) => (
-                      <option key={role} value={role}>
-                        {t(roleLabelKeyNs(role))}
-                      </option>
-                    ))}
-                  </select>
-                  {formFieldErrors.role && (
-                    <div className="alert-error login-error" role="alert">
-                      {formFieldErrors.role}
-                    </div>
-                  )}
-                </div>
-
                 {formRole !== "SUPER_ADMIN" && (
                   <div className="field">
                     <label className="field-label" htmlFor="invite-company">
@@ -497,6 +450,29 @@ export function InvitationsAdminPage() {
                     )}
                   </div>
                 )}
+
+                <div className="field">
+                  <label className="field-label" htmlFor="invite-role">
+                    {t("invitations.field_role")} *
+                  </label>
+                  <select
+                    id="invite-role"
+                    className="field-select"
+                    value={formRole}
+                    onChange={(event) => setFormRole(event.target.value as Role)}
+                  >
+                    {availableRoles.map((role) => (
+                      <option key={role} value={role}>
+                        {t(roleLabelKeyNs(role))}
+                      </option>
+                    ))}
+                  </select>
+                  {formFieldErrors.role && (
+                    <div className="alert-error login-error" role="alert">
+                      {formFieldErrors.role}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {formRole === "BUILDING_MANAGER" && (
@@ -544,50 +520,6 @@ export function InvitationsAdminPage() {
                 </div>
               )}
 
-              {formRole === "CUSTOMER_USER" && (
-                <div className="field">
-                  <label className="field-label">{t("invitations.field_customers")} *</label>
-                  <p className="field-helper">
-                    {t("invitations.customers_hint")}
-                  </p>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 8,
-                      marginTop: 4,
-                    }}
-                  >
-                    {customerOptions.length === 0 ? (
-                      <span className="muted small">
-                        {formCompany === ""
-                          ? t("invitations.select_company_first")
-                          : "No customers in this company."}
-                      </span>
-                    ) : (
-                      customerOptions.map((c) => {
-                        const active = formCustomers.includes(c.id);
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
-                            onClick={() => toggleCustomer(c.id)}
-                            aria-pressed={active}
-                          >
-                            {c.name}
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                  {formFieldErrors.customer_ids && (
-                    <div className="alert-error login-error" role="alert">
-                      {formFieldErrors.customer_ids}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 

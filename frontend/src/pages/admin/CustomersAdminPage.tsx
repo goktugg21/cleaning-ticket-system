@@ -232,8 +232,11 @@ export function CustomersAdminPage() {
           </div>
           <div className="filter-field">
             <span className="filter-label">{t("company")}</span>
+            {/* Cap the Company select so it matches Search / Status / Building
+                instead of stretching the filter-bar's 1fr track. */}
             <select
               className="filter-control"
+              style={{ maxWidth: 220 }}
               value={companyFilter === "" ? "" : String(companyFilter)}
               onChange={(event) => {
                 const v = event.target.value;

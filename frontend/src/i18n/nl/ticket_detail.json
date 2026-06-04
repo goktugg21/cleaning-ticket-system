@@ -207,6 +207,36 @@
   "convert.submit_button": "Converteer naar Extra Werk",
   "convert.submitting": "Converteren…",
 
-  "detail.spawned_from_label": "Voortgekomen uit extra werk"
+  "detail.spawned_from_label": "Voortgekomen uit extra werk",
+
+  "schedule.card_title": "Planning",
+  "schedule.current_date_label": "Geplande datum",
+  "schedule.not_scheduled": "Nog niet ingepland",
+  "schedule.window_label": "Tijdvak",
+  "schedule.status_label": "Status",
+  "schedule.status_unscheduled": "Niet ingepland",
+  "schedule.status_scheduled": "Ingepland",
+  "schedule.status_rescheduled": "Verzet",
+  "schedule.set_button": "Datum instellen",
+  "schedule.change_button": "Datum wijzigen",
+  "schedule.clear_button": "Planning wissen",
+  "schedule.date_field_label": "Geplande datum",
+  "schedule.window_field_label": "Tijdvak (optioneel)",
+  "schedule.window_field_placeholder": "bijv. Ochtend, 09:00–12:00",
+  "schedule.reason_field_label": "Reden voor wijziging",
+  "schedule.reason_field_placeholder": "Waarom wordt deze planning gewijzigd?",
+  "schedule.save_button": "Opslaan",
+  "schedule.saving": "Opslaan…",
+  "schedule.cancel_button": "Annuleren",
+  "schedule.clear_dialog_title": "Planning wissen?",
+  "schedule.clear_dialog_body": "De geplande datum wordt verwijderd en het ticket keert terug naar niet-ingepland.",
+  "schedule.clear_confirm": "Wissen",
+  "schedule.clearing": "Wissen…",
+  "schedule.error_required": "Kies een geplande datum.",
+  "schedule.error_reason_required": "Geef een reden op voor het wijzigen van de planning.",
+  "schedule.error_terminal": "Dit ticket is afgerond en kan niet meer worden ingepland.",
+  "schedule.error_forbidden_scope": "Je hebt geen rechten om dit ticket in te plannen.",
+  "schedule.error_forbidden_role": "Je rol kan tickets niet inplannen.",
+  "schedule.error_invalid": "De planning is ongeldig."
 }
 

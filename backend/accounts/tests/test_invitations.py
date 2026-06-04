@@ -120,8 +120,12 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
             BuildingManagerAssignment.objects.filter(user=user, building=self.building).exists()
         )
 
-    def test_super_admin_can_invite_customer_user_and_create_membership_on_accept(self):
-        response, raw = self._create_invitation_and_capture_raw(
+    def test_super_admin_cannot_invite_customer_user_via_public_endpoint(self):
+        # Sprint 3 — contact-first enforcement. The public invitations
+        # endpoint is for PROVIDER staff only; a CUSTOMER_USER must be
+        # created by promoting a Contact. The endpoint rejects the role
+        # outright with a stable code.
+        response = self._create_invitation_via_api(
             self.super_admin,
             {
                 "email": "new-cu@example.com",
@@ -129,8 +133,29 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
                 "customer_ids": [self.customer.id],
             },
         )
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertIsNotNone(raw)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["role"][0].code,
+            "customer_user_must_come_from_contact",
+        )
+        # No invitation row was created.
+        self.assertFalse(
+            Invitation.objects.filter(email__iexact="new-cu@example.com").exists()
+        )
+
+    def test_model_direct_customer_user_invitation_accepts_into_membership(self):
+        # Regression — the promotion path creates CUSTOMER_USER invitations
+        # MODEL-DIRECT (Invitation.objects.create(..., contact=contact)),
+        # bypassing the public serializer guard above. Such an invitation
+        # still accepts into a User + CustomerUserMembership. (`_make_invitation`
+        # mirrors that model-direct creation.)
+        invitation, raw = self._make_invitation(
+            role=UserRole.CUSTOMER_USER,
+            email="promoted-cu@example.com",
+            created_by=self.super_admin,
+            customers=[self.customer],
+        )
+        self.assertEqual(invitation.role, UserRole.CUSTOMER_USER)
 
         accept = self.client.post(
             self.ACCEPT_URL,
@@ -138,7 +163,7 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(accept.status_code, status.HTTP_201_CREATED)
-        user = get_user_model().objects.get(email="new-cu@example.com")
+        user = get_user_model().objects.get(email="promoted-cu@example.com")
         self.assertEqual(user.role, UserRole.CUSTOMER_USER)
         self.assertTrue(
             CustomerUserMembership.objects.filter(user=user, customer=self.customer).exists()
@@ -218,12 +243,15 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_creating_a_new_invitation_revokes_prior_pending_invitation_for_same_email(self):
+        # Role is incidental here — the revoke-on-reinvite logic matches by
+        # email. Use a provider role (CUSTOMER_USER is no longer invitable
+        # via the public endpoint — Sprint 3 contact-first enforcement).
         first = self._create_invitation_via_api(
             self.super_admin,
             {
                 "email": "reinvite@example.com",
-                "role": UserRole.CUSTOMER_USER,
-                "customer_ids": [self.customer.id],
+                "role": UserRole.BUILDING_MANAGER,
+                "building_ids": [self.building.id],
             },
         )
         self.assertEqual(first.status_code, status.HTTP_201_CREATED)
@@ -233,8 +261,8 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
             self.super_admin,
             {
                 "email": "reinvite@example.com",
-                "role": UserRole.CUSTOMER_USER,
-                "customer_ids": [self.customer.id],
+                "role": UserRole.BUILDING_MANAGER,
+                "building_ids": [self.building.id],
             },
         )
         self.assertEqual(second.status_code, status.HTTP_201_CREATED)
@@ -251,8 +279,8 @@ class InvitationTests(TenantFixtureMixin, APITestCase):
             self.super_admin,
             {
                 "email": "enqueue@example.com",
-                "role": UserRole.CUSTOMER_USER,
-                "customer_ids": [self.customer.id],
+                "role": UserRole.BUILDING_MANAGER,
+                "building_ids": [self.building.id],
             },
         )
         after = NotificationLog.objects.filter(
