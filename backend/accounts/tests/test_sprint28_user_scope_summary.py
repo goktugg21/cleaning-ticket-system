@@ -34,6 +34,7 @@ from companies.models import Company, CompanyUserMembership
 from customers.models import (
     Customer,
     CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
 from test_utils import TenantFixtureMixin
@@ -173,3 +174,88 @@ class UserScopeSummaryTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             row["scope_summary"], {"label": "customers", "count": 2}
         )
+
+
+class CustomerAccessRolesProjectionTests(TenantFixtureMixin, APITestCase):
+    """
+    Sprint 2c — `customer_access_roles` field on the admin Users list.
+
+    Sorted, DISTINCT set of ``access_role`` values across the user's
+    ``CustomerUserBuildingAccess`` rows; EMPTY list for provider-side
+    users (never null). Additive, read-only — no model change.
+    """
+
+    URL = "/api/users/"
+
+    def _row_for(self, response, user_id):
+        rows = response.data.get("results", response.data)
+        for row in rows:
+            if row["id"] == user_id:
+                return row
+        self.fail(f"user {user_id} not present in /api/users/ payload")
+
+    def test_provider_users_have_empty_access_roles(self):
+        staff = self.make_user("staff-car@example.com", UserRole.STAFF)
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        for user in (self.super_admin, self.company_admin, self.manager, staff):
+            self.assertEqual(
+                self._row_for(response, user.id)["customer_access_roles"], []
+            )
+
+    def test_customer_user_default_role(self):
+        # Base fixture: customer_user has one CUBA with the default
+        # CUSTOMER_USER access role.
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        row = self._row_for(response, self.customer_user.id)
+        self.assertEqual(row["customer_access_roles"], ["CUSTOMER_USER"])
+
+    def test_distinct_sorted_across_buildings(self):
+        # Same user, two buildings, two different access roles -> sorted
+        # distinct set (LOCATION_MANAGER sorts before USER), no duplicates.
+        AccessRole = CustomerUserBuildingAccess.AccessRole
+        membership = CustomerUserMembership.objects.get(
+            user=self.customer_user, customer=self.customer
+        )
+        CustomerUserBuildingAccess.objects.filter(membership=membership).update(
+            access_role=AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        extra_building = Building.objects.create(
+            company=self.company, name="Wing Z"
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=extra_building
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=extra_building,
+            access_role=AccessRole.CUSTOMER_USER,
+        )
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        row = self._row_for(response, self.customer_user.id)
+        self.assertEqual(
+            row["customer_access_roles"],
+            ["CUSTOMER_LOCATION_MANAGER", "CUSTOMER_USER"],
+        )
+
+    def test_inactive_grant_excluded_from_projection(self):
+        # A disabled grant (is_active=False) must NOT appear — the column
+        # reflects EFFECTIVE access roles (the resolver denies inactive
+        # grants). customer_user's only grant becomes inactive -> [].
+        access = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.customer_user
+        )
+        access.access_role = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        access.is_active = False
+        access.save(update_fields=["access_role", "is_active"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        row = self._row_for(response, self.customer_user.id)
+        self.assertEqual(row["customer_access_roles"], [])

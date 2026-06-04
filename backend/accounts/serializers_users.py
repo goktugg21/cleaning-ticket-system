@@ -10,6 +10,7 @@ from .scoping import (
 
 class UserListSerializer(serializers.ModelSerializer):
     scope_summary = serializers.SerializerMethodField()
+    customer_access_roles = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -22,6 +23,7 @@ class UserListSerializer(serializers.ModelSerializer):
             "is_active",
             "deleted_at",
             "scope_summary",
+            "customer_access_roles",
         ]
         read_only_fields = fields
 
@@ -59,6 +61,35 @@ class UserListSerializer(serializers.ModelSerializer):
                 "count": obj.customer_memberships.count(),
             }
         return {"label": "all", "count": -1}
+
+    def get_customer_access_roles(self, obj):
+        """
+        Sprint 2c — read-only projection of the customer-side access roles
+        a user EFFECTIVELY holds, for the global Users admin list. Returns
+        the sorted, DISTINCT set of ``access_role`` values across the user's
+        ACTIVE ``CustomerUserBuildingAccess`` rows (a user may hold a
+        different access role per building / customer). EMPTY list for
+        provider-side users (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
+        / STAFF) and for any customer user with no active per-building
+        grants — never ``null``, so the frontend renders without null
+        guards.
+
+        Inactive grants are excluded so the column matches effective
+        permissions: the resolver short-circuits an ``is_active=False`` row
+        to deny every key (customers/permissions.py), so advertising its
+        access role here would be misleading. The ``is_active`` check is
+        done in Python over the prefetched rows (see
+        ``UserViewSet.get_queryset`` — list action only) so it does NOT
+        defeat the prefetch / re-introduce an N+1.
+        """
+        return sorted(
+            {
+                access.access_role
+                for membership in obj.customer_memberships.all()
+                for access in membership.building_access.all()
+                if access.is_active
+            }
+        )
 
 
 class UserDetailSerializer(serializers.ModelSerializer):

@@ -5,12 +5,21 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listUsers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
-import type { Role, UserAdmin, UserScopeSummary } from "../../api/types";
+import type {
+  CustomerAccessRole,
+  Role,
+  UserAdmin,
+  UserScopeSummary,
+} from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { EmptyState } from "../../components/EmptyState";
 import { RoleBadge } from "../../components/RoleBadge";
-import { isProviderRole, roleLabelKey } from "../../lib/enumLabels";
+import {
+  accessRoleLabelKey,
+  isProviderRole,
+  roleLabelKey,
+} from "../../lib/enumLabels";
 
 type ActiveFilter = "true" | "false" | "all";
 
@@ -40,6 +49,34 @@ function ScopeChip({ summary }: { summary: UserScopeSummary }) {
     </span>
   );
 }
+
+// Sprint 2c — read-only customer access-role chip(s). A user may hold a
+// different access role per building, so this renders the deduped set the
+// backend projects. Provider users (or any user with no grants) render an
+// em-dash. Editing happens in the per-customer permission matrix, never here.
+function AccessRoleCell({ roles }: { roles: CustomerAccessRole[] }) {
+  const { t } = useTranslation("common");
+  if (!roles || roles.length === 0) {
+    return <span className="muted">—</span>;
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+      {roles.map((role) => (
+        <span key={role} className="badge badge-normal" data-access-role={role}>
+          {t(accessRoleLabelKey(role))}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// Sprint 2c — the three customer access roles for the read-only filter
+// toolbar (mirrors AccessRole on the backend). Labels reuse access_role.*.
+const ACCESS_ROLE_OPTIONS: CustomerAccessRole[] = [
+  "CUSTOMER_USER",
+  "CUSTOMER_LOCATION_MANAGER",
+  "CUSTOMER_COMPANY_ADMIN",
+];
 
 // Sprint 23B — STAFF is a valid filter option so reviewers can find
 // existing STAFF users. The list page only reads; the create path
@@ -75,6 +112,9 @@ export function UsersAdminPage() {
   const [searchActive, setSearchActive] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
   const [roleFilter, setRoleFilter] = useState<Role[]>([]);
+  const [accessRoleFilter, setAccessRoleFilter] = useState<
+    CustomerAccessRole[]
+  >([]);
 
   const [savedBanner] = useSavedBanner({
     saved: t("users.banner_saved"),
@@ -99,8 +139,10 @@ export function UsersAdminPage() {
     const params: AdminListParams = { page };
     if (activeFilter !== "all") params.is_active = activeFilter;
     if (roleFilter.length > 0) params.role = roleFilter.join(",");
+    if (accessRoleFilter.length > 0)
+      params.access_role = accessRoleFilter.join(",");
     return params;
-  }, [page, activeFilter, roleFilter]);
+  }, [page, activeFilter, roleFilter, accessRoleFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,12 +189,24 @@ export function UsersAdminPage() {
   }, [visibleUsers]);
 
   const hasActiveFilters = Boolean(
-    searchActive || activeFilter !== "true" || roleFilter.length > 0,
+    searchActive ||
+      activeFilter !== "true" ||
+      roleFilter.length > 0 ||
+      accessRoleFilter.length > 0,
   );
 
   function toggleRole(role: Role) {
     setRoleFilter((current) =>
       current.includes(role) ? current.filter((r) => r !== role) : [...current, role],
+    );
+    setPage(1);
+  }
+
+  function toggleAccessRole(role: CustomerAccessRole) {
+    setAccessRoleFilter((current) =>
+      current.includes(role)
+        ? current.filter((r) => r !== role)
+        : [...current, role],
     );
     setPage(1);
   }
@@ -185,6 +239,9 @@ export function UsersAdminPage() {
         <td>{user.full_name || "—"}</td>
         <td data-testid="user-row-role" data-role={user.role}>
           <RoleBadge role={user.role} />
+        </td>
+        <td data-testid="user-row-access-role">
+          <AccessRoleCell roles={user.customer_access_roles} />
         </td>
         <td>{user.language}</td>
         <td data-testid="user-row-scope">
@@ -309,6 +366,28 @@ export function UsersAdminPage() {
               })}
             </div>
           </div>
+          <div className="filter-field" style={{ flexBasis: "100%" }}>
+            <span className="filter-label">
+              {t("users.access_roles_label")}
+            </span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {ACCESS_ROLE_OPTIONS.map((role) => {
+                const active = accessRoleFilter.includes(role);
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
+                    onClick={() => toggleAccessRole(role)}
+                    aria-pressed={active}
+                    data-access-role={role}
+                  >
+                    {t(accessRoleLabelKey(role))}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="filter-actions">
             {hasActiveFilters && (
               <button
@@ -319,6 +398,7 @@ export function UsersAdminPage() {
                   setSearchInput("");
                   setActiveFilter("true");
                   setRoleFilter([]);
+                  setAccessRoleFilter([]);
                   setPage(1);
                 }}
               >
@@ -341,6 +421,7 @@ export function UsersAdminPage() {
                 <th>{t("users.col_email")}</th>
                 <th>{t("users.col_full_name")}</th>
                 <th>{t("users.col_role")}</th>
+                <th>{t("users.col_access_role")}</th>
                 <th>{t("users.col_language")}</th>
                 <th>{t("users.col_scope")}</th>
                 <th>{t("status")}</th>
@@ -354,7 +435,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-provider"
                   >
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <span className="users-group-header-label">
                         {t("users.group_provider")}
                       </span>
@@ -372,7 +453,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-customer"
                   >
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <span className="users-group-header-label">
                         {t("users.group_customer")}
                       </span>
@@ -429,6 +510,17 @@ export function UsersAdminPage() {
                         <RoleBadge role={user.role} />
                       </dd>
                     </div>
+                    {!isProviderRole(user.role) &&
+                      user.customer_access_roles.length > 0 && (
+                        <div className="admin-card-meta-row">
+                          <dt>{t("users.col_access_role")}</dt>
+                          <dd>
+                            <AccessRoleCell
+                              roles={user.customer_access_roles}
+                            />
+                          </dd>
+                        </div>
+                      )}
                     <div className="admin-card-meta-row">
                       <dt>{t("users.col_language")}</dt>
                       <dd>{user.language}</dd>

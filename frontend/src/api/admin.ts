@@ -68,6 +68,10 @@ export interface AdminListParams {
   building?: number;
   page_size?: number;
   role?: string;
+  // Sprint 2c — comma-separated customer access roles; narrows the user
+  // list to users with >=1 CustomerUserBuildingAccess row of that role.
+  // cleanParams() passes it through to ?access_role=.
+  access_role?: string;
 }
 
 function cleanParams(input: AdminListParams): Record<string, string | number> {

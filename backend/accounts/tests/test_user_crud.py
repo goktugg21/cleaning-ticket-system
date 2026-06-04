@@ -5,7 +5,12 @@ from rest_framework.test import APITestCase
 from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 from test_utils import TenantFixtureMixin
 
 
@@ -80,6 +85,116 @@ class UserCRUDTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         roles = {row["role"] for row in response.data.get("results", response.data)}
         self.assertEqual(roles, {UserRole.BUILDING_MANAGER, UserRole.CUSTOMER_USER})
+
+    # ---- Sprint 2c — ?access_role= filter ---------------------------------
+
+    def test_access_role_filter_narrows_to_matching_users(self):
+        # Promote customer_user's grant to LOCATION_MANAGER; the filter then
+        # returns that user but not the default-CUSTOMER_USER one, and never
+        # a provider user (no CUBA rows).
+        access = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.customer_user
+        )
+        access.access_role = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        access.save(update_fields=["access_role"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertIn(self.customer_user.email, emails)
+        self.assertNotIn(self.other_customer_user.email, emails)
+        self.assertNotIn(self.super_admin.email, emails)
+
+    def test_access_role_filter_multi_value(self):
+        a1 = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.customer_user
+        )
+        a1.access_role = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        a1.save(update_fields=["access_role"])
+        a2 = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.other_customer_user
+        )
+        a2.access_role = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+        )
+        a2.save(update_fields=["access_role"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL,
+            {"access_role": "CUSTOMER_LOCATION_MANAGER,CUSTOMER_COMPANY_ADMIN"},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertIn(self.customer_user.email, emails)
+        self.assertIn(self.other_customer_user.email, emails)
+
+    def test_access_role_filter_no_duplicate_rows(self):
+        # A user with TWO matching access rows must appear EXACTLY once —
+        # the Exists subquery prevents the join fan-out that a naive
+        # .filter(...__access_role__in=...) would cause.
+        extra_building = Building.objects.create(
+            company=self.company, name="Wing Dup"
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=extra_building
+        )
+        membership = CustomerUserMembership.objects.get(
+            user=self.customer_user, customer=self.customer
+        )
+        CustomerUserBuildingAccess.objects.filter(membership=membership).update(
+            access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=extra_building,
+            access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER,
+        )
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data.get("results", response.data)
+        matching = [row for row in rows if row["id"] == self.customer_user.id]
+        self.assertEqual(len(matching), 1)
+
+    def test_access_role_filter_unknown_value_returns_empty(self):
+        # Mirror ?role= — NO validation; an unknown value matches zero rows
+        # (200, not 400).
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"access_role": "BOGUS"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        rows = response.data.get("results", response.data)
+        self.assertEqual(len(rows), 0)
+
+    def test_access_role_filter_excludes_inactive_grants(self):
+        # A disabled grant (is_active=False) must NOT match — mirrors the
+        # projection + the resolver, which denies inactive grants.
+        access = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.customer_user
+        )
+        access.access_role = (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER
+        )
+        access.is_active = False
+        access.save(update_fields=["access_role", "is_active"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        emails = {row["email"] for row in response.data.get("results", response.data)}
+        self.assertNotIn(self.customer_user.email, emails)
 
     def test_is_active_false_returns_only_deactivated(self):
         self.customer_user.soft_delete(deleted_by=self.super_admin)

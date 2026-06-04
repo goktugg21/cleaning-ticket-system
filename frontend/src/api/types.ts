@@ -621,6 +621,12 @@ export interface UserAdmin {
   // payload without it the type-check here flags it at the call
   // site rather than silently rendering an empty chip.
   scope_summary: UserScopeSummary;
+  // Sprint 2c — read-only projection of the customer-side access roles the
+  // user EFFECTIVELY holds (sorted, distinct across their ACTIVE
+  // CustomerUserBuildingAccess rows; inactive grants excluded). Empty array
+  // for provider-side users (never null). Editing stays in the per-customer
+  // permission matrix / the contact->user surface.
+  customer_access_roles: CustomerAccessRole[];
 }
 
 export interface UserAdminDetail extends UserAdmin {

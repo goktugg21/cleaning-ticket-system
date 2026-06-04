@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -13,6 +13,7 @@ from companies.models import CompanyUserMembership
 from customers.models import (
     Customer,
     CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
 
@@ -103,18 +104,45 @@ class UserViewSet(viewsets.ModelViewSet):
             roles = [r.strip() for r in role_filter.split(",") if r.strip()]
             base = base.filter(role__in=roles)
 
+        # Sprint 2c — optional ?access_role= filter, mirroring ?role=
+        # exactly: comma-separated multi-value, NO validation (an unknown
+        # value simply matches zero rows -> 200, not 400). Narrows to users
+        # with >=1 ACTIVE CustomerUserBuildingAccess row of one of the given
+        # access roles (is_active=True, matching the projection + the
+        # resolver, which denies inactive grants). Uses an Exists subquery
+        # (not a join) so the membership -> building_access fan-out cannot
+        # duplicate User rows / inflate the paginated count.
+        access_role_filter = self.request.query_params.get("access_role")
+        if access_role_filter:
+            access_roles = [
+                r.strip() for r in access_role_filter.split(",") if r.strip()
+            ]
+            if access_roles:
+                base = base.filter(
+                    Exists(
+                        CustomerUserBuildingAccess.objects.filter(
+                            membership__user=OuterRef("pk"),
+                            access_role__in=access_roles,
+                            is_active=True,
+                        )
+                    )
+                )
+
         # Sprint 28 Batch 15.5 — prefetch the four scope tables the list
         # serializer's `scope_summary` counts against, so a list of N
         # users does not fire 4*N extra SELECTs. Scoped to the list
         # action because the detail / update / reactivate paths read
         # the membership rows through their own helpers and would just
         # pay the prefetch cost for nothing.
+        # Sprint 2c — also prefetch customer_memberships -> building_access
+        # for the list serializer's `customer_access_roles` projection.
         if self.action == "list":
             base = base.prefetch_related(
                 "company_memberships",
                 "building_assignments",
                 "building_visibility",
                 "customer_memberships",
+                "customer_memberships__building_access",
             )
         return base.order_by(*self.ordering)
 
