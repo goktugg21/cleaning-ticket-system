@@ -239,7 +239,7 @@ export function CustomerSettingsPage() {
               </label>
             </div>
 
-            <div className="form-actions card-actions-cluster">
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 type="submit"
                 className="btn btn-primary"
@@ -258,15 +258,27 @@ export function CustomerSettingsPage() {
             }`}
             data-testid="customer-lifecycle-section"
           >
-            <ZoneHeader
-              title={t("customer_view.settings.lifecycle_title")}
-              helper={
-                customer.is_active
-                  ? t("customer_view.settings.deactivate_consequence")
-                  : t("customer_view.settings.reactivate_consequence")
-              }
-            />
-            <div className="form-actions card-actions-cluster">
+            {/* One compact row: label + consequence on the left, the
+                (destructive) action on the right — no empty band/void. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                flexWrap: "wrap",
+              }}
+            >
+              <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+                <div className="permissions-zone-title">
+                  {t("customer_view.settings.lifecycle_title")}
+                </div>
+                <div className="permissions-zone-helper">
+                  {customer.is_active
+                    ? t("customer_view.settings.deactivate_consequence")
+                    : t("customer_view.settings.reactivate_consequence")}
+                </div>
+              </div>
               {customer.is_active ? (
                 <button
                   type="button"
