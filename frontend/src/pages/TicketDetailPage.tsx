@@ -35,7 +35,9 @@ import type {
   TicketMessageType,
   TicketStatus,
   TicketStatusChangePayload,
+  TicketTimelineRow,
 } from "../api/types";
+import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
 import {
   composerTiersForRole,
@@ -47,6 +49,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { RouteBadge } from "../components/RouteBadge";
+import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
@@ -297,6 +300,25 @@ export function TicketDetailPage() {
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
+  // Sprint 32 — unified audit timeline for provider-audit roles (SA / CA /
+  // BM). STAFF + CUSTOMER_USER never fetch it (the endpoint 403s them); they
+  // keep the status-history-only activity card. `null` while loading or on
+  // error -> the page falls back to the status-history rendering so the
+  // activity card is never blank.
+  // Tagged with the ticket id the rows were fetched for, so a navigation
+  // A -> B (TicketDetailPage does NOT unmount) never renders A's audit feed
+  // under B during B's fetch — the render gate requires the tag to match the
+  // CURRENT ticket id.
+  const [auditTimeline, setAuditTimeline] = useState<{
+    ticketId: number;
+    rows: TicketTimelineRow[];
+  } | null>(null);
+  // Bumped on every ticket reload that follows an audited mutation (message,
+  // attachment, assignment, status/override, completion). Drives a timeline
+  // refetch so non-status audit rows appear without a full page reload, in
+  // addition to the status-history-length trigger. Only bumped from
+  // user-initiated reloads, so it never over-fetches.
+  const [auditReloadNonce, setAuditReloadNonce] = useState(0);
 
   // Sprint 23B — Request-assignment state for STAFF users on a
   // ticket they have building visibility for but aren't yet
@@ -524,6 +546,11 @@ export function TicketDetailPage() {
       setTicket(ticketResponse.data);
       setMessages(messageResponse.data.results);
       setAttachments(attachmentResponse.data.results);
+      // Signal the audit-timeline effect to refetch (batched with the
+      // setters above, so the effect runs once per reload). This is what
+      // surfaces message / attachment audit rows — they do not change the
+      // status-history length.
+      setAuditReloadNonce((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -535,6 +562,45 @@ export function TicketDetailPage() {
     setLoading(true);
     loadTicket();
   }, [loadTicket]);
+
+  // Sprint 32 — provider-audit roles (SA / CA / BM, mirroring the backend
+  // IsTicketAuditConsumer) get the UNIFIED audit timeline. STAFF /
+  // CUSTOMER_USER are deliberately excluded: they must never call the
+  // provider-audit endpoint (it 403s them) nor see audit_log / EW-internal /
+  // severity rows. Refetches when the status-history length changes (a
+  // status / override transition — covers the direct-setTicket status path)
+  // OR when `auditReloadNonce` bumps (every other audited reload: message /
+  // attachment / assignment). State is only set inside the async callbacks
+  // (never synchronously in the effect body, so no set-state-in-effect), the
+  // rows are tagged with the fetched ticket id, and a failed fetch leaves
+  // `auditTimeline` null, so the activity card falls back to the
+  // status-history rendering rather than blanking.
+  const isProviderAudit = isProviderManagementRole(me?.role);
+  const auditTimelineTicketId = ticket?.id ?? null;
+  const auditTimelineHistoryLen = ticket?.status_history?.length ?? 0;
+  useEffect(() => {
+    if (!isProviderAudit || auditTimelineTicketId == null) return;
+    let cancelled = false;
+    getTicketAuditTimeline(auditTimelineTicketId)
+      .then((data) => {
+        if (!cancelled)
+          setAuditTimeline({
+            ticketId: auditTimelineTicketId,
+            rows: data.timeline,
+          });
+      })
+      .catch(() => {
+        if (!cancelled) setAuditTimeline(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isProviderAudit,
+    auditTimelineTicketId,
+    auditTimelineHistoryLen,
+    auditReloadNonce,
+  ]);
 
   useEffect(() => {
     setSelectedAssigneeId(
@@ -685,6 +751,9 @@ export function TicketDetailPage() {
         { assigned_to: assignedTo },
       );
       setTicket(response.data);
+      // Assignment changes emit an audit_log row but do NOT change the
+      // status-history length, so nudge the timeline to refetch.
+      setAuditReloadNonce((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -1131,7 +1200,19 @@ export function TicketDetailPage() {
               </span>
             </div>
             <div className="timeline">
-              {ticket.status_history.length === 0 ? (
+              {/* Sprint 32 — provider-audit roles see the UNIFIED timeline
+                  (status history + audit_log + Extra Work + planned
+                  occurrence + severity). STAFF / CUSTOMER_USER (and any
+                  load / fetch-error state, where auditTimeline stays null)
+                  fall through to the unchanged status-history rendering
+                  below, so the activity card is never blank and their view
+                  is exactly as before. */}
+              {isProviderAudit &&
+              auditTimeline !== null &&
+              auditTimeline.ticketId === ticket.id &&
+              auditTimeline.rows.length > 0 ? (
+                <UnifiedTimeline rows={auditTimeline.rows} />
+              ) : ticket.status_history.length === 0 ? (
                 <div className="timeline-row" data-color="green">
                   <div className="timeline-dot" />
                   <div>
@@ -1209,20 +1290,30 @@ export function TicketDetailPage() {
                           line. Backend always emits both fields
                           (defaulted false / ""); we only render the
                           badge for actual overrides. */}
-                      {entry.is_override && (
-                        <div
-                          className="muted small"
-                          data-testid="timeline-override-badge"
-                          style={{ marginTop: 4 }}
-                        >
-                          <b>{t("timeline_override_badge")}</b>
-                          {entry.override_reason
-                            ? ` · ${t("timeline_override_reason", {
-                                reason: entry.override_reason,
-                              })}`
-                            : ""}
-                        </div>
-                      )}
+                      {entry.is_override &&
+                        (() => {
+                          // Sanitize the override reason the same way
+                          // UnifiedTimeline does, so the demo seed marker
+                          // never leaks in the status-history fallback
+                          // path (a real typed reason is unaffected).
+                          const cleanedReason = sanitizeStatusNote(
+                            entry.override_reason,
+                          );
+                          return (
+                            <div
+                              className="muted small"
+                              data-testid="timeline-override-badge"
+                              style={{ marginTop: 4 }}
+                            >
+                              <b>{t("timeline_override_badge")}</b>
+                              {cleanedReason
+                                ? ` · ${t("timeline_override_reason", {
+                                    reason: cleanedReason,
+                                  })}`
+                                : ""}
+                            </div>
+                          );
+                        })()}
                     </div>
                   </div>
                 ))

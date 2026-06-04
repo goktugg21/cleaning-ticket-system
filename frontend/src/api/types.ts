@@ -766,6 +766,12 @@ export interface NotificationPreferencesResponse {
 // drift does not silently hide fields.
 export type AuditAction = "CREATE" | "UPDATE" | "DELETE";
 
+// Sprint 14E (SoT §9.2) — audit severity / red-flag marker. NORMAL is the
+// quiet default for routine mutations; HIGH marks a dangerous / red-flag
+// business event the feed renders with a badge. Mirrors
+// backend/audit/models.py::AuditSeverity.
+export type AuditSeverity = "NORMAL" | "HIGH";
+
 export interface AuditLog {
   id: number;
   actor: number | null;
@@ -784,6 +790,90 @@ export interface AuditLog {
   // time. Shape: { role, user_id, company_ids, customer_id, building_id }.
   // Empty dict for anonymous / system writes.
   actor_scope: Record<string, unknown>;
+  // Sprint 14E — severity marker + structured event metadata. The audit
+  // serializer always returns both (severity defaults to NORMAL, metadata
+  // to {}).
+  severity: AuditSeverity;
+  metadata: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 14A — unified ticket audit timeline (GET /api/audit/tickets/<id>/
+// timeline/). A flat, timestamp-sorted feed merging five sources, keyed on
+// the `source` discriminator. Mirrors backend/audit/views_ticket_timeline.py.
+// Provider-audit only (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER); the
+// SPA must not fetch it for STAFF / CUSTOMER_USER (the endpoint 403s them).
+// ---------------------------------------------------------------------------
+export type TicketTimelineSource =
+  | "status_history"
+  | "audit_log"
+  | "extra_work_link"
+  | "extra_work_status_history"
+  | "planned_occurrence_link";
+
+export interface TimelineStatusHistoryRow {
+  source: "status_history";
+  timestamp: string | null;
+  old_status: string;
+  new_status: string;
+  note: string;
+  is_override: boolean;
+  override_reason: string;
+  changed_by_email: string | null;
+}
+
+export interface TimelineAuditLogRow {
+  source: "audit_log";
+  timestamp: string | null;
+  target_model: string;
+  target_id: number;
+  action: AuditAction;
+  changes: Record<string, unknown>;
+  reason: string;
+  severity: AuditSeverity;
+  metadata: Record<string, unknown>;
+  actor_email: string | null;
+}
+
+export interface TimelineExtraWorkLinkRow {
+  source: "extra_work_link";
+  timestamp: string | null;
+  extra_work_id: number;
+  extra_work_status: string;
+  relation: "spawned_from" | "converted_source";
+}
+
+export interface TimelineExtraWorkStatusHistoryRow {
+  source: "extra_work_status_history";
+  timestamp: string | null;
+  extra_work_id: number;
+  old_status: string;
+  new_status: string;
+  note: string;
+  is_override: boolean;
+  changed_by_email: string | null;
+}
+
+export interface TimelinePlannedOccurrenceLinkRow {
+  source: "planned_occurrence_link";
+  timestamp: string | null;
+  occurrence_id: number;
+  status: string;
+  planned_date: string | null;
+}
+
+export type TicketTimelineRow =
+  | TimelineStatusHistoryRow
+  | TimelineAuditLogRow
+  | TimelineExtraWorkLinkRow
+  | TimelineExtraWorkStatusHistoryRow
+  | TimelinePlannedOccurrenceLinkRow;
+
+export interface TicketAuditTimeline {
+  ticket_id: number;
+  ticket_no: string;
+  generated_at: string;
+  timeline: TicketTimelineRow[];
 }
 
 // ---------------------------------------------------------------------------
