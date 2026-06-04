@@ -109,6 +109,7 @@ export function ContactPermissionsPanel({
     try {
       const resp = await listCustomerUserAccess(customerId, userId);
       setAccessRows(resp.results);
+      setError("");
     } catch (err) {
       setError(getApiError(err));
     }
@@ -134,6 +135,7 @@ export function ContactPermissionsPanel({
   async function handleSaveOverrides() {
     if (!editingAccess) return;
     setOverrideSaving(true);
+    setError("");
     try {
       await updateCustomerUserAccess(customerId, userId, editingAccess.building_id, {
         permission_overrides: buildOverridesPayload(overrideDraft),
