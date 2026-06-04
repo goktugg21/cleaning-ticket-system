@@ -1,4 +1,4 @@
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
@@ -104,29 +104,53 @@ class UserViewSet(viewsets.ModelViewSet):
             roles = [r.strip() for r in role_filter.split(",") if r.strip()]
             base = base.filter(role__in=roles)
 
-        # Sprint 2c — optional ?access_role= filter, mirroring ?role=
-        # exactly: comma-separated multi-value, NO validation (an unknown
-        # value simply matches zero rows -> 200, not 400). Narrows to users
-        # with >=1 ACTIVE CustomerUserBuildingAccess row of one of the given
-        # access roles (is_active=True, matching the projection + the
-        # resolver, which denies inactive grants). Uses an Exists subquery
-        # (not a join) so the membership -> building_access fan-out cannot
-        # duplicate User rows / inflate the paginated count.
+        # Company scope for the customer-access surfaces: SUPER_ADMIN is
+        # unrestricted (None); a COMPANY_ADMIN is limited to their own
+        # provider companies. (Other roles never reach here.)
+        scope_company_ids = None if is_super else actor_company_ids
+
+        # Sprint 2c follow-up — ?access_role= filters by the EFFECTIVE
+        # (single highest) customer access role, company-scoped to the
+        # viewer. Single value, NOT comma-multi. An unknown value yields an
+        # empty result (mirroring the role filter's "no match"). Each
+        # per-role subquery is an Exists keyed on OuterRef("pk") so the
+        # building_access fan-out cannot duplicate User rows. "Effective LM"
+        # means an LM grant exists AND no higher (CCA) grant; "effective CU"
+        # means a CU grant exists and no LM/CCA grant.
+        AccessRole = CustomerUserBuildingAccess.AccessRole
         access_role_filter = self.request.query_params.get("access_role")
         if access_role_filter:
-            access_roles = [
-                r.strip() for r in access_role_filter.split(",") if r.strip()
-            ]
-            if access_roles:
-                base = base.filter(
-                    Exists(
-                        CustomerUserBuildingAccess.objects.filter(
-                            membership__user=OuterRef("pk"),
-                            access_role__in=access_roles,
-                            is_active=True,
-                        )
-                    )
+            requested = access_role_filter.strip()
+
+            def _grant_exists(role):
+                sub = CustomerUserBuildingAccess.objects.filter(
+                    membership__user=OuterRef("pk"),
+                    access_role=role,
+                    is_active=True,
                 )
+                if scope_company_ids is not None:
+                    sub = sub.filter(
+                        membership__customer__company_id__in=scope_company_ids
+                    )
+                return Exists(sub)
+
+            if requested == AccessRole.CUSTOMER_COMPANY_ADMIN:
+                base = base.filter(
+                    _grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN)
+                )
+            elif requested == AccessRole.CUSTOMER_LOCATION_MANAGER:
+                base = base.filter(
+                    _grant_exists(AccessRole.CUSTOMER_LOCATION_MANAGER)
+                ).filter(~_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN))
+            elif requested == AccessRole.CUSTOMER_USER:
+                base = (
+                    base.filter(_grant_exists(AccessRole.CUSTOMER_USER))
+                    .filter(~_grant_exists(AccessRole.CUSTOMER_LOCATION_MANAGER))
+                    .filter(~_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN))
+                )
+            else:
+                # Unknown value -> no match (mirror ?role=).
+                base = base.none()
 
         # Sprint 28 Batch 15.5 — prefetch the four scope tables the list
         # serializer's `scope_summary` counts against, so a list of N
@@ -134,15 +158,21 @@ class UserViewSet(viewsets.ModelViewSet):
         # action because the detail / update / reactivate paths read
         # the membership rows through their own helpers and would just
         # pay the prefetch cost for nothing.
-        # Sprint 2c — also prefetch customer_memberships -> building_access
-        # for the list serializer's `customer_access_roles` projection.
+        # Sprint 2c follow-up — prefetch customer_memberships with their
+        # `customer` (select_related, for the per-grant company_id scope
+        # check) and `building_access` rows, for the list serializer's
+        # `customer_access_role` projection (no N+1).
         if self.action == "list":
             base = base.prefetch_related(
                 "company_memberships",
                 "building_assignments",
                 "building_visibility",
-                "customer_memberships",
-                "customer_memberships__building_access",
+                Prefetch(
+                    "customer_memberships",
+                    queryset=CustomerUserMembership.objects.select_related(
+                        "customer"
+                    ).prefetch_related("building_access"),
+                ),
             )
         return base.order_by(*self.ordering)
 
@@ -152,6 +182,24 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return UserDetailSerializer
         return UserUpdateSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Sprint 2c follow-up — pass the viewer's provider-company scope so
+        # the list serializer's `customer_access_role` only reflects access
+        # grants under customers in the viewer's own company. None =
+        # SUPER_ADMIN (unrestricted). Only the list action needs it.
+        if self.action == "list":
+            actor = self.request.user
+            if actor.role == UserRole.SUPER_ADMIN:
+                context["customer_access_company_ids"] = None
+            else:
+                context["customer_access_company_ids"] = list(
+                    CompanyUserMembership.objects.filter(
+                        user=actor
+                    ).values_list("company_id", flat=True)
+                )
+        return context
 
     def create(self, request, *args, **kwargs):
         return Response(

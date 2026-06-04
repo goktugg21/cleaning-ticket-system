@@ -8,9 +8,18 @@ from .scoping import (
 )
 
 
+# Sprint 2c follow-up — customer access-role hierarchy. The global Users
+# list shows ONE badge = the user's highest effective customer access role.
+_ACCESS_ROLE_RANK = {
+    "CUSTOMER_USER": 1,
+    "CUSTOMER_LOCATION_MANAGER": 2,
+    "CUSTOMER_COMPANY_ADMIN": 3,
+}
+
+
 class UserListSerializer(serializers.ModelSerializer):
     scope_summary = serializers.SerializerMethodField()
-    customer_access_roles = serializers.SerializerMethodField()
+    customer_access_role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -23,7 +32,7 @@ class UserListSerializer(serializers.ModelSerializer):
             "is_active",
             "deleted_at",
             "scope_summary",
-            "customer_access_roles",
+            "customer_access_role",
         ]
         read_only_fields = fields
 
@@ -62,34 +71,41 @@ class UserListSerializer(serializers.ModelSerializer):
             }
         return {"label": "all", "count": -1}
 
-    def get_customer_access_roles(self, obj):
+    def get_customer_access_role(self, obj):
         """
-        Sprint 2c — read-only projection of the customer-side access roles
-        a user EFFECTIVELY holds, for the global Users admin list. Returns
-        the sorted, DISTINCT set of ``access_role`` values across the user's
-        ACTIVE ``CustomerUserBuildingAccess`` rows (a user may hold a
-        different access role per building / customer). EMPTY list for
-        provider-side users (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER
-        / STAFF) and for any customer user with no active per-building
-        grants — never ``null``, so the frontend renders without null
-        guards.
+        Sprint 2c follow-up — the user's single HIGHEST effective customer
+        access role for the global Users admin list
+        (CUSTOMER_COMPANY_ADMIN > CUSTOMER_LOCATION_MANAGER > CUSTOMER_USER),
+        or ``None`` for provider-side users and for any customer user with
+        no in-scope active grant.
 
-        Inactive grants are excluded so the column matches effective
-        permissions: the resolver short-circuits an ``is_active=False`` row
-        to deny every key (customers/permissions.py), so advertising its
-        access role here would be misleading. The ``is_active`` check is
-        done in Python over the prefetched rows (see
-        ``UserViewSet.get_queryset`` — list action only) so it does NOT
-        defeat the prefetch / re-introduce an N+1.
+        Company-scoped to the VIEWER: a COMPANY_ADMIN only sees access roles
+        from customers in their own provider company. The view passes the
+        allowed company-id set via ``customer_access_company_ids`` in the
+        serializer context (``None`` = SUPER_ADMIN, unrestricted); a grant
+        whose ``membership.customer.company_id`` is outside that set is
+        ignored. This prevents a cross-company leak where one viewer would
+        see roles a user holds under a different provider's customers.
+
+        Inactive grants are excluded (the resolver denies them). Computed in
+        Python over the rows prefetched by ``UserViewSet.get_queryset``
+        (list action; ``customer_memberships`` select_relates ``customer``
+        for the company_id check) so there is no N+1.
         """
-        return sorted(
-            {
-                access.access_role
-                for membership in obj.customer_memberships.all()
-                for access in membership.building_access.all()
-                if access.is_active
-            }
-        )
+        scope = self.context.get("customer_access_company_ids")
+        best_role = None
+        best_rank = 0
+        for membership in obj.customer_memberships.all():
+            if scope is not None and membership.customer.company_id not in scope:
+                continue
+            for access in membership.building_access.all():
+                if not access.is_active:
+                    continue
+                rank = _ACCESS_ROLE_RANK.get(access.access_role, 0)
+                if rank > best_rank:
+                    best_rank = rank
+                    best_role = access.access_role
+        return best_role
 
 
 class UserDetailSerializer(serializers.ModelSerializer):

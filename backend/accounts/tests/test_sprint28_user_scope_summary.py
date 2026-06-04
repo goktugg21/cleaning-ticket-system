@@ -176,13 +176,13 @@ class UserScopeSummaryTests(TenantFixtureMixin, APITestCase):
         )
 
 
-class CustomerAccessRolesProjectionTests(TenantFixtureMixin, APITestCase):
+class CustomerAccessRoleProjectionTests(TenantFixtureMixin, APITestCase):
     """
-    Sprint 2c — `customer_access_roles` field on the admin Users list.
-
-    Sorted, DISTINCT set of ``access_role`` values across the user's
-    ``CustomerUserBuildingAccess`` rows; EMPTY list for provider-side
-    users (never null). Additive, read-only — no model change.
+    Sprint 2c follow-up — `customer_access_role` field on the admin Users
+    list: the user's single HIGHEST effective customer access role
+    (CUSTOMER_COMPANY_ADMIN > CUSTOMER_LOCATION_MANAGER > CUSTOMER_USER),
+    company-scoped to the viewer; ``None`` for provider users / no in-scope
+    active grant. Additive, read-only — no model change.
     """
 
     URL = "/api/users/"
@@ -194,58 +194,72 @@ class CustomerAccessRolesProjectionTests(TenantFixtureMixin, APITestCase):
                 return row
         self.fail(f"user {user_id} not present in /api/users/ payload")
 
-    def test_provider_users_have_empty_access_roles(self):
+    def test_provider_users_have_null_access_role(self):
         staff = self.make_user("staff-car@example.com", UserRole.STAFF)
         self.authenticate(self.super_admin)
         response = self.client.get(self.URL)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         for user in (self.super_admin, self.company_admin, self.manager, staff):
-            self.assertEqual(
-                self._row_for(response, user.id)["customer_access_roles"], []
+            self.assertIsNone(
+                self._row_for(response, user.id)["customer_access_role"]
             )
 
     def test_customer_user_default_role(self):
-        # Base fixture: customer_user has one CUBA with the default
+        # Base fixture: customer_user has one active CUBA with the default
         # CUSTOMER_USER access role.
         self.authenticate(self.super_admin)
         response = self.client.get(self.URL)
         row = self._row_for(response, self.customer_user.id)
-        self.assertEqual(row["customer_access_roles"], ["CUSTOMER_USER"])
+        self.assertEqual(row["customer_access_role"], "CUSTOMER_USER")
 
-    def test_distinct_sorted_across_buildings(self):
-        # Same user, two buildings, two different access roles -> sorted
-        # distinct set (LOCATION_MANAGER sorts before USER), no duplicates.
+    def test_highest_role_wins_across_buildings(self):
+        # Same user, three buildings, three roles -> the single HIGHEST
+        # (CUSTOMER_COMPANY_ADMIN) is returned.
         AccessRole = CustomerUserBuildingAccess.AccessRole
         membership = CustomerUserMembership.objects.get(
             user=self.customer_user, customer=self.customer
         )
-        CustomerUserBuildingAccess.objects.filter(membership=membership).update(
-            access_role=AccessRole.CUSTOMER_LOCATION_MANAGER
-        )
-        extra_building = Building.objects.create(
-            company=self.company, name="Wing Z"
-        )
-        CustomerBuildingMembership.objects.create(
-            customer=self.customer, building=extra_building
-        )
-        CustomerUserBuildingAccess.objects.create(
-            membership=membership,
-            building=extra_building,
-            access_role=AccessRole.CUSTOMER_USER,
-        )
+        for name, role in (
+            ("Wing LM", AccessRole.CUSTOMER_LOCATION_MANAGER),
+            ("Wing CCA", AccessRole.CUSTOMER_COMPANY_ADMIN),
+        ):
+            b = Building.objects.create(company=self.company, name=name)
+            CustomerBuildingMembership.objects.create(
+                customer=self.customer, building=b
+            )
+            CustomerUserBuildingAccess.objects.create(
+                membership=membership, building=b, access_role=role
+            )
 
         self.authenticate(self.super_admin)
         response = self.client.get(self.URL)
         row = self._row_for(response, self.customer_user.id)
+        self.assertEqual(row["customer_access_role"], "CUSTOMER_COMPANY_ADMIN")
+
+    def test_location_manager_beats_customer_user(self):
+        AccessRole = CustomerUserBuildingAccess.AccessRole
+        membership = CustomerUserMembership.objects.get(
+            user=self.customer_user, customer=self.customer
+        )
+        extra = Building.objects.create(company=self.company, name="Wing LM2")
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=extra
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=extra,
+            access_role=AccessRole.CUSTOMER_LOCATION_MANAGER,
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        row = self._row_for(response, self.customer_user.id)
         self.assertEqual(
-            row["customer_access_roles"],
-            ["CUSTOMER_LOCATION_MANAGER", "CUSTOMER_USER"],
+            row["customer_access_role"], "CUSTOMER_LOCATION_MANAGER"
         )
 
-    def test_inactive_grant_excluded_from_projection(self):
-        # A disabled grant (is_active=False) must NOT appear — the column
-        # reflects EFFECTIVE access roles (the resolver denies inactive
-        # grants). customer_user's only grant becomes inactive -> [].
+    def test_inactive_grant_excluded(self):
+        # A disabled grant must not count. customer_user's only grant
+        # becomes inactive -> None.
         access = CustomerUserBuildingAccess.objects.get(
             membership__user=self.customer_user
         )
@@ -258,4 +272,48 @@ class CustomerAccessRolesProjectionTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.super_admin)
         response = self.client.get(self.URL)
         row = self._row_for(response, self.customer_user.id)
-        self.assertEqual(row["customer_access_roles"], [])
+        self.assertIsNone(row["customer_access_role"])
+
+    def test_company_scoped_to_viewer(self):
+        # Codex scenario: customer_user has a CUSTOMER_USER grant under
+        # company A (base fixture) AND a CUSTOMER_COMPANY_ADMIN grant under
+        # company B. A company-A admin must see only the A role; a super
+        # admin sees the highest across both.
+        AccessRole = CustomerUserBuildingAccess.AccessRole
+        cross_customer = Customer.objects.create(
+            company=self.other_company,
+            building=self.other_building,
+            name="Cross B",
+            contact_email="cross-b@example.com",
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=cross_customer, building=self.other_building
+        )
+        m_b = CustomerUserMembership.objects.create(
+            user=self.customer_user, customer=cross_customer
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=m_b,
+            building=self.other_building,
+            access_role=AccessRole.CUSTOMER_COMPANY_ADMIN,
+        )
+
+        # Super: highest across both companies = CCA.
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL)
+        self.assertEqual(
+            self._row_for(response, self.customer_user.id)[
+                "customer_access_role"
+            ],
+            "CUSTOMER_COMPANY_ADMIN",
+        )
+
+        # Company-A admin: only the in-company grant is visible = CUSTOMER_USER.
+        self.authenticate(self.company_admin)
+        response = self.client.get(self.URL)
+        self.assertEqual(
+            self._row_for(response, self.customer_user.id)[
+                "customer_access_role"
+            ],
+            "CUSTOMER_USER",
+        )
