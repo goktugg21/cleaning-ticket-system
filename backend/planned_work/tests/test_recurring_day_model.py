@@ -593,3 +593,173 @@ class BackfillFunctionTests(PlannedWorkFixtureMixin, APITestCase):
         occ.refresh_from_db()
         default = job.windows.get(ordering=0)
         self.assertEqual(occ.source_window_id, default.id)
+
+
+# ---------------------------------------------------------------------------
+# Legacy-shaped edits (Codex P1 backward-compat). A pre-day-model client
+# sends the legacy schedule fields but NOT the new windows / weekdays keys;
+# generation now reads the window model + weekday set, so those writes must
+# still reach generation.
+# ---------------------------------------------------------------------------
+class LegacyEditBackwardCompatTests(PlannedWorkFixtureMixin, APITestCase):
+    def setUp(self):
+        super().setUp()
+        self.authenticate(self.super_admin)
+
+    def _create_legacy_job(self, **overrides):
+        """A migrated/legacy-style job: created with the legacy schedule
+        field and NO windows / weekdays, so the backend synthesizes exactly
+        one window (start_time from preferred_start_time) and defaults the
+        weekday set to start_date's weekday."""
+        payload = self.recurring_job_payload(
+            preferred_start_time="09:00", **overrides
+        )
+        resp = self.client.post(JOBS_URL, payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        return RecurringJob.objects.latest("id")
+
+    # ---- FIX 1: legacy schedule write syncs the single default window -----
+    def test_legacy_time_patch_syncs_single_window_and_generation(self):
+        # Would FAIL pre-fix: the sole window kept 09:00 and generation
+        # produced 09:00 occurrences regardless of the legacy PATCH.
+        job = self._create_legacy_job()
+        self.assertEqual(job.windows.get().start_time, time(9, 0))
+
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {"preferred_start_time": "10:00"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertEqual(job.windows.get().start_time, time(10, 0))
+
+        generate_occurrences(days_ahead=14, today=MON)
+        occ = PlannedOccurrence.objects.filter(
+            recurring_job=job, planned_date=MON
+        ).first()
+        self.assertIsNotNone(occ)
+        self.assertEqual(occ.preferred_start_time, time(10, 0))
+
+    def test_legacy_label_patch_syncs_single_window(self):
+        job = self._create_legacy_job()
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {"time_window_label": "Avond"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertEqual(job.windows.get().label, "Avond")
+
+    def test_legacy_time_patch_leaves_multiwindow_untouched(self):
+        job = self._create_legacy_job()
+        sole = job.windows.get()
+        # Promote to a multi-window job (two active windows).
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {
+                "windows": [
+                    {"id": sole.id, "label": "AM", "start_time": "09:00"},
+                    {"label": "PM", "start_time": "18:00"},
+                ]
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        before = {
+            (w.id, w.start_time, w.label)
+            for w in job.windows.filter(is_active=True)
+        }
+        self.assertEqual(len(before), 2)
+
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {"preferred_start_time": "10:00"},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        after = {
+            (w.id, w.start_time, w.label)
+            for w in job.windows.filter(is_active=True)
+        }
+        self.assertEqual(before, after)  # multi-window: untouched
+
+    def test_title_only_patch_leaves_window_untouched(self):
+        job = self._create_legacy_job()
+        window = job.windows.get()
+        before = (window.start_time, window.label)
+
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/", {"title": "Renamed"}, format="json"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        window.refresh_from_db()
+        self.assertEqual((window.start_time, window.label), before)
+
+    # ---- FIX 2: legacy start_date move re-anchors the implicit weekday ----
+    def test_legacy_start_date_move_reanchors_implicit_weekday(self):
+        # Would FAIL pre-fix: weekdays stayed "1" and generation kept landing
+        # on Mondays after moving the start to a Tuesday.
+        job = self._create_legacy_job()  # start MON 2026-06-01, weekdays "1"
+        self.assertEqual(job.weekdays, "1")
+
+        tuesday = date(2026, 6, 2)  # Tuesday
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {"start_date": tuesday.isoformat()},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        job.refresh_from_db()
+        self.assertEqual(job.weekdays, "2")  # re-anchored to Tuesday
+
+        generate_occurrences(days_ahead=14, today=tuesday)
+        dates = sorted(
+            PlannedOccurrence.objects.filter(recurring_job=job).values_list(
+                "planned_date", flat=True
+            )
+        )
+        self.assertTrue(dates)
+        self.assertTrue(all(d.isoweekday() == 2 for d in dates))
+        self.assertIn(tuesday, dates)
+
+    def test_explicit_weekday_set_not_touched_on_start_date_move(self):
+        payload = self.recurring_job_payload(
+            frequency=Frequency.WEEKLY,
+            weekdays=[1, 4],
+            windows=[{"label": "day", "start_time": "09:00"}],
+        )
+        resp = self.client.post(JOBS_URL, payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        job = RecurringJob.objects.latest("id")
+        self.assertEqual(job.weekdays, "1,4")
+
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {"start_date": date(2026, 6, 2).isoformat()},  # Tuesday
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        job.refresh_from_db()
+        self.assertEqual(job.weekdays, "1,4")  # explicit multi-day: untouched
+
+    def test_explicit_single_weekday_differing_not_touched(self):
+        # Explicit Wednesday on a Monday-start job; moving start_date must NOT
+        # clobber the deliberate single-day choice.
+        payload = self.recurring_job_payload(
+            frequency=Frequency.WEEKLY,
+            weekdays=[3],
+            windows=[{"label": "day", "start_time": "09:00"}],
+        )
+        resp = self.client.post(JOBS_URL, payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        job = RecurringJob.objects.latest("id")
+        self.assertEqual(job.weekdays, "3")
+
+        resp = self.client.patch(
+            f"{JOBS_URL}{job.id}/",
+            {"start_date": date(2026, 6, 2).isoformat()},  # Tuesday
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        job.refresh_from_db()
+        self.assertEqual(job.weekdays, "3")  # explicit single-day: untouched

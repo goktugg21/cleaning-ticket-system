@@ -28,7 +28,7 @@ from .models import (
     RecurringJobDefaultStaff,
     RecurringJobWindow,
 )
-from .weekdays import VALID_WEEKDAYS, serialize_weekdays
+from .weekdays import VALID_WEEKDAYS, parse_weekdays, serialize_weekdays
 
 
 def _two_places(value):
@@ -574,6 +574,28 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                     "start_date", instance.start_date
                 ),
             )
+        elif "start_date" in validated_data:
+            # Backward-compat (Codex P1): a pre-day-model client PATCHes
+            # start_date WITHOUT `weekdays`. If the job still carries the
+            # AUTO/IMPLICIT single weekday — i.e. the stored set is exactly
+            # {old start_date's weekday} — re-anchor it to the NEW
+            # start_date's weekday, matching the legacy "Monday job moved to
+            # a Tuesday start now runs on Tuesdays" behaviour. An EXPLICIT
+            # set (multi-day, or a single day that differs from the old
+            # anchor) is a deliberate choice and is left untouched. The
+            # implicit check is computed against the OLD instance values
+            # BEFORE super().update() applies the new start_date.
+            effective_frequency = validated_data.get(
+                "frequency", instance.frequency
+            )
+            if (
+                effective_frequency in (Frequency.WEEKLY, Frequency.BIWEEKLY)
+                and set(parse_weekdays(instance.weekdays))
+                == {instance.start_date.isoweekday()}
+            ):
+                validated_data["weekdays"] = serialize_weekdays(
+                    [validated_data["start_date"].isoweekday()]
+                )
 
         instance = super().update(instance, validated_data)
 
@@ -603,7 +625,41 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
 
         if windows_present:
             self._sync_windows(instance, windows_data, creating=False)
+        else:
+            self._sync_legacy_schedule_to_single_window(
+                instance, validated_data
+            )
         return instance
+
+    def _sync_legacy_schedule_to_single_window(self, instance, validated_data):
+        """Backward-compat (Codex P1): a pre-day-model client PATCHes
+        `preferred_start_time` / `time_window_label` WITHOUT `windows`.
+        Generation now reads the window, not those legacy fields, so mirror
+        the sent field(s) onto the job's SOLE active window so the change
+        reaches generation.
+
+        Only when the job has exactly ONE active window — a bare legacy
+        schedule write is ambiguous for a multi-window job, and legacy
+        clients never created multi-window jobs. A title-only PATCH (neither
+        legacy schedule field present) is a no-op (windows untouched)."""
+        sends_time = "preferred_start_time" in validated_data
+        sends_label = "time_window_label" in validated_data
+        if not (sends_time or sends_label):
+            return
+        windows = list(instance.windows.filter(is_active=True))
+        if len(windows) != 1:
+            return
+        window = windows[0]
+        update_fields = []
+        if sends_time:
+            window.start_time = instance.preferred_start_time
+            update_fields.append("start_time")
+        if sends_label:
+            window.label = instance.time_window_label or ""
+            update_fields.append("label")
+        if update_fields:
+            update_fields.append("updated_at")
+            window.save(update_fields=update_fields)
 
 
 # ---------------------------------------------------------------------------
