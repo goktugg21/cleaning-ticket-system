@@ -1284,11 +1284,15 @@ export interface CustomerUserMembership {
 //   - no scope memberships or permission overrides
 //   - no last_login / is_active fields
 // See `docs/product/meeting-2026-05-15-system-requirements.md` §1
-// (Contacts vs Users are distinct entities). Promoting a Contact
-// into a User is an explicit, separate flow (parked).
+// (Contacts vs Users are distinct entities). Promoting a Contact into a
+// User is an explicit, separate flow — `promoteCustomerContact`
+// (POST .../promote-to-user/), which the backend resolves to INVITE or
+// LINK mode. A plain create/edit NEVER sets `user`.
 //
 // Backend serializer: `customers/serializers_contacts.py` (ContactSerializer).
 // Backend permission: SUPER_ADMIN or COMPANY_ADMIN for the customer's provider.
+export type ContactPromotionStatus = "none" | "invited" | "linked";
+
 export interface Contact {
   id: number;
   customer: number;
@@ -1298,6 +1302,19 @@ export interface Contact {
   phone: string;
   role_label: string;
   notes: string;
+  // Sprint 12B — contact taxonomy + the promote-to-user bridge.
+  contact_type: string;
+  is_primary: boolean;
+  // `user` is the read-only FK set ONLY by the promote/link flow (null
+  // until promoted). `promotion_status` is server-computed:
+  //   "none"    — phone-book only, not yet a user (show the promote CTA)
+  //   "invited" — a pending invitation exists for this contact
+  //   "linked"  — a User exists and is linked (Contact.user is set)
+  // `linked_building_ids` is the contact's current building-link set,
+  // used to pre-fill the promote modal's building selection.
+  user: number | null;
+  linked_building_ids: number[];
+  promotion_status: ContactPromotionStatus;
   created_at: string;
   updated_at: string;
 }
@@ -1313,6 +1330,27 @@ export interface ContactCreatePayload {
 
 // PATCH semantics — every field optional.
 export type ContactUpdatePayload = Partial<ContactCreatePayload>;
+
+// Sprint 12B — promote a Contact to a customer User. All fields optional;
+// the BACKEND decides INVITE vs LINK by whether a User already exists for
+// the contact's email. A valid NL phone is REQUIRED (body.phone, else the
+// contact's stored phone).
+export interface PromoteContactPayload {
+  access_role?: CustomerAccessRole;
+  building_ids?: number[];
+  phone?: string;
+}
+
+export interface PromoteContactResponse {
+  // Mode is BACKEND-decided (the client never chooses):
+  //   "invited" — no matching User -> 201, carries `invitation_id`.
+  //   "linked"  — matching active CUSTOMER_USER -> 200, carries `user_id`.
+  mode: "invited" | "linked";
+  invitation_id?: number;
+  user_id?: number;
+  detail?: string; // e.g. "already_invited" on a re-promote
+  contact: Contact;
+}
 
 // ---------------------------------------------------------------------------
 // Sprint 28 Batch 5 — Service catalog (provider-wide) + per-customer pricing

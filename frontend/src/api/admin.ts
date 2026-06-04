@@ -20,6 +20,8 @@ import type {
   CustomerUserMembership,
   InvitationAdmin,
   PaginatedResponse,
+  PromoteContactPayload,
+  PromoteContactResponse,
   Role,
   Service,
   ServiceCategory,
@@ -651,7 +653,8 @@ export async function updateCustomerPolicy(
 //
 // Contacts are phone-book entries — they are NOT Users. The serializer
 // deliberately omits password / role / scope / is_active fields. Promoting
-// a Contact into a User is an explicit, separate flow (parked).
+// a Contact into a User is an explicit, separate flow —
+// `promoteCustomerContact` (POST .../promote-to-user/) below.
 
 export async function listCustomerContacts(
   customerId: number,
@@ -704,6 +707,24 @@ export async function deleteCustomerContact(
   contactId: number,
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/contacts/${contactId}/`);
+}
+
+// Sprint 12B — promote a Contact to a customer User. The backend chooses
+// the mode (INVITE -> 201 / LINK -> 200) based on whether a User already
+// exists for the contact's email; the response carries that mode plus the
+// refreshed contact projection. A valid NL phone is required (body.phone
+// else the contact's stored phone). Errors arrive as `{detail, code}`
+// (e.g. contact_phone_required / contact_phone_invalid / invalid_access_role).
+export async function promoteCustomerContact(
+  customerId: number,
+  contactId: number,
+  payload: PromoteContactPayload = {},
+): Promise<PromoteContactResponse> {
+  const response = await api.post<PromoteContactResponse>(
+    `/customers/${customerId}/contacts/${contactId}/promote-to-user/`,
+    payload,
+  );
+  return response.data;
 }
 
 // ---- Sprint 24A — Staff profile + building visibility admin -----------

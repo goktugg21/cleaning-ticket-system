@@ -4,6 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import axios from "axios";
+
 import { getApiError } from "../../api/client";
 import {
   createCustomerContact,
@@ -11,16 +13,20 @@ import {
   getCustomer,
   listCustomerBuildings,
   listCustomerContacts,
+  promoteCustomerContact,
   updateCustomerContact,
 } from "../../api/admin";
 import type {
   Contact,
   ContactCreatePayload,
+  CustomerAccessRole,
   CustomerAdmin,
   CustomerBuildingMembership,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { useToast } from "../../components/ToastProvider";
+import { accessRoleLabelKey } from "../../lib/enumLabels";
 
 /**
  * Sprint 28 Batch 4 — Customer Contacts page (per-customer phone book).
@@ -59,6 +65,21 @@ const EMPTY_FORM: ContactFormState = {
   building: "",
 };
 
+// Promote-to-user (Sprint 12B). The access-role options mirror the
+// backend `CustomerUserBuildingAccess.AccessRole` enum; labels reuse the
+// shared `access_role.*` keys via `accessRoleLabelKey`.
+const ACCESS_ROLE_OPTIONS: CustomerAccessRole[] = [
+  "CUSTOMER_USER",
+  "CUSTOMER_LOCATION_MANAGER",
+  "CUSTOMER_COMPANY_ADMIN",
+];
+
+interface PromoteFormState {
+  access_role: CustomerAccessRole;
+  building_ids: number[];
+  phone: string;
+}
+
 function formatDate(value: string, locale: string): string {
   if (!value) return "—";
   try {
@@ -77,6 +98,7 @@ function formatDate(value: string, locale: string): string {
 export function CustomerContactsPage() {
   const { id } = useParams();
   const { t, i18n } = useTranslation("common");
+  const toast = useToast();
   const numericId = useMemo(() => {
     if (!id) return null;
     const n = Number(id);
@@ -108,6 +130,22 @@ export function CustomerContactsPage() {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // Promote-to-user modal (Sprint 12B). Opened over the read-only
+  // `selected` detail panel. The backend decides INVITE vs LINK; we only
+  // collect the optional access role / building grant / phone. Phone is
+  // required (the backend rejects promotion without a valid NL number).
+  const [promoting, setPromoting] = useState(false);
+  const [promoteForm, setPromoteForm] = useState<PromoteFormState>({
+    access_role: "CUSTOMER_USER",
+    building_ids: [],
+    phone: "",
+  });
+  const [promoteBusy, setPromoteBusy] = useState(false);
+  const [promoteError, setPromoteError] = useState("");
+  const [promotePhoneError, setPromotePhoneError] = useState("");
+  const [promoteRoleError, setPromoteRoleError] = useState("");
+  const promotePhoneRef = useRef<HTMLInputElement>(null);
 
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
@@ -247,6 +285,108 @@ export function CustomerContactsPage() {
       deleteDialogRef.current?.close();
     } finally {
       setDeleteBusy(false);
+    }
+  }
+
+  function openPromoteModal(contact: Contact) {
+    setPromoteForm({
+      access_role: "CUSTOMER_USER",
+      building_ids: [...contact.linked_building_ids],
+      phone: contact.phone ?? "",
+    });
+    setPromoteError("");
+    setPromotePhoneError("");
+    setPromoteRoleError("");
+    setPromoting(true);
+  }
+
+  function closePromoteModal() {
+    setPromoting(false);
+    setPromoteError("");
+    setPromotePhoneError("");
+    setPromoteRoleError("");
+  }
+
+  function togglePromoteBuilding(buildingId: number) {
+    setPromoteForm((prev) => {
+      const has = prev.building_ids.includes(buildingId);
+      return {
+        ...prev,
+        building_ids: has
+          ? prev.building_ids.filter((b) => b !== buildingId)
+          : [...prev.building_ids, buildingId],
+      };
+    });
+  }
+
+  async function handleSubmitPromote(event: FormEvent) {
+    event.preventDefault();
+    if (numericId === null || !selected) return;
+    // Phone is required by the backend; check client-side first for a
+    // crisp inline error + focus before the round-trip.
+    if (!promoteForm.phone.trim()) {
+      setPromotePhoneError(t("customer_contacts.promote_error_phone_required"));
+      promotePhoneRef.current?.focus();
+      return;
+    }
+    setPromoteBusy(true);
+    setPromoteError("");
+    setPromotePhoneError("");
+    setPromoteRoleError("");
+    try {
+      const result = await promoteCustomerContact(numericId, selected.id, {
+        access_role: promoteForm.access_role,
+        // Empty selection => omit so the backend uses its default (the
+        // contact's existing building links + legacy anchor).
+        building_ids:
+          promoteForm.building_ids.length > 0
+            ? promoteForm.building_ids
+            : undefined,
+        phone: promoteForm.phone.trim(),
+      });
+      const updated = result.contact;
+      setContacts((prev) =>
+        prev
+          .map((c) => (c.id === updated.id ? updated : c))
+          .sort((a, b) => a.full_name.localeCompare(b.full_name)),
+      );
+      setSelected(updated);
+      setPromoting(false);
+      toast.push({
+        variant: "success",
+        title:
+          result.mode === "invited"
+            ? t("customer_contacts.promote_toast_invited", {
+                email: updated.email,
+              })
+            : t("customer_contacts.promote_toast_linked", {
+                email: updated.email,
+              }),
+      });
+    } catch (err) {
+      // The promote endpoint returns `{detail, code}` — map known codes to
+      // the relevant field; everything else (403, email/cross-customer
+      // guards, …) falls back to a general modal error. Modal stays open.
+      const code = axios.isAxiosError(err)
+        ? (err.response?.data as { code?: string } | undefined)?.code
+        : undefined;
+      if (code === "contact_phone_invalid") {
+        setPromotePhoneError(
+          t("customer_contacts.promote_error_phone_invalid"),
+        );
+        promotePhoneRef.current?.focus();
+      } else if (code === "contact_phone_required") {
+        setPromotePhoneError(
+          t("customer_contacts.promote_error_phone_required"),
+        );
+        promotePhoneRef.current?.focus();
+      } else if (code === "invalid_access_role") {
+        setPromoteRoleError(t("customer_contacts.promote_error_invalid_role"));
+      } else {
+        setPromoteError(getApiError(err));
+      }
+    } finally {
+      setPromoteBusy(false);
     }
   }
 
@@ -502,6 +642,55 @@ export function CustomerContactsPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Promote-to-user (Sprint 12B). A contact that is not yet a
+                  user shows the "Make user / Send invitation" CTA; once
+                  invited/linked it shows a read-only status badge instead
+                  (never offer to promote again). */}
+              <div
+                style={{
+                  marginTop: 16,
+                  paddingTop: 16,
+                  borderTop: "1px solid var(--border)",
+                }}
+              >
+                {selected.promotion_status === "none" ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      data-testid="customer-contact-promote-button"
+                      onClick={() => openPromoteModal(selected)}
+                    >
+                      {t("customer_contacts.promote_button")}
+                    </button>
+                    <div className="muted small" style={{ marginTop: 6 }}>
+                      {t("customer_contacts.promote_button_hint")}
+                    </div>
+                  </>
+                ) : (
+                  <div className="detail-kv-row">
+                    <span className="detail-kv-label">
+                      {t("customer_contacts.field_user_status")}
+                    </span>
+                    <span className="detail-kv-val">
+                      <span
+                        className={
+                          selected.promotion_status === "linked"
+                            ? "badge badge-approved"
+                            : "badge badge-waiting_customer_approval"
+                        }
+                        data-testid="customer-contact-user-status"
+                        data-status={selected.promotion_status}
+                      >
+                        {selected.promotion_status === "linked"
+                          ? t("customer_contacts.status_user")
+                          : t("customer_contacts.status_invited")}
+                      </span>
+                    </span>
+                  </div>
+                )}
+              </div>
             </section>
           )}
         </>
@@ -710,6 +899,235 @@ export function CustomerContactsPage() {
                 data-testid="customer-contact-modal-save"
               >
                 {formBusy ? t("admin_form.saving") : t("customer_contacts.save")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Promote-to-user modal (Sprint 12B). Mirrors the create/edit modal
+          shell — same overlay + <form>. The email is read-only (the
+          invite/link target); the BACKEND decides INVITE vs LINK. */}
+      {promoting && selected && (
+        <div
+          data-testid="customer-contact-promote-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("customer_contacts.promote_modal_title")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <form
+            onSubmit={handleSubmitPromote}
+            className="card"
+            style={{
+              maxWidth: 560,
+              width: "100%",
+              padding: 24,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+              {t("customer_contacts.promote_modal_title")}
+            </h3>
+            <p
+              className="muted small"
+              style={{ marginTop: 0, marginBottom: 12 }}
+            >
+              {t("customer_contacts.promote_modal_subtitle")}
+            </p>
+
+            {promoteError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-contact-promote-error"
+              >
+                {promoteError}
+              </div>
+            )}
+
+            {/* Email — read-only invite/link target. */}
+            <div className="field">
+              <label className="field-label" htmlFor="promote-email">
+                {t("customer_contacts.field_email")}
+              </label>
+              <input
+                id="promote-email"
+                className="field-input"
+                type="email"
+                value={selected.email}
+                readOnly
+                disabled
+                data-testid="customer-contact-promote-email"
+              />
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {t("customer_contacts.promote_email_help")}
+              </div>
+            </div>
+
+            {/* Access role — default CUSTOMER_USER. */}
+            <div className="field">
+              <label className="field-label" htmlFor="promote-access-role">
+                {t("customer_contacts.promote_field_access_role")}
+              </label>
+              <select
+                id="promote-access-role"
+                className="field-select"
+                value={promoteForm.access_role}
+                onChange={(event) =>
+                  setPromoteForm((prev) => ({
+                    ...prev,
+                    access_role: event.target.value as CustomerAccessRole,
+                  }))
+                }
+                data-testid="customer-contact-promote-access-role"
+                disabled={promoteBusy}
+              >
+                {ACCESS_ROLE_OPTIONS.map((role) => (
+                  <option key={role} value={role}>
+                    {t(accessRoleLabelKey(role))}
+                  </option>
+                ))}
+              </select>
+              {promoteRoleError && (
+                <div
+                  className="alert-error login-error"
+                  role="alert"
+                  data-testid="customer-contact-promote-role-error"
+                >
+                  {promoteRoleError}
+                </div>
+              )}
+            </div>
+
+            {/* Building grant — pre-filled from the contact's links.
+                Empty selection falls back to the backend default. */}
+            <div className="field">
+              <span className="field-label">
+                {t("customer_contacts.promote_field_buildings")}
+              </span>
+              {linkedBuildings.length === 0 ? (
+                <div className="muted small">
+                  {t("customer_contacts.promote_no_buildings")}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    maxHeight: 180,
+                    overflowY: "auto",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    padding: "8px 10px",
+                  }}
+                  data-testid="customer-contact-promote-buildings"
+                >
+                  {linkedBuildings.map((link) => (
+                    <label
+                      key={link.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={promoteForm.building_ids.includes(
+                          link.building_id,
+                        )}
+                        onChange={() =>
+                          togglePromoteBuilding(link.building_id)
+                        }
+                        disabled={promoteBusy}
+                        data-testid={`customer-contact-promote-building-${link.building_id}`}
+                      />
+                      <span>{link.building_name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {t("customer_contacts.promote_field_buildings_hint")}
+              </div>
+            </div>
+
+            {/* Phone — required (valid NL number). */}
+            <div className="field">
+              <label className="field-label" htmlFor="promote-phone">
+                {t("customer_contacts.field_phone")} *
+              </label>
+              <input
+                id="promote-phone"
+                ref={promotePhoneRef}
+                className="field-input"
+                type="tel"
+                value={promoteForm.phone}
+                onChange={(event) =>
+                  setPromoteForm((prev) => ({
+                    ...prev,
+                    phone: event.target.value,
+                  }))
+                }
+                data-testid="customer-contact-promote-phone"
+                disabled={promoteBusy}
+                aria-invalid={promotePhoneError ? true : undefined}
+              />
+              {promotePhoneError ? (
+                <div
+                  className="alert-error login-error"
+                  role="alert"
+                  data-testid="customer-contact-promote-phone-error"
+                >
+                  {promotePhoneError}
+                </div>
+              ) : (
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("customer_contacts.promote_field_phone_hint")}
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={closePromoteModal}
+                disabled={promoteBusy}
+                data-testid="customer-contact-promote-cancel"
+              >
+                {t("customer_contacts.cancel")}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={promoteBusy}
+                data-testid="customer-contact-promote-submit"
+              >
+                {promoteBusy
+                  ? t("admin_form.saving")
+                  : t("customer_contacts.promote_submit")}
               </button>
             </div>
           </form>
