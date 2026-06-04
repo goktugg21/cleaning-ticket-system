@@ -383,7 +383,7 @@ class CrossBuildingManagerDeleteTests(TestCase):
         client.force_authenticate(user=self.manager_a2)
         response = client.delete(
             f"/api/tickets/{self.ticket_a.id}"
-            f"/staff-assignments/{self.staff.id}/"
+            f"/staff-assignments/{self.assignment.id}/"
         )
         # scope_tickets_for hides ticket_a from manager_a2 so the
         # ticket resolution 404s. Either 404 or 403 is acceptable

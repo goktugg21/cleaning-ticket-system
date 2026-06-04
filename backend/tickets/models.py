@@ -483,10 +483,17 @@ class TicketStaffAssignment(models.Model):
     `scheduled_end_at` / `time_window_label`), an `assignment_note`, an
     assignment-level `slot_status`, and assignment-level completion
     evidence (`completion_note` / `completed_at` / `completed_by` /
-    `unable_to_complete_reason`). `unique_together(ticket, user)` is
-    PRESERVED: Ahmet and Mehmet are different users, so two slots on the
-    same ticket/date are two rows — backward compatible with every
-    existing flow that reads ticket-level assignments.
+    `unable_to_complete_reason`).
+
+    Multi-slot per staff — the SAME staff member may now hold MULTIPLE
+    dated slots on one ticket (transcript: Ahmet 09:00-11:00 AND Ahmet
+    15:00-17:00). The old `unique_together(ticket, user)` constraint is
+    therefore DROPPED: each slot is its own row keyed by `id`, and the
+    detail / PATCH / DELETE endpoint is keyed by that slot `id`, not by
+    the user. Both indexes are kept (the ticket+user list lookup and the
+    user+scheduled_start_at "my slots" agenda query). Ahmet and Mehmet
+    on the same date stay two rows exactly as before — that case never
+    needed the constraint.
 
     Validation (enforced at serializer level, not via a DB check):
       - user.role MUST be UserRole.STAFF.
@@ -544,7 +551,10 @@ class TicketStaffAssignment(models.Model):
     unable_to_complete_reason = models.TextField(blank=True, default="")
 
     class Meta:
-        unique_together = [("ticket", "user")]
+        # Multi-slot per staff — the (ticket, user) uniqueness was DROPPED
+        # so one staff member can hold several dated slots on a ticket
+        # (AM/PM / repeated windows). Each slot is its own row keyed by id;
+        # the detail endpoint is keyed by the slot id. Both indexes stay.
         indexes = [
             models.Index(fields=["ticket", "user"]),
             # Sprint 14E — the staff agenda / "my slots" query is

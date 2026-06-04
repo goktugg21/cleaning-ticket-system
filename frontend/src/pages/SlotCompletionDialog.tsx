@@ -5,7 +5,7 @@
 // extension; PDF never counts). Photo linking is a TWO-STEP flow:
 //   1. POST /tickets/<ticket_id>/attachments/ (multipart) with write-only
 //      staff_assignment_id=<slot id> for each photo;
-//   2. PATCH /tickets/<ticket_id>/staff-assignments/<my user id>/ with
+//   2. PATCH /tickets/<ticket_id>/staff-assignments/<slot id>/ with
 //      slot_status=COMPLETED (+ completion_note).
 // We pre-validate "note or photo" client-side for UX but ALSO surface the
 // backend error messages (completion_evidence_required, invalid_file_mime_pair,
@@ -23,12 +23,10 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
 
 export function SlotCompletionDialog({
   slot,
-  userId,
   onCancel,
   onDone,
 }: {
   slot: MySlot;
-  userId: number;
   onCancel: () => void;
   onDone: () => void;
 }) {
@@ -59,7 +57,7 @@ export function SlotCompletionDialog({
         });
       }
       // Step 2 — mark the slot completed. The backend re-checks evidence.
-      await updateStaffSlot(slot.ticket_id, userId, {
+      await updateStaffSlot(slot.ticket_id, slot.id, {
         slot_status: "COMPLETED",
         completion_note: note.trim(),
       });

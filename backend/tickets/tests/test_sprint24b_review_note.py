@@ -200,6 +200,45 @@ class StaffAssignmentReviewerNoteTests(TestCase):
             1,
         )
 
+    # ---- approve tolerates pre-existing direct slots (#75 multi-slot) ---
+
+    def test_approve_tolerates_multiple_existing_slots(self):
+        # Multi-slot per staff (#75) dropped unique_together(ticket, user):
+        # a manager directly added this staff to the ticket as TWO dated
+        # slots while the request sat PENDING. Approving the request must
+        # NOT route through get_or_create's internal .get() (which would
+        # raise MultipleObjectsReturned -> 500). Approval is idempotent:
+        # 200, request flips to APPROVED, and NO spurious slot is created
+        # (the staff is already on the ticket).
+        TicketStaffAssignment.objects.create(
+            ticket=self.ticket_a,
+            user=self.staff_a,
+            assigned_by=self.admin_a,
+            time_window_label="morning",
+        )
+        TicketStaffAssignment.objects.create(
+            ticket=self.ticket_a,
+            user=self.staff_a,
+            assigned_by=self.admin_a,
+            time_window_label="afternoon",
+        )
+        req = self._make_request_for(self.staff_a, self.ticket_a)
+        response = self._api(self.admin_a).post(
+            f"/api/staff-assignment-requests/{req.id}/approve/",
+            {"reviewer_note": "already on the ticket"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        req.refresh_from_db()
+        self.assertEqual(req.status, AssignmentRequestStatus.APPROVED)
+        # Still exactly the two pre-existing slots — no spurious row added.
+        self.assertEqual(
+            TicketStaffAssignment.objects.filter(
+                ticket=self.ticket_a, user=self.staff_a
+            ).count(),
+            2,
+        )
+
     # ---- COMPANY_ADMIN reject persists reviewer_note in own company ----
 
     def test_company_admin_reject_persists_reviewer_note_in_own_company(self):

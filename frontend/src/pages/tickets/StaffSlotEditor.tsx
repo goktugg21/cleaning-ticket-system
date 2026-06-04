@@ -8,7 +8,7 @@
 // schedule/window/note, or remove it. Completion (note/photo evidence) and
 // "unable" belong to the staff agenda (Part C) — this editor never sets
 // COMPLETED.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CalendarClock, Pencil, Plus, Trash2, X } from "lucide-react";
 
@@ -79,7 +79,7 @@ export function StaffSlotEditor({
   const [addUserId, setAddUserId] = useState("");
   const [addForm, setAddForm] = useState<SlotFormState>(EMPTY_FORM);
 
-  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<SlotFormState>(EMPTY_FORM);
 
   const removeRef = useRef<ConfirmDialogHandle>(null);
@@ -120,14 +120,10 @@ export function StaffSlotEditor({
     };
   }, [ticketId]);
 
-  const assignedIds = useMemo(
-    () => new Set(slots.map((s) => s.user_id)),
-    [slots],
-  );
-  const candidates = useMemo(
-    () => assignable.filter((a) => !assignedIds.has(a.id)),
-    [assignable, assignedIds],
-  );
+  // Multi-slot per staff — the same staff member may be added again as
+  // another dated slot (Ahmet 09:00-11:00 AND 15:00-17:00), so we no
+  // longer grey out already-assigned staff in the add dropdown.
+  const candidates = assignable;
 
   function windowText(slot: TicketStaffAssignmentAdmin): string {
     const parts: string[] = [];
@@ -179,7 +175,7 @@ export function StaffSlotEditor({
   }
 
   function startEdit(slot: TicketStaffAssignmentAdmin) {
-    setEditingUserId(slot.user_id);
+    setEditingSlotId(slot.id);
     setEditForm({
       start: isoToLocalInput(slot.scheduled_start_at),
       end: isoToLocalInput(slot.scheduled_end_at),
@@ -196,13 +192,13 @@ export function StaffSlotEditor({
     setBusy(true);
     setError("");
     try {
-      await updateStaffSlot(ticketId, slot.user_id, {
+      await updateStaffSlot(ticketId, slot.id, {
         scheduled_start_at: localInputToIso(editForm.start),
         scheduled_end_at: localInputToIso(editForm.end),
         time_window_label: editForm.windowLabel.trim(),
         assignment_note: editForm.note.trim(),
       });
-      setEditingUserId(null);
+      setEditingSlotId(null);
       await reload();
       onChanged?.();
       push({ variant: "success", title: t("editor.toast_saved") });
@@ -218,7 +214,7 @@ export function StaffSlotEditor({
     setBusy(true);
     setError("");
     try {
-      await removeTicketStaffAssignment(ticketId, removeTarget.user_id);
+      await removeTicketStaffAssignment(ticketId, removeTarget.id);
       removeRef.current?.close();
       setRemoveTarget(null);
       await reload();
@@ -313,6 +309,7 @@ export function StaffSlotEditor({
               key={slot.id}
               data-testid="staff-slot-card"
               data-staff-id={slot.user_id}
+              data-slot-id={slot.id}
               style={{
                 border: "1px solid var(--border)",
                 borderRadius: 8,
@@ -373,12 +370,12 @@ export function StaffSlotEditor({
                   </div>
                 )}
 
-              {editingUserId === slot.user_id ? (
+              {editingSlotId === slot.id ? (
                 <SlotFields
                   form={editForm}
                   setForm={setEditForm}
                   disabled={busy}
-                  idPrefix={`edit-${slot.user_id}`}
+                  idPrefix={`edit-${slot.id}`}
                 />
               ) : null}
 
@@ -390,7 +387,7 @@ export function StaffSlotEditor({
                   flexWrap: "wrap",
                 }}
               >
-                {editingUserId === slot.user_id ? (
+                {editingSlotId === slot.id ? (
                   <>
                     <button
                       type="button"
@@ -404,7 +401,7 @@ export function StaffSlotEditor({
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
-                      onClick={() => setEditingUserId(null)}
+                      onClick={() => setEditingSlotId(null)}
                       disabled={busy}
                     >
                       {t("common:cancel")}

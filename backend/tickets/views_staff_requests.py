@@ -252,11 +252,22 @@ class StaffAssignmentRequestViewSet(viewsets.ModelViewSet):
             # row. We do this inside the same transaction so the
             # caller gets one atomic "approve and assign" round-trip.
             if target_status == AssignmentRequestStatus.APPROVED:
-                TicketStaffAssignment.objects.get_or_create(
-                    ticket=locked.ticket,
-                    user=locked.staff,
-                    defaults={"assigned_by": request.user},
-                )
+                # Multi-slot per staff (#75) dropped unique_together(ticket,
+                # user): a manager may have directly added this staff to the
+                # ticket (one or MORE slots) while the request sat PENDING.
+                # get_or_create's internal .get() would then raise
+                # MultipleObjectsReturned -> 500. A self-request means "let
+                # me work this ticket"; if the staff already holds ANY slot
+                # they are already on it, so approval is idempotent and
+                # creates nothing.
+                if not TicketStaffAssignment.objects.filter(
+                    ticket=locked.ticket, user=locked.staff
+                ).exists():
+                    TicketStaffAssignment.objects.create(
+                        ticket=locked.ticket,
+                        user=locked.staff,
+                        assigned_by=request.user,
+                    )
         return Response(self.get_serializer(locked).data)
 
     @action(detail=True, methods=["post"])

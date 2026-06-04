@@ -820,8 +820,18 @@ def _assigned_staff_payload(ticket, viewer):
         show_name = show_email = show_phone = True
 
     out = []
+    seen_user_ids = set()
     for a in assignments:
         user = a.user
+        # Multi-slot per staff — a staff member may now hold several dated
+        # slots on one ticket. This roster answers "who is on this ticket",
+        # so collapse to ONE entry per distinct user (the per-slot detail
+        # lives on the /staff-assignments/ endpoint). Without this dedup the
+        # same user.id would appear once per slot, which the frontend renders
+        # with a duplicate React key.
+        if user.id in seen_user_ids:
+            continue
+        seen_user_ids.add(user.id)
         entry = {"id": user.id}
         if show_name:
             entry["full_name"] = user.full_name or user.email.split("@")[0]

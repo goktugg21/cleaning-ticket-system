@@ -70,11 +70,12 @@ class SlotCompletionEvidenceTests(TenantFixtureMixin, APITestCase):
             f"/api/tickets/{ticket.id}/attachments/", data, format="multipart"
         )
 
-    def patch_slot(self, *, ticket=None, user=None, **body):
+    def patch_slot(self, *, ticket=None, slot=None, **body):
+        # Multi-slot per staff — PATCH is keyed by the slot's own id.
         ticket = ticket or self.ticket
-        user = user or self.staff
+        slot = slot or self.slot
         return self.client.patch(
-            f"/api/tickets/{ticket.id}/staff-assignments/{user.id}/",
+            f"/api/tickets/{ticket.id}/staff-assignments/{slot.id}/",
             body,
             format="json",
         )
