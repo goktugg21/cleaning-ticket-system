@@ -57,9 +57,9 @@ Surface the existing `/tickets/<id>/schedule/` action as a **set / change / clea
 
 ### Sprint 2 — Permission editor in-place from the contact
 Re-host the permission editor (role + per-building access + the tri-state inherit/allow/deny override modal) so it **opens in place from the contact's user entry as a popup / expanding panel**, with groups **stacked vertically** (ticket → extra-work → toggles), compact. **Keep** the existing `/admin/customers/:id/permissions` page reachable (Ramazan: "can stay for now"). Reuse the existing `PermissionEditorModal` + access/override logic — this is placement/flow, not new permission logic.
-- [ ] In-place popup/expand from the contact's user section (no forced navigation away).
-- [ ] Vertical-stacked, compact groups; per-building scoping intact; tri-state overrides intact.
-- [ ] Existing permissions page still reachable; gates + e2e green; screenshots.
+- [x] In-place popup/expand from the contact's user section (no forced navigation away).
+- [x] Vertical-stacked, compact groups; per-building scoping intact; tri-state overrides intact.
+- [x] Existing permissions page still reachable; gates + e2e green; screenshots.
 
 ### Sprint 3 — Contact-first enforcement
 **Audit first**, then fix only the hole if present: a customer user **with access** must only be creatable **via a contact** (promote-from-contact). Make the **Invitations screen provider-staff-only**; customer-access invitations require a contact. Confirm no membership/invitation path bypasses this.
