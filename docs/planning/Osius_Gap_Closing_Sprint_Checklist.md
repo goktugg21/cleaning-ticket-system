@@ -63,9 +63,9 @@ Re-host the permission editor (role + per-building access + the tri-state inheri
 
 ### Sprint 3 — Contact-first enforcement
 **Audit first**, then fix only the hole if present: a customer user **with access** must only be creatable **via a contact** (promote-from-contact). Make the **Invitations screen provider-staff-only**; customer-access invitations require a contact. Confirm no membership/invitation path bypasses this.
-- [ ] Audit of all customer-user-with-access creation paths documented.
-- [ ] Invitations screen restricted to provider staff; customer users only via contact-promote.
-- [ ] Backend enforcement (if a bypass existed) + tests; gates/e2e green.
+- [x] Audit of all customer-user-with-access creation paths documented.
+- [x] Invitations screen restricted to provider staff; customer users only via contact-promote.
+- [x] Backend enforcement (if a bypass existed) + tests; gates/e2e green.
 
 ### Sprint 4 — Sub-tasks (backend)
 A **SubTask** = a **named work unit** under a ticket, on **all tickets**, layered on the existing dated multi-slot assignment (don't rewrite it).

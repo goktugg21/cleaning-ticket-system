@@ -20,6 +20,7 @@ from django.test import SimpleTestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, APITestCase
 
+from accounts.invitations import Invitation
 from accounts.models import UserRole
 from accounts.serializers_invitations import InvitationCreateSerializer
 from customers.models import CustomerUserMembership
@@ -243,7 +244,13 @@ class PromotionCrossCustomerTests(PromoteContactFixtureMixin, APITestCase):
             1,
         )
 
-    def test_invitation_cannot_bind_two_customers(self):
+    def test_public_invitation_serializer_rejects_customer_user(self):
+        # Sprint 3 — contact-first enforcement. The public invitation
+        # serializer rejects ANY CUSTOMER_USER invite outright (regardless
+        # of how many customers are supplied); customer users come only
+        # from promoting a Contact. The one-customer cross-customer
+        # invariant for the promotion path is covered by
+        # test_link_user_of_other_customer_is_forbidden above.
         factory = APIRequestFactory()
         request = factory.post("/api/auth/invitations/")
         request.user = self.super_admin
@@ -257,8 +264,32 @@ class PromotionCrossCustomerTests(PromoteContactFixtureMixin, APITestCase):
             context={"request": request},
         )
         self.assertFalse(serializer.is_valid())
-        self.assertIn("customer_ids", serializer.errors)
+        self.assertIn("role", serializer.errors)
         self.assertEqual(
-            serializer.errors["customer_ids"][0].code,
-            "customer_user_cross_customer_forbidden",
+            serializer.errors["role"][0].code,
+            "customer_user_must_come_from_contact",
+        )
+
+    def test_promote_still_creates_customer_user_invitation(self):
+        # Regression — the Sprint 3 serializer reject must NOT affect
+        # promote-to-user, which creates the CUSTOMER_USER invitation
+        # MODEL-DIRECT (bypassing the serializer). Promoting a contact
+        # still produces a CUSTOMER_USER invitation linked to the contact.
+        contact = self.make_contact(
+            full_name="Promote Me",
+            email="promote-me@example.com",
+            phone="+31612345678",
+        )
+        self.client.patch(
+            self.contact_detail_url(contact.id),
+            {"building_ids": [self.building.id]},
+            format="json",
+        )
+        resp = self.client.post(self.promote_url(contact.id), {}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["mode"], "invited")
+        self.assertTrue(
+            Invitation.objects.filter(
+                role=UserRole.CUSTOMER_USER, contact=contact
+            ).exists()
         )
