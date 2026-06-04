@@ -702,11 +702,19 @@ class Command(BaseCommand):
             title=f"{DEMO_TICKET_PREFIX} In progress hallway scuff",
         ).first()
         if in_progress_ticket is not None:
-            TicketStaffAssignment.objects.get_or_create(
-                ticket=in_progress_ticket,
-                user=staff,
-                defaults={"assigned_by": super_admin},
-            )
+            # Multi-slot per staff (#75) dropped unique_together(ticket,
+            # user); get_or_create's .get() would raise
+            # MultipleObjectsReturned if this demo ticket already carries
+            # 2+ slots for the staff. Create one only if none exists so the
+            # re-seed stays idempotent.
+            if not TicketStaffAssignment.objects.filter(
+                ticket=in_progress_ticket, user=staff
+            ).exists():
+                TicketStaffAssignment.objects.create(
+                    ticket=in_progress_ticket,
+                    user=staff,
+                    assigned_by=super_admin,
+                )
 
     # -----------------------------------------------------------------
     # Legacy demo cleanup
