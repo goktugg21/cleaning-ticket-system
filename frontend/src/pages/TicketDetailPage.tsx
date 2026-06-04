@@ -35,7 +35,9 @@ import type {
   TicketMessageType,
   TicketStatus,
   TicketStatusChangePayload,
+  TicketTimelineRow,
 } from "../api/types";
+import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
 import {
   composerTiersForRole,
@@ -47,6 +49,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { RouteBadge } from "../components/RouteBadge";
+import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useFormatSLATime } from "../utils/useFormatSLATime";
 import { useSLALabel } from "../utils/useSLALabel";
@@ -297,6 +300,14 @@ export function TicketDetailPage() {
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
+  // Sprint 32 — unified audit timeline for provider-audit roles (SA / CA /
+  // BM). STAFF + CUSTOMER_USER never fetch it (the endpoint 403s them); they
+  // keep the status-history-only activity card. `null` while loading or on
+  // error -> the page falls back to the status-history rendering so the
+  // activity card is never blank.
+  const [auditTimeline, setAuditTimeline] = useState<
+    TicketTimelineRow[] | null
+  >(null);
 
   // Sprint 23B — Request-assignment state for STAFF users on a
   // ticket they have building visibility for but aren't yet
@@ -535,6 +546,33 @@ export function TicketDetailPage() {
     setLoading(true);
     loadTicket();
   }, [loadTicket]);
+
+  // Sprint 32 — provider-audit roles (SA / CA / BM, mirroring the backend
+  // IsTicketAuditConsumer) get the UNIFIED audit timeline. STAFF /
+  // CUSTOMER_USER are deliberately excluded: they must never call the
+  // provider-audit endpoint (it 403s them) nor see audit_log / EW-internal /
+  // severity rows. Refetches whenever the status-history length changes (so a
+  // fresh override / transition lands in the feed). State is only set inside
+  // the async callbacks (never synchronously) and a failed fetch leaves
+  // `auditTimeline` null, so the activity card falls back to the
+  // status-history rendering rather than blanking.
+  const isProviderAudit = isProviderManagementRole(me?.role);
+  const auditTimelineTicketId = ticket?.id ?? null;
+  const auditTimelineHistoryLen = ticket?.status_history?.length ?? 0;
+  useEffect(() => {
+    if (!isProviderAudit || auditTimelineTicketId == null) return;
+    let cancelled = false;
+    getTicketAuditTimeline(auditTimelineTicketId)
+      .then((data) => {
+        if (!cancelled) setAuditTimeline(data.timeline);
+      })
+      .catch(() => {
+        if (!cancelled) setAuditTimeline(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isProviderAudit, auditTimelineTicketId, auditTimelineHistoryLen]);
 
   useEffect(() => {
     setSelectedAssigneeId(
@@ -1131,7 +1169,18 @@ export function TicketDetailPage() {
               </span>
             </div>
             <div className="timeline">
-              {ticket.status_history.length === 0 ? (
+              {/* Sprint 32 — provider-audit roles see the UNIFIED timeline
+                  (status history + audit_log + Extra Work + planned
+                  occurrence + severity). STAFF / CUSTOMER_USER (and any
+                  load / fetch-error state, where auditTimeline stays null)
+                  fall through to the unchanged status-history rendering
+                  below, so the activity card is never blank and their view
+                  is exactly as before. */}
+              {isProviderAudit &&
+              auditTimeline !== null &&
+              auditTimeline.length > 0 ? (
+                <UnifiedTimeline rows={auditTimeline} />
+              ) : ticket.status_history.length === 0 ? (
                 <div className="timeline-row" data-color="green">
                   <div className="timeline-dot" />
                   <div>
@@ -1209,20 +1258,30 @@ export function TicketDetailPage() {
                           line. Backend always emits both fields
                           (defaulted false / ""); we only render the
                           badge for actual overrides. */}
-                      {entry.is_override && (
-                        <div
-                          className="muted small"
-                          data-testid="timeline-override-badge"
-                          style={{ marginTop: 4 }}
-                        >
-                          <b>{t("timeline_override_badge")}</b>
-                          {entry.override_reason
-                            ? ` · ${t("timeline_override_reason", {
-                                reason: entry.override_reason,
-                              })}`
-                            : ""}
-                        </div>
-                      )}
+                      {entry.is_override &&
+                        (() => {
+                          // Sanitize the override reason the same way
+                          // UnifiedTimeline does, so the demo seed marker
+                          // never leaks in the status-history fallback
+                          // path (a real typed reason is unaffected).
+                          const cleanedReason = sanitizeStatusNote(
+                            entry.override_reason,
+                          );
+                          return (
+                            <div
+                              className="muted small"
+                              data-testid="timeline-override-badge"
+                              style={{ marginTop: 4 }}
+                            >
+                              <b>{t("timeline_override_badge")}</b>
+                              {cleanedReason
+                                ? ` · ${t("timeline_override_reason", {
+                                    reason: cleanedReason,
+                                  })}`
+                                : ""}
+                            </div>
+                          );
+                        })()}
                     </div>
                   </div>
                 ))

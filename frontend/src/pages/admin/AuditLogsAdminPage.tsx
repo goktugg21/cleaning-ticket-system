@@ -1,12 +1,14 @@
 import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import { listAuditLogs } from "../../api/admin";
 import type { AuditLogListParams } from "../../api/admin";
-import type { AuditAction, AuditLog } from "../../api/types";
+import { getTicketAuditTimeline } from "../../api/ticketTimeline";
+import type { AuditAction, AuditLog, TicketTimelineRow } from "../../api/types";
 import { ChangeDiff } from "../../components/ChangeDiff";
+import { SeverityBadge, UnifiedTimeline } from "../../components/UnifiedTimeline";
 import { formatDateTime } from "../../lib/intl";
 
 /**
@@ -87,6 +89,52 @@ export function AuditLogsAdminPage() {
   const queryParams = useMemo<AuditLogListParams>(() => {
     return { page, ...applied };
   }, [page, applied]);
+
+  // Ticket-timeline lookup — the per-ticket unified audit trail (status
+  // history + audit_log + Extra Work + planned occurrence + severity). A
+  // SUPER_ADMIN can call the provider-audit endpoint. The panel is closed
+  // until a lookup runs, so a fresh page load renders no per-ticket enum
+  // text (keeps the no-raw-enums audit green).
+  const [lookupInput, setLookupInput] = useState("");
+  const [lookupRows, setLookupRows] = useState<TicketTimelineRow[] | null>(null);
+  const [lookupTicketNo, setLookupTicketNo] = useState<string>("");
+  const [lookupError, setLookupError] = useState("");
+  const [lookupBusy, setLookupBusy] = useState(false);
+
+  async function submitTimelineLookup(event: FormEvent) {
+    event.preventDefault();
+    const trimmed = lookupInput.trim();
+    if (!trimmed) return;
+    setLookupBusy(true);
+    setLookupError("");
+    try {
+      const data = await getTicketAuditTimeline(trimmed);
+      setLookupRows(data.timeline);
+      setLookupTicketNo(data.ticket_no);
+    } catch (err) {
+      // 404 = unknown ticket or out of the actor's scope (the backend
+      // reports both as 404 so existence never leaks). Surface a friendly
+      // message rather than a raw error.
+      const status = (err as { response?: { status?: number } })?.response
+        ?.status;
+      setLookupRows(null);
+      setLookupTicketNo("");
+      setLookupError(
+        status === 404
+          ? t("audit_logs.timeline_lookup_not_found", { id: trimmed })
+          : getApiError(err),
+      );
+    } finally {
+      setLookupBusy(false);
+    }
+  }
+
+  function closeTimelineLookup() {
+    setLookupRows(null);
+    setLookupTicketNo("");
+    setLookupError("");
+    setLookupInput("");
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,6 +228,97 @@ export function AuditLogsAdminPage() {
           {error}
         </div>
       )}
+
+      {/* Ticket-timeline lookup — the complete per-ticket audit trail, not
+          just the raw rows. Closed (no panel) until a lookup runs. */}
+      <div
+        className="card"
+        style={{ overflow: "hidden", marginBottom: 16, padding: "16px 18px" }}
+        data-testid="audit-timeline-lookup"
+      >
+        <div className="section-head" style={{ marginBottom: 8 }}>
+          <div>
+            <div className="section-head-title">
+              {t("audit_logs.timeline_lookup_title")}
+            </div>
+            <p className="muted small" style={{ marginTop: 2 }}>
+              {t("audit_logs.timeline_lookup_desc")}
+            </p>
+          </div>
+        </div>
+        <form
+          className="filter-bar"
+          onSubmit={submitTimelineLookup}
+          style={{ alignItems: "flex-end" }}
+        >
+          <div className="filter-field">
+            <span className="filter-label">
+              {t("audit_logs.timeline_lookup_label")}
+            </span>
+            <input
+              className="filter-control"
+              type="number"
+              min={1}
+              placeholder={t("audit_logs.timeline_lookup_placeholder")}
+              value={lookupInput}
+              onChange={(event) => setLookupInput(event.target.value)}
+              data-testid="audit-timeline-lookup-input"
+            />
+          </div>
+          <div className="filter-actions">
+            <button
+              type="submit"
+              className="btn btn-secondary btn-sm"
+              disabled={lookupBusy || !lookupInput.trim()}
+              data-testid="audit-timeline-lookup-submit"
+            >
+              <Search size={14} strokeWidth={2.5} />
+              {lookupBusy
+                ? t("audit_logs.timeline_lookup_loading")
+                : t("audit_logs.timeline_lookup_button")}
+            </button>
+            {(lookupRows !== null || lookupError) && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={closeTimelineLookup}
+                data-testid="audit-timeline-lookup-close"
+              >
+                <X size={14} strokeWidth={2.5} />
+                {t("audit_logs.timeline_lookup_close")}
+              </button>
+            )}
+          </div>
+        </form>
+
+        {lookupError && (
+          <div
+            className="alert-error"
+            role="alert"
+            style={{ marginTop: 12 }}
+            data-testid="audit-timeline-lookup-error"
+          >
+            {lookupError}
+          </div>
+        )}
+
+        {lookupRows !== null && (
+          <div style={{ marginTop: 12 }} data-testid="audit-timeline-lookup-panel">
+            <div className="section-head-title" style={{ marginBottom: 8 }}>
+              {t("audit_logs.timeline_lookup_result", { ticket: lookupTicketNo })}
+            </div>
+            {lookupRows.length === 0 ? (
+              <p className="muted small">
+                {t("audit_logs.timeline_lookup_empty")}
+              </p>
+            ) : (
+              <div className="timeline">
+                <UnifiedTimeline rows={lookupRows} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="card" style={{ overflow: "hidden" }}>
         <form className="filter-bar" onSubmit={applyFilters}>
@@ -290,9 +429,19 @@ export function AuditLogsAdminPage() {
                     )}
                   </td>
                   <td>
-                    <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
-                      <i />
-                      {t(ACTION_LABEL_KEY[log.action])}
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        gap: 6,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
+                        <i />
+                        {t(ACTION_LABEL_KEY[log.action])}
+                      </span>
+                      <SeverityBadge severity={log.severity} />
                     </span>
                   </td>
                   <td>
@@ -338,9 +487,19 @@ export function AuditLogsAdminPage() {
                   <span className="admin-card-title">
                     {formatDateTime(log.created_at)}
                   </span>
-                  <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
-                    <i />
-                    {t(ACTION_LABEL_KEY[log.action])}
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      gap: 6,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span className={`cell-tag ${ACTION_CLASS[log.action]}`}>
+                      <i />
+                      {t(ACTION_LABEL_KEY[log.action])}
+                    </span>
+                    <SeverityBadge severity={log.severity} />
                   </span>
                 </div>
                 <dl className="admin-card-meta">

@@ -155,6 +155,12 @@
   "override_modal_cancel": "Annuleren",
   "timeline_override_badge": "Overrule",
   "timeline_override_reason": "Reden: {{reason}}",
+  "timeline_audit_event": "{{action}} · {{target}}",
+  "timeline_ew_reference": "Gekoppeld meerwerk #{{id}} ({{relation}})",
+  "timeline_ew_relation_spawned_from": "voortgekomen uit",
+  "timeline_ew_relation_converted_source": "omgezette bron",
+  "timeline_ew_status_change": "Meerwerk #{{id}}:",
+  "timeline_occurrence_reference": "Voortgekomen uit geplande uitvoering #{{id}} · {{date}}",
 
   "convert.dialog_title": "Converteer naar Extra Werk",
   "convert.dialog_desc": "Maak een nieuw Extra Werk-verzoek aan op basis van dit ticket. Dit ticket wordt gemarkeerd als geconverteerd en er wordt een nieuw verzoek aangemaakt met de regels hieronder.",

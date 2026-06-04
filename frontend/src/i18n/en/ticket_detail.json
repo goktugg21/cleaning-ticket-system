@@ -155,6 +155,12 @@
   "override_modal_cancel": "Cancel",
   "timeline_override_badge": "Override",
   "timeline_override_reason": "Reason: {{reason}}",
+  "timeline_audit_event": "{{action}} · {{target}}",
+  "timeline_ew_reference": "Linked Extra Work #{{id}} ({{relation}})",
+  "timeline_ew_relation_spawned_from": "spawned from",
+  "timeline_ew_relation_converted_source": "converted source",
+  "timeline_ew_status_change": "Extra Work #{{id}}:",
+  "timeline_occurrence_reference": "Originated from planned occurrence #{{id}} · {{date}}",
 
   "convert.dialog_title": "Convert to Extra Work",
   "convert.dialog_desc": "Create a new Extra Work request from this ticket. This ticket will be marked as converted and a new request is created with the line items below.",
