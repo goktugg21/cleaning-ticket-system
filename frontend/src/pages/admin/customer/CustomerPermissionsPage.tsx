@@ -483,13 +483,13 @@ export function CustomerPermissionsPage() {
     }
   }
 
-  // Sprint 29 Batch 29.2 — focus-on-mount via URL params. The Edit
-  // Basics page deep-links here with ?focus_user=<id> (row-level) or
+  // Sprint 29 Batch 29.2 — focus-on-mount via URL params. Callers
+  // deep-link here with ?focus_user=<id> (row-level) or
   // ?focus_user=<id>&focus_building=<id> (per-chip). After the
   // customer + per-user access lists resolve, scroll the matching
-  // UserAccessCard into view, optionally open the OverrideDrawer for
-  // that (user, building) pair, and consume the params so a refresh
-  // does not re-fire the effect.
+  // matrix rows into view (and briefly highlight them), optionally
+  // open the override modal for that (user, building) pair, and
+  // consume the params so a refresh does not re-fire the effect.
   const [searchParams, setSearchParams] = useSearchParams();
   const focusUserParam = searchParams.get("focus_user");
   const focusBuildingParam = searchParams.get("focus_building");
@@ -515,9 +515,32 @@ export function CustomerPermissionsPage() {
       return;
     }
 
-    const userCard = document.getElementById(`user-access-card-${userIdNum}`);
-    if (userCard) {
-      userCard.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Wait until this user's per-building access rows have loaded — the
+    // access loop populates `accessByUserId` as one object once every
+    // member is fetched, and the matrix only renders the user's rows then.
+    // Returning early (without consuming the params) lets the effect
+    // re-fire when accessByUserId updates.
+    if (!(userIdNum in accessByUserId)) return;
+
+    // Sprint 31 retired the per-user UserAccessCard; PermissionsMatrix now
+    // renders one <tr.permissions-matrix-row data-user-id> per (user,
+    // building). Scroll the user's first row into view and briefly
+    // highlight all of their rows so a deep-link (e.g. a contact's
+    // "Manage permissions") visibly lands on the right user. Imperative
+    // DOM mirrors the existing scrollIntoView — no extra React state.
+    const userRows = document.querySelectorAll<HTMLElement>(
+      `tr.permissions-matrix-row[data-user-id="${userIdNum}"]`,
+    );
+    if (userRows.length > 0) {
+      userRows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      userRows.forEach((row) =>
+        row.classList.add("permissions-matrix-row-focus"),
+      );
+      window.setTimeout(() => {
+        userRows.forEach((row) =>
+          row.classList.remove("permissions-matrix-row-focus"),
+        );
+      }, 2400);
     }
 
     if (focusBuildingParam) {

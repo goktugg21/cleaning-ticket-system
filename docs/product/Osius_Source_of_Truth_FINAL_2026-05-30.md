@@ -218,6 +218,11 @@ Implementation note:
 
 Before building, inspect backend user model, memberships, CustomerUserMembership/access_role, BuildingManagerAssignment, StaffProfile/BuildingStaffVisibility, and frontend Users/Invitations pages. This may be a frontend problem, backend serializer problem, or both.
 
+Shipped:
+
+- The global Users page now SHOWS each user's single EFFECTIVE (highest) customer access role as a read-only badge, distinct from the global/provider role, and lets you FILTER by that effective role (Customer User / Customer Location Manager / Customer Company Admin). The role shown/filtered is scoped to the VIEWER's provider company: a Provider Admin only ever sees/matches roles a user holds under their own company's customers (a Super Admin is unrestricted). Provider-side users show no customer access role ("—"). Backend: `GET /api/users/` exposes a read-only `customer_access_role` scalar (the highest active in-scope grant by the CCA > CLM > CU hierarchy; inactive grants excluded; `null` for provider users / no in-scope grant) and accepts a single-value `?access_role=` filter matching that effective role, company-scoped to the viewer.
+- Per-user permission EDITING stays in the per-customer permission matrix (§3.2) and the contact→user surface (a linked contact's "Manage permissions" deep-links into that matrix). The global Users page is read-only for access roles — it never edits customer permissions.
+
 ### 3.2 Customer permissions matrix
 
 The desired UI is not raw yes/no toggles.

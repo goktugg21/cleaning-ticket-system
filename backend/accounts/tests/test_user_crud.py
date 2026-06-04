@@ -5,7 +5,12 @@ from rest_framework.test import APITestCase
 from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 from test_utils import TenantFixtureMixin
 
 
@@ -80,6 +85,182 @@ class UserCRUDTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         roles = {row["role"] for row in response.data.get("results", response.data)}
         self.assertEqual(roles, {UserRole.BUILDING_MANAGER, UserRole.CUSTOMER_USER})
+
+    # ---- Sprint 2c follow-up — effective, company-scoped ?access_role= ----
+
+    def _set_anchor_role(self, user, role, is_active=True):
+        """Set the user's single (anchor) CUBA grant to `role` + active."""
+        access = CustomerUserBuildingAccess.objects.get(membership__user=user)
+        access.access_role = role
+        access.is_active = is_active
+        access.save(update_fields=["access_role", "is_active"])
+        return access
+
+    def _emails(self, response):
+        return {row["email"] for row in response.data.get("results", response.data)}
+
+    def test_access_role_filter_matches_effective_role(self):
+        AR = CustomerUserBuildingAccess.AccessRole
+        # customer_user (company A) keeps CUSTOMER_USER; other_customer_user
+        # (company B) -> CUSTOMER_LOCATION_MANAGER.
+        self._set_anchor_role(
+            self.other_customer_user, AR.CUSTOMER_LOCATION_MANAGER
+        )
+        self.authenticate(self.super_admin)
+
+        cu = self.client.get(self.URL, {"access_role": "CUSTOMER_USER"})
+        self.assertEqual(cu.status_code, status.HTTP_200_OK)
+        self.assertIn(self.customer_user.email, self._emails(cu))
+        self.assertNotIn(self.other_customer_user.email, self._emails(cu))
+        self.assertNotIn(self.super_admin.email, self._emails(cu))  # provider
+
+        lm = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertIn(self.other_customer_user.email, self._emails(lm))
+        self.assertNotIn(self.customer_user.email, self._emails(lm))
+
+    def test_access_role_filter_excludes_lower_when_higher_present(self):
+        # A user with BOTH a CCA and an LM grant has EFFECTIVE role CCA, so
+        # ?access_role=CCA returns them but ?access_role=LM must NOT.
+        AR = CustomerUserBuildingAccess.AccessRole
+        membership = CustomerUserMembership.objects.get(
+            user=self.customer_user, customer=self.customer
+        )
+        self._set_anchor_role(self.customer_user, AR.CUSTOMER_LOCATION_MANAGER)
+        extra = Building.objects.create(company=self.company, name="Wing CCA")
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=extra
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=extra,
+            access_role=AR.CUSTOMER_COMPANY_ADMIN,
+        )
+        self.authenticate(self.super_admin)
+
+        cca = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_COMPANY_ADMIN"}
+        )
+        self.assertIn(self.customer_user.email, self._emails(cca))
+        lm = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertNotIn(self.customer_user.email, self._emails(lm))
+
+    def test_access_role_filter_cu_excludes_when_higher_present(self):
+        # Symmetric to the LM case above: a user with CU + LM grants has
+        # EFFECTIVE role LM, so ?access_role=CUSTOMER_USER must NOT return
+        # them (guards the CU-branch double-negation), only ?access_role=LM.
+        AR = CustomerUserBuildingAccess.AccessRole
+        membership = CustomerUserMembership.objects.get(
+            user=self.customer_user, customer=self.customer
+        )
+        # Anchor grant stays CUSTOMER_USER; add an LM grant on a 2nd building.
+        extra = Building.objects.create(company=self.company, name="Wing CU+LM")
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=extra
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=extra,
+            access_role=AR.CUSTOMER_LOCATION_MANAGER,
+        )
+        self.authenticate(self.super_admin)
+
+        cu = self.client.get(self.URL, {"access_role": "CUSTOMER_USER"})
+        self.assertNotIn(self.customer_user.email, self._emails(cu))
+        lm = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertIn(self.customer_user.email, self._emails(lm))
+
+    def test_access_role_filter_no_duplicate_rows(self):
+        # A user with TWO matching grants must appear EXACTLY once (Exists,
+        # not a join).
+        AR = CustomerUserBuildingAccess.AccessRole
+        extra = Building.objects.create(company=self.company, name="Wing Dup")
+        CustomerBuildingMembership.objects.create(
+            customer=self.customer, building=extra
+        )
+        membership = CustomerUserMembership.objects.get(
+            user=self.customer_user, customer=self.customer
+        )
+        CustomerUserBuildingAccess.objects.filter(membership=membership).update(
+            access_role=AR.CUSTOMER_LOCATION_MANAGER
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=membership,
+            building=extra,
+            access_role=AR.CUSTOMER_LOCATION_MANAGER,
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        rows = response.data.get("results", response.data)
+        matching = [row for row in rows if row["id"] == self.customer_user.id]
+        self.assertEqual(len(matching), 1)
+
+    def test_access_role_filter_unknown_value_returns_empty(self):
+        # Mirror ?role= — NO validation; an unknown value matches zero rows
+        # (200, not 400).
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"access_role": "BOGUS"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data.get("results", response.data)), 0)
+
+    def test_access_role_filter_excludes_inactive_grants(self):
+        # customer_user's only grant -> LM but inactive: not matched by LM.
+        self._set_anchor_role(
+            self.customer_user,
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER,
+            is_active=False,
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_LOCATION_MANAGER"}
+        )
+        self.assertNotIn(self.customer_user.email, self._emails(response))
+
+    def test_access_role_filter_company_scoped(self):
+        # Codex scenario for the FILTER: customer_user has a CUSTOMER_USER
+        # grant in company A and a CUSTOMER_COMPANY_ADMIN grant in company B.
+        # A company-A admin filtering by CCA must NOT match them (B grant is
+        # out of scope); a super admin must. The A admin DOES match them by
+        # their in-company CUSTOMER_USER role.
+        AR = CustomerUserBuildingAccess.AccessRole
+        cross_customer = Customer.objects.create(
+            company=self.other_company,
+            building=self.other_building,
+            name="Cross Filter B",
+            contact_email="cross-filter-b@example.com",
+        )
+        CustomerBuildingMembership.objects.create(
+            customer=cross_customer, building=self.other_building
+        )
+        m_b = CustomerUserMembership.objects.create(
+            user=self.customer_user, customer=cross_customer
+        )
+        CustomerUserBuildingAccess.objects.create(
+            membership=m_b,
+            building=self.other_building,
+            access_role=AR.CUSTOMER_COMPANY_ADMIN,
+        )
+
+        self.authenticate(self.super_admin)
+        sup = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_COMPANY_ADMIN"}
+        )
+        self.assertIn(self.customer_user.email, self._emails(sup))
+
+        self.authenticate(self.company_admin)
+        ca_cca = self.client.get(
+            self.URL, {"access_role": "CUSTOMER_COMPANY_ADMIN"}
+        )
+        self.assertNotIn(self.customer_user.email, self._emails(ca_cca))
+        ca_cu = self.client.get(self.URL, {"access_role": "CUSTOMER_USER"})
+        self.assertIn(self.customer_user.email, self._emails(ca_cu))
 
     def test_is_active_false_returns_only_deactivated(self):
         self.customer_user.soft_delete(deleted_by=self.super_admin)

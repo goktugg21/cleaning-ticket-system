@@ -8,8 +8,18 @@ from .scoping import (
 )
 
 
+# Sprint 2c follow-up — customer access-role hierarchy. The global Users
+# list shows ONE badge = the user's highest effective customer access role.
+_ACCESS_ROLE_RANK = {
+    "CUSTOMER_USER": 1,
+    "CUSTOMER_LOCATION_MANAGER": 2,
+    "CUSTOMER_COMPANY_ADMIN": 3,
+}
+
+
 class UserListSerializer(serializers.ModelSerializer):
     scope_summary = serializers.SerializerMethodField()
+    customer_access_role = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -22,6 +32,7 @@ class UserListSerializer(serializers.ModelSerializer):
             "is_active",
             "deleted_at",
             "scope_summary",
+            "customer_access_role",
         ]
         read_only_fields = fields
 
@@ -59,6 +70,42 @@ class UserListSerializer(serializers.ModelSerializer):
                 "count": obj.customer_memberships.count(),
             }
         return {"label": "all", "count": -1}
+
+    def get_customer_access_role(self, obj):
+        """
+        Sprint 2c follow-up — the user's single HIGHEST effective customer
+        access role for the global Users admin list
+        (CUSTOMER_COMPANY_ADMIN > CUSTOMER_LOCATION_MANAGER > CUSTOMER_USER),
+        or ``None`` for provider-side users and for any customer user with
+        no in-scope active grant.
+
+        Company-scoped to the VIEWER: a COMPANY_ADMIN only sees access roles
+        from customers in their own provider company. The view passes the
+        allowed company-id set via ``customer_access_company_ids`` in the
+        serializer context (``None`` = SUPER_ADMIN, unrestricted); a grant
+        whose ``membership.customer.company_id`` is outside that set is
+        ignored. This prevents a cross-company leak where one viewer would
+        see roles a user holds under a different provider's customers.
+
+        Inactive grants are excluded (the resolver denies them). Computed in
+        Python over the rows prefetched by ``UserViewSet.get_queryset``
+        (list action; ``customer_memberships`` select_relates ``customer``
+        for the company_id check) so there is no N+1.
+        """
+        scope = self.context.get("customer_access_company_ids")
+        best_role = None
+        best_rank = 0
+        for membership in obj.customer_memberships.all():
+            if scope is not None and membership.customer.company_id not in scope:
+                continue
+            for access in membership.building_access.all():
+                if not access.is_active:
+                    continue
+                rank = _ACCESS_ROLE_RANK.get(access.access_role, 0)
+                if rank > best_rank:
+                    best_rank = rank
+                    best_role = access.access_role
+        return best_role
 
 
 class UserDetailSerializer(serializers.ModelSerializer):

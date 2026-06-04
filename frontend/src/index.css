@@ -117,9 +117,43 @@ p { line-height: 1.6; }
   border-color: transparent;
 }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+.btn-danger {
+  background: var(--red-soft);
+  color: var(--red);
+  border-color: var(--red-border);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
 .btn-sm { height: 30px; padding: 0 12px; font-size: 12px; }
 .btn-lg { height: 42px; padding: 0 22px; font-size: 14px; }
 .btn:disabled { opacity: 0.5; pointer-events: none; }
+
+/* Sprint 2d — per-customer Settings page polish: grouped visibility
+   toggles in one bordered list + a danger accent on the lifecycle
+   (deactivate) zone. Cosmetic only; no behaviour/testid change. */
+.settings-toggle-group {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  background: var(--surface);
+}
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text);
+}
+.settings-toggle-row:last-child { border-bottom: none; }
+.settings-toggle-row:hover { background: var(--surface-2); }
+.settings-danger-zone { border-left: 3px solid var(--red-border); }
 
 /* Badges */
 .badge {
@@ -4850,6 +4884,16 @@ table.data-table {
 .permissions-matrix-table thead .permissions-matrix-sticky-role {
   z-index: 3;
   background: var(--surface-2);
+}
+
+/* Sprint 2b — transient highlight when a ?focus_user deep-link lands on a
+   user's matrix rows (e.g. from a contact's "Manage permissions" action).
+   Targets every cell so the sticky User/Actions/Role columns highlight too;
+   the class is added on focus and removed by a ~2.4s timer. */
+.permissions-matrix-row-focus > th,
+.permissions-matrix-row-focus > td {
+  background: var(--amber-soft) !important;
+  transition: background-color 0.45s ease;
 }
 
 .permissions-matrix-user-name {
