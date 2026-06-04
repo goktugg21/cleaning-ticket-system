@@ -85,6 +85,7 @@ class _Sprint12Base(PlannedWorkFixtureMixin, APITestCase):
             customer=job.customer,
             planned_date=planned_date,
             status=PlannedOccurrenceStatus.PLANNED,
+            source_window=self.default_window(job),
             pricing_mode=job.pricing_mode,
             fixed_price=job.fixed_price,
             vat_pct=job.vat_pct,
@@ -370,6 +371,7 @@ class OccurrenceSnapshotBackfillMigrationTests(_Sprint12Base):
             customer=job.customer,
             planned_date=TODAY,
             status=PlannedOccurrenceStatus.TICKET_CREATED,
+            source_window=self.default_window(job),
             pricing_mode=PricingMode.CONTRACT_INCLUDED,
             fixed_price=None,
             vat_pct=Decimal("21.00"),
@@ -408,6 +410,7 @@ class OccurrenceSnapshotBackfillMigrationTests(_Sprint12Base):
             customer=contract_job.customer,
             planned_date=TODAY,
             status=PlannedOccurrenceStatus.PLANNED,
+            source_window=self.default_window(contract_job),
         )
 
         self._backfill()

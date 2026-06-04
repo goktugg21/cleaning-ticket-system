@@ -32,6 +32,39 @@ export type PlannedOccurrenceStatus =
   | "SKIPPED"
   | "CANCELLED";
 
+// ISO weekday numbers (Monday=1 .. Sunday=7). A WEEKLY / BIWEEKLY job
+// runs on this SET of weekdays; MONTHLY ignores it.
+export type IsoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+// ---------------------------------------------------------------------------
+// RecurringJobWindow — one per-day time window (the AM/PM model). The
+// generator materializes one occurrence per (date x active window). A
+// window may carry an OPTIONAL per-window pricing override; when its
+// `pricing_mode` is null the occurrence falls back to the job's pricing.
+// ---------------------------------------------------------------------------
+export interface RecurringJobWindow {
+  id: number;
+  label: string;
+  start_time: string | null; // HH:MM:SS
+  ordering: number;
+  is_active: boolean;
+  pricing_mode: PlannedWorkPricingMode | null;
+  fixed_price: string | null; // VAT-exclusive decimal string
+  vat_pct: string | null;
+}
+
+// Window shape sent on create / update. `id` (when present) re-targets an
+// existing window in place; omit it to create a new one.
+export interface RecurringJobWindowInput {
+  id?: number;
+  label?: string;
+  start_time?: string | null; // HH:MM (or HH:MM:SS)
+  ordering?: number;
+  pricing_mode?: SelectablePricingMode | null;
+  fixed_price?: string | null;
+  vat_pct?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // RecurringJob — read (GET list/detail, archive/unarchive responses)
 // ---------------------------------------------------------------------------
@@ -48,8 +81,11 @@ export interface RecurringJob {
   frequency: RecurringJobFrequency;
   start_date: string; // YYYY-MM-DD
   end_date: string | null;
-  preferred_start_time: string | null; // HH:MM:SS
-  time_window_label: string;
+  preferred_start_time: string | null; // HH:MM:SS (legacy; superseded by windows)
+  time_window_label: string; // legacy; superseded by windows
+  // Recurring day-model: the chosen ISO weekday set + the active windows.
+  weekdays: number[];
+  windows: RecurringJobWindow[];
   pricing_mode: PlannedWorkPricingMode;
   fixed_price: string | null; // VAT-exclusive decimal string
   vat_pct: string;
@@ -83,6 +119,11 @@ export interface RecurringJobWritePayload {
   end_date?: string | null;
   preferred_start_time?: string | null;
   time_window_label?: string;
+  // Recurring day-model (both optional; the backend defaults weekdays to
+  // start_date's weekday and synthesizes one window when omitted, so a
+  // legacy payload keeps working).
+  weekdays?: number[];
+  windows?: RecurringJobWindowInput[];
   pricing_mode: SelectablePricingMode;
   fixed_price?: string | null;
   vat_pct?: string;
@@ -107,6 +148,10 @@ export interface PlannedOccurrence {
   actual_date: string | null;
   status: PlannedOccurrenceStatus;
   ticket_id: number | null;
+  // The window this occurrence was materialized from (the AM/PM model).
+  source_window: number;
+  source_window_label: string;
+  source_window_start_time: string | null; // HH:MM:SS
   pricing_mode: PlannedWorkPricingMode;
   fixed_price: string | null; // VAT-exclusive decimal string
   vat_pct: string;

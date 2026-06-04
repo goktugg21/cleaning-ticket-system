@@ -63,6 +63,7 @@ from planned_work.models import (
     RecurringJob,
     RecurringJobDefaultManager,
     RecurringJobDefaultStaff,
+    RecurringJobWindow,
 )
 from tickets.models import (
     StaffAssignmentRequest,
@@ -855,6 +856,13 @@ def _connect():
         # workflow audit trail for planned work; registering it in the
         # generic AuditLog would double-write the same fact.
         RecurringJob,
+        # Recurring day-model — per-day time windows (label / start_time /
+        # ordering / optional per-window pricing). Editable config with
+        # meaningful UPDATE diffs, so the AM/PM windows are audited the
+        # same way the job's own schedule + pricing fields are. The
+        # generator's lazy default-window create runs as a system write
+        # (actor=None), which is the correct audit semantics.
+        RecurringJobWindow,
         # Sprint 14E — ticket notes + attachments. TicketMessage CREATE =
         # "note added (with type)"; UPDATE = a future hide/edit; DELETE =
         # a future hard delete. TicketAttachment CREATE = "attachment

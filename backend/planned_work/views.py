@@ -73,7 +73,7 @@ class RecurringJobViewSet(viewsets.ModelViewSet):
         return (
             scope_recurring_jobs_for(self.request.user)
             .select_related("company", "building", "customer", "created_by")
-            .prefetch_related("default_staff", "default_managers")
+            .prefetch_related("default_staff", "default_managers", "windows")
         )
 
     def get_serializer_class(self):
@@ -176,7 +176,7 @@ class PlannedOccurrenceViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = scope_planned_occurrences_for(self.request.user).select_related(
-            "recurring_job", "company", "building", "customer"
+            "recurring_job", "company", "building", "customer", "source_window"
         )
         params = self.request.query_params
 

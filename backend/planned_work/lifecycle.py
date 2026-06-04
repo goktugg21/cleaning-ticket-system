@@ -180,16 +180,28 @@ def mark_missed_occurrences(
     past the grace window to MISSED. Returns the count flipped."""
     today = today or timezone.localdate()
     cutoff = today - timedelta(days=grace_days)
-    qs = PlannedOccurrence.objects.filter(
-        status__in=[
-            PlannedOccurrenceStatus.PLANNED,
-            PlannedOccurrenceStatus.TICKET_CREATED,
-        ],
-        planned_date__lt=cutoff,
+    occurrences = list(
+        PlannedOccurrence.objects.filter(
+            status__in=[
+                PlannedOccurrenceStatus.PLANNED,
+                PlannedOccurrenceStatus.TICKET_CREATED,
+            ],
+            planned_date__lt=cutoff,
+        )
     )
+    # Bulk-load the linked tickets in ONE query (keyed by occurrence) rather
+    # than a per-occurrence SELECT in the loop. The day-model multiplies the
+    # occurrence count (one per date x window), so the old N+1 would scale
+    # with windows; this keeps the missed-sweep at two queries.
+    tickets_by_occurrence = {
+        t.planned_occurrence_id: t
+        for t in Ticket.objects.filter(
+            planned_occurrence__in=occurrences
+        )
+    }
     count = 0
-    for occ in qs:
-        ticket = Ticket.objects.filter(planned_occurrence=occ).first()
+    for occ in occurrences:
+        ticket = tickets_by_occurrence.get(occ.pk)
         if ticket is not None and str(ticket.status) in {
             str(TicketStatus.APPROVED),
             str(TicketStatus.CLOSED),

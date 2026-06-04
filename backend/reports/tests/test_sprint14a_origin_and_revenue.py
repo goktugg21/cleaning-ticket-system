@@ -32,6 +32,7 @@ from planned_work.models import (
     PlannedOccurrence,
     PlannedOccurrenceStatus,
     RecurringJob,
+    RecurringJobWindow,
 )
 from test_utils import TenantFixtureMixin
 from tickets.models import Ticket, TicketStatus, TicketType
@@ -102,6 +103,9 @@ class _OriginBase(TenantFixtureMixin, APITestCase):
             start_date="2026-01-01",
             created_by=self.super_admin,
         )
+        self.job_window = RecurringJobWindow.objects.create(
+            recurring_job=self.job, ordering=0
+        )
         self.occurrence = PlannedOccurrence.objects.create(
             recurring_job=self.job,
             company=self.company,
@@ -109,6 +113,7 @@ class _OriginBase(TenantFixtureMixin, APITestCase):
             customer=self.customer,
             planned_date="2026-06-01",
             status=PlannedOccurrenceStatus.TICKET_CREATED,
+            source_window=self.job_window,
         )
         self.planned_ticket = Ticket.objects.create(
             company=self.company,
