@@ -36,6 +36,7 @@ import type {
   StaffAssignmentRequestStatus,
   StaffCompletionRouteResponse,
   StaffProfileAdmin,
+  TicketDetail,
   UserAdmin,
   UserAdminDetail,
 } from "./types";
@@ -1130,6 +1131,49 @@ export async function getStaffCompletionRoute(
 ): Promise<StaffCompletionRouteResponse> {
   const response = await api.get<StaffCompletionRouteResponse>(
     `/tickets/${ticketId}/staff-completion-route/`,
+  );
+  return response.data;
+}
+
+// ---- Sprint 9B (frontend) — ticket operational schedule ---------------
+//
+// `POST /api/tickets/<id>/schedule/` sets / reschedules and
+// `DELETE /api/tickets/<id>/schedule/` clears a ticket's operational
+// schedule. Provider-management only (SUPER_ADMIN / COMPANY_ADMIN /
+// BUILDING_MANAGER); STAFF + customer roles READ the schedule on the
+// detail but get a stable 403 here. The action is ADDITIVE on the
+// backend — it never changes `status` and never disturbs SLA. BOTH
+// verbs return the full TicketDetail body (HTTP 200), so the caller
+// re-hydrates the ticket from the response (or refetches).
+//
+// `scheduled_start_at` is a DateTimeField on the wire (full ISO-8601
+// datetime, not a bare date). `reschedule_reason` is REQUIRED by the
+// backend when the ticket is already scheduled (stable 400 code
+// `reschedule_reason_required`); it is ignored on the first set.
+
+export interface TicketScheduleSetPayload {
+  scheduled_start_at: string;
+  scheduled_end_at?: string | null;
+  time_window_label?: string;
+  reschedule_reason?: string;
+}
+
+export async function setTicketSchedule(
+  ticketId: number,
+  payload: TicketScheduleSetPayload,
+): Promise<TicketDetail> {
+  const response = await api.post<TicketDetail>(
+    `/tickets/${ticketId}/schedule/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function clearTicketSchedule(
+  ticketId: number,
+): Promise<TicketDetail> {
+  const response = await api.delete<TicketDetail>(
+    `/tickets/${ticketId}/schedule/`,
   );
   return response.data;
 }

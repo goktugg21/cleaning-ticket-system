@@ -24,6 +24,7 @@ import {
   listStaffAssignmentRequests,
 } from "../api/admin";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
+import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
 import type {
   AssignableManager,
   Contact,
@@ -1939,6 +1940,22 @@ export function TicketDetailPage() {
             {/* close Sprint 30 Batch 30.1.1 assigned-staff-card subsection wrapper */}
             </div>
           </div>
+
+          {/* Sprint 1 (frontend) — operational "Scheduled date" control.
+              Surfaces the existing POST/DELETE /tickets/<id>/schedule/
+              action (Sprint 9B backend) as a set / change / clear control,
+              for ALL ticket types. Provider-management gated (SA/CA/BM via
+              isProviderManagementRole); STAFF + customer roles see the
+              scheduled date read-only inside the same card (no control, no
+              403 call). A successful set/clear refetches the ticket so the
+              date and the audit timeline refresh. */}
+          <TicketScheduleCard
+            ticket={ticket}
+            canManage={isProviderManagementRole(me?.role)}
+            onChanged={() => {
+              void loadTicket();
+            }}
+          />
 
           {/* Sprint 30 Batch 30.1.1 — consolidated Details card. Merges
               the prior Ticket details, Customer Contacts, and SLA cards
