@@ -20,12 +20,15 @@ from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
 from tickets.models import Ticket
 
 from .models import (
+    Frequency,
     PlannedOccurrence,
     PricingMode,
     RecurringJob,
     RecurringJobDefaultManager,
     RecurringJobDefaultStaff,
+    RecurringJobWindow,
 )
+from .weekdays import VALID_WEEKDAYS, serialize_weekdays
 
 
 def _two_places(value):
@@ -33,6 +36,48 @@ def _two_places(value):
     `extra_work.models._two_places` so planned-work money math matches the
     Extra Work / proposal money math exactly."""
     return value.quantize(Decimal("0.01"))
+
+
+# ---------------------------------------------------------------------------
+# RecurringJobWindow — nested read / write
+# ---------------------------------------------------------------------------
+class RecurringJobWindowReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecurringJobWindow
+        fields = [
+            "id",
+            "label",
+            "start_time",
+            "ordering",
+            "is_active",
+            "pricing_mode",
+            "fixed_price",
+            "vat_pct",
+        ]
+        read_only_fields = fields
+
+
+class RecurringJobWindowWriteSerializer(serializers.Serializer):
+    """One window in the nested `windows` write payload. `id` lets an
+    edit re-target an existing window in place (so its already-materialized
+    occurrences keep their PROTECTing FK); a window with no id is created.
+    """
+
+    id = serializers.IntegerField(required=False)
+    label = serializers.CharField(
+        max_length=64, required=False, allow_blank=True, default=""
+    )
+    start_time = serializers.TimeField(required=False, allow_null=True)
+    ordering = serializers.IntegerField(required=False)
+    pricing_mode = serializers.ChoiceField(
+        choices=PricingMode.choices, required=False, allow_null=True
+    )
+    fixed_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, allow_null=True
+    )
+    vat_pct = serializers.DecimalField(
+        max_digits=5, decimal_places=2, required=False, allow_null=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +97,9 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
     default_staff_ids = serializers.SerializerMethodField()
     default_manager_ids = serializers.SerializerMethodField()
     occurrences_count = serializers.SerializerMethodField()
+    # Recurring day-model: the parsed ISO weekday set + the active windows.
+    weekdays = serializers.SerializerMethodField()
+    windows = serializers.SerializerMethodField()
 
     class Meta:
         model = RecurringJob
@@ -70,6 +118,8 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
             "end_date",
             "preferred_start_time",
             "time_window_label",
+            "weekdays",
+            "windows",
             "pricing_mode",
             "fixed_price",
             "vat_pct",
@@ -94,6 +144,16 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
     def get_occurrences_count(self, obj):
         return obj.occurrences.count()
 
+    def get_weekdays(self, obj):
+        return obj.weekday_set
+
+    def get_windows(self, obj):
+        windows = sorted(
+            (w for w in obj.windows.all() if w.is_active),
+            key=lambda w: (w.ordering, w.id),
+        )
+        return RecurringJobWindowReadSerializer(windows, many=True).data
+
 
 def _user_role_is(user_id: int, role: str) -> bool:
     """True iff a user with `user_id` exists and holds `role`."""
@@ -116,6 +176,22 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
         required=False,
         write_only=True,
     )
+    # Recurring day-model. Both are OPTIONAL so legacy clients (and the
+    # existing create payload, which carries neither) keep working:
+    #   * `weekdays` absent on a WEEKLY/BIWEEKLY job -> defaults to
+    #     start_date's own weekday (legacy single-weekday behaviour).
+    #   * `windows` absent on create -> one default window synthesized
+    #     from preferred_start_time / time_window_label.
+    #   * `windows` absent on update -> existing windows left untouched
+    #     (same "present means replace" contract as the crew lists).
+    weekdays = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        write_only=True,
+    )
+    windows = RecurringJobWindowWriteSerializer(
+        many=True, required=False, write_only=True
+    )
 
     class Meta:
         model = RecurringJob
@@ -129,6 +205,8 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
             "end_date",
             "preferred_start_time",
             "time_window_label",
+            "weekdays",
+            "windows",
             "pricing_mode",
             "fixed_price",
             "vat_pct",
@@ -306,15 +384,158 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                     }
                 )
 
+        # Weekday set (recurring day-model). Only enforced when the key is
+        # explicitly present — an absent value defaults to start_date's
+        # weekday at persist time, keeping the legacy contract intact.
+        effective_frequency = attrs.get(
+            "frequency", getattr(instance, "frequency", None)
+        )
+        if "weekdays" in attrs:
+            weekdays = attrs["weekdays"]
+            for n in weekdays:
+                if n not in VALID_WEEKDAYS:
+                    raise serializers.ValidationError(
+                        {
+                            "weekdays": serializers.ErrorDetail(
+                                "Weekdays must be ISO weekday numbers "
+                                "(Monday=1 .. Sunday=7).",
+                                code="invalid_weekday",
+                            )
+                        }
+                    )
+            if (
+                effective_frequency
+                in (Frequency.WEEKLY, Frequency.BIWEEKLY)
+                and not weekdays
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "weekdays": serializers.ErrorDetail(
+                            "Weekly / biweekly jobs require at least one "
+                            "weekday.",
+                            code="weekdays_required",
+                        )
+                    }
+                )
+
+        # Windows (recurring day-model). When present there must be at
+        # least one, each must validate (HOURLY rejected; FIXED requires a
+        # price), mirroring the job-level pricing rules.
+        if "windows" in attrs:
+            windows = attrs["windows"]
+            if not windows:
+                raise serializers.ValidationError(
+                    {
+                        "windows": serializers.ErrorDetail(
+                            "At least one window is required.",
+                            code="windows_required",
+                        )
+                    }
+                )
+            for window in windows:
+                mode = window.get("pricing_mode")
+                if mode == PricingMode.HOURLY:
+                    raise serializers.ValidationError(
+                        {
+                            "windows": serializers.ErrorDetail(
+                                "Hourly planned work is not supported yet.",
+                                code="pricing_mode_not_supported",
+                            )
+                        }
+                    )
+                if mode == PricingMode.FIXED and window.get("fixed_price") is None:
+                    raise serializers.ValidationError(
+                        {
+                            "windows": serializers.ErrorDetail(
+                                "Fixed-price windows require a fixed_price.",
+                                code="window_fixed_price_required",
+                            )
+                        }
+                    )
+
         return attrs
+
+    def _resolve_weekdays(self, validated_data, *, frequency, start_date):
+        """Pop `weekdays` (a list of ints) from validated_data and return
+        its normalized CSV form. Absent -> default to start_date's weekday
+        for WEEKLY / BIWEEKLY (legacy behaviour), "" for MONTHLY."""
+        has_key = "weekdays" in validated_data
+        weekdays = validated_data.pop("weekdays", None)
+        if has_key:
+            return serialize_weekdays(weekdays or [])
+        if frequency in (Frequency.WEEKLY, Frequency.BIWEEKLY) and start_date:
+            return serialize_weekdays([start_date.isoweekday()])
+        return ""
+
+    def _sync_windows(self, job, windows_data, *, creating):
+        """Persist the nested `windows` payload.
+
+        creating + no windows -> synthesize one default window from the
+        job's legacy schedule fields (so a simple job stays simple and old
+        API clients keep working). update + no windows key -> leave
+        existing windows untouched. Otherwise upsert: a window with a
+        matching id is edited in place; a new one is created; an existing
+        window dropped from the payload is soft-archived when it already
+        has occurrences (PROTECT) and hard-deleted otherwise.
+        """
+        if windows_data is None:
+            if creating:
+                RecurringJobWindow.objects.create(
+                    recurring_job=job,
+                    label=job.time_window_label or "",
+                    start_time=job.preferred_start_time,
+                    ordering=0,
+                )
+            return
+
+        existing = {w.id: w for w in job.windows.all()}
+        seen_ids = set()
+        for idx, data in enumerate(windows_data):
+            wid = data.get("id")
+            fields = dict(
+                label=data.get("label", "") or "",
+                start_time=data.get("start_time"),
+                ordering=data.get("ordering", idx),
+                is_active=True,
+                pricing_mode=data.get("pricing_mode"),
+                fixed_price=data.get("fixed_price"),
+                vat_pct=data.get("vat_pct"),
+            )
+            if wid and wid in existing:
+                window = existing[wid]
+                for key, value in fields.items():
+                    setattr(window, key, value)
+                window.save()
+                seen_ids.add(wid)
+            else:
+                RecurringJobWindow.objects.create(recurring_job=job, **fields)
+
+        # Windows removed from the payload: an occurrence PROTECTs its
+        # source_window, so soft-archive a window that already materialized
+        # occurrences; hard-delete one that never did.
+        for wid, window in existing.items():
+            if wid in seen_ids:
+                continue
+            if window.occurrences.exists():
+                if window.is_active:
+                    window.is_active = False
+                    window.save(update_fields=["is_active", "updated_at"])
+            else:
+                window.delete()
 
     def create(self, validated_data):
         staff_ids = validated_data.pop("default_staff_ids", None)
         manager_ids = validated_data.pop("default_manager_ids", None)
+        windows_data = validated_data.pop("windows", None)
 
         building = validated_data["building"]
         validated_data["company"] = building.company
         validated_data["created_by"] = self.context["request"].user
+        validated_data["weekdays"] = self._resolve_weekdays(
+            validated_data,
+            frequency=validated_data.get("frequency"),
+            start_date=validated_data.get("start_date"),
+        )
 
         job = super().create(validated_data)
 
@@ -326,6 +547,7 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
             RecurringJobDefaultManager.objects.create(
                 recurring_job=job, user_id=manager_id
             )
+        self._sync_windows(job, windows_data, creating=True)
         return job
 
     def update(self, instance, validated_data):
@@ -336,6 +558,22 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
         replace_managers = "default_manager_ids" in validated_data
         staff_ids = validated_data.pop("default_staff_ids", None)
         manager_ids = validated_data.pop("default_manager_ids", None)
+        windows_present = "windows" in validated_data
+        windows_data = validated_data.pop("windows", None)
+
+        # Re-normalize weekdays only when the key is present on the wire;
+        # an absent value leaves the stored set untouched. Anchor the
+        # default on the effective frequency / start_date.
+        if "weekdays" in validated_data:
+            validated_data["weekdays"] = self._resolve_weekdays(
+                validated_data,
+                frequency=validated_data.get(
+                    "frequency", instance.frequency
+                ),
+                start_date=validated_data.get(
+                    "start_date", instance.start_date
+                ),
+            )
 
         instance = super().update(instance, validated_data)
 
@@ -362,6 +600,9 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                 RecurringJobDefaultManager.objects.create(
                     recurring_job=instance, user_id=manager_id
                 )
+
+        if windows_present:
+            self._sync_windows(instance, windows_data, creating=False)
         return instance
 
 
@@ -379,6 +620,17 @@ class PlannedOccurrenceSerializer(serializers.ModelSerializer):
         source="customer.name", read_only=True
     )
     ticket_id = serializers.SerializerMethodField()
+    # Recurring day-model: the window this occurrence was materialized
+    # from. The occurrence's own preferred_start_time / time_window_label
+    # are the frozen snapshot taken from this window at materialization;
+    # these expose the LIVE window identity so the UI can group same-date
+    # occurrences (Morning / Evening).
+    source_window_label = serializers.CharField(
+        source="source_window.label", read_only=True
+    )
+    source_window_start_time = serializers.TimeField(
+        source="source_window.start_time", read_only=True
+    )
     # Sprint 12 — per-occurrence billable amounts derived from the
     # snapshotted price fields. Null unless the occurrence is FIXED-priced
     # with a fixed_price set (CONTRACT_INCLUDED / HOURLY carry no separate
@@ -402,6 +654,9 @@ class PlannedOccurrenceSerializer(serializers.ModelSerializer):
             "actual_date",
             "status",
             "ticket_id",
+            "source_window",
+            "source_window_label",
+            "source_window_start_time",
             # Sprint 12 — per-occurrence pricing + schedule snapshot.
             "pricing_mode",
             "fixed_price",

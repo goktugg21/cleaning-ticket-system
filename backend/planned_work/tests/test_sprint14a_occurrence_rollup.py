@@ -87,6 +87,7 @@ class _OccurrenceFixtureMixin(PlannedWorkFixtureMixin):
             customer=customer,
             planned_date=planned_date,
             status=status,
+            source_window=self.default_window(job),
         )
 
 

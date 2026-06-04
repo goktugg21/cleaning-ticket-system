@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
+from .weekdays import parse_weekdays
+
 
 class Frequency(models.TextChoices):
     WEEKLY = "WEEKLY", "Weekly"
@@ -54,6 +56,15 @@ class RecurringJob(models.Model):
     preferred_start_time = models.TimeField(null=True, blank=True)
     time_window_label = models.CharField(max_length=64, blank=True, default="")
 
+    # Recurring day-model: WEEKLY / BIWEEKLY jobs run on a chosen SET of
+    # ISO weekdays (Monday=1 .. Sunday=7), stored as a sorted CSV like
+    # "1,4" (Mon+Thu). MONTHLY ignores this (it anchors on start_date's
+    # day-of-month). Empty is treated by the engine as "{start_date's
+    # weekday}" — the legacy single-weekday behaviour — so a job that
+    # predates the day-model (or any caller that omits the field)
+    # generates exactly as before. See `weekdays.py`.
+    weekdays = models.CharField(max_length=27, blank=True, default="")
+
     pricing_mode = models.CharField(
         max_length=24,
         choices=PricingMode.choices,
@@ -85,6 +96,69 @@ class RecurringJob(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.frequency})"
+
+    @property
+    def weekday_set(self) -> list[int]:
+        """The parsed ISO weekday list (sorted, de-duplicated). Empty when
+        no weekday set is stored (engine falls back to start_date's
+        weekday)."""
+        return parse_weekdays(self.weekdays)
+
+
+class RecurringJobWindow(models.Model):
+    """One time-window the job runs in on each due date (the AM/PM model).
+
+    A job has 1..N active windows; the generator materializes ONE
+    `PlannedOccurrence` per (date x window), so a Mon+Thu job with a
+    Morning + Evening window yields four occurrences a week. The window
+    carries the schedule (label + start_time) the occurrence snapshots,
+    plus an OPTIONAL per-window pricing override: when `pricing_mode` is
+    set the occurrence snapshots THIS window's pricing (e.g. evening
+    cleans cost more than morning); when null the occurrence falls back to
+    the job's pricing. `is_active` is a soft-archive: an occurrence
+    PROTECTs its `source_window`, so a window that has already
+    materialized occurrences cannot be hard-deleted — removing it from the
+    job deactivates it (the generator stops materializing from it) while
+    preserving the frozen history.
+    """
+
+    recurring_job = models.ForeignKey(
+        RecurringJob,
+        on_delete=models.CASCADE,
+        related_name="windows",
+    )
+    label = models.CharField(max_length=64, blank=True, default="")
+    start_time = models.TimeField(null=True, blank=True)
+    ordering = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    # Optional per-window pricing override. NULL pricing_mode => the
+    # occurrence falls back to the job's pricing snapshot. When set, the
+    # window's mode / fixed_price / vat_pct are snapshotted onto the
+    # occurrence instead. Mirrors the job/occurrence pricing shape;
+    # `fixed_price` is VAT-exclusive. HOURLY is rejected by the serializer
+    # (no actual-hours plumbing for planned work yet).
+    pricing_mode = models.CharField(
+        max_length=24,
+        choices=PricingMode.choices,
+        null=True,
+        blank=True,
+    )
+    fixed_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
+    vat_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["ordering", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.recurring_job_id}:{self.label or self.start_time}"
 
 
 class RecurringJobDefaultStaff(models.Model):
@@ -149,6 +223,18 @@ class PlannedOccurrence(models.Model):
     # PROTECT forces archive over delete so occurrences survive for reporting.
     recurring_job = models.ForeignKey(
         RecurringJob,
+        on_delete=models.PROTECT,
+        related_name="occurrences",
+    )
+
+    # The window this occurrence was materialized from (the AM/PM model).
+    # PROTECT: a window with materialized occurrences can never be
+    # hard-deleted — it is soft-archived (is_active=False) instead, so the
+    # occurrence's frozen schedule/pricing snapshot keeps a live anchor.
+    # Part of the idempotency key (see unique_together below): AM + PM on
+    # the same date are two distinct occurrences.
+    source_window = models.ForeignKey(
+        "RecurringJobWindow",
         on_delete=models.PROTECT,
         related_name="occurrences",
     )
@@ -219,9 +305,13 @@ class PlannedOccurrence(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # (recurring_job, planned_date) is THE idempotency anchor — the
-        # daily generator upserts on it so re-runs never duplicate.
-        unique_together = [("recurring_job", "planned_date")]
+        # (recurring_job, planned_date, source_window) is THE idempotency
+        # anchor — the daily generator upserts on it so re-runs never
+        # duplicate. The window dimension is what lets a single date carry
+        # several occurrences (Morning + Evening) without colliding.
+        unique_together = [
+            ("recurring_job", "planned_date", "source_window")
+        ]
         ordering = ["planned_date"]
         indexes = [
             models.Index(fields=["status", "planned_date"]),

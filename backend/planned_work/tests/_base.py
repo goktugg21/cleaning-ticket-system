@@ -13,7 +13,12 @@ from typing import Optional
 
 from accounts.models import StaffProfile, UserRole
 from buildings.models import BuildingStaffVisibility
-from planned_work.models import Frequency, PricingMode, RecurringJob
+from planned_work.models import (
+    Frequency,
+    PricingMode,
+    RecurringJob,
+    RecurringJobWindow,
+)
 from test_utils import TenantFixtureMixin
 
 
@@ -69,3 +74,19 @@ class PlannedWorkFixtureMixin(TenantFixtureMixin):
             archived_at=archived_at,
             created_by=created_by or self.super_admin,
         )
+
+    def default_window(self, job) -> RecurringJobWindow:
+        """Return the job's first active window, creating one from its
+        legacy schedule fields if it has none. Used by tests that build a
+        PlannedOccurrence directly (the occurrence's source_window is a
+        non-null PROTECTed FK), mirroring what the generator's
+        lazy-default-window / data migration would produce."""
+        window = job.windows.order_by("ordering", "id").first()
+        if window is None:
+            window = RecurringJobWindow.objects.create(
+                recurring_job=job,
+                label=job.time_window_label or "",
+                start_time=job.preferred_start_time,
+                ordering=0,
+            )
+        return window

@@ -30,6 +30,7 @@ import {
 } from "../../api/plannedWork";
 import type {
   RecurringJobFrequency,
+  RecurringJobWindowInput,
   RecurringJobWritePayload,
   SelectablePricingMode,
 } from "../../api/plannedWork.types";
@@ -38,6 +39,27 @@ import { useToast } from "../../components/ToastProvider";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
 const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
+const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
+
+// Per-window pricing dropdown: "" means "inherit the job's pricing" (the
+// occurrence falls back to the job default); the two explicit modes
+// override it for that window only.
+type WindowPricingChoice = "" | SelectablePricingMode;
+
+interface WindowDraft {
+  // Present for a window that already exists on the job (edit in place so
+  // its materialized occurrences keep their PROTECTing FK); absent = new.
+  id?: number;
+  label: string;
+  startTime: string; // HH:MM
+  pricingMode: WindowPricingChoice;
+  fixedPrice: string;
+  vatPct: string;
+}
+
+function emptyWindow(): WindowDraft {
+  return { label: "", startTime: "", pricingMode: "", fixedPrice: "", vatPct: "21" };
+}
 
 function customerMatchesBuilding(customer: Customer, buildingId: number): boolean {
   return (
@@ -75,8 +97,9 @@ export function RecurringJobFormPage() {
   const [frequency, setFrequency] = useState<RecurringJobFrequency>("WEEKLY");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [preferredStartTime, setPreferredStartTime] = useState("");
-  const [timeWindowLabel, setTimeWindowLabel] = useState("");
+  // Recurring day-model: a weekday SET (WEEKLY/BIWEEKLY) + 1..N windows.
+  const [weekdays, setWeekdays] = useState<number[]>([]);
+  const [windows, setWindows] = useState<WindowDraft[]>([emptyWindow()]);
   const [pricingMode, setPricingMode] =
     useState<SelectablePricingMode>("CONTRACT_INCLUDED");
   const [fixedPrice, setFixedPrice] = useState("");
@@ -134,8 +157,24 @@ export function RecurringJobFormPage() {
           setFrequency(job.frequency);
           setStartDate(job.start_date);
           setEndDate(job.end_date ?? "");
-          setPreferredStartTime(job.preferred_start_time?.slice(0, 5) ?? "");
-          setTimeWindowLabel(job.time_window_label);
+          setWeekdays(job.weekdays ?? []);
+          setWindows(
+            job.windows.length > 0
+              ? job.windows.map((w) => ({
+                  id: w.id,
+                  label: w.label,
+                  startTime: w.start_time?.slice(0, 5) ?? "",
+                  pricingMode:
+                    w.pricing_mode === "FIXED"
+                      ? "FIXED"
+                      : w.pricing_mode === "CONTRACT_INCLUDED"
+                        ? "CONTRACT_INCLUDED"
+                        : "",
+                  fixedPrice: w.fixed_price ?? "",
+                  vatPct: w.vat_pct ?? "21",
+                }))
+              : [emptyWindow()],
+          );
           // HOURLY is not selectable; coerce any legacy value to CONTRACT_INCLUDED.
           setPricingMode(
             job.pricing_mode === "FIXED" ? "FIXED" : "CONTRACT_INCLUDED",
@@ -224,6 +263,8 @@ export function RecurringJobFormPage() {
     setDefaultManagerIds([]);
   }
 
+  const showWeekdays = frequency === "WEEKLY" || frequency === "BIWEEKLY";
+
   function validate(): boolean {
     const errs: AdminFieldErrors = {};
     if (building === "") errs.building = t("form.error_building_required");
@@ -233,11 +274,66 @@ export function RecurringJobFormPage() {
     if (pricingMode === "FIXED" && !fixedPrice.trim()) {
       errs.fixed_price = t("form.error_fixed_price_required");
     }
+    if (showWeekdays && weekdays.length === 0) {
+      errs.weekdays = t("form.error_weekdays_required");
+    }
+    if (windows.length === 0) {
+      errs.windows = t("form.error_windows_required");
+    }
+    windows.forEach((w, idx) => {
+      if (w.pricingMode === "FIXED" && !w.fixedPrice.trim()) {
+        errs[`window_${idx}`] = t("form.error_window_fixed_price_required");
+      }
+    });
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
+  function toggleWeekday(day: number) {
+    setWeekdays((prev) =>
+      prev.includes(day)
+        ? prev.filter((d) => d !== day)
+        : [...prev, day].sort((a, b) => a - b),
+    );
+  }
+
+  function updateWindow(index: number, patch: Partial<WindowDraft>) {
+    setWindows((prev) =>
+      prev.map((w, i) => (i === index ? { ...w, ...patch } : w)),
+    );
+  }
+
+  function addWindow() {
+    setWindows((prev) => [...prev, emptyWindow()]);
+  }
+
+  function removeWindow(index: number) {
+    setWindows((prev) =>
+      prev.length <= 1 ? prev : prev.filter((_, i) => i !== index),
+    );
+  }
+
   function buildPayload(): RecurringJobWritePayload {
+    const windowsPayload: RecurringJobWindowInput[] = windows.map((w, idx) => {
+      const input: RecurringJobWindowInput = {
+        label: w.label.trim(),
+        start_time: w.startTime || null,
+        ordering: idx,
+      };
+      if (w.id != null) input.id = w.id;
+      if (w.pricingMode === "FIXED") {
+        input.pricing_mode = "FIXED";
+        input.fixed_price = w.fixedPrice.trim();
+        input.vat_pct = w.vatPct || "21";
+      } else if (w.pricingMode === "CONTRACT_INCLUDED") {
+        input.pricing_mode = "CONTRACT_INCLUDED";
+      } else {
+        // Inherit the job's pricing for this window.
+        input.pricing_mode = null;
+      }
+      return input;
+    });
+
     const payload: RecurringJobWritePayload = {
       building: Number(building),
       customer: Number(customer),
@@ -246,8 +342,10 @@ export function RecurringJobFormPage() {
       frequency,
       start_date: startDate,
       end_date: endDate || null,
-      preferred_start_time: preferredStartTime || null,
-      time_window_label: timeWindowLabel.trim(),
+      // Day-model: only send weekdays for WEEKLY/BIWEEKLY (MONTHLY ignores
+      // it). Windows supersede the legacy single time-window inputs.
+      weekdays: showWeekdays ? weekdays : [],
+      windows: windowsPayload,
       pricing_mode: pricingMode,
       vat_pct: vatPct || "21",
       fixed_price: pricingMode === "FIXED" ? fixedPrice.trim() : null,
@@ -518,61 +616,216 @@ export function RecurringJobFormPage() {
                 )}
               </div>
             </div>
-            <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="rj-end">
-                  {t("form.field_end_date")}
-                </label>
-                <input
-                  id="rj-end"
-                  className="field-input"
-                  type="date"
-                  value={endDate}
-                  onChange={(event) => setEndDate(event.target.value)}
-                />
-                <div className="form-section-helper">
-                  {t("form.field_end_date_hint")}
+            <div className="field">
+              <label className="field-label" htmlFor="rj-end">
+                {t("form.field_end_date")}
+              </label>
+              <input
+                id="rj-end"
+                className="field-input"
+                type="date"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+              />
+              <div className="form-section-helper">
+                {t("form.field_end_date_hint")}
+              </div>
+              {fieldErrors.end_date && (
+                <div className="alert-error login-error" role="alert">
+                  {fieldErrors.end_date}
                 </div>
-                {fieldErrors.end_date && (
+              )}
+            </div>
+
+            {/* Weekday set — WEEKLY / BIWEEKLY only. MONTHLY anchors on the
+                start-date's day-of-month, so the picker is hidden. */}
+            {showWeekdays && (
+              <div className="field">
+                <label className="field-label">
+                  {t("form.field_weekdays")} *
+                </label>
+                <div className="form-section-helper">
+                  {frequency === "BIWEEKLY"
+                    ? t("form.field_weekdays_hint_biweekly")
+                    : t("form.field_weekdays_hint")}
+                </div>
+                <div
+                  className="weekday-picker"
+                  style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
+                  data-testid="rj-weekday-picker"
+                >
+                  {WEEKDAYS.map((day) => (
+                    <button
+                      key={day}
+                      type="button"
+                      className={
+                        weekdays.includes(day)
+                          ? "btn btn-primary btn-sm"
+                          : "btn btn-secondary btn-sm"
+                      }
+                      aria-pressed={weekdays.includes(day)}
+                      onClick={() => toggleWeekday(day)}
+                    >
+                      {t(`weekday_short.${day}`)}
+                    </button>
+                  ))}
+                </div>
+                {fieldErrors.weekdays && (
                   <div className="alert-error login-error" role="alert">
-                    {fieldErrors.end_date}
+                    {fieldErrors.weekdays}
                   </div>
                 )}
               </div>
-              <div className="field">
-                <label className="field-label" htmlFor="rj-time">
-                  {t("form.field_preferred_start_time")}
-                </label>
-                <input
-                  id="rj-time"
-                  className="field-input"
-                  type="time"
-                  value={preferredStartTime}
-                  onChange={(event) =>
-                    setPreferredStartTime(event.target.value)
-                  }
-                />
-                <div className="form-section-helper">
-                  {t("form.field_preferred_start_time_hint")}
-                </div>
-              </div>
-            </div>
+            )}
+
+            {/* Time windows — one occurrence is materialized per (date x
+                window). Defaults to one window so a simple job stays simple. */}
             <div className="field">
-              <label className="field-label" htmlFor="rj-window">
-                {t("form.field_time_window_label")}
-              </label>
-              <input
-                id="rj-window"
-                className="field-input"
-                type="text"
-                maxLength={64}
-                placeholder={t("form.field_time_window_placeholder")}
-                value={timeWindowLabel}
-                onChange={(event) => setTimeWindowLabel(event.target.value)}
-              />
+              <label className="field-label">{t("form.field_windows")} *</label>
               <div className="form-section-helper">
-                {t("form.field_time_window_hint")}
+                {t("form.field_windows_hint")}
               </div>
+              <div
+                className="windows-editor"
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+                data-testid="rj-windows-editor"
+              >
+                {windows.map((win, idx) => (
+                  <div
+                    key={idx}
+                    className="window-row"
+                    data-testid="rj-window-row"
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      padding: 12,
+                    }}
+                  >
+                    <div className="form-2col">
+                      <div className="field" style={{ marginBottom: 8 }}>
+                        <label className="field-label">
+                          {t("form.window_label")}
+                        </label>
+                        <input
+                          className="field-input"
+                          type="text"
+                          maxLength={64}
+                          placeholder={t("form.window_label_placeholder")}
+                          value={win.label}
+                          onChange={(event) =>
+                            updateWindow(idx, { label: event.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="field" style={{ marginBottom: 8 }}>
+                        <label className="field-label">
+                          {t("form.window_start_time")}
+                        </label>
+                        <input
+                          className="field-input"
+                          type="time"
+                          value={win.startTime}
+                          onChange={(event) =>
+                            updateWindow(idx, { startTime: event.target.value })
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="field" style={{ marginBottom: 8 }}>
+                      <label className="field-label">
+                        {t("form.window_pricing_mode")}
+                      </label>
+                      <select
+                        className="field-select"
+                        value={win.pricingMode}
+                        onChange={(event) =>
+                          updateWindow(idx, {
+                            pricingMode: event.target
+                              .value as WindowPricingChoice,
+                          })
+                        }
+                      >
+                        <option value="">{t("form.window_pricing_inherit")}</option>
+                        {PRICING_MODES.map((m) => (
+                          <option key={m} value={m}>
+                            {t(`pricing_mode.${m}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {win.pricingMode === "FIXED" && (
+                      <div className="form-2col">
+                        <div className="field" style={{ marginBottom: 8 }}>
+                          <label className="field-label">
+                            {t("form.field_fixed_price")}
+                          </label>
+                          <input
+                            className="field-input"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={win.fixedPrice}
+                            onChange={(event) =>
+                              updateWindow(idx, {
+                                fixedPrice: event.target.value,
+                              })
+                            }
+                          />
+                          {fieldErrors[`window_${idx}`] && (
+                            <div
+                              className="alert-error login-error"
+                              role="alert"
+                            >
+                              {fieldErrors[`window_${idx}`]}
+                            </div>
+                          )}
+                        </div>
+                        <div className="field" style={{ marginBottom: 8 }}>
+                          <label className="field-label">
+                            {t("form.field_vat_pct")}
+                          </label>
+                          <input
+                            className="field-input"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={win.vatPct}
+                            onChange={(event) =>
+                              updateWindow(idx, { vatPct: event.target.value })
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {windows.length > 1 && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => removeWindow(idx)}
+                        data-testid="rj-window-remove"
+                      >
+                        {t("form.window_remove")}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {fieldErrors.windows && (
+                <div className="alert-error login-error" role="alert">
+                  {fieldErrors.windows}
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={addWindow}
+                data-testid="rj-window-add"
+                style={{ marginTop: 10 }}
+              >
+                {t("form.window_add")}
+              </button>
             </div>
           </div>
 

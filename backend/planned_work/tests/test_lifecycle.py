@@ -110,13 +110,15 @@ class RescheduleTests(PlannedWorkFixtureMixin, APITestCase):
 
 class MissedSweepTests(PlannedWorkFixtureMixin, APITestCase):
     def _make_occurrence(self, *, planned_date, status_value):
+        job = self.make_recurring_job(start_date=planned_date)
         return PlannedOccurrence.objects.create(
-            recurring_job=self.make_recurring_job(start_date=planned_date),
+            recurring_job=job,
             company=self.company,
             building=self.building,
             customer=self.customer,
             planned_date=planned_date,
             status=status_value,
+            source_window=self.default_window(job),
         )
 
     def test_past_due_open_ticket_is_marked_missed(self):
@@ -189,6 +191,7 @@ class SkipTests(PlannedWorkFixtureMixin, APITestCase):
             customer=self.customer,
             planned_date=TODAY,
             status=PlannedOccurrenceStatus.PLANNED,
+            source_window=self.default_window(job),
         )
 
     def test_skip_planned_occurrence(self):
@@ -262,6 +265,7 @@ class CancelTests(PlannedWorkFixtureMixin, APITestCase):
             customer=self.customer,
             planned_date=TODAY,
             status=PlannedOccurrenceStatus.COMPLETED,
+            source_window=self.default_window(job),
         )
         resp = self.client.post(
             f"{OCC_URL}{occ.id}/cancel/",

@@ -17,6 +17,7 @@ import {
 import type {
   PlannedOccurrence,
   RecurringJob,
+  RecurringJobWindow,
 } from "../../api/plannedWork.types";
 import { getApiError } from "../../api/client";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -37,6 +38,13 @@ function occurrenceWindow(occ: PlannedOccurrence): string {
   if (occ.preferred_start_time) parts.push(occ.preferred_start_time.slice(0, 5));
   if (occ.time_window_label) parts.push(occ.time_window_label);
   return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
+function formatWindow(window: RecurringJobWindow): string {
+  const parts: string[] = [];
+  if (window.start_time) parts.push(window.start_time.slice(0, 5));
+  if (window.label) parts.push(window.label);
+  return parts.length > 0 ? parts.join(" ") : "—";
 }
 
 export function RecurringJobDetailPage() {
@@ -323,16 +331,23 @@ export function RecurringJobDetailPage() {
                 : t("detail.period_open", { start: formatDate(job.start_date) })
             }
           />
+          {(job.frequency === "WEEKLY" || job.frequency === "BIWEEKLY") && (
+            <SummaryRow
+              label={t("detail.field_weekdays")}
+              value={
+                job.weekdays.length > 0
+                  ? job.weekdays
+                      .map((d) => t(`weekday_short.${d}`))
+                      .join(", ")
+                  : t("detail.no_weekdays")
+              }
+            />
+          )}
           <SummaryRow
-            label={t("detail.field_window")}
+            label={t("detail.field_windows")}
             value={
-              job.preferred_start_time || job.time_window_label
-                ? [
-                    job.preferred_start_time?.slice(0, 5),
-                    job.time_window_label,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
+              job.windows.length > 0
+                ? job.windows.map((w) => formatWindow(w)).join(" · ")
                 : t("detail.no_window")
             }
           />

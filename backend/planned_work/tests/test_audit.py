@@ -106,6 +106,7 @@ class PlannedOccurrenceNoDoubleWriteTests(PlannedWorkFixtureMixin, APITestCase):
             customer=self.customer,
             planned_date=TODAY + datetime.timedelta(days=1),
             status=PlannedOccurrenceStatus.PLANNED,
+            source_window=self.default_window(job),
         )
         skip_occurrence(planned, actor=self.super_admin, reason="holiday")
 

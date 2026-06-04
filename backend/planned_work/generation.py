@@ -1,21 +1,24 @@
 """Occurrence materialization + operational-ticket spawning
-(Sprint 11B Batch 2).
+(Sprint 11B Batch 2; recurring day-model extension).
 
 `generate_occurrences` is the daily entry point (Celery task +
 management command). It upserts `PlannedOccurrence` rows from each
 active `RecurringJob` inside the look-ahead horizon and spawns exactly
-one operational ticket per fresh PLANNED occurrence. The
-(recurring_job, planned_date) unique constraint is the idempotency
-anchor, so re-runs never duplicate.
+one operational ticket per fresh PLANNED occurrence. A job runs on a SET
+of weekdays and in 1..N time windows, so the generator materializes one
+occurrence per (date x window). The
+(recurring_job, planned_date, source_window) unique constraint is the
+idempotency anchor, so re-runs never duplicate.
 """
 from __future__ import annotations
 
 import datetime
 import logging
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Optional
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
@@ -30,10 +33,81 @@ from tickets.models import (
 
 from .constants import DEFAULT_GENERATION_DAYS_AHEAD
 from .lifecycle import apply_occurrence_status
-from .models import PlannedOccurrence, PlannedOccurrenceStatus, RecurringJob
+from .models import (
+    PlannedOccurrence,
+    PlannedOccurrenceStatus,
+    RecurringJob,
+    RecurringJobWindow,
+)
 from .recurrence import iter_occurrence_dates
 
 logger = logging.getLogger("planned_work")
+
+_DEFAULT_VAT_PCT = Decimal("21.00")
+
+
+def ensure_job_windows(job: RecurringJob) -> list:
+    """Return the job's active windows (ordered), lazily creating ONE
+    default window from the job's legacy `preferred_start_time` /
+    `time_window_label` if the job has no windows at all.
+
+    This is the backward-compatibility safety net: a RecurringJob created
+    before the day-model (the data migration backfills those) — or via any
+    path that bypassed the window-aware serializer — still generates
+    exactly one occurrence per date with the same schedule snapshot it had
+    before. A job whose windows were ALL soft-archived intentionally
+    generates nothing (we never resurrect a deliberately emptied job).
+    """
+    active = list(
+        job.windows.filter(is_active=True).order_by("ordering", "id")
+    )
+    if active:
+        return active
+    if job.windows.exists():
+        # Has windows but every one is archived — respect that.
+        return []
+    # No windows at all. Serialize lazy creation with a row lock on the job
+    # (re-checking inside the atomic block) so two overlapping generator
+    # runs — e.g. the daily Celery task overlapping a manual `generate`
+    # action — can never both create a default window for the same job (a
+    # duplicate default window would explode one-occurrence-per-date into
+    # two).
+    with transaction.atomic():
+        RecurringJob.objects.select_for_update().filter(pk=job.pk).first()
+        active = list(
+            job.windows.filter(is_active=True).order_by("ordering", "id")
+        )
+        if active:
+            return active
+        if job.windows.exists():
+            return []
+        logger.warning(
+            "Recurring job #%s has no windows; creating a default window "
+            "from its legacy schedule fields.",
+            job.id,
+        )
+        window = RecurringJobWindow.objects.create(
+            recurring_job=job,
+            label=job.time_window_label or "",
+            start_time=job.preferred_start_time,
+            ordering=0,
+        )
+        return [window]
+
+
+def _occurrence_pricing_snapshot(job: RecurringJob, window: RecurringJobWindow):
+    """(pricing_mode, fixed_price, vat_pct) to freeze onto a new occurrence.
+
+    A window may carry an OPTIONAL pricing override: when its
+    `pricing_mode` is set the occurrence snapshots the window's pricing
+    (e.g. evening cleans priced higher than morning); otherwise it falls
+    back to the job's pricing — which preserves the legacy single-window
+    behaviour exactly (the migration's default window leaves pricing
+    null)."""
+    if window.pricing_mode:
+        vat = window.vat_pct if window.vat_pct is not None else _DEFAULT_VAT_PCT
+        return window.pricing_mode, window.fixed_price, vat
+    return job.pricing_mode, job.fixed_price, job.vat_pct
 
 
 def spawn_ticket_for_occurrence(occurrence: PlannedOccurrence, *, actor=None) -> Ticket:
@@ -55,12 +129,24 @@ def spawn_ticket_for_occurrence(occurrence: PlannedOccurrence, *, actor=None) ->
     naive_start = datetime.datetime.combine(occurrence.planned_date, start_time)
     scheduled_start_at = timezone.make_aware(naive_start)
 
+    # Disambiguate the ticket title by window ONLY when the job has more
+    # than one active window — a single-window (legacy-style) job keeps
+    # its exact title for backward compatibility. With multiple windows
+    # (Morning / Evening) the label is appended so the two same-date
+    # tickets are distinguishable.
+    base_title = job.title or "Planned job"
+    window_label = (occurrence.time_window_label or "").strip()
+    if window_label and job.windows.filter(is_active=True).count() > 1:
+        ticket_title = f"{base_title} — {window_label}"
+    else:
+        ticket_title = base_title
+
     ticket = Ticket.objects.create(
         company=occurrence.company,
         building=occurrence.building,
         customer=occurrence.customer,
         created_by=creator,
-        title=job.title or "Planned job",
+        title=ticket_title,
         description=job.description or "",
         status=TicketStatus.OPEN,
         planned_occurrence=occurrence,
@@ -194,42 +280,85 @@ def generate_occurrences(
         )
 
     for job in jobs:
+        windows = ensure_job_windows(job)
+        if not windows:
+            continue
         for d in iter_occurrence_dates(
-            job.frequency, job.start_date, range_start, range_end, job.end_date
+            job.frequency,
+            job.start_date,
+            range_start,
+            range_end,
+            job.end_date,
+            weekdays=job.weekdays,
         ):
-            with transaction.atomic():
-                occ, created = PlannedOccurrence.objects.get_or_create(
-                    recurring_job=job,
-                    planned_date=d,
-                    defaults={
-                        "company": job.company,
-                        "building": job.building,
-                        "customer": job.customer,
-                        "status": PlannedOccurrenceStatus.PLANNED,
-                        # Sprint 12 — snapshot the job's pricing + schedule
-                        # window onto the occurrence at materialization
-                        # time. `defaults` only applies on CREATE, so an
-                        # existing occurrence keeps its frozen snapshot when
-                        # the parent job is later edited; only freshly
-                        # generated future occurrences pick up new values.
-                        "pricing_mode": job.pricing_mode,
-                        "fixed_price": job.fixed_price,
-                        "vat_pct": job.vat_pct,
-                        "preferred_start_time": job.preferred_start_time,
-                        "time_window_label": job.time_window_label,
-                    },
-                )
+            for window in windows:
+                # Each (date x window) upsert + spawn is one atomic unit.
+                # The (recurring_job, planned_date, source_window) unique
+                # constraint makes the occurrence idempotent; the
+                # Ticket.planned_occurrence OneToOne makes the spawn
+                # idempotent. Under concurrent runs (daily task overlapping
+                # a manual generate) the loser's INSERT trips one of those
+                # constraints — we catch IntegrityError, roll that unit
+                # back, and skip it rather than 500 the whole run.
+                created = False
+                spawned = False
+                try:
+                    with transaction.atomic():
+                        pricing_mode, fixed_price, vat_pct = (
+                            _occurrence_pricing_snapshot(job, window)
+                        )
+                        occ, created = PlannedOccurrence.objects.get_or_create(
+                            recurring_job=job,
+                            planned_date=d,
+                            source_window=window,
+                            defaults={
+                                "company": job.company,
+                                "building": job.building,
+                                "customer": job.customer,
+                                "status": PlannedOccurrenceStatus.PLANNED,
+                                # Snapshot the schedule + pricing from the
+                                # WINDOW (falling back to the job's pricing)
+                                # at materialization time, then FREEZE it.
+                                # `defaults` only applies on CREATE, so an
+                                # existing occurrence keeps its frozen
+                                # snapshot when the template / window is
+                                # later edited.
+                                "pricing_mode": pricing_mode,
+                                "fixed_price": fixed_price,
+                                "vat_pct": vat_pct,
+                                "preferred_start_time": window.start_time,
+                                "time_window_label": window.label,
+                            },
+                        )
+
+                        # Idempotent spawn: only a PLANNED occurrence with no
+                        # ticket spawns one. SKIPPED / CANCELLED / etc. are
+                        # left alone.
+                        if (
+                            occ.status == PlannedOccurrenceStatus.PLANNED
+                            and not Ticket.objects.filter(
+                                planned_occurrence=occ
+                            ).exists()
+                        ):
+                            spawn_ticket_for_occurrence(occ, actor=actor)
+                            spawned = True
+                except IntegrityError:
+                    # A concurrent run already materialized this occurrence
+                    # / spawned its ticket. The constraints guarantee one
+                    # each, so this unit is simply skipped (its counters are
+                    # not incremented).
+                    logger.warning(
+                        "Concurrent generation race for job #%s on %s "
+                        "(window #%s); skipping.",
+                        job.id,
+                        d,
+                        window.id,
+                    )
+                    continue
+
                 if created:
                     created_occurrences += 1
-
-                # Idempotent spawn: only a PLANNED occurrence with no
-                # ticket spawns one. SKIPPED / CANCELLED / etc. are left
-                # alone.
-                if (
-                    occ.status == PlannedOccurrenceStatus.PLANNED
-                    and not Ticket.objects.filter(planned_occurrence=occ).exists()
-                ):
-                    spawn_ticket_for_occurrence(occ, actor=actor)
+                if spawned:
                     created_tickets += 1
 
     return {
