@@ -14,6 +14,9 @@ import type {
   PlannedOccurrence,
   PlannedOccurrenceOverridePayload,
   RecurringJob,
+  RecurringJobCalendar,
+  RecurringJobCalendarDate,
+  RecurringJobCalendarParams,
   RecurringJobWritePayload,
 } from "./plannedWork.types";
 
@@ -118,6 +121,58 @@ export async function generateOccurrences(
   const response = await api.post<GenerateOccurrencesResult>(
     `${JOBS_URL}${id}/generate/`,
     body,
+  );
+  return response.data;
+}
+
+// ---- Sprint 6 — recurring-job calendar (explicit per-date control) --------
+//
+// `getRecurringJobCalendar` reads the merged rule+persisted projection over a
+// horizon (default today..+90d server-side). The three per-date actions each
+// take a single `date` (YYYY-MM-DD), apply it across the job's active windows,
+// and return that date's projected windows; the caller refetches the month.
+// Mirror the backend RecurringJobViewSet detail actions 1:1.
+
+export async function getRecurringJobCalendar(
+  id: number | string,
+  params: RecurringJobCalendarParams = {},
+): Promise<RecurringJobCalendar> {
+  const response = await api.get<RecurringJobCalendar>(
+    `${JOBS_URL}${id}/calendar/`,
+    { params: cleanParams({ ...params }) },
+  );
+  return response.data;
+}
+
+export async function skipRecurringJobDate(
+  id: number | string,
+  date: string,
+): Promise<RecurringJobCalendarDate> {
+  const response = await api.post<RecurringJobCalendarDate>(
+    `${JOBS_URL}${id}/skip-date/`,
+    { date },
+  );
+  return response.data;
+}
+
+export async function addRecurringJobDate(
+  id: number | string,
+  date: string,
+): Promise<RecurringJobCalendarDate> {
+  const response = await api.post<RecurringJobCalendarDate>(
+    `${JOBS_URL}${id}/add-date/`,
+    { date },
+  );
+  return response.data;
+}
+
+export async function clearRecurringJobDate(
+  id: number | string,
+  date: string,
+): Promise<RecurringJobCalendarDate> {
+  const response = await api.post<RecurringJobCalendarDate>(
+    `${JOBS_URL}${id}/clear-date/`,
+    { date },
   );
   return response.data;
 }

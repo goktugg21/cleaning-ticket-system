@@ -83,10 +83,10 @@ A **SubTask** = a **named work unit** under a ticket, on **all tickets**, layere
 
 ### Sprint 6 — Recurring UI/UX (calendar-tick + pricing)
 Redesign the recurring job workflow to **calendar-tick** as the primary input (hand-pick specific dates + AM/PM windows + per-date/window price), with an **optional weekday-rule generator** that pre-fills ticks you can edit/remove, and a **clearer pricing UX**. **Includes a backend recon/design step** — the current model is weekday-based; explicit picked-date support may need a small backend change (design it minimally, back-compat with #77).
-- [ ] Backend recon + minimal design for explicit picked dates (if needed); migration back-compat with #77.
-- [ ] Calendar-tick form (primary) + optional weekday-rule generator; clearer per-date/window pricing.
-- [ ] Reschedule (Sprint 1) works naturally on a single ticked date; gates/e2e green; screenshots.
-- [ ] Swap the customer/building dropdown order on the recurring-job form (customer left, building right).
+- [x] Backend recon + minimal design for explicit picked dates: additive `PlannedOccurrence.is_ad_hoc` (migration 0004) + four idempotent per-date RecurringJobViewSet actions (skip-date / add-date / clear-date / calendar). Back-compat with #77 — rule jobs + the rolling generator behave exactly as before (skip pre-creates a SKIPPED row the generator never spawns; an additive ad-hoc spawn pass picks up off-rule dates).
+- [x] Calendar-tick control on the saved recurring job (month grid): the weekday/monthly RULE pre-fills the ticks; untick a rule date to skip it, re-tick to restore, tick an off-rule date to add one. Per-window pricing UX clarified (inherit-job-pricing label + fallback hint; fixed windows show price + VAT).
+- [x] Spawned/completed dates are LOCKED in the calendar and deep-link to their operational ticket (where the Sprint 1 reschedule control lives). Gates green (typecheck, eslint 49, build); token-inject smoke 7/7 (calendar loads + add/clear + skip/clear round-trips + dropdown order).
+- [x] Swap the customer/building dropdown order on the recurring-job form (customer left, building right) — layout-only.
 
 ### Sprint 7 — Bulk select-and-approve
 The father's "select" button: confirm many completions at once.
