@@ -837,6 +837,7 @@
   "customer_pricing.no_services_hint": "Nog geen actieve diensten in de catalogus.",
   "customer_pricing.col_service": "Dienst",
   "customer_pricing.col_unit_price": "Eenheidsprijs",
+  "customer_pricing.col_default_price": "Standaardprijs",
   "customer_pricing.col_vat_pct": "BTW %",
   "customer_pricing.col_valid_from": "Geldig vanaf",
   "customer_pricing.col_valid_to": "Geldig tot",
