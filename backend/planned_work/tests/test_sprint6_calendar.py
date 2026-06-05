@@ -384,3 +384,9 @@ class CalendarRbacTests(Sprint6CalendarBase):
 
     def test_staff_forbidden(self):
         self._assert_forbidden(self.staff)
+
+    def test_other_company_admin_out_of_scope(self):
+        # A provider admin of another company passes the role gate but
+        # get_object() runs through the scoped queryset, so a cross-company
+        # job 404s on every calendar action (never a 403 leak; H-1/H-2).
+        self._assert_forbidden(self.other_company_admin)
