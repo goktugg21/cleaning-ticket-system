@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from .models import StaffAssignmentSlotStatus, TicketStatus
+from .models import StaffAssignmentSlotStatus, Ticket, TicketStatus
 from .state_machine import TransitionError, apply_transition
 
 logger = logging.getLogger(__name__)
@@ -61,16 +61,30 @@ def maybe_auto_complete_ticket_on_subtasks(ticket, user) -> bool:
     logged and swallowed — the caller's slot completion must still commit.
     `apply_transition` is itself `@transaction.atomic`, so a failed call
     rolls back its own savepoint and leaves the outer slot-save intact.
+
+    Concurrency: the readiness check runs against a `select_for_update()`
+    re-read of the ticket so two staff finishing the final two slots at once
+    serialize on the ticket row. Under READ COMMITTED an un-locked readiness
+    SELECT would let each transaction miss the other's still-uncommitted slot
+    completion (TOCTOU) and skip the transition, stranding a fully-done ticket
+    in IN_PROGRESS. The lock makes the second finisher block until the first
+    commits, then re-read the now-COMMITTED sibling and fire the transition.
+    Safe + deadlock-free: the caller's slot PATCH is `@transaction.atomic`, so
+    the just-saved slot is visible (own write) and only the single ticket row
+    is contended (slot rows are never cross-locked). `apply_transition` does
+    its own `select_for_update` + stale-status guard on the same row (same tx,
+    a no-op re-lock).
     """
     if not ticket.auto_complete_on_subtasks:
         return False
-    if str(ticket.status) != str(TicketStatus.IN_PROGRESS):
+    locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
+    if str(locked.status) != str(TicketStatus.IN_PROGRESS):
         return False
-    if not ticket_all_subtasks_done(ticket):
+    if not ticket_all_subtasks_done(locked):
         return False
     try:
         apply_transition(
-            ticket,
+            locked,
             user,
             TicketStatus.WAITING_MANAGER_REVIEW,
             note=_AUTO_COMPLETE_NOTE,
@@ -79,7 +93,7 @@ def maybe_auto_complete_ticket_on_subtasks(ticket, user) -> bool:
     except TransitionError as exc:
         logger.warning(
             "sub-task auto-complete roll-up skipped for ticket #%s: %s (code=%s)",
-            getattr(ticket, "pk", None),
+            getattr(locked, "pk", None),
             exc,
             getattr(exc, "code", None),
         )

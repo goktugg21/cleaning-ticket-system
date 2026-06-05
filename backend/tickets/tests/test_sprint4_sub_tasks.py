@@ -453,6 +453,44 @@ class SubTaskRollUpTests(SubTaskFixture):
         self.ticket_a.refresh_from_db()
         self.assertEqual(self.ticket_a.status, TicketStatus.IN_PROGRESS)
 
+    def test_rollup_readiness_check_locks_ticket_row(self):
+        # Codex P2 TOCTOU guard: the roll-up readiness check must run against
+        # a `SELECT ... FOR UPDATE` re-read of the ticket so two staff
+        # finishing the final two slots at once serialize on the ticket row
+        # (under READ COMMITTED an un-locked check would let each transaction
+        # miss the other's still-uncommitted sibling and strand a fully-done
+        # ticket in IN_PROGRESS). A thread race is flaky on CI, so we assert
+        # the lock fires deterministically on the final-slot completion.
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self._enable_flag(self.ticket_a)
+        st1 = SubTask.objects.create(ticket=self.ticket_a, title="A", ordering=1)
+        st2 = SubTask.objects.create(ticket=self.ticket_a, title="B", ordering=2)
+        self._mk_slot(self.ticket_a, sub_task=st1, slot_status=COMPLETED)
+        last = self._mk_slot(self.ticket_a, sub_task=st2, slot_status=ASSIGNED)
+
+        table = Ticket._meta.db_table
+        with CaptureQueriesContext(connection) as ctx:
+            resp = self._complete_slot_via_api(self.ticket_a, last)
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+        locking_selects = [
+            q["sql"]
+            for q in ctx.captured_queries
+            if "FOR UPDATE" in q["sql"].upper() and table in q["sql"]
+        ]
+        self.assertTrue(
+            locking_selects,
+            "expected a SELECT ... FOR UPDATE on the ticket row during the "
+            f"roll-up; captured: {[q['sql'] for q in ctx.captured_queries]}",
+        )
+        # Behaviour still holds: with both sub-tasks done the ticket advanced.
+        self.ticket_a.refresh_from_db()
+        self.assertEqual(
+            self.ticket_a.status, TicketStatus.WAITING_MANAGER_REVIEW
+        )
+
     def test_delete_sub_task_preserves_assignment(self):
         # Deleting a sub-task SET_NULLs its slot back to the loose pool —
         # never deletes the assignment or its completion evidence.
