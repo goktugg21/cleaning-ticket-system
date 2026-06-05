@@ -709,6 +709,7 @@ class PlannedOccurrenceSerializer(serializers.ModelSerializer):
             "planned_date",
             "actual_date",
             "status",
+            "is_ad_hoc",
             "ticket_id",
             "source_window",
             "source_window_label",
