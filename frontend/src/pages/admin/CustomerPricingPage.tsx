@@ -139,7 +139,11 @@ export function CustomerPricingPage() {
         const [customerData, pricesData, servicesData] = await Promise.all([
           getCustomer(customerId),
           listCustomerPrices(customerId),
-          listServices({ is_active: true }),
+          // Full catalog (active + inactive). The Default-price column must
+          // resolve for pricing rows whose service was later archived, so
+          // serviceById is built from every service; the dropdown + create
+          // defaults filter down to active-only (see activeServices).
+          listServices(),
         ]);
         if (cancelled.current) return;
         setCustomer(customerData);
@@ -173,7 +177,7 @@ export function CustomerPricingPage() {
     // Prefill the editable contract price + VAT from the initially-selected
     // service's catalog defaults (the admin can still override before
     // saving). Previously only VAT was prefilled; unit_price stayed at 0.00.
-    const first = services.length > 0 ? services[0] : null;
+    const first = activeServices.length > 0 ? activeServices[0] : null;
     setForm({
       ...buildEmptyForm(),
       service: first ? first.id : "",
@@ -306,6 +310,14 @@ export function CustomerPricingPage() {
     }
     return map;
   }, [services]);
+
+  // Active-only subset for the create dropdown + create defaults — a retired
+  // service must never be offered for a NEW contract price (existing rows on
+  // an archived service still resolve via serviceById / the full catalog).
+  // Plain derived value (the filter is cheap and the React Compiler memoizes
+  // it): a manual useMemo here trips react-hooks/preserve-manual-memoization
+  // because the earlier-defined openCreateModal captures it.
+  const activeServices = services.filter((s) => s.is_active);
 
   // Build the service name shown in the table — prefer the embedded
   // `service_name` (always present) but fall back to the dropdown
@@ -626,9 +638,9 @@ export function CustomerPricingPage() {
                 <option value="">
                   {t("customer_pricing.field_service_placeholder")}
                 </option>
-                {services.map((s) => (
+                {activeServices.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name}
+                    {s.name} — {s.default_unit_price}
                   </option>
                 ))}
               </select>
