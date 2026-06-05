@@ -837,6 +837,7 @@
   "customer_pricing.no_services_hint": "No active services in the catalog yet.",
   "customer_pricing.col_service": "Service",
   "customer_pricing.col_unit_price": "Unit price",
+  "customer_pricing.col_default_price": "Default price",
   "customer_pricing.col_vat_pct": "VAT %",
   "customer_pricing.col_valid_from": "Valid from",
   "customer_pricing.col_valid_to": "Valid to",

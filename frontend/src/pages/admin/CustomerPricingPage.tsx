@@ -139,7 +139,11 @@ export function CustomerPricingPage() {
         const [customerData, pricesData, servicesData] = await Promise.all([
           getCustomer(customerId),
           listCustomerPrices(customerId),
-          listServices({ is_active: true }),
+          // Full catalog (active + inactive). The Default-price column must
+          // resolve for pricing rows whose service was later archived, so
+          // serviceById is built from every service; the dropdown + create
+          // defaults filter down to active-only (see activeServices).
+          listServices(),
         ]);
         if (cancelled.current) return;
         setCustomer(customerData);
@@ -170,11 +174,15 @@ export function CustomerPricingPage() {
 
   function openCreateModal() {
     setMode("create");
+    // Prefill the editable contract price + VAT from the initially-selected
+    // service's catalog defaults (the admin can still override before
+    // saving). Previously only VAT was prefilled; unit_price stayed at 0.00.
+    const first = activeServices.length > 0 ? activeServices[0] : null;
     setForm({
       ...buildEmptyForm(),
-      service: services.length > 0 ? services[0].id : "",
-      vat_pct:
-        services.length > 0 ? services[0].default_vat_pct : "21.00",
+      service: first ? first.id : "",
+      unit_price: first ? first.default_unit_price : "0.00",
+      vat_pct: first ? first.default_vat_pct : "21.00",
     });
     setFormError("");
   }
@@ -292,6 +300,25 @@ export function CustomerPricingPage() {
     return map;
   }, [services]);
 
+  // Full service lookup (id -> Service) so we can surface each catalog
+  // service's reference `default_unit_price` next to the contract price
+  // (table column) and re-default the form on a service change.
+  const serviceById = useMemo(() => {
+    const map = new Map<number, Service>();
+    for (const s of services) {
+      map.set(s.id, s);
+    }
+    return map;
+  }, [services]);
+
+  // Active-only subset for the create dropdown + create defaults — a retired
+  // service must never be offered for a NEW contract price (existing rows on
+  // an archived service still resolve via serviceById / the full catalog).
+  // Plain derived value (the filter is cheap and the React Compiler memoizes
+  // it): a manual useMemo here trips react-hooks/preserve-manual-memoization
+  // because the earlier-defined openCreateModal captures it.
+  const activeServices = services.filter((s) => s.is_active);
+
   // Build the service name shown in the table — prefer the embedded
   // `service_name` (always present) but fall back to the dropdown
   // lookup if a stale row references a now-renamed service.
@@ -374,6 +401,7 @@ export function CustomerPricingPage() {
                     <tr>
                       <th>{t("customer_pricing.col_service")}</th>
                       <th>{t("customer_pricing.col_unit_price")}</th>
+                      <th>{t("customer_pricing.col_default_price")}</th>
                       <th>{t("customer_pricing.col_vat_pct")}</th>
                       <th>{t("customer_pricing.col_valid_from")}</th>
                       <th>{t("customer_pricing.col_valid_to")}</th>
@@ -390,6 +418,10 @@ export function CustomerPricingPage() {
                       >
                         <td>{resolveServiceName(price)}</td>
                         <td>{price.unit_price}</td>
+                        <td>
+                          {serviceById.get(price.service)?.default_unit_price ??
+                            "—"}
+                        </td>
                         <td>{price.vat_pct}</td>
                         <td>{formatDateOnly(price.valid_from, dateLocale)}</td>
                         <td>
@@ -582,9 +614,21 @@ export function CustomerPricingPage() {
                 value={form.service === "" ? "" : String(form.service)}
                 onChange={(event) => {
                   const v = event.target.value;
+                  if (v === "") {
+                    setForm((prev) => ({ ...prev, service: "" }));
+                    return;
+                  }
+                  const nextId = Number(v);
+                  const svc = serviceById.get(nextId);
                   setForm((prev) => ({
                     ...prev,
-                    service: v === "" ? "" : Number(v),
+                    service: nextId,
+                    // Re-default the editable price + VAT to the newly
+                    // selected service's catalog defaults (still overridable).
+                    // Only reachable in create mode — the select is disabled
+                    // in edit mode, so an existing row's price is never reset.
+                    unit_price: svc ? svc.default_unit_price : prev.unit_price,
+                    vat_pct: svc ? svc.default_vat_pct : prev.vat_pct,
                   }));
                 }}
                 data-testid="customer-pricing-input-service"
@@ -594,9 +638,9 @@ export function CustomerPricingPage() {
                 <option value="">
                   {t("customer_pricing.field_service_placeholder")}
                 </option>
-                {services.map((s) => (
+                {activeServices.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name}
+                    {s.name} — {s.default_unit_price}
                   </option>
                 ))}
               </select>
