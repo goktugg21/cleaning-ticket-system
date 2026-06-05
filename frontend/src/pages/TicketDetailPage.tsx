@@ -1774,6 +1774,12 @@ export function TicketDetailPage() {
 
               {isStaff && (
                 <StaffSlotEditor
+                  // Key by ticket id so the editor REMOUNTS on an A->B ticket
+                  // change and its useState(autoCompleteOnSubtasks)-seeded
+                  // autoFlag re-seeds from the new ticket (fixes a stale
+                  // checkbox after navigation). A same-ticket reload keeps the
+                  // key, so the local toggle state is correctly preserved.
+                  key={ticket.id}
                   ticketId={ticket.id}
                   onChanged={() => {
                     void loadTicket();

@@ -1258,14 +1258,27 @@ export async function clearTicketSchedule(
 // 403/404. Mutations are blocked on a terminal ticket (stable code
 // `sub_task_not_allowed_terminal`). DELETE SET_NULLs the sub-task's slots
 // back to the loose pool — it NEVER deletes a staff assignment or its
-// completion evidence. The list endpoint is paginated; we unwrap to a bare
-// array (the same shape as the nested `sub_tasks` on the ticket detail).
+// completion evidence.
+//
+// The list endpoint is paginated (StandardResultsSetPagination, 25/page), so
+// returning only page 1 would silently drop a ticket's later sub-tasks. Page
+// through `page=1,2,…` accumulating results until `next` is null (or a short
+// page), with a hard cap so a backend paging bug can't loop forever. Mirrors
+// the listManagerAssignments / planned-work list helpers.
+const _SUB_TASK_LIST_MAX_PAGES = 40; // 40 * 25 = 1000 sub-tasks — far beyond any ticket.
 
 export async function listSubTasks(ticketId: number): Promise<SubTask[]> {
-  const response = await api.get<PaginatedResponse<SubTask>>(
-    `/tickets/${ticketId}/sub-tasks/`,
-  );
-  return response.data.results;
+  const results: SubTask[] = [];
+  for (let page = 1; page <= _SUB_TASK_LIST_MAX_PAGES; page += 1) {
+    const response = await api.get<PaginatedResponse<SubTask>>(
+      `/tickets/${ticketId}/sub-tasks/`,
+      { params: { page } },
+    );
+    const data = response.data;
+    results.push(...data.results);
+    if (!data.next || data.results.length === 0) break;
+  }
+  return results;
 }
 
 export async function createSubTask(
