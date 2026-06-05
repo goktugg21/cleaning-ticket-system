@@ -988,6 +988,11 @@ export type SlotStatus =
 export interface TicketStaffAssignmentAdmin {
   id: number;
   ticket: number;
+  // Sprint 4 (backend) / Sprint 5 (frontend) — the SubTask this slot is
+  // placed into, or null for a loose slot in the General pool. A manager
+  // create + PATCH may set / retarget / detach it; a STAFF self-PATCH never
+  // touches it.
+  sub_task: number | null;
   user_id: number;
   user_email: string;
   user_full_name: string;
@@ -1013,6 +1018,10 @@ export interface StaffSlotCreatePayload {
   scheduled_end_at?: string | null;
   time_window_label?: string;
   assignment_note?: string;
+  // Sprint 5 — optional SubTask placement (id of a sub-task on the SAME
+  // ticket, or null for a loose slot). The backend 400s a cross-ticket id
+  // (`sub_task_ticket_mismatch`) or a terminal ticket (`sub_task_ticket_terminal`).
+  sub_task?: number | null;
 }
 
 // PATCH surface. Manager may write schedule/window/note/status/completion;
@@ -1027,6 +1036,10 @@ export interface StaffSlotPatch {
   slot_status?: SlotStatus;
   completion_note?: string;
   unable_to_complete_reason?: string;
+  // Sprint 5 — manager-only re-placement: move this slot into a different
+  // SubTask on the same ticket, or detach it (null) back to the General
+  // pool. Same backend guards as create.
+  sub_task?: number | null;
 }
 
 // Caller-scoped staff agenda row (_MySlotSerializer). Safe for any role;
@@ -1047,6 +1060,58 @@ export interface MySlot {
   completion_note: string;
   completed_at: string | null;
   unable_to_complete_reason: string;
+}
+
+// Sprint 4 (backend) / Sprint 5 (frontend) — named sub-tasks on a ticket.
+//
+// `SubTaskAssignment` is the COMPACT read-only view of a staff slot nested
+// under its sub-task (the full slot surface, with assigned_by / assigned_at,
+// stays on TicketStaffAssignmentAdmin / the /staff-assignments/ endpoint).
+export interface SubTaskAssignment {
+  id: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  scheduled_start_at: string | null;
+  scheduled_end_at: string | null;
+  time_window_label: string;
+  assignment_note: string;
+  slot_status: SlotStatus;
+  completion_note: string;
+  completed_at: string | null;
+  unable_to_complete_reason: string;
+}
+
+// A named sub-task. `is_done` is true iff the sub-task has >=1 staff slot AND
+// every slot is COMPLETED (an empty sub-task is NOT done). This is the read
+// shape of the SubTask CRUD endpoints AND of the nested `sub_tasks` on the
+// ticket detail.
+export interface SubTask {
+  id: number;
+  ticket: number;
+  title: string;
+  description: string;
+  ordering: number;
+  created_by: number | null;
+  created_by_email: string | null;
+  created_at: string;
+  updated_at: string;
+  is_done: boolean;
+  staff_assignments: SubTaskAssignment[];
+}
+
+// POST body for SubTask create (manager only; `ordering` defaults to 0).
+export interface SubTaskCreatePayload {
+  title: string;
+  description?: string;
+  ordering?: number;
+}
+
+// PATCH body for SubTask update (manager only; all fields optional).
+export interface SubTaskPatch {
+  title?: string;
+  description?: string;
+  ordering?: number;
 }
 
 export async function listAssignableStaff(
@@ -1182,6 +1247,69 @@ export async function clearTicketSchedule(
 ): Promise<TicketDetail> {
   const response = await api.delete<TicketDetail>(
     `/tickets/${ticketId}/schedule/`,
+  );
+  return response.data;
+}
+
+// ---- Sprint 4 (backend) / Sprint 5 (frontend) — ticket sub-tasks ---------
+//
+// SubTask CRUD nested under a ticket. Manager-gated (SA / CA / BM holding
+// osius.ticket.assign_staff for the ticket's building); STAFF + customer get
+// 403/404. Mutations are blocked on a terminal ticket (stable code
+// `sub_task_not_allowed_terminal`). DELETE SET_NULLs the sub-task's slots
+// back to the loose pool — it NEVER deletes a staff assignment or its
+// completion evidence. The list endpoint is paginated; we unwrap to a bare
+// array (the same shape as the nested `sub_tasks` on the ticket detail).
+
+export async function listSubTasks(ticketId: number): Promise<SubTask[]> {
+  const response = await api.get<PaginatedResponse<SubTask>>(
+    `/tickets/${ticketId}/sub-tasks/`,
+  );
+  return response.data.results;
+}
+
+export async function createSubTask(
+  ticketId: number,
+  payload: SubTaskCreatePayload,
+): Promise<SubTask> {
+  const response = await api.post<SubTask>(
+    `/tickets/${ticketId}/sub-tasks/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function updateSubTask(
+  ticketId: number,
+  subTaskId: number,
+  patch: SubTaskPatch,
+): Promise<SubTask> {
+  const response = await api.patch<SubTask>(
+    `/tickets/${ticketId}/sub-tasks/${subTaskId}/`,
+    patch,
+  );
+  return response.data;
+}
+
+export async function deleteSubTask(
+  ticketId: number,
+  subTaskId: number,
+): Promise<void> {
+  await api.delete(`/tickets/${ticketId}/sub-tasks/${subTaskId}/`);
+}
+
+// PATCH /tickets/<id>/auto-complete-flag/ — set the per-ticket
+// `auto_complete_on_subtasks` opt-in. PA / SA only (COMPANY_ADMIN /
+// SUPER_ADMIN); BM / STAFF / customer get 403 `auto_complete_flag_forbidden`.
+// Blocked on a terminal ticket (`auto_complete_flag_not_allowed_terminal`).
+// Returns the full refreshed ticket detail.
+export async function setAutoCompleteFlag(
+  ticketId: number,
+  value: boolean,
+): Promise<TicketDetail> {
+  const response = await api.patch<TicketDetail>(
+    `/tickets/${ticketId}/auto-complete-flag/`,
+    { auto_complete_on_subtasks: value },
   );
   return response.data;
 }
