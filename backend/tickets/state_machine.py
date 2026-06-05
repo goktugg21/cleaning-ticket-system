@@ -199,6 +199,16 @@ def _user_passes_scope(user, ticket, scope):
     if scope == SCOPE_BUILDING_ASSIGNED:
         return BuildingManagerAssignment.objects.filter(user=user, building_id=ticket.building_id).exists()
     if scope == SCOPE_CUSTOMER_LINKED:
+        # SoT Addendum A.1 — a company-wide Customer Company Admin (the
+        # membership `is_company_admin` flag) may drive customer-decision
+        # transitions (approve / reject) on ANY building of every customer
+        # they administer, with no per-building access row. Mirrors the
+        # company_admin_customer_ids union in scope_tickets_for and the
+        # Extra Work state machine's user_can-based customer gate.
+        from accounts.scoping import company_admin_customer_ids
+
+        if ticket.customer_id in company_admin_customer_ids(user):
+            return True
         # Sprint 15: customer-user transitions (approve / reject) require
         # the EXACT (customer, building) pair access, not just any
         # CustomerUserMembership for the customer. A user with membership

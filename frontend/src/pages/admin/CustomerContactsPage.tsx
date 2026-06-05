@@ -355,13 +355,19 @@ export function CustomerContactsPage() {
     setPromoteError("");
     setPromotePhoneError("");
     setPromoteRoleError("");
+    // SoT Addendum A.1 — a CUSTOMER_COMPANY_ADMIN promotion is routed to
+    // the company-wide membership flag on the backend; it has NO
+    // per-building rows, so we omit `building_ids` entirely for that role.
+    const isCompanyAdminPromote =
+      promoteForm.access_role === "CUSTOMER_COMPANY_ADMIN";
     try {
       const result = await promoteCustomerContact(numericId, selected.id, {
         access_role: promoteForm.access_role,
         // Empty selection => omit so the backend uses its default (the
-        // contact's existing building links + legacy anchor).
+        // contact's existing building links + legacy anchor). For a
+        // company-admin promote, always omit.
         building_ids:
-          promoteForm.building_ids.length > 0
+          !isCompanyAdminPromote && promoteForm.building_ids.length > 0
             ? promoteForm.building_ids
             : undefined,
         phone: promoteForm.phone.trim(),
@@ -1103,59 +1109,76 @@ export function CustomerContactsPage() {
             </div>
 
             {/* Building grant — pre-filled from the contact's links.
-                Empty selection falls back to the backend default. */}
-            <div className="field">
-              <span className="field-label">
-                {t("customer_contacts.promote_field_buildings")}
-              </span>
-              {linkedBuildings.length === 0 ? (
+                Empty selection falls back to the backend default.
+                SoT Addendum A.1: a CUSTOMER_COMPANY_ADMIN promote is
+                company-wide (no per-building rows), so the grid is hidden
+                and a company-wide note is shown instead. */}
+            {promoteForm.access_role === "CUSTOMER_COMPANY_ADMIN" ? (
+              <div
+                className="field"
+                data-testid="customer-contact-promote-company-admin-note"
+              >
+                <span className="field-label">
+                  {t("customer_contacts.promote_field_buildings")}
+                </span>
                 <div className="muted small">
-                  {t("customer_contacts.promote_no_buildings")}
+                  {t("customer_people.company_admin.all_buildings_caption")}
                 </div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                    maxHeight: 180,
-                    overflowY: "auto",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                  }}
-                  data-testid="customer-contact-promote-buildings"
-                >
-                  {linkedBuildings.map((link) => (
-                    <label
-                      key={link.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={promoteForm.building_ids.includes(
-                          link.building_id,
-                        )}
-                        onChange={() =>
-                          togglePromoteBuilding(link.building_id)
-                        }
-                        disabled={promoteBusy}
-                        data-testid={`customer-contact-promote-building-${link.building_id}`}
-                      />
-                      <span>{link.building_name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-              <div className="muted small" style={{ marginTop: 4 }}>
-                {t("customer_contacts.promote_field_buildings_hint")}
               </div>
-            </div>
+            ) : (
+              <div className="field">
+                <span className="field-label">
+                  {t("customer_contacts.promote_field_buildings")}
+                </span>
+                {linkedBuildings.length === 0 ? (
+                  <div className="muted small">
+                    {t("customer_contacts.promote_no_buildings")}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      maxHeight: 180,
+                      overflowY: "auto",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                    }}
+                    data-testid="customer-contact-promote-buildings"
+                  >
+                    {linkedBuildings.map((link) => (
+                      <label
+                        key={link.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={promoteForm.building_ids.includes(
+                            link.building_id,
+                          )}
+                          onChange={() =>
+                            togglePromoteBuilding(link.building_id)
+                          }
+                          disabled={promoteBusy}
+                          data-testid={`customer-contact-promote-building-${link.building_id}`}
+                        />
+                        <span>{link.building_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("customer_contacts.promote_field_buildings_hint")}
+                </div>
+              </div>
+            )}
 
             {/* Phone — required (valid NL number). */}
             <div className="field">

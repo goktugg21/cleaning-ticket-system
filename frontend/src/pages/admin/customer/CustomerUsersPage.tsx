@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -21,10 +21,9 @@ import type {
 } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
-import { PermissionsRollupChip } from "../../../components/PermissionsRollupChip";
-import { PermissionsRollupSummary } from "../../../components/PermissionsRollupSummary";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { CustomerUserManageModal } from "./CustomerUserManageModal";
 
 /**
  * Sprint 28 Batch 13 (rework) — Customer Users page (admin variant).
@@ -43,7 +42,6 @@ const ACCESS_ROLE_LABEL: Record<CustomerAccessRole, string> = {
 
 export function CustomerUsersPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { t } = useTranslation("common");
 
   const numericId = useMemo(() => {
@@ -68,12 +66,13 @@ export function CustomerUsersPage() {
   const [removeTarget, setRemoveTarget] =
     useState<CustomerUserMembership | null>(null);
 
-  // Sprint 29 Batch 29.8.5 — per-row toggle for the inline
-  // <PermissionsRollupSummary>. Single-expansion: clicking another row
-  // collapses the previous one. The summary surfaces every (building,
-  // role, override-count) tuple inline so the operator does not need
-  // to navigate away.
-  const [summaryUserId, setSummaryUserId] = useState<number | null>(null);
+  // SoT Addendum A.2 — DRILL-IN replaces the old inline accordion. A
+  // row's "Manage" action opens a modal (CustomerUserManageModal) that
+  // hosts the company-admin toggle + the per-building access editor +
+  // the permission-override modal. "Click a row, edit, leave" — no
+  // inline expansion.
+  const [manageTarget, setManageTarget] =
+    useState<CustomerUserMembership | null>(null);
 
   async function loadAccessForMembers(
     customerId: number,
@@ -274,14 +273,41 @@ export function CustomerUsersPage() {
                 <tbody>
                   {members.map((membership) => {
                     const access = accessByUserId[membership.user_id] ?? [];
-                    const isSummaryOpen = summaryUserId === membership.user_id;
+                    const isCompanyAdmin = membership.is_company_admin === true;
                     return (
                       <Fragment key={membership.id}>
                         <tr data-testid="customer-user-row">
                           <td className="td-subject">{membership.user_email}</td>
                           <td>{membership.user_full_name || "—"}</td>
                           <td data-testid="customer-user-access-summary">
-                            {access.length === 0 ? (
+                            {isCompanyAdmin ? (
+                              // SoT Addendum A.1 — a company-wide CCA is
+                              // ONE status across all buildings; the
+                              // per-building pills are hidden for them.
+                              <div
+                                className="customer-user-access-pills"
+                                data-testid="customer-user-company-admin-pill"
+                              >
+                                <span
+                                  className="customer-user-access-pill"
+                                  title={t(
+                                    "customer_people.company_admin.all_buildings_caption",
+                                  )}
+                                >
+                                  <span>
+                                    {t(
+                                      ACCESS_ROLE_LABEL.CUSTOMER_COMPANY_ADMIN,
+                                    )}
+                                  </span>
+                                  <span aria-hidden="true">·</span>
+                                  <span>
+                                    {t(
+                                      "customer_people.company_admin.all_buildings_short",
+                                    )}
+                                  </span>
+                                </span>
+                              </div>
+                            ) : access.length === 0 ? (
                               <span className="muted small">
                                 {t("customer_view.users.no_access_yet")}
                               </span>
@@ -309,67 +335,29 @@ export function CustomerUsersPage() {
                                 ))}
                               </div>
                             )}
-                            {numericId !== null && (
-                              <div style={{ marginTop: 6 }}>
-                                <PermissionsRollupChip
-                                  customerId={numericId}
-                                  userId={membership.user_id}
-                                  accesses={access}
-                                  onToggle={() =>
-                                    setSummaryUserId((current) =>
-                                      current === membership.user_id
-                                        ? null
-                                        : membership.user_id,
-                                    )
-                                  }
-                                  expanded={isSummaryOpen}
-                                />
-                              </div>
-                            )}
                           </td>
                           <td>
-                            {canManageMembers && (
+                            <div style={{ display: "flex", gap: 6 }}>
                               <button
                                 type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => openRemoveDialog(membership)}
+                                className="btn btn-secondary btn-sm"
+                                data-testid="customer-user-manage-button"
+                                onClick={() => setManageTarget(membership)}
                               >
-                                {t("admin_form.remove")}
+                                {t("customer_people.manage_button")}
                               </button>
-                            )}
+                              {canManageMembers && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => openRemoveDialog(membership)}
+                                >
+                                  {t("admin_form.remove")}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
-                        {isSummaryOpen && numericId !== null && (
-                          <tr
-                            className="customer-user-row-summary"
-                            data-testid={`customer-user-row-summary-${membership.user_id}`}
-                          >
-                            <td colSpan={4}>
-                              <PermissionsRollupSummary
-                                userId={membership.user_id}
-                                customerId={numericId}
-                                userLabel={
-                                  membership.user_full_name ||
-                                  membership.user_email
-                                }
-                                customerLabel={customerName}
-                                accesses={access}
-                                onOpenOverrides={(access) => {
-                                  // The override drawer lives on the
-                                  // Permissions page, not here.
-                                  // Deep-link via 29.2's
-                                  // ?focus_user=&focus_building= shape
-                                  // so the drawer auto-opens on that
-                                  // specific row.
-                                  navigate(
-                                    `/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}&focus_building=${access.building_id}`,
-                                  );
-                                }}
-                                onCollapse={() => setSummaryUserId(null)}
-                              />
-                            </td>
-                          </tr>
-                        )}
                       </Fragment>
                     );
                   })}
@@ -449,6 +437,20 @@ export function CustomerUsersPage() {
           </section>
         </>
       ) : null}
+
+      {/* SoT Addendum A.2 — drill-in modal (replaces the old accordion).
+          Keyed by user id so the prop-derived membership sub-state never
+          resyncs in an effect. */}
+      {manageTarget && numericId !== null && (
+        <CustomerUserManageModal
+          key={manageTarget.user_id}
+          customerId={numericId}
+          userId={manageTarget.user_id}
+          userLabel={manageTarget.user_full_name || manageTarget.user_email}
+          onClose={() => setManageTarget(null)}
+          onChanged={() => reloadMembers(numericId)}
+        />
+      )}
     </div>
   );
 }

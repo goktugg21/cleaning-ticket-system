@@ -34,7 +34,11 @@ from __future__ import annotations
 
 from typing import Iterable, Optional
 
-from .models import CustomerCompanyPolicy, CustomerUserBuildingAccess
+from .models import (
+    CustomerCompanyPolicy,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 
 
 # Sprint 23A canonical customer-side permission keys. Listed
@@ -229,6 +233,30 @@ def user_can(
     """
     if user is None or not user.is_authenticated:
         return False
+    # SoT Addendum A.1 — company-wide Customer Company Admin short-circuit.
+    #
+    # A membership flagged `is_company_admin` is the top customer-side
+    # role: admin across ALL the customer's buildings (present + future)
+    # with NO per-building access row required and NO per-building row
+    # able to downgrade it. We resolve such a user directly against the
+    # CCA role defaults.
+    #
+    # DELIBERATE PRODUCT DECISION (flagged for the owner): this
+    # short-circuit intentionally BYPASSES the per-access
+    # is_active / permission_overrides / _policy_denies (CustomerCompany-
+    # Policy) layers, because Addendum A.1 makes a company-wide CCA the
+    # un-downgradable top customer-side role. In particular a
+    # CustomerCompanyPolicy "deny" does NOT narrow a company-admin. If the
+    # owner wants CustomerCompanyPolicy to also bound a company-admin,
+    # that is a follow-up decision.
+    membership = CustomerUserMembership.objects.filter(
+        user=user, customer_id=customer_id
+    ).first()
+    if membership is not None and membership.is_company_admin:
+        return role_default(
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN,
+            permission_key,
+        )
     accesses = CustomerUserBuildingAccess.objects.filter(
         membership__user=user,
         membership__customer_id=customer_id,

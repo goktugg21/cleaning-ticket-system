@@ -18,6 +18,29 @@ def _is_anonymous(user):
     return user is None or not getattr(user, "is_authenticated", False)
 
 
+def company_admin_customer_ids(user) -> set[int]:
+    """SoT Addendum A.1 — the set of customer ids for which `user` holds
+    the company-wide Customer Company Admin status (the membership-level
+    `is_company_admin` flag).
+
+    This is the AUTHORITATIVE source for "is this user a company admin
+    of customer X" — it is derived purely from the membership flag and is
+    independent of any per-building CustomerUserBuildingAccess row. A
+    company admin is admin across ALL of the customer's buildings
+    (present + future) with no per-building rows required and no
+    per-building row able to downgrade them.
+
+    Returns an empty set for an anonymous / None user.
+    """
+    if _is_anonymous(user):
+        return set()
+    return set(
+        CustomerUserMembership.objects.filter(
+            user=user, is_company_admin=True
+        ).values_list("customer_id", flat=True)
+    )
+
+
 def company_ids_for(user):
     if _is_anonymous(user):
         return Company.objects.none().values_list("id", flat=True)
@@ -79,9 +102,26 @@ def building_ids_for(user):
         # zero access rows sees zero buildings.
         #
         # Sprint 23A: only active access rows count.
-        return CustomerUserBuildingAccess.objects.filter(
+        #
+        # SoT Addendum A.1: a company-wide Customer Company Admin (the
+        # membership `is_company_admin` flag) additionally sees EVERY
+        # building of every customer they administer — with no per-building
+        # access row required. We UNION the per-row building ids with the
+        # buildings linked to each company-admin customer via
+        # CustomerBuildingMembership.
+        per_row_ids = CustomerUserBuildingAccess.objects.filter(
             membership__user=user, is_active=True
         ).values_list("building_id", flat=True)
+        admin_customer_ids = company_admin_customer_ids(user)
+        if not admin_customer_ids:
+            return per_row_ids
+        company_admin_building_ids = CustomerBuildingMembership.objects.filter(
+            customer_id__in=admin_customer_ids
+        ).values_list("building_id", flat=True)
+        union_ids = set(per_row_ids) | set(company_admin_building_ids)
+        return Building.objects.filter(id__in=union_ids).values_list(
+            "id", flat=True
+        )
 
     return Building.objects.none().values_list("id", flat=True)
 
@@ -190,6 +230,12 @@ def scope_tickets_for(user):
            against that customer (cross-building visibility).
          All access rows with is_active=False are ignored.
 
+         SoT Addendum A.1: a company-wide Customer Company Admin
+         (the membership `is_company_admin` flag) is unioned into
+         `view_company_customers` directly — it grants visibility on
+         EVERY ticket of every customer they administer, with no
+         per-building access row required.
+
       2. A new STAFF branch: returns the union of
          - tickets where the user appears in
            TicketStaffAssignment; and
@@ -276,6 +322,9 @@ def scope_tickets_for(user):
         view_company_customers = set()  # {customer_id}
         view_location_pairs = set()  # {(customer_id, building_id)}
         view_own_pairs = set()  # {(customer_id, building_id)}
+        # SoT Addendum A.1: company-wide CCA grants whole-customer
+        # visibility with no per-building row required.
+        view_company_customers |= set(company_admin_customer_ids(user))
         for access in (
             CustomerUserBuildingAccess.objects.filter(
                 membership__user=user, is_active=True

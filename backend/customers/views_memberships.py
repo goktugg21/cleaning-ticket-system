@@ -22,6 +22,7 @@ from .models import (
     CustomerUserMembership,
 )
 from .permissions import user_can
+from .serializers import compute_customer_actions
 from .serializers_memberships import (
     CustomerBuildingMembershipSerializer,
     CustomerCompanyPolicySerializer,
@@ -43,11 +44,25 @@ from .serializers_memberships import (
 #     only at buildings where their `customer.users.manage` resolves true).
 # ---------------------------------------------------------------------------
 def _target_has_cca_access(customer, user_id) -> bool:
-    """B4 — True if the (user_id, customer) target carries at least one
-    active `CustomerUserBuildingAccess` row at `access_role=
-    CUSTOMER_COMPANY_ADMIN`. A CCA actor must never touch another CCA's
-    rows or membership; this helper centralises the check.
+    """B4 — True if the (user_id, customer) target is a Customer Company
+    Admin under this customer.
+
+    SoT Addendum A.1 widens the definition: a target is a CCA if EITHER
+      * their membership carries the company-wide `is_company_admin`
+        flag (the new authoritative status), OR
+      * they hold at least one `CustomerUserBuildingAccess` row at
+        `access_role=CUSTOMER_COMPANY_ADMIN` (legacy per-building row,
+        kept so any not-yet-collapsed data is still protected).
+
+    A CCA actor must never touch another CCA's rows or membership, and
+    the B5 policy gate protects a flag-CCA target from a policy-off
+    COMPANY_ADMIN exactly like a row-based one — this helper centralises
+    the check both rely on.
     """
+    if CustomerUserMembership.objects.filter(
+        customer=customer, user_id=user_id, is_company_admin=True
+    ).exists():
+        return True
     return CustomerUserBuildingAccess.objects.filter(
         membership__customer=customer,
         membership__user_id=user_id,
@@ -289,6 +304,106 @@ class CustomerUserDeleteView(generics.GenericAPIView):
         if deleted == 0:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CustomerUserCompanyAdminView(generics.GenericAPIView):
+    """
+    SoT Addendum A.1 — toggle the company-wide Customer Company Admin
+    status on a customer membership.
+
+      POST   /api/customers/<customer_id>/users/<user_id>/company-admin/
+             → set membership.is_company_admin = True
+      DELETE /api/customers/<customer_id>/users/<user_id>/company-admin/
+             → set membership.is_company_admin = False
+
+    Both return 200 with the serialized membership (incl.
+    `is_company_admin` + `actions`). Idempotent: POST when already True /
+    DELETE when already False is a no-op success (still 200).
+
+    Authorization (data-driven via `compute_customer_actions`):
+      * SUPER_ADMIN — always allowed.
+      * COMPANY_ADMIN (in the customer's provider company) — allowed iff
+        the provider Company's
+        `provider_admin_may_manage_customer_company_admins` policy is True.
+      * CUSTOMER_USER (a CCA actor) — always blocked (cannot toggle a
+        peer's company-admin status).
+      * BUILDING_MANAGER / STAFF — refused at the class-level admit
+        (`CanManageCustomerSideUsers`).
+
+    Audit (H-10): the `is_company_admin` toggle is recorded by the
+    dedicated CustomerUserMembership UPDATE-diff audit signal
+    (audit/signals.py, SoT A.1) — one AuditLog row with before/after on
+    every ACTUAL state change (grant or revoke). This view writes NO
+    explicit AuditLog row (that would double-write the same fact, matrix
+    H-11). Idempotent no-ops skip the save, so they emit no audit row.
+    """
+
+    permission_classes = [CanManageCustomerSideUsers]
+    serializer_class = CustomerUserMembershipSerializer
+
+    def _get_membership(self, request, customer_id, user_id):
+        customer = get_object_or_404(Customer, pk=customer_id)
+        self.check_object_permissions(request, customer)
+        membership = get_object_or_404(
+            CustomerUserMembership, customer=customer, user_id=user_id
+        )
+        return customer, membership
+
+    def _forbidden_if_cannot_manage(self, request, customer):
+        if not compute_customer_actions(request.user, customer)[
+            "can_manage_customer_company_admins"
+        ]:
+            return Response(
+                {
+                    "detail": (
+                        "You are not allowed to manage Customer Company "
+                        "Admin status on this customer."
+                    ),
+                    "code": "cca_management_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _set_flag(self, request, membership, new_value):
+        old_value = membership.is_company_admin
+        if old_value != new_value:
+            # The is_company_admin UPDATE is audited by the dedicated
+            # CustomerUserMembership audit signal (audit/signals.py, SoT
+            # A.1): one AuditLog UPDATE row with before/after. No explicit
+            # write here — that would double-write the same fact (matrix
+            # H-11). The post_save signal fires inside the save's
+            # transaction, so the flip + its audit row are one unit.
+            with transaction.atomic():
+                membership.is_company_admin = new_value
+                membership.save(update_fields=["is_company_admin"])
+            membership.refresh_from_db()
+        # Idempotent no-op (old == new) returns the unchanged membership
+        # with no save and no audit row.
+        return Response(
+            CustomerUserMembershipSerializer(
+                membership, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, customer_id, user_id):
+        customer, membership = self._get_membership(
+            request, customer_id, user_id
+        )
+        blocked = self._forbidden_if_cannot_manage(request, customer)
+        if blocked is not None:
+            return blocked
+        return self._set_flag(request, membership, True)
+
+    def delete(self, request, customer_id, user_id):
+        customer, membership = self._get_membership(
+            request, customer_id, user_id
+        )
+        blocked = self._forbidden_if_cannot_manage(request, customer)
+        if blocked is not None:
+            return blocked
+        return self._set_flag(request, membership, False)
 
 
 # ===========================================================================

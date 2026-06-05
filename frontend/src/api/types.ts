@@ -1449,6 +1449,13 @@ export interface CustomerUserMembership {
   user_email: string;
   user_full_name: string;
   user_role: Role;
+  // SoT Addendum A.1 — company-wide Customer Company Admin flag. A
+  // membership with `is_company_admin: true` is CCA across ALL of the
+  // customer's buildings (no per-building access rows). READ-ONLY on
+  // the wire; toggle it via `setCustomerCompanyAdmin`
+  // (POST/DELETE `.../users/<uid>/company-admin/`). Gating the make/
+  // remove control on `actions.can_manage_customer_company_admins`.
+  is_company_admin: boolean;
   created_at: string;
   // Per-row capability block — same shape as `Customer.actions`,
   // computed against `request.user` + this membership's parent

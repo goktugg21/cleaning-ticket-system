@@ -126,6 +126,19 @@ class CustomerUserMembership(models.Model):
         on_delete=models.CASCADE,
         related_name="customer_memberships",
     )
+    # SoT Addendum A.1 — Customer Company Admin is a COMPANY-WIDE status,
+    # not a per-building access_role. A membership with this flag set is
+    # admin across ALL the customer's buildings (present + future), needs
+    # NO per-building CustomerUserBuildingAccess rows, and NO per-building
+    # row may downgrade it. The forward-only 0010 migration collapses the
+    # legacy per-building CUSTOMER_COMPANY_ADMIN CUBA rows into this flag.
+    is_company_admin = models.BooleanField(
+        default=False,
+        help_text=(
+            "Company-wide Customer Company Admin: admin across ALL the "
+            "customer's buildings; per-building access rows do not apply."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

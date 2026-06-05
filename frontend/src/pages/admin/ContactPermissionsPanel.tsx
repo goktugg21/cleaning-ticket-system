@@ -17,7 +17,6 @@ import { ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
 import { getApiError } from "../../api/client";
 import {
   addCustomerUserAccess,
-  getCustomer,
   getCustomerPolicy,
   listCustomerBuildings,
   listCustomerUserAccess,
@@ -28,7 +27,6 @@ import {
 } from "../../api/admin";
 import type {
   CustomerAccessRole,
-  CustomerAdmin,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
   CustomerPermissionKey,
@@ -58,7 +56,6 @@ export function ContactPermissionsPanel({
   const { t } = useTranslation("common");
   const { me } = useAuth();
 
-  const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
   const [membership, setMembership] = useState<CustomerUserMembership | null>(
     null,
   );
@@ -73,6 +70,12 @@ export function ContactPermissionsPanel({
   // round-trip is in flight — mirrors the matrix's per-user busy gate.
   const [accessBusy, setAccessBusy] = useState(false);
   const [addBuildingId, setAddBuildingId] = useState("");
+  // SoT Addendum A.2 — the add-building control lets the operator pick a
+  // grantable role alongside the building. The default is CUSTOMER_USER
+  // (the tier the access row materialises at on the backend); a non-
+  // default choice is applied with a follow-up role PATCH.
+  const [addBuildingRole, setAddBuildingRole] =
+    useState<CustomerAccessRole>("CUSTOMER_USER");
 
   // Override modal state — mirrors CustomerPermissionsPage exactly so the
   // reused PermissionEditorModal behaves identically here.
@@ -103,16 +106,14 @@ export function ContactPermissionsPanel({
     let cancelled = false;
     (async () => {
       try {
-        const [customerData, usersResp, accessResp, policyData, buildingsResp] =
+        const [usersResp, accessResp, policyData, buildingsResp] =
           await Promise.all([
-            getCustomer(customerId),
             listCustomerUsers(customerId),
             listCustomerUserAccess(customerId, userId),
             getCustomerPolicy(customerId),
             listCustomerBuildings(customerId),
           ]);
         if (cancelled) return;
-        setCustomer(customerData);
         setMembership(
           usersResp.results.find((m) => m.user_id === userId) ?? null,
         );
@@ -226,7 +227,19 @@ export function ContactPermissionsPanel({
     setError("");
     try {
       await addCustomerUserAccess(customerId, userId, buildingId);
+      // SoT Addendum A.2 — the create endpoint materialises the row at
+      // the default CUSTOMER_USER tier. When the operator chose a higher
+      // grantable role, apply it with a follow-up role PATCH.
+      if (addBuildingRole !== "CUSTOMER_USER") {
+        await updateCustomerUserAccessRole(
+          customerId,
+          userId,
+          buildingId,
+          addBuildingRole,
+        );
+      }
       setAddBuildingId("");
+      setAddBuildingRole("CUSTOMER_USER");
       await reloadAccess();
     } catch (err) {
       setError(getApiError(err));
@@ -262,12 +275,14 @@ export function ContactPermissionsPanel({
   // Self-edit guard: an actor cannot edit their OWN access row.
   const isSelf = me?.id === userId;
   // H-6/H-7: only viewers whose customer.actions allow it may grant CCA;
-  // absent actions falls back to SUPER_ADMIN-only (safest pre-fetch).
-  const allowedTargetAccessRoles =
-    customer?.actions?.allowed_target_customer_access_roles ?? null;
-  const canGrantCustomerCompanyAdmin = allowedTargetAccessRoles
-    ? allowedTargetAccessRoles.includes("CUSTOMER_COMPANY_ADMIN")
-    : me?.role === "SUPER_ADMIN";
+  // SoT Addendum A.1 — Customer Company Admin is a COMPANY-WIDE status
+  // (the membership `is_company_admin` flag toggled via the company-admin
+  // surface), NOT a per-building access role. Per-building sub-roles only
+  // apply to non-CCA users (Customer User / Customer Location Manager), so
+  // this per-building picker never OFFERS CCA as a grantable role. (An
+  // existing legacy CCA access row is still rendered read-back via the
+  // `access.access_role === "CUSTOMER_COMPANY_ADMIN"` fallback below.)
+  const canGrantCustomerCompanyAdmin = false;
 
   // Buildings the user does not yet have access to (for the add picker).
   const availableBuildings = buildings.filter(
@@ -344,6 +359,37 @@ export function ContactPermissionsPanel({
                   {b.building_name}
                 </option>
               ))}
+            </select>
+          </div>
+          {/* SoT Addendum A.2 — grantable-role picker. CCA is offered only
+              when the viewer's `actions.allowed_target_customer_access_roles`
+              includes it (mirrors the per-row role select gate). */}
+          <div className="field" style={{ margin: 0 }}>
+            <label className="field-label" htmlFor="contact-perm-add-role">
+              {t("customer_contacts.permissions_panel_add_role_label")}
+            </label>
+            <select
+              id="contact-perm-add-role"
+              className="field-input"
+              data-testid="contact-permissions-add-building-role"
+              value={addBuildingRole}
+              disabled={accessBusy}
+              onChange={(event) =>
+                setAddBuildingRole(event.target.value as CustomerAccessRole)
+              }
+              style={{ minWidth: 160, height: 34 }}
+            >
+              <option value="CUSTOMER_USER">
+                {t(accessRoleLabelKey("CUSTOMER_USER"))}
+              </option>
+              <option value="CUSTOMER_LOCATION_MANAGER">
+                {t(accessRoleLabelKey("CUSTOMER_LOCATION_MANAGER"))}
+              </option>
+              {canGrantCustomerCompanyAdmin && (
+                <option value="CUSTOMER_COMPANY_ADMIN">
+                  {t(accessRoleLabelKey("CUSTOMER_COMPANY_ADMIN"))}
+                </option>
+              )}
             </select>
           </div>
           <button

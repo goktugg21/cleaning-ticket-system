@@ -51,6 +51,10 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
             "user_email",
             "user_full_name",
             "user_role",
+            # SoT Addendum A.1 — company-wide Customer Company Admin flag.
+            # Read-only on the wire; toggled via the dedicated
+            # /users/<id>/company-admin/ endpoint.
+            "is_company_admin",
             "created_at",
             "actions",
         ]
@@ -95,6 +99,12 @@ class CustomerEmployeeSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_customer_access_role(self, obj):
+        # SoT Addendum A.1 — a company-wide Customer Company Admin (the
+        # membership `is_company_admin` flag) is CCA across all buildings,
+        # with no per-building access row. Report CCA directly so the
+        # Employees directory shows the company-wide status correctly.
+        if obj.is_company_admin:
+            return CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
         best_role = None
         best_rank = 0
         for access in obj.building_access.all():

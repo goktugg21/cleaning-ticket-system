@@ -523,6 +523,34 @@ export async function removeCustomerUser(
   await api.delete(`/customers/${customerId}/users/${userId}/`);
 }
 
+// SoT Addendum A.1 — toggle the company-wide Customer Company Admin
+// status on a customer membership. A `true` flag makes the user a CCA
+// across ALL of the customer's buildings (no per-building access rows);
+// `false` revokes it. Mirrors the addCustomerUser POST / removeCustomerUser
+// DELETE shape:
+//   POST   /api/customers/<cid>/users/<uid>/company-admin/  → set true
+//   DELETE /api/customers/<cid>/users/<uid>/company-admin/  → set false
+//
+// Both return 200 with the updated CustomerUserMembership (incl.
+// `is_company_admin` + the per-(viewer, customer) `actions` block).
+// Idempotent: POST when already true / DELETE when already false is a
+// no-op 200. Backend gate is data-driven via
+// `actions.can_manage_customer_company_admins`; an actor who may not
+// manage company-admins gets 403 `{code: "cca_management_forbidden"}`,
+// and a target with no membership 404s. The caller must therefore only
+// surface the make/remove control when that action flag is true.
+export async function setCustomerCompanyAdmin(
+  customerId: number,
+  userId: number,
+  enabled: boolean,
+): Promise<CustomerUserMembership> {
+  const url = `/customers/${customerId}/users/${userId}/company-admin/`;
+  const response = enabled
+    ? await api.post<CustomerUserMembership>(url)
+    : await api.delete<CustomerUserMembership>(url);
+  return response.data;
+}
+
 // ---- Sprint 14: customer ↔ buildings (M:N) ----
 
 export async function listCustomerBuildings(

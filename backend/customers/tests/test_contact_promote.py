@@ -458,10 +458,15 @@ class PromotePermissionTests(PromoteContactFixtureMixin, APITestCase):
         membership = CustomerUserMembership.objects.get(
             customer=self.customer, user=spare
         )
-        access = CustomerUserBuildingAccess.objects.get(
-            membership=membership, building=self.building
-        )
-        self.assertEqual(
-            access.access_role,
-            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN,
+        # SoT Addendum A.1 — Customer Company Admin is now the company-wide
+        # membership flag, not a per-building access row. A CCA promote
+        # routes to the flag and creates NO per-building CCA CUBA row.
+        self.assertTrue(membership.is_company_admin)
+        self.assertFalse(
+            CustomerUserBuildingAccess.objects.filter(
+                membership=membership,
+                access_role=(
+                    CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+                ),
+            ).exists()
         )

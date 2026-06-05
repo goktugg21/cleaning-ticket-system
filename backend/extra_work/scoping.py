@@ -33,6 +33,7 @@ from __future__ import annotations
 from django.db import models
 
 from accounts.models import UserRole
+from accounts.scoping import company_admin_customer_ids
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 from customers.models import CustomerUserBuildingAccess
@@ -91,6 +92,12 @@ def scope_extra_work_for(user):
         view_company_customers: set[int] = set()
         view_location_pairs: set[tuple[int, int]] = set()
         view_own_pairs: set[tuple[int, int]] = set()
+
+        # SoT Addendum A.1: a company-wide Customer Company Admin (the
+        # membership `is_company_admin` flag) sees EVERY Extra Work
+        # request of every customer they administer — no per-building
+        # access row required.
+        view_company_customers |= set(company_admin_customer_ids(user))
 
         for access in (
             CustomerUserBuildingAccess.objects.filter(

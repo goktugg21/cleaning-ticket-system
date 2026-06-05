@@ -20,6 +20,7 @@ from .views_memberships import (
     CustomerEmployeesView,
     CustomerUserAccessDeleteView,
     CustomerUserAccessListCreateView,
+    CustomerUserCompanyAdminView,
     CustomerUserDeleteView,
     CustomerUserListCreateView,
 )
@@ -48,6 +49,13 @@ urlpatterns = [
         "<int:customer_id>/users/<int:user_id>/",
         CustomerUserDeleteView.as_view(),
         name="customer-user-delete",
+    ),
+    # SoT Addendum A.1 — toggle the company-wide Customer Company Admin
+    # status on a customer membership (POST grant / DELETE revoke).
+    path(
+        "<int:customer_id>/users/<int:user_id>/company-admin/",
+        CustomerUserCompanyAdminView.as_view(),
+        name="customer-user-company-admin",
     ),
     # Sprint 14 — customer ↔ buildings (M:N).
     path(

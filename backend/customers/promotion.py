@@ -236,12 +236,26 @@ def promote_contact(
     membership, _ = CustomerUserMembership.objects.get_or_create(
         customer=customer, user=existing
     )
-    for bid in target_building_ids:
-        CustomerUserBuildingAccess.objects.get_or_create(
-            membership=membership,
-            building_id=bid,
-            defaults={"access_role": access_role, "permission_overrides": {}},
-        )
+    # SoT Addendum A.1 — Customer Company Admin is a company-wide
+    # membership flag, NOT a per-building access role. When promotion
+    # grants CCA, set `is_company_admin=True` on the membership and do
+    # NOT create per-building CCA CUBA rows. The flag set is audited by
+    # the dedicated CustomerUserMembership UPDATE signal
+    # (audit/signals.py, SoT A.1) — no explicit write needed here.
+    if access_role == AccessRole.CUSTOMER_COMPANY_ADMIN:
+        if not membership.is_company_admin:
+            membership.is_company_admin = True
+            membership.save(update_fields=["is_company_admin"])
+    else:
+        for bid in target_building_ids:
+            CustomerUserBuildingAccess.objects.get_or_create(
+                membership=membership,
+                building_id=bid,
+                defaults={
+                    "access_role": access_role,
+                    "permission_overrides": {},
+                },
+            )
 
     if contact.user_id is None:
         contact.user = existing

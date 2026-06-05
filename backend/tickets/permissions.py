@@ -2,7 +2,7 @@ from rest_framework.permissions import BasePermission
 
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
-from accounts.scoping import scope_tickets_for
+from accounts.scoping import company_admin_customer_ids, scope_tickets_for
 from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
 from companies.models import CompanyUserMembership
 from customers.models import CustomerUserBuildingAccess
@@ -55,6 +55,14 @@ def user_has_scope_for_ticket(user, ticket):
             user=user, building_id=ticket.building_id
         ).exists()
     if user.role == UserRole.CUSTOMER_USER:
+        # SoT Addendum A.1 — a company-wide Customer Company Admin (the
+        # membership `is_company_admin` flag) is in scope for EVERY ticket
+        # of every customer they administer, with no per-building access
+        # row required. Mirrors the company_admin_customer_ids union in
+        # scope_tickets_for so the two helpers stay in lockstep (a CCA can
+        # post messages / attachments + drive transitions on any ticket).
+        if ticket.customer_id in company_admin_customer_ids(user):
+            return True
         # Sprint 23A (corrected before PR #50): mirror the resolver
         # logic in `accounts.scoping.scope_tickets_for`. The two
         # helpers MUST agree — anything visible on the list endpoint

@@ -98,6 +98,12 @@ class UserListSerializer(serializers.ModelSerializer):
         for membership in obj.customer_memberships.all():
             if scope is not None and membership.customer.company_id not in scope:
                 continue
+            # SoT Addendum A.1 — a company-wide Customer Company Admin
+            # (the membership `is_company_admin` flag) is CCA across all
+            # buildings, with no per-building access row. CCA is the top
+            # rank, so it always wins — surface it directly.
+            if membership.is_company_admin:
+                return "CUSTOMER_COMPANY_ADMIN"
             for access in membership.building_access.all():
                 if not access.is_active:
                     continue

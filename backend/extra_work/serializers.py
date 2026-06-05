@@ -19,6 +19,7 @@ from customers.models import (
     Customer,
     CustomerBuildingMembership,
     CustomerUserBuildingAccess,
+    CustomerUserMembership,
 )
 from customers.permissions import access_has_permission, user_can
 
@@ -85,6 +86,15 @@ def derive_actor_kind(user, customer, building) -> str:
         UserRole.BUILDING_MANAGER,
     }:
         return ACTOR_PROVIDER
+
+    # SoT Addendum A.1 — a company-wide Customer Company Admin (the
+    # membership `is_company_admin` flag) is classified as CCA across
+    # ALL buildings, with no per-building access row required (the 0010
+    # migration deletes the legacy per-building CCA rows).
+    if CustomerUserMembership.objects.filter(
+        user=user, customer=customer, is_company_admin=True
+    ).exists():
+        return ACTOR_CUSTOMER_COMPANY_ADMIN
 
     access = (
         CustomerUserBuildingAccess.objects.filter(

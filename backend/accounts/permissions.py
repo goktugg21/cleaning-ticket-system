@@ -310,7 +310,11 @@ class CanManageCustomerSideUsers(IsAuthenticatedAndActive):
 
     def has_object_permission(self, request, view, obj):
         from companies.models import CompanyUserMembership
-        from customers.models import Customer, CustomerUserBuildingAccess
+        from customers.models import (
+            Customer,
+            CustomerUserBuildingAccess,
+            CustomerUserMembership,
+        )
         from customers.permissions import access_has_permission
 
         actor = request.user
@@ -325,6 +329,17 @@ class CanManageCustomerSideUsers(IsAuthenticatedAndActive):
             ).exists()
 
         if actor.role == UserRole.CUSTOMER_USER:
+            # SoT Addendum A.1 — a company-wide Customer Company Admin
+            # (the membership `is_company_admin` flag) is admitted with
+            # NO per-building CUBA row required. The flag is the
+            # authoritative top customer-side status; without this check
+            # the 0010 migration (which deletes the legacy per-building
+            # CCA rows) would strip a company-wide CCA's user-management
+            # capability.
+            if CustomerUserMembership.objects.filter(
+                user=actor, customer=obj, is_company_admin=True
+            ).exists():
+                return True
             # B4 CCA admit. Must hold at least one active CUBA row
             # under THIS customer that resolves `customer.users.manage`
             # to True (default for `access_role=CUSTOMER_COMPANY_ADMIN`,
