@@ -369,12 +369,18 @@ def generate_occurrences(
         # rows, and the `not Ticket.exists()` guard keeps it idempotent (an
         # ad-hoc row that happens to fall on a rule date was already spawned +
         # flipped to TICKET_CREATED above, so it is excluded here).
+        # Defense-in-depth: cap the due window at the job's end_date so an
+        # ad-hoc occurrence somehow persisted past end_date never spawns a
+        # ticket (add-date already rejects out-of-window dates).
+        adhoc_due_end = range_end
+        if job.end_date is not None and job.end_date < adhoc_due_end:
+            adhoc_due_end = job.end_date
         adhoc_due = PlannedOccurrence.objects.filter(
             recurring_job=job,
             is_ad_hoc=True,
             status=PlannedOccurrenceStatus.PLANNED,
             planned_date__gte=range_start,
-            planned_date__lte=range_end,
+            planned_date__lte=adhoc_due_end,
         )
         for occ in adhoc_due:
             try:

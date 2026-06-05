@@ -374,6 +374,28 @@ class RecurringJobViewSet(viewsets.ModelViewSet):
         """
         job = self.get_object()
         d = _require_calendar_date(request)
+        # Bound the ad-hoc date to the job's own [start_date, end_date] window
+        # (end_date null = open-ended, no upper bound). Adding a date outside
+        # the job's lifetime would create an occurrence the rule could never
+        # have produced — and one past end_date would never spawn anyway.
+        if d < job.start_date:
+            return Response(
+                {
+                    "detail": "This date is before the recurring job's start "
+                    "date.",
+                    "code": "add_date_before_start_date",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if job.end_date is not None and d > job.end_date:
+            return Response(
+                {
+                    "detail": "This date is after the recurring job's end "
+                    "date.",
+                    "code": "add_date_after_end_date",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         with transaction.atomic():
             for window in ensure_job_windows(job):
                 pricing_mode, fixed_price, vat_pct = _occurrence_pricing_snapshot(

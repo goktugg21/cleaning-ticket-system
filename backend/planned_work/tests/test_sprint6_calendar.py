@@ -275,6 +275,93 @@ class AddDateTests(Sprint6CalendarBase):
         )
 
 
+class AddDateWindowTests(Sprint6CalendarBase):
+    """add-date must stay inside the job's own [start_date, end_date] window,
+    and the ad-hoc spawn pass must never spawn past end_date (defense)."""
+
+    def setUp(self):
+        super().setUp()
+        # A job with an explicit end_date (the base self.job is open-ended).
+        self.windowed = self.make_recurring_job(
+            frequency=Frequency.WEEKLY,
+            start_date=self.today,
+            end_date=self.today + datetime.timedelta(days=14),
+        )
+        self.default_window(self.windowed)
+
+    def _add(self, job, d):
+        return self.client.post(
+            f"{JOBS_URL}{job.id}/add-date/", {"date": d.isoformat()}, format="json"
+        )
+
+    def test_add_after_end_date_rejected(self):
+        d = self.today + datetime.timedelta(days=21)  # > end_date (today+14)
+        resp = self._add(self.windowed, d)
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
+        self.assertEqual(resp.data["code"], "add_date_after_end_date")
+        self.assertFalse(
+            PlannedOccurrence.objects.filter(
+                recurring_job=self.windowed, planned_date=d
+            ).exists()
+        )
+
+    def test_add_before_start_date_rejected(self):
+        d = self.today - datetime.timedelta(days=7)
+        resp = self._add(self.windowed, d)
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
+        self.assertEqual(resp.data["code"], "add_date_before_start_date")
+        self.assertFalse(
+            PlannedOccurrence.objects.filter(
+                recurring_job=self.windowed, planned_date=d
+            ).exists()
+        )
+
+    def test_add_inside_window_succeeds(self):
+        d = self.today + datetime.timedelta(days=3)  # off-rule, within [start, end]
+        resp = self._add(self.windowed, d)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        occ = PlannedOccurrence.objects.filter(
+            recurring_job=self.windowed, planned_date=d
+        ).first()
+        self.assertIsNotNone(occ)
+        self.assertTrue(occ.is_ad_hoc)
+
+    def test_open_ended_job_accepts_future_add(self):
+        # The base self.job has end_date=None — a far-future add is allowed.
+        d = self.today + datetime.timedelta(days=120)
+        resp = self._add(self.job, d)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertTrue(
+            PlannedOccurrence.objects.filter(
+                recurring_job=self.job, planned_date=d
+            ).exists()
+        )
+
+    def test_spawn_pass_caps_at_end_date(self):
+        # Defense-in-depth: an is_ad_hoc PLANNED occurrence force-created PAST
+        # end_date must never spawn, even when the generate horizon covers it.
+        past_end = self.today + datetime.timedelta(days=21)  # > end_date (today+14)
+        occ = PlannedOccurrence.objects.create(
+            recurring_job=self.windowed,
+            company=self.company,
+            building=self.building,
+            customer=self.customer,
+            planned_date=past_end,
+            status=PlannedOccurrenceStatus.PLANNED,
+            is_ad_hoc=True,
+            source_window=self.default_window(self.windowed),
+        )
+        generate_occurrences(
+            days_ahead=30,  # horizon covers past_end, but the cap excludes it
+            today=self.today,
+            actor=self.super_admin,
+            jobs=RecurringJob.objects.filter(pk=self.windowed.pk),
+        )
+        occ.refresh_from_db()
+        self.assertEqual(str(occ.status), str(PlannedOccurrenceStatus.PLANNED))
+        self.assertFalse(Ticket.objects.filter(planned_occurrence=occ).exists())
+
+
 class CalendarProjectionTests(Sprint6CalendarBase):
     def test_calendar_merges_rule_skipped_and_adhoc(self):
         self.client.post(
