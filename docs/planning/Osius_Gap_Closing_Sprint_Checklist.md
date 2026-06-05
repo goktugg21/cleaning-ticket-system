@@ -1,92 +1,85 @@
 # Osius — Gap-Closing Sprint Checklist
 
-**Purpose.** This is the living plan to close every remaining gap between the system and the Ramazan transcript + Source of Truth, ending with a premium UI/UX polish. **CC ticks the boxes for a sprint as it completes it** (and stages this file with the commit), so we always know where we are and what's done.
+**Updated 2026-06-05** — post PR #87 (Sprint 6 merged) + **Ramazan Meeting 2**.
 
-**How to use.** Work sprints top-to-bottom. Each sprint is a separate CC prompt. After a sprint passes its gates + review and is pushed, CC checks its boxes here. Don't start a sprint before the prior one is reviewed/merged unless noted as independent.
+**Purpose.** The living plan to close every remaining gap between the system and the Ramazan transcripts + Source of Truth, ending with a premium UI/UX polish. **CC ticks the boxes for a sprint as it completes it** (and stages this file with the commit), so we always know where we are.
+
+**How to use.** Work the **Near-term priority** block first (Ramazan Meeting 2 is the Monday-deadline work), then the original Sprints 7–9, then the standing milestones. Each sprint is a separate CC prompt. Don't start a sprint before the prior one is reviewed/merged unless noted as independent.
 
 ---
 
-## Background — what the system is
-
-Osius / CleanOps is a multi-tenant cleaning-operations SaaS for cleaning providers (Osius is the first provider) and their customer companies. Django 5.2 + DRF + Postgres/Redis/Celery backend; React 19 + TS + Vite + i18next (Dutch default) frontend; Docker Compose. Roles: SUPER_ADMIN, COMPANY_ADMIN (Provider Admin/PA), BUILDING_MANAGER (BM), STAFF, CUSTOMER_USER; per-customer access roles CCA > CLM > CU; staff employment types INTERNAL_STAFF / ZZP / INHUUR. Tickets (operational), Extra Work (priced, becomes operational after pricing), a service catalog with per-customer agreed prices, recurring/planned jobs, multi-manager + multi-staff assignment, a system-wide audit log, and reports with CSV/PDF export.
-
-**Conventions (apply to every sprint / CC prompt):**
+## Conventions (apply to every sprint / CC prompt)
 - Backend is the business source of truth; **verify, don't assume**; never invent endpoints.
-- **Never read or stage** `docs/transkript.txt` or its `:Zone.Identifier`. Stage commits by explicit path.
+- **Never read or stage** `docs/transkript.txt` / `docs/ramazan_transkript*.txt` or their `:Zone.Identifier`. Stage commits by **explicit path**.
 - nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
-- ESLint baseline = **49** (47 errors, 2 warnings): add **no** new violations; **never** add a synchronous setState in an effect body.
-- Backend-touching / migration / RBAC → open a PR (CI + Codex). Routine frontend-only → push the branch and STOP for the owner to fast-forward.
-- Each prompt starts with a sync + a grep GUARD proving the right base, captures the lint baseline, and ends with an adversarial review. Screenshots via token-inject (the e2e login form is flaky).
+- ESLint baseline = **49** (47 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect).
+- Backend / migration / RBAC → open a **PR** (CI + Codex). Migrations additive + back-compat. Routine frontend-only → also a PR now (de-facto rhythm).
+- Each prompt starts with a sync + a grep GUARD proving the right base, captures the lint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
+- Co-author trailer on commits: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
 
 ---
 
-## Current codebase state — what we have / what we don't
+## Where we are (2026-06-05)
 
-**Already built (verified in the repo — do NOT rebuild):**
-- Contacts under a customer + **promote-to-user** (contact-anchored); customer **permissions matrix** (per-building access + tri-state inherit/allow/deny override modal); per-user building scoping.
-- Staff **"My Work" agenda** (`/agenda`, `GET /tickets/my-slots/`).
-- **Slot-level completion** note-or-photo enforcement (`TicketAttachment.staff_assignment` FK exists).
-- **Ticket → Extra Work** convert; EW **instant-vs-proposal/quote** ordering + dangerous quote-bypass (ProposalBuilder, RouteBadge, direct-publish, company toggle).
-- Reports + **CSV/PDF export** + EW revenue chart.
-- Recurring engine (weekday-sets + AM/PM windows + per-occurrence billing, #77); system-wide audit + ticket-id timeline + severity (#78); multi-manager + SA company policy toggles (#79).
-- **Reschedule backend**: `POST/DELETE /tickets/<id>/schedule/` (set/reschedule/clear) — provider-management only, additive.
+**Completed in this gap-closing effort (do NOT rebuild):**
+- **Sprint 0** — PR #79 Codex P2 fixes (paginate responsible-managers; key by ticket id) ✅ merged; customer-pricing reference prefill ✅ (shipped as the #86 line below).
+- **Sprint 1** — Reschedule frontend control on ticket detail (consumes `/tickets/<id>/schedule/`; SA/CA/BM) ✅.
+- **Sprint 2** — Permission editor in-place from the contact (popup/expand; existing page still reachable) ✅.
+- **Sprint 3** — Contact-first enforcement audited + invitations restricted to provider staff ✅.
+- **Sprint 4** — Sub-tasks **backend** (PR #84): `SubTask` model, nullable `TicketStaffAssignment.sub_task` FK, PA/SA `auto_complete_on_subtasks` flag + roll-up, audit ✅ merged.
+- **Sprint 5** — Sub-tasks **frontend** (PR #85): grouped staff slots, sub-task CRUD, PA/SA auto-complete toggle, PII-safe customer view ✅ merged.
+- **Customer pricing — surface the service default price** (PR #86): dialog prefills unit price + VAT from the service default; default-price column (incl. inactive services); dropdown shows defaults ✅ merged.
+- **Sprint 6** — Recurring **calendar-tick** (PR #87): additive `PlannedOccurrence.is_ad_hoc` (migration 0004) + four idempotent per-date `RecurringJobViewSet` actions (skip-date / add-date / clear-date / calendar) + the month-grid calendar UI + customer/building dropdown swap + per-window pricing clarity. Back-compat with #77. **Follow-up fix in-flight:** bound `add-date` to `[start_date, end_date]` + cap the ad-hoc spawn at `end_date` (Codex P2) — push re-triggers CI; resolve the thread; merge on green.
 
-**Genuine gaps (this checklist closes them):**
-- Reschedule has **no frontend control** (backend exists).
-- **Sub-tasks** do not exist (no model, no UI).
-- **Bulk select-and-approve** of completions does not exist.
-- **Contact-first enforcement** unverified (a non-contact path to a customer user with access may exist).
-- Permission editor is a **separate page**, not the in-place popup Ramazan wants.
-- A few backend endpoints may be **unsurfaced** (unable-to-complete, actual-hours, copy-from-default, occurrence skip/cancel) — verify.
-- Recurring + recurrence **pricing UX** should be improved (calendar-tick).
-- A final **premium UI/UX polish** is wanted.
+**Standing infra not yet done:** production deployment; CD (CI exists as PR checks); Sentry DSNs.
 
 ---
 
-## Sprints
+## Near-term priority — Ramazan Meeting 2 (2026-06-05) + carried-over
 
-### Sprint 0 — In-flight (track only)
-- [ ] PR #79 Codex P2 fixes (paginate the responsible-manager list; key the section by ticket id) — pushed/merged.
-- [ ] Customer-pricing **reference prefill** (dropdown shows the service's reference €; selecting prefills `unit_price`+VAT, editable; never clobbers a saved price) — pushed/merged.
+> Ramazan wants these by **Monday**. He also wants a **live login link** to poke around himself → the deployment milestone is pulling forward. Department section is **deferred** (do it in person, after these). Re-read `ramazan_transkript (2).txt` + the SoT addendum before scoping each.
 
-### Sprint 1 — Reschedule (frontend-only)
-Surface the existing `/tickets/<id>/schedule/` action as a **set / change / clear scheduled-date** control on the ticket detail, for **all ticket types**, provider-management gated (SA/CA/BM). Read the schedule contract from the backend; don't invent fields.
-- [x] Reschedule/clear control on ticket detail, consuming the existing schedule action.
-- [x] Gated to SA/CA/BM; STAFF/customer see the date read-only (no 403 surfaced).
-- [x] Gates green (typecheck/build/eslint 49); at-risk e2e green; screenshots.
+### CP — Customer-permissions page (carried over) — do first, one PR (same page)
+Backend already supports granting a building a customer user isn't in (`POST /api/customers/<id>/users/<user_id>/access/ {building_id}`, gated only by the Sprint-14 customer↔building link). The FE has `addCustomerUserAccess` wired but the matrix view doesn't surface the control.
+- [ ] **Add-building control** in the customer-permissions matrix (pick an un-granted building linked to the customer + role → POST). FE-only.
+- [ ] **Option A — `CUSTOMER_COMPANY_ADMIN` company-wide.** Make CCA grant admin across **all** the customer's buildings from one setting; collapse the per-building rows into a single company-wide status; demote = remove that status. Backend semantics + scoping + a small migration (existing multi-building CCAs collapse to the company-wide flag). Currently CCA is enforced **per-building** (`effective_actions.compute_role_defaults` reads the building-specific row; the cross-row "strongest" is only the `building=None` aggregate) — so this is a real backend change, not just UI.
+- [ ] **People consolidation + drill-in edit** (Ramazan #5): Contacts / Users / (customer) Employees on **one page** with **drill-in / modal edit** ("click in, edit, leave" — NOT accordion expand). They remain distinct concepts: a person can be a non-user (info only); **customer Employees = building access**, **Users = the permissions** for those buildings — combine the management surface, keep the data distinct. Phone-number validation already enforced.
 
-### Sprint 2 — Permission editor in-place from the contact
-Re-host the permission editor (role + per-building access + the tri-state inherit/allow/deny override modal) so it **opens in place from the contact's user entry as a popup / expanding panel**, with groups **stacked vertically** (ticket → extra-work → toggles), compact. **Keep** the existing `/admin/customers/:id/permissions` page reachable (Ramazan: "can stay for now"). Reuse the existing `PermissionEditorModal` + access/override logic — this is placement/flow, not new permission logic.
-- [x] In-place popup/expand from the contact's user section (no forced navigation away).
-- [x] Vertical-stacked, compact groups; per-building scoping intact; tri-state overrides intact.
-- [x] Existing permissions page still reachable; gates + e2e green; screenshots.
+### M1 — Notification / message center (Ramazan #1 — his top pain)
+Messages on tickets / extra-work / meldingen get lost; nobody sees replies.
+- [ ] Backend: a notifications feed + per-message "directed-to" (personal/tagged) targeting; recon what already exists (notifications app) before building. Events: new message on a ticket / EW request / melding, and a personally-addressed message.
+- [ ] FE: a **top-right bell** + a **notifications page**; each item deep-links to the source (ticket/EW/melding). Personal/tagged messages surface to the addressee only.
 
-### Sprint 3 — Contact-first enforcement
-**Audit first**, then fix only the hole if present: a customer user **with access** must only be creatable **via a contact** (promote-from-contact). Make the **Invitations screen provider-staff-only**; customer-access invitations require a contact. Confirm no membership/invitation path bypasses this.
-- [x] Audit of all customer-user-with-access creation paths documented.
-- [x] Invitations screen restricted to provider staff; customer users only via contact-promote.
-- [x] Backend enforcement (if a bypass existed) + tests; gates/e2e green.
+### M2 — User/staff profile: structured credentials + flexible custom properties + visibility (Ramazan #4, expanded)
+**Hybrid model (confirmed):**
+- [ ] **Structured, typed, compliance-aware credential fields** with built-in rules: **residence permit** (showable; when shown, only expiry date + ID number) · **EU national ID** (**HARD-BLOCKED from any customer — PA/SA only, never a customer-visible PDF**; enforced in code, not a toggle) · **certificates/VCA** (PDF, showable). Documents are **PDF**.
+- [ ] **Generic custom-property system** on **all** user profiles (staff + customer users): `property name / value / optional PDF attachment`, **add/remove** (e.g. age, salary, contract).
+- [ ] **Visibility model:** every property/document has a visibility level, **default most-restrictive (provider-only)**; salary-type defaults to **PA/SA-only**; visibility selectable **per-customer and per-staff** (who sees what). Visibility changes on sensitive fields are **audited**.
+- [ ] Customer-side view honours visibility + the customer permission gate; the EU-ID block is unconditional.
 
-### Sprint 4 — Sub-tasks (backend)
-A **SubTask** = a **named work unit** under a ticket, on **all tickets**, layered on the existing dated multi-slot assignment (don't rewrite it).
-- [x] `SubTask` model: FK to ticket, `title`, `description`, `ordering`, `created_by`, timestamps; done-state is the computed `is_done()` (>=1 assignment, all COMPLETED). (Occurrence link is deferred to the recurrence integration — out of this sprint's locked design.)
-- [x] Nullable `sub_task` FK on `TicketStaffAssignment` (slots with `null` = the ticket's default un-split work — back-compat; `on_delete=SET_NULL` so deleting a sub-task never destroys an assignment or its evidence).
-- [x] **Auto-complete rule:** default = a manager (SA/CA/BM) confirms ticket completion; **PA/SA set a per-ticket `auto_complete_on_subtasks` flag** — when set, completing the final slot auto-advances the ticket IN_PROGRESS → WAITING_MANAGER_REVIEW. (Sub-tasks are **not** priced separately.)
-- [x] Completion roll-up: a sub-task is done when its assignments are all COMPLETED (note/photo already enforced per assignment); the ticket advances per the rule above (best-effort, vacuous-truth guarded, loose-work guarded).
-- [x] Audit coverage for SubTask CRUD (full-CRUD trio) + an explicit AuditLog row for the flag flip; tests; PR.
+### M3 — Navigation / IA (Ramazan #1-nav)
+- [ ] Move **Recurring Work** and the **customer price-quote-request** flow to live **under Extra Work** (sub-items), not as separate top-level / not performed directly in Extra Work.
 
-### Sprint 5 — Sub-tasks (frontend)
-- [x] Sub-task section on the ticket detail: managers add/edit/delete named sub-tasks; the ticket's staff slots render **grouped under their sub-task** (+ a "General (no sub-task)" group for loose slots), and the existing slot picker gains a sub-task selector on **create AND edit** (re-placement / detach) so one sub-task can hold Ahmet 09:00 / Mehmet 12:00 / Ahmet 16:00; per-slot completion state shown.
-- [x] **Layered** on the current multi-slot UI (sub-tasks optional): a ticket with no sub-tasks renders exactly as before (flat slot list); grouping appears only once a sub-task exists.
-- [x] The `auto_complete_on_subtasks` toggle exposed to PA/SA (writable; BM read-only disabled); STAFF see a read-only sub-tasks view + complete only their own slots via the agenda. Customer-side viewers get a PII-safe read-only summary (no staff identity/notes — the backend does not redact nested `sub_tasks`).
-- [x] Gates green (typecheck clean, eslint at baseline 49, build OK); token-inject smoke verified manager splits+assigns + the STAFF read-only view (8/8 checks).
+### M4 — Extra Work billing: monthly invoice run + billing-month (Ramazan #2)
+Billing must key off a **billing month you set**, not the customer's final-approval date (work done May 31, approved Jun 7 → bills in **May**).
+- [ ] Backend: a settable **billing month / invoice date** on completed extra work (decoupled from approval); an **"invoice run" per month** concept; filters by month + status (completed / invoiced). Extends the existing EW-revenue report.
+- [ ] FE: a **monthly filter** on Extra Work (time-range select) + status filter; surface the billing-month field at completion; revenue/invoice export per month (PDF/CSV).
 
-### Sprint 6 — Recurring UI/UX (calendar-tick + pricing)
-Redesign the recurring job workflow to **calendar-tick** as the primary input (hand-pick specific dates + AM/PM windows + per-date/window price), with an **optional weekday-rule generator** that pre-fills ticks you can edit/remove, and a **clearer pricing UX**. **Includes a backend recon/design step** — the current model is weekday-based; explicit picked-date support may need a small backend change (design it minimally, back-compat with #77).
-- [x] Backend recon + minimal design for explicit picked dates: additive `PlannedOccurrence.is_ad_hoc` (migration 0004) + four idempotent per-date RecurringJobViewSet actions (skip-date / add-date / clear-date / calendar). Back-compat with #77 — rule jobs + the rolling generator behave exactly as before (skip pre-creates a SKIPPED row the generator never spawns; an additive ad-hoc spawn pass picks up off-rule dates).
-- [x] Calendar-tick control on the saved recurring job (month grid): the weekday/monthly RULE pre-fills the ticks; untick a rule date to skip it, re-tick to restore, tick an off-rule date to add one. Per-window pricing UX clarified (inherit-job-pricing label + fallback hint; fixed windows show price + VAT).
-- [x] Spawned/completed dates are LOCKED in the calendar and deep-link to their operational ticket (where the Sprint 1 reschedule control lives). Gates green (typecheck, eslint 49, build); token-inject smoke 7/7 (calendar loads + add/clear + skip/clear round-trips + dropdown order).
-- [x] Swap the customer/building dropdown order on the recurring-job form (customer left, building right) — layout-only.
+### M5 — Customer pricing: custom line + category edit + bulk raise (Ramazan #3)
+Builds on #86.
+- [ ] **Custom/ad-hoc price line**: add a price for a service **not in the catalog** (free-text name + price + VAT), customer-specific.
+- [ ] **Category editing** on the service catalog; a **bulk price-raise** helper (raise many catalog/customer prices at once).
+
+### M6 — Customer detail (provider side) + dashboard "my X" (Ramazan #7)
+- [ ] On a customer's page, surface **that customer's** tickets / extra-work / **price-quote-requests** / meldingen as drill-in sub-tabs (mirror existing surfaces).
+- [ ] Dashboard: a **"my X"** aggregation (my tickets / meldingen / extra-work / requests).
+
+### M7 — Melding (Ramazan #8)
+- [ ] **Melding = a customer-created waiting ticket** (the Dutch-facing name; NOT a separate concept). Verify the customer-create-ticket path exists + is surfaced as "melding" in the customer UI; close any gap.
+
+---
+
+## Original remaining sprints (after the Meeting-2 block)
 
 ### Sprint 7 — Bulk select-and-approve
 The father's "select" button: confirm many completions at once.
@@ -101,11 +94,15 @@ Verify, then surface only what's missing.
 - [ ] Occurrence **skip/cancel** surfaced; any other unsurfaced endpoint closed.
 
 ### Sprint 9 — Premium UI/UX polish
-- [ ] A cohesive visual polish pass for a premium look (tokens, spacing, density, consistency), with extra attention to the recurring + sub-task surfaces. No behavior changes; gates/e2e green; before/after screenshots.
+- [ ] A cohesive visual polish pass for a premium look (tokens, spacing, density, consistency), with extra attention to the recurring + sub-task + new profile/notification surfaces. No behavior changes; gates/e2e green; before/after screenshots.
 
 ---
 
-## Open assumptions to confirm before their sprint (veto any)
-- **Sub-task auto-complete (Sprint 4):** default is manager-confirm; PA/SA can flip a per-ticket auto-complete-when-all-sub-tasks-done flag. (Your Q4, as I read it.)
-- **Permission page (Sprint 2):** additive — keep the existing page reachable, add the in-place popup as the primary path.
-- **Recurring (Sprint 6):** calendar-tick primary + optional weekday-rule generator; a small back-compat backend change for explicit dates is likely needed (I'll recon the recurrence engine at that sprint).
+## Standing milestones
+- [ ] **Production deployment** (pull forward — Ramazan wants a live link): VPS, TLS, real SMTP, non-root containers, `ALLOWED_HOSTS` fix for the Docker internal healthcheck (broken with `DEBUG=False`).
+- [ ] **CD** via GitHub Actions (CI already runs as required PR checks: backend Django/Postgres/Redis + frontend lint/tsc/build).
+- [ ] **Sentry** DSNs (integration is merge-safe / empty-DSN no-op; needs Göktuğ to create the account + provide DSNs).
+- [ ] **Backend follow-up:** redact nested `sub_tasks` for `CUSTOMER_USER` in `TicketDetailSerializer` (like `assigned_staff`) — the FE currently does a PII-safe summary client-side.
+
+## Deferred
+- [ ] **Department section** — do in person with Ramazan, after the Meeting-2 block.
