@@ -76,10 +76,10 @@ A **SubTask** = a **named work unit** under a ticket, on **all tickets**, layere
 - [x] Audit coverage for SubTask CRUD (full-CRUD trio) + an explicit AuditLog row for the flag flip; tests; PR.
 
 ### Sprint 5 — Sub-tasks (frontend)
-- [ ] Sub-task section on the ticket detail (all tickets): add named sub-tasks; under each, **time-windowed staff assignments** (reuse the slot picker) so one sub-task can be Ahmet 09:00 / Mehmet 12:00 / Ahmet 16:00; per-assignment completion state.
-- [ ] **Layered** on the current multi-slot UI (sub-tasks optional); careful UI/UX so it's not cluttered.
-- [ ] The `auto_complete_on_subtasks` toggle exposed to PA/SA; staff see/complete only their own assignments.
-- [ ] Gates/e2e green; screenshots (manager splits + assigns; staff view).
+- [x] Sub-task section on the ticket detail: managers add/edit/delete named sub-tasks; the ticket's staff slots render **grouped under their sub-task** (+ a "General (no sub-task)" group for loose slots), and the existing slot picker gains a sub-task selector on **create AND edit** (re-placement / detach) so one sub-task can hold Ahmet 09:00 / Mehmet 12:00 / Ahmet 16:00; per-slot completion state shown.
+- [x] **Layered** on the current multi-slot UI (sub-tasks optional): a ticket with no sub-tasks renders exactly as before (flat slot list); grouping appears only once a sub-task exists.
+- [x] The `auto_complete_on_subtasks` toggle exposed to PA/SA (writable; BM read-only disabled); STAFF see a read-only sub-tasks view + complete only their own slots via the agenda. Customer-side viewers get a PII-safe read-only summary (no staff identity/notes — the backend does not redact nested `sub_tasks`).
+- [x] Gates green (typecheck clean, eslint at baseline 49, build OK); token-inject smoke verified manager splits+assigns + the STAFF read-only view (8/8 checks).
 
 ### Sprint 6 — Recurring UI/UX (calendar-tick + pricing)
 Redesign the recurring job workflow to **calendar-tick** as the primary input (hand-pick specific dates + AM/PM windows + per-date/window price), with an **optional weekday-rule generator** that pre-fills ticks you can edit/remove, and a **clearer pricing UX**. **Includes a backend recon/design step** — the current model is weekday-based; explicit picked-date support may need a small backend change (design it minimally, back-compat with #77).

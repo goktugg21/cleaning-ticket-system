@@ -24,6 +24,7 @@ import {
   listStaffAssignmentRequests,
 } from "../api/admin";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
+import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
 import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
 import type {
@@ -1773,10 +1774,32 @@ export function TicketDetailPage() {
 
               {isStaff && (
                 <StaffSlotEditor
+                  // Key by ticket id so the editor REMOUNTS on an A->B ticket
+                  // change and its useState(autoCompleteOnSubtasks)-seeded
+                  // autoFlag re-seeds from the new ticket (fixes a stale
+                  // checkbox after navigation). A same-ticket reload keeps the
+                  // key, so the local toggle state is correctly preserved.
+                  key={ticket.id}
                   ticketId={ticket.id}
                   onChanged={() => {
                     void loadTicket();
                   }}
+                  autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                  canSetAutoCompleteFlag={isProviderAdmin(me?.role)}
+                  ticketStatus={ticket.status}
+                />
+              )}
+
+              {/* Sprint 5 — read-only sub-tasks for NON-manager viewers.
+                  STAFF (provider-side) see full detail; customer-side
+                  viewers get a PII-safe summary (no staff identity/notes).
+                  Only renders once a manager has created sub-tasks, so a
+                  ticket with none is unchanged for these roles. */}
+              {!isStaff && ticket.sub_tasks.length > 0 && (
+                <SubTaskReadOnly
+                  subTasks={ticket.sub_tasks}
+                  autoCompleteOnSubtasks={ticket.auto_complete_on_subtasks}
+                  showStaffDetails={me?.role === "STAFF"}
                 />
               )}
 

@@ -1,3 +1,9 @@
+// Sprint 5 — the sub-task / staff-slot admin shapes are co-located in
+// `./admin` (alongside SlotStatus + TicketStaffAssignmentAdmin + their client
+// fns). `TicketDetail` carries the nested read-only `sub_tasks`, so it
+// re-uses that type. Type-only import — erased at build, no runtime cycle.
+import type { SubTask } from "./admin";
+
 export type Role =
   | "SUPER_ADMIN"
   | "COMPANY_ADMIN"
@@ -340,6 +346,13 @@ export interface TicketDetail extends TicketList {
   schedule_status: TicketScheduleStatus;
   rescheduled_from: string | null;
   reschedule_reason: string;
+  // Sprint 4 (backend) / Sprint 5 (frontend) — the ticket's named sub-tasks
+  // (each with its compact staff slots + a computed `is_done`) and the
+  // per-ticket PA/SA "auto-complete when every sub-task is done" opt-in.
+  // Read-only here: sub-tasks are mutated via the SubTask CRUD endpoints and
+  // the flag via PATCH /tickets/<id>/auto-complete-flag/. Additive.
+  sub_tasks: SubTask[];
+  auto_complete_on_subtasks: boolean;
   // Per-current-user, per-ticket capability block — backend
   // `TicketDetailSerializer.get_actions`. Optional so older list
   // serializers / pre-cherry-pick caches don't break typing; treat
