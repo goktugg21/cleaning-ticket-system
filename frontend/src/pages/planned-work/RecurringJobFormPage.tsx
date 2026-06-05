@@ -472,33 +472,9 @@ export function RecurringJobFormPage() {
             <div className="form-section-helper">
               {t("form.section_basics_desc")}
             </div>
+            {/* Sprint 6 — CUSTOMER left / BUILDING right (layout-only swap;
+                all bindings/handlers unchanged). */}
             <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="rj-building">
-                  {t("form.field_building")} *
-                </label>
-                <select
-                  id="rj-building"
-                  className="field-select"
-                  value={building === "" ? "" : String(building)}
-                  onChange={(event) => handleBuildingChange(event.target.value)}
-                  required
-                >
-                  <option value="" disabled>
-                    {t("form.field_building_placeholder")}
-                  </option>
-                  {buildingOptions.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-                {fieldErrors.building && (
-                  <div className="alert-error login-error" role="alert">
-                    {fieldErrors.building}
-                  </div>
-                )}
-              </div>
               <div className="field">
                 <label className="field-label" htmlFor="rj-customer">
                   {t("form.field_customer")} *
@@ -531,6 +507,32 @@ export function RecurringJobFormPage() {
                 {fieldErrors.customer && (
                   <div className="alert-error login-error" role="alert">
                     {fieldErrors.customer}
+                  </div>
+                )}
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="rj-building">
+                  {t("form.field_building")} *
+                </label>
+                <select
+                  id="rj-building"
+                  className="field-select"
+                  value={building === "" ? "" : String(building)}
+                  onChange={(event) => handleBuildingChange(event.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    {t("form.field_building_placeholder")}
+                  </option>
+                  {buildingOptions.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                {fieldErrors.building && (
+                  <div className="alert-error login-error" role="alert">
+                    {fieldErrors.building}
                   </div>
                 )}
               </div>
@@ -752,6 +754,11 @@ export function RecurringJobFormPage() {
                           </option>
                         ))}
                       </select>
+                      {win.pricingMode === "" && (
+                        <div className="form-section-helper">
+                          {t("form.window_pricing_inherit_hint")}
+                        </div>
+                      )}
                     </div>
                     {win.pricingMode === "FIXED" && (
                       <div className="form-2col">

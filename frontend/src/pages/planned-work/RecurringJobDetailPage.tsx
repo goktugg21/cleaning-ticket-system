@@ -30,6 +30,7 @@ import { useToast } from "../../components/ToastProvider";
 import { formatDate, formatDateTime, formatMoney } from "../../lib/intl";
 import { OccurrenceStatusBadge } from "./OccurrenceStatusBadge";
 import { OccurrenceOverrideDialog } from "./OccurrenceOverrideDialog";
+import { RecurringJobCalendar } from "./RecurringJobCalendar";
 
 type ReasonMode = "skip" | "cancel";
 
@@ -380,6 +381,15 @@ export function RecurringJobDetailPage() {
           {job.description?.trim() ? job.description : t("detail.no_description")}
         </p>
       </div>
+
+      {/* Sprint 6 — occurrence calendar (explicit per-date tick control).
+          Keyed by job id so it remounts + re-seeds on a job change (no
+          resync effect). Read-only when the job is archived. */}
+      <RecurringJobCalendar
+        key={job.id}
+        jobId={job.id}
+        canManage={job.is_active}
+      />
 
       {/* Occurrences */}
       <div className="card" style={{ overflow: "hidden" }}>

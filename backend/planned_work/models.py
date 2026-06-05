@@ -273,6 +273,12 @@ class PlannedOccurrence(models.Model):
     skipped_at = models.DateTimeField(null=True, blank=True)
     generated_at = models.DateTimeField(null=True, blank=True)  # when ticket spawned
 
+    # Sprint 6 — True when this occurrence was hand-added on a date OUTSIDE
+    # the recurrence rule (the calendar "tick an off-rule date" control), as
+    # opposed to a rule-materialized occurrence. Purely informational: the
+    # spawn path treats an ad-hoc PLANNED row exactly like a rule one.
+    is_ad_hoc = models.BooleanField(default=False)
+
     # ------------------------------------------------------------------
     # Sprint 12 — per-occurrence pricing + schedule snapshot.
     #

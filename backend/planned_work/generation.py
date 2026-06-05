@@ -361,6 +361,47 @@ def generate_occurrences(
                 if spawned:
                     created_tickets += 1
 
+        # Sprint 6 — also spawn AD-HOC occurrences (hand-added OFF the rule via
+        # the calendar add-date action) that fall due within the horizon. The
+        # rule-date loop above never visits them (they are not rule dates), so
+        # without this pass an ad-hoc PLANNED occurrence would never spawn its
+        # ticket. Rule dates are unaffected: this scans only is_ad_hoc PLANNED
+        # rows, and the `not Ticket.exists()` guard keeps it idempotent (an
+        # ad-hoc row that happens to fall on a rule date was already spawned +
+        # flipped to TICKET_CREATED above, so it is excluded here).
+        # Defense-in-depth: cap the due window at the job's end_date so an
+        # ad-hoc occurrence somehow persisted past end_date never spawns a
+        # ticket (add-date already rejects out-of-window dates).
+        adhoc_due_end = range_end
+        if job.end_date is not None and job.end_date < adhoc_due_end:
+            adhoc_due_end = job.end_date
+        adhoc_due = PlannedOccurrence.objects.filter(
+            recurring_job=job,
+            is_ad_hoc=True,
+            status=PlannedOccurrenceStatus.PLANNED,
+            planned_date__gte=range_start,
+            planned_date__lte=adhoc_due_end,
+        )
+        for occ in adhoc_due:
+            try:
+                with transaction.atomic():
+                    if (
+                        occ.status == PlannedOccurrenceStatus.PLANNED
+                        and not Ticket.objects.filter(
+                            planned_occurrence=occ
+                        ).exists()
+                    ):
+                        spawn_ticket_for_occurrence(occ, actor=actor)
+                        created_tickets += 1
+            except IntegrityError:
+                logger.warning(
+                    "Concurrent ad-hoc spawn race for job #%s occurrence #%s; "
+                    "skipping.",
+                    job.id,
+                    occ.id,
+                )
+                continue
+
     return {
         "occurrences_created": created_occurrences,
         "tickets_created": created_tickets,

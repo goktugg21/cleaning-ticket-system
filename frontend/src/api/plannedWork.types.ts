@@ -147,6 +147,9 @@ export interface PlannedOccurrence {
   planned_date: string; // YYYY-MM-DD (immutable plan-of-record)
   actual_date: string | null;
   status: PlannedOccurrenceStatus;
+  // Sprint 6 — true when this occurrence was hand-added on a date OUTSIDE
+  // the recurrence rule (the calendar "tick an off-rule date" control).
+  is_ad_hoc: boolean;
   ticket_id: number | null;
   // The window this occurrence was materialized from (the AM/PM model).
   source_window: number;
@@ -184,6 +187,38 @@ export interface PlannedOccurrenceOverridePayload {
 export interface GenerateOccurrencesResult {
   occurrences_created: number;
   tickets_created: number;
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 6 — recurring-job calendar projection (GET …/calendar/) + the
+// explicit per-date actions' response. One cell per (date x window): the
+// UNION of rule-projected dates (unmaterialized -> PLANNED, occurrence_id
+// null) and persisted occurrences (their real state). Mirrors
+// `_build_job_calendar` in backend/planned_work/views.py.
+// ---------------------------------------------------------------------------
+export interface RecurringJobCalendarWindow {
+  window_id: number;
+  window_label: string;
+  status: PlannedOccurrenceStatus;
+  is_ad_hoc: boolean;
+  occurrence_id: number | null;
+  ticket_id: number | null;
+}
+
+export interface RecurringJobCalendarDate {
+  date: string; // YYYY-MM-DD
+  windows: RecurringJobCalendarWindow[];
+}
+
+export interface RecurringJobCalendar {
+  from: string; // YYYY-MM-DD (effective, after horizon caps)
+  to: string; // YYYY-MM-DD
+  dates: RecurringJobCalendarDate[];
+}
+
+export interface RecurringJobCalendarParams {
+  from?: string;
+  to?: string;
 }
 
 export interface ListRecurringJobsParams {
