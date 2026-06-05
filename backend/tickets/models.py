@@ -63,6 +63,20 @@ class TicketStatus(models.TextChoices):
     CONVERTED_TO_EXTRA_WORK = "CONVERTED_TO_EXTRA_WORK", "Converted to Extra Work"
 
 
+# Sprint 4 — terminal ticket statuses, mirroring the schedule control's
+# `_SCHEDULE_TERMINAL_STATUSES` (tickets/views.py). Sub-task mutation,
+# placing an assignment into a sub-task, and flipping
+# `auto_complete_on_subtasks` are all blocked when the ticket is terminal.
+TERMINAL_TICKET_STATUSES = frozenset(
+    {
+        TicketStatus.APPROVED,
+        TicketStatus.REJECTED,
+        TicketStatus.CLOSED,
+        TicketStatus.CONVERTED_TO_EXTRA_WORK,
+    }
+)
+
+
 class TicketMessageType(models.TextChoices):
     """
     B7 — four-tier note taxonomy (`docs/product/system-business-logic-
@@ -298,6 +312,14 @@ class Ticket(models.Model):
     rescheduled_from = models.DateTimeField(null=True, blank=True, default=None)
     reschedule_reason = models.TextField(blank=True, default="")
 
+    # Sprint 4 — sub-task auto-complete opt-in. When True AND the ticket
+    # has >=1 SubTask, completing the final outstanding slot auto-advances
+    # the ticket IN_PROGRESS -> WAITING_MANAGER_REVIEW (best-effort
+    # roll-up; see tickets/sub_task_rollup.py). Default False keeps the
+    # existing manager/staff-confirm completion flow. Settable only by
+    # PA / SA via the dedicated auto-complete-flag endpoint.
+    auto_complete_on_subtasks = models.BooleanField(default=False)
+
     class Meta:
         ordering = ["-created_at"]
 
@@ -321,6 +343,62 @@ class Ticket(models.Model):
         if not self.first_response_at:
             self.first_response_at = timezone.now()
             self.save(update_fields=["first_response_at"])
+
+
+class SubTask(models.Model):
+    """
+    Sprint 4 — a named operational work-unit under a Ticket.
+
+    A ticket may carry many sub-tasks; each sub-task carries 1..N staff
+    assignments via the nullable `TicketStaffAssignment.sub_task` FK (a
+    slot with sub_task=NULL is the ticket's default un-split work). Sub-
+    tasks are OPTIONAL and LAYERED: a ticket with no sub-tasks, and any
+    assignment with sub_task=NULL, behaves exactly as before this sprint.
+
+    Sub-tasks are NOT priced — billing stays per-occurrence/per-ticket;
+    this layer adds no pricing columns. Deleting a sub-task SET_NULLs its
+    slots back to the loose pool (see TicketStaffAssignment.sub_task), so
+    it NEVER destroys a staff assignment or its completion evidence.
+    """
+
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="sub_tasks",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    ordering = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sub_tasks_created",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["ordering", "id"]
+
+    def __str__(self):
+        return f"SubTask #{self.pk} of ticket {self.ticket_id}: {self.title}"
+
+    def is_done(self) -> bool:
+        """A sub-task is done iff it has >=1 staff assignment AND every one
+        of those assignments is COMPLETED. An empty sub-task is NOT done
+        (avoids the vacuous-truth bug in the auto-complete roll-up).
+
+        Iterates `staff_assignments.all()` so a prefetched detail render
+        uses the cache; the roll-up path issues one bounded query."""
+        assignments = list(self.staff_assignments.all())
+        if not assignments:
+            return False
+        return all(
+            a.slot_status == StaffAssignmentSlotStatus.COMPLETED
+            for a in assignments
+        )
 
 
 class TicketMessage(models.Model):
@@ -504,6 +582,18 @@ class TicketStaffAssignment(models.Model):
     ticket = models.ForeignKey(
         Ticket,
         on_delete=models.CASCADE,
+        related_name="staff_assignments",
+    )
+    # Sprint 4 — optional placement into a named SubTask on the SAME
+    # ticket. NULL = the ticket's default un-split work (today's
+    # behaviour, full back-compat). on_delete=SET_NULL so deleting a
+    # sub-task returns its slots (completion evidence intact) to the loose
+    # pool — it NEVER deletes a staff assignment.
+    sub_task = models.ForeignKey(
+        "SubTask",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="staff_assignments",
     )
     user = models.ForeignKey(

@@ -65,10 +65,13 @@ from notifications.services import send_slot_unable_to_complete_email
 
 from .models import (
     StaffAssignmentSlotStatus,
+    SubTask,
+    TERMINAL_TICKET_STATUSES,
     Ticket,
     TicketStaffAssignment,
 )
 from .serializers import is_photo_attachment
+from .sub_task_rollup import maybe_auto_complete_ticket_on_subtasks
 
 
 # Sprint 14E — writable slot fields, split by who may write them.
@@ -85,6 +88,10 @@ _MANAGER_SLOT_WRITE_FIELDS = (
     "slot_status",
     "completion_note",
     "unable_to_complete_reason",
+    # Sprint 4 — place this slot into / out of a named SubTask on the same
+    # ticket. Manager-only: a STAFF self-PATCH (status/completion only)
+    # cannot retarget the slot's sub_task.
+    "sub_task",
 )
 _STAFF_SELF_SLOT_WRITE_FIELDS = (
     "slot_status",
@@ -115,6 +122,8 @@ class _TicketStaffAssignmentSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "ticket",
+            # Sprint 4 — the SubTask this slot is placed in (null = loose).
+            "sub_task",
             "user_id",
             "user_email",
             "user_full_name",
@@ -152,6 +161,31 @@ class _SlotWriteSerializer(serializers.ModelSerializer):
                 self.fields.pop(name)
 
     def validate(self, attrs):
+        # Sprint 4 — placing a slot into a SubTask: the sub-task must belong
+        # to THIS ticket, and a terminal ticket cannot accept new sub-task
+        # placement. Only fires when sub_task is EXPLICITLY supplied with a
+        # non-null value (a STAFF self-completion never touches it; a detach
+        # to NULL is always allowed). The ticket comes from the VIEW via
+        # serializer context, never from caller input.
+        if attrs.get("sub_task") is not None and "sub_task" in attrs:
+            ticket = self.context.get("ticket")
+            sub_task = attrs["sub_task"]
+            if ticket is not None:
+                if sub_task.ticket_id != ticket.id:
+                    raise serializers.ValidationError(
+                        {"sub_task": "Sub-task does not belong to this ticket."},
+                        code="sub_task_ticket_mismatch",
+                    )
+                if ticket.status in TERMINAL_TICKET_STATUSES:
+                    raise serializers.ValidationError(
+                        {
+                            "sub_task": (
+                                "This ticket is in a terminal status; "
+                                "assignments cannot be placed into a sub-task."
+                            )
+                        },
+                        code="sub_task_ticket_terminal",
+                    )
         # Resolve the post-write status to validate completion evidence.
         new_status = attrs.get(
             "slot_status",
@@ -394,7 +428,10 @@ class TicketStaffAssignmentListCreateView(generics.ListCreateAPIView):
                 "scheduled_end_at",
                 "time_window_label",
                 "assignment_note",
+                # Sprint 4 — a slot may be created directly inside a SubTask.
+                "sub_task",
             ),
+            context={"ticket": ticket},
         )
         slot_ser.is_valid(raise_exception=True)
 
@@ -473,6 +510,7 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
             data=request.data,
             partial=True,
             allowed_fields=allowed,
+            context={"ticket": ticket},
         )
         ser.is_valid(raise_exception=True)
 
@@ -507,6 +545,18 @@ class TicketStaffAssignmentDetailView(generics.GenericAPIView):
             send_slot_unable_to_complete_email(
                 ticket, updated, actor=request.user
             )
+
+        # Sprint 4 — sub-task auto-complete roll-up. Fires ONLY on a genuine
+        # transition INTO COMPLETED (the prev != COMPLETED edge), so a
+        # re-PATCH of an already-COMPLETED slot does not re-trigger it. The
+        # helper no-ops unless the ticket opted in and every sub-task (plus
+        # all loose work) is done; a failed transition is logged inside the
+        # helper and never blocks this slot completion (best-effort).
+        if (
+            new_status == StaffAssignmentSlotStatus.COMPLETED
+            and prev_status != StaffAssignmentSlotStatus.COMPLETED
+        ):
+            maybe_auto_complete_ticket_on_subtasks(ticket, request.user)
 
         return Response(_TicketStaffAssignmentSerializer(updated).data)
 

@@ -67,6 +67,7 @@ from planned_work.models import (
 )
 from tickets.models import (
     StaffAssignmentRequest,
+    SubTask,
     TicketAttachment,
     TicketManagerAssignment,
     TicketMessage,
@@ -655,6 +656,10 @@ _TSA_TRACKED_FIELDS = (
     "completed_at",
     "completed_by_id",
     "unable_to_complete_reason",
+    # Sprint 4 — `sub_task` is now a manager-writable PATCH field; track its
+    # FK id (JSON-safe via serialize_value, like completed_by_id) so a
+    # re-placement / detach lands as a TicketStaffAssignment UPDATE row.
+    "sub_task_id",
 )
 
 
@@ -880,6 +885,14 @@ def _connect():
         # registration would double-write the lifecycle fact.
         TicketMessage,
         TicketAttachment,
+        # Sprint 4 — sub-tasks. Editable fields (title / description /
+        # ordering) produce meaningful UPDATE diffs, so the full CRUD trio
+        # is the right shape: CREATE / UPDATE / DELETE each emit one
+        # AuditLog row with automatic field diffing. (The parent Ticket
+        # stays unregistered — its CREATE/DELETE audit is hand-written in
+        # tickets/views.py and the auto_complete_on_subtasks flip writes its
+        # own explicit row; no double-write.)
+        SubTask,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")

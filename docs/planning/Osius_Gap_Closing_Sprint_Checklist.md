@@ -69,11 +69,11 @@ Re-host the permission editor (role + per-building access + the tri-state inheri
 
 ### Sprint 4 — Sub-tasks (backend)
 A **SubTask** = a **named work unit** under a ticket, on **all tickets**, layered on the existing dated multi-slot assignment (don't rewrite it).
-- [ ] `SubTask` model: FK to ticket, `title`, `ordering`, `status`, timestamps; carries the occurrence link when spawned from recurrence.
-- [ ] Nullable `sub_task` FK on `TicketStaffAssignment` (slots with `null` = the ticket's default un-split work — back-compat).
-- [ ] **Auto-complete rule:** default = a manager (SA/CA/BM) confirms ticket completion; **PA/SA can set a per-ticket `auto_complete_on_subtasks` flag** — when set, the ticket auto-completes once all its sub-tasks are done. (Sub-tasks are **not** priced separately; billing stays per-occurrence.)
-- [ ] Completion roll-up: a sub-task is done when its assignments are done (note/photo already enforced per assignment); ticket completion per the rule above.
-- [ ] Audit coverage for SubTask CRUD + the flag; tests; PR.
+- [x] `SubTask` model: FK to ticket, `title`, `description`, `ordering`, `created_by`, timestamps; done-state is the computed `is_done()` (>=1 assignment, all COMPLETED). (Occurrence link is deferred to the recurrence integration — out of this sprint's locked design.)
+- [x] Nullable `sub_task` FK on `TicketStaffAssignment` (slots with `null` = the ticket's default un-split work — back-compat; `on_delete=SET_NULL` so deleting a sub-task never destroys an assignment or its evidence).
+- [x] **Auto-complete rule:** default = a manager (SA/CA/BM) confirms ticket completion; **PA/SA set a per-ticket `auto_complete_on_subtasks` flag** — when set, completing the final slot auto-advances the ticket IN_PROGRESS → WAITING_MANAGER_REVIEW. (Sub-tasks are **not** priced separately.)
+- [x] Completion roll-up: a sub-task is done when its assignments are all COMPLETED (note/photo already enforced per assignment); the ticket advances per the rule above (best-effort, vacuous-truth guarded, loose-work guarded).
+- [x] Audit coverage for SubTask CRUD (full-CRUD trio) + an explicit AuditLog row for the flag flip; tests; PR.
 
 ### Sprint 5 — Sub-tasks (frontend)
 - [ ] Sub-task section on the ticket detail (all tickets): add named sub-tasks; under each, **time-windowed staff assignments** (reuse the slot picker) so one sub-task can be Ahmet 09:00 / Mehmet 12:00 / Ahmet 16:00; per-assignment completion state.
