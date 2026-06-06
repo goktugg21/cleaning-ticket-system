@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -195,11 +195,136 @@ class CustomerUserListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         customer = self._get_customer()
-        return (
+        AR = CustomerUserBuildingAccess.AccessRole
+        qs = (
             CustomerUserMembership.objects.filter(customer=customer)
             .select_related("user")
-            .order_by("-created_at")
         )
+
+        params = self.request.query_params
+
+        # ?building_id=<int> — members with an active CUBA row for that
+        # building, OR flag-CCAs (company-wide, span ALL the customer's
+        # buildings). A non-int value yields a stable 400 in `list()`;
+        # here we simply skip when absent/blank and treat a bad int as
+        # "no rows" so the queryset itself never raises.
+        building_id_raw = params.get("building_id")
+        if building_id_raw not in (None, ""):
+            try:
+                bid = int(building_id_raw)
+            except (TypeError, ValueError):
+                bid = None
+            if bid is None:
+                qs = qs.none()
+            else:
+                qs = qs.annotate(
+                    _has_bld=Exists(
+                        CustomerUserBuildingAccess.objects.filter(
+                            membership_id=OuterRef("pk"),
+                            is_active=True,
+                            building_id=bid,
+                        )
+                    )
+                ).filter(Q(is_company_admin=True) | Q(_has_bld=True))
+
+        # ?access_role=<effective role> — the SAME flag-aware filter as
+        # CustomerEmployeesView: effective-CCA = membership flag OR an
+        # active CCA CUBA row; LM/CU exclude flag-CCAs. An unknown value
+        # yields `.none()` (the `list()` override pre-validates and 400s
+        # before we get here, but `.none()` keeps the queryset honest if
+        # called directly).
+        access_role_raw = params.get("access_role")
+        if access_role_raw not in (None, ""):
+            qs = qs.annotate(
+                _has_cca=Exists(
+                    CustomerUserBuildingAccess.objects.filter(
+                        membership_id=OuterRef("pk"),
+                        is_active=True,
+                        access_role=AR.CUSTOMER_COMPANY_ADMIN,
+                    )
+                ),
+                _has_clm=Exists(
+                    CustomerUserBuildingAccess.objects.filter(
+                        membership_id=OuterRef("pk"),
+                        is_active=True,
+                        access_role=AR.CUSTOMER_LOCATION_MANAGER,
+                    )
+                ),
+                _has_cu=Exists(
+                    CustomerUserBuildingAccess.objects.filter(
+                        membership_id=OuterRef("pk"),
+                        is_active=True,
+                        access_role=AR.CUSTOMER_USER,
+                    )
+                ),
+            )
+            if access_role_raw == AR.CUSTOMER_COMPANY_ADMIN:
+                qs = qs.filter(Q(is_company_admin=True) | Q(_has_cca=True))
+            elif access_role_raw == AR.CUSTOMER_LOCATION_MANAGER:
+                qs = qs.filter(
+                    _has_clm=True, _has_cca=False, is_company_admin=False
+                )
+            elif access_role_raw == AR.CUSTOMER_USER:
+                qs = qs.filter(
+                    _has_cu=True,
+                    _has_clm=False,
+                    _has_cca=False,
+                    is_company_admin=False,
+                )
+            else:
+                qs = qs.none()
+
+        # Ordering: `-created_at` is preserved as the stable default. The
+        # Exists annotations above are on the membership pk so they do not
+        # fan-out rows, but `.distinct()` is kept as a guard.
+        return qs.order_by("-created_at").distinct()
+
+    def _validate_access_role_param(self):
+        """Return an early 400 Response for an out-of-enum ?access_role=,
+        else None. Mirrors CustomerEmployeesView's stable
+        `access_role_invalid` contract."""
+        raw = self.request.query_params.get("access_role")
+        if raw in (None, ""):
+            return None
+        if raw not in CustomerUserBuildingAccess.AccessRole.values:
+            return Response(
+                {
+                    "detail": "Unknown access_role.",
+                    "code": "access_role_invalid",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return None
+
+    def _validate_building_id_param(self):
+        """Return an early 400 Response for a non-int ?building_id=, else
+        None."""
+        raw = self.request.query_params.get("building_id")
+        if raw in (None, ""):
+            return None
+        try:
+            int(raw)
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    "detail": "building_id must be an integer.",
+                    "code": "building_id_invalid",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return None
+
+    def list(self, request, *args, **kwargs):
+        # Validate the optional filters before touching the queryset so an
+        # out-of-enum access_role / non-int building_id returns the stable
+        # 400 code rather than an empty 200.
+        early = self._validate_access_role_param()
+        if early is not None:
+            return early
+        early = self._validate_building_id_param()
+        if early is not None:
+            return early
+        return super().list(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         customer = self._get_customer()
@@ -540,36 +665,28 @@ class CustomerUserAccessListCreateView(generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         membership = self._get_membership()
 
-        # B5 defense-in-depth — POST cannot be used as a CCA-grant
-        # smuggle path. The create endpoint historically ignores
-        # `access_role` in the request body (the row is materialised
-        # at the model default), but we explicitly reject the payload
-        # when a COMPANY_ADMIN actor passes `access_role=CCA` and the
-        # provider Company's policy toggle is False. SA bypasses;
-        # non-COMPANY_ADMIN actors fall through to the existing
-        # "silently ignore body's access_role" behaviour (the
-        # serializer-layer H-7 guard still owns the PATCH grant path).
+        # Single-path CCA — POST cannot be used as a CCA-grant smuggle
+        # path. CUSTOMER_COMPANY_ADMIN is a company-wide status carried
+        # on the membership flag (toggled via /users/<id>/company-admin/),
+        # never a per-building access_role. The create endpoint always
+        # materialises the row at the model default (CUSTOMER_USER), so a
+        # body `access_role` is normally ignored — but we reject ANY
+        # actor (SA included) who passes `access_role=CCA` so the FE gets
+        # the same stable `cca_is_company_wide` 400 it sees on PATCH
+        # (defence-in-depth; the row would never become a CCA regardless).
         payload_access_role = request.data.get("access_role")
-        if (
-            payload_access_role == (
-                CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
-            )
-            and request.user.role == UserRole.COMPANY_ADMIN
-            and not (
-                membership.customer.company
-                .provider_admin_may_manage_customer_company_admins
-            )
+        if payload_access_role == (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
         ):
             return Response(
                 {
                     "detail": (
-                        "Super Admin has disabled Provider Company "
-                        "Admin's ability to grant the Customer Company "
-                        "Admin access role on this provider company."
+                        "Customer Admin is company-wide — use the "
+                        "company-admin toggle."
                     ),
-                    "code": "cca_policy_disabled",
+                    "code": "cca_is_company_wide",
                 },
-                status=status.HTTP_403_FORBIDDEN,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         building_id = request.data.get("building_id")
@@ -743,6 +860,28 @@ class CustomerUserAccessDeleteView(generics.GenericAPIView):
                     "detail": "You cannot edit your own customer access row.",
                 },
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Single-path CCA — a per-building CCA grant is impossible.
+        # CUSTOMER_COMPANY_ADMIN is a company-wide status carried on the
+        # membership flag (toggled via /users/<id>/company-admin/), never
+        # a per-building access_role. Reject the payload for EVERY actor
+        # (SA included) with the stable code so the FE can branch on it.
+        # The serializer's `validate_access_role` enforces the same fact
+        # as defence-in-depth; this view-layer guard guarantees the
+        # top-level `{detail, code}` shape on the wire.
+        if request.data.get("access_role") == (
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+        ):
+            return Response(
+                {
+                    "detail": (
+                        "Customer Admin is company-wide — use the "
+                        "company-admin toggle."
+                    ),
+                    "code": "cca_is_company_wide",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         access = self._get_access(request, customer_id, user_id, building_id)
@@ -967,12 +1106,28 @@ class CustomerEmployeesView(generics.ListAPIView):
         )
 
         access_role, _early = self._access_role_filter()
+        # SoT Addendum A.1 — a company-wide CCA (membership
+        # `is_company_admin=True`) has NO per-building CUBA rows, so the
+        # `_has_cca` Exists annotation is False for them. `is_company_admin`
+        # is a real BooleanField column on the membership rows being
+        # queried, so a plain Q on it composes with no annotation /
+        # migration. The effective-CCA bucket is therefore
+        # "flag OR a legacy active CCA row"; LM/CU explicitly exclude
+        # flag-CCAs so a flag-CCA with a leftover lower row is never
+        # mis-bucketed below their company-wide status.
         if access_role == AR.CUSTOMER_COMPANY_ADMIN:
-            qs = qs.filter(_has_cca=True)
+            qs = qs.filter(Q(is_company_admin=True) | Q(_has_cca=True))
         elif access_role == AR.CUSTOMER_LOCATION_MANAGER:
-            qs = qs.filter(_has_clm=True, _has_cca=False)
+            qs = qs.filter(
+                _has_clm=True, _has_cca=False, is_company_admin=False
+            )
         elif access_role == AR.CUSTOMER_USER:
-            qs = qs.filter(_has_cu=True, _has_clm=False, _has_cca=False)
+            qs = qs.filter(
+                _has_cu=True,
+                _has_clm=False,
+                _has_cca=False,
+                is_company_admin=False,
+            )
 
         return qs.order_by("user__email").distinct()
 

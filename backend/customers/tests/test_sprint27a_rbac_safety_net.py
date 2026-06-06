@@ -3,9 +3,14 @@ Sprint 27A — RBAC / permission / hierarchy safety net (customers app).
 
 This file pins three of the seven Sprint 27A regression tests:
 
-  T-1  test_company_admin_cannot_grant_customer_company_admin_access_role
-  T-2  test_super_admin_can_grant_customer_company_admin_access_role
+  T-1  test_company_admin_cannot_grant_cca_per_building_anymore
+  T-2  test_super_admin_cannot_grant_cca_per_building_anymore
   T-3  test_customer_company_admin_cannot_promote_peer_to_company_admin
+
+  (Single-path CCA rework: T-1/T-2 originally locked "only SA may grant
+  per-building CCA"; SoT A.1 makes CCA a company-wide membership flag, so
+  the per-building grant is now rejected for EVERY actor — see those
+  tests for the `cca_is_company_wide` contract.)
 
 Plus the permission-override / workflow-override conceptual split:
 
@@ -72,9 +77,13 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
     (or when the actor is not SA/COMPANY_ADMIN).
     """
 
-    def test_company_admin_can_grant_cca_when_policy_default_true(self):
-        """B5 default behaviour: COMPANY_ADMIN may grant CCA when the
-        provider Company's policy toggle is True (the default).
+    def test_company_admin_cannot_grant_cca_per_building_anymore(self):
+        """Single-path CCA (SoT A.1) — CUSTOMER_COMPANY_ADMIN is a
+        company-wide membership flag, never a per-building access_role.
+        A per-building CCA grant via PATCH is rejected for EVERY actor,
+        including a policy-on COMPANY_ADMIN, with HTTP 400 + stable code
+        `cca_is_company_wide`. The only path to making a CCA is the
+        company-admin toggle endpoint.
         """
         self.assertTrue(self.company.provider_admin_may_manage_customer_company_admins)
         self.authenticate(self.company_admin)
@@ -86,21 +95,21 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(
-            response.status_code, status.HTTP_200_OK, response.content
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.content
         )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         access = CustomerUserBuildingAccess.objects.get(
             membership__user=self.customer_user,
             membership__customer=self.customer,
             building=self.building,
         )
-        self.assertEqual(access.access_role, CUSTOMER_COMPANY_ADMIN)
+        self.assertEqual(access.access_role, CUSTOMER_USER)
 
     def test_company_admin_cannot_grant_cca_when_policy_disabled(self):
-        """B5 — SA disables the toggle on the provider company. The
-        H-7 leg of `validate_access_role` then rejects with the
-        pre-B5 invariant shape (HTTP 400) and the access row stays
-        unchanged. Matches the canonical doc §5: 'Super Admin can
-        restrict / revoke this provider-admin capability'.
+        """Single-path CCA — with the B5 toggle disabled the per-building
+        CCA grant is still rejected; the reject is now the company-wide
+        guard (`cca_is_company_wide`, 400) rather than the policy guard,
+        because the per-building grant path no longer exists at all.
         """
         self.company.provider_admin_may_manage_customer_company_admins = False
         self.company.save(
@@ -117,10 +126,10 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_400_BAD_REQUEST,
-            f"With policy disabled, Provider COMPANY_ADMIN must not be "
-            f"able to grant CUSTOMER_COMPANY_ADMIN. Got "
+            f"Per-building CCA grant must be rejected. Got "
             f"{response.status_code}: {response.content!r}",
         )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         access = CustomerUserBuildingAccess.objects.get(
             membership__user=self.customer_user,
             membership__customer=self.customer,
@@ -129,15 +138,14 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             access.access_role,
             CUSTOMER_USER,
-            "Access role was unexpectedly mutated despite disabled policy.",
+            "Access role was unexpectedly mutated despite the CCA reject.",
         )
 
-    def test_super_admin_can_grant_customer_company_admin_access_role(self):
-        """T-2: SUPER_ADMIN PATCH → CUSTOMER_COMPANY_ADMIN must
-        succeed regardless of the B5 policy toggle state.
-
-        Locks the positive half of the H-7 invariant: someone has to
-        be able to grant the role; SUPER_ADMIN can always do it.
+    def test_super_admin_cannot_grant_cca_per_building_anymore(self):
+        """Single-path CCA — even SUPER_ADMIN can no longer set a CUBA
+        row's access_role to CUSTOMER_COMPANY_ADMIN. The company-wide
+        status is owned exclusively by the membership flag / company-admin
+        endpoint; the per-building grant returns 400 + `cca_is_company_wide`.
         """
         self.authenticate(self.super_admin)
         response = self.client.patch(
@@ -149,13 +157,17 @@ class CustomerCompanyAdminGrantGuardTests(TenantFixtureMixin, APITestCase):
         )
         self.assertEqual(
             response.status_code,
-            status.HTTP_200_OK,
-            f"SUPER_ADMIN must be able to grant CUSTOMER_COMPANY_ADMIN. "
-            f"Got {response.status_code}: {response.content!r}",
+            status.HTTP_400_BAD_REQUEST,
+            f"Per-building CCA grant must be rejected even for SA. Got "
+            f"{response.status_code}: {response.content!r}",
         )
-        self.assertEqual(
-            response.data["access_role"], CUSTOMER_COMPANY_ADMIN
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
+        access = CustomerUserBuildingAccess.objects.get(
+            membership__user=self.customer_user,
+            membership__customer=self.customer,
+            building=self.building,
         )
+        self.assertEqual(access.access_role, CUSTOMER_USER)
 
     def test_company_admin_can_still_promote_to_customer_location_manager(self):
         """Regression net: the Sprint 27A guard is narrow.

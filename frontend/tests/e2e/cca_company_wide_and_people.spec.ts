@@ -5,21 +5,26 @@ import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
 
 /**
- * SoT Addendum A.1 + A.2 (frontend) — company-wide Customer Company
- * Admin (CCA) + People consolidation page.
+ * SoT Addendum A.1 (frontend) — company-wide Customer Company Admin
+ * (CCA) on the consolidated USERS surface.
  *
- * Covers:
- *   1. The "People" sidebar entry + page render: ONE list with type
- *      badges (Contact / Employee / User), reachable under the customer
- *      sidebar, and a drill-in modal (NOT an accordion).
- *   2. The Users page drill-in replaces the old accordion: a "Manage"
- *      button opens the same modal; the old
- *      `customer-user-row-summary-*` accordion row is gone.
- *   3. Company-admin make → the row collapses to a single company-wide
- *      status; remove → it returns to per-building. Gated on
+ * Ramazan rejected the four-overlapping-pages IA (Users + People +
+ * Employees + Contacts). The decision: USERS is the single
+ * people-with-access surface; the standalone "People" page and the
+ * customer-scoped "Employees" tab are DELETED. This spec asserts the
+ * post-rework state:
+ *   1. The customer-scoped sidebar no longer has the People or
+ *      Employees tabs (`sidebar-customer-people` /
+ *      `sidebar-customer-employees` count 0), while Users / Permissions
+ *      / Contacts survive.
+ *   2. The Users page drill-in modal is the single people-with-access
+ *      surface: a "Manage" button opens the modal (no accordion);
+ *      company-admin make → the access editor collapses to a
+ *      company-wide note; remove → it returns to per-building. Gated on
  *      `actions.can_manage_customer_company_admins` (SUPER_ADMIN here).
- *   4. The Overview → Permissions contract still holds (the People page
- *      is additive and never moves the locked quicklink/stat testids).
+ *   3. The Users access-role + building filters narrow the list.
+ *   4. The Overview → Permissions contract still holds (the locked
+ *      quicklink/stat testids never move).
  *
  * Auth: SUPER_ADMIN so `can_manage_customer_company_admins` is true and
  * the make/remove company-admin controls are present.
@@ -106,7 +111,7 @@ async function resolveFirstMemberUserId(
   return (nonAdmin ?? body.results[0]).user_id;
 }
 
-test("People page renders type badges + opens a drill-in modal", async ({
+test("People + Employees customer-scoped tabs are gone; Users / Permissions / Contacts survive", async ({
   page,
   baseURL,
 }) => {
@@ -118,46 +123,95 @@ test("People page renders type badges + opens a drill-in modal", async ({
   await page.goto(`/admin/customers/${customerId}`);
   await page.waitForLoadState("networkidle");
 
-  // The People sidebar entry is present and navigates to the page.
-  const peopleNav = page.locator("[data-testid='sidebar-customer-people']");
-  await expect(peopleNav).toBeVisible({ timeout: 10_000 });
-  await peopleNav.click();
+  // The customer-scoped sidebar is active (the Users tab proves we are
+  // in customer-scoped mode).
+  await expect(
+    page.locator("[data-testid='sidebar-customer-users']"),
+  ).toBeVisible({ timeout: 10_000 });
 
-  await page.waitForURL(/\/admin\/customers\/\d+\/people$/, {
-    timeout: 10_000,
-  });
+  // The standalone People page tab + the customer-scoped Employees tab
+  // are DELETED — neither appears in the customer-scoped submenu.
+  await expect(
+    page.locator("[data-testid='sidebar-customer-people']"),
+  ).toHaveCount(0);
+  await expect(
+    page.locator("[data-testid='sidebar-customer-employees']"),
+  ).toHaveCount(0);
+
+  // The surviving people/permission surfaces are still present.
+  await expect(
+    page.locator("[data-testid='sidebar-customer-permissions']"),
+  ).toBeVisible();
+  await expect(
+    page.locator("[data-testid='sidebar-customer-contacts']"),
+  ).toBeVisible();
+
+  // The deleted routes redirect to the dashboard (catch-all), not a page.
+  await page.goto(`/admin/customers/${customerId}/people`);
   await expect(
     page.locator("[data-testid='customer-people-page']"),
-  ).toBeVisible();
-  await expect(
-    page.locator("[data-testid='section-customer-people']"),
-  ).toBeVisible();
-
-  // At least one person row with a type badge.
-  const rows = page.locator("[data-testid='customer-person-row']");
-  await expect(rows.first()).toBeVisible({ timeout: 10_000 });
-  await expect(
-    page.locator("[data-testid='customer-person-badge-user']").first(),
-  ).toBeVisible();
-
-  // Drill-in modal opens on Manage (no accordion).
-  await page.locator("[data-testid='customer-person-manage']").first().click();
-  await expect(
-    page.locator("[data-testid='customer-user-manage-modal']"),
-  ).toBeVisible({ timeout: 10_000 });
-  await expect(
-    page.locator("[data-testid='customer-user-company-admin-section']"),
-  ).toBeVisible();
-  // SUPER_ADMIN may manage company admins → the make-button is present
-  // (the chosen member starts as non-admin in the resolver above).
-  await expect(
-    page.locator("[data-testid='customer-user-make-company-admin']"),
-  ).toBeVisible();
-
-  await page.locator("[data-testid='customer-user-manage-close']").click();
-  await expect(
-    page.locator("[data-testid='customer-user-manage-modal']"),
   ).toHaveCount(0);
+  await page.goto(`/admin/customers/${customerId}/employees`);
+  await expect(
+    page.locator("[data-testid='customer-employees-page']"),
+  ).toHaveCount(0);
+});
+
+test("Users filters narrow the list (server-side access-role + building)", async ({
+  page,
+  baseURL,
+}) => {
+  const sa = await apiAs(apiBaseFor(baseURL!), DEMO_USERS.super.email);
+  const customerId = await resolveCustomerId(sa, OSIUS_CUSTOMER_NAME);
+  await sa.dispose();
+
+  await loginAs(page, DEMO_USERS.super);
+  await page.goto(`/admin/customers/${customerId}/users`);
+  await page.waitForLoadState("networkidle");
+
+  await expect(
+    page.locator("[data-testid='customer-users-page']"),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // The filter bar + its three controls are present.
+  await expect(
+    page.locator("[data-testid='customer-users-filter-bar']"),
+  ).toBeVisible();
+  const accessRoleFilter = page.locator(
+    "[data-testid='customer-users-filter-access-role']",
+  );
+  const buildingFilter = page.locator(
+    "[data-testid='customer-users-filter-building']",
+  );
+  await expect(accessRoleFilter).toBeVisible();
+  await expect(buildingFilter).toBeVisible();
+  await expect(
+    page.locator("[data-testid='customer-users-filter-search']"),
+  ).toBeVisible();
+
+  // Baseline: at least one member row renders before filtering.
+  await expect(
+    page.locator("[data-testid='customer-user-row']").first(),
+  ).toBeVisible({ timeout: 10_000 });
+  const baselineCount = await page
+    .locator("[data-testid='customer-user-row']")
+    .count();
+
+  // Filtering by a specific access role re-fetches server-side and the
+  // row count never exceeds the baseline (a narrower or equal set).
+  await accessRoleFilter.selectOption("CUSTOMER_LOCATION_MANAGER");
+  await page.waitForLoadState("networkidle");
+  const filteredCount = await page
+    .locator("[data-testid='customer-user-row']")
+    .count();
+  expect(filteredCount).toBeLessThanOrEqual(baselineCount);
+
+  // Back to All restores the full list.
+  await accessRoleFilter.selectOption("");
+  await page.waitForLoadState("networkidle");
+  await expect(
+    page.locator("[data-testid='customer-user-row']").first(),
+  ).toBeVisible({ timeout: 10_000 });
 });
 
 test("Users page drill-in replaces the accordion + company-admin round-trip", async ({

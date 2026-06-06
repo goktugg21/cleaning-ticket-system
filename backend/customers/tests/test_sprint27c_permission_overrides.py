@@ -383,11 +383,10 @@ class SelfEditGuardTests(TenantFixtureMixin, APITestCase):
 # pre-B5 invariant.
 # ---------------------------------------------------------------------------
 class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
-    def test_company_admin_can_grant_cca_when_policy_default_true(self):
-        # B5 default behaviour: COMPANY_ADMIN may grant CCA. The
-        # `provider_admin_may_manage_customer_company_admins` field defaults
-        # to True on the Company model — confirm and exercise the
-        # default path.
+    def test_company_admin_cannot_grant_cca_per_building(self):
+        # Single-path CCA (SoT A.1): CCA is a company-wide membership
+        # flag, not a per-building access_role. A policy-on COMPANY_ADMIN
+        # per-building grant is rejected with 400 + `cca_is_company_wide`.
         self.company.refresh_from_db()
         self.assertTrue(self.company.provider_admin_may_manage_customer_company_admins)
         self.authenticate(self.company_admin)
@@ -398,12 +397,14 @@ class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
             {"access_role": CUSTOMER_COMPANY_ADMIN},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.data
+        )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
 
     def test_company_admin_cannot_grant_cca_when_policy_disabled(self):
-        # B5 — SA disables the toggle on the provider company. Then
-        # the H-7 leg rejects COMPANY_ADMIN's CCA-grant attempt with
-        # the pre-B5 invariant shape (400).
+        # Single-path CCA: with the B5 toggle disabled the per-building
+        # CCA grant is still rejected by the company-wide guard.
         self.company.provider_admin_may_manage_customer_company_admins = False
         self.company.save(
             update_fields=["provider_admin_may_manage_customer_company_admins"]
@@ -419,9 +420,11 @@ class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(
             response.status_code, status.HTTP_400_BAD_REQUEST, response.data
         )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
 
-    def test_super_admin_always_grants_cca_regardless_of_policy(self):
-        # SUPER_ADMIN bypasses the policy toggle in both directions.
+    def test_super_admin_cannot_grant_cca_per_building_regardless_of_policy(self):
+        # Single-path CCA: even SA cannot grant CCA per-building, in
+        # either policy state.
         for policy_value in (True, False):
             self.company.provider_admin_may_manage_customer_company_admins = (
                 policy_value
@@ -450,9 +453,11 @@ class SprintTwentyASevenGuardStillHoldsTests(TenantFixtureMixin, APITestCase):
             )
             self.assertEqual(
                 response.status_code,
-                status.HTTP_200_OK,
-                f"SA grant blocked while policy={policy_value}: {response.content!r}",
+                status.HTTP_400_BAD_REQUEST,
+                f"SA per-building CCA grant must be rejected while "
+                f"policy={policy_value}: {response.content!r}",
             )
+            self.assertEqual(response.data.get("code"), "cca_is_company_wide")
 
 
 # ---------------------------------------------------------------------------

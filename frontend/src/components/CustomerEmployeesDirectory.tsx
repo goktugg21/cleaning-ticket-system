@@ -23,9 +23,8 @@ import { StatusBadge } from "./StatusBadge";
 /**
  * Shared customer-employees directory.
  *
- * One component, two entry points (see `CustomerEmployeesPage` for the
- * provider-admin variant and `MyEmployeesPage` for the customer-facing
- * variant). It fetches `GET /api/customers/<cid>/employees/`, renders a
+ * Mounted by `MyEmployeesPage` (the customer-facing `/my/employees`
+ * directory). It fetches `GET /api/customers/<cid>/employees/`, renders a
  * read-only table (view-first per the 2026-05-15 stakeholder doc §3),
  * and exposes an access-role filter dropdown.
  *

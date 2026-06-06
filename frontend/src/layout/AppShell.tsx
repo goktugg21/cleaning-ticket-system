@@ -267,29 +267,6 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.customer_submenu.users")}
                   </NavLink>
-                  {/* SoT Addendum A.2 — People consolidation entry. */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/people`}
-                    className={navClass}
-                    data-testid="sidebar-customer-people"
-                  >
-                    <span className="nav-icon">
-                      <Users size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.people")}
-                  </NavLink>
-                  {/* Employees directory — customer-scoped, provider-admin
-                      entry. Same admin-only gate as the Users entry. */}
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/employees`}
-                    className={navClass}
-                    data-testid="sidebar-customer-employees"
-                  >
-                    <span className="nav-icon">
-                      <Contact size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.employees")}
-                  </NavLink>
                   <NavLink
                     to={`/admin/customers/${sidebar.customerId}/permissions`}
                     className={navClass}

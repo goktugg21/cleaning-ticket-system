@@ -48,10 +48,8 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // create flow (`/admin/customers/new`) and as the basics editor
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
-import { CustomerEmployeesPage } from "./pages/admin/customer/CustomerEmployeesPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
-import { CustomerPeoplePage } from "./pages/admin/customer/CustomerPeoplePage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
@@ -382,29 +380,6 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerUsersPage />
-              </AdminRoute>
-            }
-          />
-          {/* SoT Addendum A.2 — People consolidation page. ONE list of
-              the customer's people (Contact / Employee / User) with a
-              drill-in modal. Additive alongside the existing
-              users/employees/contacts routes. */}
-          <Route
-            path="/admin/customers/:id/people"
-            element={
-              <AdminRoute>
-                <CustomerPeoplePage />
-              </AdminRoute>
-            }
-          />
-          {/* Employees directory — provider-admin entry point
-              (customer-scoped). SA / CA only; the customer-scoped
-              sidebar submenu surfaces the nav link. */}
-          <Route
-            path="/admin/customers/:id/employees"
-            element={
-              <AdminRoute>
-                <CustomerEmployeesPage />
               </AdminRoute>
             }
           />

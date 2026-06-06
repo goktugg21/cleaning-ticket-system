@@ -134,19 +134,41 @@ class UserViewSet(viewsets.ModelViewSet):
                     )
                 return Exists(sub)
 
+            def _flag_cca_exists():
+                # SoT Addendum A.1 — a company-wide CCA carries the
+                # `is_company_admin` flag on its CustomerUserMembership and
+                # has ZERO per-building CUBA rows, so `_grant_exists(CCA)`
+                # misses them. This sibling Exists, company-scoped exactly
+                # like `_grant_exists`, finds the flag-CCAs so the effective
+                # CCA bucket includes them and the LM/CU buckets exclude
+                # them.
+                sub = CustomerUserMembership.objects.filter(
+                    user=OuterRef("pk"),
+                    is_company_admin=True,
+                )
+                if scope_company_ids is not None:
+                    sub = sub.filter(customer__company_id__in=scope_company_ids)
+                return Exists(sub)
+
             if requested == AccessRole.CUSTOMER_COMPANY_ADMIN:
                 base = base.filter(
-                    _grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN)
+                    Q(_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN))
+                    | Q(_flag_cca_exists())
                 )
             elif requested == AccessRole.CUSTOMER_LOCATION_MANAGER:
-                base = base.filter(
-                    _grant_exists(AccessRole.CUSTOMER_LOCATION_MANAGER)
-                ).filter(~_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN))
+                base = (
+                    base.filter(
+                        _grant_exists(AccessRole.CUSTOMER_LOCATION_MANAGER)
+                    )
+                    .filter(~Q(_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN)))
+                    .filter(~Q(_flag_cca_exists()))
+                )
             elif requested == AccessRole.CUSTOMER_USER:
                 base = (
                     base.filter(_grant_exists(AccessRole.CUSTOMER_USER))
-                    .filter(~_grant_exists(AccessRole.CUSTOMER_LOCATION_MANAGER))
-                    .filter(~_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN))
+                    .filter(~Q(_grant_exists(AccessRole.CUSTOMER_LOCATION_MANAGER)))
+                    .filter(~Q(_grant_exists(AccessRole.CUSTOMER_COMPANY_ADMIN)))
+                    .filter(~Q(_flag_cca_exists()))
                 )
             else:
                 # Unknown value -> no match (mirror ?role=).

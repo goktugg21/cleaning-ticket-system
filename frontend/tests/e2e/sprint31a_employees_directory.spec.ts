@@ -117,42 +117,39 @@ test.describe("Employees directory", () => {
     ).toHaveCount(0);
   });
 
-  test("super admin edits a customer employee's access role", async ({
+  test("super admin edits a customer user's per-building access via the Users drill-in modal", async ({
     page,
   }) => {
+    // The customer-scoped Employees tab was deleted in the CCA / people
+    // consolidation rework: USERS is now the single people-with-access
+    // surface, and per-building access editing lives in the Users
+    // drill-in modal (the reused ContactPermissionsPanel). Navigate
+    // straight to the Users sub-page to avoid a fragile dependency on
+    // the customers-list link ordering.
     await loginAs(page, DEMO_USERS.super);
-
-    // Enter a customer scope (a seeded customer always exists), then the
-    // Employees submenu entry. Navigating straight to the overview avoids
-    // a fragile dependency on the customers-list link ordering.
-    await page.goto("/admin/customers/1");
+    await page.goto("/admin/customers/1/users");
     await page.waitForURL((url) =>
-      /^\/admin\/customers\/\d+/.test(url.pathname),
-    );
-
-    const employeesEntry = page.locator(
-      '[data-testid="sidebar-customer-employees"]',
-    );
-    await expect(employeesEntry).toBeVisible({ timeout: 10_000 });
-    await employeesEntry.click();
-
-    await page.waitForURL((url) =>
-      /^\/admin\/customers\/\d+\/employees$/.test(url.pathname),
+      /^\/admin\/customers\/\d+\/users$/.test(url.pathname),
     );
     await expect(
-      page.locator('[data-testid="customer-employees-page"]'),
+      page.locator('[data-testid="customer-users-page"]'),
     ).toBeVisible({ timeout: 10_000 });
 
-    // SA gets the edit affordance. If the customer has at least one
-    // employee, the affordance is present and opens the modal.
-    const editButton = page
-      .locator('[data-testid="customer-employee-edit-access-role"]')
+    // SA gets the Manage affordance on each member row. If the customer
+    // has at least one member, the drill-in modal opens and exposes the
+    // per-building access editor (ContactPermissionsPanel) for a
+    // non-company-admin user.
+    const manageButton = page
+      .locator('[data-testid="customer-user-manage-button"]')
       .first();
-    if ((await editButton.count()) > 0) {
-      await editButton.click();
+    if ((await manageButton.count()) > 0) {
+      await manageButton.click();
       await expect(
-        page.locator('[data-testid="customer-employee-edit-modal"]'),
+        page.locator('[data-testid="customer-user-manage-modal"]'),
       ).toBeVisible({ timeout: 10_000 });
+      await expect(
+        page.locator('[data-testid="customer-user-company-admin-section"]'),
+      ).toBeVisible();
     }
   });
 
