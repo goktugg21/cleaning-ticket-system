@@ -137,3 +137,65 @@ def message_type_visible_to_user(user, message_type):
         TicketMessageType.PUBLIC_REPLY,
         TicketMessageType.STAFF_COMPLETION,
     )
+
+
+def filter_messages_visible_to(qs, user):
+    """M1 B2 — the SINGLE chokepoint for TicketMessage read visibility.
+
+    Every read / count / search path for TicketMessage must route through
+    this helper so the rule cannot drift or be missed at one site. It AND-s
+    two layers; each only ever NARROWS the queryset (it never widens):
+
+      (a) B7 role / is_hidden filtering — byte-equivalent to the pre-B2
+          inline `TicketMessageListCreateView.get_queryset` filter:
+            * provider management (SA / CA / BM) — every tier including
+              INTERNAL_NOTE and is_hidden moderation rows.
+            * STAFF — every tier EXCEPT INTERNAL_NOTE; is_hidden dropped.
+            * customer-side / other — PUBLIC_REPLY + STAFF_COMPLETION only;
+              is_hidden dropped.
+      (b) M1 B2 RESTRICTED party filter — applied UNCONDITIONALLY so it
+          binds EVERY role, provider management included: a RESTRICTED
+          message is visible iff the viewer is the author OR a directed_to
+          member. NORMAL messages are unaffected. A non-party admin can
+          neither read nor infer a RESTRICTED message anywhere this
+          chokepoint is used.
+
+    A userless / unauthenticated caller (defensive — these endpoints are
+    auth-gated) is treated as a non-party: layer (a) treats them as
+    non-management customer-side, and layer (b) leaves only NORMAL rows.
+    """
+    from django.db.models import Exists, OuterRef, Q
+
+    from .models import (
+        TicketMessage,
+        TicketMessageType,
+        TicketMessageVisibility,
+    )
+
+    user_id = getattr(user, "id", None)
+
+    # (a) B7 role / is_hidden — only management sees every tier + hidden rows.
+    if not is_provider_management_role(user):
+        qs = qs.filter(is_hidden=False)
+        qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
+        if not is_staff_role(user):
+            qs = qs.exclude(message_type=TicketMessageType.STAFF_OPERATIONAL)
+
+    # (b) RESTRICTED party filter — unconditional. Uses Exists (a correlated
+    # subquery, NOT a directed_to join) so there is no row fan-out / duplicate
+    # rows, and never has to .distinct().
+    if user_id is None:
+        return qs.filter(visibility_mode=TicketMessageVisibility.NORMAL)
+
+    through = TicketMessage.directed_to.through
+    return qs.annotate(
+        _directed_to_me=Exists(
+            through.objects.filter(
+                ticketmessage_id=OuterRef("pk"), user_id=user_id
+            )
+        )
+    ).filter(
+        Q(visibility_mode=TicketMessageVisibility.NORMAL)
+        | Q(author_id=user_id)
+        | Q(_directed_to_me=True)
+    )

@@ -476,3 +476,77 @@ class NotificationFeedTests(_MsgNotifFixture):
             resp.status_code,
             (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN),
         )
+
+
+# ---------------------------------------------------------------------------
+# M1 B2 — RESTRICTED feed/deep-link no-inference + Customer Company Admin
+# ---------------------------------------------------------------------------
+class RestrictedFeedAndCCATests(_MsgNotifFixture):
+    def _make_cca(self):
+        """A Customer Company Admin: role CUSTOMER_USER + a company-wide
+        membership flag, with NO per-building access row (company-wide
+        scope). Created per-test so the shared fixture's audience
+        assertions are not disturbed."""
+        cca = self.make_user("cca-b2@example.com", UserRole.CUSTOMER_USER)
+        CustomerUserMembership.objects.create(
+            user=cca, customer=self.customer, is_company_admin=True
+        )
+        return cca
+
+    def test_restricted_message_gives_non_party_admin_no_row_and_no_read(self):
+        resp = self._post_message(
+            self.manager,
+            message_type=TicketMessageType.PUBLIC_REPLY,
+            visibility_mode=TicketMessageVisibility.RESTRICTED,
+            directed_to=[self.customer_user.id],
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
+        msg_id = resp.data["id"]
+
+        # company_admin is provider-mgmt + in scope, but not author/directed:
+        # no notification row exists (so no deep-link)...
+        self.assertEqual(
+            Notification.objects.filter(recipient=self.company_admin).count(), 0
+        )
+        # ...and navigating to the thread does not reveal the message.
+        self.authenticate(self.company_admin)
+        thread = self.client.get(self._messages_url())
+        self.assertEqual(thread.status_code, status.HTTP_200_OK)
+        ids = {m["id"] for m in thread.data.get("results", thread.data)}
+        self.assertNotIn(msg_id, ids)
+
+    def test_cca_is_notified_and_can_read_normal_customer_visible_message(self):
+        cca = self._make_cca()
+        resp = self._post_message(
+            self.manager, message_type=TicketMessageType.PUBLIC_REPLY
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
+        msg_id = resp.data["id"]
+
+        # The "even admins" rule does NOT over-redact: a NORMAL customer-
+        # visible message reaches a customer company admin in their org.
+        self.assertIn(cca.id, self._recipient_ids())
+        self.authenticate(cca)
+        thread = self.client.get(self._messages_url())
+        self.assertEqual(thread.status_code, status.HTTP_200_OK)
+        ids = {m["id"] for m in thread.data.get("results", thread.data)}
+        self.assertIn(msg_id, ids)
+
+    def test_cca_non_party_cannot_see_or_be_notified_for_restricted(self):
+        cca = self._make_cca()
+        resp = self._post_message(
+            self.manager,
+            message_type=TicketMessageType.PUBLIC_REPLY,
+            visibility_mode=TicketMessageVisibility.RESTRICTED,
+            directed_to=[self.customer_user.id],
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
+        msg_id = resp.data["id"]
+
+        # The "even admins" rule applies to customer company admins too.
+        self.assertNotIn(cca.id, self._recipient_ids())
+        self.authenticate(cca)
+        thread = self.client.get(self._messages_url())
+        self.assertEqual(thread.status_code, status.HTTP_200_OK)
+        ids = {m["id"] for m in thread.data.get("results", thread.data)}
+        self.assertNotIn(msg_id, ids)

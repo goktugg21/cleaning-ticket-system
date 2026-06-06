@@ -40,7 +40,12 @@ from .models import (
     TicketStatusHistory,
 )
 from buildings.models import BuildingManagerAssignment
-from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
+from .permissions import (
+    CanPostMessage,
+    CanViewTicket,
+    filter_messages_visible_to,
+    user_has_scope_for_ticket,
+)
 from .state_machine import TransitionError, apply_transition
 from .serializers import (
     TicketAssignableManagerSerializer,
@@ -1167,29 +1172,12 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
             .select_related("author")
             .prefetch_related("directed_to")
         )
-        user = self.request.user
-        # B7 — four-tier note visibility. The three tiers below each
-        # exclude a specific subset of `message_type` values:
-        #
-        #   * Provider management (SA/COMPANY_ADMIN/BM): sees every
-        #     tier including INTERNAL_NOTE (PROVIDER_INTERNAL).
-        #   * STAFF: sees PUBLIC_REPLY + STAFF_OPERATIONAL +
-        #     STAFF_COMPLETION. Hidden from INTERNAL_NOTE
-        #     (PROVIDER_INTERNAL) — STAFF must never see commercial /
-        #     management notes per §9.2 of the canonical doc.
-        #   * Customer-side: sees PUBLIC_REPLY + STAFF_COMPLETION.
-        #     Hidden from INTERNAL_NOTE and STAFF_OPERATIONAL.
-        #
-        # `is_hidden=True` is a moderation flag; only provider
-        # management retains visibility on hidden rows.
-        if not is_provider_management_role(user):
-            qs = qs.filter(is_hidden=False)
-            qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
-            if not is_staff_role(user):
-                # Customer-side: also exclude STAFF_OPERATIONAL.
-                qs = qs.exclude(
-                    message_type=TicketMessageType.STAFF_OPERATIONAL
-                )
+        # M1 B2 — route through the SINGLE visibility chokepoint. It layers
+        # the (unchanged) B7 role/is_hidden four-tier filter AND the M1 B2
+        # RESTRICTED party filter (visible iff author or directed_to member,
+        # for EVERY role including provider management). See
+        # tickets.permissions.filter_messages_visible_to.
+        qs = filter_messages_visible_to(qs, self.request.user)
         return qs.order_by("created_at")
 
     def get_serializer_context(self):
