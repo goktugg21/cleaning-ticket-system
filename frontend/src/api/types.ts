@@ -401,6 +401,16 @@ export interface StaffAssignmentRequest {
   reviewer_note: string;
 }
 
+// M1 — message visibility mode (B1 model field; B2 enforces RESTRICTED on
+// the read side). NORMAL = visible to the message_type audience; RESTRICTED
+// = only the author + directed_to users.
+export type TicketMessageVisibility = "NORMAL" | "RESTRICTED";
+
+export interface DirectedRecipientLabel {
+  id: number;
+  full_name: string;
+}
+
 export interface TicketMessage {
   id: number;
   ticket: number;
@@ -408,8 +418,50 @@ export interface TicketMessage {
   author_email: string;
   message: string;
   message_type: TicketMessageType;
+  // M1 B1/B3 — attention targets (writable ids) + read-only label detail +
+  // visibility mode. directed_to_detail is for rendering the "-> directed
+  // to X" chip; visibility_mode drives the "Private" badge.
+  directed_to: number[];
+  directed_to_detail: DirectedRecipientLabel[];
+  visibility_mode: TicketMessageVisibility;
   is_hidden: boolean;
   created_at: string;
+}
+
+// M1 B3 — a valid directed_to target for the composer picker, from
+// GET /api/tickets/<id>/message-recipients/. `side` groups the picker.
+export interface MessageRecipient {
+  id: number;
+  full_name: string;
+  email: string;
+  side: "provider" | "staff" | "customer";
+}
+
+// M1 — in-app notification (mirrors notifications.serializers.
+// NotificationSerializer). Deep-link is derived from `ticket` (-> the
+// ticket detail) or `extra_work` (-> EW detail, wired for B4).
+export interface Notification {
+  id: number;
+  event_type: string;
+  is_directed: boolean;
+  summary: string;
+  ticket: number | null;
+  ticket_no: string | null;
+  extra_work: number | null;
+  actor_id: number | null;
+  actor_name: string | null;
+  actor_email: string | null;
+  read_at: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: Notification[];
+  unread_count: number;
 }
 
 

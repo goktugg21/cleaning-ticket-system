@@ -23,6 +23,7 @@ import { RecurringJobDetailPage } from "./pages/planned-work/RecurringJobDetailP
 import { RecurringJobFormPage } from "./pages/planned-work/RecurringJobFormPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MyEmployeesPage } from "./pages/MyEmployeesPage";
+import { NotificationsPage } from "./pages/NotificationsPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
@@ -148,6 +149,17 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <SettingsPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* M1 B3 — in-app notifications page. Caller-scoped (the feed is
+              recipient=request.user only), so a plain ProtectedRoute is
+              sufficient; the topbar bell is the primary entry. */}
+          <Route
+            path="/notifications"
+            element={
+              <ProtectedRoute>
+                <NotificationsPage />
               </ProtectedRoute>
             }
           />

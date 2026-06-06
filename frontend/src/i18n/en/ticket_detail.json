@@ -237,6 +237,16 @@
   "schedule.error_terminal": "This ticket is finished and can no longer be scheduled.",
   "schedule.error_forbidden_scope": "You do not have permission to schedule this ticket.",
   "schedule.error_forbidden_role": "Your role cannot schedule tickets.",
-  "schedule.error_invalid": "The schedule is invalid."
+  "schedule.error_invalid": "The schedule is invalid.",
+  "directed.label": "Notify specific people",
+  "directed.side_provider": "manager",
+  "directed.side_staff": "staff",
+  "directed.side_customer": "customer",
+  "directed.private_label": "Private (only the selected people can see this)",
+  "directed.private_on_hint": "Only you and the people you select can see this message.",
+  "directed.private_off_hint": "Everyone who can see this ticket will see this message; the selected people also get a notification.",
+  "directed.private_disabled_hint": "Select at least one person to make this message private.",
+  "directed.private_badge": "Private",
+  "directed.bubble_prefix": "Directed to:"
 }
 

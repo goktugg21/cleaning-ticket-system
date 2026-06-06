@@ -23,6 +23,7 @@ import {
   listCustomerContacts,
   listStaffAssignmentRequests,
 } from "../api/admin";
+import { getMessageRecipients } from "../api/notifications";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
@@ -30,6 +31,7 @@ import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
 import type {
   AssignableManager,
   Contact,
+  MessageRecipient,
   PaginatedResponse,
   StaffCompletionRoute,
   TicketAttachment,
@@ -418,6 +420,63 @@ export function TicketDetailPage() {
     ? messageType
     : composerTiers[0] ?? "PUBLIC_REPLY";
   const [sendingMessage, setSendingMessage] = useState(false);
+
+  // M1 B3 — directed_to ("notify specific people") + RESTRICTED ("private")
+  // compose state. The valid recipient set depends on the active tier, so we
+  // refetch it whenever the effective tier changes and prune any now-invalid
+  // selection. `effectivePrivate` mirrors the B1 restricted_requires_target
+  // rule (RESTRICTED requires >=1 target) so the UI never sends a black-hole
+  // message.
+  const [directedTo, setDirectedTo] = useState<number[]>([]);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [recipients, setRecipients] = useState<MessageRecipient[]>([]);
+  const effectivePrivate = isPrivate && directedTo.length > 0;
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    const loadRecipients = async () => {
+      try {
+        const data = await getMessageRecipients(id, effectiveMessageType);
+        if (cancelled) return;
+        setRecipients(data);
+        // Drop any selected target that is not valid for the new tier
+        // (e.g. switching PUBLIC_REPLY -> INTERNAL_NOTE removes customers).
+        const validIds = new Set(data.map((recipient) => recipient.id));
+        setDirectedTo((prev) => prev.filter((rid) => validIds.has(rid)));
+      } catch {
+        // A failed refetch must not strand a now-invalid, invisible
+        // selection (the chip picker hides when recipients is empty). Clear
+        // the selection + private intent so the next send can't carry a
+        // target the user can no longer see/deselect.
+        if (!cancelled) {
+          setRecipients([]);
+          setDirectedTo([]);
+          setIsPrivate(false);
+        }
+      }
+    };
+    loadRecipients();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, effectiveMessageType]);
+
+  const toggleDirected = useCallback(
+    (recipientId: number) => {
+      const next = directedTo.includes(recipientId)
+        ? directedTo.filter((rid) => rid !== recipientId)
+        : [...directedTo, recipientId];
+      setDirectedTo(next);
+      // RESTRICTED is only meaningful with >=1 target; clearing the last
+      // target drops the private intent so re-selecting someone later does
+      // not silently re-arm "Private".
+      if (next.length === 0) {
+        setIsPrivate(false);
+      }
+    },
+    [directedTo],
+  );
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentHidden, setAttachmentHidden] = useState(false);
@@ -1010,9 +1069,18 @@ export function TicketDetailPage() {
       await api.post(`/tickets/${id}/messages/`, {
         message: message.trim(),
         message_type: effectiveMessageType,
+        // M1 B3 — attention targets + visibility. effectivePrivate guards
+        // the B1 restricted_requires_target rule client-side (RESTRICTED is
+        // only sent with >=1 target). The picker only offers valid targets,
+        // so directed_to_not_visible / too_many_directed_recipients cannot
+        // be reached from the UI; getApiError surfaces them if they ever do.
+        directed_to: directedTo,
+        visibility_mode: effectivePrivate ? "RESTRICTED" : "NORMAL",
       });
       setMessage("");
       setMessageType(composerTiers[0] ?? "PUBLIC_REPLY");
+      setDirectedTo([]);
+      setIsPrivate(false);
       await loadTicket();
     } catch (err) {
       setError(getApiError(err));
@@ -1341,6 +1409,51 @@ export function TicketDetailPage() {
                 onChange={(event) => setMessage(event.target.value)}
                 required
               />
+              {recipients.length > 0 && (
+                <div className="composer-directed" data-testid="composer-directed">
+                  <div className="composer-directed-label">
+                    {t("directed.label")}
+                  </div>
+                  <div className="composer-directed-chips">
+                    {recipients.map((recipient) => {
+                      const selected = directedTo.includes(recipient.id);
+                      return (
+                        <button
+                          key={recipient.id}
+                          type="button"
+                          className={`directed-chip${
+                            selected ? " directed-chip-selected" : ""
+                          }`}
+                          aria-pressed={selected}
+                          onClick={() => toggleDirected(recipient.id)}
+                        >
+                          {recipient.full_name}
+                          <span className="directed-chip-side">
+                            {t(`directed.side_${recipient.side}`)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <label className="composer-private-toggle">
+                    <input
+                      type="checkbox"
+                      checked={effectivePrivate}
+                      disabled={directedTo.length === 0}
+                      onChange={(event) => setIsPrivate(event.target.checked)}
+                      data-testid="composer-private-toggle"
+                    />
+                    <span>{t("directed.private_label")}</span>
+                  </label>
+                  <p className="muted small composer-directed-hint">
+                    {directedTo.length === 0
+                      ? t("directed.private_disabled_hint")
+                      : effectivePrivate
+                        ? t("directed.private_on_hint")
+                        : t("directed.private_off_hint")}
+                  </p>
+                </div>
+              )}
               <div className="notes-actions">
                 <div className="notes-tools">
                   {composerTiers.length > 1 && (
@@ -1418,7 +1531,27 @@ export function TicketDetailPage() {
                       >
                         {t(NOTE_TIER_BADGE_KEY[item.message_type] ?? "tag_public")}
                       </span>
+                      {item.visibility_mode === "RESTRICTED" && (
+                        <span
+                          className="note-bubble-private"
+                          data-testid="note-private"
+                        >
+                          {t("directed.private_badge")}
+                        </span>
+                      )}
                     </div>
+                    {item.directed_to_detail &&
+                      item.directed_to_detail.length > 0 && (
+                        <div
+                          className="note-bubble-directed"
+                          data-testid="note-directed"
+                        >
+                          {t("directed.bubble_prefix")}{" "}
+                          {item.directed_to_detail
+                            .map((target) => target.full_name)
+                            .join(", ")}
+                        </div>
+                      )}
                     <div className="note-bubble-text">{item.message}</div>
                   </div>
                 </div>

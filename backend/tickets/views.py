@@ -26,6 +26,7 @@ from notifications.services import (
     send_ticket_created_email,
     send_ticket_status_changed_email,
     send_ticket_unassigned_email,
+    ticket_message_audience,
 )
 
 from .filters import TicketFilter
@@ -44,6 +45,7 @@ from .permissions import (
     CanPostMessage,
     CanViewTicket,
     filter_messages_visible_to,
+    message_type_visible_to_user,
     user_has_scope_for_ticket,
 )
 from .state_machine import TransitionError, apply_transition
@@ -1232,6 +1234,76 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
 
         return message
 
+
+def _recipient_side(user):
+    """Bucket a directed-recipient candidate so the picker can group/label
+    them: provider management, field staff, or customer-side."""
+    if is_provider_management_role(user):
+        return "provider"
+    if getattr(user, "role", None) == UserRole.STAFF:
+        return "staff"
+    return "customer"
+
+
+class TicketMessageRecipientsView(generics.GenericAPIView):
+    """M1 B3 — directed-recipients source for the composer's "notify
+    specific people" picker.
+
+    GET /api/tickets/<ticket_id>/message-recipients/?message_type=<tier>
+
+    Returns the users who are VALID directed_to targets for that tier on
+    this ticket = the B1 read-visible audience
+    (notifications.services.ticket_message_audience, which reuses the B1
+    resolvers) INTERSECTED with message_type_visible_to_user AND
+    user_has_scope_for_ticket, MINUS the caller. Every returned user
+    therefore passes the B1 directed_to validation, so the picker can never
+    offer a target the POST would 400 (esp. INTERNAL_NOTE -> no customer;
+    STAFF_OPERATIONAL -> no customer; out-of-scope users excluded).
+
+    Scope-gated exactly like the messages endpoint (same permission classes
+    + scope_tickets_for guard): a caller without ticket access gets 404.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive, CanPostMessage]
+
+    def _get_ticket(self):
+        ticket = get_object_or_404(Ticket, pk=self.kwargs["ticket_id"])
+        if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
+            raise Http404("Ticket not found.")
+        self.check_object_permissions(self.request, ticket)
+        return ticket
+
+    def get(self, request, ticket_id):
+        ticket = self._get_ticket()
+        message_type = request.query_params.get(
+            "message_type", TicketMessageType.PUBLIC_REPLY
+        )
+        if message_type not in set(TicketMessageType.values):
+            return Response(
+                {"detail": "Invalid message_type.", "code": "invalid_message_type"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        results = []
+        for user in ticket_message_audience(ticket, message_type):
+            if user.id == request.user.id:
+                continue
+            # Belt-and-suspenders: the audience is already type-scoped, but
+            # intersect with the exact predicates the B1 serializer validates
+            # so the endpoint output can never drift wider than valid.
+            if not message_type_visible_to_user(user, message_type):
+                continue
+            if not user_has_scope_for_ticket(user, ticket):
+                continue
+            results.append(
+                {
+                    "id": user.id,
+                    "full_name": user.full_name or user.email.split("@")[0],
+                    "email": user.email,
+                    "side": _recipient_side(user),
+                }
+            )
+        return Response({"results": results})
 
 
 class TicketAttachmentListCreateView(generics.ListCreateAPIView):

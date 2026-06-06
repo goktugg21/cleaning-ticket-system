@@ -5,6 +5,7 @@ from .views import (
     TicketAttachmentDownloadView,
     TicketAttachmentListCreateView,
     TicketMessageListCreateView,
+    TicketMessageRecipientsView,
     TicketViewSet,
 )
 from .views_manager_assignments import (
@@ -59,6 +60,12 @@ urlpatterns = [
         "<int:ticket_id>/messages/",
         TicketMessageListCreateView.as_view(),
         name="ticket-messages",
+    ),
+    # M1 B3 — directed-recipients picker source for the composer.
+    path(
+        "<int:ticket_id>/message-recipients/",
+        TicketMessageRecipientsView.as_view(),
+        name="ticket-message-recipients",
     ),
     # Sprint 25A — admin/manager direct staff assignment endpoints.
     # `GET /<id>/assignable-staff/` lives on the viewset as a DRF

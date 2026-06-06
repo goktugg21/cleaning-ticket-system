@@ -37,6 +37,7 @@ __all__ = (
     "send_password_reset_email",
     "send_invitation_email",
     "emit_ticket_message_notifications",
+    "ticket_message_audience",
 )
 
 
@@ -124,6 +125,28 @@ def _ticket_assigned_staff_users(ticket):
         .distinct()
         .order_by("email")
     )
+
+
+def ticket_message_audience(ticket, message_type):
+    """M1 B3 — the NORMAL read-visible audience for a `message_type` on a
+    ticket: the SAME composition `emit_ticket_message_notifications` uses for
+    a NORMAL message (provider-mgmt + assigned-staff + customer-side, branched
+    by tier), built from the SAME B1 resolvers. Returned deduped + active;
+    NOT yet minus-author and NOT yet role/scope filtered — callers layer those
+    on (the message-recipients endpoint intersects with
+    message_type_visible_to_user + user_has_scope_for_ticket so its output is
+    always a subset of the valid directed_to targets the B1 serializer
+    accepts). Kept separate from emit so the B1 emit path is untouched.
+    """
+    audience = list(_ticket_staff_users(ticket))  # provider management
+    if message_type != TicketMessageType.INTERNAL_NOTE:
+        audience.extend(_ticket_assigned_staff_users(ticket))
+    if message_type in (
+        TicketMessageType.PUBLIC_REPLY,
+        TicketMessageType.STAFF_COMPLETION,
+    ):
+        audience.extend(_ticket_customer_users(ticket))
+    return _dedupe_users(audience)
 
 
 def emit_ticket_message_notifications(message, actor=None):

@@ -237,6 +237,16 @@
   "schedule.error_terminal": "Dit ticket is afgerond en kan niet meer worden ingepland.",
   "schedule.error_forbidden_scope": "Je hebt geen rechten om dit ticket in te plannen.",
   "schedule.error_forbidden_role": "Je rol kan tickets niet inplannen.",
-  "schedule.error_invalid": "De planning is ongeldig."
+  "schedule.error_invalid": "De planning is ongeldig.",
+  "directed.label": "Specifieke personen op de hoogte stellen",
+  "directed.side_provider": "beheerder",
+  "directed.side_staff": "medewerker",
+  "directed.side_customer": "klant",
+  "directed.private_label": "Privé (alleen de geselecteerde personen zien dit)",
+  "directed.private_on_hint": "Alleen jij en de personen die je selecteert kunnen dit bericht zien.",
+  "directed.private_off_hint": "Iedereen die dit ticket kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een melding.",
+  "directed.private_disabled_hint": "Selecteer minstens één persoon om dit bericht privé te maken.",
+  "directed.private_badge": "Privé",
+  "directed.bubble_prefix": "Gericht aan:"
 }
 

@@ -1204,7 +1204,21 @@
   "permissions_rollup.custom_other": "Aangepast ({{count}})",
   "permissions_rollup.aria_default": "Permissies volgen de klantstandaard. Klik om te bekijken.",
   "permissions_rollup.aria_custom_one": "1 aangepaste permissie. Klik om te bekijken.",
-  "permissions_rollup.aria_custom_other": "{{count}} aangepaste permissies. Klik om te bekijken."
+  "permissions_rollup.aria_custom_other": "{{count}} aangepaste permissies. Klik om te bekijken.",
+  "notifications.title": "Meldingen",
+  "notifications.eyebrow": "Postvak",
+  "notifications.subtitle": "Berichten en updates die aan jou gericht zijn.",
+  "notifications.loading": "Laden…",
+  "notifications.empty": "Geen meldingen",
+  "notifications.empty_sub": "Je bent helemaal bij.",
+  "notifications.for_you": "voor jou",
+  "notifications.see_all": "Alle meldingen bekijken",
+  "notifications.mark_all_read": "Alles als gelezen markeren",
+  "notifications.bell_aria": "Meldingen",
+  "notifications.bell_aria_unread": "Meldingen, {{count}} ongelezen",
+  "notifications.prev": "Vorige",
+  "notifications.next": "Volgende",
+  "notifications.page_of": "Pagina {{page}} van {{total}}"
 }
 
 

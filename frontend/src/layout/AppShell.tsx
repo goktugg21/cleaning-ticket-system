@@ -40,6 +40,7 @@ import {
 } from "../auth/permissions";
 import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
+import { NotificationBell } from "../components/NotificationBell";
 import { getCompany, getCustomer } from "../api/admin";
 import { getInitials } from "../lib/initials";
 
@@ -553,6 +554,7 @@ export function AppShell({ children }: AppShellProps) {
             </div>
           </div>
           <div className="topbar-right">
+            <NotificationBell />
             <UserMenu />
           </div>
         </header>

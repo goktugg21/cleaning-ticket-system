@@ -1145,6 +1145,14 @@ class TicketMessageSerializer(serializers.ModelSerializer):
         required=False,
         default=list,
     )
+    # M1 B3 — read-only display detail for the directed targets so the
+    # thread can render "-> directed to Serkan" without a second lookup.
+    # Display only: it is a SerializerMethodField on the SAME message rows
+    # the B2 chokepoint already admitted (TicketMessageListCreateView.
+    # get_queryset filters first), so it never widens who can see a
+    # RESTRICTED message — it only names the targets on a message the
+    # viewer is already allowed to read.
+    directed_to_detail = serializers.SerializerMethodField()
 
     # Upper bound on attention targets. "Direct at" is for a handful of
     # people, not a broadcast; the cap closes a query-amplification surface
@@ -1162,11 +1170,23 @@ class TicketMessageSerializer(serializers.ModelSerializer):
             "message",
             "message_type",
             "directed_to",
+            "directed_to_detail",
             "visibility_mode",
             "is_hidden",
             "created_at",
         ]
         read_only_fields = ["id", "ticket", "author", "author_email", "is_hidden", "created_at"]
+
+    def get_directed_to_detail(self, obj):
+        # Cheap label list for the thread chips. The list view prefetches
+        # `directed_to`, so this does not add an N+1.
+        return [
+            {
+                "id": user.id,
+                "full_name": user.full_name or user.email.split("@")[0],
+            }
+            for user in obj.directed_to.all()
+        ]
 
     def to_internal_value(self, data):
         # Cap directed_to on the RAW input, before DRF resolves each PK (one
