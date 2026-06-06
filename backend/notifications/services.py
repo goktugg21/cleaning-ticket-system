@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db.models import Q
@@ -38,7 +40,12 @@ __all__ = (
     "send_invitation_email",
     "emit_ticket_message_notifications",
     "ticket_message_audience",
+    "emit_extra_work_requested_notifications",
+    "emit_extra_work_proposal_sent_notifications",
+    "emit_extra_work_decision_notifications",
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _active_users():
@@ -262,6 +269,182 @@ def emit_ticket_message_notifications(message, actor=None):
     if rows:
         Notification.objects.bulk_create(rows)
     return rows
+
+
+# ---------------------------------------------------------------------------
+# M1 B4 — Extra Work lifecycle in-app notifications.
+#
+# IN-APP ONLY (no email; there is no existing EW email path to change). Three
+# events, each keyed STRICTLY on the EW's own FKs so a notification can never
+# bleed across tenants:
+#   * NEW REQUEST   -> provider management (action needed)
+#   * QUOTE SENT    -> customer side (decision needed)
+#   * CUSTOMER DECISION (approved / rejected) -> provider management
+#
+# The resolvers mirror the ticket resolvers (`_ticket_staff_users` /
+# `_ticket_customer_users`) but read the EW's company / building / customer /
+# created_by. SUPER_ADMIN is deliberately NOT auto-notified (email-path parity
+# with B1); SA can still read every EW directly.
+# ---------------------------------------------------------------------------
+def _extra_work_provider_users(ew):
+    """Active provider-management users for `ew`: COMPANY_ADMIN of the EW's
+    company + BUILDING_MANAGER assigned to the EW's building. Same shape as
+    `_ticket_staff_users`, keyed on the EW's own FKs. SUPER_ADMIN excluded."""
+    return (
+        _active_users()
+        .filter(
+            Q(
+                role=UserRole.COMPANY_ADMIN,
+                company_memberships__company_id=ew.company_id,
+            )
+            | Q(
+                role=UserRole.BUILDING_MANAGER,
+                building_assignments__building_id=ew.building_id,
+            )
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
+def _extra_work_customer_users(ew):
+    """Active customer-side users for `ew`: every CUSTOMER_USER with a
+    membership for the EW's customer, plus the requester (`created_by`).
+    Same shape as `_ticket_customer_users`, keyed on the EW's customer.
+
+    NOTE: this returns EVERY member of the customer org regardless of which
+    building their access covers — exactly like `_ticket_customer_users`.
+    The emit path therefore applies a SCOPE gate (`_extra_work_visible_to`)
+    so a member whose building access does NOT cover the EW's building (and
+    thus cannot open the EW) is never notified about it (B1 parity — the
+    same leak the B1 adversarial review caught for tickets)."""
+    users = list(
+        _active_users()
+        .filter(
+            role=UserRole.CUSTOMER_USER,
+            customer_memberships__customer_id=ew.customer_id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+    if (
+        ew.created_by_id
+        and ew.created_by.role == UserRole.CUSTOMER_USER
+        and ew.created_by.is_active
+        and ew.created_by.deleted_at is None
+    ):
+        users.append(ew.created_by)
+
+    return _dedupe_users(users)
+
+
+def _extra_work_visible_to(user, ew):
+    """True iff `user` can read `ew` through the canonical read-side scoper.
+
+    Reusing `scope_extra_work_for` makes the notification audience EXACTLY a
+    subset of the read-visible audience by construction — it can never drift
+    from what the list / detail endpoints show. Provider-management resolved
+    above is scope-correct by construction (CA of the company, BM of the
+    building); the uniform check is cheap and closes the customer-side gap
+    (a customer-org member without building access for the EW's building must
+    not be notified about a quote they cannot open)."""
+    # Lazy import keeps the notifications <-> extra_work import graph acyclic
+    # (extra_work.views imports notifications.services at module load).
+    from extra_work.scoping import scope_extra_work_for
+
+    return scope_extra_work_for(user).filter(pk=ew.pk).exists()
+
+
+def _emit_extra_work_notifications(ew, *, recipients, actor, event_type, summary):
+    """Shared builder for the three EW emit helpers: minus-actor, dedupe,
+    SCOPE-gate, then bulk-create. Sets `extra_work=ew`, `ticket=None`,
+    `is_directed=False` (EW notifications are never 'directed')."""
+    recipients = _dedupe_users(_without_actor(recipients, actor))
+    recipients = [u for u in recipients if _extra_work_visible_to(u, ew)]
+
+    summary = (summary or "").strip()[:500]
+    rows = [
+        Notification(
+            recipient=user,
+            actor=actor,
+            event_type=event_type,
+            ticket=None,
+            extra_work=ew,
+            is_directed=False,
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
+
+
+def _ew_title(ew):
+    return (ew.title or "").strip()
+
+
+def emit_extra_work_requested_notifications(ew, actor=None):
+    """NEW EW REQUEST -> notify provider management ('action needed').
+
+    Recipients = `_extra_work_provider_users(ew)` minus the requester. Fires
+    for EVERY EW regardless of intent (instant / auto-start / request-quote).
+    `actor` is the requester (`ew.created_by`)."""
+    title = _ew_title(ew)
+    summary = (
+        f"New extra-work request: {title}" if title else "New extra-work request"
+    )
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_provider_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_REQUESTED,
+        summary=summary,
+    )
+
+
+def emit_extra_work_proposal_sent_notifications(ew, actor=None):
+    """QUOTE / PROPOSAL SENT -> notify the customer side ('decision needed').
+
+    Recipients = `_extra_work_customer_users(ew)` minus the sender (the
+    provider operator who sent the quote; minus-actor is a no-op for the
+    customer set but kept uniform). `actor` is the provider operator."""
+    title = _ew_title(ew)
+    summary = f"Quote ready: {title}" if title else "Quote ready"
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_customer_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_PROPOSAL_SENT,
+        summary=summary,
+    )
+
+
+def emit_extra_work_decision_notifications(ew, actor=None, *, approved):
+    """CUSTOMER DECISION (approved / rejected) -> notify provider management.
+
+    Recipients = `_extra_work_provider_users(ew)` minus the decider. `actor`
+    is the customer decider on the normal path, or the provider operator on
+    an override path (minus-actor then excludes them so they don't self-
+    notify). The approved-vs-rejected distinction rides the `summary`."""
+    title = _ew_title(ew)
+    decider = ""
+    if actor:
+        decider = (actor.full_name or actor.email or "").strip()
+    verb = "approved" if approved else "rejected"
+    if decider:
+        summary = f"{decider} {verb} {title}".strip()
+    else:
+        summary = f"Extra work {verb}: {title}".strip()
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_provider_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_DECISION,
+        summary=summary,
+    )
 
 
 # Dutch status labels for email rendering. The model's TextChoices labels

@@ -94,11 +94,26 @@ class NotificationType(models.TextChoices):
     Deliberately SEPARATE from the email `NotificationEventType` above:
     in-app notifications are a different surface with a different lifecycle
     (no SMTP, no NotificationLog, read/unread per recipient). Overloading
-    the email enum here would conflate the two channels. B1 ships only
-    TICKET_MESSAGE; B4 will add Extra Work event types.
+    the email enum here would conflate the two channels. B1 ships
+    TICKET_MESSAGE; B4 adds the Extra Work lifecycle event types below.
     """
 
     TICKET_MESSAGE = "TICKET_MESSAGE", "Ticket message"
+
+    # M1 B4 — Extra Work lifecycle (in-app only; no email path is added).
+    #   EXTRA_WORK_REQUESTED      a new EW request needs provider attention.
+    #   EXTRA_WORK_PROPOSAL_SENT  a quote/proposal was sent; customer decides.
+    #   EXTRA_WORK_DECISION       the customer approved OR rejected. ONE type:
+    #     the approved-vs-rejected distinction is carried in the row `summary`
+    #     (and the deep-linked EW status), not in a separate event_type. A
+    #     single type keeps the FE bell/page rendering generic and avoids a
+    #     migration churn pair where one would do.
+    EXTRA_WORK_REQUESTED = "EXTRA_WORK_REQUESTED", "Extra work requested"
+    EXTRA_WORK_PROPOSAL_SENT = (
+        "EXTRA_WORK_PROPOSAL_SENT",
+        "Extra work proposal sent",
+    )
+    EXTRA_WORK_DECISION = "EXTRA_WORK_DECISION", "Extra work decision"
 
 
 class Notification(models.Model):

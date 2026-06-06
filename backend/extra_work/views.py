@@ -19,6 +19,8 @@ Provider users CAN additionally manage pricing line items.
 """
 from __future__ import annotations
 
+import logging
+
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, mixins, status, viewsets
@@ -29,6 +31,7 @@ from rest_framework.response import Response
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
+from notifications.services import emit_extra_work_requested_notifications
 
 from .classification import (
     IntentValidationError,
@@ -60,6 +63,9 @@ from .serializers import (
     derive_actor_kind,
 )
 from .state_machine import TransitionError, apply_transition
+
+
+logger = logging.getLogger(__name__)
 
 
 # Sprint 5 — stable order of intents in the preview `allowed_intents`
@@ -138,6 +144,23 @@ class ExtraWorkRequestViewSet(
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         instance = serializer.save()
+
+        # M1 B4 — emit the in-app "new extra-work request" notification to
+        # provider management (action needed). Fires for every intent
+        # (instant / auto-start / request-quote). Best-effort + logged: the
+        # EW is already saved, so a notification fan-out failure must never
+        # fail the create. The error is logged (not silently swallowed) so a
+        # real bug stays visible.
+        try:
+            emit_extra_work_requested_notifications(
+                instance, actor=instance.created_by
+            )
+        except Exception:  # noqa: BLE001 — best-effort fan-out, logged below
+            logger.exception(
+                "Failed to emit extra-work requested notification for EW %s",
+                instance.pk,
+            )
+
         # Read it back through the detail serializer so the
         # response shape matches what the GET /<id>/ endpoint
         # returns. The actor's role decides whether provider-

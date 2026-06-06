@@ -22,6 +22,7 @@ line CRUD endpoints.
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
@@ -39,6 +40,10 @@ from accounts.permissions_v2 import (
 )
 from audit import context as audit_context
 from audit.models import AuditAction, AuditLog, AuditSeverity
+from notifications.services import (
+    emit_extra_work_decision_notifications,
+    emit_extra_work_proposal_sent_notifications,
+)
 
 from .models import (
     ExtraWorkPricingUnitType,
@@ -72,6 +77,9 @@ from .serializers import (
     ProposalTransitionSerializer,
     _decimal_str,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 PROVIDER_ROLES = {
@@ -270,6 +278,57 @@ class ProposalTransitionView(views.APIView):
                 {"detail": str(exc), "code": exc.code},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # M1 B4 — emit EW lifecycle in-app notifications for the proposal
+        # transition just applied. Best-effort + logged so a fan-out failure
+        # never fails the (already committed) transition. We branch on the
+        # REQUESTED transition AND the RESULTING status, which makes the
+        # intents fall out without any special-casing:
+        #   * DRAFT->SENT that stays SENT  == REQUEST_QUOTE quote sent ->
+        #     notify the customer side (a decision is needed).
+        #   * DRAFT->SENT that collapsed to CUSTOMER_APPROVED == an
+        #     AUTO_START_AFTER_PRICING EW (apply_proposal_transition auto-
+        #     approves + spawns inside the SEND): the customer pre-authorised,
+        #     there is NO decision to make, so NO quote-sent fires here AND
+        #     the decision branch below never triggers (requested_to is SENT).
+        #   * SENT->CUSTOMER_APPROVED / CUSTOMER_REJECTED == a real customer
+        #     decision (customer-driven OR a provider override) -> notify
+        #     provider management.
+        # The direct-publish (quote-bypass) endpoint is a DIFFERENT view and
+        # is deliberately NOT instrumented in B4 (it skips the customer step
+        # entirely; a "decision needed" / "approved" pair there would be
+        # misleading).
+        try:
+            requested_to = data["to_status"]
+            ew = updated.extra_work_request
+            if (
+                requested_to == ProposalStatus.SENT
+                and updated.status == ProposalStatus.SENT
+            ):
+                emit_extra_work_proposal_sent_notifications(
+                    ew, actor=request.user
+                )
+            elif (
+                requested_to
+                in (
+                    ProposalStatus.CUSTOMER_APPROVED,
+                    ProposalStatus.CUSTOMER_REJECTED,
+                )
+                and updated.status == requested_to
+            ):
+                emit_extra_work_decision_notifications(
+                    ew,
+                    actor=request.user,
+                    approved=(
+                        requested_to == ProposalStatus.CUSTOMER_APPROVED
+                    ),
+                )
+        except Exception:  # noqa: BLE001 — best-effort fan-out, logged below
+            logger.exception(
+                "Failed to emit EW lifecycle notification for proposal %s",
+                proposal.pk,
+            )
+
         return Response(
             ProposalDetailSerializer(
                 updated, context={"request": request}
