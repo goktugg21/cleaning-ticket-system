@@ -115,6 +115,12 @@ export function CustomerContactsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
+  // Filter bar — building + free-text search are BOTH server-side
+  // (passed through to ?building_id / ?search). "" = All (param
+  // omitted, full list returned).
+  const [filterBuildingId, setFilterBuildingId] = useState<number | "">("");
+  const [searchText, setSearchText] = useState("");
+
   // Read-only detail panel state. `selected` is the contact currently
   // expanded into the detail view. Editing toggles `editing=true` and
   // pre-populates `form`.
@@ -156,9 +162,25 @@ export function CustomerContactsPage() {
 
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
+  // Build the server-side contacts params from the current filter
+  // state. Empty/All filters are omitted so the backend returns the full
+  // list. Optional overrides let the filter-change effect pass the
+  // new value without racing the not-yet-committed state.
+  function contactListParams(overrides?: {
+    buildingId?: number | "";
+    search?: string;
+  }): { building_id?: number; search?: string } {
+    const buildingId = overrides?.buildingId ?? filterBuildingId;
+    const search = overrides?.search ?? searchText;
+    const params: { building_id?: number; search?: string } = {};
+    if (buildingId !== "") params.building_id = buildingId;
+    if (search.trim() !== "") params.search = search.trim();
+    return params;
+  }
+
   // Initial load — fetch the customer (for the page title) and the
   // contacts list in parallel. The buildings list is needed for the
-  // create/edit modal's building dropdown.
+  // create/edit modal's building dropdown AND the filter dropdown.
   useEffect(() => {
     const cancelled = { current: false };
     async function load(customerId: number) {
@@ -198,6 +220,39 @@ export function CustomerContactsPage() {
       cancelled.current = true;
     };
   }, [numericId, t]);
+
+  // Server-side filter refetch. The initial-load effect already fetched
+  // once with empty filters, so skip the very first run; thereafter a
+  // change to the building filter or search re-fetches the contacts list
+  // with the new ?building_id / ?search params. Search is debounced
+  // (300ms) so typing doesn't fire a request per keystroke; the building
+  // change refetches as soon as the debounce window elapses. All
+  // setState happens inside the async closure after an await.
+  const didMountContactFilterRef = useRef(false);
+  useEffect(() => {
+    if (numericId === null) return;
+    if (!didMountContactFilterRef.current) {
+      didMountContactFilterRef.current = true;
+      return;
+    }
+    const cancelled = { current: false };
+    const handle = window.setTimeout(() => {
+      listCustomerContacts(numericId, contactListParams())
+        .then((rows) => {
+          if (!cancelled.current) setContacts(rows);
+        })
+        .catch((err) => {
+          if (!cancelled.current) setLoadError(getApiError(err));
+        });
+    }, 300);
+    return () => {
+      cancelled.current = true;
+      window.clearTimeout(handle);
+    };
+    // contactListParams reads the latest filter state; the effect fires
+    // on filter/search changes and numericId resets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numericId, filterBuildingId, searchText]);
 
   function openCreateModal() {
     setMode("create");
@@ -355,13 +410,19 @@ export function CustomerContactsPage() {
     setPromoteError("");
     setPromotePhoneError("");
     setPromoteRoleError("");
+    // SoT Addendum A.1 — a CUSTOMER_COMPANY_ADMIN promotion is routed to
+    // the company-wide membership flag on the backend; it has NO
+    // per-building rows, so we omit `building_ids` entirely for that role.
+    const isCompanyAdminPromote =
+      promoteForm.access_role === "CUSTOMER_COMPANY_ADMIN";
     try {
       const result = await promoteCustomerContact(numericId, selected.id, {
         access_role: promoteForm.access_role,
         // Empty selection => omit so the backend uses its default (the
-        // contact's existing building links + legacy anchor).
+        // contact's existing building links + legacy anchor). For a
+        // company-admin promote, always omit.
         building_ids:
-          promoteForm.building_ids.length > 0
+          !isCompanyAdminPromote && promoteForm.building_ids.length > 0
             ? promoteForm.building_ids
             : undefined,
         phone: promoteForm.phone.trim(),
@@ -469,6 +530,69 @@ export function CustomerContactsPage() {
         </div>
       ) : (
         <>
+          {/* Filter bar — building + free-text search are BOTH server-
+              side (?building_id / ?search). */}
+          <div
+            className="customer-contacts-filter-bar"
+            data-testid="customer-contacts-filter-bar"
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 10,
+              marginBottom: 14,
+              alignItems: "flex-end",
+            }}
+          >
+            <div className="field" style={{ marginBottom: 0, minWidth: 200 }}>
+              <label
+                className="field-label"
+                htmlFor="customer-contacts-filter-building"
+              >
+                {t("customer_contacts.filter_building_label")}
+              </label>
+              <select
+                id="customer-contacts-filter-building"
+                className="field-select"
+                data-testid="customer-contacts-filter-building"
+                value={filterBuildingId === "" ? "" : String(filterBuildingId)}
+                onChange={(event) => {
+                  const v = event.target.value;
+                  setFilterBuildingId(v === "" ? "" : Number(v));
+                }}
+              >
+                <option value="">
+                  {t("customer_contacts.filter_building_all")}
+                </option>
+                {linkedBuildings.map((link) => (
+                  <option key={link.id} value={link.building_id}>
+                    {link.building_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div
+              className="field"
+              style={{ marginBottom: 0, flex: 1, minWidth: 200 }}
+            >
+              <label
+                className="field-label"
+                htmlFor="customer-contacts-filter-search"
+              >
+                {t("customer_contacts.filter_search_label")}
+              </label>
+              <input
+                id="customer-contacts-filter-search"
+                className="field-input"
+                type="search"
+                data-testid="customer-contacts-filter-search"
+                value={searchText}
+                onChange={(event) => setSearchText(event.target.value)}
+                placeholder={t("customer_contacts.filter_search_placeholder")}
+              />
+            </div>
+          </div>
+
           <div className="card" data-testid="customer-contacts-list">
             {contacts.length === 0 ? (
               <div
@@ -1103,59 +1227,76 @@ export function CustomerContactsPage() {
             </div>
 
             {/* Building grant — pre-filled from the contact's links.
-                Empty selection falls back to the backend default. */}
-            <div className="field">
-              <span className="field-label">
-                {t("customer_contacts.promote_field_buildings")}
-              </span>
-              {linkedBuildings.length === 0 ? (
+                Empty selection falls back to the backend default.
+                SoT Addendum A.1: a CUSTOMER_COMPANY_ADMIN promote is
+                company-wide (no per-building rows), so the grid is hidden
+                and a company-wide note is shown instead. */}
+            {promoteForm.access_role === "CUSTOMER_COMPANY_ADMIN" ? (
+              <div
+                className="field"
+                data-testid="customer-contact-promote-company-admin-note"
+              >
+                <span className="field-label">
+                  {t("customer_contacts.promote_field_buildings")}
+                </span>
                 <div className="muted small">
-                  {t("customer_contacts.promote_no_buildings")}
+                  {t("customer_people.company_admin.all_buildings_caption")}
                 </div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                    maxHeight: 180,
-                    overflowY: "auto",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                  }}
-                  data-testid="customer-contact-promote-buildings"
-                >
-                  {linkedBuildings.map((link) => (
-                    <label
-                      key={link.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={promoteForm.building_ids.includes(
-                          link.building_id,
-                        )}
-                        onChange={() =>
-                          togglePromoteBuilding(link.building_id)
-                        }
-                        disabled={promoteBusy}
-                        data-testid={`customer-contact-promote-building-${link.building_id}`}
-                      />
-                      <span>{link.building_name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-              <div className="muted small" style={{ marginTop: 4 }}>
-                {t("customer_contacts.promote_field_buildings_hint")}
               </div>
-            </div>
+            ) : (
+              <div className="field">
+                <span className="field-label">
+                  {t("customer_contacts.promote_field_buildings")}
+                </span>
+                {linkedBuildings.length === 0 ? (
+                  <div className="muted small">
+                    {t("customer_contacts.promote_no_buildings")}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                      maxHeight: 180,
+                      overflowY: "auto",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                    }}
+                    data-testid="customer-contact-promote-buildings"
+                  >
+                    {linkedBuildings.map((link) => (
+                      <label
+                        key={link.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={promoteForm.building_ids.includes(
+                            link.building_id,
+                          )}
+                          onChange={() =>
+                            togglePromoteBuilding(link.building_id)
+                          }
+                          disabled={promoteBusy}
+                          data-testid={`customer-contact-promote-building-${link.building_id}`}
+                        />
+                        <span>{link.building_name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("customer_contacts.promote_field_buildings_hint")}
+                </div>
+              </div>
+            )}
 
             {/* Phone — required (valid NL number). */}
             <div className="field">

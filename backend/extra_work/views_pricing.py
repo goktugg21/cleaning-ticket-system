@@ -66,7 +66,11 @@ from accounts.permissions import (
 from audit import context as audit_context
 from companies.models import CompanyUserMembership
 from config.pagination import UnboundedPagination
-from customers.models import Customer, CustomerUserBuildingAccess
+from customers.models import (
+    Customer,
+    CustomerUserBuildingAccess,
+    CustomerUserMembership,
+)
 
 from .models import CustomerServicePrice, Service
 from .serializers_catalog import CustomerServicePriceSerializer
@@ -119,7 +123,17 @@ def _customer_user_has_access(user, customer) -> bool:
     """Sprint 4B — return True iff `user` (role=CUSTOMER_USER) holds at
     least one ACTIVE `CustomerUserBuildingAccess` row for `customer`.
     Sprint 4B keeps CSP customer-wide, so any active access under the
-    customer admits the user to the customer-side pricing read."""
+    customer admits the user to the customer-side pricing read.
+
+    SoT Addendum A.1 — a company-wide Customer Company Admin (the
+    membership `is_company_admin` flag) has customer-wide access with NO
+    per-building access row, so the flag alone admits them (otherwise a
+    migrated CCA with zero CUBA rows would be 403'd on the pricing read
+    that a strictly-lower Customer User is allowed)."""
+    if CustomerUserMembership.objects.filter(
+        user=user, customer=customer, is_company_admin=True
+    ).exists():
+        return True
     return CustomerUserBuildingAccess.objects.filter(
         membership__user=user,
         membership__customer=customer,

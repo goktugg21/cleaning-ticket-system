@@ -9,19 +9,28 @@ SUPER_ADMIN may. B4 lower-user management (Customer User / Customer
 Location Manager + their `permission_overrides`) is NOT affected by
 this toggle — only CCA-level grant authority is.
 
+Single-path CCA rework (SoT A.1): CUSTOMER_COMPANY_ADMIN is now a
+company-wide membership flag, never a per-building access_role. Every
+per-building CCA-grant attempt (PATCH or POST) is rejected for EVERY
+actor with HTTP 400 + stable code `cca_is_company_wide`. The B5 policy
+(`provider_admin_may_manage_customer_company_admins`) still governs
+Provider Admin's authority to manage EXISTING CCA-tier targets (edit /
+demote / revoke / extend-reach) — those non-CCA-grant paths keep the B5
+403 `cca_policy_disabled` contract.
+
 Tests pinned in this file:
 
   1. Default behaviour (policy=True):
-     - Provider Admin can grant CCA on a lower user.
-     - Super Admin can grant CCA.
+     - Provider Admin CANNOT grant CCA per-building (cca_is_company_wide).
+     - Super Admin CANNOT grant CCA per-building (cca_is_company_wide).
      - CCA cannot grant CCA (H-7 / cca_cannot_manage_cca / B4 guards).
 
   2. Toggle disabled (policy=False):
-     - Provider Admin's CCA-grant attempt returns 400 with the
-       documented validation error.
+     - Per-building CCA-grant attempts return 400 cca_is_company_wide.
      - Provider Admin can still manage lower customer users' overrides
        (B4 behaviour preserved).
-     - Super Admin can still grant CCA.
+     - Provider Admin still blocked (cca_policy_disabled) from managing
+       EXISTING CCA targets via the non-grant paths.
 
   3. Toggle write surface:
      - Only Super Admin may flip the policy via PATCH
@@ -170,7 +179,10 @@ class DefaultBehaviourPolicyTrueTests(_B5Fixture):
         self.company.refresh_from_db()
         self.assertTrue(self.company.provider_admin_may_manage_customer_company_admins)
 
-    def test_super_admin_can_grant_cca(self):
+    def test_super_admin_cannot_grant_cca_per_building(self):
+        # Single-path CCA (SoT A.1): a per-building CCA grant is rejected
+        # for EVERY actor, SA included, with 400 + `cca_is_company_wide`.
+        # The CCA status is owned by the company-admin flag/endpoint.
         response = self._api(self.super_admin).patch(
             self._access_url(
                 self.customer.id, self.cu_target.id, self.building.id
@@ -178,14 +190,19 @@ class DefaultBehaviourPolicyTrueTests(_B5Fixture):
             self._grant_cca_payload(),
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.data
+        )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         self.cu_target_access.refresh_from_db()
         self.assertEqual(
             self.cu_target_access.access_role,
-            (CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN),
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-    def test_provider_admin_can_grant_cca_when_policy_true(self):
+    def test_provider_admin_cannot_grant_cca_per_building_when_policy_true(self):
+        # Single-path CCA: even with the B5 policy True, the per-building
+        # grant path no longer exists — 400 + `cca_is_company_wide`.
         response = self._api(self.admin).patch(
             self._access_url(
                 self.customer.id, self.cu_target.id, self.building.id
@@ -193,11 +210,14 @@ class DefaultBehaviourPolicyTrueTests(_B5Fixture):
             self._grant_cca_payload(),
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.data
+        )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         self.cu_target_access.refresh_from_db()
         self.assertEqual(
             self.cu_target_access.access_role,
-            (CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN),
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
     def test_cca_cannot_grant_cca_even_when_policy_true(self):
@@ -239,6 +259,9 @@ class PolicyDisabledTests(_B5Fixture):
         )
 
     def test_provider_admin_cca_grant_attempt_returns_400(self):
+        # Single-path CCA: with policy disabled the per-building grant is
+        # still rejected, now by the company-wide guard
+        # (`cca_is_company_wide`) rather than the policy guard.
         response = self._api(self.admin).patch(
             self._access_url(
                 self.customer.id, self.cu_target.id, self.building.id
@@ -247,13 +270,16 @@ class PolicyDisabledTests(_B5Fixture):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         self.cu_target_access.refresh_from_db()
         self.assertEqual(
             self.cu_target_access.access_role,
             CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-    def test_super_admin_can_still_grant_cca_regardless_of_policy(self):
+    def test_super_admin_cannot_grant_cca_per_building_regardless_of_policy(self):
+        # Single-path CCA: SA also cannot grant CCA per-building; the
+        # company-wide guard fires regardless of the B5 toggle state.
         response = self._api(self.super_admin).patch(
             self._access_url(
                 self.customer.id, self.cu_target.id, self.building.id
@@ -261,11 +287,14 @@ class PolicyDisabledTests(_B5Fixture):
             self._grant_cca_payload(),
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.data
+        )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         self.cu_target_access.refresh_from_db()
         self.assertEqual(
             self.cu_target_access.access_role,
-            (CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN),
+            CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
     def test_provider_admin_can_still_edit_lower_user_overrides(self):
@@ -350,17 +379,15 @@ class PolicyDisabledTests(_B5Fixture):
         )
 
     def test_provider_admin_cannot_post_grant_cca_when_policy_disabled(self):
-        """Explicit POST regression: a Provider Company Admin must not
-        be able to create/grant a new CCA access row through a direct
-        POST to `/api/customers/<cid>/users/<uid>/access/` with
-        `access_role=CUSTOMER_COMPANY_ADMIN` smuggled in the body
-        when the toggle is False. The view-layer defensive guard
-        rejects with HTTP 403 + stable code `cca_policy_disabled`,
+        """Explicit POST regression (single-path CCA): a direct POST to
+        `/api/customers/<cid>/users/<uid>/access/` carrying
+        `access_role=CUSTOMER_COMPANY_ADMIN` in the body is rejected for
+        EVERY actor with HTTP 400 + stable code `cca_is_company_wide`,
         and NO access row materialises on the second building.
 
-        This locks the regression for the documented goal: the POST
-        endpoint cannot be used as a back-door to bypass the
-        serializer-layer PATCH grant gate."""
+        The POST endpoint cannot be used as a back-door to grant a
+        per-building CCA — the only path to a CCA is the company-admin
+        flag/endpoint."""
         # Add a second building so we can target a building where the
         # cu_target has no existing access row at all.
         second_building = Building.objects.create(
@@ -386,10 +413,10 @@ class PolicyDisabledTests(_B5Fixture):
         )
         self.assertEqual(
             response.status_code,
-            status.HTTP_403_FORBIDDEN,
+            status.HTTP_400_BAD_REQUEST,
             response.content,
         )
-        self.assertEqual(response.data.get("code"), "cca_policy_disabled")
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
         # And critically: no access row materialised on second_building
         # at any tier (the POST was rejected entirely, not silently
         # downgraded to CUSTOMER_USER).
@@ -577,12 +604,12 @@ class UrlSmugglingRegressionTests(_B5Fixture):
         self.cu_target_access.refresh_from_db()
         self.assertTrue(self.cu_target_access.is_active)
 
-    # --- PATCH access row (no-op rewrite to CCA) ---
+    # --- PATCH access row (rewrite to CCA) ---
     def test_patch_access_role_cca_on_cca_row_is_blocked(self):
-        # A no-op rewrite (CCA → CCA) is still "managing CCA". The
-        # view-layer gate fires before the serializer's H-7 grant gate,
-        # so the rejection code is `cca_policy_disabled` (403), NOT
-        # the serializer's 400.
+        # Single-path CCA: any PATCH carrying access_role=CCA is rejected
+        # by the company-wide guard, which runs BEFORE the B5 policy gate,
+        # so the rejection is 400 + `cca_is_company_wide` (NOT the B5
+        # 403 `cca_policy_disabled`). The CCA row stays CCA either way.
         response = self._api(self.admin).patch(
             self._access_url(
                 self.customer.id, self.cu_target.id, self.building.id
@@ -590,7 +617,10 @@ class UrlSmugglingRegressionTests(_B5Fixture):
             self._grant_cca_payload(),
             format="json",
         )
-        self._assert_blocked(response)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.content
+        )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
 
     # --- DELETE access row (revoke) ---
     def test_delete_cca_access_row_is_blocked(self):

@@ -496,11 +496,28 @@ export async function updateBuildingManager(
   return response.data;
 }
 
+// Sprint (CCA consolidation) — the customer-users list now accepts
+// server-side filters:
+//   ?access_role= = CUSTOMER_USER | CUSTOMER_LOCATION_MANAGER |
+//                   CUSTOMER_COMPANY_ADMIN (flag-aware effective role;
+//                   unknown value → 400 {code: access_role_invalid}).
+//   ?building_id= = members with an active access row for that building
+//                   OR company-wide CCAs (non-int → 400
+//                   {code: building_id_invalid}).
+// Status + free-text search are NOT backend params — the Users page
+// does those client-side. An empty/omitted filter returns the full list.
+export interface CustomerUserListParams {
+  access_role?: string;
+  building_id?: number;
+}
+
 export async function listCustomerUsers(
   customerId: number,
+  params: CustomerUserListParams = {},
 ): Promise<PaginatedResponse<CustomerUserMembership>> {
   const response = await api.get<PaginatedResponse<CustomerUserMembership>>(
     `/customers/${customerId}/users/`,
+    { params: cleanParams(params as AdminListParams) },
   );
   return response.data;
 }
@@ -521,6 +538,34 @@ export async function removeCustomerUser(
   userId: number,
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/users/${userId}/`);
+}
+
+// SoT Addendum A.1 — toggle the company-wide Customer Company Admin
+// status on a customer membership. A `true` flag makes the user a CCA
+// across ALL of the customer's buildings (no per-building access rows);
+// `false` revokes it. Mirrors the addCustomerUser POST / removeCustomerUser
+// DELETE shape:
+//   POST   /api/customers/<cid>/users/<uid>/company-admin/  → set true
+//   DELETE /api/customers/<cid>/users/<uid>/company-admin/  → set false
+//
+// Both return 200 with the updated CustomerUserMembership (incl.
+// `is_company_admin` + the per-(viewer, customer) `actions` block).
+// Idempotent: POST when already true / DELETE when already false is a
+// no-op 200. Backend gate is data-driven via
+// `actions.can_manage_customer_company_admins`; an actor who may not
+// manage company-admins gets 403 `{code: "cca_management_forbidden"}`,
+// and a target with no membership 404s. The caller must therefore only
+// surface the make/remove control when that action flag is true.
+export async function setCustomerCompanyAdmin(
+  customerId: number,
+  userId: number,
+  enabled: boolean,
+): Promise<CustomerUserMembership> {
+  const url = `/customers/${customerId}/users/${userId}/company-admin/`;
+  const response = enabled
+    ? await api.post<CustomerUserMembership>(url)
+    : await api.delete<CustomerUserMembership>(url);
+  return response.data;
 }
 
 // ---- Sprint 14: customer ↔ buildings (M:N) ----
@@ -718,8 +763,21 @@ export async function updateCustomerPolicy(
 // a Contact into a User is an explicit, separate flow —
 // `promoteCustomerContact` (POST .../promote-to-user/) below.
 
+// Sprint (CCA consolidation) — the contacts list now accepts
+// server-side filters:
+//   ?search=      = free-text SearchFilter over full_name/email/phone/
+//                   role_label.
+//   ?building_id= = linked OR legacy-anchor OR company-wide contacts
+//                   (non-int is ignored by the backend).
+// An empty/omitted filter returns the full list.
+export interface CustomerContactListParams {
+  building_id?: number;
+  search?: string;
+}
+
 export async function listCustomerContacts(
   customerId: number,
+  params: CustomerContactListParams = {},
 ): Promise<Contact[]> {
   // UnboundedPagination on the backend returns the standard
   // {count, next, previous, results} envelope. Callers want the flat
@@ -727,6 +785,7 @@ export async function listCustomerContacts(
   // plain `Contact[]`.
   const response = await api.get<PaginatedResponse<Contact>>(
     `/customers/${customerId}/contacts/`,
+    { params: cleanParams(params as AdminListParams) },
   );
   return response.data.results;
 }

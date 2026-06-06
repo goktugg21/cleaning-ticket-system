@@ -280,10 +280,17 @@ def _on_membership_post_save(sender, instance, created, **kwargs):
         # the membership-fallback UPDATE here so a slot edit lands as
         # exactly one AuditLog row, not two. CREATE / DELETE still flow
         # through the membership handlers (the shape is unchanged).
+        # SoT Addendum A.1: CustomerUserMembership gained an editable
+        # field (`is_company_admin`). Its UPDATE diff is owned by the
+        # dedicated handler below
+        # (`_on_customer_user_membership_post_save_update`) so the flag
+        # toggle lands as exactly one AuditLog row with before/after —
+        # skip the membership-fallback UPDATE here to avoid a double-write.
         if sender.__name__ in {
             "BuildingStaffVisibility",
             "BuildingManagerAssignment",
             "TicketStaffAssignment",
+            "CustomerUserMembership",
         }:
             return
 
@@ -578,6 +585,75 @@ def _on_building_manager_assignment_post_save_update(
     except Exception:  # pragma: no cover — defensive
         logger.exception(
             "audit: BuildingManagerAssignment post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+# ---------------------------------------------------------------------------
+# SoT Addendum A.1 — CustomerUserMembership gained an editable field
+# (`is_company_admin`, the company-wide Customer Company Admin flag). It was a
+# CREATE/DELETE-only membership row; the flag toggle is a role/scope change
+# (matrix H-10) that must land as a single AuditLog row with before/after.
+# Mirrors the BMA / BSV UPDATE-only pattern: a pre_save snapshot + a post_save
+# UPDATE-diff handler, with the model added to the membership-fallback
+# skip-set (above) so the toggle is not double-written.
+# ---------------------------------------------------------------------------
+_CUM_TRACKED_FIELDS = ("is_company_admin",)
+
+
+def _cum_snapshot_for_pre_save(instance):
+    """Snapshot the SoT A.1 editable field on CustomerUserMembership."""
+    if instance.pk is None:
+        return None
+    from customers.models import CustomerUserMembership
+
+    try:
+        previous = CustomerUserMembership.objects.get(pk=instance.pk)
+    except CustomerUserMembership.DoesNotExist:
+        return None
+    return {field: getattr(previous, field) for field in _CUM_TRACKED_FIELDS}
+
+
+def _on_customer_user_membership_pre_save(sender, instance, **kwargs):
+    """Snapshot the pre-update state so post_save can diff it."""
+    try:
+        snapshot = _cum_snapshot_for_pre_save(instance)
+        _state_map()[
+            ("customers.CustomerUserMembership", instance.pk)
+        ] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerUserMembership pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_customer_user_membership_post_save_update(
+    sender, instance, created, **kwargs
+):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of the
+    tracked field(s). CREATE is intentionally a no-op here — the
+    membership handler already emits the rich CREATE payload."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("customers.CustomerUserMembership", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _CUM_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = getattr(instance, field)
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomerUserMembership post_save UPDATE failed for #%s",
             getattr(instance, "pk", None),
         )
 
@@ -1014,6 +1090,25 @@ def _connect():
         sender=BuildingManagerAssignment,
         weak=False,
         dispatch_uid="audit:bma:post_update:BuildingManagerAssignment",
+    )
+
+    # SoT Addendum A.1: UPDATE-diff handler for the new `is_company_admin`
+    # flag on CustomerUserMembership. CREATE/DELETE shape stays on the
+    # membership handlers registered above (the membership UPDATE-fallback
+    # now skips CustomerUserMembership, see _on_membership_post_save) so
+    # each company-admin toggle lands as exactly one AuditLog UPDATE row
+    # with before/after.
+    pre_save.connect(
+        _on_customer_user_membership_pre_save,
+        sender=CustomerUserMembership,
+        weak=False,
+        dispatch_uid="audit:cum:pre:CustomerUserMembership",
+    )
+    post_save.connect(
+        _on_customer_user_membership_post_save_update,
+        sender=CustomerUserMembership,
+        weak=False,
+        dispatch_uid="audit:cum:post_update:CustomerUserMembership",
     )
 
     # Sprint 14E: UPDATE-diff handler for the new dated-slot fields on

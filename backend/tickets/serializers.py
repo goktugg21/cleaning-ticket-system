@@ -1066,6 +1066,14 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                     {"customer": "You are not linked to this customer."}
                 )
 
+            # SoT Addendum A.1 — a company-wide Customer Company Admin
+            # (the membership `is_company_admin` flag) may create a ticket
+            # at ANY building of the customer, with no per-building access
+            # row required (the CCA role default grants
+            # `customer.ticket.create`).
+            if membership.is_company_admin:
+                return attrs
+
             # Sprint 14: customer-users must additionally have building
             # access for the (customer, building) pair. A user with
             # access to B3 only cannot create a ticket for B1, even if

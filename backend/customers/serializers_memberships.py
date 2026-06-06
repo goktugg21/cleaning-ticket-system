@@ -1,6 +1,5 @@
 from rest_framework import serializers
 
-from accounts.models import UserRole
 # Reuse the #74 effective-access-role ranking verbatim so the Employees
 # directory and the global Users list never drift on "which grant wins".
 from accounts.serializers_users import _ACCESS_ROLE_RANK
@@ -51,6 +50,10 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
             "user_email",
             "user_full_name",
             "user_role",
+            # SoT Addendum A.1 — company-wide Customer Company Admin flag.
+            # Read-only on the wire; toggled via the dedicated
+            # /users/<id>/company-admin/ endpoint.
+            "is_company_admin",
             "created_at",
             "actions",
         ]
@@ -95,6 +98,12 @@ class CustomerEmployeeSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_customer_access_role(self, obj):
+        # SoT Addendum A.1 — a company-wide Customer Company Admin (the
+        # membership `is_company_admin` flag) is CCA across all buildings,
+        # with no per-building access row. Report CCA directly so the
+        # Employees directory shows the company-wide status correctly.
+        if obj.is_company_admin:
+            return CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
         best_role = None
         best_rank = 0
         for access in obj.building_access.all():
@@ -212,59 +221,33 @@ class CustomerUserBuildingAccessUpdateSerializer(serializers.ModelSerializer):
         fields = ["access_role", "permission_overrides", "is_active"]
 
     def validate_access_role(self, value):
-        """Sprint 27A + B5 — CCA-grant gate.
+        """CCA is company-wide — never a per-building access_role.
 
-        Sprint 27A established H-7: only SUPER_ADMIN may grant
-        `CUSTOMER_COMPANY_ADMIN`. B5 narrows this: a Provider Company
-        Admin (COMPANY_ADMIN role) may ALSO grant CCA, but only when
-        the provider Company's `provider_admin_may_manage_customer_company_admins`
-        policy is True (the default). When the Super Admin has
-        toggled the policy to False on a specific provider company,
-        only SUPER_ADMIN can grant CCA on that company's customers.
+        SoT Addendum A.1 makes Customer Company Admin a COMPANY-WIDE
+        status carried on `CustomerUserMembership.is_company_admin`,
+        toggled exclusively through the dedicated company-admin
+        endpoint (`/users/<id>/company-admin/`). It is no longer a
+        per-building `access_role` value. To close the split-brain,
+        this serializer UNCONDITIONALLY rejects an attempt to set a
+        CUBA row's `access_role` to `CUSTOMER_COMPANY_ADMIN` for EVERY
+        actor (SUPER_ADMIN included) — the only path to making a CCA
+        is the company-admin flag.
 
-        Everyone else (BUILDING_MANAGER / STAFF / CUSTOMER_USER —
-        including a CCA actor) is always blocked from setting
-        `access_role=CUSTOMER_COMPANY_ADMIN`. The endpoint's
-        class-level permission already excludes BM and STAFF; CCA is
-        admitted to the endpoint by `CanManageCustomerSideUsers` (B4)
-        but is still blocked here.
+        The stable code `cca_is_company_wide` is surfaced on the wire
+        via the `ErrorDetail.code` so the frontend can branch on it
+        without string-matching; the PATCH view also mirrors this as a
+        view-layer `{detail, code}` 400 before the serializer runs.
+
+        Non-CCA values (CUSTOMER_USER / CUSTOMER_LOCATION_MANAGER) pass
+        through unchanged — this reject is CCA-only.
         """
         if value != CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN:
             return value
 
-        request = self.context.get("request")
-        actor = getattr(request, "user", None)
-        actor_role = getattr(actor, "role", None)
-
-        if actor_role == UserRole.SUPER_ADMIN:
-            return value
-
-        if actor_role == UserRole.COMPANY_ADMIN:
-            # B5 — consult the provider Company's toggle. The
-            # serializer's `self.instance` is the existing CUBA row
-            # being PATCHed; walk to the customer's provider Company
-            # and read the policy field.
-            instance = getattr(self, "instance", None)
-            if instance is None:
-                raise serializers.ValidationError(
-                    "Cannot validate CCA grant: target access row not "
-                    "found in serializer context.",
-                )
-            company = instance.membership.customer.company
-            if not company.provider_admin_may_manage_customer_company_admins:
-                raise serializers.ValidationError(
-                    "Super Admin has disabled Provider Admin's ability "
-                    "to grant the Customer Company Admin access role "
-                    "on this provider company. Only a Super Admin may "
-                    "do so."
-                )
-            return value
-
-        # CCA / CLM / CUSTOMER_USER / BM / STAFF — never.
         raise serializers.ValidationError(
-            "Only a Super Admin (or a Provider Company Admin when the "
-            "policy allows) may grant the Customer Company Admin "
-            "access role.",
+            "Customer Admin is company-wide — use the company-admin "
+            "toggle.",
+            code="cca_is_company_wide",
         )
 
     def validate_permission_overrides(self, value):

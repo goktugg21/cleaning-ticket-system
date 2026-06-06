@@ -31,7 +31,7 @@ target a contact from another customer by URL-mismatch
 from django.db.models import Exists, OuterRef, Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, status, views
+from rest_framework import filters, generics, status, views
 from rest_framework.response import Response
 
 from accounts.models import UserRole
@@ -99,6 +99,10 @@ class CustomerContactListCreateView(generics.ListCreateAPIView):
     ]
     serializer_class = ContactSerializer
     pagination_class = UnboundedPagination
+    # ?search= — free-text across the contact's real fields. Uses the
+    # REAL model field names (full_name / email / phone / role_label).
+    filter_backends = [filters.SearchFilter]
+    search_fields = ["full_name", "email", "phone", "role_label"]
 
     def _get_customer(self):
         customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
@@ -113,10 +117,42 @@ class CustomerContactListCreateView(generics.ListCreateAPIView):
         qs = (
             Contact.objects.filter(customer=customer)
             .select_related("building")
-            .order_by("full_name", "id")
         )
+
+        # ?building_id=<int> — a contact matches when it is linked to that
+        # building via ContactBuildingLink, OR via the legacy single-
+        # building anchor, OR it is company-wide (no link rows AND no
+        # legacy anchor). A non-int value is ignored (no narrowing) so a
+        # malformed query never errors the list.
+        building_id_raw = self.request.query_params.get("building_id")
+        if building_id_raw not in (None, ""):
+            try:
+                bid = int(building_id_raw)
+            except (TypeError, ValueError):
+                bid = None
+            if bid is not None:
+                qs = qs.annotate(
+                    _in_bld=Exists(
+                        ContactBuildingLink.objects.filter(
+                            contact=OuterRef("pk"), building_id=bid
+                        )
+                    ),
+                    _any_link=Exists(
+                        ContactBuildingLink.objects.filter(
+                            contact=OuterRef("pk")
+                        )
+                    ),
+                ).filter(
+                    Q(_in_bld=True)
+                    | Q(building_id=bid)
+                    | (Q(_any_link=False) & Q(building__isnull=True))
+                ).distinct()
+
+        qs = qs.order_by("full_name", "id")
         # Sprint 14G — narrow contacts linked only to buildings a
-        # BUILDING_MANAGER does not manage (no-op for SA / CA).
+        # BUILDING_MANAGER does not manage (no-op for SA / CA). MUST stay
+        # the LAST step so the BM building-scope narrowing applies on top
+        # of the ?building_id= filter.
         return scope_contacts_for_reader(qs, self.request.user)
 
     def get_serializer_context(self):

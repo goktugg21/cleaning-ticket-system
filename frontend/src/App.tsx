@@ -48,7 +48,6 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // create flow (`/admin/customers/new`) and as the basics editor
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
-import { CustomerEmployeesPage } from "./pages/admin/customer/CustomerEmployeesPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
@@ -381,17 +380,6 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerUsersPage />
-              </AdminRoute>
-            }
-          />
-          {/* Employees directory — provider-admin entry point
-              (customer-scoped). SA / CA only; the customer-scoped
-              sidebar submenu surfaces the nav link. */}
-          <Route
-            path="/admin/customers/:id/employees"
-            element={
-              <AdminRoute>
-                <CustomerEmployeesPage />
               </AdminRoute>
             }
           />

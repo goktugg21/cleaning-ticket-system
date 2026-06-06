@@ -89,15 +89,27 @@ def scope_company_ids_for_catalog(user) -> Optional[frozenset[int]]:
         )
 
     if role == UserRole.CUSTOMER_USER:
-        from customers.models import CustomerUserBuildingAccess
+        from accounts.scoping import company_admin_customer_ids
+        from customers.models import Customer, CustomerUserBuildingAccess
 
-        return frozenset(
+        row_company_ids = set(
             CustomerUserBuildingAccess.objects.filter(
                 membership__user=user, is_active=True
             )
             .values_list("membership__customer__company_id", flat=True)
             .distinct()
         )
+        # SoT Addendum A.1 — a company-wide Customer Company Admin (the
+        # membership flag) sees the catalog of every provider company whose
+        # customer they administer, with no per-building access row. Without
+        # this a migrated CCA (zero CUBA rows) sees an EMPTY catalog and
+        # cannot compose an Extra Work cart (the headline CCA workflow).
+        admin_company_ids = set(
+            Customer.objects.filter(
+                id__in=company_admin_customer_ids(user)
+            ).values_list("company_id", flat=True)
+        )
+        return frozenset(row_company_ids | admin_company_ids)
 
     return frozenset()
 

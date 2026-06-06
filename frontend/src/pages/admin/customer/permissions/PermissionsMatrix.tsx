@@ -63,7 +63,6 @@ export interface PermissionsMatrixProps {
   linkedBuildings: CustomerBuildingMembership[];
   policy: CustomerCompanyPolicyAdmin | null;
   meId: number | undefined;
-  canGrantCustomerCompanyAdmin: boolean;
   /** True when an immediate-save round-trip is in flight for this user. */
   isUserBusy: (userId: number) => boolean;
   onRoleChange: (
@@ -244,9 +243,6 @@ export function PermissionsMatrix(props: PermissionsMatrixProps) {
                   policy={props.policy}
                   isSelf={props.meId === membership.user_id}
                   busy={props.isUserBusy(membership.user_id)}
-                  canGrantCustomerCompanyAdmin={
-                    props.canGrantCustomerCompanyAdmin
-                  }
                   policyBlockedLabel={t(
                     "customer_permissions.matrix.policy_blocked",
                   )}
@@ -278,7 +274,6 @@ interface MatrixRowProps {
   policy: CustomerCompanyPolicyAdmin | null;
   isSelf: boolean;
   busy: boolean;
-  canGrantCustomerCompanyAdmin: boolean;
   policyBlockedLabel: string;
   onRoleChange: (newRole: CustomerAccessRole) => void;
   onActiveToggle: (next: boolean) => void;
@@ -386,14 +381,16 @@ function MatrixRow(props: MatrixRowProps) {
             {t(accessRoleLabelKey("CUSTOMER_LOCATION_MANAGER"))}
           </option>
           {/*
-            H-6 / H-7 invariant: only SUPER_ADMIN may grant
-            CUSTOMER_COMPANY_ADMIN. Show the option if the viewer can
-            grant it OR if the row already holds it (so the select
-            displays the current value for a CA who cannot promote
-            other users to CCA but must still see this user's role).
+            CUSTOMER_COMPANY_ADMIN is company-wide and is NEVER offered as
+            a per-building grant here — the only CCA control lives in the
+            Users drill-in modal's "Make / Remove company admin" toggle
+            (the backend 400s a per-building CCA grant with
+            `cca_is_company_wide`). The option is rendered READ-BACK-ONLY:
+            shown solely so a legacy CCA row still displays its current
+            value in the select; it is never an option the operator can
+            pick for a row that does not already hold it.
           */}
-          {(props.canGrantCustomerCompanyAdmin ||
-            props.access.access_role === "CUSTOMER_COMPANY_ADMIN") && (
+          {props.access.access_role === "CUSTOMER_COMPANY_ADMIN" && (
             <option value="CUSTOMER_COMPANY_ADMIN">
               {t(accessRoleLabelKey("CUSTOMER_COMPANY_ADMIN"))}
             </option>

@@ -117,6 +117,17 @@ def _target_staff_in_scope(target, customer: Customer, building) -> bool:
     ).exists()
 
 
+def _membership_is_company_admin(target, customer: Customer) -> bool:
+    """SoT Addendum A.1 — True iff the target holds the company-wide
+    Customer Company Admin status (the membership `is_company_admin`
+    flag) for this customer. A company-wide CCA is admin across ALL the
+    customer's buildings; no per-building access row can downgrade them.
+    """
+    return CustomerUserMembership.objects.filter(
+        user=target, customer=customer, is_company_admin=True
+    ).exists()
+
+
 def _customer_user_access_rows(target, customer: Customer):
     """Active CustomerUserBuildingAccess rows for the target under this
     customer. Used to compute customer-side capability booleans + the
@@ -223,6 +234,17 @@ def compute_scope(target, customer: Customer, building) -> dict:
                 "in_scope": False,
                 "reason": "Customer user has no membership for this customer.",
             }
+        # SoT Addendum A.1: a company-wide Customer Company Admin is in
+        # scope for this customer and EVERY building (present + future)
+        # with no per-building access row required.
+        if _membership_is_company_admin(target, customer):
+            return {
+                "in_scope": True,
+                "reason": (
+                    "Company-wide Customer Company Admin (admin across all "
+                    "the customer's buildings, no per-building row required)."
+                ),
+            }
         if building is not None:
             row = _customer_user_pair_access(target, customer, building)
             if row is None:
@@ -284,6 +306,17 @@ def compute_role_defaults(target, customer: Customer, building) -> dict:
     if role != UserRole.CUSTOMER_USER:
         return block
 
+    # SoT Addendum A.1: a company-wide Customer Company Admin is admin
+    # across ALL the customer's buildings; no per-building access row can
+    # downgrade them. Short-circuit BEFORE reading any pair_row so the
+    # CCA defaults always win, regardless of the (customer, building)
+    # context or any lower-tier row the user may also hold.
+    if _membership_is_company_admin(target, customer):
+        cca = CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+        block["access_role"] = cca
+        block["default_permission_keys"] = sorted(_TICKET_ROLE_DEFAULTS[cca])
+        return block
+
     # Customer-side default depends on the access row in the given
     # (customer, building) context. When `building` is None we fall
     # back to the strongest active access row across the customer —
@@ -328,6 +361,14 @@ def compute_overrides(target, customer: Customer, building) -> list[dict]:
     `permission_overrides` JSON so the frontend can render the
     "default → override → effective" chain.
     """
+    # SoT Addendum A.1: a company-wide Customer Company Admin has no
+    # per-building access rows that apply — their authority is the
+    # membership-level flag, not any CUBA row. Return an empty list so
+    # the frontend renders "company-wide admin" rather than a stale
+    # per-building override chain.
+    if _membership_is_company_admin(target, customer):
+        return []
+
     rows = _customer_user_access_rows(target, customer)
     if building is not None:
         rows = [r for r in rows if r.building_id == building.id]
@@ -349,7 +390,15 @@ def compute_overrides(target, customer: Customer, building) -> list[dict]:
 def _customer_can(target, customer: Customer, building, key: str) -> bool:
     """Helper — does the target hold a customer-side permission key in
     the given (customer, building) context? Re-uses the existing
-    customer-side resolver."""
+    customer-side resolver.
+
+    SoT Addendum A.1: `user_can` itself short-circuits to the CCA role
+    defaults when the membership carries the company-wide
+    `is_company_admin` flag, so a company-wide CCA resolves every key the
+    CCA role grants here (and `_any_customer_view_key` /
+    `_any_customer_approve_key`, which call through this helper, inherit
+    that behaviour) — no per-building row required.
+    """
     from customers.permissions import user_can
 
     building_id = building.id if building is not None else None
@@ -705,5 +754,15 @@ def compute_endpoint_notes(target, customer: Customer, building) -> list[str]:
             "Customer Location Manager); the H-7 grant gate continues "
             "to block any non-Super-Admin actor from setting "
             "`access_role=CUSTOMER_COMPANY_ADMIN`."
+        )
+        notes.append(
+            "SoT Addendum A.1: Customer Company Admin is now a "
+            "COMPANY-WIDE status carried on the membership "
+            "(`is_company_admin`), not a per-building access role. A "
+            "company-wide CCA is admin across ALL the customer's "
+            "buildings (present + future) regardless of any per-building "
+            "CustomerUserBuildingAccess row — no per-building row is "
+            "required, and no per-building row can downgrade them. Such a "
+            "membership has no per-building overrides that apply."
         )
     return notes

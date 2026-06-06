@@ -376,10 +376,23 @@ class InvitationAcceptSerializer(serializers.Serializer):
                 invitation.customer_access_role
                 or CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER
             )
+            # SoT Addendum A.1 — Customer Company Admin is a company-wide
+            # membership flag, NOT a per-building access role. When the
+            # invitation grants CCA, set `is_company_admin=True` on the
+            # membership and do NOT create per-building CCA CUBA rows.
+            is_cca_invite = (
+                role_value
+                == CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN
+            )
             for customer in invitation.customers.all():
                 membership, _ = CustomerUserMembership.objects.get_or_create(
                     user=user, customer=customer
                 )
+                if is_cca_invite:
+                    if not membership.is_company_admin:
+                        membership.is_company_admin = True
+                        membership.save(update_fields=["is_company_admin"])
+                    continue
                 for building in invitation.buildings.all():
                     if CustomerBuildingMembership.objects.filter(
                         customer=customer, building=building

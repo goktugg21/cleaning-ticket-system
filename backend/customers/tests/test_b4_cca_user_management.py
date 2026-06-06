@@ -269,8 +269,10 @@ class ExistingAdminBehaviorTests(_B4Fixture):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
 
-    def test_super_admin_can_still_grant_cca_role(self):
-        # H-7: only SA may set access_role=CCA. Re-pin.
+    def test_super_admin_cannot_grant_cca_per_building_anymore(self):
+        # Single-path CCA (SoT A.1): CCA is a company-wide membership
+        # flag, never a per-building access_role. Even SA's per-building
+        # grant is rejected with 400 + `cca_is_company_wide`.
         response = self._api(self.super_admin).patch(
             self._access_detail_url(
                 self.customer_a.id, self.cu_target.id, self.b1.id
@@ -278,7 +280,10 @@ class ExistingAdminBehaviorTests(_B4Fixture):
             {"access_role": CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN},
             format="json",
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.status_code, status.HTTP_400_BAD_REQUEST, response.data
+        )
+        self.assertEqual(response.data.get("code"), "cca_is_company_wide")
 
 
 # ---------------------------------------------------------------------------

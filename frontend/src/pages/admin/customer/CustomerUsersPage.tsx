@@ -1,12 +1,13 @@
 import type { FormEvent } from "react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
 import {
   addCustomerUser,
   getCustomer,
+  listCustomerBuildings,
   listCustomerUserAccess,
   listCustomerUsers,
   listUsers,
@@ -15,16 +16,16 @@ import {
 import type {
   CustomerAccessRole,
   CustomerAdmin,
+  CustomerBuildingMembership,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
   UserAdmin,
 } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
-import { PermissionsRollupChip } from "../../../components/PermissionsRollupChip";
-import { PermissionsRollupSummary } from "../../../components/PermissionsRollupSummary";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { CustomerUserManageModal } from "./CustomerUserManageModal";
 
 /**
  * Sprint 28 Batch 13 (rework) — Customer Users page (admin variant).
@@ -41,9 +42,16 @@ const ACCESS_ROLE_LABEL: Record<CustomerAccessRole, string> = {
   CUSTOMER_COMPANY_ADMIN: "access_role.customer_company_admin",
 };
 
+// The three filterable effective access roles offered in the access-role
+// filter dropdown. "" means "All" (the param is omitted server-side).
+const ACCESS_ROLE_FILTER_OPTIONS: CustomerAccessRole[] = [
+  "CUSTOMER_COMPANY_ADMIN",
+  "CUSTOMER_LOCATION_MANAGER",
+  "CUSTOMER_USER",
+];
+
 export function CustomerUsersPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const { t } = useTranslation("common");
 
   const numericId = useMemo(() => {
@@ -55,9 +63,18 @@ export function CustomerUsersPage() {
   const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
   const [members, setMembers] = useState<CustomerUserMembership[]>([]);
   const [availableUsers, setAvailableUsers] = useState<UserAdmin[]>([]);
+  const [buildings, setBuildings] = useState<CustomerBuildingMembership[]>([]);
   const [accessByUserId, setAccessByUserId] = useState<
     Record<number, CustomerUserBuildingAccess[]>
   >({});
+  // Filter bar (Ramazan's 40+-people pain). Access-role + building are
+  // SERVER-SIDE (passed through to ?access_role / ?building_id); search
+  // is CLIENT-SIDE over the loaded members. "" = All (param omitted).
+  const [filterAccessRole, setFilterAccessRole] = useState<
+    CustomerAccessRole | ""
+  >("");
+  const [filterBuildingId, setFilterBuildingId] = useState<number | "">("");
+  const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [memberError, setMemberError] = useState("");
@@ -68,12 +85,13 @@ export function CustomerUsersPage() {
   const [removeTarget, setRemoveTarget] =
     useState<CustomerUserMembership | null>(null);
 
-  // Sprint 29 Batch 29.8.5 — per-row toggle for the inline
-  // <PermissionsRollupSummary>. Single-expansion: clicking another row
-  // collapses the previous one. The summary surfaces every (building,
-  // role, override-count) tuple inline so the operator does not need
-  // to navigate away.
-  const [summaryUserId, setSummaryUserId] = useState<number | null>(null);
+  // SoT Addendum A.2 — DRILL-IN replaces the old inline accordion. A
+  // row's "Manage" action opens a modal (CustomerUserManageModal) that
+  // hosts the company-admin toggle + the per-building access editor +
+  // the permission-override modal. "Click a row, edit, leave" — no
+  // inline expansion.
+  const [manageTarget, setManageTarget] =
+    useState<CustomerUserMembership | null>(null);
 
   async function loadAccessForMembers(
     customerId: number,
@@ -94,10 +112,32 @@ export function CustomerUsersPage() {
     return next;
   }
 
-  async function reloadMembers(customerId: number) {
+  // Build the server-side member-list params from the current filter
+  // state. Empty/All filters are omitted so the backend returns the full
+  // list. The caller may pass explicit overrides (used by the filter-
+  // change refetch effect so it never races the not-yet-committed state).
+  function memberListParams(overrides?: {
+    accessRole?: CustomerAccessRole | "";
+    buildingId?: number | "";
+  }): { access_role?: string; building_id?: number } {
+    const accessRole = overrides?.accessRole ?? filterAccessRole;
+    const buildingId = overrides?.buildingId ?? filterBuildingId;
+    const params: { access_role?: string; building_id?: number } = {};
+    if (accessRole !== "") params.access_role = accessRole;
+    if (buildingId !== "") params.building_id = buildingId;
+    return params;
+  }
+
+  async function reloadMembers(
+    customerId: number,
+    overrides?: {
+      accessRole?: CustomerAccessRole | "";
+      buildingId?: number | "";
+    },
+  ) {
     try {
       const [membersResponse, candidatesResponse] = await Promise.all([
-        listCustomerUsers(customerId),
+        listCustomerUsers(customerId, memberListParams(overrides)),
         listUsers({ role: "CUSTOMER_USER", page_size: 200 }),
       ]);
       setMembers(membersResponse.results);
@@ -127,27 +167,40 @@ export function CustomerUsersPage() {
     }
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     setLoadError("");
+    // Initial load runs with no filters committed yet (the filter state
+    // is "" / "" at mount), so the member list comes back unfiltered.
+    // Building options come from listCustomerBuildings — the same source
+    // the Permissions / Contacts pages use for their building dropdowns.
     Promise.all([
       getCustomer(numericId),
       listCustomerUsers(numericId),
       listUsers({ role: "CUSTOMER_USER", page_size: 200 }),
+      listCustomerBuildings(numericId),
     ])
-      .then(async ([customerData, membersResponse, candidatesResponse]) => {
-        if (cancelled) return;
-        setCustomer(customerData);
-        setMembers(membersResponse.results);
-        const memberIds = new Set(
-          membersResponse.results.map((m) => m.user_id),
-        );
-        setAvailableUsers(
-          candidatesResponse.results.filter((u) => !memberIds.has(u.id)),
-        );
-        const access = await loadAccessForMembers(
-          numericId,
-          membersResponse.results,
-        );
-        if (!cancelled) setAccessByUserId(access);
-      })
+      .then(
+        async ([
+          customerData,
+          membersResponse,
+          candidatesResponse,
+          buildingsResponse,
+        ]) => {
+          if (cancelled) return;
+          setCustomer(customerData);
+          setBuildings(buildingsResponse.results);
+          setMembers(membersResponse.results);
+          const memberIds = new Set(
+            membersResponse.results.map((m) => m.user_id),
+          );
+          setAvailableUsers(
+            candidatesResponse.results.filter((u) => !memberIds.has(u.id)),
+          );
+          const access = await loadAccessForMembers(
+            numericId,
+            membersResponse.results,
+          );
+          if (!cancelled) setAccessByUserId(access);
+        },
+      )
       .catch((err) => {
         if (!cancelled) setLoadError(getApiError(err));
       })
@@ -158,6 +211,27 @@ export function CustomerUsersPage() {
       cancelled = true;
     };
   }, [numericId, t]);
+
+  // Server-side filter refetch. The initial-load effect above already
+  // fetched once with empty filters, so skip the very first run of this
+  // effect; thereafter, any change to the access-role or building filter
+  // re-fetches the member list (and its access pills) with the new
+  // params. Search is purely client-side, so it deliberately does NOT
+  // appear in the dependency list. All setState happens inside the async
+  // reload closure after an await — never synchronously in the effect
+  // body — so there is no set-state-in-effect.
+  const didMountFilterRef = useRef(false);
+  useEffect(() => {
+    if (numericId === null) return;
+    if (!didMountFilterRef.current) {
+      didMountFilterRef.current = true;
+      return;
+    }
+    void reloadMembers(numericId);
+    // reloadMembers reads the latest filter state via memberListParams;
+    // the effect fires on filter changes and numericId resets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numericId, filterAccessRole, filterBuildingId]);
 
   async function handleAddMember(event: FormEvent) {
     event.preventDefault();
@@ -210,6 +284,18 @@ export function CustomerUsersPage() {
   const canManageMembers =
     customer?.actions?.can_manage_customer_users === true;
 
+  // Client-side free-text search over the loaded (already server-
+  // filtered) members. Matches on email + full name, case-insensitive.
+  // An empty query shows every loaded member.
+  const visibleMembers = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    if (query === "") return members;
+    return members.filter((m) => {
+      const haystack = `${m.user_email} ${m.user_full_name ?? ""}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [members, searchText]);
+
   return (
     <div data-testid="customer-users-page">
       <CustomerSubPageHeader
@@ -251,6 +337,96 @@ export function CustomerUsersPage() {
               {t("customer_form.section_users_desc")}
             </p>
 
+            {/* Filter bar — access-role + building are SERVER-SIDE
+                (passed through to ?access_role / ?building_id); search is
+                CLIENT-SIDE over the loaded members. */}
+            <div
+              className="customer-users-filter-bar"
+              data-testid="customer-users-filter-bar"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 10,
+                marginBottom: 14,
+                alignItems: "flex-end",
+              }}
+            >
+              <div className="field" style={{ marginBottom: 0, minWidth: 200 }}>
+                <label
+                  className="field-label"
+                  htmlFor="customer-users-filter-access-role"
+                >
+                  {t("customer_view.users.filter_access_role_label")}
+                </label>
+                <select
+                  id="customer-users-filter-access-role"
+                  className="field-select"
+                  data-testid="customer-users-filter-access-role"
+                  value={filterAccessRole}
+                  onChange={(event) =>
+                    setFilterAccessRole(
+                      event.target.value as CustomerAccessRole | "",
+                    )
+                  }
+                >
+                  <option value="">
+                    {t("customer_view.users.filter_access_role_all")}
+                  </option>
+                  {ACCESS_ROLE_FILTER_OPTIONS.map((role) => (
+                    <option key={role} value={role}>
+                      {t(ACCESS_ROLE_LABEL[role])}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field" style={{ marginBottom: 0, minWidth: 200 }}>
+                <label
+                  className="field-label"
+                  htmlFor="customer-users-filter-building"
+                >
+                  {t("customer_view.users.filter_building_label")}
+                </label>
+                <select
+                  id="customer-users-filter-building"
+                  className="field-select"
+                  data-testid="customer-users-filter-building"
+                  value={filterBuildingId === "" ? "" : String(filterBuildingId)}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setFilterBuildingId(v === "" ? "" : Number(v));
+                  }}
+                >
+                  <option value="">
+                    {t("customer_view.users.filter_building_all")}
+                  </option>
+                  {buildings.map((link) => (
+                    <option key={link.id} value={link.building_id}>
+                      {link.building_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 200 }}>
+                <label
+                  className="field-label"
+                  htmlFor="customer-users-filter-search"
+                >
+                  {t("customer_view.users.filter_search_label")}
+                </label>
+                <input
+                  id="customer-users-filter-search"
+                  className="field-input"
+                  type="search"
+                  data-testid="customer-users-filter-search"
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  placeholder={t("customer_view.users.filter_search_placeholder")}
+                />
+              </div>
+            </div>
+
             {memberError && (
               <div
                 className="alert-error"
@@ -272,16 +448,43 @@ export function CustomerUsersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {members.map((membership) => {
+                  {visibleMembers.map((membership) => {
                     const access = accessByUserId[membership.user_id] ?? [];
-                    const isSummaryOpen = summaryUserId === membership.user_id;
+                    const isCompanyAdmin = membership.is_company_admin === true;
                     return (
                       <Fragment key={membership.id}>
                         <tr data-testid="customer-user-row">
                           <td className="td-subject">{membership.user_email}</td>
                           <td>{membership.user_full_name || "—"}</td>
                           <td data-testid="customer-user-access-summary">
-                            {access.length === 0 ? (
+                            {isCompanyAdmin ? (
+                              // SoT Addendum A.1 — a company-wide CCA is
+                              // ONE status across all buildings; the
+                              // per-building pills are hidden for them.
+                              <div
+                                className="customer-user-access-pills"
+                                data-testid="customer-user-company-admin-pill"
+                              >
+                                <span
+                                  className="customer-user-access-pill"
+                                  title={t(
+                                    "customer_people.company_admin.all_buildings_caption",
+                                  )}
+                                >
+                                  <span>
+                                    {t(
+                                      ACCESS_ROLE_LABEL.CUSTOMER_COMPANY_ADMIN,
+                                    )}
+                                  </span>
+                                  <span aria-hidden="true">·</span>
+                                  <span>
+                                    {t(
+                                      "customer_people.company_admin.all_buildings_short",
+                                    )}
+                                  </span>
+                                </span>
+                              </div>
+                            ) : access.length === 0 ? (
                               <span className="muted small">
                                 {t("customer_view.users.no_access_yet")}
                               </span>
@@ -309,73 +512,35 @@ export function CustomerUsersPage() {
                                 ))}
                               </div>
                             )}
-                            {numericId !== null && (
-                              <div style={{ marginTop: 6 }}>
-                                <PermissionsRollupChip
-                                  customerId={numericId}
-                                  userId={membership.user_id}
-                                  accesses={access}
-                                  onToggle={() =>
-                                    setSummaryUserId((current) =>
-                                      current === membership.user_id
-                                        ? null
-                                        : membership.user_id,
-                                    )
-                                  }
-                                  expanded={isSummaryOpen}
-                                />
-                              </div>
-                            )}
                           </td>
                           <td>
-                            {canManageMembers && (
+                            <div style={{ display: "flex", gap: 6 }}>
                               <button
                                 type="button"
-                                className="btn btn-ghost btn-sm"
-                                onClick={() => openRemoveDialog(membership)}
+                                className="btn btn-secondary btn-sm"
+                                data-testid="customer-user-manage-button"
+                                onClick={() => setManageTarget(membership)}
                               >
-                                {t("admin_form.remove")}
+                                {t("customer_people.manage_button")}
                               </button>
-                            )}
+                              {canManageMembers && (
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => openRemoveDialog(membership)}
+                                >
+                                  {t("admin_form.remove")}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
-                        {isSummaryOpen && numericId !== null && (
-                          <tr
-                            className="customer-user-row-summary"
-                            data-testid={`customer-user-row-summary-${membership.user_id}`}
-                          >
-                            <td colSpan={4}>
-                              <PermissionsRollupSummary
-                                userId={membership.user_id}
-                                customerId={numericId}
-                                userLabel={
-                                  membership.user_full_name ||
-                                  membership.user_email
-                                }
-                                customerLabel={customerName}
-                                accesses={access}
-                                onOpenOverrides={(access) => {
-                                  // The override drawer lives on the
-                                  // Permissions page, not here.
-                                  // Deep-link via 29.2's
-                                  // ?focus_user=&focus_building= shape
-                                  // so the drawer auto-opens on that
-                                  // specific row.
-                                  navigate(
-                                    `/admin/customers/${numericId}/permissions?focus_user=${membership.user_id}&focus_building=${access.building_id}`,
-                                  );
-                                }}
-                                onCollapse={() => setSummaryUserId(null)}
-                              />
-                            </td>
-                          </tr>
-                        )}
                       </Fragment>
                     );
                   })}
                 </tbody>
               </table>
-              {members.length === 0 && (
+              {members.length === 0 ? (
                 <p
                   className="muted small"
                   style={{ padding: "12px 0" }}
@@ -383,7 +548,15 @@ export function CustomerUsersPage() {
                 >
                   {t("customer_form.no_users_yet")}
                 </p>
-              )}
+              ) : visibleMembers.length === 0 ? (
+                <p
+                  className="muted small"
+                  style={{ padding: "12px 0" }}
+                  data-testid="customer-users-no-matches"
+                >
+                  {t("customer_view.users.filter_no_matches")}
+                </p>
+              ) : null}
             </div>
 
             {canManageMembers && (
@@ -449,6 +622,20 @@ export function CustomerUsersPage() {
           </section>
         </>
       ) : null}
+
+      {/* SoT Addendum A.2 — drill-in modal (replaces the old accordion).
+          Keyed by user id so the prop-derived membership sub-state never
+          resyncs in an effect. */}
+      {manageTarget && numericId !== null && (
+        <CustomerUserManageModal
+          key={manageTarget.user_id}
+          customerId={numericId}
+          userId={manageTarget.user_id}
+          userLabel={manageTarget.user_full_name || manageTarget.user_email}
+          onClose={() => setManageTarget(null)}
+          onChanged={() => reloadMembers(numericId)}
+        />
+      )}
     </div>
   );
 }
