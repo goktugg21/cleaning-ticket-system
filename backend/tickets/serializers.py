@@ -10,6 +10,7 @@ from accounts.permissions import (
     is_staff_role,
 )
 from accounts.permissions_v2 import user_has_osius_permission
+from accounts.scoping import scope_tickets_for
 from buildings.models import Building, BuildingManagerAssignment
 from customers.models import (
     Customer,
@@ -24,11 +25,12 @@ from .models import (
     TicketAttachment,
     TicketMessage,
     TicketMessageType,
+    TicketMessageVisibility,
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
 )
-from .permissions import user_has_scope_for_ticket
+from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 
 # Sprint 7B — reuse the Extra Work cart-line input contract for the
@@ -1134,6 +1136,21 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
 class TicketMessageSerializer(serializers.ModelSerializer):
     author_email = serializers.CharField(source="author.email", read_only=True)
+    # M1 B1 — attention targets (writable PK list, default empty) +
+    # visibility mode (writable, default NORMAL). `author` / `is_hidden`
+    # stay read-only (set server-side in the view).
+    directed_to = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=User.objects.all(),
+        required=False,
+        default=list,
+    )
+
+    # Upper bound on attention targets. "Direct at" is for a handful of
+    # people, not a broadcast; the cap closes a query-amplification surface
+    # (one PK resolution + one scope_tickets_for() per id) before any of
+    # that work runs — see to_internal_value below.
+    MAX_DIRECTED_TO = 50
 
     class Meta:
         model = TicketMessage
@@ -1144,10 +1161,33 @@ class TicketMessageSerializer(serializers.ModelSerializer):
             "author_email",
             "message",
             "message_type",
+            "directed_to",
+            "visibility_mode",
             "is_hidden",
             "created_at",
         ]
         read_only_fields = ["id", "ticket", "author", "author_email", "is_hidden", "created_at"]
+
+    def to_internal_value(self, data):
+        # Cap directed_to on the RAW input, before DRF resolves each PK (one
+        # query per id) and before validate() runs the per-target scope
+        # check — so an oversized list is rejected up front rather than
+        # amplified into N queries. Only meaningful for list-shaped JSON
+        # input; other shapes fall through to DRF's normal handling.
+        directed = data.get("directed_to") if hasattr(data, "get") else None
+        if isinstance(directed, (list, tuple)) and len(directed) > self.MAX_DIRECTED_TO:
+            raise serializers.ValidationError(
+                {
+                    "directed_to": [
+                        serializers.ErrorDetail(
+                            f"At most {self.MAX_DIRECTED_TO} directed "
+                            "recipients are allowed.",
+                            code="too_many_directed_recipients",
+                        )
+                    ]
+                }
+            )
+        return super().to_internal_value(data)
 
     def validate_message_type(self, value):
         request = self.context.get("request")
@@ -1182,6 +1222,59 @@ class TicketMessageSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         if not user_has_scope_for_ticket(user, ticket):
             raise serializers.ValidationError("You do not have access to this ticket.")
+
+        # M1 B1 — directed_to + visibility_mode validation.
+        #
+        # `message_type` here is the value the serializer will save. For a
+        # provider-side author it is the validated wire value; for a
+        # customer-side author it is already PUBLIC_REPLY (validate_message_type
+        # rejects every other tier from a customer), which is exactly what the
+        # view force-normalises it to — so the audience check below matches the
+        # message that actually gets stored.
+        message_type = attrs.get("message_type", TicketMessageType.PUBLIC_REPLY)
+        directed_to = attrs.get("directed_to") or []
+        visibility_mode = attrs.get(
+            "visibility_mode", TicketMessageVisibility.NORMAL
+        )
+
+        # A RESTRICTED message with no target would be visible to nobody but
+        # the author — reject it so it cannot become a silent black hole.
+        if (
+            visibility_mode == TicketMessageVisibility.RESTRICTED
+            and not directed_to
+        ):
+            raise serializers.ValidationError(
+                {
+                    "directed_to": [
+                        serializers.ErrorDetail(
+                            "A restricted message must name at least one "
+                            "recipient.",
+                            code="restricted_requires_target",
+                        )
+                    ]
+                }
+            )
+
+        # Every directed user must (a) have ticket access AND (b) be allowed
+        # to see this message_type. This blocks directing e.g. an
+        # INTERNAL_NOTE at a customer-side user — directing can never widen
+        # who can see a note beyond its message_type audience.
+        for target in directed_to:
+            in_scope = scope_tickets_for(target).filter(pk=ticket.pk).exists()
+            if not in_scope or not message_type_visible_to_user(
+                target, message_type
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "directed_to": [
+                            serializers.ErrorDetail(
+                                "You cannot direct this message to a user who "
+                                "cannot see it.",
+                                code="directed_to_not_visible",
+                            )
+                        ]
+                    }
+                )
         return attrs
 
 

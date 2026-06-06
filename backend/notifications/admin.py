@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import NotificationLog
+from .models import Notification, NotificationLog
 
 
 @admin.register(NotificationLog)
@@ -33,5 +33,37 @@ class NotificationLogAdmin(admin.ModelAdmin):
         "status",
         "error_message",
         "sent_at",
+        "created_at",
+    )
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = (
+        "event_type",
+        "recipient",
+        "actor",
+        "is_directed",
+        "ticket",
+        "extra_work",
+        "read_at",
+        "created_at",
+    )
+    list_filter = ("event_type", "is_directed", "created_at", "read_at")
+    search_fields = (
+        "recipient__email",
+        "actor__email",
+        "summary",
+        "ticket__ticket_no",
+    )
+    readonly_fields = (
+        "recipient",
+        "actor",
+        "event_type",
+        "is_directed",
+        "ticket",
+        "extra_work",
+        "summary",
+        "read_at",
         "created_at",
     )

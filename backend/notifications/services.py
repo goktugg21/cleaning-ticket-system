@@ -4,13 +4,21 @@ from django.db.models import Q
 from django.utils import timezone
 
 from accounts.models import User, UserRole
-from tickets.models import TicketPriority, TicketStatus, TicketType
+from tickets.models import (
+    TicketMessageType,
+    TicketMessageVisibility,
+    TicketPriority,
+    TicketStatus,
+    TicketType,
+)
 
 from .models import (
+    Notification,
     NotificationEventType,
     NotificationLog,
     NotificationPreference,
     NotificationStatus,
+    NotificationType,
 )
 
 # `send_mail` is re-exported here so that test code patching
@@ -28,6 +36,7 @@ __all__ = (
     "send_slot_unable_to_complete_email",
     "send_password_reset_email",
     "send_invitation_email",
+    "emit_ticket_message_notifications",
 )
 
 
@@ -92,6 +101,144 @@ def _ticket_customer_users(ticket):
         users.append(ticket.created_by)
 
     return _dedupe_users(users)
+
+
+def _ticket_assigned_staff_users(ticket):
+    """M1 B1 — active STAFF users assigned to this ticket.
+
+    "Assigned STAFF" = the field workers actually placed on the ticket via
+    `TicketStaffAssignment` (any slot), deduped. This is intentionally
+    NARROWER than "every STAFF who could read the ticket via building
+    visibility": message notifications go to the people working the job,
+    not to every staff member in the building. The set is a strict subset
+    of the read-visible audience, so it can never notify a STAFF user who
+    cannot see the message. Slot status is not filtered — this mirrors the
+    `_assigned_staff_payload` roster ("who is on this ticket").
+    """
+    return (
+        _active_users()
+        .filter(
+            role=UserRole.STAFF,
+            ticket_staff_assignments__ticket_id=ticket.id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
+def emit_ticket_message_notifications(message, actor=None):
+    """M1 B1 — create in-app Notification rows for a newly created
+    TicketMessage. IN-APP ONLY (no email; the lifecycle emails are
+    unchanged).
+
+    Recipients = the read-visible audience for `message.message_type`,
+    branched by `message.visibility_mode`:
+
+        message_type        NORMAL audience
+        ------------------  ----------------------------------------------
+        PUBLIC_REPLY        provider-mgmt + assigned-staff + customer-side
+        STAFF_COMPLETION    provider-mgmt + assigned-staff + customer-side
+        STAFF_OPERATIONAL   provider-mgmt + assigned-staff
+        INTERNAL_NOTE       provider-mgmt ONLY
+
+        NORMAL     -> the audience above (+ any directed_to, flagged)
+        RESTRICTED -> message.directed_to only
+
+    minus the author, deduped, active only. Every directed_to user (minus
+    the author) is flagged `is_directed=True`.
+
+    "provider-mgmt" reuses `_ticket_staff_users` (the email-path resolver =
+    the ticket's COMPANY_ADMIN + BUILDING_MANAGER). SUPER_ADMIN is
+    deliberately not auto-notified, matching the existing email behaviour;
+    SA can still read every message directly.
+
+    HARD invariant: an INTERNAL_NOTE never notifies a customer-side user
+    and never notifies STAFF; a STAFF_OPERATIONAL never notifies a
+    customer. Enforced twice — the per-type audience sets exclude those
+    roles, AND a final `message_type_visible_to_user` filter drops any
+    recipient (including any directed_to target) who cannot read the type.
+    """
+    # Lazy import keeps the module-load import graph free of any
+    # notifications <-> tickets.permissions cycle risk.
+    from tickets.permissions import (
+        message_type_visible_to_user,
+        user_has_scope_for_ticket,
+    )
+
+    ticket = message.ticket
+    message_type = message.message_type
+
+    audience = list(_ticket_staff_users(ticket))  # provider management
+    if message_type != TicketMessageType.INTERNAL_NOTE:
+        audience.extend(_ticket_assigned_staff_users(ticket))
+    if message_type in (
+        TicketMessageType.PUBLIC_REPLY,
+        TicketMessageType.STAFF_COMPLETION,
+    ):
+        audience.extend(_ticket_customer_users(ticket))
+
+    directed = [
+        u
+        for u in message.directed_to.all()
+        if u and u.is_active and u.deleted_at is None
+    ]
+
+    if message.visibility_mode == TicketMessageVisibility.RESTRICTED:
+        base = list(directed)
+    else:
+        base = audience + directed
+
+    recipients = _dedupe_users(_without_actor(base, actor))
+    # Two independent gates make the notification audience EXACTLY the
+    # read-visible audience:
+    #   1. ROLE gate (`message_type_visible_to_user`) — never notify a role
+    #      that cannot read this tier (INTERNAL_NOTE never reaches STAFF or
+    #      customer; STAFF_OPERATIONAL never reaches customer).
+    #   2. SCOPE gate (`user_has_scope_for_ticket`) — never notify a user who
+    #      lacks read scope on THIS ticket. This closes the customer-side
+    #      gap: `_ticket_customer_users` resolves EVERY member of the
+    #      ticket's customer org, but a member whose building access does not
+    #      cover the ticket's building cannot open it (scope_tickets_for /
+    #      the messages endpoint would 404 them), so they must not be
+    #      notified either. The per-recipient check is bounded by the
+    #      (small) already-deduped audience. Provider-mgmt + assigned-staff
+    #      are scope-correct by construction; the redundant check on them is
+    #      cheap and keeps the invariant uniform.
+    recipients = [
+        u
+        for u in recipients
+        if message_type_visible_to_user(u, message_type)
+        and user_has_scope_for_ticket(u, ticket)
+    ]
+
+    directed_ids = {u.id for u in directed}
+
+    author_label = ""
+    if actor:
+        author_label = (actor.full_name or actor.email or "").strip()
+    body = (message.message or "").strip()
+    truncated = body[:140] + ("…" if len(body) > 140 else "")
+    if author_label:
+        summary = f"{author_label}: {truncated}"
+    else:
+        summary = truncated
+    summary = summary[:500]
+
+    rows = [
+        Notification(
+            recipient=user,
+            actor=actor,
+            event_type=NotificationType.TICKET_MESSAGE,
+            ticket=ticket,
+            is_directed=(user.id in directed_ids),
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
 
 
 # Dutch status labels for email rendering. The model's TextChoices labels

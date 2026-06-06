@@ -107,6 +107,26 @@ class TicketMessageType(models.TextChoices):
     STAFF_COMPLETION = "STAFF_COMPLETION", "Staff Completion Note"
 
 
+class TicketMessageVisibility(models.TextChoices):
+    """M1 B1 — message visibility mode, orthogonal to `message_type`.
+
+    `message_type` classifies the AUDIENCE TIER (who may ever see this
+    kind of note). `visibility_mode` narrows WITHIN that tier:
+
+      * NORMAL (default) — the message is visible to its full
+        message_type audience (the existing behaviour; every pre-B1 row
+        is NORMAL). `directed_to` here is an attention hint only.
+      * RESTRICTED — the message is visible only to the users named in
+        `directed_to` (still within the message_type audience). B1 adds
+        the field and computes notification recipients correctly for
+        RESTRICTED; the READ-SIDE hiding (queryset filter) is enforced
+        in B2, not here.
+    """
+
+    NORMAL = "NORMAL", "Normal"
+    RESTRICTED = "RESTRICTED", "Restricted"
+
+
 def ticket_attachment_upload_path(instance, filename):
     extension = FilePath(filename).suffix.lower()
     return f"tickets/{instance.ticket_id}/{uuid4().hex}{extension}"
@@ -418,6 +438,28 @@ class TicketMessage(models.Model):
         max_length=32,
         choices=TicketMessageType.choices,
         default=TicketMessageType.PUBLIC_REPLY,
+    )
+
+    # M1 B1 — attention / notification target. Distinct from
+    # `visibility_mode`: naming a user here does NOT make the message
+    # private (a NORMAL message stays visible to its whole audience). It
+    # marks who the message is "directed to" so they get a flagged
+    # in-app notification. Validation (serializer) keeps every directed
+    # user inside the message_type's visible audience so directing can
+    # never leak a note to someone who could not otherwise see it.
+    directed_to = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="directed_ticket_messages",
+    )
+    # M1 B1 — NORMAL (default, full back-compat) | RESTRICTED. See
+    # TicketMessageVisibility. B1 stores it + uses it to scope
+    # notification recipients; the read-side hiding for RESTRICTED is B2.
+    visibility_mode = models.CharField(
+        max_length=16,
+        choices=TicketMessageVisibility.choices,
+        default=TicketMessageVisibility.NORMAL,
+        db_index=True,
     )
 
     is_hidden = models.BooleanField(default=False)

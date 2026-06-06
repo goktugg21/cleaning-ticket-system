@@ -1,7 +1,11 @@
 from rest_framework.permissions import BasePermission
 
 from accounts.models import UserRole
-from accounts.permissions import IsAuthenticatedAndActive
+from accounts.permissions import (
+    IsAuthenticatedAndActive,
+    is_provider_management_role,
+    is_staff_role,
+)
 from accounts.scoping import company_admin_customer_ids, scope_tickets_for
 from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
 from companies.models import CompanyUserMembership
@@ -102,3 +106,34 @@ def user_has_scope_for_ticket(user, ticket):
                 return True
         return False
     return False
+
+
+def message_type_visible_to_user(user, message_type):
+    """ROLE-based read visibility for a `TicketMessage.message_type`.
+
+    Mirrors the role branches of
+    `TicketMessageListCreateView.get_queryset` (B7 four-tier taxonomy):
+
+      * provider management (SA / COMPANY_ADMIN / BUILDING_MANAGER) —
+        every tier, including INTERNAL_NOTE.
+      * STAFF — every tier EXCEPT INTERNAL_NOTE.
+      * customer-side / anyone else — PUBLIC_REPLY + STAFF_COMPLETION only.
+
+    This is the ROLE gate only. Ticket SCOPE (scope_tickets_for /
+    user_has_scope_for_ticket) is checked separately by callers. Used by
+    M1 B1 to (a) validate `directed_to` targets and (b) belt-and-suspenders
+    filter notification recipients so an INTERNAL_NOTE / STAFF_OPERATIONAL
+    can never notify a role that cannot read it.
+    """
+    # Local import: tickets.models may import this module transitively;
+    # keep the enum reference lazy to avoid an import-time cycle.
+    from tickets.models import TicketMessageType
+
+    if is_provider_management_role(user):
+        return True
+    if is_staff_role(user):  # STAFF only — management handled above.
+        return message_type != TicketMessageType.INTERNAL_NOTE
+    return message_type in (
+        TicketMessageType.PUBLIC_REPLY,
+        TicketMessageType.STAFF_COMPLETION,
+    )

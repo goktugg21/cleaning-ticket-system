@@ -88,6 +88,105 @@ class NotificationLog(models.Model):
         self.save(update_fields=["status"])
 
 
+class NotificationType(models.TextChoices):
+    """In-app (bell / message-center) notification event types.
+
+    Deliberately SEPARATE from the email `NotificationEventType` above:
+    in-app notifications are a different surface with a different lifecycle
+    (no SMTP, no NotificationLog, read/unread per recipient). Overloading
+    the email enum here would conflate the two channels. B1 ships only
+    TICKET_MESSAGE; B4 will add Extra Work event types.
+    """
+
+    TICKET_MESSAGE = "TICKET_MESSAGE", "Ticket message"
+
+
+class Notification(models.Model):
+    """In-app notification (M1 — message center, phase B1).
+
+    One row per (recipient, triggering event). Distinct from
+    `NotificationLog`, which is the EMAIL audit/delivery log. A
+    `Notification` is purely an in-app signal: it is created when a
+    ticket message (B1) — and later an Extra Work event (B4) — needs the
+    recipient's attention, and it is dismissed by setting `read_at`.
+
+    Source / deep-link reference (FE route derivation): a nullable
+    `ticket` FK covers both ticket and *melding* (a melding IS a ticket),
+    and a nullable `extra_work` FK is added forward-compatibly for B4
+    (unused in B1). The FE derives the route from whichever FK is set:
+    `ticket` -> /tickets/<id>, `extra_work` -> /extra-work/<id>. Explicit
+    FKs (over a (source_kind, source_id) pair) keep referential integrity
+    and allow cheap select_related for the feed.
+    """
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        db_index=True,
+        related_name="notifications",
+    )
+    # Who triggered the notification (message author / actor). SET_NULL so
+    # deleting the actor never destroys the recipient's notification.
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="emitted_notifications",
+    )
+
+    event_type = models.CharField(
+        max_length=32,
+        choices=NotificationType.choices,
+    )
+
+    # True when this recipient was personally named in the message's
+    # `directed_to` set (FE renders "directed to you"). For a NORMAL
+    # message the directed recipients are a flagged subset of the audience;
+    # for a RESTRICTED message they ARE the audience.
+    is_directed = models.BooleanField(default=False)
+
+    # Deep-link source. Exactly one is set in B1 (ticket). CASCADE: an
+    # in-app notification is an ephemeral UX signal, not the audit trail
+    # (the AuditLog / *StatusHistory rows are), so if the source row is
+    # ever hard-deleted its now-dead deep-links go with it.
+    ticket = models.ForeignKey(
+        "tickets.Ticket",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="inapp_notifications",
+    )
+    extra_work = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="inapp_notifications",
+    )
+
+    # Short denormalised display line (author label + truncated body). Only
+    # content the recipient is already allowed to see is stored here (the
+    # recipient set is the message's visible audience), so this carries no
+    # PII the recipient could not already read on the ticket.
+    summary = models.CharField(max_length=500, blank=True, default="")
+
+    # NULL = unread. Set to now() when the recipient marks it read.
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["recipient", "read_at"]),
+        ]
+
+    def __str__(self):
+        state = "read" if self.read_at else "unread"
+        return f"{self.event_type} -> {self.recipient_id} ({state})"
+
+
 class NotificationPreference(models.Model):
     """Per-user mute toggle for a notification event type.
 

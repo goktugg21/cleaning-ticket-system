@@ -21,6 +21,7 @@ from accounts.scoping import scope_tickets_for
 from audit.models import AuditAction, AuditLog
 from audit import context as audit_context
 from notifications.services import (
+    emit_ticket_message_notifications,
     send_ticket_assigned_email,
     send_ticket_created_email,
     send_ticket_status_changed_email,
@@ -1161,7 +1162,11 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         ticket = self._get_ticket()
-        qs = TicketMessage.objects.filter(ticket=ticket).select_related("author")
+        qs = (
+            TicketMessage.objects.filter(ticket=ticket)
+            .select_related("author")
+            .prefetch_related("directed_to")
+        )
         user = self.request.user
         # B7 — four-tier note visibility. The three tiers below each
         # exclude a specific subset of `message_type` values:
@@ -1224,6 +1229,18 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         # First staff response stamps first_response_at on the ticket.
         if is_staff_role(user):
             ticket.mark_first_response_if_needed()
+
+        # M1 B1 — emit in-app notifications for this message. Best-effort:
+        # the message is already saved, and a failure to fan out
+        # notifications must never fail the message POST. The error is
+        # logged (not silently swallowed) so a real bug stays visible.
+        try:
+            emit_ticket_message_notifications(message, actor=user)
+        except Exception:  # noqa: BLE001 — best-effort fan-out, logged below
+            _audit_logger.exception(
+                "Failed to emit in-app notifications for ticket message %s",
+                message.id,
+            )
 
         return message
 
