@@ -4439,13 +4439,14 @@ table.data-table {
 
 /* ----- M1 B3 — composer directed/private + thread chips ----- */
 .composer-directed {
-  /* Align to the composer body edges (.notes-textarea / .notes-actions):
-     the parent .notes-composer-body already insets 22px, so no side margin. */
-  margin: 0 0 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-2);
+  /* A flush section of the composer (not a boxed widget): a single
+     hairline separates it from the textarea; no fill/border/radius, and
+     no horizontal inset so the label + chips align to the composer body
+     (.notes-composer-body already provides the 22px). */
+  margin: 14px 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
 }
 .composer-directed-label {
   font-size: 11.5px;
