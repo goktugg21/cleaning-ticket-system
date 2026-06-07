@@ -688,11 +688,13 @@ class Sprint23AFoundationTests(TestCase):
     def test_20_staff_first_message_stamps_first_response_at(self):
         """
         Posting the first non-customer message must set
-        ticket.first_response_at. Without STAFF in is_staff_role(),
-        a STAFF user's first message is silently downgraded to a
-        PUBLIC_REPLY and the `mark_first_response_if_needed` branch
-        below it is skipped → the SLA "time-to-first-response"
-        metric is wrong for every STAFF-handled ticket.
+        ticket.first_response_at. A STAFF member posts an operational
+        note (STAFF_OPERATIONAL — the customer-facing PUBLIC_REPLY tier
+        is not available to staff since M1 B5); because the stamp is
+        gated on is_staff_role(user) and not the message tier, that
+        first message still fires `mark_first_response_if_needed`, so
+        the SLA "time-to-first-response" metric stays correct for
+        STAFF-handled tickets.
         """
         # Build a fresh ticket so no other staff message has fired.
         ticket = Ticket.objects.create(
@@ -711,7 +713,7 @@ class Sprint23AFoundationTests(TestCase):
         client.force_authenticate(user=self.staff_visible_b1)
         r = client.post(
             f"/api/tickets/{ticket.id}/messages/",
-            {"message": "On it.", "message_type": "PUBLIC_REPLY"},
+            {"message": "On it.", "message_type": "STAFF_OPERATIONAL"},
             format="json",
         )
         self.assertEqual(r.status_code, 201, r.data)
