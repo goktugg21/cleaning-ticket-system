@@ -739,6 +739,10 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
                 "can_view_proposal_pdf": False,
                 "can_approve": False,
                 "can_reject": False,
+                # M1 B6 — EW message thread posting flags.
+                "can_post_ew_public_reply": False,
+                "can_post_ew_internal_note": False,
+                "can_post_ew_customer_internal": False,
             }
 
         allowed = self._resolve_allowed_next_statuses(obj)
@@ -847,6 +851,23 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             can_approve = can_override_customer_decision
             can_reject = can_override_customer_decision
 
+        # M1 B6 — EW message thread POSTING flags (mirror the
+        # `extra_work.message_permissions.user_may_post_ew_message_type`
+        # POSTING table; role-only, since the EW-scope precondition is already
+        # met by reaching this in-scope detail). The composer reads these so
+        # it only offers a tier the POST will accept:
+        #   PUBLIC_REPLY = CUST + MGMT + SA;  INTERNAL_NOTE = MGMT + SA;
+        #   CUSTOMER_INTERNAL = CUST. Staff never (STAFF never reaches an EW
+        #   detail; the flags would be False anyway).
+        provider_mgmt = role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+            UserRole.BUILDING_MANAGER,
+        )
+        can_post_ew_public_reply = is_customer or provider_mgmt
+        can_post_ew_internal_note = provider_mgmt
+        can_post_ew_customer_internal = is_customer
+
         return {
             "allowed_next_statuses": list(allowed),
             "can_prepare_extra_work_proposal": can_prepare_extra_work_proposal,
@@ -856,6 +877,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "can_view_proposal_pdf": can_view_proposal_pdf,
             "can_approve": can_approve,
             "can_reject": can_reject,
+            "can_post_ew_public_reply": can_post_ew_public_reply,
+            "can_post_ew_internal_note": can_post_ew_internal_note,
+            "can_post_ew_customer_internal": can_post_ew_customer_internal,
         }
 
     def to_representation(self, instance):

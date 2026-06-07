@@ -146,10 +146,18 @@ class TicketAuditTimelineView(APIView):
             )
         )
         # Sprint 14E — ticket-anchored note + attachment audit rows.
+        # M1 B2 — only surface audit rows for messages the requesting
+        # provider-mgmt actor may actually read. A RESTRICTED message the
+        # actor is not a party to must not leak its existence/body via its
+        # AuditLog CREATE/UPDATE row (the changes diff carries the body).
+        # Route through the same chokepoint the message list uses.
+        from tickets.permissions import filter_messages_visible_to
+
         message_pks = list(
-            TicketMessage.objects.filter(ticket_id=ticket_id).values_list(
-                "id", flat=True
-            )
+            filter_messages_visible_to(
+                TicketMessage.objects.filter(ticket_id=ticket_id),
+                request.user,
+            ).values_list("id", flat=True)
         )
         attachment_pks = list(
             TicketAttachment.objects.filter(ticket_id=ticket_id).values_list(

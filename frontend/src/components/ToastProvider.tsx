@@ -34,6 +34,12 @@ export interface ToastInput {
   description?: string;
   /** Override default auto-dismiss. 0 keeps it open until dismissed. */
   durationMs?: number;
+  /**
+   * When set, the toast becomes activatable (click / Enter / Space):
+   * invoking it runs this handler AND dismisses the toast. Callers that
+   * omit it (the default) render a display-only toast, unchanged.
+   */
+  onClick?: () => void;
 }
 
 interface ToastInstance extends ToastInput {
@@ -125,32 +131,64 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       <div className="toast-stack" role="region" aria-label="Notifications">
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`toast toast-${toast.variant}`}
-            role={toast.variant === "error" ? "alert" : "status"}
-            data-testid={`toast-${toast.variant}`}
-          >
-            <span className="toast-icon" aria-hidden="true">
-              {variantIcon(toast.variant)}
-            </span>
-            <div className="toast-text">
-              <div className="toast-title">{toast.title}</div>
-              {toast.description && (
-                <div className="toast-desc">{toast.description}</div>
-              )}
-            </div>
-            <button
-              type="button"
-              className="toast-close"
-              aria-label="Dismiss notification"
-              onClick={() => dismiss(toast.id)}
+        {toasts.map((toast) => {
+          const clickable = typeof toast.onClick === "function";
+          const activate = () => {
+            toast.onClick?.();
+            dismiss(toast.id);
+          };
+          return (
+            <div
+              key={toast.id}
+              className={`toast toast-${toast.variant}${
+                clickable ? " toast-clickable" : ""
+              }`}
+              role={
+                clickable
+                  ? "button"
+                  : toast.variant === "error"
+                    ? "alert"
+                    : "status"
+              }
+              tabIndex={clickable ? 0 : undefined}
+              data-testid={`toast-${toast.variant}`}
+              data-toast-action={clickable ? "true" : undefined}
+              onClick={clickable ? activate : undefined}
+              onKeyDown={
+                clickable
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        activate();
+                      }
+                    }
+                  : undefined
+              }
             >
-              <X size={14} strokeWidth={2.4} />
-            </button>
-          </div>
-        ))}
+              <span className="toast-icon" aria-hidden="true">
+                {variantIcon(toast.variant)}
+              </span>
+              <div className="toast-text">
+                <div className="toast-title">{toast.title}</div>
+                {toast.description && (
+                  <div className="toast-desc">{toast.description}</div>
+                )}
+              </div>
+              <button
+                type="button"
+                className="toast-close"
+                aria-label="Dismiss notification"
+                onClick={(event) => {
+                  // Don't let the dismiss "X" trigger the toast's own onClick.
+                  event.stopPropagation();
+                  dismiss(toast.id);
+                }}
+              >
+                <X size={14} strokeWidth={2.4} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

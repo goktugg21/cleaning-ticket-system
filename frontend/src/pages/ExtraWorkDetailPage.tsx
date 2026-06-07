@@ -32,7 +32,7 @@
 // The frontend is defense-in-depth only — it renders only what the
 // backend's allowed_next_statuses field says.
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { FileSearch, FileText } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -42,19 +42,26 @@ import axios from "axios";
 import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
 import {
+  createEwMessage,
   createProposal,
   directPublishProposal,
   fetchProposalPdf,
+  getEwMessageRecipients,
   getProposalDetail,
   getExtraWork,
+  listEwMessages,
   listProposalsForEw,
   listSpawnedTickets,
   retrySpawnTicketsForExtraWork,
   transitionExtraWork,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
+import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
   Contact,
+  EwMessage,
+  EwMessageRecipient,
+  EwMessageType,
   ExtraWorkCategory,
   ExtraWorkRequestDetail,
   ExtraWorkStatus,
@@ -191,6 +198,34 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
   return "spawn_generic";
 }
 
+// M1 B6 — Extra Work message-thread tier vocabulary (three tiers, NO staff).
+// Keys live under the `extra_work` i18n namespace (`messages.*`).
+const EW_TIER_LABEL_KEY: Record<EwMessageType, string> = {
+  PUBLIC_REPLY: "messages.composer_public",
+  INTERNAL_NOTE: "messages.composer_internal",
+  CUSTOMER_INTERNAL: "messages.composer_customer_internal",
+};
+const EW_TIER_PLACEHOLDER_KEY: Record<EwMessageType, string> = {
+  PUBLIC_REPLY: "messages.composer_public_placeholder",
+  INTERNAL_NOTE: "messages.composer_internal_placeholder",
+  CUSTOMER_INTERNAL: "messages.composer_customer_internal_placeholder",
+};
+const EW_TIER_WHO_SEES_KEY: Record<EwMessageType, string> = {
+  PUBLIC_REPLY: "messages.composer_public_who_sees",
+  INTERNAL_NOTE: "messages.composer_internal_who_sees",
+  CUSTOMER_INTERNAL: "messages.composer_customer_internal_who_sees",
+};
+const EW_TIER_BADGE_KEY: Record<EwMessageType, string> = {
+  PUBLIC_REPLY: "messages.tag_public",
+  INTERNAL_NOTE: "messages.tag_internal",
+  CUSTOMER_INTERNAL: "messages.tag_customer_internal",
+};
+const EW_TIER_TONE_CLASS: Record<EwMessageType, string> = {
+  PUBLIC_REPLY: "",
+  INTERNAL_NOTE: "internal",
+  CUSTOMER_INTERNAL: "internal",
+};
+
 
 export function ExtraWorkDetailPage() {
   const { id } = useParams();
@@ -259,6 +294,16 @@ export function ExtraWorkDetailPage() {
   // spawned tickets renders before the destructive action fires.
   const cancelDialogRef = useRef<ConfirmDialogHandle>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
+
+  // M1 B6 — Extra Work message thread + composer state.
+  const [ewMessages, setEwMessages] = useState<EwMessage[]>([]);
+  const [ewMessageText, setEwMessageText] = useState("");
+  const [ewMessageType, setEwMessageType] =
+    useState<EwMessageType>("PUBLIC_REPLY");
+  const [ewDirectedTo, setEwDirectedTo] = useState<number[]>([]);
+  const [ewIsPrivate, setEwIsPrivate] = useState(false);
+  const [ewRecipients, setEwRecipients] = useState<EwMessageRecipient[]>([]);
+  const [ewSending, setEwSending] = useState(false);
 
   // ----- load -----
   useEffect(() => {
@@ -340,6 +385,138 @@ export function ExtraWorkDetailPage() {
       cancelled = true;
     };
   }, [ewId]);
+
+  // M1 B6 — message thread. Composer tiers are driven by the per-record
+  // `ew.actions.can_post_ew_*` flags (so the composer never offers a tier the
+  // backend would reject); falls back to a role-derived 3-tier set before the
+  // detail loads. Net per role: CUST = PUBLIC_REPLY + CUSTOMER_INTERNAL;
+  // MGMT/SA = PUBLIC_REPLY + INTERNAL_NOTE. STAFF have no EW scope -> none.
+  const ewComposerTiers = useMemo<EwMessageType[]>(() => {
+    const a = ew?.actions;
+    if (a) {
+      const tiers: EwMessageType[] = [];
+      if (a.can_post_ew_public_reply) tiers.push("PUBLIC_REPLY");
+      if (a.can_post_ew_internal_note) tiers.push("INTERNAL_NOTE");
+      if (a.can_post_ew_customer_internal) tiers.push("CUSTOMER_INTERNAL");
+      return tiers;
+    }
+    if (isProviderManagementRole(me?.role))
+      return ["PUBLIC_REPLY", "INTERNAL_NOTE"];
+    if (isCustomerUser(me?.role)) return ["PUBLIC_REPLY", "CUSTOMER_INTERNAL"];
+    return [];
+  }, [ew?.actions, me?.role]);
+
+  const effectiveEwMessageType: EwMessageType = ewComposerTiers.includes(
+    ewMessageType,
+  )
+    ? ewMessageType
+    : ewComposerTiers[0] ?? "PUBLIC_REPLY";
+
+  // Who may make a message RESTRICTED ("Private"): provider management / SA on
+  // any tier they post; a customer-side user ONLY on CUSTOMER_INTERNAL (B5
+  // parity, minus staff who have no EW surface).
+  const ewCanUsePrivate =
+    isProviderManagementRole(me?.role) ||
+    (isCustomerUser(me?.role) &&
+      effectiveEwMessageType === "CUSTOMER_INTERNAL");
+  const ewEffectivePrivate =
+    ewCanUsePrivate && ewIsPrivate && ewDirectedTo.length > 0;
+
+  // Load the thread, keyed on ewId (mirror the proposals-load pattern). A POST
+  // does not refire this; `reloadEwMessages` is called imperatively.
+  const reloadEwMessages = useCallback(() => {
+    if (ewId === null) return;
+    listEwMessages(ewId)
+      .then((list) => setEwMessages(list))
+      .catch(() => setEwMessages([]));
+  }, [ewId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (ewId === null) {
+      queueMicrotask(() => {
+        if (!cancelled) setEwMessages([]);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    listEwMessages(ewId)
+      .then((list) => {
+        if (!cancelled) setEwMessages(list);
+      })
+      .catch(() => {
+        if (!cancelled) setEwMessages([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId]);
+
+  // Refetch the directed-recipients picker whenever the effective tier
+  // changes; prune any now-invalid selection (B5 parity). setState lives in
+  // the async closure (not the effect body), so no set-state-in-effect lint.
+  useEffect(() => {
+    if (ewId === null) return;
+    let cancelled = false;
+    const loadRecipients = async () => {
+      try {
+        const data = await getEwMessageRecipients(ewId, effectiveEwMessageType);
+        if (cancelled) return;
+        setEwRecipients(data);
+        const validIds = new Set(data.map((r) => r.id));
+        setEwDirectedTo((prev) => prev.filter((rid) => validIds.has(rid)));
+      } catch {
+        if (!cancelled) {
+          setEwRecipients([]);
+          setEwDirectedTo([]);
+          setEwIsPrivate(false);
+        }
+      }
+    };
+    loadRecipients();
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, effectiveEwMessageType]);
+
+  const toggleEwDirected = useCallback(
+    (recipientId: number) => {
+      setEwDirectedTo((prev) => {
+        const next = prev.includes(recipientId)
+          ? prev.filter((rid) => rid !== recipientId)
+          : [...prev, recipientId];
+        // RESTRICTED is only meaningful with >=1 target; clearing the last
+        // target drops the private intent so it does not silently re-arm.
+        if (next.length === 0) setEwIsPrivate(false);
+        return next;
+      });
+    },
+    [],
+  );
+
+  async function submitEwMessage(event: FormEvent) {
+    event.preventDefault();
+    if (!id || !ewMessageText.trim()) return;
+    setEwSending(true);
+    try {
+      await createEwMessage(id, {
+        message: ewMessageText.trim(),
+        message_type: effectiveEwMessageType,
+        directed_to: ewDirectedTo,
+        visibility_mode: ewEffectivePrivate ? "RESTRICTED" : "NORMAL",
+      });
+      setEwMessageText("");
+      setEwDirectedTo([]);
+      setEwIsPrivate(false);
+      reloadEwMessages();
+      pushToast({ variant: "success", title: t("messages.posted") });
+    } catch (err) {
+      pushToast({ variant: "error", title: getApiError(err) });
+    } finally {
+      setEwSending(false);
+    }
+  }
 
   // When a DRAFT proposal exists, fetch its detail so we have
   // `actions.can_direct_publish` for the direct-publish button. The
@@ -1242,6 +1419,160 @@ export function ExtraWorkDetailPage() {
             </div>
           </div>
           </div>{/* end .ew-detail-top-row */}
+
+          {/* M1 B6 — Extra Work message thread + composer. Functional only;
+              B8 polishes the visuals. The backend chokepoint filters which
+              messages this viewer receives; the composer offers only the
+              tiers the backend will accept. */}
+          <section
+            className="card"
+            data-testid="extra-work-messages-panel"
+            style={{ marginBottom: 16 }}
+          >
+            <div className="form-section">
+              <div className="form-section-title">{t("messages.title")}</div>
+
+              <div className="ew-message-thread" data-testid="ew-message-thread">
+                {ewMessages.length === 0 ? (
+                  <p className="muted small">{t("messages.empty")}</p>
+                ) : (
+                  ewMessages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`note-bubble ${EW_TIER_TONE_CLASS[m.message_type]}`}
+                      data-testid="ew-message-row"
+                      style={{ marginBottom: 8 }}
+                    >
+                      <div className="note-bubble-meta muted small">
+                        <span className="note-tag">
+                          {t(EW_TIER_BADGE_KEY[m.message_type])}
+                        </span>{" "}
+                        {m.author_email}
+                        {m.visibility_mode === "RESTRICTED" && (
+                          <span className="note-private-badge">
+                            {" "}
+                            · {t("messages.private_badge")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="note-bubble-body">{m.message}</div>
+                      {m.directed_to_detail.length > 0 && (
+                        <div className="muted small">
+                          {t("messages.directed_prefix")}{" "}
+                          {m.directed_to_detail
+                            .map((d) => d.full_name)
+                            .join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {ewComposerTiers.length > 0 && (
+                <form
+                  onSubmit={submitEwMessage}
+                  data-testid="ew-message-composer"
+                  style={{ marginTop: 12 }}
+                >
+                  {ewComposerTiers.length > 1 && (
+                    <div className="composer-toggle" role="tablist">
+                      {ewComposerTiers.map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          role="tab"
+                          aria-selected={effectiveEwMessageType === tier}
+                          className={`composer-toggle-btn ${
+                            effectiveEwMessageType === tier
+                              ? `active ${EW_TIER_TONE_CLASS[tier]}`
+                              : ""
+                          }`}
+                          onClick={() => setEwMessageType(tier)}
+                        >
+                          {t(EW_TIER_LABEL_KEY[tier])}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    className="field-textarea"
+                    rows={3}
+                    placeholder={t(
+                      EW_TIER_PLACEHOLDER_KEY[effectiveEwMessageType],
+                    )}
+                    value={ewMessageText}
+                    onChange={(e) => setEwMessageText(e.target.value)}
+                    required
+                  />
+                  <p className="muted small">
+                    {t(EW_TIER_WHO_SEES_KEY[effectiveEwMessageType])}
+                  </p>
+
+                  {ewRecipients.length > 0 && (
+                    <div
+                      className="composer-directed"
+                      data-testid="ew-composer-directed"
+                    >
+                      <div className="composer-directed-label">
+                        {t("messages.directed_label")}
+                      </div>
+                      <div className="composer-directed-chips">
+                        {ewRecipients.map((recipient) => {
+                          const selected = ewDirectedTo.includes(recipient.id);
+                          return (
+                            <button
+                              key={recipient.id}
+                              type="button"
+                              className={`directed-chip${
+                                selected ? " directed-chip-selected" : ""
+                              }`}
+                              aria-pressed={selected}
+                              onClick={() => toggleEwDirected(recipient.id)}
+                            >
+                              {recipient.full_name}
+                              <span className="directed-chip-side">
+                                {t(`messages.side_${recipient.side}`)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {ewCanUsePrivate && (
+                        <>
+                          <label className="composer-private-toggle">
+                            <input
+                              type="checkbox"
+                              checked={ewEffectivePrivate}
+                              disabled={ewDirectedTo.length === 0}
+                              onChange={(e) => setEwIsPrivate(e.target.checked)}
+                              data-testid="ew-composer-private-toggle"
+                            />
+                            <span>{t("messages.private_label")}</span>
+                          </label>
+                          <p className="muted small">
+                            {ewDirectedTo.length === 0
+                              ? t("messages.private_disabled_hint")
+                              : ewEffectivePrivate
+                                ? t("messages.private_on_hint")
+                                : t("messages.private_off_hint")}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={ewSending || !ewMessageText.trim()}
+                  >
+                    {ewSending ? t("messages.sending") : t("messages.post")}
+                  </button>
+                </form>
+              )}
+            </div>
+          </section>
 
           {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
               Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the

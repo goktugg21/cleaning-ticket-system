@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from accounts.models import UserRole
 from accounts.permissions import (
     IsAuthenticatedAndActive,
+    is_customer_side,
     is_provider_management_role,
     is_staff_role,
 )
@@ -21,10 +22,12 @@ from accounts.scoping import scope_tickets_for
 from audit.models import AuditAction, AuditLog
 from audit import context as audit_context
 from notifications.services import (
+    emit_ticket_message_notifications,
     send_ticket_assigned_email,
     send_ticket_created_email,
     send_ticket_status_changed_email,
     send_ticket_unassigned_email,
+    ticket_message_audience,
 )
 
 from .filters import TicketFilter
@@ -39,7 +42,13 @@ from .models import (
     TicketStatusHistory,
 )
 from buildings.models import BuildingManagerAssignment
-from .permissions import CanPostMessage, CanViewTicket, user_has_scope_for_ticket
+from .permissions import (
+    CanPostMessage,
+    CanViewTicket,
+    filter_messages_visible_to,
+    message_type_visible_to_user,
+    user_has_scope_for_ticket,
+)
 from .state_machine import TransitionError, apply_transition
 from .serializers import (
     TicketAssignableManagerSerializer,
@@ -1161,30 +1170,17 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         ticket = self._get_ticket()
-        qs = TicketMessage.objects.filter(ticket=ticket).select_related("author")
-        user = self.request.user
-        # B7 — four-tier note visibility. The three tiers below each
-        # exclude a specific subset of `message_type` values:
-        #
-        #   * Provider management (SA/COMPANY_ADMIN/BM): sees every
-        #     tier including INTERNAL_NOTE (PROVIDER_INTERNAL).
-        #   * STAFF: sees PUBLIC_REPLY + STAFF_OPERATIONAL +
-        #     STAFF_COMPLETION. Hidden from INTERNAL_NOTE
-        #     (PROVIDER_INTERNAL) — STAFF must never see commercial /
-        #     management notes per §9.2 of the canonical doc.
-        #   * Customer-side: sees PUBLIC_REPLY + STAFF_COMPLETION.
-        #     Hidden from INTERNAL_NOTE and STAFF_OPERATIONAL.
-        #
-        # `is_hidden=True` is a moderation flag; only provider
-        # management retains visibility on hidden rows.
-        if not is_provider_management_role(user):
-            qs = qs.filter(is_hidden=False)
-            qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
-            if not is_staff_role(user):
-                # Customer-side: also exclude STAFF_OPERATIONAL.
-                qs = qs.exclude(
-                    message_type=TicketMessageType.STAFF_OPERATIONAL
-                )
+        qs = (
+            TicketMessage.objects.filter(ticket=ticket)
+            .select_related("author")
+            .prefetch_related("directed_to")
+        )
+        # M1 B2 — route through the SINGLE visibility chokepoint. It layers
+        # the (unchanged) B7 role/is_hidden four-tier filter AND the M1 B2
+        # RESTRICTED party filter (visible iff author or directed_to member,
+        # for EVERY role including provider management). See
+        # tickets.permissions.filter_messages_visible_to.
+        qs = filter_messages_visible_to(qs, self.request.user)
         return qs.order_by("created_at")
 
     def get_serializer_context(self):
@@ -1196,19 +1192,17 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         ticket = self._get_ticket()
         user = self.request.user
 
+        # M1 B5 — the serializer's validate() / validate_message_type is now
+        # the AUTHORITATIVE posting gate (the POSTING table, via
+        # `_user_may_post_message_type`), rejecting every disallowed
+        # (author, tier) combination with HTTP 400 before we get here. We
+        # therefore save the validated tier verbatim — no silent
+        # force-normalise, which would mis-save a customer's CUSTOMER_INTERNAL
+        # as PUBLIC_REPLY and contradicts the new reject-don't-coerce
+        # contract.
         message_type = serializer.validated_data.get(
             "message_type", TicketMessageType.PUBLIC_REPLY
         )
-        # CUSTOMER_USER and any non-provider-side actor is force-
-        # normalised to PUBLIC_REPLY (defence in depth — the
-        # serializer's `validate_message_type` already rejects
-        # PROVIDER_INTERNAL / STAFF_OPERATIONAL / STAFF_COMPLETION
-        # from non-provider-side actors). Provider-side actors
-        # (provider management + STAFF) keep the validated value
-        # so STAFF can author STAFF_OPERATIONAL / STAFF_COMPLETION
-        # and provider management can author INTERNAL_NOTE.
-        if not is_staff_role(user):
-            message_type = TicketMessageType.PUBLIC_REPLY
 
         message = serializer.save(
             ticket=ticket,
@@ -1225,8 +1219,108 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         if is_staff_role(user):
             ticket.mark_first_response_if_needed()
 
+        # M1 B1 — emit in-app notifications for this message. Best-effort:
+        # the message is already saved, and a failure to fan out
+        # notifications must never fail the message POST. The error is
+        # logged (not silently swallowed) so a real bug stays visible.
+        try:
+            emit_ticket_message_notifications(message, actor=user)
+        except Exception:  # noqa: BLE001 — best-effort fan-out, logged below
+            _audit_logger.exception(
+                "Failed to emit in-app notifications for ticket message %s",
+                message.id,
+            )
+
         return message
 
+
+def _recipient_side(user):
+    """Bucket a directed-recipient candidate so the picker can group/label
+    them: provider management, field staff, or customer-side."""
+    if is_provider_management_role(user):
+        return "provider"
+    if getattr(user, "role", None) == UserRole.STAFF:
+        return "staff"
+    return "customer"
+
+
+class TicketMessageRecipientsView(generics.GenericAPIView):
+    """M1 B3 — directed-recipients source for the composer's "notify
+    specific people" picker.
+
+    GET /api/tickets/<ticket_id>/message-recipients/?message_type=<tier>
+
+    Returns the users who are VALID directed_to targets for that tier on
+    this ticket = the B1 read-visible audience
+    (notifications.services.ticket_message_audience, which reuses the B1
+    resolvers) INTERSECTED with message_type_visible_to_user AND
+    user_has_scope_for_ticket, MINUS the caller. Every returned user
+    therefore passes the B1 directed_to validation, so the picker can never
+    offer a target the POST would 400 (esp. INTERNAL_NOTE -> no customer;
+    STAFF_OPERATIONAL -> no customer; out-of-scope users excluded).
+
+    Scope-gated exactly like the messages endpoint (same permission classes
+    + scope_tickets_for guard): a caller without ticket access gets 404.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive, CanPostMessage]
+
+    def _get_ticket(self):
+        ticket = get_object_or_404(Ticket, pk=self.kwargs["ticket_id"])
+        if not scope_tickets_for(self.request.user).filter(pk=ticket.pk).exists():
+            raise Http404("Ticket not found.")
+        self.check_object_permissions(self.request, ticket)
+        return ticket
+
+    def get(self, request, ticket_id):
+        ticket = self._get_ticket()
+        caller = request.user
+        message_type = request.query_params.get(
+            "message_type", TicketMessageType.PUBLIC_REPLY
+        )
+        if message_type not in set(TicketMessageType.values):
+            return Response(
+                {"detail": "Invalid message_type.", "code": "invalid_message_type"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # M1 B5 — the picker is SIDE-AWARE by the CALLER:
+        #   * STAFF caller  -> no picker at all (field staff never direct a
+        #     message). Empty list, 200 — the FE renders nothing.
+        #   * CUST caller   -> only customer-side candidates (a customer can
+        #     never direct a message at a provider user, on any tier).
+        #   * MGMT / SA     -> the full tier audience (provider + customer
+        #     as applicable), as before.
+        if getattr(caller, "role", None) == UserRole.STAFF:
+            return Response({"results": []})
+        caller_is_customer = is_customer_side(caller)
+
+        results = []
+        for user in ticket_message_audience(ticket, message_type):
+            if user.id == caller.id:
+                continue
+            # Belt-and-suspenders: the audience is already type-scoped, but
+            # intersect with the exact predicates the serializer validates
+            # so the endpoint output can never drift wider than valid.
+            if not message_type_visible_to_user(user, message_type):
+                continue
+            if not user_has_scope_for_ticket(user, ticket):
+                continue
+            side = _recipient_side(user)
+            # A customer composer may only ever direct at customer-side
+            # people — drop provider/staff candidates from a customer caller
+            # so the picker can never offer a target the POST would 400
+            # (directed_to_must_be_customer_side).
+            if caller_is_customer and side != "customer":
+                continue
+            results.append(
+                {
+                    "id": user.id,
+                    "full_name": user.full_name or user.email.split("@")[0],
+                    "side": side,
+                }
+            )
+        return Response({"results": results})
 
 
 class TicketAttachmentListCreateView(generics.ListCreateAPIView):

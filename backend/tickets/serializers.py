@@ -6,10 +6,12 @@ from rest_framework import serializers
 
 from accounts.models import User, UserRole
 from accounts.permissions import (
+    is_customer_side,
     is_provider_management_role,
     is_staff_role,
 )
 from accounts.permissions_v2 import user_has_osius_permission
+from accounts.scoping import scope_tickets_for
 from buildings.models import Building, BuildingManagerAssignment
 from customers.models import (
     Customer,
@@ -24,11 +26,12 @@ from .models import (
     TicketAttachment,
     TicketMessage,
     TicketMessageType,
+    TicketMessageVisibility,
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
 )
-from .permissions import user_has_scope_for_ticket
+from .permissions import message_type_visible_to_user, user_has_scope_for_ticket
 from .state_machine import TransitionError, allowed_next_statuses, apply_transition
 
 # Sprint 7B — reuse the Extra Work cart-line input contract for the
@@ -618,9 +621,11 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             blank: dict = {
                 "allowed_next_statuses": [],
                 "can_override_customer_decision": False,
+                "can_post_public_reply": False,
                 "can_post_provider_internal_note": False,
                 "can_post_staff_operational_note": False,
                 "can_post_staff_completion_note": False,
+                "can_post_customer_internal_note": False,
                 "can_upload_hidden_attachment": False,
                 "status_transitions": {
                     str(status): False for status, _label in TicketStatus.choices
@@ -677,21 +682,28 @@ class TicketDetailSerializer(serializers.ModelSerializer):
             has_override_authority and in_decision_phase
         )
 
-        # Note booleans mirror `TicketMessageSerializer.validate_message_type`
-        # exactly (which the view's `perform_create` defers to). The
-        # four-tier taxonomy lives in `TicketMessageType` (B7); each
-        # boolean below corresponds to a non-trivial tier:
+        # M1 B5 — note booleans mirror the POSTING table enforced by
+        # `_user_may_post_message_type` (which the serializer's validate()
+        # defers to, and the view's perform_create saves verbatim). The
+        # frontend composer reads these flags to decide which tiers to
+        # offer, so they MUST match the server-side gate exactly:
         #
-        #   * INTERNAL_NOTE (PROVIDER_INTERNAL) — provider mgmt only.
-        #   * STAFF_OPERATIONAL — any provider-side actor (incl. STAFF).
-        #   * STAFF_COMPLETION — any provider-side actor (incl. STAFF).
-        #
-        # `PUBLIC_REPLY` is omitted because every authenticated viewer
-        # in scope on the ticket can author it; the frontend doesn't
-        # need a boolean for "always-allowed" tiers.
+        #   * PUBLIC_REPLY      — CUST + MGMT + SA (NOT STAFF; a field
+        #                         worker's only customer-facing channel is
+        #                         STAFF_COMPLETION). M1 B5 adds this flag
+        #                         because PUBLIC_REPLY is no longer
+        #                         "always-allowed".
+        #   * INTERNAL_NOTE     — MGMT + SA.
+        #   * STAFF_OPERATIONAL — STAFF + MGMT + SA (any provider-side actor).
+        #   * STAFF_COMPLETION  — STAFF + MGMT + SA (any provider-side actor).
+        #   * CUSTOMER_INTERNAL — CUST only (M1 B5, new).
+        can_post_public_reply = is_customer_side(user) or is_provider_management_role(
+            user
+        )
         can_post_provider_internal_note = is_provider_management_role(user)
         can_post_staff_operational_note = is_staff_role(user)
         can_post_staff_completion_note = is_staff_role(user)
+        can_post_customer_internal_note = is_customer_side(user)
         # Mirrors `TicketAttachmentSerializer.validate_is_hidden`. Only
         # provider management may upload an `is_hidden=True` attachment
         # (the moderation flag that strips visibility from STAFF and
@@ -701,9 +713,11 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         return {
             "allowed_next_statuses": list(allowed),
             "can_override_customer_decision": can_override_customer_decision,
+            "can_post_public_reply": can_post_public_reply,
             "can_post_provider_internal_note": can_post_provider_internal_note,
             "can_post_staff_operational_note": can_post_staff_operational_note,
             "can_post_staff_completion_note": can_post_staff_completion_note,
+            "can_post_customer_internal_note": can_post_customer_internal_note,
             "can_upload_hidden_attachment": can_upload_hidden_attachment,
             "status_transitions": status_transitions,
         }
@@ -1132,8 +1146,60 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+def _user_may_post_message_type(user, message_type):
+    """M1 B5 — the POSTING table (who may CREATE each tier). Single source
+    of truth for the message-create authz; the `actions.can_post_*` flags in
+    `TicketDetailSerializer.get_actions` mirror this exactly so the composer
+    only ever offers a tier the POST will accept:
+
+      PUBLIC_REPLY       CUST + MGMT + SA   (NOT STAFF)
+      STAFF_COMPLETION   STAFF + MGMT + SA  (any provider-side actor)
+      STAFF_OPERATIONAL  STAFF + MGMT + SA  (any provider-side actor)
+      INTERNAL_NOTE      MGMT + SA
+      CUSTOMER_INTERNAL  CUST
+
+    `is_staff_role` already means "any provider-side actor" (SA / CA / BM /
+    STAFF), so it is the gate for the two STAFF_* tiers.
+    """
+    if message_type == TicketMessageType.PUBLIC_REPLY:
+        return is_customer_side(user) or is_provider_management_role(user)
+    if message_type in (
+        TicketMessageType.STAFF_OPERATIONAL,
+        TicketMessageType.STAFF_COMPLETION,
+    ):
+        return is_staff_role(user)
+    if message_type == TicketMessageType.INTERNAL_NOTE:
+        return is_provider_management_role(user)
+    if message_type == TicketMessageType.CUSTOMER_INTERNAL:
+        return is_customer_side(user)
+    return False
+
+
 class TicketMessageSerializer(serializers.ModelSerializer):
     author_email = serializers.CharField(source="author.email", read_only=True)
+    # M1 B1 — attention targets (writable PK list, default empty) +
+    # visibility mode (writable, default NORMAL). `author` / `is_hidden`
+    # stay read-only (set server-side in the view).
+    directed_to = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=User.objects.all(),
+        required=False,
+        default=list,
+    )
+    # M1 B3 — read-only display detail for the directed targets so the
+    # thread can render "-> directed to Serkan" without a second lookup.
+    # Display only: it is a SerializerMethodField on the SAME message rows
+    # the B2 chokepoint already admitted (TicketMessageListCreateView.
+    # get_queryset filters first), so it never widens who can see a
+    # RESTRICTED message — it only names the targets on a message the
+    # viewer is already allowed to read.
+    directed_to_detail = serializers.SerializerMethodField()
+
+    # Upper bound on attention targets. "Direct at" is for a handful of
+    # people, not a broadcast; the cap closes a query-amplification surface
+    # (one PK resolution + one scope_tickets_for() per id) before any of
+    # that work runs — see to_internal_value below.
+    MAX_DIRECTED_TO = 50
 
     class Meta:
         model = TicketMessage
@@ -1144,36 +1210,61 @@ class TicketMessageSerializer(serializers.ModelSerializer):
             "author_email",
             "message",
             "message_type",
+            "directed_to",
+            "directed_to_detail",
+            "visibility_mode",
             "is_hidden",
             "created_at",
         ]
         read_only_fields = ["id", "ticket", "author", "author_email", "is_hidden", "created_at"]
 
+    def get_directed_to_detail(self, obj):
+        # Cheap label list for the thread chips. The list view prefetches
+        # `directed_to`, so this does not add an N+1.
+        return [
+            {
+                "id": user.id,
+                "full_name": user.full_name or user.email.split("@")[0],
+            }
+            for user in obj.directed_to.all()
+        ]
+
+    def to_internal_value(self, data):
+        # Cap directed_to on the RAW input, before DRF resolves each PK (one
+        # query per id) and before validate() runs the per-target scope
+        # check — so an oversized list is rejected up front rather than
+        # amplified into N queries. Only meaningful for list-shaped JSON
+        # input; other shapes fall through to DRF's normal handling.
+        directed = data.get("directed_to") if hasattr(data, "get") else None
+        if isinstance(directed, (list, tuple)) and len(directed) > self.MAX_DIRECTED_TO:
+            raise serializers.ValidationError(
+                {
+                    "directed_to": [
+                        serializers.ErrorDetail(
+                            f"At most {self.MAX_DIRECTED_TO} directed "
+                            "recipients are allowed.",
+                            code="too_many_directed_recipients",
+                        )
+                    ]
+                }
+            )
+        return super().to_internal_value(data)
+
     def validate_message_type(self, value):
+        # M1 B5 — enforce the POSTING table for an EXPLICITLY supplied
+        # message_type. The complete gate (incl. the defaulted-field path,
+        # which skips per-field validators) lives in validate(); this
+        # field-level check gives a clean per-field error when the client
+        # sends a tier its role may not author (e.g. STAFF -> PUBLIC_REPLY,
+        # CUST -> STAFF_*/INTERNAL_NOTE, MGMT/STAFF -> CUSTOMER_INTERNAL).
         request = self.context.get("request")
         user = request.user if request else None
-        # B7 — INTERNAL_NOTE (PROVIDER_INTERNAL) is provider-management
-        # only. STAFF cannot author it. Customer-side users cannot
-        # author it. The two staff-facing tiers (STAFF_OPERATIONAL,
-        # STAFF_COMPLETION) require any provider-side actor; the
-        # view's perform_create forces non-provider-side authors to
-        # PUBLIC_REPLY before this validator fires so a customer
-        # cannot smuggle a STAFF_* tier through the wire.
-        if value == TicketMessageType.INTERNAL_NOTE and not (
-            is_provider_management_role(user)
-        ):
+        if not _user_may_post_message_type(user, value):
             raise serializers.ValidationError(
-                "Only provider management roles "
-                "(Super Admin / Provider Company Admin / Building "
-                "Manager) may post internal (provider-internal) notes."
-            )
-        if value in {
-            TicketMessageType.STAFF_OPERATIONAL,
-            TicketMessageType.STAFF_COMPLETION,
-        } and not is_staff_role(user):
-            raise serializers.ValidationError(
-                "Only provider-side actors may post staff "
-                "operational / completion notes."
+                serializers.ErrorDetail(
+                    "Your role is not allowed to post this message type.",
+                    code="message_type_not_allowed",
+                )
             )
         return value
 
@@ -1182,6 +1273,129 @@ class TicketMessageSerializer(serializers.ModelSerializer):
         user = self.context["request"].user
         if not user_has_scope_for_ticket(user, ticket):
             raise serializers.ValidationError("You do not have access to this ticket.")
+
+        # `message_type` is the value the serializer will save: the explicit
+        # wire value, or the model default (PUBLIC_REPLY) when omitted. We
+        # read the EFFECTIVE value here because per-field validators
+        # (validate_message_type) do NOT run for a defaulted field — so the
+        # POSTING authz must be re-checked here to cover the default path
+        # (e.g. a STAFF user POSTing with no message_type must NOT silently
+        # get PUBLIC_REPLY, which STAFF may not author).
+        message_type = attrs.get("message_type", TicketMessageType.PUBLIC_REPLY)
+        directed_to = attrs.get("directed_to") or []
+        visibility_mode = attrs.get(
+            "visibility_mode", TicketMessageVisibility.NORMAL
+        )
+
+        # M1 B5 — POSTING authz on the effective tier (the complete gate;
+        # validate_message_type is the field-level mirror for explicit input).
+        if not _user_may_post_message_type(user, message_type):
+            raise serializers.ValidationError(
+                {
+                    "message_type": [
+                        serializers.ErrorDetail(
+                            "Your role is not allowed to post this message "
+                            "type.",
+                            code="message_type_not_allowed",
+                        )
+                    ]
+                }
+            )
+
+        # M1 B5 — STAFF authors get NO picker and NO private, ever: a field
+        # worker never directs or restricts a message. directed_to must be
+        # empty and visibility_mode must be NORMAL.
+        if getattr(user, "role", None) == UserRole.STAFF and (
+            directed_to or visibility_mode != TicketMessageVisibility.NORMAL
+        ):
+            raise serializers.ValidationError(
+                {
+                    "directed_to": [
+                        serializers.ErrorDetail(
+                            "Field staff cannot direct or restrict a message.",
+                            code="staff_cannot_direct_or_restrict",
+                        )
+                    ]
+                }
+            )
+
+        # A RESTRICTED message with no target would be visible to nobody but
+        # the author — reject it so it cannot become a silent black hole.
+        if (
+            visibility_mode == TicketMessageVisibility.RESTRICTED
+            and not directed_to
+        ):
+            raise serializers.ValidationError(
+                {
+                    "directed_to": [
+                        serializers.ErrorDetail(
+                            "A restricted message must name at least one "
+                            "recipient.",
+                            code="restricted_requires_target",
+                        )
+                    ]
+                }
+            )
+
+        # M1 B5 — a CUSTOMER-side author may make a message RESTRICTED ONLY on
+        # the CUSTOMER_INTERNAL tier. They can direct (notify) customer-side
+        # people on a PUBLIC_REPLY, but cannot make a PUBLIC_REPLY private.
+        if (
+            is_customer_side(user)
+            and visibility_mode == TicketMessageVisibility.RESTRICTED
+            and message_type != TicketMessageType.CUSTOMER_INTERNAL
+        ):
+            raise serializers.ValidationError(
+                {
+                    "visibility_mode": [
+                        serializers.ErrorDetail(
+                            "A customer-side user can only make a Customer "
+                            "Internal note private.",
+                            code="restricted_only_for_customer_internal",
+                        )
+                    ]
+                }
+            )
+
+        # M1 B5 — a CUSTOMER-side author may NEVER direct a message at a
+        # provider-side user (provider management or staff), on ANY tier
+        # (including PUBLIC_REPLY). The customer's directed_to is restricted
+        # to other customer-side principals.
+        if is_customer_side(user):
+            for target in directed_to:
+                if not is_customer_side(target):
+                    raise serializers.ValidationError(
+                        {
+                            "directed_to": [
+                                serializers.ErrorDetail(
+                                    "A customer-side user can only notify "
+                                    "other customer-side people.",
+                                    code="directed_to_must_be_customer_side",
+                                )
+                            ]
+                        }
+                    )
+
+        # Every directed user must (a) have ticket access AND (b) be allowed
+        # to see this message_type. This blocks directing e.g. an
+        # INTERNAL_NOTE at a customer-side user — directing can never widen
+        # who can see a note beyond its message_type audience.
+        for target in directed_to:
+            in_scope = scope_tickets_for(target).filter(pk=ticket.pk).exists()
+            if not in_scope or not message_type_visible_to_user(
+                target, message_type
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "directed_to": [
+                            serializers.ErrorDetail(
+                                "You cannot direct this message to a user who "
+                                "cannot see it.",
+                                code="directed_to_not_visible",
+                            )
+                        ]
+                    }
+                )
         return attrs
 
 

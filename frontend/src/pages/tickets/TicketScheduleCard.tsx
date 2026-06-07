@@ -24,6 +24,7 @@ import axios from "axios";
 
 import { getApiError } from "../../api/client";
 import { setTicketSchedule, clearTicketSchedule } from "../../api/admin";
+import { formatDate } from "../../lib/intl";
 import type { TicketDetail, TicketStatus } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -57,16 +58,13 @@ function dateInputToIso(date: string): string | null {
 }
 
 // Date-only display (the time component is a fixed local midnight, so we
-// never surface it). Locale-agnostic to match the page's other dates.
+// never surface it). Locale-aware via lib/intl (app language, not the host
+// OS locale); keeps the "" empty sentinel so a missing date renders nothing.
 function formatScheduledDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDate(iso);
 }
 
 export function TicketScheduleCard({

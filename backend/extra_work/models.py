@@ -1415,3 +1415,88 @@ class ProposalTimelineEvent(models.Model):
 
     def __str__(self):
         return f"{self.proposal_id}: {self.event_type}"
+
+
+# ---------------------------------------------------------------------------
+# M1 B6 — Extra Work message thread.
+# ---------------------------------------------------------------------------
+class ExtraWorkMessageType(models.TextChoices):
+    """M1 B6 — three-channel EW message taxonomy. Mirrors
+    `tickets.TicketMessageType` MINUS the two staff tiers (STAFF_OPERATIONAL /
+    STAFF_COMPLETION): staff have NO Extra Work scope and never see or post an
+    EW message. Read-visibility (SA = Super Admin, MGMT = Company Admin /
+    Building Manager, CUST = customer-side):
+
+      * PUBLIC_REPLY      — customer <-> management conversation (SA+MGMT+CUST).
+      * INTERNAL_NOTE     — provider-management-internal (SA+MGMT). NOT CUST.
+      * CUSTOMER_INTERNAL — the customer side's OWN internal note (SA forensic
+                            + CUST). NOT MGMT. The mirror of INTERNAL_NOTE.
+
+    Posting (enforced in `extra_work.message_permissions`): PUBLIC_REPLY =
+    CUST+MGMT+SA; INTERNAL_NOTE = MGMT+SA; CUSTOMER_INTERNAL = CUST. Staff
+    never.
+    """
+
+    PUBLIC_REPLY = "PUBLIC_REPLY", "Public Reply"
+    INTERNAL_NOTE = "INTERNAL_NOTE", "Internal Note (provider-internal)"
+    CUSTOMER_INTERNAL = "CUSTOMER_INTERNAL", "Customer Internal Note"
+
+
+class ExtraWorkMessageVisibility(models.TextChoices):
+    """Visibility mode orthogonal to `message_type` (parallels
+    `tickets.TicketMessageVisibility`). NORMAL = visible to the full tier
+    audience; RESTRICTED = visible only to author + `directed_to`."""
+
+    NORMAL = "NORMAL", "Normal"
+    RESTRICTED = "RESTRICTED", "Restricted"
+
+
+class ExtraWorkMessage(models.Model):
+    """M1 B6 — one message on an Extra Work request thread.
+
+    Mirrors `tickets.TicketMessage` MINUS the staff dimension, attachments,
+    and the `is_hidden` moderation flag (EW has no staff scope and no
+    moderation surface). Text only. Read-visibility + posting are enforced
+    server-side by `extra_work.message_permissions`; the in-app fan-out reuses
+    the B1 `Notification` + its `extra_work` FK.
+    """
+
+    extra_work = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    # Mirror TicketMessage.author — SET_NULL so deleting the author never
+    # destroys the thread row.
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="extra_work_messages",
+    )
+    message_type = models.CharField(
+        max_length=32,
+        choices=ExtraWorkMessageType.choices,
+        default=ExtraWorkMessageType.PUBLIC_REPLY,
+    )
+    visibility_mode = models.CharField(
+        max_length=16,
+        choices=ExtraWorkMessageVisibility.choices,
+        default=ExtraWorkMessageVisibility.NORMAL,
+        db_index=True,
+    )
+    directed_to = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="directed_extra_work_messages",
+    )
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["extra_work", "created_at"])]
+
+    def __str__(self):
+        return f"{self.extra_work_id}: {self.message_type}"

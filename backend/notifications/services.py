@@ -1,16 +1,26 @@
+import logging
+
 from django.conf import settings
 from django.core.mail import send_mail
 from django.db.models import Q
 from django.utils import timezone
 
 from accounts.models import User, UserRole
-from tickets.models import TicketPriority, TicketStatus, TicketType
+from tickets.models import (
+    TicketMessageType,
+    TicketMessageVisibility,
+    TicketPriority,
+    TicketStatus,
+    TicketType,
+)
 
 from .models import (
+    Notification,
     NotificationEventType,
     NotificationLog,
     NotificationPreference,
     NotificationStatus,
+    NotificationType,
 )
 
 # `send_mail` is re-exported here so that test code patching
@@ -28,7 +38,17 @@ __all__ = (
     "send_slot_unable_to_complete_email",
     "send_password_reset_email",
     "send_invitation_email",
+    "emit_ticket_message_notifications",
+    "ticket_message_audience",
+    "emit_extra_work_requested_notifications",
+    "emit_extra_work_proposal_sent_notifications",
+    "emit_extra_work_decision_notifications",
+    "ew_message_audience",
+    "emit_extra_work_message_notifications",
+    "emit_extra_work_published_notifications",
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _active_users():
@@ -92,6 +112,479 @@ def _ticket_customer_users(ticket):
         users.append(ticket.created_by)
 
     return _dedupe_users(users)
+
+
+def _ticket_assigned_staff_users(ticket):
+    """M1 B1 — active STAFF users assigned to this ticket.
+
+    "Assigned STAFF" = the field workers actually placed on the ticket via
+    `TicketStaffAssignment` (any slot), deduped. This is intentionally
+    NARROWER than "every STAFF who could read the ticket via building
+    visibility": message notifications go to the people working the job,
+    not to every staff member in the building. The set is a strict subset
+    of the read-visible audience, so it can never notify a STAFF user who
+    cannot see the message. Slot status is not filtered — this mirrors the
+    `_assigned_staff_payload` roster ("who is on this ticket").
+    """
+    return (
+        _active_users()
+        .filter(
+            role=UserRole.STAFF,
+            ticket_staff_assignments__ticket_id=ticket.id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
+def ticket_message_audience(ticket, message_type):
+    """M1 B5 — the NORMAL read-visible audience for a `message_type` on a
+    ticket. This is the SINGLE source of truth for the NORMAL fan-out:
+    `emit_ticket_message_notifications` (the B1 emit) AND the B3 message-
+    recipients endpoint both build from it, so the emit audience, the picker,
+    and the read-visibility table can never drift.
+
+    Composition per tier (SUPER_ADMIN is deliberately NOT auto-notified —
+    email-path parity; SA still reads everything):
+
+      message_type        provider-mgmt   assigned-staff   customer-side
+      ------------------   -------------   --------------   -------------
+      PUBLIC_REPLY              v                -                v
+      STAFF_COMPLETION         v                v                v
+      STAFF_OPERATIONAL        v                v                -
+      INTERNAL_NOTE            v                -                -
+      CUSTOMER_INTERNAL        -                -                v
+
+    M1 B5 changes vs B1: assigned-staff DROPPED from PUBLIC_REPLY; the new
+    CUSTOMER_INTERNAL tier reaches customer-side ONLY (no provider-mgmt).
+
+    Returned deduped + active; NOT yet minus-author and NOT yet role/scope
+    filtered — callers layer those on (the message-recipients endpoint
+    intersects with message_type_visible_to_user + user_has_scope_for_ticket
+    so its output is always a subset of the valid directed_to targets the
+    serializer accepts).
+    """
+    audience = []
+    # Provider management — every tier EXCEPT the customer-only
+    # CUSTOMER_INTERNAL (the provider never sees the customer's own note).
+    if message_type != TicketMessageType.CUSTOMER_INTERNAL:
+        audience.extend(_ticket_staff_users(ticket))
+    # Assigned field staff — only the two staff-facing tiers (M1 B5:
+    # PUBLIC_REPLY no longer reaches staff).
+    if message_type in (
+        TicketMessageType.STAFF_OPERATIONAL,
+        TicketMessageType.STAFF_COMPLETION,
+    ):
+        audience.extend(_ticket_assigned_staff_users(ticket))
+    # Customer-side — the customer-visible tiers.
+    if message_type in (
+        TicketMessageType.PUBLIC_REPLY,
+        TicketMessageType.STAFF_COMPLETION,
+        TicketMessageType.CUSTOMER_INTERNAL,
+    ):
+        audience.extend(_ticket_customer_users(ticket))
+    return _dedupe_users(audience)
+
+
+def emit_ticket_message_notifications(message, actor=None):
+    """M1 B1 — create in-app Notification rows for a newly created
+    TicketMessage. IN-APP ONLY (no email; the lifecycle emails are
+    unchanged).
+
+    Recipients = the read-visible audience for `message.message_type`
+    (the single source of truth `ticket_message_audience`, see its table),
+    branched by `message.visibility_mode`:
+
+        NORMAL     -> the tier audience (+ any directed_to, flagged)
+        RESTRICTED -> message.directed_to only
+
+    minus the author, deduped, active only. Every directed_to user (minus
+    the author) is flagged `is_directed=True`.
+
+    "provider-mgmt" reuses `_ticket_staff_users` (the email-path resolver =
+    the ticket's COMPANY_ADMIN + BUILDING_MANAGER). SUPER_ADMIN is
+    deliberately not auto-notified, matching the existing email behaviour;
+    SA can still read every message directly.
+
+    HARD invariants (M1 B5): an INTERNAL_NOTE never notifies STAFF or
+    customer; a STAFF_OPERATIONAL never notifies a customer; a PUBLIC_REPLY
+    never notifies STAFF; a CUSTOMER_INTERNAL never notifies provider-mgmt or
+    STAFF. Enforced twice — `ticket_message_audience` excludes those roles by
+    construction, AND a final `message_type_visible_to_user` filter drops any
+    recipient (including any directed_to target) who cannot read the tier.
+    """
+    # Lazy import keeps the module-load import graph free of any
+    # notifications <-> tickets.permissions cycle risk.
+    from tickets.permissions import (
+        message_type_visible_to_user,
+        user_has_scope_for_ticket,
+    )
+
+    ticket = message.ticket
+    message_type = message.message_type
+
+    # Single source of truth for the NORMAL fan-out (same table the B3
+    # recipients endpoint + the read chokepoint use), so emit can never
+    # drift from read-visibility.
+    audience = list(ticket_message_audience(ticket, message_type))
+
+    directed = [
+        u
+        for u in message.directed_to.all()
+        if u and u.is_active and u.deleted_at is None
+    ]
+
+    if message.visibility_mode == TicketMessageVisibility.RESTRICTED:
+        base = list(directed)
+    else:
+        base = audience + directed
+
+    recipients = _dedupe_users(_without_actor(base, actor))
+    # Two independent gates make the notification audience EXACTLY the
+    # read-visible audience:
+    #   1. ROLE gate (`message_type_visible_to_user`) — never notify a role
+    #      that cannot read this tier (INTERNAL_NOTE never reaches STAFF or
+    #      customer; STAFF_OPERATIONAL never reaches customer).
+    #   2. SCOPE gate (`user_has_scope_for_ticket`) — never notify a user who
+    #      lacks read scope on THIS ticket. This closes the customer-side
+    #      gap: `_ticket_customer_users` resolves EVERY member of the
+    #      ticket's customer org, but a member whose building access does not
+    #      cover the ticket's building cannot open it (scope_tickets_for /
+    #      the messages endpoint would 404 them), so they must not be
+    #      notified either. The per-recipient check is bounded by the
+    #      (small) already-deduped audience. Provider-mgmt + assigned-staff
+    #      are scope-correct by construction; the redundant check on them is
+    #      cheap and keeps the invariant uniform.
+    recipients = [
+        u
+        for u in recipients
+        if message_type_visible_to_user(u, message_type)
+        and user_has_scope_for_ticket(u, ticket)
+    ]
+
+    directed_ids = {u.id for u in directed}
+
+    author_label = ""
+    if actor:
+        author_label = (actor.full_name or actor.email or "").strip()
+    body = (message.message or "").strip()
+    truncated = body[:140] + ("…" if len(body) > 140 else "")
+    if author_label:
+        summary = f"{author_label}: {truncated}"
+    else:
+        summary = truncated
+    summary = summary[:500]
+
+    rows = [
+        Notification(
+            recipient=user,
+            actor=actor,
+            event_type=NotificationType.TICKET_MESSAGE,
+            ticket=ticket,
+            is_directed=(user.id in directed_ids),
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# M1 B4 — Extra Work lifecycle in-app notifications.
+#
+# IN-APP ONLY (no email; there is no existing EW email path to change). Three
+# events, each keyed STRICTLY on the EW's own FKs so a notification can never
+# bleed across tenants:
+#   * NEW REQUEST   -> provider management (action needed)
+#   * QUOTE SENT    -> customer side (decision needed)
+#   * CUSTOMER DECISION (approved / rejected) -> provider management
+#
+# The resolvers mirror the ticket resolvers (`_ticket_staff_users` /
+# `_ticket_customer_users`) but read the EW's company / building / customer /
+# created_by. SUPER_ADMIN is deliberately NOT auto-notified (email-path parity
+# with B1); SA can still read every EW directly.
+# ---------------------------------------------------------------------------
+def _extra_work_provider_users(ew):
+    """Active provider-management users for `ew`: COMPANY_ADMIN of the EW's
+    company + BUILDING_MANAGER assigned to the EW's building. Same shape as
+    `_ticket_staff_users`, keyed on the EW's own FKs. SUPER_ADMIN excluded."""
+    return (
+        _active_users()
+        .filter(
+            Q(
+                role=UserRole.COMPANY_ADMIN,
+                company_memberships__company_id=ew.company_id,
+            )
+            | Q(
+                role=UserRole.BUILDING_MANAGER,
+                building_assignments__building_id=ew.building_id,
+            )
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
+def _extra_work_customer_users(ew):
+    """Active customer-side users for `ew`: every CUSTOMER_USER with a
+    membership for the EW's customer, plus the requester (`created_by`).
+    Same shape as `_ticket_customer_users`, keyed on the EW's customer.
+
+    NOTE: this returns EVERY member of the customer org regardless of which
+    building their access covers — exactly like `_ticket_customer_users`.
+    The emit path therefore applies a SCOPE gate (`_extra_work_visible_to`)
+    so a member whose building access does NOT cover the EW's building (and
+    thus cannot open the EW) is never notified about it (B1 parity — the
+    same leak the B1 adversarial review caught for tickets)."""
+    users = list(
+        _active_users()
+        .filter(
+            role=UserRole.CUSTOMER_USER,
+            customer_memberships__customer_id=ew.customer_id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+    if (
+        ew.created_by_id
+        and ew.created_by.role == UserRole.CUSTOMER_USER
+        and ew.created_by.is_active
+        and ew.created_by.deleted_at is None
+    ):
+        users.append(ew.created_by)
+
+    return _dedupe_users(users)
+
+
+def _extra_work_visible_to(user, ew):
+    """True iff `user` can read `ew` through the canonical read-side scoper.
+
+    Reusing `scope_extra_work_for` makes the notification audience EXACTLY a
+    subset of the read-visible audience by construction — it can never drift
+    from what the list / detail endpoints show. Provider-management resolved
+    above is scope-correct by construction (CA of the company, BM of the
+    building); the uniform check is cheap and closes the customer-side gap
+    (a customer-org member without building access for the EW's building must
+    not be notified about a quote they cannot open)."""
+    # Lazy import keeps the notifications <-> extra_work import graph acyclic
+    # (extra_work.views imports notifications.services at module load).
+    from extra_work.scoping import scope_extra_work_for
+
+    return scope_extra_work_for(user).filter(pk=ew.pk).exists()
+
+
+def _emit_extra_work_notifications(ew, *, recipients, actor, event_type, summary):
+    """Shared builder for the three EW emit helpers: minus-actor, dedupe,
+    SCOPE-gate, then bulk-create. Sets `extra_work=ew`, `ticket=None`,
+    `is_directed=False` (EW notifications are never 'directed')."""
+    recipients = _dedupe_users(_without_actor(recipients, actor))
+    recipients = [u for u in recipients if _extra_work_visible_to(u, ew)]
+
+    summary = (summary or "").strip()[:500]
+    rows = [
+        Notification(
+            recipient=user,
+            actor=actor,
+            event_type=event_type,
+            ticket=None,
+            extra_work=ew,
+            is_directed=False,
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
+
+
+def _ew_title(ew):
+    return (ew.title or "").strip()
+
+
+def emit_extra_work_requested_notifications(ew, actor=None):
+    """NEW EW REQUEST -> notify provider management ('action needed').
+
+    Recipients = `_extra_work_provider_users(ew)` minus the requester. Fires
+    for EVERY EW regardless of intent (instant / auto-start / request-quote).
+    `actor` is the requester (`ew.created_by`)."""
+    title = _ew_title(ew)
+    summary = (
+        f"New extra-work request: {title}" if title else "New extra-work request"
+    )
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_provider_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_REQUESTED,
+        summary=summary,
+    )
+
+
+def emit_extra_work_proposal_sent_notifications(ew, actor=None):
+    """QUOTE / PROPOSAL SENT -> notify the customer side ('decision needed').
+
+    Recipients = `_extra_work_customer_users(ew)` minus the sender (the
+    provider operator who sent the quote; minus-actor is a no-op for the
+    customer set but kept uniform). `actor` is the provider operator."""
+    title = _ew_title(ew)
+    summary = f"Quote ready: {title}" if title else "Quote ready"
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_customer_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_PROPOSAL_SENT,
+        summary=summary,
+    )
+
+
+def emit_extra_work_decision_notifications(ew, actor=None, *, approved):
+    """CUSTOMER DECISION (approved / rejected) -> notify provider management.
+
+    Recipients = `_extra_work_provider_users(ew)` minus the decider. `actor`
+    is the customer decider on the normal path, or the provider operator on
+    an override path (minus-actor then excludes them so they don't self-
+    notify). The approved-vs-rejected distinction rides the `summary`."""
+    title = _ew_title(ew)
+    decider = ""
+    if actor:
+        decider = (actor.full_name or actor.email or "").strip()
+    verb = "approved" if approved else "rejected"
+    if decider:
+        summary = f"{decider} {verb} {title}".strip()
+    else:
+        summary = f"Extra work {verb}: {title}".strip()
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_provider_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_DECISION,
+        summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# M1 B6 — Extra Work message thread fan-out (mirrors the ticket-message emit
+# MINUS staff; EW has no staff dimension). Reuses the B4 EW resolvers + the
+# B1 Notification + its extra_work FK + B3 deep-link.
+# ---------------------------------------------------------------------------
+def ew_message_audience(ew, message_type):
+    """The NORMAL read-visible audience for an EW message tier. Single source
+    of truth for the fan-out AND the recipients picker (mirror of
+    `ticket_message_audience`, minus staff):
+
+      PUBLIC_REPLY       -> provider-mgmt + customer
+      INTERNAL_NOTE      -> provider-mgmt only
+      CUSTOMER_INTERNAL  -> customer only
+
+    SUPER_ADMIN is deliberately NOT auto-notified (email-path parity, same as
+    the EW lifecycle notifications); SA can still read every EW message.
+    Returned deduped + active; NOT yet minus-author / role+scope filtered —
+    callers layer those on.
+    """
+    from extra_work.models import ExtraWorkMessageType
+
+    audience = []
+    # Provider management — every tier EXCEPT the customer-only CUSTOMER_INTERNAL.
+    if message_type != ExtraWorkMessageType.CUSTOMER_INTERNAL:
+        audience.extend(_extra_work_provider_users(ew))
+    # Customer-side — the customer-visible tiers.
+    if message_type in (
+        ExtraWorkMessageType.PUBLIC_REPLY,
+        ExtraWorkMessageType.CUSTOMER_INTERNAL,
+    ):
+        audience.extend(_extra_work_customer_users(ew))
+    return _dedupe_users(audience)
+
+
+def emit_extra_work_message_notifications(message, actor=None):
+    """M1 B6 — create in-app Notification rows for a new ExtraWorkMessage.
+    Mirrors `emit_ticket_message_notifications` minus staff:
+
+        NORMAL     -> the tier audience (+ any directed_to, flagged)
+        RESTRICTED -> message.directed_to only
+
+    minus the author, deduped, active only. Two gates make the notified set
+    EXACTLY the read-visible set: the ROLE gate
+    (`ew_message_type_visible_to_user`) and the EW SCOPE gate
+    (`_extra_work_visible_to`). SUPER_ADMIN is not auto-notified.
+    """
+    from extra_work.message_permissions import ew_message_type_visible_to_user
+    from extra_work.models import ExtraWorkMessageVisibility
+
+    ew = message.extra_work
+    message_type = message.message_type
+
+    audience = list(ew_message_audience(ew, message_type))
+    directed = [
+        u
+        for u in message.directed_to.all()
+        if u and u.is_active and u.deleted_at is None
+    ]
+
+    if message.visibility_mode == ExtraWorkMessageVisibility.RESTRICTED:
+        base = list(directed)
+    else:
+        base = audience + directed
+
+    recipients = _dedupe_users(_without_actor(base, actor))
+    recipients = [
+        u
+        for u in recipients
+        if ew_message_type_visible_to_user(u, message_type)
+        and _extra_work_visible_to(u, ew)
+    ]
+
+    directed_ids = {u.id for u in directed}
+
+    author_label = ""
+    if actor:
+        author_label = (actor.full_name or actor.email or "").strip()
+    body = (message.message or "").strip()
+    truncated = body[:140] + ("…" if len(body) > 140 else "")
+    summary = f"{author_label}: {truncated}" if author_label else truncated
+    summary = summary[:500]
+
+    rows = [
+        Notification(
+            recipient=user,
+            actor=actor,
+            event_type=NotificationType.EXTRA_WORK_MESSAGE,
+            ticket=None,
+            extra_work=ew,
+            is_directed=(user.id in directed_ids),
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
+
+
+def emit_extra_work_published_notifications(ew, actor=None):
+    """M1 B6 item-7 — a provider DIRECT-PUBLISHED (quote-bypass) the customer's
+    extra work WITHOUT a separate decision step. Tell the CUSTOMER side it was
+    approved/started. Recipients = `_extra_work_customer_users(ew)` minus the
+    actor (the provider operator). A single direct emit at the view, so it
+    fires exactly once regardless of the internal two-leg transition."""
+    title = _ew_title(ew)
+    summary = (
+        f"Extra work approved: {title}" if title else "Extra work approved"
+    )
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_customer_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_PUBLISHED,
+        summary=summary,
+    )
 
 
 # Dutch status labels for email rendering. The model's TextChoices labels

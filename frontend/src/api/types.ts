@@ -50,6 +50,10 @@ export type TicketStatus =
 //   STAFF_OPERATIONAL  — provider-side + STAFF; NOT customer-side.
 //   STAFF_COMPLETION   — provider-side + STAFF; ALSO customer-visible as
 //                        completion evidence.
+//   CUSTOMER_INTERNAL  — M1 B5, customer-side's own internal note. Visible
+//                        to customer-side + SA (forensic) only; NOT MGMT,
+//                        NOT STAFF. PUBLIC_REPLY is now provider+customer
+//                        only (STAFF dropped).
 //
 // Backend filters at the queryset level — the SPA renders whatever the
 // API returns. The frontend's job is to render the correct badge / bubble
@@ -59,7 +63,8 @@ export type TicketMessageType =
   | "PUBLIC_REPLY"
   | "INTERNAL_NOTE"
   | "STAFF_OPERATIONAL"
-  | "STAFF_COMPLETION";
+  | "STAFF_COMPLETION"
+  | "CUSTOMER_INTERNAL";
 
 export interface PaginatedResponse<T> {
   count: number;
@@ -372,9 +377,14 @@ export interface TicketDetail extends TicketList {
 export interface TicketDetailActions {
   allowed_next_statuses: TicketStatus[];
   can_override_customer_decision: boolean;
+  // M1 B5 — PUBLIC_REPLY is no longer "always allowed" (STAFF cannot post
+  // it), so the composer needs an explicit flag; CUSTOMER_INTERNAL is the
+  // new customer-only tier.
+  can_post_public_reply: boolean;
   can_post_provider_internal_note: boolean;
   can_post_staff_operational_note: boolean;
   can_post_staff_completion_note: boolean;
+  can_post_customer_internal_note: boolean;
   can_upload_hidden_attachment: boolean;
   status_transitions: Record<TicketStatus, boolean>;
 }
@@ -401,6 +411,16 @@ export interface StaffAssignmentRequest {
   reviewer_note: string;
 }
 
+// M1 — message visibility mode (B1 model field; B2 enforces RESTRICTED on
+// the read side). NORMAL = visible to the message_type audience; RESTRICTED
+// = only the author + directed_to users.
+export type TicketMessageVisibility = "NORMAL" | "RESTRICTED";
+
+export interface DirectedRecipientLabel {
+  id: number;
+  full_name: string;
+}
+
 export interface TicketMessage {
   id: number;
   ticket: number;
@@ -408,8 +428,53 @@ export interface TicketMessage {
   author_email: string;
   message: string;
   message_type: TicketMessageType;
+  // M1 B1/B3 — attention targets (writable ids) + read-only label detail +
+  // visibility mode. directed_to_detail is for rendering the "-> directed
+  // to X" chip; visibility_mode drives the "Private" badge.
+  directed_to: number[];
+  directed_to_detail: DirectedRecipientLabel[];
+  visibility_mode: TicketMessageVisibility;
   is_hidden: boolean;
   created_at: string;
+}
+
+// M1 B3 — a valid directed_to target for the composer picker, from
+// GET /api/tickets/<id>/message-recipients/. `side` groups the picker.
+// M1 B5: the endpoint is side-aware by caller (STAFF -> [], CUSTOMER ->
+// customer-side only) and no longer returns an `email` field.
+export interface MessageRecipient {
+  id: number;
+  full_name: string;
+  side: "provider" | "staff" | "customer";
+}
+
+// M1 — in-app notification (mirrors notifications.serializers.
+// NotificationSerializer). Deep-link is derived from `ticket` (-> the
+// ticket detail) or `extra_work` (-> EW detail, wired for B4).
+export interface Notification {
+  id: number;
+  event_type: string;
+  is_directed: boolean;
+  summary: string;
+  ticket: number | null;
+  ticket_no: string | null;
+  ticket_title: string | null;
+  extra_work: number | null;
+  extra_work_title: string | null;
+  actor_id: number | null;
+  actor_name: string | null;
+  actor_email: string | null;
+  read_at: string | null;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface NotificationListResponse {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: Notification[];
+  unread_count: number;
 }
 
 
@@ -1166,6 +1231,42 @@ export interface ExtraWorkActions {
   can_view_proposal_pdf: boolean;
   can_approve: boolean;
   can_reject: boolean;
+  // M1 B6 — EW message thread posting flags (the composer offers only the
+  // tiers the backend will accept). Optional so older responses typecheck.
+  can_post_ew_public_reply?: boolean;
+  can_post_ew_internal_note?: boolean;
+  can_post_ew_customer_internal?: boolean;
+}
+
+// M1 B6 — Extra Work message thread (mirrors TicketMessageType MINUS the two
+// staff tiers; EW has no staff dimension).
+export type EwMessageType =
+  | "PUBLIC_REPLY"
+  | "INTERNAL_NOTE"
+  | "CUSTOMER_INTERNAL";
+
+export type EwMessageVisibility = "NORMAL" | "RESTRICTED";
+
+export interface EwMessage {
+  id: number;
+  extra_work: number;
+  author: number | null;
+  author_email: string;
+  message: string;
+  message_type: EwMessageType;
+  directed_to: number[];
+  directed_to_detail: { id: number; full_name: string }[];
+  visibility_mode: EwMessageVisibility;
+  created_at: string;
+}
+
+// M1 B6 — a valid directed_to target for the EW composer picker, from
+// GET /api/extra-work/<id>/message-recipients/. Side-aware by caller; no
+// email (EW has no staff side, so `side` is provider | customer).
+export interface EwMessageRecipient {
+  id: number;
+  full_name: string;
+  side: "provider" | "customer";
 }
 
 // Sprint 28 Batch 6 — cart-shaped POST payload for /extra-work/.

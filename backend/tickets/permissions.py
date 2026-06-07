@@ -1,7 +1,12 @@
 from rest_framework.permissions import BasePermission
 
 from accounts.models import UserRole
-from accounts.permissions import IsAuthenticatedAndActive
+from accounts.permissions import (
+    IsAuthenticatedAndActive,
+    is_provider_management_role,
+    is_staff_role,
+    is_super_admin,
+)
 from accounts.scoping import company_admin_customer_ids, scope_tickets_for
 from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
 from companies.models import CompanyUserMembership
@@ -102,3 +107,136 @@ def user_has_scope_for_ticket(user, ticket):
                 return True
         return False
     return False
+
+
+def message_type_visible_to_user(user, message_type):
+    """M1 B5 — ROLE-based read visibility for a `TicketMessage.message_type`.
+
+    The canonical READ-VISIBILITY table (five channels). This function and
+    `filter_messages_visible_to` layer (a) below are the SAME table expressed
+    two ways (per-user predicate vs queryset exclude) and MUST stay in
+    lockstep:
+
+      message_type        SA   MGMT  STAFF  CUST
+      ------------------   ---  ----  -----  ----
+      PUBLIC_REPLY          v    v     -      v     (M1 B5: STAFF dropped)
+      STAFF_COMPLETION      v    v     v      v
+      STAFF_OPERATIONAL     v    v     v      -
+      INTERNAL_NOTE         v    v     -      -
+      CUSTOMER_INTERNAL     v    -     -      v     (M1 B5: new, customer-only)
+
+    SA is checked FIRST (is_provider_management_role still lumps SA with
+    MGMT, but SA keeps a forensic read of every tier incl. CUSTOMER_INTERNAL,
+    whereas MGMT must NOT see CUSTOMER_INTERNAL).
+
+    This is the ROLE gate only. Ticket SCOPE (scope_tickets_for /
+    user_has_scope_for_ticket) is checked separately by callers. Used to
+    (a) validate `directed_to` targets and (b) belt-and-suspenders filter
+    notification recipients so a tier can never notify a role that cannot
+    read it.
+    """
+    # Local import: tickets.models may import this module transitively;
+    # keep the enum reference lazy to avoid an import-time cycle.
+    from tickets.models import TicketMessageType
+
+    if is_super_admin(user):
+        return True  # forensic — every tier.
+    if is_provider_management_role(user):  # MGMT (SA handled above).
+        return message_type != TicketMessageType.CUSTOMER_INTERNAL
+    if is_staff_role(user):  # STAFF only — management handled above.
+        return message_type in (
+            TicketMessageType.STAFF_OPERATIONAL,
+            TicketMessageType.STAFF_COMPLETION,
+        )
+    return message_type in (  # customer-side / anyone else.
+        TicketMessageType.PUBLIC_REPLY,
+        TicketMessageType.STAFF_COMPLETION,
+        TicketMessageType.CUSTOMER_INTERNAL,
+    )
+
+
+def filter_messages_visible_to(qs, user):
+    """M1 B2 — the SINGLE chokepoint for TicketMessage read visibility.
+
+    Every read / count / search path for TicketMessage must route through
+    this helper so the rule cannot drift or be missed at one site. It AND-s
+    two layers; each only ever NARROWS the queryset (it never widens):
+
+      (a) M1 B5 role / is_hidden filtering — the canonical READ-VISIBILITY
+          table (the SAME table `message_type_visible_to_user` encodes,
+          expressed as queryset excludes; keep the two in lockstep):
+            * SA — every tier, including INTERNAL_NOTE, CUSTOMER_INTERNAL,
+              and is_hidden moderation rows (forensic).
+            * MGMT (CA / BM) — every tier EXCEPT CUSTOMER_INTERNAL; still
+              sees is_hidden moderation rows.
+            * STAFF — STAFF_OPERATIONAL + STAFF_COMPLETION only (PUBLIC_REPLY
+              dropped in M1 B5; INTERNAL_NOTE + CUSTOMER_INTERNAL excluded);
+              is_hidden dropped.
+            * customer-side / other — PUBLIC_REPLY + STAFF_COMPLETION +
+              CUSTOMER_INTERNAL only (INTERNAL_NOTE + STAFF_OPERATIONAL
+              excluded); is_hidden dropped.
+      (b) M1 B2 RESTRICTED party filter — applied UNCONDITIONALLY so it
+          binds EVERY role, provider management AND SA included: a RESTRICTED
+          message is visible iff the viewer is the author OR a directed_to
+          member. NORMAL messages are unaffected. A non-party admin can
+          neither read nor infer a RESTRICTED message anywhere this
+          chokepoint is used. SA is NOT exempt from layer (b) on the
+          per-ticket list (B2 decision; SA's forensic path for restricted
+          content is the global audit log, untouched).
+
+    A userless / unauthenticated caller (defensive — these endpoints are
+    auth-gated) is treated as a non-party: layer (a) treats them as
+    non-management customer-side, and layer (b) leaves only NORMAL rows.
+    """
+    from django.db.models import Exists, OuterRef, Q
+
+    from .models import (
+        TicketMessage,
+        TicketMessageType,
+        TicketMessageVisibility,
+    )
+
+    user_id = getattr(user, "id", None)
+
+    # (a) M1 B5 role / is_hidden. SA checked FIRST (sees all + hidden);
+    # MGMT sees all-but-CUSTOMER_INTERNAL + hidden; STAFF and customer-side
+    # apply is_hidden=False and their per-tier excludes. Mirrors
+    # `message_type_visible_to_user` exactly.
+    if is_super_admin(user):
+        pass  # forensic — no tier exclusion, hidden rows retained.
+    elif is_provider_management_role(user):  # MGMT (SA handled above).
+        qs = qs.exclude(message_type=TicketMessageType.CUSTOMER_INTERNAL)
+    elif is_staff_role(user):
+        qs = qs.filter(is_hidden=False).exclude(
+            message_type__in=(
+                TicketMessageType.PUBLIC_REPLY,
+                TicketMessageType.INTERNAL_NOTE,
+                TicketMessageType.CUSTOMER_INTERNAL,
+            )
+        )
+    else:  # customer-side / userless.
+        qs = qs.filter(is_hidden=False).exclude(
+            message_type__in=(
+                TicketMessageType.INTERNAL_NOTE,
+                TicketMessageType.STAFF_OPERATIONAL,
+            )
+        )
+
+    # (b) RESTRICTED party filter — unconditional. Uses Exists (a correlated
+    # subquery, NOT a directed_to join) so there is no row fan-out / duplicate
+    # rows, and never has to .distinct().
+    if user_id is None:
+        return qs.filter(visibility_mode=TicketMessageVisibility.NORMAL)
+
+    through = TicketMessage.directed_to.through
+    return qs.annotate(
+        _directed_to_me=Exists(
+            through.objects.filter(
+                ticketmessage_id=OuterRef("pk"), user_id=user_id
+            )
+        )
+    ).filter(
+        Q(visibility_mode=TicketMessageVisibility.NORMAL)
+        | Q(author_id=user_id)
+        | Q(_directed_to_me=True)
+    )

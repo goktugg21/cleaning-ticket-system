@@ -95,6 +95,30 @@ def is_provider_management_role(user):
     )
 
 
+def is_super_admin(user):
+    """True iff `user` is the global SUPER_ADMIN role.
+
+    M1 B5 needs SUPER_ADMIN distinguished FROM the other two management
+    roles (which `is_provider_management_role` lumps together): SA keeps a
+    forensic read of EVERY message tier (incl. the customer-only
+    CUSTOMER_INTERNAL), whereas COMPANY_ADMIN / BUILDING_MANAGER must NOT
+    see CUSTOMER_INTERNAL.
+    """
+    return getattr(user, "role", None) == UserRole.SUPER_ADMIN
+
+
+def is_customer_side(user):
+    """True iff `user` is a customer-side principal (role CUSTOMER_USER).
+
+    Covers both plain customer users and company-wide Customer Company
+    Admins (the `is_company_admin` membership flag is carried on a
+    CUSTOMER_USER-role user, so they share this role). M1 B5 uses this to
+    gate PUBLIC_REPLY / CUSTOMER_INTERNAL posting and the customer-only
+    RESTRICTED rule.
+    """
+    return getattr(user, "role", None) == UserRole.CUSTOMER_USER
+
+
 class IsSuperAdminOrCompanyAdmin(IsAuthenticatedAndActive):
     """
     Either super admin or company admin role. Object-level scope is enforced

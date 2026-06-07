@@ -6,6 +6,10 @@ from .views import (
     ExtraWorkPricingLineItemListCreateView,
     ExtraWorkRequestViewSet,
 )
+from .views_messages import (
+    ExtraWorkMessageListCreateView,
+    ExtraWorkMessageRecipientsView,
+)
 from .views_proposals import (
     ProposalDetailView,
     ProposalDirectPublishView,
@@ -90,5 +94,16 @@ urlpatterns = [
         "<int:ew_id>/proposals/<int:pid>/direct-publish/",
         ProposalDirectPublishView.as_view(),
         name="extra-work-proposal-direct-publish",
+    ),
+    # M1 B6 — Extra Work message thread.
+    path(
+        "<int:ew_id>/messages/",
+        ExtraWorkMessageListCreateView.as_view(),
+        name="extra-work-message-list",
+    ),
+    path(
+        "<int:ew_id>/message-recipients/",
+        ExtraWorkMessageRecipientsView.as_view(),
+        name="extra-work-message-recipients",
     ),
 ]

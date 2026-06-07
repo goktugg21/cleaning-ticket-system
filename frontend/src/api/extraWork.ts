@@ -6,6 +6,10 @@
 // the `/api` prefix).
 import { api } from "./client";
 import type {
+  EwMessage,
+  EwMessageRecipient,
+  EwMessageType,
+  EwMessageVisibility,
   ExtraWorkPreviewPayload,
   ExtraWorkPreviewResponse,
   ExtraWorkPricingLineItem,
@@ -386,6 +390,52 @@ export async function transitionProposal(
     payload,
   );
   return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// M1 B6 — Extra Work message thread.
+// ---------------------------------------------------------------------------
+interface CreateEwMessagePayload {
+  message: string;
+  message_type: EwMessageType;
+  directed_to?: number[];
+  visibility_mode?: EwMessageVisibility;
+}
+
+/** GET /api/extra-work/<id>/messages/ — the chokepoint-filtered thread
+ * (flat array, like proposals). */
+export async function listEwMessages(
+  ewId: number | string,
+): Promise<EwMessage[]> {
+  const response = await api.get<EwMessage[]>(
+    `/extra-work/${ewId}/messages/`,
+  );
+  return response.data;
+}
+
+/** POST /api/extra-work/<id>/messages/ — create a message on the thread. */
+export async function createEwMessage(
+  ewId: number | string,
+  payload: CreateEwMessagePayload,
+): Promise<EwMessage> {
+  const response = await api.post<EwMessage>(
+    `/extra-work/${ewId}/messages/`,
+    payload,
+  );
+  return response.data;
+}
+
+/** GET /api/extra-work/<id>/message-recipients/?message_type=<tier> — the
+ * side-aware directed_to candidates for the composer picker. */
+export async function getEwMessageRecipients(
+  ewId: number | string,
+  messageType: EwMessageType,
+): Promise<EwMessageRecipient[]> {
+  const response = await api.get<{ results: EwMessageRecipient[] }>(
+    `/extra-work/${ewId}/message-recipients/`,
+    { params: { message_type: messageType } },
+  );
+  return response.data.results;
 }
 
 

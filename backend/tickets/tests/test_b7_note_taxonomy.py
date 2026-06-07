@@ -189,18 +189,23 @@ class MessageVisibilityPerTierTests(_B7Fixture):
                 f"actor={actor.email} should see all four tiers",
             )
 
-    def test_staff_sees_public_operational_completion_not_internal(self):
+    def test_staff_sees_operational_completion_not_public_or_internal(self):
+        # M1 B5 — STAFF visibility narrowed to STAFF_OPERATIONAL +
+        # STAFF_COMPLETION. PUBLIC_REPLY is now provider/customer-only (a
+        # field worker has no customer-conversation channel); INTERNAL_NOTE
+        # stays provider-management only.
         self.authenticate(self.staff_user)
         response = self.client.get(self._messages_url())
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(
             self._visible_ids(response),
             {
-                self.public_msg.id,
                 self.staff_op_msg.id,
                 self.staff_completion_msg.id,
             },
         )
+        # STAFF must NOT see the PUBLIC_REPLY (customer-conversation channel).
+        self.assertNotIn(self.public_msg.id, self._visible_ids(response))
         # Defence-in-depth: explicit assertion the body of INTERNAL_NOTE
         # never leaks.
         data = response.data.get("results", response.data)

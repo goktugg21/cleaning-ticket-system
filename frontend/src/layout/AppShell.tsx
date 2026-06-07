@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
+  Bell,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -40,6 +41,7 @@ import {
 } from "../auth/permissions";
 import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
+import { NotificationBell } from "../components/NotificationBell";
 import { getCompany, getCustomer } from "../api/admin";
 import { getInitials } from "../lib/initials";
 
@@ -350,6 +352,12 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.my_work")}
                 </NavLink>
               )}
+              <NavLink to="/notifications" className={navClass}>
+                <span className="nav-icon">
+                  <Bell size={16} strokeWidth={2} />
+                </span>
+                {t("nav.notifications")}
+              </NavLink>
               {canAccessExtraWork(me?.role) && (
                 <NavLink to="/extra-work" className={navClass}>
                   <span className="nav-icon">
@@ -553,6 +561,7 @@ export function AppShell({ children }: AppShellProps) {
             </div>
           </div>
           <div className="topbar-right">
+            <NotificationBell />
             <UserMenu />
           </div>
         </header>

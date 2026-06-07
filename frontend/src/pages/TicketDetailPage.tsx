@@ -23,6 +23,8 @@ import {
   listCustomerContacts,
   listStaffAssignmentRequests,
 } from "../api/admin";
+import { getMessageRecipients } from "../api/notifications";
+import { formatDateTime } from "../lib/intl";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
@@ -30,6 +32,7 @@ import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
 import type {
   AssignableManager,
   Contact,
+  MessageRecipient,
   PaginatedResponse,
   StaffCompletionRoute,
   TicketAttachment,
@@ -44,6 +47,7 @@ import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
 import {
   composerTiersForRole,
+  isCustomerUser,
   isProviderAdmin,
   isProviderManagementRole,
   isStaff as isStaffRoleFn,
@@ -68,6 +72,7 @@ const NOTE_TIER_BADGE_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "tag_internal",
   STAFF_OPERATIONAL: "tag_staff_operational",
   STAFF_COMPLETION: "tag_staff_completion",
+  CUSTOMER_INTERNAL: "tag_customer_internal",
 };
 
 const NOTE_TIER_BUBBLE_CLASS: Record<TicketMessageType, string> = {
@@ -75,6 +80,7 @@ const NOTE_TIER_BUBBLE_CLASS: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "internal",
   STAFF_OPERATIONAL: "internal",
   STAFF_COMPLETION: "",
+  CUSTOMER_INTERNAL: "internal",
 };
 
 const NOTE_TIER_TAG_CLASS: Record<TicketMessageType, string> = {
@@ -82,6 +88,7 @@ const NOTE_TIER_TAG_CLASS: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "",
   STAFF_OPERATIONAL: "",
   STAFF_COMPLETION: "",
+  CUSTOMER_INTERNAL: "",
 };
 
 const NOTE_TIER_COMPOSER_LABEL_KEY: Record<TicketMessageType, string> = {
@@ -89,6 +96,7 @@ const NOTE_TIER_COMPOSER_LABEL_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "composer_internal",
   STAFF_OPERATIONAL: "composer_staff_operational",
   STAFF_COMPLETION: "composer_staff_completion",
+  CUSTOMER_INTERNAL: "composer_customer_internal",
 };
 
 const NOTE_TIER_PLACEHOLDER_KEY: Record<TicketMessageType, string> = {
@@ -96,10 +104,11 @@ const NOTE_TIER_PLACEHOLDER_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "composer_internal_placeholder",
   STAFF_OPERATIONAL: "composer_staff_operational_placeholder",
   STAFF_COMPLETION: "composer_staff_completion_placeholder",
+  CUSTOMER_INTERNAL: "composer_customer_internal_placeholder",
 };
 
 // "Who sees this" description rendered under the composer-tier
-// toggle. The map covers all four tiers so the helper line renders
+// toggle. The map covers all five tiers so the helper line renders
 // even when the viewer only has one tier available (the toggle row
 // itself hides in that case, but the visibility statement still
 // shows so an author never posts without knowing the audience).
@@ -108,6 +117,7 @@ const NOTE_TIER_WHO_SEES_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "composer_internal_who_sees",
   STAFF_OPERATIONAL: "composer_staff_operational_who_sees",
   STAFF_COMPLETION: "composer_staff_completion_who_sees",
+  CUSTOMER_INTERNAL: "composer_customer_internal_who_sees",
 };
 
 const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
@@ -115,6 +125,7 @@ const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "internal",
   STAFF_OPERATIONAL: "internal",
   STAFF_COMPLETION: "",
+  CUSTOMER_INTERNAL: "internal",
 };
 
 // Sprint 15: backend is the source of truth for which transitions are
@@ -196,19 +207,12 @@ const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
+// Delegates to lib/intl so dates follow the app language (nl-NL/en-US
+// derived from i18n.language), not the host OS locale. Name kept so the
+// existing call sites stay unchanged; lib formatDateTime handles
+// null/empty/parse-fail (returns "—").
 function formatDate(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString(undefined, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return value;
-  }
+  return formatDateTime(value);
 }
 
 function formatBytes(bytes: number): string {
@@ -389,20 +393,23 @@ export function TicketDetailPage() {
   const [completeBusy, setCompleteBusy] = useState(false);
 
   const [message, setMessage] = useState("");
-  // Composer tier list — driven by per-record `ticket.actions` when the
-  // detail has loaded (PUBLIC_REPLY is always allowed for an
-  // authenticated viewer in scope, plus whichever of INTERNAL_NOTE /
-  // STAFF_OPERATIONAL / STAFF_COMPLETION the backend says this user
-  // can author on THIS ticket). Falls back to the role-based predicate
-  // before the detail loads (or for older serializers that don't carry
-  // `actions`), so the page never crashes on undefined.
+  // Composer tier list (M1 B5) — driven by the per-record `ticket.actions`
+  // POSTING flags when the detail has loaded, so the composer NEVER offers a
+  // tier the backend would reject. Net per role: CUST = PUBLIC_REPLY +
+  // CUSTOMER_INTERNAL; STAFF = STAFF_OPERATIONAL + STAFF_COMPLETION; MGMT/SA =
+  // PUBLIC_REPLY + INTERNAL_NOTE + STAFF_OPERATIONAL + STAFF_COMPLETION.
+  // Falls back to the role-based predicate before the detail loads (or for
+  // older serializers without `actions`), so the page never crashes on
+  // undefined.
   const composerTiers = useMemo<TicketMessageType[]>(() => {
     const actions = ticket?.actions;
     if (actions) {
-      const tiers: TicketMessageType[] = ["PUBLIC_REPLY"];
+      const tiers: TicketMessageType[] = [];
+      if (actions.can_post_public_reply) tiers.push("PUBLIC_REPLY");
       if (actions.can_post_provider_internal_note) tiers.push("INTERNAL_NOTE");
       if (actions.can_post_staff_operational_note) tiers.push("STAFF_OPERATIONAL");
       if (actions.can_post_staff_completion_note) tiers.push("STAFF_COMPLETION");
+      if (actions.can_post_customer_internal_note) tiers.push("CUSTOMER_INTERNAL");
       return tiers;
     }
     return composerTiersForRole(me?.role);
@@ -418,6 +425,75 @@ export function TicketDetailPage() {
     ? messageType
     : composerTiers[0] ?? "PUBLIC_REPLY";
   const [sendingMessage, setSendingMessage] = useState(false);
+
+  // M1 B3 — directed_to ("notify specific people") + RESTRICTED ("private")
+  // compose state. The valid recipient set depends on the active tier, so we
+  // refetch it whenever the effective tier changes and prune any now-invalid
+  // selection. `effectivePrivate` mirrors the B1 restricted_requires_target
+  // rule (RESTRICTED requires >=1 target) so the UI never sends a black-hole
+  // message.
+  const [directedTo, setDirectedTo] = useState<number[]>([]);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [recipients, setRecipients] = useState<MessageRecipient[]>([]);
+  // M1 B5 — who may make a message RESTRICTED ("Private"): provider
+  // management / SA on any tier they post; a customer-side user ONLY on the
+  // CUSTOMER_INTERNAL tier (they can notify customer-side people on a
+  // PUBLIC_REPLY, but cannot make a PUBLIC_REPLY private). STAFF never (and
+  // their picker is empty anyway, so the whole block is hidden). This mirrors
+  // the server-side `restricted_only_for_customer_internal` /
+  // `staff_cannot_direct_or_restrict` rules so RESTRICTED stays UI-unreachable
+  // where the backend would 400.
+  const canUsePrivate =
+    isProviderManagementRole(me?.role) ||
+    (isCustomerUser(me?.role) && effectiveMessageType === "CUSTOMER_INTERNAL");
+  const effectivePrivate =
+    canUsePrivate && isPrivate && directedTo.length > 0;
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    const loadRecipients = async () => {
+      try {
+        const data = await getMessageRecipients(id, effectiveMessageType);
+        if (cancelled) return;
+        setRecipients(data);
+        // Drop any selected target that is not valid for the new tier
+        // (e.g. switching PUBLIC_REPLY -> INTERNAL_NOTE removes customers).
+        const validIds = new Set(data.map((recipient) => recipient.id));
+        setDirectedTo((prev) => prev.filter((rid) => validIds.has(rid)));
+      } catch {
+        // A failed refetch must not strand a now-invalid, invisible
+        // selection (the chip picker hides when recipients is empty). Clear
+        // the selection + private intent so the next send can't carry a
+        // target the user can no longer see/deselect.
+        if (!cancelled) {
+          setRecipients([]);
+          setDirectedTo([]);
+          setIsPrivate(false);
+        }
+      }
+    };
+    loadRecipients();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, effectiveMessageType]);
+
+  const toggleDirected = useCallback(
+    (recipientId: number) => {
+      const next = directedTo.includes(recipientId)
+        ? directedTo.filter((rid) => rid !== recipientId)
+        : [...directedTo, recipientId];
+      setDirectedTo(next);
+      // RESTRICTED is only meaningful with >=1 target; clearing the last
+      // target drops the private intent so re-selecting someone later does
+      // not silently re-arm "Private".
+      if (next.length === 0) {
+        setIsPrivate(false);
+      }
+    },
+    [directedTo],
+  );
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentHidden, setAttachmentHidden] = useState(false);
@@ -1010,9 +1086,18 @@ export function TicketDetailPage() {
       await api.post(`/tickets/${id}/messages/`, {
         message: message.trim(),
         message_type: effectiveMessageType,
+        // M1 B3 — attention targets + visibility. effectivePrivate guards
+        // the B1 restricted_requires_target rule client-side (RESTRICTED is
+        // only sent with >=1 target). The picker only offers valid targets,
+        // so directed_to_not_visible / too_many_directed_recipients cannot
+        // be reached from the UI; getApiError surfaces them if they ever do.
+        directed_to: directedTo,
+        visibility_mode: effectivePrivate ? "RESTRICTED" : "NORMAL",
       });
       setMessage("");
       setMessageType(composerTiers[0] ?? "PUBLIC_REPLY");
+      setDirectedTo([]);
+      setIsPrivate(false);
       await loadTicket();
     } catch (err) {
       setError(getApiError(err));
@@ -1196,6 +1281,285 @@ export function TicketDetailPage() {
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">
+                <MessageSquare size={14} strokeWidth={2.2} />
+              </span>
+              <span className="card-head-icon-title">
+                {t("card_messages_title")}
+              </span>
+            </div>
+            <form className="notes-composer-body" onSubmit={submitMessage}>
+              <textarea
+                className="notes-textarea"
+                placeholder={t(NOTE_TIER_PLACEHOLDER_KEY[effectiveMessageType])}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                required
+              />
+              {recipients.length > 0 && (
+                <div className="composer-directed" data-testid="composer-directed">
+                  <div className="composer-directed-label">
+                    {t("directed.label")}
+                  </div>
+                  <div className="composer-directed-chips">
+                    {recipients.map((recipient) => {
+                      const selected = directedTo.includes(recipient.id);
+                      return (
+                        <button
+                          key={recipient.id}
+                          type="button"
+                          className={`directed-chip${
+                            selected ? " directed-chip-selected" : ""
+                          }`}
+                          aria-pressed={selected}
+                          onClick={() => toggleDirected(recipient.id)}
+                        >
+                          {recipient.full_name}
+                          <span className="directed-chip-side">
+                            {t(`directed.side_${recipient.side}`)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* M1 B5 — the "Private" (RESTRICTED) toggle renders only
+                      where the author may restrict: provider mgmt / SA on any
+                      tier, customer-side ONLY on CUSTOMER_INTERNAL. STAFF have
+                      an empty picker so this whole block is already hidden. */}
+                  {canUsePrivate && (
+                    <>
+                      <label className="composer-private-toggle">
+                        <input
+                          type="checkbox"
+                          checked={effectivePrivate}
+                          disabled={directedTo.length === 0}
+                          onChange={(event) => setIsPrivate(event.target.checked)}
+                          data-testid="composer-private-toggle"
+                        />
+                        <span>{t("directed.private_label")}</span>
+                      </label>
+                      <p className="muted small composer-directed-hint">
+                        {directedTo.length === 0
+                          ? t("directed.private_disabled_hint")
+                          : effectivePrivate
+                            ? t("directed.private_on_hint")
+                            : t("directed.private_off_hint")}
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="notes-actions">
+                <div className="notes-tools">
+                  {composerTiers.length > 1 && (
+                    <div className="composer-toggle" role="tablist">
+                      {composerTiers.map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          role="tab"
+                          aria-selected={effectiveMessageType === tier}
+                          className={`composer-toggle-btn ${
+                            effectiveMessageType === tier
+                              ? `active ${NOTE_TIER_TONE_CLASS[tier]}`
+                              : ""
+                          }`}
+                          onClick={() => setMessageType(tier)}
+                        >
+                          {t(NOTE_TIER_COMPOSER_LABEL_KEY[tier])}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={sendingMessage || !message.trim()}
+                >
+                  {sendingMessage ? t("sending") : t("post_message")}
+                </button>
+              </div>
+              {/* "Who sees this" helper, keyed to the active tier so
+                  the author knows the visibility scope before posting.
+                  Renders for every tier (even when only one is
+                  available) so the author cannot post a note without
+                  the visibility statement on screen. */}
+              <p
+                className="muted small composer-tier-help"
+                data-testid="composer-tier-help"
+                style={{ margin: "6px 22px 0", padding: "0 0 14px" }}
+              >
+                {t(NOTE_TIER_WHO_SEES_KEY[effectiveMessageType])}
+              </p>
+            </form>
+
+            {messages.length === 0 ? (
+              <p
+                style={{
+                  padding: "0 22px 22px",
+                  color: "var(--text-faint)",
+                  fontSize: 13,
+                }}
+              >
+                {t("no_messages")}
+              </p>
+            ) : (
+              messages.map((item) => (
+                <div
+                  key={item.id}
+                  className={`note-bubble ${NOTE_TIER_BUBBLE_CLASS[item.message_type] ?? ""}`}
+                >
+                  <div className="note-bubble-avatar">
+                    {getInitials(item.author_email)}
+                  </div>
+                  <div>
+                    <div className="note-bubble-head">
+                      <span className="note-bubble-name">
+                        {humanName(item.author_email, t("unassigned"))}
+                      </span>
+                      <span className="note-bubble-time">
+                        {formatDate(item.created_at)}
+                      </span>
+                      <span
+                        className={`note-bubble-tag ${NOTE_TIER_TAG_CLASS[item.message_type] ?? ""}`}
+                      >
+                        {t(NOTE_TIER_BADGE_KEY[item.message_type] ?? "tag_public")}
+                      </span>
+                      {item.visibility_mode === "RESTRICTED" && (
+                        <span
+                          className="note-bubble-private"
+                          data-testid="note-private"
+                        >
+                          {t("directed.private_badge")}
+                        </span>
+                      )}
+                    </div>
+                    {item.directed_to_detail &&
+                      item.directed_to_detail.length > 0 && (
+                        <div
+                          className="note-bubble-directed"
+                          data-testid="note-directed"
+                        >
+                          {t("directed.bubble_prefix")}{" "}
+                          {item.directed_to_detail
+                            .map((target) => target.full_name)
+                            .join(", ")}
+                        </div>
+                      )}
+                    <div className="note-bubble-text">{item.message}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-head-icon">
+              <span className="card-head-icon-glyph">
+                <Paperclip size={14} strokeWidth={2.2} />
+              </span>
+              <span className="card-head-icon-title">
+                {t("card_attachments_title")}
+              </span>
+              <span className="card-head-icon-spacer" />
+              <span className="card-head-icon-link">
+                {t(
+                  attachments.length === 1 ? "files_singular" : "files_plural",
+                  { count: attachments.length },
+                )}
+              </span>
+            </div>
+
+            <div className="att-thumb-grid">
+              {attachments.map((item) => (
+                <div className="att-thumb" key={item.id}>
+                  <button
+                    type="button"
+                    className={`att-thumb-tile ${item.is_hidden ? "internal" : ""}`}
+                    onClick={() => downloadAttachment(item)}
+                    disabled={downloadingAttachmentId === item.id}
+                    aria-label={`Download ${item.original_filename}`}
+                  >
+                    <span className="att-thumb-ext">
+                      {getFileExtension(item.original_filename)}
+                    </span>
+                    {item.is_hidden && (
+                      <span className="att-thumb-internal-pill">
+                        {t("internal_pill")}
+                      </span>
+                    )}
+                  </button>
+                  <div className="att-thumb-name">
+                    {downloadingAttachmentId === item.id
+                      ? t("downloading")
+                      : item.original_filename}
+                  </div>
+                  <div className="att-thumb-size">
+                    {formatBytes(item.file_size)} ·{" "}
+                    {formatDate(item.created_at)}
+                  </div>
+                </div>
+              ))}
+
+              <label className="att-thumb-upload">
+                <UploadCloud size={22} strokeWidth={2} />
+                <span>
+                  {selectedFile ? t("replace_selection") : t("upload_file")}
+                </span>
+                <input
+                  type="file"
+                  accept={ACCEPTED_ATTACHMENT_TYPES}
+                  onChange={handleFileChange}
+                  disabled={uploadingAttachment}
+                />
+              </label>
+            </div>
+
+            {selectedFile && (
+              <form
+                className="att-thumb-staged"
+                onSubmit={submitAttachment}
+              >
+                <span className="att-thumb-staged-text">
+                  {t("selected")} <b>{selectedFile.name}</b> ·{" "}
+                  {formatBytes(selectedFile.size)}
+                </span>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {ticket?.actions?.can_upload_hidden_attachment && (
+                    <label className="login-check" style={{ margin: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={attachmentHidden}
+                        onChange={(event) =>
+                          setAttachmentHidden(event.target.checked)
+                        }
+                        disabled={uploadingAttachment}
+                      />
+                      <span>{t("internal_only")}</span>
+                    </label>
+                  )}
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={uploadingAttachment}
+                  >
+                    {uploadingAttachment ? t("uploading") : t("upload_button")}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-head-icon">
+              <span className="card-head-icon-glyph">
                 <Clock size={14} strokeWidth={2.2} />
               </span>
               <span className="card-head-icon-title">
@@ -1322,212 +1686,6 @@ export function TicketDetailPage() {
                 ))
               )}
             </div>
-          </div>
-
-          <div className="card">
-            <div className="card-head-icon">
-              <span className="card-head-icon-glyph">
-                <MessageSquare size={14} strokeWidth={2.2} />
-              </span>
-              <span className="card-head-icon-title">
-                {t("card_messages_title")}
-              </span>
-            </div>
-            <form className="notes-composer-body" onSubmit={submitMessage}>
-              <textarea
-                className="notes-textarea"
-                placeholder={t(NOTE_TIER_PLACEHOLDER_KEY[effectiveMessageType])}
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                required
-              />
-              <div className="notes-actions">
-                <div className="notes-tools">
-                  {composerTiers.length > 1 && (
-                    <div className="composer-toggle" role="tablist">
-                      {composerTiers.map((tier) => (
-                        <button
-                          key={tier}
-                          type="button"
-                          role="tab"
-                          aria-selected={effectiveMessageType === tier}
-                          className={`composer-toggle-btn ${
-                            effectiveMessageType === tier
-                              ? `active ${NOTE_TIER_TONE_CLASS[tier]}`
-                              : ""
-                          }`}
-                          onClick={() => setMessageType(tier)}
-                        >
-                          {t(NOTE_TIER_COMPOSER_LABEL_KEY[tier])}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-sm"
-                  disabled={sendingMessage || !message.trim()}
-                >
-                  {sendingMessage ? t("sending") : t("post_message")}
-                </button>
-              </div>
-              {/* "Who sees this" helper, keyed to the active tier so
-                  the author knows the visibility scope before posting.
-                  Renders for every tier (even when only one is
-                  available) so the author cannot post a note without
-                  the visibility statement on screen. */}
-              <p
-                className="muted small composer-tier-help"
-                data-testid="composer-tier-help"
-                style={{ margin: "6px 22px 0", padding: "0 0 14px" }}
-              >
-                {t(NOTE_TIER_WHO_SEES_KEY[effectiveMessageType])}
-              </p>
-            </form>
-
-            {messages.length === 0 ? (
-              <p
-                style={{
-                  padding: "0 22px 22px",
-                  color: "var(--text-faint)",
-                  fontSize: 13,
-                }}
-              >
-                {t("no_messages")}
-              </p>
-            ) : (
-              messages.map((item) => (
-                <div
-                  key={item.id}
-                  className={`note-bubble ${NOTE_TIER_BUBBLE_CLASS[item.message_type] ?? ""}`}
-                >
-                  <div className="note-bubble-avatar">
-                    {getInitials(item.author_email)}
-                  </div>
-                  <div>
-                    <div className="note-bubble-head">
-                      <span className="note-bubble-name">
-                        {humanName(item.author_email, t("unassigned"))}
-                      </span>
-                      <span className="note-bubble-time">
-                        {formatDate(item.created_at)}
-                      </span>
-                      <span
-                        className={`note-bubble-tag ${NOTE_TIER_TAG_CLASS[item.message_type] ?? ""}`}
-                      >
-                        {t(NOTE_TIER_BADGE_KEY[item.message_type] ?? "tag_public")}
-                      </span>
-                    </div>
-                    <div className="note-bubble-text">{item.message}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className="card">
-            <div className="card-head-icon">
-              <span className="card-head-icon-glyph">
-                <Paperclip size={14} strokeWidth={2.2} />
-              </span>
-              <span className="card-head-icon-title">
-                {t("card_attachments_title")}
-              </span>
-              <span className="card-head-icon-spacer" />
-              <span className="card-head-icon-link">
-                {t(
-                  attachments.length === 1 ? "files_singular" : "files_plural",
-                  { count: attachments.length },
-                )}
-              </span>
-            </div>
-
-            <div className="att-thumb-grid">
-              {attachments.map((item) => (
-                <div className="att-thumb" key={item.id}>
-                  <button
-                    type="button"
-                    className={`att-thumb-tile ${item.is_hidden ? "internal" : ""}`}
-                    onClick={() => downloadAttachment(item)}
-                    disabled={downloadingAttachmentId === item.id}
-                    aria-label={`Download ${item.original_filename}`}
-                  >
-                    <span className="att-thumb-ext">
-                      {getFileExtension(item.original_filename)}
-                    </span>
-                    {item.is_hidden && (
-                      <span className="att-thumb-internal-pill">
-                        {t("internal_pill")}
-                      </span>
-                    )}
-                  </button>
-                  <div className="att-thumb-name">
-                    {downloadingAttachmentId === item.id
-                      ? t("downloading")
-                      : item.original_filename}
-                  </div>
-                  <div className="att-thumb-size">
-                    {formatBytes(item.file_size)} ·{" "}
-                    {formatDate(item.created_at)}
-                  </div>
-                </div>
-              ))}
-
-              <label className="att-thumb-upload">
-                <UploadCloud size={22} strokeWidth={2} />
-                <span>
-                  {selectedFile ? t("replace_selection") : t("upload_file")}
-                </span>
-                <input
-                  type="file"
-                  accept={ACCEPTED_ATTACHMENT_TYPES}
-                  onChange={handleFileChange}
-                  disabled={uploadingAttachment}
-                />
-              </label>
-            </div>
-
-            {selectedFile && (
-              <form
-                className="att-thumb-staged"
-                onSubmit={submitAttachment}
-              >
-                <span className="att-thumb-staged-text">
-                  {t("selected")} <b>{selectedFile.name}</b> ·{" "}
-                  {formatBytes(selectedFile.size)}
-                </span>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  {ticket?.actions?.can_upload_hidden_attachment && (
-                    <label className="login-check" style={{ margin: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={attachmentHidden}
-                        onChange={(event) =>
-                          setAttachmentHidden(event.target.checked)
-                        }
-                        disabled={uploadingAttachment}
-                      />
-                      <span>{t("internal_only")}</span>
-                    </label>
-                  )}
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm"
-                    disabled={uploadingAttachment}
-                  >
-                    {uploadingAttachment ? t("uploading") : t("upload_button")}
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         </div>
 

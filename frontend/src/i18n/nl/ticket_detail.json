@@ -17,10 +17,12 @@
   "composer_public_placeholder": "Schrijf een reactie…",
   "composer_staff_operational_placeholder": "Operationele notitie — alleen zichtbaar voor het providerteam, niet voor de klant.",
   "composer_staff_completion_placeholder": "Afrondingsnotitie — zichtbaar voor de klant als bewijs van uitvoering.",
+  "composer_customer_internal_placeholder": "Interne notitie — alleen zichtbaar voor je eigen team aan klantzijde, niet voor de provider.",
   "composer_public": "Openbare reactie",
   "composer_internal": "Interne notitie",
   "composer_staff_operational": "Operationeel",
   "composer_staff_completion": "Afronding",
+  "composer_customer_internal": "Interne notitie (mijn team)",
   "post_message": "Bericht plaatsen",
   "sending": "Verzenden…",
   "no_messages": "Nog geen berichten. Wees de eerste die reageert.",
@@ -28,6 +30,7 @@
   "tag_internal": "Interne notitie",
   "tag_staff_operational": "Operationeel",
   "tag_staff_completion": "Afronding",
+  "tag_customer_internal": "Intern (mijn team)",
 
   "card_attachments_title": "Bijlagen",
   "files_singular": "{{count}} bestand",
@@ -97,6 +100,7 @@
   "composer_internal_who_sees": "Alleen zichtbaar voor providerbeheerders en gebouwbeheerders. Niet zichtbaar voor de klant of voor toegewezen veldmedewerkers.",
   "composer_staff_operational_who_sees": "Zichtbaar voor het providerteam en de toegewezen veldmedewerkers. Niet zichtbaar voor de klant. Gebruik dit voor werkinstructies en interne voortgang.",
   "composer_staff_completion_who_sees": "Zichtbaar voor de klant als bewijs van uitgevoerd werk.",
+  "composer_customer_internal_who_sees": "Alleen zichtbaar voor jouw eigen team aan klantzijde. Niet zichtbaar voor de provider of veldmedewerkers.",
   "assignment_section_bm_helper": "De gebouwbeheerder die dit ticket vanuit de providerzijde beheert. Hij/zij stuurt het werk aan en bewaakt de afronding.",
   "workflow_completion_evidence_hint": "Upload indien mogelijk een foto van het uitgevoerde werk. Zo kunnen de manager en de klant het resultaat controleren. Als er geen foto beschikbaar is, schrijf dan in plaats daarvan een korte afrondingsnotitie.",
   "workflow_completion_evidence_required": "Voeg een afrondingsnotitie toe of plaats een foto van het uitgevoerde werk voordat u dit ticket ter goedkeuring aan de klant stuurt.",
@@ -237,6 +241,16 @@
   "schedule.error_terminal": "Dit ticket is afgerond en kan niet meer worden ingepland.",
   "schedule.error_forbidden_scope": "Je hebt geen rechten om dit ticket in te plannen.",
   "schedule.error_forbidden_role": "Je rol kan tickets niet inplannen.",
-  "schedule.error_invalid": "De planning is ongeldig."
+  "schedule.error_invalid": "De planning is ongeldig.",
+  "directed.label": "Specifieke personen op de hoogte stellen",
+  "directed.side_provider": "beheerder",
+  "directed.side_staff": "medewerker",
+  "directed.side_customer": "klant",
+  "directed.private_label": "Privé (alleen de geselecteerde personen zien dit)",
+  "directed.private_on_hint": "Alleen jij en de personen die je selecteert kunnen dit bericht zien.",
+  "directed.private_off_hint": "Iedereen die dit ticket kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een melding.",
+  "directed.private_disabled_hint": "Selecteer minstens één persoon om dit bericht privé te maken.",
+  "directed.private_badge": "Privé",
+  "directed.bubble_prefix": "Gericht aan:"
 }
 
