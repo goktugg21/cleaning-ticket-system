@@ -53,13 +53,17 @@ def _ticket_has_visible_attachment(ticket):
     customer user would see. Imported locally to avoid a circular
     import between state_machine.py and models.py.
 
-    B7 — the four-tier `TicketMessageType` taxonomy narrows the
-    customer-visible set to PUBLIC_REPLY + STAFF_COMPLETION. The
-    other two tiers (INTERNAL_NOTE = PROVIDER_INTERNAL and
-    STAFF_OPERATIONAL) are not customer-visible; an attachment
-    living on such a message is therefore NOT customer-visible
-    evidence and does not satisfy the staff-completion evidence
-    rule.
+    B7 / M1 B5 — the message taxonomy narrows the "counts as staff
+    completion evidence" set to PUBLIC_REPLY + STAFF_COMPLETION. The
+    other tiers are NOT staff-completion proof and are excluded:
+    INTERNAL_NOTE (PROVIDER_INTERNAL) and STAFF_OPERATIONAL are not
+    customer-visible at all; CUSTOMER_INTERNAL (M1 B5) IS customer-
+    visible but is the CUSTOMER's own private note — never the
+    provider/staff's proof of completed work — so it must not satisfy
+    the staff-completion evidence rule either. (Today this is dormant:
+    `TicketAttachment.message` is serializer read-only and never set,
+    so no attachment is message-linked; the exclude is the correct,
+    future-proof classification of the new tier.)
     """
     from .models import TicketAttachment, TicketMessageType
 
@@ -67,6 +71,7 @@ def _ticket_has_visible_attachment(ticket):
     qs = qs.exclude(message__is_hidden=True)
     qs = qs.exclude(message__message_type=TicketMessageType.INTERNAL_NOTE)
     qs = qs.exclude(message__message_type=TicketMessageType.STAFF_OPERATIONAL)
+    qs = qs.exclude(message__message_type=TicketMessageType.CUSTOMER_INTERNAL)
     return qs.exists()
 
 

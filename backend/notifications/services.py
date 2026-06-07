@@ -135,22 +135,49 @@ def _ticket_assigned_staff_users(ticket):
 
 
 def ticket_message_audience(ticket, message_type):
-    """M1 B3 — the NORMAL read-visible audience for a `message_type` on a
-    ticket: the SAME composition `emit_ticket_message_notifications` uses for
-    a NORMAL message (provider-mgmt + assigned-staff + customer-side, branched
-    by tier), built from the SAME B1 resolvers. Returned deduped + active;
-    NOT yet minus-author and NOT yet role/scope filtered — callers layer those
-    on (the message-recipients endpoint intersects with
-    message_type_visible_to_user + user_has_scope_for_ticket so its output is
-    always a subset of the valid directed_to targets the B1 serializer
-    accepts). Kept separate from emit so the B1 emit path is untouched.
+    """M1 B5 — the NORMAL read-visible audience for a `message_type` on a
+    ticket. This is the SINGLE source of truth for the NORMAL fan-out:
+    `emit_ticket_message_notifications` (the B1 emit) AND the B3 message-
+    recipients endpoint both build from it, so the emit audience, the picker,
+    and the read-visibility table can never drift.
+
+    Composition per tier (SUPER_ADMIN is deliberately NOT auto-notified —
+    email-path parity; SA still reads everything):
+
+      message_type        provider-mgmt   assigned-staff   customer-side
+      ------------------   -------------   --------------   -------------
+      PUBLIC_REPLY              v                -                v
+      STAFF_COMPLETION         v                v                v
+      STAFF_OPERATIONAL        v                v                -
+      INTERNAL_NOTE            v                -                -
+      CUSTOMER_INTERNAL        -                -                v
+
+    M1 B5 changes vs B1: assigned-staff DROPPED from PUBLIC_REPLY; the new
+    CUSTOMER_INTERNAL tier reaches customer-side ONLY (no provider-mgmt).
+
+    Returned deduped + active; NOT yet minus-author and NOT yet role/scope
+    filtered — callers layer those on (the message-recipients endpoint
+    intersects with message_type_visible_to_user + user_has_scope_for_ticket
+    so its output is always a subset of the valid directed_to targets the
+    serializer accepts).
     """
-    audience = list(_ticket_staff_users(ticket))  # provider management
-    if message_type != TicketMessageType.INTERNAL_NOTE:
+    audience = []
+    # Provider management — every tier EXCEPT the customer-only
+    # CUSTOMER_INTERNAL (the provider never sees the customer's own note).
+    if message_type != TicketMessageType.CUSTOMER_INTERNAL:
+        audience.extend(_ticket_staff_users(ticket))
+    # Assigned field staff — only the two staff-facing tiers (M1 B5:
+    # PUBLIC_REPLY no longer reaches staff).
+    if message_type in (
+        TicketMessageType.STAFF_OPERATIONAL,
+        TicketMessageType.STAFF_COMPLETION,
+    ):
         audience.extend(_ticket_assigned_staff_users(ticket))
+    # Customer-side — the customer-visible tiers.
     if message_type in (
         TicketMessageType.PUBLIC_REPLY,
         TicketMessageType.STAFF_COMPLETION,
+        TicketMessageType.CUSTOMER_INTERNAL,
     ):
         audience.extend(_ticket_customer_users(ticket))
     return _dedupe_users(audience)
@@ -161,17 +188,11 @@ def emit_ticket_message_notifications(message, actor=None):
     TicketMessage. IN-APP ONLY (no email; the lifecycle emails are
     unchanged).
 
-    Recipients = the read-visible audience for `message.message_type`,
+    Recipients = the read-visible audience for `message.message_type`
+    (the single source of truth `ticket_message_audience`, see its table),
     branched by `message.visibility_mode`:
 
-        message_type        NORMAL audience
-        ------------------  ----------------------------------------------
-        PUBLIC_REPLY        provider-mgmt + assigned-staff + customer-side
-        STAFF_COMPLETION    provider-mgmt + assigned-staff + customer-side
-        STAFF_OPERATIONAL   provider-mgmt + assigned-staff
-        INTERNAL_NOTE       provider-mgmt ONLY
-
-        NORMAL     -> the audience above (+ any directed_to, flagged)
+        NORMAL     -> the tier audience (+ any directed_to, flagged)
         RESTRICTED -> message.directed_to only
 
     minus the author, deduped, active only. Every directed_to user (minus
@@ -182,11 +203,12 @@ def emit_ticket_message_notifications(message, actor=None):
     deliberately not auto-notified, matching the existing email behaviour;
     SA can still read every message directly.
 
-    HARD invariant: an INTERNAL_NOTE never notifies a customer-side user
-    and never notifies STAFF; a STAFF_OPERATIONAL never notifies a
-    customer. Enforced twice — the per-type audience sets exclude those
-    roles, AND a final `message_type_visible_to_user` filter drops any
-    recipient (including any directed_to target) who cannot read the type.
+    HARD invariants (M1 B5): an INTERNAL_NOTE never notifies STAFF or
+    customer; a STAFF_OPERATIONAL never notifies a customer; a PUBLIC_REPLY
+    never notifies STAFF; a CUSTOMER_INTERNAL never notifies provider-mgmt or
+    STAFF. Enforced twice — `ticket_message_audience` excludes those roles by
+    construction, AND a final `message_type_visible_to_user` filter drops any
+    recipient (including any directed_to target) who cannot read the tier.
     """
     # Lazy import keeps the module-load import graph free of any
     # notifications <-> tickets.permissions cycle risk.
@@ -198,14 +220,10 @@ def emit_ticket_message_notifications(message, actor=None):
     ticket = message.ticket
     message_type = message.message_type
 
-    audience = list(_ticket_staff_users(ticket))  # provider management
-    if message_type != TicketMessageType.INTERNAL_NOTE:
-        audience.extend(_ticket_assigned_staff_users(ticket))
-    if message_type in (
-        TicketMessageType.PUBLIC_REPLY,
-        TicketMessageType.STAFF_COMPLETION,
-    ):
-        audience.extend(_ticket_customer_users(ticket))
+    # Single source of truth for the NORMAL fan-out (same table the B3
+    # recipients endpoint + the read chokepoint use), so emit can never
+    # drift from read-visibility.
+    audience = list(ticket_message_audience(ticket, message_type))
 
     directed = [
         u

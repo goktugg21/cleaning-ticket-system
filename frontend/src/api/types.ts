@@ -50,6 +50,10 @@ export type TicketStatus =
 //   STAFF_OPERATIONAL  — provider-side + STAFF; NOT customer-side.
 //   STAFF_COMPLETION   — provider-side + STAFF; ALSO customer-visible as
 //                        completion evidence.
+//   CUSTOMER_INTERNAL  — M1 B5, customer-side's own internal note. Visible
+//                        to customer-side + SA (forensic) only; NOT MGMT,
+//                        NOT STAFF. PUBLIC_REPLY is now provider+customer
+//                        only (STAFF dropped).
 //
 // Backend filters at the queryset level — the SPA renders whatever the
 // API returns. The frontend's job is to render the correct badge / bubble
@@ -59,7 +63,8 @@ export type TicketMessageType =
   | "PUBLIC_REPLY"
   | "INTERNAL_NOTE"
   | "STAFF_OPERATIONAL"
-  | "STAFF_COMPLETION";
+  | "STAFF_COMPLETION"
+  | "CUSTOMER_INTERNAL";
 
 export interface PaginatedResponse<T> {
   count: number;
@@ -372,9 +377,14 @@ export interface TicketDetail extends TicketList {
 export interface TicketDetailActions {
   allowed_next_statuses: TicketStatus[];
   can_override_customer_decision: boolean;
+  // M1 B5 — PUBLIC_REPLY is no longer "always allowed" (STAFF cannot post
+  // it), so the composer needs an explicit flag; CUSTOMER_INTERNAL is the
+  // new customer-only tier.
+  can_post_public_reply: boolean;
   can_post_provider_internal_note: boolean;
   can_post_staff_operational_note: boolean;
   can_post_staff_completion_note: boolean;
+  can_post_customer_internal_note: boolean;
   can_upload_hidden_attachment: boolean;
   status_transitions: Record<TicketStatus, boolean>;
 }
@@ -430,10 +440,11 @@ export interface TicketMessage {
 
 // M1 B3 — a valid directed_to target for the composer picker, from
 // GET /api/tickets/<id>/message-recipients/. `side` groups the picker.
+// M1 B5: the endpoint is side-aware by caller (STAFF -> [], CUSTOMER ->
+// customer-side only) and no longer returns an `email` field.
 export interface MessageRecipient {
   id: number;
   full_name: string;
-  email: string;
   side: "provider" | "staff" | "customer";
 }
 

@@ -209,19 +209,24 @@ export function canReadCustomerArea(role: Role | null | undefined): boolean {
 export const canViewCustomerContacts = isProviderAdmin;
 
 // ---------------------------------------------------------------------------
-// Note tier (B7 four-tier taxonomy on TicketMessage.message_type)
+// Note tier (M1 B5 five-channel taxonomy on TicketMessage.message_type)
 // ---------------------------------------------------------------------------
 export const TICKET_MESSAGE_TIERS = [
   "PUBLIC_REPLY",
   "INTERNAL_NOTE",
   "STAFF_OPERATIONAL",
   "STAFF_COMPLETION",
+  "CUSTOMER_INTERNAL",
 ] as const;
 export type TicketMessageTier = (typeof TICKET_MESSAGE_TIERS)[number];
 
-// Backend: `tickets.views.TicketMessageViewSet.get_queryset` + the
-// write-side validation in `tickets.serializers`. Mirrors those rules
-// so the SPA can render the composer + per-bubble badge consistently.
+// Backend: `tickets.permissions.message_type_visible_to_user` /
+// `filter_messages_visible_to` (read) + `_user_may_post_message_type`
+// (write). Mirrors those rules so the SPA renders the composer + per-bubble
+// badge consistently. These are only a render hint — the backend is the
+// authority (it filters the message list and rejects disallowed posts);
+// the composer primarily reads the per-record `ticket.actions.can_post_*`
+// flags, falling back to these predicates before the detail loads.
 //
 // The customer-side access roles (CCA / CLM / CU access_role) are NOT
 // `Me.role` values — for the composer we only need the current viewer's
@@ -231,14 +236,23 @@ export function canReadTicketMessageTier(
   role: Role | null | undefined,
   tier: TicketMessageTier,
 ): boolean {
-  if (isProviderManagementRole(role)) return true;
+  if (isSuperAdmin(role)) return true; // forensic — every tier.
+  if (isProviderManagementRole(role)) {
+    // MGMT (SA handled above): everything EXCEPT the customer-only tier.
+    return tier !== "CUSTOMER_INTERNAL";
+  }
   if (role === "STAFF") {
-    // STAFF: PUBLIC_REPLY + STAFF_OPERATIONAL + STAFF_COMPLETION.
-    return tier !== "INTERNAL_NOTE";
+    // STAFF: STAFF_OPERATIONAL + STAFF_COMPLETION only (M1 B5: PUBLIC_REPLY
+    // dropped).
+    return tier === "STAFF_OPERATIONAL" || tier === "STAFF_COMPLETION";
   }
   if (role === "CUSTOMER_USER") {
-    // Customer-side: PUBLIC_REPLY + STAFF_COMPLETION.
-    return tier === "PUBLIC_REPLY" || tier === "STAFF_COMPLETION";
+    // Customer-side: PUBLIC_REPLY + STAFF_COMPLETION + CUSTOMER_INTERNAL.
+    return (
+      tier === "PUBLIC_REPLY" ||
+      tier === "STAFF_COMPLETION" ||
+      tier === "CUSTOMER_INTERNAL"
+    );
   }
   return false;
 }
@@ -247,14 +261,18 @@ export function canWriteTicketMessageTier(
   role: Role | null | undefined,
   tier: TicketMessageTier,
 ): boolean {
-  if (isProviderManagementRole(role)) return true;
+  if (isProviderManagementRole(role)) {
+    // MGMT / SA: every tier EXCEPT the customer-only CUSTOMER_INTERNAL.
+    return tier !== "CUSTOMER_INTERNAL";
+  }
   if (role === "STAFF") {
-    // STAFF may compose STAFF_OPERATIONAL and STAFF_COMPLETION only.
+    // STAFF may compose STAFF_OPERATIONAL and STAFF_COMPLETION only (M1 B5:
+    // NOT PUBLIC_REPLY — staff have no customer-conversation channel).
     return tier === "STAFF_OPERATIONAL" || tier === "STAFF_COMPLETION";
   }
   if (role === "CUSTOMER_USER") {
-    // Customer-side may only post PUBLIC_REPLY.
-    return tier === "PUBLIC_REPLY";
+    // Customer-side may post PUBLIC_REPLY + their own CUSTOMER_INTERNAL.
+    return tier === "PUBLIC_REPLY" || tier === "CUSTOMER_INTERNAL";
   }
   return false;
 }

@@ -126,10 +126,14 @@ class EmitPerMessageTypeTests(_MsgNotifFixture):
             self.manager, message_type=TicketMessageType.PUBLIC_REPLY
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
+        # M1 B5 — PUBLIC_REPLY no longer reaches STAFF (a field worker has no
+        # customer-conversation channel). Audience = provider-mgmt + customer.
         self.assertEqual(
             self._recipient_ids(),
-            {self.company_admin.id, self.staff_user.id, self.customer_user.id},
+            {self.company_admin.id, self.customer_user.id},
         )
+        # M1 B5 — assigned STAFF is NOT notified about a PUBLIC_REPLY.
+        self.assertNotIn(self.staff_user.id, self._recipient_ids())
         # Author is never a recipient.
         self.assertNotIn(self.manager.id, self._recipient_ids())
         # Building-scoped but UNASSIGNED staff is not in the fan-out.
@@ -201,9 +205,10 @@ class EmitPerMessageTypeTests(_MsgNotifFixture):
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
         self.assertNotIn(self.company_admin.id, self._recipient_ids())
+        # M1 B5 — PUBLIC_REPLY audience = provider-mgmt + customer (no STAFF).
         self.assertEqual(
             self._recipient_ids(),
-            {self.manager.id, self.staff_user.id, self.customer_user.id},
+            {self.manager.id, self.customer_user.id},
         )
 
 
@@ -218,17 +223,18 @@ class DirectedAndRestrictedTests(_MsgNotifFixture):
             directed_to=[self.customer_user.id],
         )
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.content)
-        # Whole audience still notified (NORMAL).
+        # Whole NORMAL PUBLIC_REPLY audience notified — M1 B5: provider-mgmt
+        # + customer, STAFF dropped.
         self.assertEqual(
             self._recipient_ids(),
-            {self.company_admin.id, self.staff_user.id, self.customer_user.id},
+            {self.company_admin.id, self.customer_user.id},
         )
         # Only the directed user carries is_directed=True.
         self.assertEqual(self._directed_ids(), {self.customer_user.id})
         non_directed = Notification.objects.filter(is_directed=False)
         self.assertEqual(
             {n.recipient_id for n in non_directed},
-            {self.company_admin.id, self.staff_user.id},
+            {self.company_admin.id},
         )
 
     def test_normal_directed_user_outside_fanout_still_notified(self):
@@ -349,9 +355,11 @@ class BackCompatTests(_MsgNotifFixture):
             str(msg.visibility_mode), str(TicketMessageVisibility.NORMAL)
         )
         self.assertEqual(msg.directed_to.count(), 0)
+        # M1 B5 — a plain post defaults to PUBLIC_REPLY/NORMAL; audience is
+        # provider-mgmt + customer (STAFF dropped from PUBLIC_REPLY).
         self.assertEqual(
             self._recipient_ids(),
-            {self.company_admin.id, self.staff_user.id, self.customer_user.id},
+            {self.company_admin.id, self.customer_user.id},
         )
 
     def test_existing_message_reads_with_default_fields(self):

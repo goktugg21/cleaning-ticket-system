@@ -79,32 +79,40 @@ TERMINAL_TICKET_STATUSES = frozenset(
 
 class TicketMessageType(models.TextChoices):
     """
-    B7 — four-tier note taxonomy (`docs/product/system-business-logic-
-    and-workflows.md` §9). Each `TicketMessage` carries one value; the
-    enum value IS the canonical visibility classification.
+    B7 + M1 B5 — five-channel note taxonomy (`docs/product/system-
+    business-logic-and-workflows.md` §9). Each `TicketMessage` carries one
+    value; the enum value IS the canonical visibility classification.
+    Read-visibility per tier (SA = Super Admin, MGMT = Company Admin /
+    Building Manager, STAFF = field staff, CUST = customer-side):
 
-      * `PUBLIC_REPLY` — CUSTOMER_VISIBLE. Visible to customer-side
-        users in scope and to every provider-side role.
-      * `INTERNAL_NOTE` — PROVIDER_INTERNAL. Visible only to provider
-        management roles in scope (Super Admin, Company Admin,
-        Building Manager). NOT visible to STAFF or any customer-side
-        role. The literal `"INTERNAL_NOTE"` is preserved so legacy
-        rows keep their semantic without a data migration; the value
-        itself is the PROVIDER_INTERNAL tier.
-      * `STAFF_OPERATIONAL` — STAFF_OPERATIONAL. Visible to every
-        provider-side role including STAFF in scope. NOT visible to
-        customer. Used for operational instructions field staff need
-        to do the job (e.g. "bring a ladder", "use the back entrance").
-      * `STAFF_COMPLETION` — STAFF_COMPLETION / evidence. Written by
-        STAFF as completion evidence; visible to provider-side users
-        in scope; customer-visible per the existing staff-completion
-        evidence rule (P0/B1).
+      * `PUBLIC_REPLY` — visible to SA + MGMT + CUST. M1 B5: STAFF DROPPED
+        (a field worker has no customer-conversation channel; their only
+        customer-facing channel is STAFF_COMPLETION, one-way status).
+      * `INTERNAL_NOTE` — PROVIDER_INTERNAL. Visible to SA + MGMT only.
+        NOT STAFF, NOT CUST. The literal `"INTERNAL_NOTE"` is preserved so
+        legacy rows keep their semantic without a data migration.
+      * `STAFF_OPERATIONAL` — visible to SA + MGMT + STAFF. NOT CUST.
+        Operational instructions field staff need (e.g. "bring a ladder").
+      * `STAFF_COMPLETION` — completion evidence. Visible to SA + MGMT +
+        STAFF + CUST (customer-visible proof of work).
+      * `CUSTOMER_INTERNAL` (M1 B5, NEW) — the customer side's OWN internal
+        note. Visible to CUST + SA (forensic) ONLY. NOT MGMT, NOT STAFF —
+        the provider never sees the customer's internal deliberation. The
+        mirror image of INTERNAL_NOTE.
+
+    Posting (who may CREATE each tier) is enforced separately in
+    `tickets.serializers.TicketMessageSerializer` (the POSTING table):
+    PUBLIC_REPLY = CUST + MGMT + SA (not STAFF); STAFF_COMPLETION = STAFF
+    (+ provider-side); STAFF_OPERATIONAL = STAFF + MGMT + SA; INTERNAL_NOTE
+    = MGMT + SA; CUSTOMER_INTERNAL = CUST.
     """
 
     PUBLIC_REPLY = "PUBLIC_REPLY", "Public Reply"
     INTERNAL_NOTE = "INTERNAL_NOTE", "Internal Note (provider-internal)"
     STAFF_OPERATIONAL = "STAFF_OPERATIONAL", "Staff Operational Note"
     STAFF_COMPLETION = "STAFF_COMPLETION", "Staff Completion Note"
+    # M1 B5 — the customer side's own internal note (CUST + SA forensic only).
+    CUSTOMER_INTERNAL = "CUSTOMER_INTERNAL", "Customer Internal Note"
 
 
 class TicketMessageVisibility(models.TextChoices):

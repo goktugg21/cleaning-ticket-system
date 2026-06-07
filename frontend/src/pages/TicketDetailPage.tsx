@@ -46,6 +46,7 @@ import { getTicketAuditTimeline } from "../api/ticketTimeline";
 import { useAuth } from "../auth/AuthContext";
 import {
   composerTiersForRole,
+  isCustomerUser,
   isProviderAdmin,
   isProviderManagementRole,
   isStaff as isStaffRoleFn,
@@ -70,6 +71,7 @@ const NOTE_TIER_BADGE_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "tag_internal",
   STAFF_OPERATIONAL: "tag_staff_operational",
   STAFF_COMPLETION: "tag_staff_completion",
+  CUSTOMER_INTERNAL: "tag_customer_internal",
 };
 
 const NOTE_TIER_BUBBLE_CLASS: Record<TicketMessageType, string> = {
@@ -77,6 +79,7 @@ const NOTE_TIER_BUBBLE_CLASS: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "internal",
   STAFF_OPERATIONAL: "internal",
   STAFF_COMPLETION: "",
+  CUSTOMER_INTERNAL: "internal",
 };
 
 const NOTE_TIER_TAG_CLASS: Record<TicketMessageType, string> = {
@@ -84,6 +87,7 @@ const NOTE_TIER_TAG_CLASS: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "",
   STAFF_OPERATIONAL: "",
   STAFF_COMPLETION: "",
+  CUSTOMER_INTERNAL: "",
 };
 
 const NOTE_TIER_COMPOSER_LABEL_KEY: Record<TicketMessageType, string> = {
@@ -91,6 +95,7 @@ const NOTE_TIER_COMPOSER_LABEL_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "composer_internal",
   STAFF_OPERATIONAL: "composer_staff_operational",
   STAFF_COMPLETION: "composer_staff_completion",
+  CUSTOMER_INTERNAL: "composer_customer_internal",
 };
 
 const NOTE_TIER_PLACEHOLDER_KEY: Record<TicketMessageType, string> = {
@@ -98,10 +103,11 @@ const NOTE_TIER_PLACEHOLDER_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "composer_internal_placeholder",
   STAFF_OPERATIONAL: "composer_staff_operational_placeholder",
   STAFF_COMPLETION: "composer_staff_completion_placeholder",
+  CUSTOMER_INTERNAL: "composer_customer_internal_placeholder",
 };
 
 // "Who sees this" description rendered under the composer-tier
-// toggle. The map covers all four tiers so the helper line renders
+// toggle. The map covers all five tiers so the helper line renders
 // even when the viewer only has one tier available (the toggle row
 // itself hides in that case, but the visibility statement still
 // shows so an author never posts without knowing the audience).
@@ -110,6 +116,7 @@ const NOTE_TIER_WHO_SEES_KEY: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "composer_internal_who_sees",
   STAFF_OPERATIONAL: "composer_staff_operational_who_sees",
   STAFF_COMPLETION: "composer_staff_completion_who_sees",
+  CUSTOMER_INTERNAL: "composer_customer_internal_who_sees",
 };
 
 const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
@@ -117,6 +124,7 @@ const NOTE_TIER_TONE_CLASS: Record<TicketMessageType, string> = {
   INTERNAL_NOTE: "internal",
   STAFF_OPERATIONAL: "internal",
   STAFF_COMPLETION: "",
+  CUSTOMER_INTERNAL: "internal",
 };
 
 // Sprint 15: backend is the source of truth for which transitions are
@@ -391,20 +399,23 @@ export function TicketDetailPage() {
   const [completeBusy, setCompleteBusy] = useState(false);
 
   const [message, setMessage] = useState("");
-  // Composer tier list — driven by per-record `ticket.actions` when the
-  // detail has loaded (PUBLIC_REPLY is always allowed for an
-  // authenticated viewer in scope, plus whichever of INTERNAL_NOTE /
-  // STAFF_OPERATIONAL / STAFF_COMPLETION the backend says this user
-  // can author on THIS ticket). Falls back to the role-based predicate
-  // before the detail loads (or for older serializers that don't carry
-  // `actions`), so the page never crashes on undefined.
+  // Composer tier list (M1 B5) — driven by the per-record `ticket.actions`
+  // POSTING flags when the detail has loaded, so the composer NEVER offers a
+  // tier the backend would reject. Net per role: CUST = PUBLIC_REPLY +
+  // CUSTOMER_INTERNAL; STAFF = STAFF_OPERATIONAL + STAFF_COMPLETION; MGMT/SA =
+  // PUBLIC_REPLY + INTERNAL_NOTE + STAFF_OPERATIONAL + STAFF_COMPLETION.
+  // Falls back to the role-based predicate before the detail loads (or for
+  // older serializers without `actions`), so the page never crashes on
+  // undefined.
   const composerTiers = useMemo<TicketMessageType[]>(() => {
     const actions = ticket?.actions;
     if (actions) {
-      const tiers: TicketMessageType[] = ["PUBLIC_REPLY"];
+      const tiers: TicketMessageType[] = [];
+      if (actions.can_post_public_reply) tiers.push("PUBLIC_REPLY");
       if (actions.can_post_provider_internal_note) tiers.push("INTERNAL_NOTE");
       if (actions.can_post_staff_operational_note) tiers.push("STAFF_OPERATIONAL");
       if (actions.can_post_staff_completion_note) tiers.push("STAFF_COMPLETION");
+      if (actions.can_post_customer_internal_note) tiers.push("CUSTOMER_INTERNAL");
       return tiers;
     }
     return composerTiersForRole(me?.role);
@@ -430,7 +441,19 @@ export function TicketDetailPage() {
   const [directedTo, setDirectedTo] = useState<number[]>([]);
   const [isPrivate, setIsPrivate] = useState(false);
   const [recipients, setRecipients] = useState<MessageRecipient[]>([]);
-  const effectivePrivate = isPrivate && directedTo.length > 0;
+  // M1 B5 — who may make a message RESTRICTED ("Private"): provider
+  // management / SA on any tier they post; a customer-side user ONLY on the
+  // CUSTOMER_INTERNAL tier (they can notify customer-side people on a
+  // PUBLIC_REPLY, but cannot make a PUBLIC_REPLY private). STAFF never (and
+  // their picker is empty anyway, so the whole block is hidden). This mirrors
+  // the server-side `restricted_only_for_customer_internal` /
+  // `staff_cannot_direct_or_restrict` rules so RESTRICTED stays UI-unreachable
+  // where the backend would 400.
+  const canUsePrivate =
+    isProviderManagementRole(me?.role) ||
+    (isCustomerUser(me?.role) && effectiveMessageType === "CUSTOMER_INTERNAL");
+  const effectivePrivate =
+    canUsePrivate && isPrivate && directedTo.length > 0;
 
   useEffect(() => {
     if (!id) return;
@@ -1435,23 +1458,31 @@ export function TicketDetailPage() {
                       );
                     })}
                   </div>
-                  <label className="composer-private-toggle">
-                    <input
-                      type="checkbox"
-                      checked={effectivePrivate}
-                      disabled={directedTo.length === 0}
-                      onChange={(event) => setIsPrivate(event.target.checked)}
-                      data-testid="composer-private-toggle"
-                    />
-                    <span>{t("directed.private_label")}</span>
-                  </label>
-                  <p className="muted small composer-directed-hint">
-                    {directedTo.length === 0
-                      ? t("directed.private_disabled_hint")
-                      : effectivePrivate
-                        ? t("directed.private_on_hint")
-                        : t("directed.private_off_hint")}
-                  </p>
+                  {/* M1 B5 — the "Private" (RESTRICTED) toggle renders only
+                      where the author may restrict: provider mgmt / SA on any
+                      tier, customer-side ONLY on CUSTOMER_INTERNAL. STAFF have
+                      an empty picker so this whole block is already hidden. */}
+                  {canUsePrivate && (
+                    <>
+                      <label className="composer-private-toggle">
+                        <input
+                          type="checkbox"
+                          checked={effectivePrivate}
+                          disabled={directedTo.length === 0}
+                          onChange={(event) => setIsPrivate(event.target.checked)}
+                          data-testid="composer-private-toggle"
+                        />
+                        <span>{t("directed.private_label")}</span>
+                      </label>
+                      <p className="muted small composer-directed-hint">
+                        {directedTo.length === 0
+                          ? t("directed.private_disabled_hint")
+                          : effectivePrivate
+                            ? t("directed.private_on_hint")
+                            : t("directed.private_off_hint")}
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
               <div className="notes-actions">

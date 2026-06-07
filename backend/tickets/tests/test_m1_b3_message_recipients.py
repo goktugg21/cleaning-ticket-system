@@ -7,10 +7,12 @@ subset of the valid directed_to targets the B1 serializer accepts for that
 tier, so the picker can never offer a target the POST would 400:
   * INTERNAL_NOTE      -> provider management only (no customer, no staff).
   * STAFF_OPERATIONAL  -> provider + assigned staff (no customer).
-  * PUBLIC_REPLY /
-    STAFF_COMPLETION   -> provider + assigned staff + customer-side.
+  * PUBLIC_REPLY       -> provider + customer-side (M1 B5: STAFF dropped).
+  * STAFF_COMPLETION   -> provider + assigned staff + customer-side.
   * a customer-org member without building access is never returned (scope).
   * the caller is never in their own picker.
+  * M1 B5: the picker is side-aware by CALLER — a STAFF caller gets [];
+    a CUSTOMER caller gets customer-side candidates only.
 
 directed_to_detail is a read-only display field on the message list; it must
 not bypass the B2 chokepoint (a non-party never sees a RESTRICTED message,
@@ -82,12 +84,15 @@ class _B3Fixture(TenantFixtureMixin, APITestCase):
 
 
 class RecipientsPerTierTests(_B3Fixture):
-    def test_public_reply_includes_provider_staff_customer(self):
+    def test_public_reply_includes_provider_and_customer_not_staff(self):
+        # M1 B5 — PUBLIC_REPLY audience = provider-mgmt + customer; STAFF is
+        # dropped, so a manager composing a PUBLIC_REPLY is never offered a
+        # staff target.
         results = self._recipients(self.manager, TicketMessageType.PUBLIC_REPLY)
         ids = self._ids(results)
         self.assertIn(self.company_admin.id, ids)
-        self.assertIn(self.staff_user.id, ids)
         self.assertIn(self.customer_user.id, ids)
+        self.assertNotIn(self.staff_user.id, ids)
         # Caller excluded; out-of-scope customer-org member excluded.
         self.assertNotIn(self.manager.id, ids)
         self.assertNotIn(self.customer_no_access.id, ids)
@@ -95,8 +100,9 @@ class RecipientsPerTierTests(_B3Fixture):
         self.assertNotIn(self.super_admin.id, ids)
         # Sides are correctly bucketed.
         self.assertEqual(self._side_of(results, self.company_admin.id), "provider")
-        self.assertEqual(self._side_of(results, self.staff_user.id), "staff")
         self.assertEqual(self._side_of(results, self.customer_user.id), "customer")
+        # M1 B5 — the payload no longer carries an `email` field.
+        self.assertTrue(all("email" not in r for r in results))
 
     def test_internal_note_provider_only(self):
         ids = self._ids(self._recipients(self.manager, TicketMessageType.INTERNAL_NOTE))

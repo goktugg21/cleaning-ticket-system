@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from accounts.models import UserRole
 from accounts.permissions import (
     IsAuthenticatedAndActive,
+    is_customer_side,
     is_provider_management_role,
     is_staff_role,
 )
@@ -1191,19 +1192,17 @@ class TicketMessageListCreateView(generics.ListCreateAPIView):
         ticket = self._get_ticket()
         user = self.request.user
 
+        # M1 B5 — the serializer's validate() / validate_message_type is now
+        # the AUTHORITATIVE posting gate (the POSTING table, via
+        # `_user_may_post_message_type`), rejecting every disallowed
+        # (author, tier) combination with HTTP 400 before we get here. We
+        # therefore save the validated tier verbatim — no silent
+        # force-normalise, which would mis-save a customer's CUSTOMER_INTERNAL
+        # as PUBLIC_REPLY and contradicts the new reject-don't-coerce
+        # contract.
         message_type = serializer.validated_data.get(
             "message_type", TicketMessageType.PUBLIC_REPLY
         )
-        # CUSTOMER_USER and any non-provider-side actor is force-
-        # normalised to PUBLIC_REPLY (defence in depth — the
-        # serializer's `validate_message_type` already rejects
-        # PROVIDER_INTERNAL / STAFF_OPERATIONAL / STAFF_COMPLETION
-        # from non-provider-side actors). Provider-side actors
-        # (provider management + STAFF) keep the validated value
-        # so STAFF can author STAFF_OPERATIONAL / STAFF_COMPLETION
-        # and provider management can author INTERNAL_NOTE.
-        if not is_staff_role(user):
-            message_type = TicketMessageType.PUBLIC_REPLY
 
         message = serializer.save(
             ticket=ticket,
@@ -1275,6 +1274,7 @@ class TicketMessageRecipientsView(generics.GenericAPIView):
 
     def get(self, request, ticket_id):
         ticket = self._get_ticket()
+        caller = request.user
         message_type = request.query_params.get(
             "message_type", TicketMessageType.PUBLIC_REPLY
         )
@@ -1284,23 +1284,40 @@ class TicketMessageRecipientsView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # M1 B5 — the picker is SIDE-AWARE by the CALLER:
+        #   * STAFF caller  -> no picker at all (field staff never direct a
+        #     message). Empty list, 200 — the FE renders nothing.
+        #   * CUST caller   -> only customer-side candidates (a customer can
+        #     never direct a message at a provider user, on any tier).
+        #   * MGMT / SA     -> the full tier audience (provider + customer
+        #     as applicable), as before.
+        if getattr(caller, "role", None) == UserRole.STAFF:
+            return Response({"results": []})
+        caller_is_customer = is_customer_side(caller)
+
         results = []
         for user in ticket_message_audience(ticket, message_type):
-            if user.id == request.user.id:
+            if user.id == caller.id:
                 continue
             # Belt-and-suspenders: the audience is already type-scoped, but
-            # intersect with the exact predicates the B1 serializer validates
+            # intersect with the exact predicates the serializer validates
             # so the endpoint output can never drift wider than valid.
             if not message_type_visible_to_user(user, message_type):
                 continue
             if not user_has_scope_for_ticket(user, ticket):
                 continue
+            side = _recipient_side(user)
+            # A customer composer may only ever direct at customer-side
+            # people — drop provider/staff candidates from a customer caller
+            # so the picker can never offer a target the POST would 400
+            # (directed_to_must_be_customer_side).
+            if caller_is_customer and side != "customer":
+                continue
             results.append(
                 {
                     "id": user.id,
                     "full_name": user.full_name or user.email.split("@")[0],
-                    "email": user.email,
-                    "side": _recipient_side(user),
+                    "side": side,
                 }
             )
         return Response({"results": results})

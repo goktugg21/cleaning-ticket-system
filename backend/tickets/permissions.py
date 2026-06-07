@@ -5,6 +5,7 @@ from accounts.permissions import (
     IsAuthenticatedAndActive,
     is_provider_management_role,
     is_staff_role,
+    is_super_admin,
 )
 from accounts.scoping import company_admin_customer_ids, scope_tickets_for
 from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
@@ -109,33 +110,48 @@ def user_has_scope_for_ticket(user, ticket):
 
 
 def message_type_visible_to_user(user, message_type):
-    """ROLE-based read visibility for a `TicketMessage.message_type`.
+    """M1 B5 — ROLE-based read visibility for a `TicketMessage.message_type`.
 
-    Mirrors the role branches of
-    `TicketMessageListCreateView.get_queryset` (B7 four-tier taxonomy):
+    The canonical READ-VISIBILITY table (five channels). This function and
+    `filter_messages_visible_to` layer (a) below are the SAME table expressed
+    two ways (per-user predicate vs queryset exclude) and MUST stay in
+    lockstep:
 
-      * provider management (SA / COMPANY_ADMIN / BUILDING_MANAGER) —
-        every tier, including INTERNAL_NOTE.
-      * STAFF — every tier EXCEPT INTERNAL_NOTE.
-      * customer-side / anyone else — PUBLIC_REPLY + STAFF_COMPLETION only.
+      message_type        SA   MGMT  STAFF  CUST
+      ------------------   ---  ----  -----  ----
+      PUBLIC_REPLY          v    v     -      v     (M1 B5: STAFF dropped)
+      STAFF_COMPLETION      v    v     v      v
+      STAFF_OPERATIONAL     v    v     v      -
+      INTERNAL_NOTE         v    v     -      -
+      CUSTOMER_INTERNAL     v    -     -      v     (M1 B5: new, customer-only)
+
+    SA is checked FIRST (is_provider_management_role still lumps SA with
+    MGMT, but SA keeps a forensic read of every tier incl. CUSTOMER_INTERNAL,
+    whereas MGMT must NOT see CUSTOMER_INTERNAL).
 
     This is the ROLE gate only. Ticket SCOPE (scope_tickets_for /
-    user_has_scope_for_ticket) is checked separately by callers. Used by
-    M1 B1 to (a) validate `directed_to` targets and (b) belt-and-suspenders
-    filter notification recipients so an INTERNAL_NOTE / STAFF_OPERATIONAL
-    can never notify a role that cannot read it.
+    user_has_scope_for_ticket) is checked separately by callers. Used to
+    (a) validate `directed_to` targets and (b) belt-and-suspenders filter
+    notification recipients so a tier can never notify a role that cannot
+    read it.
     """
     # Local import: tickets.models may import this module transitively;
     # keep the enum reference lazy to avoid an import-time cycle.
     from tickets.models import TicketMessageType
 
-    if is_provider_management_role(user):
-        return True
+    if is_super_admin(user):
+        return True  # forensic — every tier.
+    if is_provider_management_role(user):  # MGMT (SA handled above).
+        return message_type != TicketMessageType.CUSTOMER_INTERNAL
     if is_staff_role(user):  # STAFF only — management handled above.
-        return message_type != TicketMessageType.INTERNAL_NOTE
-    return message_type in (
+        return message_type in (
+            TicketMessageType.STAFF_OPERATIONAL,
+            TicketMessageType.STAFF_COMPLETION,
+        )
+    return message_type in (  # customer-side / anyone else.
         TicketMessageType.PUBLIC_REPLY,
         TicketMessageType.STAFF_COMPLETION,
+        TicketMessageType.CUSTOMER_INTERNAL,
     )
 
 
@@ -146,19 +162,27 @@ def filter_messages_visible_to(qs, user):
     this helper so the rule cannot drift or be missed at one site. It AND-s
     two layers; each only ever NARROWS the queryset (it never widens):
 
-      (a) B7 role / is_hidden filtering — byte-equivalent to the pre-B2
-          inline `TicketMessageListCreateView.get_queryset` filter:
-            * provider management (SA / CA / BM) — every tier including
-              INTERNAL_NOTE and is_hidden moderation rows.
-            * STAFF — every tier EXCEPT INTERNAL_NOTE; is_hidden dropped.
-            * customer-side / other — PUBLIC_REPLY + STAFF_COMPLETION only;
+      (a) M1 B5 role / is_hidden filtering — the canonical READ-VISIBILITY
+          table (the SAME table `message_type_visible_to_user` encodes,
+          expressed as queryset excludes; keep the two in lockstep):
+            * SA — every tier, including INTERNAL_NOTE, CUSTOMER_INTERNAL,
+              and is_hidden moderation rows (forensic).
+            * MGMT (CA / BM) — every tier EXCEPT CUSTOMER_INTERNAL; still
+              sees is_hidden moderation rows.
+            * STAFF — STAFF_OPERATIONAL + STAFF_COMPLETION only (PUBLIC_REPLY
+              dropped in M1 B5; INTERNAL_NOTE + CUSTOMER_INTERNAL excluded);
               is_hidden dropped.
+            * customer-side / other — PUBLIC_REPLY + STAFF_COMPLETION +
+              CUSTOMER_INTERNAL only (INTERNAL_NOTE + STAFF_OPERATIONAL
+              excluded); is_hidden dropped.
       (b) M1 B2 RESTRICTED party filter — applied UNCONDITIONALLY so it
-          binds EVERY role, provider management included: a RESTRICTED
+          binds EVERY role, provider management AND SA included: a RESTRICTED
           message is visible iff the viewer is the author OR a directed_to
           member. NORMAL messages are unaffected. A non-party admin can
           neither read nor infer a RESTRICTED message anywhere this
-          chokepoint is used.
+          chokepoint is used. SA is NOT exempt from layer (b) on the
+          per-ticket list (B2 decision; SA's forensic path for restricted
+          content is the global audit log, untouched).
 
     A userless / unauthenticated caller (defensive — these endpoints are
     auth-gated) is treated as a non-party: layer (a) treats them as
@@ -174,12 +198,29 @@ def filter_messages_visible_to(qs, user):
 
     user_id = getattr(user, "id", None)
 
-    # (a) B7 role / is_hidden — only management sees every tier + hidden rows.
-    if not is_provider_management_role(user):
-        qs = qs.filter(is_hidden=False)
-        qs = qs.exclude(message_type=TicketMessageType.INTERNAL_NOTE)
-        if not is_staff_role(user):
-            qs = qs.exclude(message_type=TicketMessageType.STAFF_OPERATIONAL)
+    # (a) M1 B5 role / is_hidden. SA checked FIRST (sees all + hidden);
+    # MGMT sees all-but-CUSTOMER_INTERNAL + hidden; STAFF and customer-side
+    # apply is_hidden=False and their per-tier excludes. Mirrors
+    # `message_type_visible_to_user` exactly.
+    if is_super_admin(user):
+        pass  # forensic — no tier exclusion, hidden rows retained.
+    elif is_provider_management_role(user):  # MGMT (SA handled above).
+        qs = qs.exclude(message_type=TicketMessageType.CUSTOMER_INTERNAL)
+    elif is_staff_role(user):
+        qs = qs.filter(is_hidden=False).exclude(
+            message_type__in=(
+                TicketMessageType.PUBLIC_REPLY,
+                TicketMessageType.INTERNAL_NOTE,
+                TicketMessageType.CUSTOMER_INTERNAL,
+            )
+        )
+    else:  # customer-side / userless.
+        qs = qs.filter(is_hidden=False).exclude(
+            message_type__in=(
+                TicketMessageType.INTERNAL_NOTE,
+                TicketMessageType.STAFF_OPERATIONAL,
+            )
+        )
 
     # (b) RESTRICTED party filter — unconditional. Uses Exists (a correlated
     # subquery, NOT a directed_to join) so there is no row fan-out / duplicate

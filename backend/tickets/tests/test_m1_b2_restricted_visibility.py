@@ -251,10 +251,12 @@ class B7NormalVisibilityUnchangedTests(_B2Fixture):
                 f"actor={actor.email}",
             )
 
-    def test_staff_sees_all_normal_except_internal(self):
+    def test_staff_sees_operational_and_completion_only(self):
+        # M1 B5 — STAFF read narrowed to STAFF_OPERATIONAL + STAFF_COMPLETION;
+        # PUBLIC_REPLY (and INTERNAL_NOTE) no longer visible to STAFF.
         self.assertEqual(
             self._list_ids(self.staff_user),
-            {self.public.id, self.operational.id, self.completion.id},
+            {self.operational.id, self.completion.id},
         )
 
     def test_customer_sees_public_and_completion_only(self):
