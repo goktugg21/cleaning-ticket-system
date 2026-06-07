@@ -1,12 +1,19 @@
 /**
  * M1 B3 — topbar notification bell.
  *
- * Sits in the topbar beside the UserMenu. Polls the unread count
- * (mount + 60s interval + on navigation; NO websockets) and shows a
- * badge. Clicking opens a dropdown of the most recent notifications;
- * clicking one marks it read and deep-links to its source. "See all"
- * navigates to the full /notifications page. Mirrors the UserMenu
- * open/close (click-outside + Escape) pattern.
+ * Sits in the topbar beside the UserMenu. Polls the feed (mount + on
+ * navigation + every POLL_MS; NO websockets) and shows an unread badge.
+ * Clicking opens a dropdown of the most recent notifications; clicking one
+ * marks it read and deep-links to its source. "See all" navigates to the
+ * full /notifications page. Mirrors the UserMenu open/close (click-outside +
+ * Escape) pattern.
+ *
+ * M1 B7 — the same poll drives a soft-green toast for notifications that
+ * arrive AFTER the tab is open. A high-water-mark (by id) suppresses the
+ * existing backlog on first load and guarantees each notification toasts at
+ * most once. 1..N new in a single poll surface as individual toasts; a larger
+ * burst collapses to one aggregate toast. Real push (WebSocket/SSE) is
+ * deferred to the production-deploy phase; the POLL_MS interval is the latency.
  */
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -14,20 +21,27 @@ import { useTranslation } from "react-i18next";
 import { Bell } from "lucide-react";
 import { formatRelative } from "../lib/intl";
 import {
-  getUnreadCount,
+  diffNewNotifications,
   listNotifications,
   markNotificationRead,
   notificationHref,
 } from "../api/notifications";
 import type { Notification } from "../api/types";
+import { useToast } from "./ToastProvider";
 
-const POLL_MS = 60_000;
+// Shortened poll (was 60s) so a newly-arrived notification surfaces as a toast
+// within ~one interval. Real push is deferred to the production-deploy phase.
+const POLL_MS = 15_000;
 const PANEL_LIMIT = 8;
+// 1..N new in a single poll -> that many individual toasts; strictly above this
+// -> one aggregate "N new notifications" toast (never a wall of toasts).
+const TOAST_BURST_CAP = 3;
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
+  const { push } = useToast();
   const panelId = useId();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -35,16 +49,80 @@ export function NotificationBell() {
   const [loadingItems, setLoadingItems] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  // B7 live-toast state. lastSeenIdRef is the high-water-mark (max notification
+  // id seen so far); initializedRef guards the very first poll so the existing
+  // backlog never toasts. Both are refs so they survive effect re-subscribes
+  // (navigation) without re-arming or double-firing the toast.
+  const lastSeenIdRef = useRef<number | null>(null);
+  const initializedRef = useRef<boolean>(false);
 
-  // Unread count: refresh on mount, on each navigation, and on a light
-  // interval. setState lives inside the async closure (not the effect
-  // body), so this does not trip react-hooks/set-state-in-effect.
+  // Mark read (best-effort) + deep-link. Shared by the panel item click AND
+  // the B7 toast onClick so the two paths never drift.
+  const openNotification = useCallback(
+    async (notification: Notification) => {
+      setOpen(false);
+      if (!notification.is_read) {
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === notification.id ? { ...item, is_read: true } : item,
+          ),
+        );
+        setUnread((value) => Math.max(0, value - 1));
+        try {
+          await markNotificationRead(notification.id);
+        } catch {
+          // Best-effort: the deep-link still navigates.
+        }
+      }
+      const href = notificationHref(notification);
+      if (href) navigate(href);
+    },
+    [navigate],
+  );
+
+  // Feed poll: refresh on mount, on each navigation, and on a light interval.
+  // It yields BOTH the items (badge list + B7 detection) and the unread count.
+  // setState lives inside the async closure (not the effect body), so this does
+  // not trip react-hooks/set-state-in-effect.
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
       try {
-        const count = await getUnreadCount();
-        if (!cancelled) setUnread(count);
+        const data = await listNotifications();
+        if (cancelled) return;
+        const feed = data.results;
+        const { newItems, maxId } = diffNewNotifications(
+          lastSeenIdRef.current,
+          feed,
+        );
+        lastSeenIdRef.current = maxId;
+        setUnread(data.unread_count);
+        setItems(feed.slice(0, PANEL_LIMIT));
+        // First poll only establishes the high-water-mark — never toast the
+        // backlog. (newItems is already [] when prevMaxId was null; the
+        // initialized guard is belt-and-suspenders.)
+        if (!initializedRef.current) {
+          initializedRef.current = true;
+          return;
+        }
+        if (newItems.length === 0) return;
+        if (newItems.length <= TOAST_BURST_CAP) {
+          for (const n of newItems) {
+            push({
+              variant: "success",
+              title: n.summary || t("notifications.toast_new"),
+              onClick: () => {
+                openNotification(n);
+              },
+            });
+          }
+        } else {
+          push({
+            variant: "success",
+            title: t("notifications.toast_many", { count: newItems.length }),
+            onClick: () => navigate("/notifications"),
+          });
+        }
       } catch {
         // Transient — the next tick / navigation retries.
       }
@@ -55,7 +133,7 @@ export function NotificationBell() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [location.pathname]);
+  }, [location.pathname, push, openNotification, navigate, t]);
 
   // Close on click-outside.
   useEffect(() => {
@@ -105,28 +183,6 @@ export function NotificationBell() {
       cancelled = true;
     };
   }, [open]);
-
-  const handleSelect = useCallback(
-    async (notification: Notification) => {
-      setOpen(false);
-      if (!notification.is_read) {
-        setItems((prev) =>
-          prev.map((item) =>
-            item.id === notification.id ? { ...item, is_read: true } : item,
-          ),
-        );
-        setUnread((value) => Math.max(0, value - 1));
-        try {
-          await markNotificationRead(notification.id);
-        } catch {
-          // Best-effort: the deep-link still navigates.
-        }
-      }
-      const href = notificationHref(notification);
-      if (href) navigate(href);
-    },
-    [navigate],
-  );
 
   const seeAll = useCallback(() => {
     setOpen(false);
@@ -184,7 +240,7 @@ export function NotificationBell() {
                   className={`notif-item${
                     notification.is_read ? "" : " notif-item-unread"
                   }`}
-                  onClick={() => handleSelect(notification)}
+                  onClick={() => openNotification(notification)}
                 >
                   <span className="notif-item-main">
                     <span className="notif-item-summary">

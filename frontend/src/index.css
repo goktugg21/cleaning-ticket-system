@@ -3884,13 +3884,22 @@ table.data-table {
 }
 .toast-close:hover { background: var(--surface-2); color: var(--text); }
 .toast-success .toast-icon { color: var(--green); }
-.toast-success { border-left: 3px solid var(--green); }
+/* Medium-priority soft-green tone (matches the notification-toast intent). */
+.toast-success { background: var(--green-soft); border-left: 3px solid var(--green); }
 .toast-error .toast-icon { color: var(--red); }
 .toast-error { border-left: 3px solid var(--red); }
 .toast-warning .toast-icon { color: var(--amber); }
 .toast-warning { border-left: 3px solid var(--amber); }
 .toast-info .toast-icon { color: var(--teal); }
 .toast-info { border-left: 3px solid var(--teal); }
+
+/* Activatable toast (B7 notification deep-link): the whole card is a button. */
+.toast-clickable { cursor: pointer; }
+.toast-clickable:hover { border-color: var(--green); }
+.toast-clickable:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
 
 @media (max-width: 640px) {
   .toast-stack {

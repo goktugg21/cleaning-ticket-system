@@ -21,6 +21,32 @@ export function notificationHref(notification: Notification): string | null {
   return null;
 }
 
+/**
+ * Pure high-water-mark diff for the B7 live toast. `items` is the feed page
+ * (newest-first). Returns the notifications strictly newer than `prevMaxId`
+ * (newest-first) plus the new high-water-mark.
+ *
+ * - `maxId` = the greatest id across `items`, never regressing below
+ *   `prevMaxId` (monotonic). Falls back to `prevMaxId` when `items` is empty.
+ * - When `prevMaxId` is null (first load) `newItems` is empty: the existing
+ *   backlog must never toast — the first poll only establishes the mark.
+ *
+ * Notification ids are monotonic PKs, so id ordering == arrival ordering.
+ * Pure (no React) so it is unit-testable in isolation.
+ */
+export function diffNewNotifications(
+  prevMaxId: number | null,
+  items: Notification[],
+): { newItems: Notification[]; maxId: number | null } {
+  const maxId = items.reduce<number | null>(
+    (acc, item) => (acc === null || item.id > acc ? item.id : acc),
+    prevMaxId,
+  );
+  const newItems =
+    prevMaxId === null ? [] : items.filter((item) => item.id > prevMaxId);
+  return { newItems, maxId };
+}
+
 export async function listNotifications(
   params?: { page?: number },
 ): Promise<NotificationListResponse> {

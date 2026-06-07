@@ -1212,6 +1212,8 @@
   "notifications.empty": "Geen meldingen",
   "notifications.empty_sub": "Je bent helemaal bij.",
   "notifications.for_you": "voor jou",
+  "notifications.toast_new": "Nieuwe melding",
+  "notifications.toast_many": "{{count}} nieuwe meldingen",
   "notifications.see_all": "Alle meldingen bekijken",
   "notifications.mark_all_read": "Alles als gelezen markeren",
   "notifications.bell_aria": "Meldingen",
