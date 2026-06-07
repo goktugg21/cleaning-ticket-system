@@ -1229,6 +1229,42 @@ export interface ExtraWorkActions {
   can_view_proposal_pdf: boolean;
   can_approve: boolean;
   can_reject: boolean;
+  // M1 B6 — EW message thread posting flags (the composer offers only the
+  // tiers the backend will accept). Optional so older responses typecheck.
+  can_post_ew_public_reply?: boolean;
+  can_post_ew_internal_note?: boolean;
+  can_post_ew_customer_internal?: boolean;
+}
+
+// M1 B6 — Extra Work message thread (mirrors TicketMessageType MINUS the two
+// staff tiers; EW has no staff dimension).
+export type EwMessageType =
+  | "PUBLIC_REPLY"
+  | "INTERNAL_NOTE"
+  | "CUSTOMER_INTERNAL";
+
+export type EwMessageVisibility = "NORMAL" | "RESTRICTED";
+
+export interface EwMessage {
+  id: number;
+  extra_work: number;
+  author: number | null;
+  author_email: string;
+  message: string;
+  message_type: EwMessageType;
+  directed_to: number[];
+  directed_to_detail: { id: number; full_name: string }[];
+  visibility_mode: EwMessageVisibility;
+  created_at: string;
+}
+
+// M1 B6 — a valid directed_to target for the EW composer picker, from
+// GET /api/extra-work/<id>/message-recipients/. Side-aware by caller; no
+// email (EW has no staff side, so `side` is provider | customer).
+export interface EwMessageRecipient {
+  id: number;
+  full_name: string;
+  side: "provider" | "customer";
 }
 
 // Sprint 28 Batch 6 — cart-shaped POST payload for /extra-work/.

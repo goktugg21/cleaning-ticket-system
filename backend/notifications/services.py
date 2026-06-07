@@ -43,6 +43,9 @@ __all__ = (
     "emit_extra_work_requested_notifications",
     "emit_extra_work_proposal_sent_notifications",
     "emit_extra_work_decision_notifications",
+    "ew_message_audience",
+    "emit_extra_work_message_notifications",
+    "emit_extra_work_published_notifications",
 )
 
 logger = logging.getLogger(__name__)
@@ -461,6 +464,125 @@ def emit_extra_work_decision_notifications(ew, actor=None, *, approved):
         recipients=list(_extra_work_provider_users(ew)),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_DECISION,
+        summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# M1 B6 — Extra Work message thread fan-out (mirrors the ticket-message emit
+# MINUS staff; EW has no staff dimension). Reuses the B4 EW resolvers + the
+# B1 Notification + its extra_work FK + B3 deep-link.
+# ---------------------------------------------------------------------------
+def ew_message_audience(ew, message_type):
+    """The NORMAL read-visible audience for an EW message tier. Single source
+    of truth for the fan-out AND the recipients picker (mirror of
+    `ticket_message_audience`, minus staff):
+
+      PUBLIC_REPLY       -> provider-mgmt + customer
+      INTERNAL_NOTE      -> provider-mgmt only
+      CUSTOMER_INTERNAL  -> customer only
+
+    SUPER_ADMIN is deliberately NOT auto-notified (email-path parity, same as
+    the EW lifecycle notifications); SA can still read every EW message.
+    Returned deduped + active; NOT yet minus-author / role+scope filtered —
+    callers layer those on.
+    """
+    from extra_work.models import ExtraWorkMessageType
+
+    audience = []
+    # Provider management — every tier EXCEPT the customer-only CUSTOMER_INTERNAL.
+    if message_type != ExtraWorkMessageType.CUSTOMER_INTERNAL:
+        audience.extend(_extra_work_provider_users(ew))
+    # Customer-side — the customer-visible tiers.
+    if message_type in (
+        ExtraWorkMessageType.PUBLIC_REPLY,
+        ExtraWorkMessageType.CUSTOMER_INTERNAL,
+    ):
+        audience.extend(_extra_work_customer_users(ew))
+    return _dedupe_users(audience)
+
+
+def emit_extra_work_message_notifications(message, actor=None):
+    """M1 B6 — create in-app Notification rows for a new ExtraWorkMessage.
+    Mirrors `emit_ticket_message_notifications` minus staff:
+
+        NORMAL     -> the tier audience (+ any directed_to, flagged)
+        RESTRICTED -> message.directed_to only
+
+    minus the author, deduped, active only. Two gates make the notified set
+    EXACTLY the read-visible set: the ROLE gate
+    (`ew_message_type_visible_to_user`) and the EW SCOPE gate
+    (`_extra_work_visible_to`). SUPER_ADMIN is not auto-notified.
+    """
+    from extra_work.message_permissions import ew_message_type_visible_to_user
+    from extra_work.models import ExtraWorkMessageVisibility
+
+    ew = message.extra_work
+    message_type = message.message_type
+
+    audience = list(ew_message_audience(ew, message_type))
+    directed = [
+        u
+        for u in message.directed_to.all()
+        if u and u.is_active and u.deleted_at is None
+    ]
+
+    if message.visibility_mode == ExtraWorkMessageVisibility.RESTRICTED:
+        base = list(directed)
+    else:
+        base = audience + directed
+
+    recipients = _dedupe_users(_without_actor(base, actor))
+    recipients = [
+        u
+        for u in recipients
+        if ew_message_type_visible_to_user(u, message_type)
+        and _extra_work_visible_to(u, ew)
+    ]
+
+    directed_ids = {u.id for u in directed}
+
+    author_label = ""
+    if actor:
+        author_label = (actor.full_name or actor.email or "").strip()
+    body = (message.message or "").strip()
+    truncated = body[:140] + ("…" if len(body) > 140 else "")
+    summary = f"{author_label}: {truncated}" if author_label else truncated
+    summary = summary[:500]
+
+    rows = [
+        Notification(
+            recipient=user,
+            actor=actor,
+            event_type=NotificationType.EXTRA_WORK_MESSAGE,
+            ticket=None,
+            extra_work=ew,
+            is_directed=(user.id in directed_ids),
+            summary=summary,
+            read_at=None,
+        )
+        for user in recipients
+    ]
+    if rows:
+        Notification.objects.bulk_create(rows)
+    return rows
+
+
+def emit_extra_work_published_notifications(ew, actor=None):
+    """M1 B6 item-7 — a provider DIRECT-PUBLISHED (quote-bypass) the customer's
+    extra work WITHOUT a separate decision step. Tell the CUSTOMER side it was
+    approved/started. Recipients = `_extra_work_customer_users(ew)` minus the
+    actor (the provider operator). A single direct emit at the view, so it
+    fires exactly once regardless of the internal two-leg transition."""
+    title = _ew_title(ew)
+    summary = (
+        f"Extra work approved: {title}" if title else "Extra work approved"
+    )
+    return _emit_extra_work_notifications(
+        ew,
+        recipients=list(_extra_work_customer_users(ew)),
+        actor=actor,
+        event_type=NotificationType.EXTRA_WORK_PUBLISHED,
         summary=summary,
     )
 

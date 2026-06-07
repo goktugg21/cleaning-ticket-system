@@ -115,6 +115,14 @@ class NotificationType(models.TextChoices):
     )
     EXTRA_WORK_DECISION = "EXTRA_WORK_DECISION", "Extra work decision"
 
+    # M1 B6 — Extra Work message thread (mirrors TICKET_MESSAGE, in-app only).
+    #   EXTRA_WORK_MESSAGE    a new message on an Extra Work request thread.
+    #   EXTRA_WORK_PUBLISHED  item-7: a provider direct-published (quote-bypass)
+    #     the customer's extra work WITHOUT a separate decision step — the
+    #     customer is told it was approved/started.
+    EXTRA_WORK_MESSAGE = "EXTRA_WORK_MESSAGE", "Extra work message"
+    EXTRA_WORK_PUBLISHED = "EXTRA_WORK_PUBLISHED", "Extra work published"
+
 
 class Notification(models.Model):
     """In-app notification (M1 — message center, phase B1).

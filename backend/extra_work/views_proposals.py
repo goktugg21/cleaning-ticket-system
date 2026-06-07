@@ -43,6 +43,7 @@ from audit.models import AuditAction, AuditLog, AuditSeverity
 from notifications.services import (
     emit_extra_work_decision_notifications,
     emit_extra_work_proposal_sent_notifications,
+    emit_extra_work_published_notifications,
 )
 
 from .models import (
@@ -929,6 +930,24 @@ class ProposalDirectPublishView(views.APIView):
             return Response(
                 {"detail": str(exc), "code": exc.code},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # M1 B6 item-7 — the provider direct-published (quote-bypass) this EW
+        # WITHOUT a separate customer decision step. Tell the CUSTOMER side it
+        # was approved/started. ONE direct emit here (NOT inside
+        # apply_proposal_transition), so it fires exactly once after the whole
+        # atomic publish has committed and the TransitionError early-return is
+        # ruled out — never on a leg that later rolls back. Best-effort +
+        # logged: a fan-out failure must not fail the (already committed)
+        # publish.
+        try:
+            emit_extra_work_published_notifications(
+                extra_work, actor=request.user
+            )
+        except Exception:  # noqa: BLE001 — best-effort fan-out, logged below
+            logger.exception(
+                "Failed to emit EW published notification for EW %s",
+                extra_work.id,
             )
 
         return Response(
