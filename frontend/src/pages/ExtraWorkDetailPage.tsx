@@ -1420,6 +1420,160 @@ export function ExtraWorkDetailPage() {
           </div>
           </div>{/* end .ew-detail-top-row */}
 
+          {/* M1 B6 — Extra Work message thread + composer. Functional only;
+              B8 polishes the visuals. The backend chokepoint filters which
+              messages this viewer receives; the composer offers only the
+              tiers the backend will accept. */}
+          <section
+            className="card"
+            data-testid="extra-work-messages-panel"
+            style={{ marginBottom: 16 }}
+          >
+            <div className="form-section">
+              <div className="form-section-title">{t("messages.title")}</div>
+
+              <div className="ew-message-thread" data-testid="ew-message-thread">
+                {ewMessages.length === 0 ? (
+                  <p className="muted small">{t("messages.empty")}</p>
+                ) : (
+                  ewMessages.map((m) => (
+                    <div
+                      key={m.id}
+                      className={`note-bubble ${EW_TIER_TONE_CLASS[m.message_type]}`}
+                      data-testid="ew-message-row"
+                      style={{ marginBottom: 8 }}
+                    >
+                      <div className="note-bubble-meta muted small">
+                        <span className="note-tag">
+                          {t(EW_TIER_BADGE_KEY[m.message_type])}
+                        </span>{" "}
+                        {m.author_email}
+                        {m.visibility_mode === "RESTRICTED" && (
+                          <span className="note-private-badge">
+                            {" "}
+                            · {t("messages.private_badge")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="note-bubble-body">{m.message}</div>
+                      {m.directed_to_detail.length > 0 && (
+                        <div className="muted small">
+                          {t("messages.directed_prefix")}{" "}
+                          {m.directed_to_detail
+                            .map((d) => d.full_name)
+                            .join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {ewComposerTiers.length > 0 && (
+                <form
+                  onSubmit={submitEwMessage}
+                  data-testid="ew-message-composer"
+                  style={{ marginTop: 12 }}
+                >
+                  {ewComposerTiers.length > 1 && (
+                    <div className="composer-toggle" role="tablist">
+                      {ewComposerTiers.map((tier) => (
+                        <button
+                          key={tier}
+                          type="button"
+                          role="tab"
+                          aria-selected={effectiveEwMessageType === tier}
+                          className={`composer-toggle-btn ${
+                            effectiveEwMessageType === tier
+                              ? `active ${EW_TIER_TONE_CLASS[tier]}`
+                              : ""
+                          }`}
+                          onClick={() => setEwMessageType(tier)}
+                        >
+                          {t(EW_TIER_LABEL_KEY[tier])}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    className="field-textarea"
+                    rows={3}
+                    placeholder={t(
+                      EW_TIER_PLACEHOLDER_KEY[effectiveEwMessageType],
+                    )}
+                    value={ewMessageText}
+                    onChange={(e) => setEwMessageText(e.target.value)}
+                    required
+                  />
+                  <p className="muted small">
+                    {t(EW_TIER_WHO_SEES_KEY[effectiveEwMessageType])}
+                  </p>
+
+                  {ewRecipients.length > 0 && (
+                    <div
+                      className="composer-directed"
+                      data-testid="ew-composer-directed"
+                    >
+                      <div className="composer-directed-label">
+                        {t("messages.directed_label")}
+                      </div>
+                      <div className="composer-directed-chips">
+                        {ewRecipients.map((recipient) => {
+                          const selected = ewDirectedTo.includes(recipient.id);
+                          return (
+                            <button
+                              key={recipient.id}
+                              type="button"
+                              className={`directed-chip${
+                                selected ? " directed-chip-selected" : ""
+                              }`}
+                              aria-pressed={selected}
+                              onClick={() => toggleEwDirected(recipient.id)}
+                            >
+                              {recipient.full_name}
+                              <span className="directed-chip-side">
+                                {t(`messages.side_${recipient.side}`)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {ewCanUsePrivate && (
+                        <>
+                          <label className="composer-private-toggle">
+                            <input
+                              type="checkbox"
+                              checked={ewEffectivePrivate}
+                              disabled={ewDirectedTo.length === 0}
+                              onChange={(e) => setEwIsPrivate(e.target.checked)}
+                              data-testid="ew-composer-private-toggle"
+                            />
+                            <span>{t("messages.private_label")}</span>
+                          </label>
+                          <p className="muted small">
+                            {ewDirectedTo.length === 0
+                              ? t("messages.private_disabled_hint")
+                              : ewEffectivePrivate
+                                ? t("messages.private_on_hint")
+                                : t("messages.private_off_hint")}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    disabled={ewSending || !ewMessageText.trim()}
+                  >
+                    {ewSending ? t("messages.sending") : t("messages.post")}
+                  </button>
+                </form>
+              )}
+            </div>
+          </section>
+
           {/* Sprint 28 Batch 4 — read-only Customer Contacts panel.
               Renders only for SUPER_ADMIN / COMPANY_ADMIN (mirrors the
               backend gate; other roles never see this card). Pure
@@ -1657,160 +1811,6 @@ export function ExtraWorkDetailPage() {
               </div>
             </section>
           )}
-
-          {/* M1 B6 — Extra Work message thread + composer. Functional only;
-              B8 polishes the visuals. The backend chokepoint filters which
-              messages this viewer receives; the composer offers only the
-              tiers the backend will accept. */}
-          <section
-            className="card"
-            data-testid="extra-work-messages-panel"
-            style={{ marginBottom: 16 }}
-          >
-            <div className="form-section">
-              <div className="form-section-title">{t("messages.title")}</div>
-
-              <div className="ew-message-thread" data-testid="ew-message-thread">
-                {ewMessages.length === 0 ? (
-                  <p className="muted small">{t("messages.empty")}</p>
-                ) : (
-                  ewMessages.map((m) => (
-                    <div
-                      key={m.id}
-                      className={`note-bubble ${EW_TIER_TONE_CLASS[m.message_type]}`}
-                      data-testid="ew-message-row"
-                      style={{ marginBottom: 8 }}
-                    >
-                      <div className="note-bubble-meta muted small">
-                        <span className="note-tag">
-                          {t(EW_TIER_BADGE_KEY[m.message_type])}
-                        </span>{" "}
-                        {m.author_email}
-                        {m.visibility_mode === "RESTRICTED" && (
-                          <span className="note-private-badge">
-                            {" "}
-                            · {t("messages.private_badge")}
-                          </span>
-                        )}
-                      </div>
-                      <div className="note-bubble-body">{m.message}</div>
-                      {m.directed_to_detail.length > 0 && (
-                        <div className="muted small">
-                          {t("messages.directed_prefix")}{" "}
-                          {m.directed_to_detail
-                            .map((d) => d.full_name)
-                            .join(", ")}
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {ewComposerTiers.length > 0 && (
-                <form
-                  onSubmit={submitEwMessage}
-                  data-testid="ew-message-composer"
-                  style={{ marginTop: 12 }}
-                >
-                  {ewComposerTiers.length > 1 && (
-                    <div className="composer-toggle" role="tablist">
-                      {ewComposerTiers.map((tier) => (
-                        <button
-                          key={tier}
-                          type="button"
-                          role="tab"
-                          aria-selected={effectiveEwMessageType === tier}
-                          className={`composer-toggle-btn ${
-                            effectiveEwMessageType === tier
-                              ? `active ${EW_TIER_TONE_CLASS[tier]}`
-                              : ""
-                          }`}
-                          onClick={() => setEwMessageType(tier)}
-                        >
-                          {t(EW_TIER_LABEL_KEY[tier])}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <textarea
-                    className="field-textarea"
-                    rows={3}
-                    placeholder={t(
-                      EW_TIER_PLACEHOLDER_KEY[effectiveEwMessageType],
-                    )}
-                    value={ewMessageText}
-                    onChange={(e) => setEwMessageText(e.target.value)}
-                    required
-                  />
-                  <p className="muted small">
-                    {t(EW_TIER_WHO_SEES_KEY[effectiveEwMessageType])}
-                  </p>
-
-                  {ewRecipients.length > 0 && (
-                    <div
-                      className="composer-directed"
-                      data-testid="ew-composer-directed"
-                    >
-                      <div className="composer-directed-label">
-                        {t("messages.directed_label")}
-                      </div>
-                      <div className="composer-directed-chips">
-                        {ewRecipients.map((recipient) => {
-                          const selected = ewDirectedTo.includes(recipient.id);
-                          return (
-                            <button
-                              key={recipient.id}
-                              type="button"
-                              className={`directed-chip${
-                                selected ? " directed-chip-selected" : ""
-                              }`}
-                              aria-pressed={selected}
-                              onClick={() => toggleEwDirected(recipient.id)}
-                            >
-                              {recipient.full_name}
-                              <span className="directed-chip-side">
-                                {t(`messages.side_${recipient.side}`)}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {ewCanUsePrivate && (
-                        <>
-                          <label className="composer-private-toggle">
-                            <input
-                              type="checkbox"
-                              checked={ewEffectivePrivate}
-                              disabled={ewDirectedTo.length === 0}
-                              onChange={(e) => setEwIsPrivate(e.target.checked)}
-                              data-testid="ew-composer-private-toggle"
-                            />
-                            <span>{t("messages.private_label")}</span>
-                          </label>
-                          <p className="muted small">
-                            {ewDirectedTo.length === 0
-                              ? t("messages.private_disabled_hint")
-                              : ewEffectivePrivate
-                                ? t("messages.private_on_hint")
-                                : t("messages.private_off_hint")}
-                          </p>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-sm"
-                    disabled={ewSending || !ewMessageText.trim()}
-                  >
-                    {ewSending ? t("messages.sending") : t("messages.post")}
-                  </button>
-                </form>
-              )}
-            </div>
-          </section>
 
           <div
             className="muted small"
