@@ -1281,137 +1281,6 @@ export function TicketDetailPage() {
           <div className="card">
             <div className="card-head-icon">
               <span className="card-head-icon-glyph">
-                <Clock size={14} strokeWidth={2.2} />
-              </span>
-              <span className="card-head-icon-title">
-                {t("card_activity_title")}
-              </span>
-            </div>
-            <div className="timeline">
-              {/* Sprint 32 — provider-audit roles see the UNIFIED timeline
-                  (status history + audit_log + Extra Work + planned
-                  occurrence + severity). STAFF / CUSTOMER_USER (and any
-                  load / fetch-error state, where auditTimeline stays null)
-                  fall through to the unchanged status-history rendering
-                  below, so the activity card is never blank and their view
-                  is exactly as before. */}
-              {isProviderAudit &&
-              auditTimeline !== null &&
-              auditTimeline.ticketId === ticket.id &&
-              auditTimeline.rows.length > 0 ? (
-                <UnifiedTimeline rows={auditTimeline.rows} />
-              ) : ticket.status_history.length === 0 ? (
-                <div className="timeline-row" data-color="green">
-                  <div className="timeline-dot" />
-                  <div>
-                    <div className="timeline-time">
-                      {formatDate(ticket.created_at)}
-                    </div>
-                    <div className="timeline-text">
-                      <Trans
-                        i18nKey="ticket_detail:timeline_created"
-                        values={{
-                          name: humanName(
-                            ticket.created_by_email,
-                            t("unassigned"),
-                          ),
-                        }}
-                        components={{ b: <b /> }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                ticket.status_history.map((entry, index) => (
-                  <div
-                    key={entry.id}
-                    className="timeline-row"
-                    data-color={
-                      index === 0
-                        ? "green"
-                        : entry.new_status === "REJECTED"
-                          ? "red"
-                          : entry.new_status === "WAITING_CUSTOMER_APPROVAL"
-                            ? "amber"
-                            : "muted"
-                    }
-                  >
-                    <div className="timeline-dot" />
-                    <div>
-                      <div className="timeline-time">
-                        {formatDate(entry.created_at)}
-                      </div>
-                      <div className="timeline-text">
-                        <b>
-                          {humanName(
-                            entry.changed_by_email,
-                            t("unassigned"),
-                          )}
-                        </b>
-                        {entry.old_status ? (
-                          <>
-                            {t("timeline_status_changed_from_to")}
-                            <span
-                              className={`pill ${entry.old_status === "OPEN" ? "open" : "progress"}`}
-                            >
-                              {tStatus(entry.old_status)}
-                            </span>
-                            {t("timeline_status_to")}
-                            <span className="pill progress">
-                              {tStatus(entry.new_status)}
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            {t("timeline_created_as")}
-                            <span className="pill progress">
-                              {tStatus(entry.new_status)}
-                            </span>
-                          </>
-                        )}
-                        {(() => {
-                          const cleaned = sanitizeStatusNote(entry.note);
-                          return cleaned ? `. ${cleaned}` : ".";
-                        })()}
-                      </div>
-                      {/* Sprint 27F-F1 — override badge + reason sub-
-                          line. Backend always emits both fields
-                          (defaulted false / ""); we only render the
-                          badge for actual overrides. */}
-                      {entry.is_override &&
-                        (() => {
-                          // Sanitize the override reason the same way
-                          // UnifiedTimeline does, so the demo seed marker
-                          // never leaks in the status-history fallback
-                          // path (a real typed reason is unaffected).
-                          const cleanedReason = sanitizeStatusNote(
-                            entry.override_reason,
-                          );
-                          return (
-                            <div
-                              className="muted small"
-                              data-testid="timeline-override-badge"
-                              style={{ marginTop: 4 }}
-                            >
-                              <b>{t("timeline_override_badge")}</b>
-                              {cleanedReason
-                                ? ` · ${t("timeline_override_reason", {
-                                    reason: cleanedReason,
-                                  })}`
-                                : ""}
-                            </div>
-                          );
-                        })()}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-head-icon">
-              <span className="card-head-icon-glyph">
                 <MessageSquare size={14} strokeWidth={2.2} />
               </span>
               <span className="card-head-icon-title">
@@ -1686,6 +1555,137 @@ export function TicketDetailPage() {
                 </div>
               </form>
             )}
+          </div>
+
+          <div className="card">
+            <div className="card-head-icon">
+              <span className="card-head-icon-glyph">
+                <Clock size={14} strokeWidth={2.2} />
+              </span>
+              <span className="card-head-icon-title">
+                {t("card_activity_title")}
+              </span>
+            </div>
+            <div className="timeline">
+              {/* Sprint 32 — provider-audit roles see the UNIFIED timeline
+                  (status history + audit_log + Extra Work + planned
+                  occurrence + severity). STAFF / CUSTOMER_USER (and any
+                  load / fetch-error state, where auditTimeline stays null)
+                  fall through to the unchanged status-history rendering
+                  below, so the activity card is never blank and their view
+                  is exactly as before. */}
+              {isProviderAudit &&
+              auditTimeline !== null &&
+              auditTimeline.ticketId === ticket.id &&
+              auditTimeline.rows.length > 0 ? (
+                <UnifiedTimeline rows={auditTimeline.rows} />
+              ) : ticket.status_history.length === 0 ? (
+                <div className="timeline-row" data-color="green">
+                  <div className="timeline-dot" />
+                  <div>
+                    <div className="timeline-time">
+                      {formatDate(ticket.created_at)}
+                    </div>
+                    <div className="timeline-text">
+                      <Trans
+                        i18nKey="ticket_detail:timeline_created"
+                        values={{
+                          name: humanName(
+                            ticket.created_by_email,
+                            t("unassigned"),
+                          ),
+                        }}
+                        components={{ b: <b /> }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                ticket.status_history.map((entry, index) => (
+                  <div
+                    key={entry.id}
+                    className="timeline-row"
+                    data-color={
+                      index === 0
+                        ? "green"
+                        : entry.new_status === "REJECTED"
+                          ? "red"
+                          : entry.new_status === "WAITING_CUSTOMER_APPROVAL"
+                            ? "amber"
+                            : "muted"
+                    }
+                  >
+                    <div className="timeline-dot" />
+                    <div>
+                      <div className="timeline-time">
+                        {formatDate(entry.created_at)}
+                      </div>
+                      <div className="timeline-text">
+                        <b>
+                          {humanName(
+                            entry.changed_by_email,
+                            t("unassigned"),
+                          )}
+                        </b>
+                        {entry.old_status ? (
+                          <>
+                            {t("timeline_status_changed_from_to")}
+                            <span
+                              className={`pill ${entry.old_status === "OPEN" ? "open" : "progress"}`}
+                            >
+                              {tStatus(entry.old_status)}
+                            </span>
+                            {t("timeline_status_to")}
+                            <span className="pill progress">
+                              {tStatus(entry.new_status)}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            {t("timeline_created_as")}
+                            <span className="pill progress">
+                              {tStatus(entry.new_status)}
+                            </span>
+                          </>
+                        )}
+                        {(() => {
+                          const cleaned = sanitizeStatusNote(entry.note);
+                          return cleaned ? `. ${cleaned}` : ".";
+                        })()}
+                      </div>
+                      {/* Sprint 27F-F1 — override badge + reason sub-
+                          line. Backend always emits both fields
+                          (defaulted false / ""); we only render the
+                          badge for actual overrides. */}
+                      {entry.is_override &&
+                        (() => {
+                          // Sanitize the override reason the same way
+                          // UnifiedTimeline does, so the demo seed marker
+                          // never leaks in the status-history fallback
+                          // path (a real typed reason is unaffected).
+                          const cleanedReason = sanitizeStatusNote(
+                            entry.override_reason,
+                          );
+                          return (
+                            <div
+                              className="muted small"
+                              data-testid="timeline-override-badge"
+                              style={{ marginTop: 4 }}
+                            >
+                              <b>{t("timeline_override_badge")}</b>
+                              {cleanedReason
+                                ? ` · ${t("timeline_override_reason", {
+                                    reason: cleanedReason,
+                                  })}`
+                                : ""}
+                            </div>
+                          );
+                        })()}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
 

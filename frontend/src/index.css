@@ -2013,12 +2013,16 @@ table.data-table {
   text-wrap: balance;
 }
 .detail-header-desc {
-  font-size: 14px;
+  font-size: 17px;
   line-height: 1.6;
-  color: var(--text-2);
+  color: var(--text);
   max-width: 64ch;
   white-space: pre-wrap;
+  margin-top: 2px;
 }
+/* A description-less ticket renders no text node, so :empty hides the
+   element entirely rather than leaving a prominent void below the title. */
+.detail-header-desc:empty { display: none; }
 
 .detail-grid { display: grid; grid-template-columns: 1fr 296px; gap: 22px; align-items: start; }
 .detail-main { display: flex; flex-direction: column; gap: 18px; }
@@ -4435,7 +4439,9 @@ table.data-table {
 
 /* ----- M1 B3 — composer directed/private + thread chips ----- */
 .composer-directed {
-  margin: 0 22px 10px;
+  /* Align to the composer body edges (.notes-textarea / .notes-actions):
+     the parent .notes-composer-body already insets 22px, so no side margin. */
+  margin: 0 0 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;

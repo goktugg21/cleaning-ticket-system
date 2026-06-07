@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BarChart3,
+  Bell,
   Building2,
   CalendarCheck,
   CalendarClock,
@@ -351,6 +352,12 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.my_work")}
                 </NavLink>
               )}
+              <NavLink to="/notifications" className={navClass}>
+                <span className="nav-icon">
+                  <Bell size={16} strokeWidth={2} />
+                </span>
+                {t("nav.notifications")}
+              </NavLink>
               {canAccessExtraWork(me?.role) && (
                 <NavLink to="/extra-work" className={navClass}>
                   <span className="nav-icon">
