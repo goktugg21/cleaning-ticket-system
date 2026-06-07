@@ -1215,6 +1215,8 @@
   "notifications.for_you": "for you",
   "notifications.toast_new": "New notification",
   "notifications.toast_many": "{{count}} new notifications",
+  "notifications.toast_ticket_ref": "Ticket {{no}}",
+  "notifications.toast_unread_more": "{{count}} more unread",
   "notifications.see_all": "See all notifications",
   "notifications.mark_all_read": "Mark all as read",
   "notifications.bell_aria": "Notifications",

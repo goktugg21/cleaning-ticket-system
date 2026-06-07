@@ -16,6 +16,8 @@ class NotificationSerializer(serializers.ModelSerializer):
     actor_name = serializers.SerializerMethodField()
     actor_email = serializers.SerializerMethodField()
     ticket_no = serializers.SerializerMethodField()
+    ticket_title = serializers.SerializerMethodField()
+    extra_work_title = serializers.SerializerMethodField()
     is_read = serializers.SerializerMethodField()
 
     class Meta:
@@ -27,7 +29,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             "summary",
             "ticket",
             "ticket_no",
+            "ticket_title",
             "extra_work",
+            "extra_work_title",
             "actor_id",
             "actor_name",
             "actor_email",
@@ -51,6 +55,12 @@ class NotificationSerializer(serializers.ModelSerializer):
 
     def get_ticket_no(self, obj):
         return obj.ticket.ticket_no if obj.ticket_id else None
+
+    def get_ticket_title(self, obj):
+        return obj.ticket.title if obj.ticket_id else None
+
+    def get_extra_work_title(self, obj):
+        return obj.extra_work.title if obj.extra_work_id else None
 
     def get_is_read(self, obj):
         return obj.read_at is not None

@@ -28,6 +28,7 @@ import {
 } from "../api/notifications";
 import type { Notification } from "../api/types";
 import { useToast } from "./ToastProvider";
+import type { ToastInput } from "./ToastProvider";
 
 // Shortened poll (was 60s) so a newly-arrived notification surfaces as a toast
 // within ~one interval. Real push is deferred to the production-deploy phase.
@@ -36,6 +37,10 @@ const PANEL_LIMIT = 8;
 // 1..N new in a single poll -> that many individual toasts; strictly above this
 // -> one aggregate "N new notifications" toast (never a wall of toasts).
 const TOAST_BURST_CAP = 3;
+// One-time-per-tab-session guard for the login backlog greeting (B9). Stored in
+// sessionStorage so a mid-session reload doesn't re-flood; a fresh tab (new
+// login) greets again.
+const GREETED_KEY = "cleanops.notifGreeted";
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
@@ -80,6 +85,31 @@ export function NotificationBell() {
     [navigate],
   );
 
+  // Build the toast content for a notification. Headline = the ticket / EW
+  // NAME (falling back to a Ticket-no reference, then a generic label); the
+  // message goes on the description line. Shared by BOTH the live poll path
+  // and the login backlog so the two never drift.
+  const notificationToastInput = useCallback(
+    (n: Notification): ToastInput => {
+      const name =
+        n.ticket_title ||
+        n.extra_work_title ||
+        (n.ticket_no
+          ? t("notifications.toast_ticket_ref", { no: n.ticket_no })
+          : "") ||
+        t("notifications.toast_new");
+      return {
+        variant: "success",
+        title: name,
+        description: n.summary,
+        onClick: () => {
+          openNotification(n);
+        },
+      };
+    },
+    [t, openNotification],
+  );
+
   // Feed poll: refresh on mount, on each navigation, and on a light interval.
   // It yields BOTH the items (badge list + B7 detection) and the unread count.
   // setState lives inside the async closure (not the effect body), so this does
@@ -98,23 +128,44 @@ export function NotificationBell() {
         lastSeenIdRef.current = maxId;
         setUnread(data.unread_count);
         setItems(feed.slice(0, PANEL_LIMIT));
-        // First poll only establishes the high-water-mark — never toast the
-        // backlog. (newItems is already [] when prevMaxId was null; the
-        // initialized guard is belt-and-suspenders.)
+        // First poll establishes the high-water-mark (set above) AND greets
+        // with the unread backlog ONCE per tab-session (B9, Option B): a
+        // mid-session reload/navigation never re-floods, and because the mark
+        // is already set the greeted backlog never re-toasts on later polls.
         if (!initializedRef.current) {
           initializedRef.current = true;
+          let greeted = false;
+          try {
+            greeted = sessionStorage.getItem(GREETED_KEY) === "1";
+          } catch {
+            // sessionStorage unavailable -> we can't dedupe across reloads, so
+            // stay silent rather than risk re-flooding on every load.
+            greeted = true;
+          }
+          if (!greeted && data.unread_count > 0) {
+            try {
+              sessionStorage.setItem(GREETED_KEY, "1");
+            } catch {
+              // Best-effort: still show this single greeting.
+            }
+            const unreadItems = feed.filter((x) => !x.is_read); // newest-first
+            const shown = unreadItems.slice(0, TOAST_BURST_CAP);
+            shown.forEach((x) => push(notificationToastInput(x)));
+            const more = data.unread_count - shown.length;
+            if (more > 0) {
+              push({
+                variant: "success",
+                title: t("notifications.toast_unread_more", { count: more }),
+                onClick: () => navigate("/notifications"),
+              });
+            }
+          }
           return;
         }
         if (newItems.length === 0) return;
         if (newItems.length <= TOAST_BURST_CAP) {
           for (const n of newItems) {
-            push({
-              variant: "success",
-              title: n.summary || t("notifications.toast_new"),
-              onClick: () => {
-                openNotification(n);
-              },
-            });
+            push(notificationToastInput(n));
           }
         } else {
           push({
@@ -133,7 +184,7 @@ export function NotificationBell() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [location.pathname, push, openNotification, navigate, t]);
+  }, [location.pathname, push, notificationToastInput, navigate, t]);
 
   // Close on click-outside.
   useEffect(() => {

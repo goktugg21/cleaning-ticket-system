@@ -458,7 +458,9 @@ export interface Notification {
   summary: string;
   ticket: number | null;
   ticket_no: string | null;
+  ticket_title: string | null;
   extra_work: number | null;
+  extra_work_title: string | null;
   actor_id: number | null;
   actor_name: string | null;
   actor_email: string | null;
