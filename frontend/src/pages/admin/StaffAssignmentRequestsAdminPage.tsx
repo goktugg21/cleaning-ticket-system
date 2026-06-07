@@ -14,6 +14,7 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { formatDateTime } from "../../lib/intl";
 
 /**
  * Sprint 23B — minimal review queue for staff-initiated
@@ -53,18 +54,9 @@ const STATUS_CLASS: Record<StaffAssignmentRequestStatus, string> = {
   CANCELLED: "cell-tag-closed",
 };
 
+// Locale-aware (app language via lib/intl), not the host OS locale.
 function formatTimestamp(value: string): string {
-  try {
-    return new Date(value).toLocaleString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return value;
-  }
+  return formatDateTime(value);
 }
 
 function ticketLabel(req: StaffAssignmentRequest): string {

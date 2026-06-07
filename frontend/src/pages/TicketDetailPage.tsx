@@ -24,6 +24,7 @@ import {
   listStaffAssignmentRequests,
 } from "../api/admin";
 import { getMessageRecipients } from "../api/notifications";
+import { formatDateTime } from "../lib/intl";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
 import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection";
@@ -206,19 +207,12 @@ const ACCEPTED_ATTACHMENT_TYPES =
   ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
 const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
+// Delegates to lib/intl so dates follow the app language (nl-NL/en-US
+// derived from i18n.language), not the host OS locale. Name kept so the
+// existing call sites stay unchanged; lib formatDateTime handles
+// null/empty/parse-fail (returns "—").
 function formatDate(value: string | null): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString(undefined, {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return value;
-  }
+  return formatDateTime(value);
 }
 
 function formatBytes(bytes: number): string {

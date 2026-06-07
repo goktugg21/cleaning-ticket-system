@@ -21,6 +21,7 @@ import type {
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { SLABadge } from "../components/sla/SLABadge";
+import { formatDate, formatDateTime } from "../lib/intl";
 
 type SLAFilterValue =
   | ""
@@ -81,18 +82,6 @@ const SLA_FILTER_VALUES: Exclude<SLAFilterValue, "">[] = [
   "completed",
   "historical",
 ];
-
-function formatDate(value: string): string {
-  try {
-    return new Date(value).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
-  } catch {
-    return value;
-  }
-}
 
 function priorityCellClass(priority: string): string {
   return `cell-tag cell-tag-${priority.toLowerCase()}`;
@@ -492,7 +481,7 @@ export function DashboardPage() {
             <span
               className="last-updated"
               aria-live="polite"
-              title={lastUpdated ? lastUpdated.toLocaleString() : undefined}
+              title={lastUpdated ? formatDateTime(lastUpdated) : undefined}
             >
               {lastUpdatedLabel}
             </span>
