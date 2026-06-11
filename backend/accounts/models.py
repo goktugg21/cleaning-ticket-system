@@ -330,6 +330,21 @@ class StaffCredential(models.Model):
                 ),
                 name="uniq_staff_singleton_credential",
             ),
+            # M2 P3 — the A.3.1 compliance hard block, DATABASE-enforced.
+            # clean() + save() already pin EU national IDs to
+            # PA_SA_ONLY / not-customer-visible, but QuerySet.update()
+            # and bulk_create() bypass Model.save(); this constraint
+            # closes that residual at the SQL layer.
+            models.CheckConstraint(
+                condition=(
+                    ~models.Q(credential_type="EU_NATIONAL_ID")
+                    | (
+                        models.Q(visibility_level="PA_SA_ONLY")
+                        & models.Q(document_customer_visible=False)
+                    )
+                ),
+                name="eu_id_hard_block",
+            ),
         ]
 
     def __str__(self):
