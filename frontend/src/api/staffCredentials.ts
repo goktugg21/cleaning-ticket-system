@@ -112,37 +112,41 @@ export function isAcceptablePdf(file: File): boolean {
 
 type WireValue = string | boolean | null | undefined;
 
-/** Build the request body: multipart only when a File rides along
- *  (mirrors the ticket-attachment upload pattern), plain JSON
- *  otherwise. Multipart skips null/undefined/empty-string values —
- *  "not sent" means "unchanged" on PATCH and "model default" on POST;
- *  explicit nulls (e.g. clearing expiry_date) work via the JSON path. */
-function buildBody(
+/** JSON body: drops only `undefined` ("not sent" = unchanged on PATCH).
+ *  Explicit nulls and empty strings are PRESERVED — this is the path
+ *  that can clear a field (expiry_date -> null, permit_number -> ""). */
+function jsonBody(
   fields: Record<string, WireValue>,
-  document: File | null | undefined,
-): { body: FormData | Record<string, WireValue>; multipart: boolean } {
-  if (document instanceof File) {
-    const form = new FormData();
-    for (const [key, value] of Object.entries(fields)) {
-      if (value === undefined || value === null || value === "") continue;
-      form.append(key, typeof value === "boolean" ? String(value) : value);
-    }
-    form.append("document", document);
-    return { body: form, multipart: true };
-  }
+): Record<string, WireValue> {
   const json: Record<string, WireValue> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
     json[key] = value;
   }
-  return { body: json, multipart: false };
+  return json;
 }
 
-function postConfig(multipart: boolean) {
-  return multipart
-    ? { headers: { "Content-Type": "multipart/form-data" } }
-    : undefined;
+/** Multipart body for CREATE-with-document: FormData cannot carry an
+ *  explicit null, so null/""/undefined are skipped — on create that
+ *  means "model default", which is correct. UPDATES never use this for
+ *  field changes (see the split-save in updateCredential/updateProperty
+ *  — Codex P2 on #91). */
+function multipartBody(
+  fields: Record<string, WireValue>,
+  document: File,
+): FormData {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null || value === "") continue;
+    form.append(key, typeof value === "boolean" ? String(value) : value);
+  }
+  form.append("document", document);
+  return form;
 }
+
+const MULTIPART_CONFIG = {
+  headers: { "Content-Type": "multipart/form-data" },
+};
 
 /** Shared blob-download trigger (TicketDetailPage downloadAttachment
  *  pattern: responseType blob + createObjectURL + synthetic click). */
@@ -188,12 +192,14 @@ export async function createCredential(
   payload: CredentialCreatePayload,
 ): Promise<StaffCredential> {
   const { document: file, ...fields } = payload;
-  const { body, multipart } = buildBody(fields, file);
-  const response = await api.post(
-    `/users/${userId}/credentials/`,
-    body,
-    postConfig(multipart),
-  );
+  const response =
+    file instanceof File
+      ? await api.post(
+          `/users/${userId}/credentials/`,
+          multipartBody(fields, file),
+          MULTIPART_CONFIG,
+        )
+      : await api.post(`/users/${userId}/credentials/`, jsonBody(fields));
   return response.data;
 }
 
@@ -203,12 +209,24 @@ export async function updateCredential(
   payload: CredentialUpdatePayload,
 ): Promise<StaffCredential> {
   const { document: file, ...fields } = payload;
-  const { body, multipart } = buildBody(fields, file);
-  const response = await api.patch(
-    `/users/${userId}/credentials/${credentialId}/`,
-    body,
-    postConfig(multipart),
-  );
+  const url = `/users/${userId}/credentials/${credentialId}/`;
+  if (file instanceof File) {
+    // Codex P2 (#91) — FormData cannot express an explicit clear
+    // (null/"" are skipped), so a single multipart PATCH that uploads a
+    // new document would silently keep old field values. Split the
+    // save: JSON PATCH first (clears preserved), then a document-only
+    // multipart PATCH. If the second call fails the field changes have
+    // already landed — acceptable, and superior to silently losing
+    // them; the caller's toast reports the document failure.
+    await api.patch(url, jsonBody(fields));
+    const response = await api.patch(
+      url,
+      multipartBody({}, file),
+      MULTIPART_CONFIG,
+    );
+    return response.data;
+  }
+  const response = await api.patch(url, jsonBody(fields));
   return response.data;
 }
 
@@ -277,12 +295,14 @@ export async function createProperty(
   payload: PropertyWritePayload,
 ): Promise<CustomProfileProperty> {
   const { document: file, ...fields } = payload;
-  const { body, multipart } = buildBody(fields, file);
-  const response = await api.post(
-    `/users/${userId}/properties/`,
-    body,
-    postConfig(multipart),
-  );
+  const response =
+    file instanceof File
+      ? await api.post(
+          `/users/${userId}/properties/`,
+          multipartBody(fields, file),
+          MULTIPART_CONFIG,
+        )
+      : await api.post(`/users/${userId}/properties/`, jsonBody(fields));
   return response.data;
 }
 
@@ -292,12 +312,21 @@ export async function updateProperty(
   payload: PropertyWritePayload,
 ): Promise<CustomProfileProperty> {
   const { document: file, ...fields } = payload;
-  const { body, multipart } = buildBody(fields, file);
-  const response = await api.patch(
-    `/users/${userId}/properties/${propertyId}/`,
-    body,
-    postConfig(multipart),
-  );
+  const url = `/users/${userId}/properties/${propertyId}/`;
+  if (file instanceof File) {
+    // Codex P2 (#91) — same split-save as updateCredential: JSON PATCH
+    // for the field changes (explicit ""/null clears preserved), then a
+    // document-only multipart PATCH. A second-call failure leaves the
+    // field changes applied — acceptable over silently losing them.
+    await api.patch(url, jsonBody(fields));
+    const response = await api.patch(
+      url,
+      multipartBody({}, file),
+      MULTIPART_CONFIG,
+    );
+    return response.data;
+  }
+  const response = await api.patch(url, jsonBody(fields));
   return response.data;
 }
 
