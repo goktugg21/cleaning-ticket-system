@@ -59,7 +59,7 @@ Messages on tickets / extra-work / meldingen get lost; nobody sees replies.
 - [x] Customer-side view honours visibility + the customer permission gate; the EU-ID block is unconditional.
 
 ### M3 — Navigation / IA (Ramazan #1-nav)
-- [ ] Move **Recurring Work** and the **customer price-quote-request** flow to live **under Extra Work** (sub-items), not as separate top-level / not performed directly in Extra Work.
+- [x] Move **Recurring Work** and the **customer price-quote-request** flow to live **under Extra Work** (sub-items), not as separate top-level / not performed directly in Extra Work.
 
 ### M4 — Extra Work billing: monthly invoice run + billing-month (Ramazan #2)
 Billing must key off a **billing month you set**, not the customer's final-approval date (work done May 31, approved Jun 7 → bills in **May**).

@@ -2,12 +2,15 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
+  BadgeEuro,
   BarChart3,
   Bell,
   Building2,
   CalendarCheck,
   CalendarClock,
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Contact,
   LayoutGrid,
@@ -168,6 +171,18 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
+
+  // M3 (SoT Addendum A.5) — Extra Work nav GROUP expansion. Default-
+  // expanded whenever any child route is active; a manual toggle
+  // overrides the default and lives in component state only (no
+  // persistence — a refresh re-derives from the URL).
+  const extraWorkChildActive =
+    location.pathname.startsWith("/extra-work") ||
+    location.pathname.startsWith("/planned-work");
+  const [extraWorkManualOpen, setExtraWorkManualOpen] = useState<
+    boolean | null
+  >(null);
+  const extraWorkOpen = extraWorkManualOpen ?? extraWorkChildActive;
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
@@ -358,25 +373,105 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.notifications")}
               </NavLink>
+              {/* M3 (SoT Addendum A.5) — "Extra Work" is a nav GROUP
+                  with three indented children. Routes are unchanged;
+                  this is IA only. Group gate = the same
+                  canAccessExtraWork as the old flat link; the
+                  Recurring Work child keeps its canAccessPlannedWork
+                  gate; Request a Quote uses the same gate as the
+                  /extra-work/new entry (ExtraWorkRoute ⇒
+                  canAccessExtraWork — no new role logic). */}
               {canAccessExtraWork(me?.role) && (
-                <NavLink to="/extra-work" className={navClass}>
-                  <span className="nav-icon">
-                    <Receipt size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.extra_work")}
-                </NavLink>
-              )}
-              {canAccessPlannedWork(me?.role) && (
-                <NavLink
-                  to="/planned-work"
-                  className={navClass}
-                  data-testid="sidebar-planned-work"
-                >
-                  <span className="nav-icon">
-                    <CalendarClock size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.planned_work")}
-                </NavLink>
+                <>
+                  <button
+                    type="button"
+                    className="nav-item"
+                    data-testid="sidebar-extra-work-group"
+                    aria-expanded={extraWorkOpen}
+                    onClick={() =>
+                      setExtraWorkManualOpen(
+                        (current) => !(current ?? extraWorkChildActive),
+                      )
+                    }
+                    style={{
+                      width: "100%",
+                      border: "none",
+                      background: "none",
+                      font: "inherit",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span className="nav-icon">
+                      <Receipt size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.extra_work")}
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        display: "inline-flex",
+                        alignItems: "center",
+                      }}
+                      aria-hidden="true"
+                    >
+                      {extraWorkOpen ? (
+                        <ChevronDown size={14} strokeWidth={2} />
+                      ) : (
+                        <ChevronRight size={14} strokeWidth={2} />
+                      )}
+                    </span>
+                  </button>
+                  {extraWorkOpen && (
+                    <>
+                      <NavLink
+                        to="/extra-work"
+                        className={({ isActive }) =>
+                          navClass({
+                            // The list link matches every /extra-work/*
+                            // path; carve the quote page out so only its
+                            // own child lights up there.
+                            isActive:
+                              isActive &&
+                              !location.pathname.startsWith(
+                                "/extra-work/request-quote",
+                              ),
+                          })
+                        }
+                        data-testid="sidebar-extra-work-request"
+                        style={{ paddingLeft: 34 }}
+                      >
+                        <span className="nav-icon">
+                          <ClipboardList size={16} strokeWidth={2} />
+                        </span>
+                        {t("nav.extra_work_request")}
+                      </NavLink>
+                      {canAccessPlannedWork(me?.role) && (
+                        <NavLink
+                          to="/planned-work"
+                          className={navClass}
+                          data-testid="sidebar-planned-work"
+                          style={{ paddingLeft: 34 }}
+                        >
+                          <span className="nav-icon">
+                            <CalendarClock size={16} strokeWidth={2} />
+                          </span>
+                          {t("nav.planned_work")}
+                        </NavLink>
+                      )}
+                      <NavLink
+                        to="/extra-work/request-quote"
+                        className={navClass}
+                        data-testid="sidebar-request-quote"
+                        style={{ paddingLeft: 34 }}
+                      >
+                        <span className="nav-icon">
+                          <BadgeEuro size={16} strokeWidth={2} />
+                        </span>
+                        {t("nav.request_quote")}
+                      </NavLink>
+                    </>
+                  )}
+                </>
               )}
               {canAccessReports(me?.role) && (
                 <NavLink to="/reports" className={navClass}>

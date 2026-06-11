@@ -261,8 +261,21 @@ function isIntentSubmitError(err: unknown): boolean {
   );
 }
 
-export function CreateExtraWorkPage() {
+export interface CreateExtraWorkPageProps {
+  /** M3 (SoT Addendum A.5) — entry-point separation. "standard" is the
+   *  generic /extra-work/new flow with REQUEST_QUOTE filtered OUT of
+   *  the intent options; "quote" is the dedicated
+   *  /extra-work/request-quote page with the intent picker hidden and
+   *  the selection pinned to REQUEST_QUOTE (never silently another
+   *  intent). All preview/cart/submit behaviour is otherwise shared. */
+  intentMode?: "quote" | "standard";
+}
+
+export function CreateExtraWorkPage({
+  intentMode = "standard",
+}: CreateExtraWorkPageProps) {
   const { t } = useTranslation(["extra_work", "common"]);
+  const isQuoteMode = intentMode === "quote";
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -538,13 +551,33 @@ export function CreateExtraWorkPage() {
           // radio renders checked. Triggers at most ONE extra debounced
           // re-fetch (the new selection is re-validated) — bounded.
           setSelectedIntent((current) => {
-            if (current && data.allowed_intents.includes(current)) {
+            // M3 — quote page: the selection is PINNED to
+            // REQUEST_QUOTE whenever the latest preview allows it;
+            // when it does not (e.g. every line has an agreed price),
+            // the selection is null and submit is blocked with an
+            // inline notice. NEVER silently fall back to another
+            // intent on the quote page.
+            if (isQuoteMode) {
+              return data.allowed_intents.includes("REQUEST_QUOTE")
+                ? "REQUEST_QUOTE"
+                : null;
+            }
+            // M3 — standard page: reconcile against the FILTERED set
+            // (REQUEST_QUOTE removed) so the selection can never be
+            // REQUEST_QUOTE here. Same priority order as before
+            // (current pick → backend default → first offerable →
+            // null when nothing is offerable).
+            const offerable: ExtraWorkRequestIntent[] =
+              data.allowed_intents.filter(
+                (intent) => intent !== "REQUEST_QUOTE",
+              );
+            if (current && offerable.includes(current)) {
               return current;
             }
-            if (data.allowed_intents.includes(data.default_intent)) {
+            if (offerable.includes(data.default_intent)) {
               return data.default_intent;
             }
-            return data.allowed_intents[0] ?? null;
+            return offerable[0] ?? null;
           });
         } catch (err) {
           if (cancelled) return;
@@ -556,7 +589,7 @@ export function CreateExtraWorkPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [previewKey, selectedIntent]);
+  }, [previewKey, selectedIntent, isQuoteMode]);
 
   // Fetch the selected customer's agreed contract prices. All state
   // writes are inside the async resolution (deferred), never in the
@@ -607,6 +640,27 @@ export function CreateExtraWorkPage() {
   const previewTotals = previewData
     ? computeAgreedTotals(previewData.lines)
     : null;
+
+  // M3 — mode-derived intent view-state.
+  // Standard page: the picker renders the FILTERED set (REQUEST_QUOTE
+  // removed); when the backend would ONLY allow REQUEST_QUOTE, nothing
+  // is offerable here and the mirrored notice points at the quote page.
+  // Quote page: no picker; when the latest preview does not allow
+  // REQUEST_QUOTE the submit is disabled with an inline notice.
+  const offeredIntents = previewData
+    ? previewData.allowed_intents.filter(
+        (intent) => intent !== "REQUEST_QUOTE",
+      )
+    : [];
+  const quoteAllowed =
+    previewData !== null &&
+    previewData.allowed_intents.includes("REQUEST_QUOTE");
+  const quoteUnavailable = isQuoteMode && previewData !== null && !quoteAllowed;
+  const standardOnlyQuote =
+    !isQuoteMode &&
+    previewData !== null &&
+    previewData.allowed_intents.length > 0 &&
+    offeredIntents.length === 0;
 
   // Agreed-prices panel: catalog lookup (for category/unit labels the
   // pricing endpoint doesn't carry) + the current customer's currently-
@@ -786,6 +840,28 @@ export function CreateExtraWorkPage() {
           return;
         }
       }
+    }
+
+    // M3 — quote page: submitting REQUIRES a fresh preview that allows
+    // REQUEST_QUOTE and the pinned selection. Without it (preview
+    // mid-flight, preview error, or an all-agreed-price cart) we block
+    // rather than let the backend derive a NON-quote intent from an
+    // omitted request_intent — the quote page must never create
+    // anything but a quote request.
+    if (
+      isQuoteMode &&
+      (!previewData || !quoteAllowed || selectedIntent !== "REQUEST_QUOTE")
+    ) {
+      setError(t("quote.error_not_ready"));
+      return;
+    }
+    // M3 — standard page: REQUEST_QUOTE is filtered out of both the
+    // options and the reconcile, so this is unreachable by
+    // construction; belt-and-suspenders so the generic flow can never
+    // submit a quote intent through any state race.
+    if (!isQuoteMode && selectedIntent === "REQUEST_QUOTE") {
+      setError(t("create.intent.error.none_selected"));
+      return;
     }
 
     // PR #71 Codex P2 fix — when a fresh preview exists, REQUIRE a
@@ -1006,15 +1082,25 @@ export function CreateExtraWorkPage() {
 
   // ----- Form -----
   return (
-    <div data-testid="extra-work-create-page">
+    <div
+      data-testid={
+        isQuoteMode ? "extra-work-quote-page" : "extra-work-create-page"
+      }
+    >
       <div className="page-header">
         <div>
           <Link to="/extra-work" className="link-back">
             <ChevronLeft size={14} strokeWidth={2.5} />
             {t("back_to_extra_work")}
           </Link>
-          <h2 className="page-title">{t("create.page_title")}</h2>
-          <p className="page-sub">{t("create.page_subtitle")}</p>
+          <h2 className="page-title">
+            {isQuoteMode ? t("quote.page_title") : t("create.page_title")}
+          </h2>
+          <p className="page-sub">
+            {isQuoteMode
+              ? t("quote.page_subtitle")
+              : t("create.page_subtitle")}
+          </p>
         </div>
       </div>
 
@@ -1711,7 +1797,64 @@ export function CreateExtraWorkPage() {
                 )}
               </div>
 
-              {previewData && previewData.allowed_intents.length > 0 && (
+              {/* M3 — quote page: NO intent picker. A pinned-intent
+                  info row when the quote is available; the inline
+                  non-blocking notice (with a link to the standard
+                  flow) when every line already has an agreed price. */}
+              {isQuoteMode && previewData && (
+                <div
+                  className="form-section"
+                  data-testid="extra-work-quote-intent"
+                >
+                  {quoteAllowed ? (
+                    <div
+                      className="alert-info"
+                      role="status"
+                      data-testid="extra-work-quote-pinned"
+                    >
+                      <span
+                        className="field-label"
+                        style={{ display: "block", marginBottom: 2 }}
+                      >
+                        {t(INTENT_LABEL_KEY.REQUEST_QUOTE)}
+                      </span>
+                      <span className="muted small">
+                        {t(INTENT_DESC_KEY.REQUEST_QUOTE)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      className="alert-info"
+                      role="status"
+                      data-testid="extra-work-quote-unavailable"
+                    >
+                      {t("quote.unavailable_notice")}{" "}
+                      <Link to="/extra-work/new">
+                        {t("quote.unavailable_link")}
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* M3 — standard page: the picker renders the FILTERED
+                  intent set (REQUEST_QUOTE removed). When the backend
+                  would only allow a quote, nothing is offerable here
+                  and the mirrored notice links to the quote page. */}
+              {!isQuoteMode && standardOnlyQuote && (
+                <div
+                  className="form-section"
+                  data-testid="extra-work-standard-quote-only"
+                >
+                  <div className="alert-info" role="status">
+                    {t("create.quote_only_notice")}{" "}
+                    <Link to="/extra-work/request-quote">
+                      {t("create.quote_only_link")}
+                    </Link>
+                  </div>
+                </div>
+              )}
+              {!isQuoteMode && previewData && offeredIntents.length > 0 && (
                 <div
                   className="form-section"
                   data-testid="extra-work-create-intent"
@@ -1726,7 +1869,7 @@ export function CreateExtraWorkPage() {
                     role="radiogroup"
                     aria-label={t("create.intent.section_title")}
                   >
-                    {previewData.allowed_intents.map((intent) => (
+                    {offeredIntents.map((intent) => (
                       <label
                         key={intent}
                         className="ew-intent-option"
@@ -1789,9 +1932,22 @@ export function CreateExtraWorkPage() {
               type="submit"
               className="btn btn-primary btn-sm"
               data-testid="extra-work-create-submit"
-              disabled={submitting || loadingOptions || noOptions}
+              disabled={
+                submitting ||
+                loadingOptions ||
+                noOptions ||
+                // M3 — quote page with no quotable line / standard page
+                // with a quote-only cart: blocked here AND in
+                // handleSubmit (the notice explains the way out).
+                quoteUnavailable ||
+                standardOnlyQuote
+              }
             >
-              {submitting ? t("create.submitting") : t("create.submit_button")}
+              {submitting
+                ? t("create.submitting")
+                : isQuoteMode
+                  ? t("quote.submit_button")
+                  : t("create.submit_button")}
             </button>
           </div>
         </div>
