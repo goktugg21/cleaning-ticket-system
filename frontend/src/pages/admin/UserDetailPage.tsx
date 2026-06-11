@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -8,12 +9,24 @@ import {
   getBuilding,
   getCompany,
   getCustomer,
+  getStaffProfile,
   getUser,
   listBuildingManagers,
   listCustomerUserAccess,
+  listStaffVisibility,
   reactivateUser,
   updateBuildingManager,
 } from "../../api/admin";
+import {
+  downloadCredentialDocument,
+  downloadPropertyDocument,
+  listCredentials,
+  listProperties,
+} from "../../api/staffCredentials";
+import type {
+  CustomProfileProperty,
+  StaffCredential,
+} from "../../api/staffCredentials";
 import {
   BM_REVOCABLE_PERMISSION_KEYS,
   type BmRevocablePermissionKey,
@@ -21,9 +34,11 @@ import {
 import type {
   BuildingAdmin,
   BuildingManagerMembership,
+  BuildingStaffVisibilityAdmin,
   CompanyAdmin,
   CustomerAdmin,
   CustomerUserBuildingAccess,
+  StaffProfileAdmin,
   UserAdminDetail,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -31,6 +46,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { useToast } from "../../components/ToastProvider";
 import { PermissionsRollupChip } from "../../components/PermissionsRollupChip";
 import { PermissionsRollupSummary } from "../../components/PermissionsRollupSummary";
 import { RoleBadge } from "../../components/RoleBadge";
@@ -942,6 +958,21 @@ export function UserDetailPage() {
             </section>
           )}
 
+          {/* M2 P6 — read-only staff sections per the GLOBAL view-first
+              rule: the detail page SHOWS staff profile, staff
+              buildings, credentials and custom properties; editing
+              stays on /edit. Each card fetches defensively and renders
+              NOTHING on a 403/error (a BM viewer lacks the PA/SA-only
+              credential endpoints — their page must not break). */}
+          {user.role === "STAFF" && (
+            <>
+              <StaffProfileReadOnlyCard userId={user.id} />
+              <StaffBuildingsReadOnlyCard userId={user.id} />
+              <CredentialsReadOnlyCard userId={user.id} />
+            </>
+          )}
+          <PropertiesReadOnlyCard userId={user.id} />
+
           {/* Sprint 29 Batch 29.7 placeholder — per-customer access row
               with a "View permissions" deep-link that lands on
               29.2's `?focus_user=` surface. The locked testid strings
@@ -1043,6 +1074,445 @@ export function UserDetailPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// M2 P6 — read-only staff sections (GLOBAL view-first rule).
+//
+// Internal (non-exported) card components. Shared discipline:
+//   * defensive fetch — a 403/error renders NOTHING for the section
+//     (mirrors the 29.6 per-entity `.catch(() => null)` rule);
+//   * async-IIFE effect with a cancelled flag, all setState behind the
+//     await (never synchronously in the effect body);
+//   * zero edit controls — editing lives on /admin/users/:id/edit.
+// Labels reuse the existing `staff_admin.*` (common) and
+// `staff_credentials` namespaces; only the yes/no value labels are new.
+// ---------------------------------------------------------------------------
+
+function StaffProfileReadOnlyCard({ userId }: { userId: number }) {
+  const { t } = useTranslation("common");
+  const { t: tCred } = useTranslation("staff_credentials");
+  const [profile, setProfile] = useState<StaffProfileAdmin | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await getStaffProfile(userId);
+        if (!cancelled) setProfile(data);
+      } catch {
+        // 403 / error: render nothing for this section.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  if (profile === null) return null;
+  const yesNo = (value: boolean) =>
+    value ? tCred("detail.yes") : tCred("detail.no");
+  return (
+    <section
+      className="card"
+      data-testid="user-detail-staff-profile-card"
+      style={{ padding: "20px 22px", marginBottom: 16 }}
+    >
+      <div className="section-head" style={{ marginBottom: 8 }}>
+        <div>
+          <div className="section-head-title">
+            {t("staff_admin.profile_title")}
+          </div>
+          <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
+        </div>
+      </div>
+      <div className="detail-field-row">
+        <div className="detail-field-label">{t("staff_admin.field_phone")}</div>
+        <div
+          className={`detail-field-value${profile.phone ? "" : " muted-empty"}`}
+        >
+          {profile.phone || "—"}
+        </div>
+      </div>
+      <div className="detail-field-row">
+        <div className="detail-field-label">
+          {t("staff_admin.field_internal_note")}
+        </div>
+        <div
+          className={`detail-field-value${
+            profile.internal_note ? "" : " muted-empty"
+          }`}
+          style={{ whiteSpace: "pre-wrap" }}
+        >
+          {profile.internal_note || "—"}
+        </div>
+      </div>
+      <div className="detail-field-row">
+        <div className="detail-field-label">
+          {t("staff_admin.field_can_request_assignment")}
+        </div>
+        <div className="detail-field-value">
+          {yesNo(profile.can_request_assignment)}
+        </div>
+      </div>
+      <div className="detail-field-row">
+        <div className="detail-field-label">
+          {t("staff_admin.field_is_active")}
+        </div>
+        <div className="detail-field-value">
+          {profile.is_active ? (
+            <span className="cell-tag cell-tag-open">
+              <i />
+              {tCred("detail.yes")}
+            </span>
+          ) : (
+            <span className="cell-tag cell-tag-closed">
+              <i />
+              {tCred("detail.no")}
+            </span>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StaffBuildingsReadOnlyCard({ userId }: { userId: number }) {
+  const { t } = useTranslation("common");
+  const { t: tCred } = useTranslation("staff_credentials");
+  const [rows, setRows] = useState<BuildingStaffVisibilityAdmin[] | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await listStaffVisibility(userId);
+        if (!cancelled) setRows(response.results);
+      } catch {
+        // 403 / error: render nothing for this section.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  if (rows === null) return null;
+  return (
+    <section
+      className="card"
+      data-testid="user-detail-staff-buildings-card"
+      style={{ padding: "20px 22px", marginBottom: 16 }}
+    >
+      <div className="section-head" style={{ marginBottom: 8 }}>
+        <div>
+          <div className="section-head-title">
+            {t("staff_admin.visibility_title")}
+          </div>
+          <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <p className="muted small" style={{ padding: "6px 0" }}>
+          {t("staff_admin.visibility_no_rows")}
+        </p>
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              data-testid="user-detail-staff-building-row"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                borderTop: "1px solid var(--border)",
+                padding: "8px 2px",
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{row.building_name}</span>
+              <span className="cell-tag cell-tag-open">
+                <i />
+                {t(`staff_admin.level.${row.visibility_level.toLowerCase()}`)}
+              </span>
+              {row.can_request_assignment && (
+                <span className="muted small">
+                  {t("staff_admin.visibility_can_request_label")}
+                </span>
+              )}
+              {row.staff_completion_routes_to_customer && (
+                <span className="muted small">
+                  {t("staff_admin.routes_to_customer_label")}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function CredentialsReadOnlyCard({ userId }: { userId: number }) {
+  const { t: tCred } = useTranslation("staff_credentials");
+  const toast = useToast();
+  const [rows, setRows] = useState<StaffCredential[] | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await listCredentials(userId);
+        if (!cancelled) setRows(data);
+      } catch {
+        // 403 / error (e.g. BM viewer): render nothing for this section.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  if (rows === null) return null;
+
+  async function handleDownload(credential: StaffCredential) {
+    setDownloadingId(credential.id);
+    try {
+      await downloadCredentialDocument(userId, credential);
+    } catch (err) {
+      toast.push({
+        variant: "error",
+        title: tCred("customer.download_failed"),
+        description: getApiError(err),
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  return (
+    <section
+      className="card"
+      data-testid="user-detail-credentials-card"
+      style={{ padding: "20px 22px", marginBottom: 16 }}
+    >
+      <div className="section-head" style={{ marginBottom: 8 }}>
+        <div>
+          <div className="section-head-title">
+            {tCred("section.credentials_title")}
+          </div>
+          <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState
+          compact
+          title={tCred("section.empty_credentials_title")}
+          testId="user-detail-credentials-empty"
+        />
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {rows.map((credential) => (
+            <li
+              key={credential.id}
+              data-testid="user-detail-credential-row"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                borderTop: "1px solid var(--border)",
+                padding: "8px 2px",
+              }}
+            >
+              <span style={{ fontWeight: 600, minWidth: 140 }}>
+                {tCred(`type.${credential.credential_type}`)}
+              </span>
+              <span className="cell-tag cell-tag-open">
+                <i />
+                {tCred(`visibility.${credential.visibility_level}`)}
+              </span>
+              {credential.permit_number && (
+                <span className="muted small">{credential.permit_number}</span>
+              )}
+              <span className="muted small">
+                {credential.expiry_date
+                  ? tCred("summary.expires", { date: credential.expiry_date })
+                  : tCred("summary.no_expiry")}
+              </span>
+              {credential.has_document && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ padding: "1px 6px", fontSize: 11 }}
+                  onClick={() => {
+                    void handleDownload(credential);
+                  }}
+                  disabled={downloadingId === credential.id}
+                  data-testid="user-detail-credential-download"
+                >
+                  <Paperclip size={12} strokeWidth={2} />
+                  {downloadingId === credential.id
+                    ? tCred("field.downloading")
+                    : tCred("field.download")}
+                </button>
+              )}
+              {credential.grants.length > 0 && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    gap: 4,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {credential.grants.map((grant) => (
+                    <span key={grant.id} className="cell-tag cell-tag-open">
+                      {grant.customer_name}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function PropertiesReadOnlyCard({ userId }: { userId: number }) {
+  const { t: tCred } = useTranslation("staff_credentials");
+  const toast = useToast();
+  const [rows, setRows] = useState<CustomProfileProperty[] | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await listProperties(userId);
+        if (!cancelled) setRows(data);
+      } catch {
+        // 403 / error: render nothing for this section.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  if (rows === null) return null;
+
+  async function handleDownload(property: CustomProfileProperty) {
+    setDownloadingId(property.id);
+    try {
+      await downloadPropertyDocument(userId, property);
+    } catch (err) {
+      toast.push({
+        variant: "error",
+        title: tCred("customer.download_failed"),
+        description: getApiError(err),
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  return (
+    <section
+      className="card"
+      data-testid="user-detail-properties-card"
+      style={{ padding: "20px 22px", marginBottom: 16 }}
+    >
+      <div className="section-head" style={{ marginBottom: 8 }}>
+        <div>
+          <div className="section-head-title">
+            {tCred("section.properties_title")}
+          </div>
+          <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
+        </div>
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState
+          compact
+          title={tCred("section.empty_properties_title")}
+          testId="user-detail-properties-empty"
+        />
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {rows.map((property) => (
+            <li
+              key={property.id}
+              data-testid="user-detail-property-row"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                flexWrap: "wrap",
+                borderTop: "1px solid var(--border)",
+                padding: "8px 2px",
+              }}
+            >
+              <span style={{ fontWeight: 600, minWidth: 140 }}>
+                {property.name}
+              </span>
+              <span className="cell-tag cell-tag-open">
+                <i />
+                {tCred(`visibility.${property.visibility_level}`)}
+              </span>
+              <span
+                className="muted small"
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 260,
+                }}
+              >
+                {property.value}
+              </span>
+              {property.has_document && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={{ padding: "1px 6px", fontSize: 11 }}
+                  onClick={() => {
+                    void handleDownload(property);
+                  }}
+                  disabled={downloadingId === property.id}
+                  data-testid="user-detail-property-download"
+                >
+                  <Paperclip size={12} strokeWidth={2} />
+                  {downloadingId === property.id
+                    ? tCred("field.downloading")
+                    : tCred("field.download")}
+                </button>
+              )}
+              {property.grants.length > 0 && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    gap: 4,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {property.grants.map((grant) => (
+                    <span key={grant.id} className="cell-tag cell-tag-open">
+                      {grant.customer_name}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

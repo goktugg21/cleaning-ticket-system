@@ -56,7 +56,7 @@ export const DEMO_USERS: Record<string, DemoUser> = {
     password: DEMO_PASSWORD,
     role: "COMPANY_ADMIN",
     buildings: COMPANY_A_BUILDINGS,
-    fullName: "Ramazan Koçak",
+    fullName: "Ramazan Uğurlu",
     company: "A",
   },
   managerAll: {

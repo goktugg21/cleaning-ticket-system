@@ -10,6 +10,18 @@ from accounts.views_staff import (
     BuildingStaffVisibilityListCreateView,
     StaffProfileView,
 )
+from accounts.views_credentials import (
+    UserCredentialDetailView,
+    UserCredentialDownloadView,
+    UserCredentialGrantDeleteView,
+    UserCredentialGrantListCreateView,
+    UserCredentialListCreateView,
+    UserPropertyDetailView,
+    UserPropertyDownloadView,
+    UserPropertyGrantDeleteView,
+    UserPropertyGrantListCreateView,
+    UserPropertyListCreateView,
+)
 from accounts.views_permission_matrix import PermissionMatrixView
 from accounts.views_users import UserViewSet
 from config.health import liveness, readiness
@@ -68,6 +80,61 @@ urlpatterns = [
         "api/users/<int:user_id>/staff-visibility/<int:building_id>/",
         BuildingStaffVisibilityDetailView.as_view(),
         name="user-staff-visibility-detail",
+    ),
+    # M2 P3 — staff credentials + custom profile properties (SoT
+    # Addendum A.3). Same /api/users/<user_id>/ placement as the
+    # Sprint 24A staff-* admin views. The download routes are also the
+    # customer-facing document URLs surfaced in the ticket payload
+    # (resolver-gated; everything else is SA/PA management-only).
+    path(
+        "api/users/<int:user_id>/credentials/",
+        UserCredentialListCreateView.as_view(),
+        name="user-credentials",
+    ),
+    path(
+        "api/users/<int:user_id>/credentials/<int:pk>/",
+        UserCredentialDetailView.as_view(),
+        name="user-credential-detail",
+    ),
+    path(
+        "api/users/<int:user_id>/credentials/<int:pk>/download/",
+        UserCredentialDownloadView.as_view(),
+        name="user-credential-download",
+    ),
+    path(
+        "api/users/<int:user_id>/credentials/<int:pk>/grants/",
+        UserCredentialGrantListCreateView.as_view(),
+        name="user-credential-grants",
+    ),
+    path(
+        "api/users/<int:user_id>/credentials/<int:pk>/grants/<int:grant_id>/",
+        UserCredentialGrantDeleteView.as_view(),
+        name="user-credential-grant-detail",
+    ),
+    path(
+        "api/users/<int:user_id>/properties/",
+        UserPropertyListCreateView.as_view(),
+        name="user-properties",
+    ),
+    path(
+        "api/users/<int:user_id>/properties/<int:pk>/",
+        UserPropertyDetailView.as_view(),
+        name="user-property-detail",
+    ),
+    path(
+        "api/users/<int:user_id>/properties/<int:pk>/download/",
+        UserPropertyDownloadView.as_view(),
+        name="user-property-download",
+    ),
+    path(
+        "api/users/<int:user_id>/properties/<int:pk>/grants/",
+        UserPropertyGrantListCreateView.as_view(),
+        name="user-property-grants",
+    ),
+    path(
+        "api/users/<int:user_id>/properties/<int:pk>/grants/<int:grant_id>/",
+        UserPropertyGrantDeleteView.as_view(),
+        name="user-property-grant-detail",
     ),
     # Sprint 13C — provider/BM-scoped STAFF roster (Employees page
     # backend). Read-only LIST; admits BUILDING_MANAGER with a

@@ -292,6 +292,44 @@ class CanManageStaffMember(IsAuthenticatedAndActive):
         return _user_in_actor_company(actor, obj)
 
 
+class CanManageUserProperties(IsAuthenticatedAndActive):
+    """
+    M2 P3 — gate for the custom-profile-property admin endpoints under
+    `/api/users/<user_id>/properties/`.
+
+    Sibling of `CanManageStaffMember` (deliberately NOT a modification
+    of it), with two differences:
+
+      - the target may be ANY user: staff AND customer users carry
+        custom properties (SoT Addendum A.3.2), so there is no
+        role==STAFF object filter;
+      - COMPANY_ADMIN reaches targets via the same
+        `_user_in_actor_company` union, which already includes
+        CustomerUserMembership→customer→company, so customer users in
+        the admin's provider-company scope are reachable.
+
+    has_permission: SUPER_ADMIN or COMPANY_ADMIN passes; others 403.
+    Customer-side roles get NO access — these endpoints are a
+    management surface; the only customer-facing reads are the
+    resolver-gated ticket payload and document download.
+    """
+
+    def has_permission(self, request, view):
+        if not super().has_permission(request, view):
+            return False
+        return request.user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN)
+
+    def has_object_permission(self, request, view, obj):
+        actor = request.user
+        if actor.role == UserRole.SUPER_ADMIN:
+            return True
+        if actor.role != UserRole.COMPANY_ADMIN:
+            return False
+        from .scoping import _user_in_actor_company
+
+        return _user_in_actor_company(actor, obj)
+
+
 class CanManageCustomerSideUsers(IsAuthenticatedAndActive):
     """
     B4 — gate for the customer-user management endpoints that admits a

@@ -30,6 +30,7 @@
 - **Sprint 5** — Sub-tasks **frontend** (PR #85): grouped staff slots, sub-task CRUD, PA/SA auto-complete toggle, PII-safe customer view ✅ merged.
 - **Customer pricing — surface the service default price** (PR #86): dialog prefills unit price + VAT from the service default; default-price column (incl. inactive services); dropdown shows defaults ✅ merged.
 - **Sprint 6** — Recurring **calendar-tick** (PR #87): additive `PlannedOccurrence.is_ad_hoc` (migration 0004) + four idempotent per-date `RecurringJobViewSet` actions (skip-date / add-date / clear-date / calendar) + the month-grid calendar UI + customer/building dropdown swap + per-window pricing clarity. Back-compat with #77. **Follow-up fix in-flight:** bound `add-date` to `[start_date, end_date]` + cap the ad-hoc spawn at `end_date` (Codex P2) — push re-triggers CI; resolve the thread; merge on green.
+- **M1 — Notification & message center** (PR #90): in-app notifications feed + recipient-scoped REST + NotificationBell + /notifications page; 5-channel ticket message visibility + RESTRICTED directed messages through the single `filter_messages_visible_to` chokepoint; 3-channel Extra Work thread; EW lifecycle + message notifications ✅ merged.
 
 **Standing infra not yet done:** production deployment; CD (CI exists as PR checks); Sentry DSNs.
 
@@ -47,15 +48,15 @@ Backend already supports granting a building a customer user isn't in (`POST /ap
 
 ### M1 — Notification / message center (Ramazan #1 — his top pain)
 Messages on tickets / extra-work / meldingen get lost; nobody sees replies.
-- [ ] Backend: a notifications feed + per-message "directed-to" (personal/tagged) targeting; recon what already exists (notifications app) before building. Events: new message on a ticket / EW request / melding, and a personally-addressed message.
-- [ ] FE: a **top-right bell** + a **notifications page**; each item deep-links to the source (ticket/EW/melding). Personal/tagged messages surface to the addressee only.
+- [x] Backend: a notifications feed + per-message "directed-to" (personal/tagged) targeting; recon what already exists (notifications app) before building. Events: new message on a ticket / EW request / melding, and a personally-addressed message.
+- [x] FE: a **top-right bell** + a **notifications page**; each item deep-links to the source (ticket/EW/melding). Personal/tagged messages surface to the addressee only.
 
 ### M2 — User/staff profile: structured credentials + flexible custom properties + visibility (Ramazan #4, expanded)
 **Hybrid model (confirmed):**
-- [ ] **Structured, typed, compliance-aware credential fields** with built-in rules: **residence permit** (showable; when shown, only expiry date + ID number) · **EU national ID** (**HARD-BLOCKED from any customer — PA/SA only, never a customer-visible PDF**; enforced in code, not a toggle) · **certificates/VCA** (PDF, showable). Documents are **PDF**.
-- [ ] **Generic custom-property system** on **all** user profiles (staff + customer users): `property name / value / optional PDF attachment`, **add/remove** (e.g. age, salary, contract).
-- [ ] **Visibility model:** every property/document has a visibility level, **default most-restrictive (provider-only)**; salary-type defaults to **PA/SA-only**; visibility selectable **per-customer and per-staff** (who sees what). Visibility changes on sensitive fields are **audited**.
-- [ ] Customer-side view honours visibility + the customer permission gate; the EU-ID block is unconditional.
+- [x] **Structured, typed, compliance-aware credential fields** with built-in rules: **residence permit** (showable; when shown, only expiry date + ID number) · **EU national ID** (**HARD-BLOCKED from any customer — PA/SA only, never a customer-visible PDF**; enforced in code, not a toggle) · **certificates/VCA** (PDF, showable). Documents are **PDF**.
+- [x] **Generic custom-property system** on **all** user profiles (staff + customer users): `property name / value / optional PDF attachment`, **add/remove** (e.g. age, salary, contract).
+- [x] **Visibility model:** every property/document has a visibility level, **default most-restrictive (provider-only)**; salary-type defaults to **PA/SA-only**; visibility selectable **per-customer and per-staff** (who sees what). Visibility changes on sensitive fields are **audited**.
+- [x] Customer-side view honours visibility + the customer permission gate; the EU-ID block is unconditional.
 
 ### M3 — Navigation / IA (Ramazan #1-nav)
 - [ ] Move **Recurring Work** and the **customer price-quote-request** flow to live **under Extra Work** (sub-items), not as separate top-level / not performed directly in Extra Work.

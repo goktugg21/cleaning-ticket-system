@@ -82,7 +82,7 @@ from .diff import (
     serialize_value,
     snapshot_for_pre_save,
 )
-from .models import AuditAction, AuditLog
+from .models import AuditAction, AuditLog, AuditSeverity
 
 
 logger = logging.getLogger(__name__)
@@ -112,8 +112,12 @@ def _label(instance) -> str:
     return f"{meta.app_label}.{meta.object_name}"
 
 
-def _create_log(instance, action: str, changes: dict) -> None:
-    """Write one AuditLog row. Swallows all exceptions."""
+def _create_log(instance, action: str, changes: dict, *, severity=None) -> None:
+    """Write one AuditLog row. Swallows all exceptions.
+
+    M2 P3 — optional `severity` kwarg: the credential / property
+    handlers mark sensitive-visibility changes HIGH; every existing
+    caller omits it and keeps the model default (NORMAL)."""
     try:
         # Sprint 27F-B2 (G-B6): every audit row records the operator-supplied
         # reason (default "") + a JSON snapshot of the actor's role + scope
@@ -136,6 +140,7 @@ def _create_log(instance, action: str, changes: dict) -> None:
             request_id=context.get_current_request_id(),
             reason=context.get_current_reason(),
             actor_scope=actor_scope,
+            severity=severity or AuditSeverity.NORMAL,
         )
     except Exception:  # pragma: no cover — defensive; never fail the caller
         logger.exception(
@@ -870,6 +875,313 @@ def _on_planned_occurrence_post_save_update(sender, instance, created, **kwargs)
         )
 
 
+# ===========================================================================
+# M2 P3 — staff credentials, custom profile properties and their
+# per-customer share grants (SoT Addendum A.3; matrix H-10: every
+# permission / visibility change writes an AuditLog row).
+#
+# These models are NOT in the generic CRUD trio on purpose: the generic
+# diff engine would serialize the `document` FileField (a storage path).
+# Audit payloads must carry FILENAMES ONLY — never document bytes, never
+# storage paths — so the four models get hand-crafted handlers in the
+# BMA / BSV / CUM shape:
+#
+#   * StaffCredential — CREATE / DELETE rows + UPDATE diff over
+#     (visibility_level, document_customer_visible, permit_number,
+#     expiry_date). Severity HIGH when visibility_level or
+#     document_customer_visible changes (a sensitive-visibility change);
+#     NORMAL otherwise.
+#   * CustomProfileProperty — CREATE / DELETE rows + UPDATE diff over
+#     (visibility_level, name, value). HIGH when visibility_level
+#     changes; NORMAL otherwise.
+#   * CredentialCustomerVisibility / PropertyCustomerVisibility —
+#     CREATE / DELETE rows at HIGH (a per-customer share grant IS a
+#     sensitive-visibility change).
+# ===========================================================================
+_STAFF_CREDENTIAL_TRACKED_FIELDS = (
+    "visibility_level",
+    "document_customer_visible",
+    "permit_number",
+    "expiry_date",
+)
+_STAFF_CREDENTIAL_HIGH_FIELDS = ("visibility_level", "document_customer_visible")
+_PROFILE_PROPERTY_TRACKED_FIELDS = ("visibility_level", "name", "value")
+_PROFILE_PROPERTY_HIGH_FIELDS = ("visibility_level",)
+
+
+def _staff_credential_changes(credential, *, action: str) -> dict:
+    """CREATE / DELETE payload for a credential. Filenames only — the
+    `document` FieldFile (a storage path) is deliberately excluded."""
+    staff_user = getattr(
+        getattr(credential, "staff_profile", None), "user", None
+    )
+    payload = {
+        "staff_user_id": staff_user.id if staff_user else None,
+        "staff_user_email": getattr(staff_user, "email", None),
+        "credential_type": credential.credential_type,
+        "permit_number": credential.permit_number,
+        "expiry_date": serialize_value(credential.expiry_date),
+        "visibility_level": credential.visibility_level,
+        "document_customer_visible": credential.document_customer_visible,
+        "original_filename": credential.original_filename,
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _profile_property_changes(prop, *, action: str) -> dict:
+    """CREATE / DELETE payload for a custom property. Filenames only."""
+    owner = getattr(prop, "user", None)
+    payload = {
+        "user_id": owner.id if owner else None,
+        "user_email": getattr(owner, "email", None),
+        "name": prop.name,
+        "value": prop.value,
+        "visibility_level": prop.visibility_level,
+        "original_filename": prop.original_filename,
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _credential_grant_changes(grant, *, action: str) -> dict:
+    credential = getattr(grant, "credential", None)
+    staff_user = getattr(
+        getattr(credential, "staff_profile", None), "user", None
+    )
+    customer = getattr(grant, "customer", None)
+    payload = {
+        "credential_id": credential.id if credential else None,
+        "credential_type": getattr(credential, "credential_type", None),
+        "staff_user_email": getattr(staff_user, "email", None),
+        "customer_id": customer.id if customer else None,
+        "customer_name": getattr(customer, "name", None),
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _property_grant_changes(grant, *, action: str) -> dict:
+    prop = getattr(grant, "property", None)
+    owner = getattr(prop, "user", None)
+    customer = getattr(grant, "customer", None)
+    payload = {
+        "property_id": prop.id if prop else None,
+        "property_name": getattr(prop, "name", None),
+        "owner_user_email": getattr(owner, "email", None),
+        "customer_id": customer.id if customer else None,
+        "customer_name": getattr(customer, "name", None),
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _tracked_snapshot(model, instance, fields):
+    """Generic tracked-field pre_save snapshot (serialize_value because
+    expiry_date is a date)."""
+    if instance.pk is None:
+        return None
+    try:
+        previous = model.objects.get(pk=instance.pk)
+    except model.DoesNotExist:
+        return None
+    return {
+        field: serialize_value(getattr(previous, field)) for field in fields
+    }
+
+
+def _on_staff_credential_pre_save(sender, instance, **kwargs):
+    try:
+        snapshot = _tracked_snapshot(
+            sender, instance, _STAFF_CREDENTIAL_TRACKED_FIELDS
+        )
+        _state_map()[("accounts.StaffCredential", instance.pk)] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: StaffCredential pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_staff_credential_post_save(sender, instance, created, **kwargs):
+    try:
+        if created:
+            _create_log(
+                instance,
+                AuditAction.CREATE,
+                _staff_credential_changes(instance, action=AuditAction.CREATE),
+            )
+            return
+        snapshot = _state_map().pop(
+            ("accounts.StaffCredential", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _STAFF_CREDENTIAL_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        severity = (
+            AuditSeverity.HIGH
+            if any(f in diff for f in _STAFF_CREDENTIAL_HIGH_FIELDS)
+            else AuditSeverity.NORMAL
+        )
+        _create_log(instance, AuditAction.UPDATE, diff, severity=severity)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: StaffCredential post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_staff_credential_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _staff_credential_changes(instance, action=AuditAction.DELETE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: StaffCredential post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_profile_property_pre_save(sender, instance, **kwargs):
+    try:
+        snapshot = _tracked_snapshot(
+            sender, instance, _PROFILE_PROPERTY_TRACKED_FIELDS
+        )
+        _state_map()[("accounts.CustomProfileProperty", instance.pk)] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomProfileProperty pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_profile_property_post_save(sender, instance, created, **kwargs):
+    try:
+        if created:
+            _create_log(
+                instance,
+                AuditAction.CREATE,
+                _profile_property_changes(instance, action=AuditAction.CREATE),
+            )
+            return
+        snapshot = _state_map().pop(
+            ("accounts.CustomProfileProperty", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _PROFILE_PROPERTY_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        severity = (
+            AuditSeverity.HIGH
+            if any(f in diff for f in _PROFILE_PROPERTY_HIGH_FIELDS)
+            else AuditSeverity.NORMAL
+        )
+        _create_log(instance, AuditAction.UPDATE, diff, severity=severity)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomProfileProperty post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_profile_property_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _profile_property_changes(instance, action=AuditAction.DELETE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CustomProfileProperty post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_credential_grant_post_save(sender, instance, created, **kwargs):
+    if not created:
+        return  # No editable fields; only CREATE / DELETE exist.
+    try:
+        _create_log(
+            instance,
+            AuditAction.CREATE,
+            _credential_grant_changes(instance, action=AuditAction.CREATE),
+            severity=AuditSeverity.HIGH,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CredentialCustomerVisibility post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_credential_grant_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _credential_grant_changes(instance, action=AuditAction.DELETE),
+            severity=AuditSeverity.HIGH,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: CredentialCustomerVisibility post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_property_grant_post_save(sender, instance, created, **kwargs):
+    if not created:
+        return  # No editable fields; only CREATE / DELETE exist.
+    try:
+        _create_log(
+            instance,
+            AuditAction.CREATE,
+            _property_grant_changes(instance, action=AuditAction.CREATE),
+            severity=AuditSeverity.HIGH,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: PropertyCustomerVisibility post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_property_grant_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _property_grant_changes(instance, action=AuditAction.DELETE),
+            severity=AuditSeverity.HIGH,
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: PropertyCustomerVisibility post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _connect():
     User = _user_model()
     # Lazy import: StaffProfile lives in accounts and would create a
@@ -1147,6 +1459,77 @@ def _connect():
         sender=PlannedOccurrence,
         weak=False,
         dispatch_uid="audit:po:post_update:PlannedOccurrence",
+    )
+
+    # M2 P3 — staff credentials / custom profile properties / share
+    # grants (lazy import like StaffProfile above: accounts pulls audit
+    # transitively, so a top-level import would cycle at app load).
+    from accounts.models import (
+        CredentialCustomerVisibility,
+        CustomProfileProperty,
+        PropertyCustomerVisibility,
+        StaffCredential,
+    )
+
+    pre_save.connect(
+        _on_staff_credential_pre_save,
+        sender=StaffCredential,
+        weak=False,
+        dispatch_uid="audit:credential:pre:StaffCredential",
+    )
+    post_save.connect(
+        _on_staff_credential_post_save,
+        sender=StaffCredential,
+        weak=False,
+        dispatch_uid="audit:credential:post:StaffCredential",
+    )
+    post_delete.connect(
+        _on_staff_credential_post_delete,
+        sender=StaffCredential,
+        weak=False,
+        dispatch_uid="audit:credential:del:StaffCredential",
+    )
+    pre_save.connect(
+        _on_profile_property_pre_save,
+        sender=CustomProfileProperty,
+        weak=False,
+        dispatch_uid="audit:property:pre:CustomProfileProperty",
+    )
+    post_save.connect(
+        _on_profile_property_post_save,
+        sender=CustomProfileProperty,
+        weak=False,
+        dispatch_uid="audit:property:post:CustomProfileProperty",
+    )
+    post_delete.connect(
+        _on_profile_property_post_delete,
+        sender=CustomProfileProperty,
+        weak=False,
+        dispatch_uid="audit:property:del:CustomProfileProperty",
+    )
+    post_save.connect(
+        _on_credential_grant_post_save,
+        sender=CredentialCustomerVisibility,
+        weak=False,
+        dispatch_uid="audit:credential_grant:post:CredentialCustomerVisibility",
+    )
+    post_delete.connect(
+        _on_credential_grant_post_delete,
+        sender=CredentialCustomerVisibility,
+        weak=False,
+        dispatch_uid="audit:credential_grant:del:CredentialCustomerVisibility",
+    )
+    post_save.connect(
+        _on_property_grant_post_save,
+        sender=PropertyCustomerVisibility,
+        weak=False,
+        dispatch_uid="audit:property_grant:post:PropertyCustomerVisibility",
+    )
+    post_delete.connect(
+        _on_property_grant_post_delete,
+        sender=PropertyCustomerVisibility,
+        weak=False,
+        dispatch_uid="audit:property_grant:del:PropertyCustomerVisibility",
     )
 
 

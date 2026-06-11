@@ -5,6 +5,7 @@ import {
   ArrowRightLeft,
   ChevronLeft,
   Clock,
+  Download,
   MapPin,
   MessageSquare,
   Paperclip,
@@ -24,6 +25,7 @@ import {
   listStaffAssignmentRequests,
 } from "../api/admin";
 import { getMessageRecipients } from "../api/notifications";
+import { downloadDocumentFromUrl } from "../api/staffCredentials";
 import { formatDateTime } from "../lib/intl";
 import { StaffSlotEditor } from "./tickets/StaffSlotEditor";
 import { SubTaskReadOnly } from "./tickets/SubTaskReadOnly";
@@ -31,6 +33,7 @@ import { ResponsibleManagersSection } from "./tickets/ResponsibleManagersSection
 import { TicketScheduleCard } from "./tickets/TicketScheduleCard";
 import type {
   AssignableManager,
+  AssignedStaffNamedEntry,
   Contact,
   MessageRecipient,
   PaginatedResponse,
@@ -55,6 +58,7 @@ import {
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
+import { useToast } from "../components/ToastProvider";
 import { RouteBadge } from "../components/RouteBadge";
 import { UnifiedTimeline } from "../components/UnifiedTimeline";
 import { SLABadge } from "../components/sla/SLABadge";
@@ -273,6 +277,11 @@ export function TicketDetailPage() {
   const navigate = useNavigate();
   const { me } = useAuth();
   const { t } = useTranslation(["ticket_detail", "common"]);
+  // M2 P5 — type / customer-facing labels for the resolver-gated
+  // credential summaries on assigned-staff entries (reuses the P4
+  // namespace; keys are NOT duplicated here).
+  const { t: tCred } = useTranslation("staff_credentials");
+  const toast = useToast();
   const slaLabel = useSLALabel();
   const formatSLATime = useFormatSLATime();
 
@@ -500,6 +509,11 @@ export function TicketDetailPage() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
+  // M2 P5 — busy marker for a staff credential/property document
+  // download (keyed by document_url; one in flight at a time).
+  const [downloadingStaffDocUrl, setDownloadingStaffDocUrl] = useState<
+    string | null
+  >(null);
 
   const [assignableManagers, setAssignableManagers] = useState<
     AssignableManager[]
@@ -1139,6 +1153,25 @@ export function TicketDetailPage() {
       setError(getApiError(err));
     } finally {
       setDownloadingAttachmentId(null);
+    }
+  }
+
+  // M2 P5 — download a staff credential / property document from the
+  // `document_url` the customer-facing assigned-staff payload carries.
+  // Failures surface as a toast (the section is small; an inline page
+  // error banner would be disproportionate).
+  async function downloadStaffDocument(documentUrl: string, filename: string) {
+    setDownloadingStaffDocUrl(documentUrl);
+    try {
+      await downloadDocumentFromUrl(documentUrl, filename);
+    } catch (err) {
+      toast.push({
+        variant: "error",
+        title: tCred("customer.download_failed"),
+        description: getApiError(err),
+      });
+    } finally {
+      setDownloadingStaffDocUrl(null);
     }
   }
 
@@ -1895,15 +1928,19 @@ export function TicketDetailPage() {
                         </li>
                       );
                     }
-                    const named = entry as {
-                      id: number;
-                      full_name?: string;
-                      email?: string;
-                      phone?: string;
-                    };
+                    const named = entry as AssignedStaffNamedEntry;
                     const displayName =
                       named.full_name ||
                       (named.email ? named.email.split("@")[0] : "—");
+                    // M2 P5 — resolver-gated credential / property
+                    // summaries. Present ONLY for CUSTOMER_USER viewers
+                    // with per-customer grants; provider viewers (and
+                    // ungranted customers) get no arrays and render a
+                    // byte-identical block.
+                    const credentials = named.credentials ?? [];
+                    const properties = named.properties ?? [];
+                    const hasShared =
+                      credentials.length > 0 || properties.length > 0;
                     return (
                       <li
                         key={named.id}
@@ -1923,6 +1960,136 @@ export function TicketDetailPage() {
                             {named.email ? ` · ${named.email}` : ""}
                             {named.phone ? ` · ${named.phone}` : ""}
                           </span>
+                          {hasShared && (
+                            <div
+                              data-testid="assigned-staff-credentials"
+                              style={{
+                                marginTop: 6,
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: 4,
+                              }}
+                            >
+                              {credentials.length > 0 && (
+                                <span
+                                  className="muted small"
+                                  style={{
+                                    fontSize: 10,
+                                    textTransform: "uppercase",
+                                    letterSpacing: 0.4,
+                                  }}
+                                >
+                                  {tCred("customer.credentials_title")}
+                                </span>
+                              )}
+                              {credentials.map((credential, credIndex) => (
+                                <div
+                                  key={`cred-${credIndex}`}
+                                  className="muted small"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    flexWrap: "wrap",
+                                  }}
+                                  data-testid="assigned-staff-credential-row"
+                                >
+                                  <span style={{ fontWeight: 600 }}>
+                                    {tCred(`type.${credential.type}`)}
+                                  </span>
+                                  {credential.permit_number && (
+                                    <span>{credential.permit_number}</span>
+                                  )}
+                                  {credential.expiry_date && (
+                                    <span>
+                                      {tCred("customer.expires_label", {
+                                        date: credential.expiry_date,
+                                      })}
+                                    </span>
+                                  )}
+                                  {credential.document_url && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      style={{ padding: "1px 6px", fontSize: 11 }}
+                                      onClick={() =>
+                                        downloadStaffDocument(
+                                          credential.document_url ?? "",
+                                          `${credential.type.toLowerCase()}.pdf`,
+                                        )
+                                      }
+                                      disabled={
+                                        downloadingStaffDocUrl ===
+                                        credential.document_url
+                                      }
+                                      data-testid="assigned-staff-credential-download"
+                                    >
+                                      <Download size={12} strokeWidth={2} />
+                                      {downloadingStaffDocUrl ===
+                                      credential.document_url
+                                        ? tCred("field.downloading")
+                                        : tCred("customer.download_document")}
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                              {properties.length > 0 && (
+                                <span
+                                  className="muted small"
+                                  style={{
+                                    fontSize: 10,
+                                    textTransform: "uppercase",
+                                    letterSpacing: 0.4,
+                                    marginTop: credentials.length > 0 ? 4 : 0,
+                                  }}
+                                >
+                                  {tCred("customer.properties_title")}
+                                </span>
+                              )}
+                              {properties.map((property, propIndex) => (
+                                <div
+                                  key={`prop-${propIndex}`}
+                                  className="muted small"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    flexWrap: "wrap",
+                                  }}
+                                  data-testid="assigned-staff-property-row"
+                                >
+                                  <span style={{ fontWeight: 600 }}>
+                                    {property.name}:
+                                  </span>
+                                  <span>{property.value}</span>
+                                  {property.document_url && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-ghost btn-sm"
+                                      style={{ padding: "1px 6px", fontSize: 11 }}
+                                      onClick={() =>
+                                        downloadStaffDocument(
+                                          property.document_url ?? "",
+                                          `${property.name}.pdf`,
+                                        )
+                                      }
+                                      disabled={
+                                        downloadingStaffDocUrl ===
+                                        property.document_url
+                                      }
+                                      data-testid="assigned-staff-property-download"
+                                    >
+                                      <Download size={12} strokeWidth={2} />
+                                      {downloadingStaffDocUrl ===
+                                      property.document_url
+                                        ? tCred("field.downloading")
+                                        : tCred("customer.download_document")}
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </li>
                     );

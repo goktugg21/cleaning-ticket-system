@@ -31,6 +31,8 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { StaffCredentialsSection } from "./StaffCredentialsSection";
+import { UserPropertiesSection } from "./UserPropertiesSection";
 
 interface UserUpdatePayload {
   full_name: string;
@@ -367,6 +369,22 @@ export function UserFormPage() {
               canEdit={!isSelf}
             />
           )}
+
+          {/* M2 P4 (SoT Addendum A.3) — credentials are STAFF-only
+              (residence permit / EU national ID / VCA on the staff
+              profile); custom properties exist on ANY user. Both use
+              the same viewer gate as the Sprint 24A staff editors
+              above: the route already restricts this page to provider
+              admins, the backend company-scopes the target, and
+              canEdit mirrors the !isSelf rule — no new role checks. */}
+          {user.role === "STAFF" && (
+            <StaffCredentialsSection userId={numericId} canEdit={!isSelf} />
+          )}
+          <UserPropertiesSection
+            userId={numericId}
+            targetIsStaff={user.role === "STAFF"}
+            canEdit={!isSelf}
+          />
 
           <section className="card" style={{ marginTop: 16, padding: "20px 22px" }}>
             <h3 className="section-title">{t("user_form.memberships_title")}</h3>

@@ -943,7 +943,98 @@ def _assigned_staff_payload(ticket, viewer):
         if show_phone:
             profile = getattr(user, "staff_profile", None)
             entry["phone"] = profile.phone if profile else ""
+        if is_customer:
+            # M2 P3 (SoT Addendum A.3) — CUSTOMER_USER viewers ONLY: the
+            # resolver-gated credential / property summary for each
+            # assigned staff member, in the context of the ticket's
+            # customer. Provider viewers get NO new keys — their payload
+            # is byte-identical to pre-M2. The anonymous-collapse early
+            # return above is untouched, so a fully-redacted roster never
+            # exposes credentials either.
+            entry["credentials"] = _staff_credentials_payload_for_customer(
+                user, viewer, customer
+            )
+            entry["properties"] = _staff_properties_payload_for_customer(
+                user, viewer, customer
+            )
         out.append(entry)
+    return out
+
+
+def _staff_credentials_payload_for_customer(staff_user, viewer, customer):
+    """M2 P3 — credential summary for a customer viewer, filtered by the
+    accounts.visibility resolver for the CONTEXT customer.
+
+    Shapes (per SoT A.3.1):
+      RESIDENCE_PERMIT -> {type, permit_number, expiry_date,
+                           document_url? (iff the photocopy rule passes)}
+      VCA              -> {type, expiry_date, document_url?}
+      EU_NATIONAL_ID   -> can never appear. The resolver guarantees it
+                          (the model pins EU-ID rows to PA_SA_ONLY); the
+                          exclude below is belt-and-suspenders per the
+                          A.3.1 compliance hard block.
+    """
+    from accounts.models import StaffCredential
+    from accounts.visibility import (
+        credential_document_visible_to_user,
+        filter_credentials_visible_to,
+    )
+
+    profile = getattr(staff_user, "staff_profile", None)
+    if profile is None:
+        return []
+    visible = filter_credentials_visible_to(
+        profile.credentials.all(), viewer, customer
+    ).exclude(credential_type=StaffCredential.CredentialType.EU_NATIONAL_ID)
+    out = []
+    for credential in visible:
+        item = {
+            "type": credential.credential_type,
+            "expiry_date": (
+                credential.expiry_date.isoformat()
+                if credential.expiry_date
+                else None
+            ),
+        }
+        if (
+            credential.credential_type
+            == StaffCredential.CredentialType.RESIDENCE_PERMIT
+        ):
+            item["permit_number"] = credential.permit_number
+        if credential.document and credential_document_visible_to_user(
+            credential, viewer, customer
+        ):
+            item["document_url"] = reverse(
+                "user-credential-download",
+                kwargs={"user_id": staff_user.id, "pk": credential.id},
+            )
+        out.append(item)
+    return out
+
+
+def _staff_properties_payload_for_customer(staff_user, viewer, customer):
+    """M2 P3 — custom-property summary for a customer viewer, filtered
+    by the accounts.visibility resolver for the CONTEXT customer.
+    Shape: {name, value, document_url?}."""
+    from accounts.visibility import (
+        filter_properties_visible_to,
+        property_document_visible_to_user,
+    )
+
+    visible = filter_properties_visible_to(
+        staff_user.profile_properties.all(), viewer, customer
+    )
+    out = []
+    for prop in visible:
+        item = {"name": prop.name, "value": prop.value}
+        if prop.document and property_document_visible_to_user(
+            prop, viewer, customer
+        ):
+            item["document_url"] = reverse(
+                "user-property-download",
+                kwargs={"user_id": staff_user.id, "pk": prop.id},
+            )
+        out.append(item)
     return out
 
 

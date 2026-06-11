@@ -11,6 +11,7 @@ import nlReports from "./nl/reports.json";
 import nlExtraWork from "./nl/extra_work.json";
 import nlPlannedWork from "./nl/planned_work.json";
 import nlStaffSlots from "./nl/staff_slots.json";
+import nlStaffCredentials from "./nl/staff_credentials.json";
 import enCommon from "./en/common.json";
 import enLogin from "./en/login.json";
 import enSettings from "./en/settings.json";
@@ -21,6 +22,7 @@ import enReports from "./en/reports.json";
 import enExtraWork from "./en/extra_work.json";
 import enPlannedWork from "./en/planned_work.json";
 import enStaffSlots from "./en/staff_slots.json";
+import enStaffCredentials from "./en/staff_credentials.json";
 
 // Default language is "nl" so unauthenticated routes (Login) render in Dutch.
 // Once the user is authenticated, useLanguageSync re-fires changeLanguage
@@ -39,6 +41,7 @@ i18n.use(initReactI18next).init({
       extra_work: nlExtraWork,
       planned_work: nlPlannedWork,
       staff_slots: nlStaffSlots,
+      staff_credentials: nlStaffCredentials,
     },
     en: {
       common: enCommon,
@@ -51,6 +54,7 @@ i18n.use(initReactI18next).init({
       extra_work: enExtraWork,
       planned_work: enPlannedWork,
       staff_slots: enStaffSlots,
+      staff_credentials: enStaffCredentials,
     },
   },
   lng: "nl",
@@ -67,6 +71,7 @@ i18n.use(initReactI18next).init({
     "extra_work",
     "planned_work",
     "staff_slots",
+    "staff_credentials",
   ],
   interpolation: {
     escapeValue: false,

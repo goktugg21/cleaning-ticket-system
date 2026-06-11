@@ -260,14 +260,42 @@ export interface TicketConvertToExtraWorkResponse {
 // it to a CUSTOMER_USER; if every flag is off the payload
 // collapses to a single anonymous-label entry the UI translates
 // via the `label_key` i18n key.
+// M2 P5 — resolver-gated credential / property summaries the backend
+// attaches to NAMED assigned-staff entries for CUSTOMER_USER viewers
+// ONLY (tickets/serializers.py `_staff_credentials_payload_for_customer`).
+// Both arrays are OPTIONAL: provider viewers never receive the keys, so
+// the FE must render nothing when they are absent. EU_NATIONAL_ID can
+// never appear (resolver + hard exclude on the backend).
+export interface AssignedStaffCredential {
+  type: "RESIDENCE_PERMIT" | "VCA";
+  expiry_date: string | null;
+  // RESIDENCE_PERMIT only.
+  permit_number?: string;
+  // Present iff the document sub-rule passes (e.g. the residence-permit
+  // photocopy flag). A reverse() path starting "/api/..." — strip the
+  // prefix before calling through the axios client (its baseURL already
+  // ends in /api); use downloadDocumentFromUrl in api/staffCredentials.
+  document_url?: string;
+}
+
+export interface AssignedStaffProperty {
+  name: string;
+  value: string;
+  document_url?: string;
+}
+
+export interface AssignedStaffNamedEntry {
+  id: number;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  anonymous?: false;
+  credentials?: AssignedStaffCredential[];
+  properties?: AssignedStaffProperty[];
+}
+
 export type AssignedStaffEntry =
-  | {
-      id: number;
-      full_name?: string;
-      email?: string;
-      phone?: string;
-      anonymous?: false;
-    }
+  | AssignedStaffNamedEntry
   | { anonymous: true; label_key: string };
 
 // Sprint 28 Batch 15.4 — ticket "spawned from extra work" anchor.
