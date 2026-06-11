@@ -218,7 +218,7 @@ COMPANIES = [
         },
         "company_admin": {
             "email": "ramazan-admin-osius@b-amsterdam.demo",
-            "full_name": "Ramazan Koçak",
+            "full_name": "Ramazan Uğurlu",
             "language": "en",
         },
         "building_managers": [
