@@ -158,6 +158,20 @@ async function downloadToFile(url: string, filename: string): Promise<void> {
   URL.revokeObjectURL(blobUrl);
 }
 
+/** M2 P5 — download from a backend-emitted `document_url`. The ticket
+ *  payload carries Django reverse() paths beginning "/api/..." while
+ *  the axios baseURL already ends in "/api" — strip the prefix so the
+ *  request does not become /api/api/... . */
+export async function downloadDocumentFromUrl(
+  documentUrl: string,
+  filename = "document.pdf",
+): Promise<void> {
+  const path = documentUrl.startsWith("/api/")
+    ? documentUrl.slice("/api".length)
+    : documentUrl;
+  await downloadToFile(path, filename);
+}
+
 // ---------------------------------------------------------------------------
 // Credentials (STAFF targets only)
 // ---------------------------------------------------------------------------
