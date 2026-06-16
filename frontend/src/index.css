@@ -799,6 +799,17 @@ p { line-height: 1.6; }
 }
 .qa-role-pill.muted { background: rgba(15,42,34,0.05); color: var(--text-2); }
 .qa-role-pill.muted::before { display: none; }
+.qa-gate { margin-top: 10px; margin-bottom: 8px; }
+.qa-gate-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.qa-gate-row { display: flex; align-items: center; gap: 8px; }
+.qa-gate-row .login-field-input { flex: 1; }
+.qa-gate-btn { width: auto; padding-left: 16px; padding-right: 16px; }
 
 .login-divider {
   display: flex;

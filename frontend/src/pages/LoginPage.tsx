@@ -18,6 +18,12 @@ const SHOW_DEMO_USERS = import.meta.env.VITE_DEMO_MODE === "true";
 
 const DEMO_PASSWORD = "Demo12345!";
 
+// Client-side gate for the demo quick-fill cards: a THIN barrier for the
+// public dev/test box only. Compiled into the bundle (weak by design), it
+// lives entirely inside the SHOW_DEMO_USERS branch, and production builds
+// set VITE_DEMO_MODE=false (cards off), so it never reaches prod.
+const DEMO_UNLOCK_PASSWORD = "Goktug999!!";
+
 interface DemoUser {
   id: string;
   email: string;
@@ -192,6 +198,10 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedDemo, setSelectedDemo] = useState<string | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
+  const [demoUnlocked, setDemoUnlocked] = useState(false);
+  const [demoGateInput, setDemoGateInput] = useState("");
+  const [demoGateError, setDemoGateError] = useState("");
+  const [pendingDemoUser, setPendingDemoUser] = useState<DemoUser | null>(null);
 
   useEffect(() => {
     if (searchParams.get("reset") === "ok") {
@@ -209,12 +219,35 @@ export function LoginPage() {
 
   if (me) return <Navigate to="/" replace />;
 
-  function applyDemoUser(user: DemoUser) {
+  function fillFromDemoUser(user: DemoUser) {
     setEmail(user.email);
     setPassword(user.password);
     setSelectedDemo(user.id);
     setError("");
     setInfo("");
+  }
+
+  function applyDemoUser(user: DemoUser) {
+    if (!demoUnlocked) {
+      setPendingDemoUser(user);
+      setDemoGateInput("");
+      setDemoGateError("");
+      return;
+    }
+    fillFromDemoUser(user);
+  }
+
+  function submitDemoGate() {
+    if (demoGateInput !== DEMO_UNLOCK_PASSWORD) {
+      setDemoGateError(t("demo_gate_error"));
+      return;
+    }
+    setDemoUnlocked(true);
+    setDemoGateError("");
+    const user = pendingDemoUser;
+    setPendingDemoUser(null);
+    setDemoGateInput("");
+    if (user) fillFromDemoUser(user);
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -288,8 +321,45 @@ export function LoginPage() {
             <div className="qa-section" data-testid="demo-cards">
               <div className="qa-label">{t("demo_label")}</div>
               <div className="qa-hint">
-                {t("demo_credentials_hint", { password: DEMO_PASSWORD })}
+                {demoUnlocked
+                  ? t("demo_credentials_hint", { password: DEMO_PASSWORD })
+                  : t("demo_gate_hint")}
               </div>
+
+              {!demoUnlocked && pendingDemoUser && (
+                <div className="qa-gate" data-testid="demo-gate">
+                  <label className="qa-gate-label" htmlFor="demo-gate-input">
+                    {t("demo_gate_label", { name: pendingDemoUser.name })}
+                  </label>
+                  <div className="qa-gate-row">
+                    <input
+                      id="demo-gate-input"
+                      type="password"
+                      className="login-field-input"
+                      autoFocus
+                      value={demoGateInput}
+                      onChange={(e) => setDemoGateInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); submitDemoGate(); }
+                      }}
+                      placeholder={t("demo_gate_placeholder")}
+                    />
+                    <button type="button" className="login-submit qa-gate-btn" onClick={submitDemoGate}>
+                      {t("demo_gate_submit")}
+                    </button>
+                    <button
+                      type="button"
+                      className="login-field-link"
+                      onClick={() => { setPendingDemoUser(null); setDemoGateInput(""); setDemoGateError(""); }}
+                    >
+                      {t("demo_gate_cancel")}
+                    </button>
+                  </div>
+                  {demoGateError && (
+                    <div className="alert-error login-error" role="alert">{demoGateError}</div>
+                  )}
+                </div>
+              )}
 
               <div
                 className="qa-company-label"
