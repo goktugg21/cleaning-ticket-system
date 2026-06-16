@@ -31,3 +31,11 @@ backups/
 
 # Claude Code agent metadata
 .claude/
+
+# Local working files — never committed
+# NTFS "downloaded-from-internet" ADS sidecars. WSL maps the ADS colon
+# to Unicode U+F03A, so a literal `*:Zone.Identifier` (ASCII colon)
+# never matches; the suffix wildcard does.
+*Zone.Identifier
+docs/transkript*.txt
+docs/**/*_2026-06-05.md
