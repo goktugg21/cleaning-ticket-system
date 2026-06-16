@@ -625,6 +625,12 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "final_subtotal_amount",
             "final_vat_amount",
             "final_total_amount",
+            # M4 — billing month / invoice run. Provider-only (stripped for
+            # CUSTOMER_USER in to_representation); read-only this commit,
+            # provider write lands in 2b.
+            "invoice_date",
+            "is_invoiced",
+            "invoiced_at",
             # Bookkeeping.
             "created_by",
             "created_by_email",
@@ -653,6 +659,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "final_subtotal_amount",
             "final_vat_amount",
             "final_total_amount",
+            "invoice_date",
+            "is_invoiced",
+            "invoiced_at",
             "created_by",
             "created_by_email",
             "requested_at",
@@ -669,6 +678,9 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         "override_by",
         "override_reason",
         "override_at",
+        "invoice_date",
+        "is_invoiced",
+        "invoiced_at",
     )
 
     def get_pricing_line_items(self, obj):
