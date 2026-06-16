@@ -207,6 +207,19 @@ export default function App() {
               </ExtraWorkRoute>
             }
           />
+          {/* M3 (SoT Addendum A.5) — dedicated quote-request page.
+              Defined ABOVE /extra-work/:id; React Router v6 ranks
+              static segments over dynamic params anyway, but the
+              explicit ordering keeps the intent obvious. Same gate as
+              /extra-work/new. */}
+          <Route
+            path="/extra-work/request-quote"
+            element={
+              <ExtraWorkRoute>
+                <CreateExtraWorkPage intentMode="quote" />
+              </ExtraWorkRoute>
+            }
+          />
           <Route
             path="/extra-work/:id"
             element={
