@@ -22,6 +22,7 @@ Hierarchy rules (Sprint 3.6):
 """
 from __future__ import annotations
 
+import calendar
 from datetime import date as date_type
 from decimal import Decimal
 from typing import Optional
@@ -34,6 +35,7 @@ from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
 from customers.models import Customer, CustomerUserMembership
+from extra_work.billing import billing_month, build_ticket_map, is_earned
 from extra_work.models import ExtraWorkStatus
 from tickets.models import Ticket, TicketStatus, TicketType
 
@@ -508,14 +510,52 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
     scope_building_raw = _first_param(query_params, "building", "building_id")
     scope = resolve_scope(actor, scope_company_raw, scope_building_raw)
 
-    from_date, to_date = parse_date_range(
-        query_params.get("from"), query_params.get("to")
-    )
-    bound_lo, bound_hi = date_range_to_aware_bounds(from_date, to_date)
+    billing_period_raw = query_params.get("billing_period")
+    invoice_status_raw = query_params.get("invoice_status")
 
-    ew_qs = extra_work_for_scope(actor, scope).filter(
-        requested_at__gte=bound_lo, requested_at__lt=bound_hi
-    )
+    if billing_period_raw:
+        # M4 billing-month mode: anchor on COALESCE(invoice_date,
+        # spawned-ticket completion date) via extra_work.billing — the
+        # SAME logic the invoice run and the EW list filter use —
+        # restricted to EARNED EW. Bypasses the requested_at window; the
+        # payload period reflects the billing month so the CSV/PDF
+        # filenames + headers track it.
+        try:
+            _yr, _mo = billing_period_raw.split("-")
+            year, month = int(_yr), int(_mo)
+            if not (1 <= month <= 12):
+                raise ValueError
+        except (ValueError, AttributeError):
+            raise ValidationError({"billing_period": "Expected YYYY-MM."})
+
+        from_date = date_type(year, month, 1)
+        to_date = date_type(year, month, calendar.monthrange(year, month)[1])
+
+        base_qs = extra_work_for_scope(actor, scope)
+        _ew_list = list(base_qs)
+        _ticket_map = build_ticket_map([e.id for e in _ew_list])
+
+        def _bills_in_month(e):
+            t = _ticket_map.get(e.id)
+            if not is_earned(t) or billing_month(e, t) != (year, month):
+                return False
+            if invoice_status_raw == "invoiced":
+                return e.is_invoiced
+            if invoice_status_raw == "completed":
+                return not e.is_invoiced
+            return True
+
+        ew_qs = base_qs.filter(
+            id__in=[e.id for e in _ew_list if _bills_in_month(e)]
+        )
+    else:
+        from_date, to_date = parse_date_range(
+            query_params.get("from"), query_params.get("to")
+        )
+        bound_lo, bound_hi = date_range_to_aware_bounds(from_date, to_date)
+        ew_qs = extra_work_for_scope(actor, scope).filter(
+            requested_at__gte=bound_lo, requested_at__lt=bound_hi
+        )
 
     # One spawned operational ticket per EW (linked via
     # Ticket.extra_work_request). Map ew_id -> ticket so the classifier
