@@ -25,6 +25,8 @@ import type {
   ExtraWorkStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { isProviderManagementRole } from "../auth/permissions";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -109,6 +111,11 @@ function KpiCard({
 
 export function ExtraWorkListPage() {
   const { t } = useTranslation(["extra_work", "common"]);
+  const { me } = useAuth();
+  // Provider-only: the billing-month picker, invoice-status filter, and the
+  // invoiced column. The backend redacts the billing fields for CUSTOMER_USER
+  // anyway; this also hides the controls from them.
+  const isProvider = isProviderManagementRole(me?.role);
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -119,12 +126,23 @@ export function ExtraWorkListPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
 
+  // Server-side filters (M4): these drive the 2d list endpoint
+  // (?billing_period / ?invoice_status). Search / status / category stay
+  // client-side. "" = no billing-month filter.
+  const [billingMonth, setBillingMonth] = useState("");
+  const [invoiceStatus, setInvoiceStatus] = useState<
+    "ALL" | "completed" | "invoiced"
+  >("ALL");
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setError("");
       try {
-        const response = await listExtraWork();
+        const response = await listExtraWork({
+          billing_period: billingMonth || undefined,
+          invoice_status: invoiceStatus === "ALL" ? undefined : invoiceStatus,
+        });
         if (!cancelled) setRows(response.results);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
@@ -136,7 +154,7 @@ export function ExtraWorkListPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [billingMonth, invoiceStatus]);
 
   // KPI strip — computed from the full loaded set (not the filtered
   // view) so the operator always sees the same headline numbers
@@ -295,6 +313,62 @@ export function ExtraWorkListPage() {
             )}
           </select>
         </div>
+        {isProvider && (
+          <>
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("list.filter_billing_month")}
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  gap: 6,
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  className="filter-control"
+                  type="month"
+                  value={billingMonth}
+                  onChange={(event) => setBillingMonth(event.target.value)}
+                  data-testid="extra-work-list-billing-month"
+                />
+                {billingMonth && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setBillingMonth("")}
+                  >
+                    {t("list.filter_billing_month_clear")}
+                  </button>
+                )}
+              </span>
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("list.filter_invoice_status")}
+              </span>
+              <select
+                className="filter-control"
+                value={invoiceStatus}
+                onChange={(event) =>
+                  setInvoiceStatus(
+                    event.target.value as "ALL" | "completed" | "invoiced",
+                  )
+                }
+                data-testid="extra-work-list-invoice-status"
+              >
+                <option value="ALL">{t("list.invoice_status_all")}</option>
+                <option value="completed">
+                  {t("list.invoice_status_completed")}
+                </option>
+                <option value="invoiced">
+                  {t("list.invoice_status_invoiced")}
+                </option>
+              </select>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Empty / list */}
@@ -302,12 +376,16 @@ export function ExtraWorkListPage() {
         <EmptyState
           icon={Sparkles}
           title={
-            rows.length === 0
-              ? t("list.empty_state")
-              : t("list.empty_filtered_title")
+            billingMonth
+              ? t("list.empty_billing_month")
+              : rows.length === 0
+                ? t("list.empty_state")
+                : t("list.empty_filtered_title")
           }
           description={
-            rows.length === 0 ? undefined : t("list.empty_filtered_desc")
+            billingMonth || rows.length === 0
+              ? undefined
+              : t("list.empty_filtered_desc")
           }
           testId="extra-work-list-empty"
         />
@@ -328,6 +406,7 @@ export function ExtraWorkListPage() {
                   <th style={{ textAlign: "right" }}>
                     {t("list.column_total")}
                   </th>
+                  {isProvider && <th>{t("list.column_billing")}</th>}
                   <th>{t("list.column_requested")}</th>
                 </tr>
               </thead>
@@ -357,6 +436,30 @@ export function ExtraWorkListPage() {
                     <td style={{ textAlign: "right" }}>
                       {formatMoney(row.total_amount)}
                     </td>
+                    {isProvider && (
+                      <td>
+                        {row.is_invoiced ? (
+                          <span className="badge badge-approved">
+                            {t("list.billing_invoiced")}
+                          </span>
+                        ) : (
+                          <span className="badge badge-normal">
+                            {t("list.billing_to_invoice")}
+                          </span>
+                        )}
+                        {row.invoice_date && (
+                          <div
+                            style={{
+                              fontSize: "0.8em",
+                              marginTop: 2,
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {formatDate(row.invoice_date)}
+                          </div>
+                        )}
+                      </td>
+                    )}
                     <td>{formatDate(row.requested_at)}</td>
                   </ClickableRow>
                 ))}
@@ -420,6 +523,25 @@ export function ExtraWorkListPage() {
                       <dt>{t("list.column_total")}</dt>
                       <dd>{formatMoney(row.total_amount)}</dd>
                     </div>
+                    {isProvider && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("list.column_billing")}</dt>
+                        <dd>
+                          {row.is_invoiced ? (
+                            <span className="badge badge-approved">
+                              {t("list.billing_invoiced")}
+                            </span>
+                          ) : (
+                            <span className="badge badge-normal">
+                              {t("list.billing_to_invoice")}
+                            </span>
+                          )}
+                          {row.invoice_date
+                            ? ` · ${formatDate(row.invoice_date)}`
+                            : ""}
+                        </dd>
+                      </div>
+                    )}
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_requested")}</dt>
                       <dd>{formatDate(row.requested_at)}</dd>

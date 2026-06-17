@@ -43,6 +43,8 @@ export interface ListExtraWorkParams {
   building?: number;
   status?: ExtraWorkStatus;
   routing_decision?: "INSTANT" | "PROPOSAL";
+  billing_period?: string; // "YYYY-MM" — server buckets on COALESCE(invoice_date, completion date)
+  invoice_status?: "completed" | "invoiced";
   page_size?: number;
 }
 

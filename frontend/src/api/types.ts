@@ -1089,6 +1089,11 @@ export interface ExtraWorkRequestList {
   // every list row so the EW list can render an at-a-glance
   // Instant/Proposal badge per row without a per-row detail fetch.
   routing_decision: RoutingDecision;
+  // M4 — billing month / invoice run. Provider-only (the backend redacts
+  // these for CUSTOMER_USER), hence optional.
+  invoice_date?: string | null;
+  is_invoiced?: boolean;
+  invoiced_at?: string | null;
 }
 
 // Provider-side pricing line item — full shape with internal note.
