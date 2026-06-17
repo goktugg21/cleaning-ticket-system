@@ -278,6 +278,55 @@ export function ExtraWorkListPage() {
     }
   }
 
+  // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
+  // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
+  // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
+  function exportCsv() {
+    const esc = (v: string | null | undefined) =>
+      `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const headers = [
+      t("list.column_title"),
+      t("list.column_customer"),
+      t("list.column_building"),
+      t("list.column_status"),
+      t("list.export_col_subtotal"),
+      t("list.export_col_vat"),
+      t("list.column_total"),
+      t("list.column_billing"),
+      t("list.export_col_invoice_date"),
+      t("list.column_requested"),
+    ];
+    const lines = [headers.map(esc).join(",")];
+    for (const row of visibleRows) {
+      lines.push(
+        [
+          row.title,
+          row.customer_name,
+          row.building_name,
+          t(STATUS_I18N_KEY[row.status] ?? row.status),
+          row.subtotal_amount,
+          row.vat_amount,
+          row.total_amount,
+          row.is_invoiced
+            ? t("list.billing_invoiced")
+            : t("list.billing_to_invoice"),
+          row.invoice_date ? formatDate(row.invoice_date) : "",
+          formatDate(row.requested_at),
+        ]
+          .map(esc)
+          .join(","),
+      );
+    }
+    const csv = "\uFEFF" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `extra-work_${billingMonth}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div data-testid="extra-work-list-page">
       <PageHeader
@@ -492,6 +541,17 @@ export function ExtraWorkListPage() {
           {runMessage && (
             <span style={{ color: "var(--green)" }}>{runMessage}</span>
           )}
+          <div style={{ marginLeft: "auto" }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={visibleRows.length === 0}
+              onClick={exportCsv}
+              data-testid="extra-work-list-export-csv"
+            >
+              {t("list.export_csv")}
+            </button>
+          </div>
         </div>
       )}
 
