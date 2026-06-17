@@ -547,8 +547,26 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "updated_at",
             "pricing_proposed_at",
             "customer_decided_at",
+            # M4 — billing month / invoice run. Provider-only (stripped for
+            # CUSTOMER_USER in to_representation, mirroring the detail
+            # serializer). Read-only via read_only_fields = fields.
+            "invoice_date",
+            "is_invoiced",
+            "invoiced_at",
         ]
         read_only_fields = fields
+
+    # Mirror ExtraWorkRequestDetailSerializer's redaction: a CUSTOMER_USER
+    # never sees billing metadata on the list either.
+    _PROVIDER_ONLY_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        user = self.context.get("request").user if self.context.get("request") else None
+        if _is_customer(user):
+            for field in self._PROVIDER_ONLY_FIELDS:
+                data.pop(field, None)
+        return data
 
 
 # ---------------------------------------------------------------------------
