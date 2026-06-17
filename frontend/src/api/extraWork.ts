@@ -155,6 +155,19 @@ export async function clearExtraWorkInvoiced(body: {
   return response.data;
 }
 
+// M4 (2b) provider-only billing-month override. invoice_date = "YYYY-MM-DD"
+// sets the billing month; null reverts to the completion-month default.
+export async function updateExtraWorkBilling(
+  id: number | string,
+  body: { invoice_date: string | null },
+): Promise<ExtraWorkRequestDetail> {
+  const response = await api.patch<ExtraWorkRequestDetail>(
+    `/extra-work/${id}/billing/`,
+    body,
+  );
+  return response.data;
+}
+
 export async function listExtraWorkPricing(
   id: number | string,
 ): Promise<ExtraWorkPricingLineItem[]> {

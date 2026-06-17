@@ -1230,6 +1230,12 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   override_by?: number | null;
   override_reason?: string;
   override_at?: string | null;
+  // M4 — billing month / invoice run (2a). Always emitted on the detail
+  // wire for providers (redacted for CUSTOMER_USER); required here to
+  // narrow the optional list-row variants inherited from the list type.
+  invoice_date: string | null;
+  is_invoiced: boolean;
+  invoiced_at: string | null;
   pricing_line_items: ExtraWorkPricingLineItem[];
   // Sprint 28 Batch 6 — cart line items + routing decision.
   // `line_items` is always present on responses (empty array for

@@ -54,6 +54,7 @@ import {
   listSpawnedTickets,
   retrySpawnTicketsForExtraWork,
   transitionExtraWork,
+  updateExtraWorkBilling,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
@@ -258,6 +259,13 @@ export function ExtraWorkDetailPage() {
   const [overrideReason, setOverrideReason] = useState("");
   const [overrideBusy, setOverrideBusy] = useState(false);
   const [overrideError, setOverrideError] = useState("");
+
+  // M4 (3d) — per-EW billing-month override. billingDraft=null means
+  // "show ew's current value"; the input is derived at render (never synced
+  // via an effect, to avoid a setState-in-effect violation).
+  const [billingDraft, setBillingDraft] = useState<string | null>(null);
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [billingError, setBillingError] = useState("");
 
   // Sprint 28 Batch 15.4 — customer reject-reason dialog state.
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
@@ -998,6 +1006,40 @@ export function ExtraWorkDetailPage() {
     }
   }
 
+  async function saveBillingMonth() {
+    if (!id) return;
+    const month =
+      billingDraft ?? (ew?.invoice_date ? ew.invoice_date.slice(0, 7) : "");
+    if (!month) return;
+    setBillingSaving(true);
+    setBillingError("");
+    try {
+      const updated = await updateExtraWorkBilling(id, {
+        invoice_date: `${month}-01`,
+      });
+      setEw(updated);
+      setBillingDraft(null);
+    } catch (err) {
+      setBillingError(getApiError(err));
+    } finally {
+      setBillingSaving(false);
+    }
+  }
+  async function clearBillingMonth() {
+    if (!id) return;
+    setBillingSaving(true);
+    setBillingError("");
+    try {
+      const updated = await updateExtraWorkBilling(id, { invoice_date: null });
+      setEw(updated);
+      setBillingDraft(null);
+    } catch (err) {
+      setBillingError(getApiError(err));
+    } finally {
+      setBillingSaving(false);
+    }
+  }
+
   return (
     <div data-testid="extra-work-detail-page">
       <PageHeader
@@ -1124,6 +1166,90 @@ export function ExtraWorkDetailPage() {
                   <div className="muted small" style={{ marginTop: 4 }}>
                     {formatDateTime(ew.override_at)}
                   </div>
+                </div>
+              )}
+
+              {isProvider && (
+                <div
+                  className="field"
+                  data-testid="extra-work-billing-override"
+                >
+                  <div className="muted small">
+                    {t("detail.billing_section_title")}
+                  </div>
+                  <div>
+                    {ew.invoice_date
+                      ? t("detail.billing_overridden", {
+                          month: ew.invoice_date.slice(0, 7),
+                        })
+                      : t("detail.billing_default")}
+                  </div>
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {ew.is_invoiced
+                      ? t("detail.billing_invoiced_on", {
+                          date: ew.invoiced_at
+                            ? formatDateTime(ew.invoiced_at)
+                            : "—",
+                        })
+                      : t("detail.billing_not_invoiced")}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "flex-end",
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <span className="muted small">
+                        {t("detail.billing_month_input_label")}
+                      </span>
+                      <input
+                        type="month"
+                        className="field-input"
+                        value={
+                          billingDraft ??
+                          (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
+                        }
+                        onChange={(e) => setBillingDraft(e.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={
+                        billingSaving ||
+                        !(
+                          billingDraft ??
+                          (ew.invoice_date ? ew.invoice_date.slice(0, 7) : "")
+                        )
+                      }
+                      onClick={saveBillingMonth}
+                    >
+                      {t("detail.billing_save")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      disabled={billingSaving || !ew.invoice_date}
+                      onClick={clearBillingMonth}
+                    >
+                      {t("detail.billing_use_completion")}
+                    </button>
+                  </div>
+                  {billingError && (
+                    <div className="alert-error" style={{ marginTop: 8 }}>
+                      {billingError}
+                    </div>
+                  )}
                 </div>
               )}
 
