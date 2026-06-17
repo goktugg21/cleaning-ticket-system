@@ -122,6 +122,39 @@ export async function transitionExtraWork(
   return response.data;
 }
 
+// M4 (2c) invoice run — mark/clear every EARNED, not-yet-invoiced EW that
+// bills in a given company+month. `invoiced_count` comes back from mark,
+// `cleared_count` from clear; both return the affected `ew_ids`.
+export interface InvoiceRunResult {
+  invoiced_count?: number;
+  cleared_count?: number;
+  ew_ids: number[];
+}
+
+export async function markExtraWorkInvoiced(body: {
+  company: number;
+  year: number;
+  month: number;
+}): Promise<InvoiceRunResult> {
+  const response = await api.post<InvoiceRunResult>(
+    "/extra-work/mark-invoiced/",
+    body,
+  );
+  return response.data;
+}
+
+export async function clearExtraWorkInvoiced(body: {
+  company: number;
+  year: number;
+  month: number;
+}): Promise<InvoiceRunResult> {
+  const response = await api.post<InvoiceRunResult>(
+    "/extra-work/clear-invoiced/",
+    body,
+  );
+  return response.data;
+}
+
 export async function listExtraWorkPricing(
   id: number | string,
 ): Promise<ExtraWorkPricingLineItem[]> {

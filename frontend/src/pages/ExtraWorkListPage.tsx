@@ -5,7 +5,7 @@
 //   Functional contract is unchanged; only the presentation layer moves.
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
@@ -18,7 +18,11 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listExtraWork } from "../api/extraWork";
+import {
+  clearExtraWorkInvoiced,
+  listExtraWork,
+  markExtraWorkInvoiced,
+} from "../api/extraWork";
 import type {
   ExtraWorkCategory,
   ExtraWorkRequestList,
@@ -28,6 +32,10 @@ import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { ClickableRow } from "../components/ClickableRow";
+import {
+  ConfirmDialog,
+  type ConfirmDialogHandle,
+} from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
@@ -134,6 +142,16 @@ export function ExtraWorkListPage() {
     "ALL" | "completed" | "invoiced"
   >("ALL");
 
+  // M4 (3b) invoice run — provider-only toolbar driving 2c's
+  // mark/clear-invoiced for the selected billing month + in-view company.
+  // `pendingRun` selects which action the shared ConfirmDialog confirms;
+  // bumping `refreshKey` re-fires the fetch so the list reflects the run.
+  const [running, setRunning] = useState(false);
+  const [runMessage, setRunMessage] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [pendingRun, setPendingRun] = useState<"mark" | "clear" | null>(null);
+  const confirmRunRef = useRef<ConfirmDialogHandle>(null);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -154,7 +172,14 @@ export function ExtraWorkListPage() {
     return () => {
       cancelled = true;
     };
-  }, [billingMonth, invoiceStatus]);
+  }, [billingMonth, invoiceStatus, refreshKey]);
+
+  // Open the shared run-confirm dialog after `pendingRun` is set, so its
+  // title/body reflect the chosen action (no synchronous open-with-stale
+  // content). Closing/cancelling resets pendingRun.
+  useEffect(() => {
+    if (pendingRun) confirmRunRef.current?.open();
+  }, [pendingRun]);
 
   // KPI strip — computed from the full loaded set (not the filtered
   // view) so the operator always sees the same headline numbers
@@ -184,6 +209,14 @@ export function ExtraWorkListPage() {
     };
   }, [rows]);
 
+  // The invoice run targets ONE provider company. Derive it from the loaded
+  // rows: exactly one company in view -> that company; 0 or >1 -> null (the
+  // toolbar disables and shows a "narrow the view" hint).
+  const runCompany = useMemo(() => {
+    const companies = new Set(rows.map((r) => r.company));
+    return companies.size === 1 ? rows[0].company : null;
+  }, [rows]);
+
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
     return rows.filter((r) => {
@@ -198,6 +231,52 @@ export function ExtraWorkListPage() {
       return true;
     });
   }, [rows, searchInput, statusFilter, categoryFilter]);
+
+  async function doMarkInvoiced() {
+    if (runCompany === null || !billingMonth) return;
+    const [year, month] = billingMonth.split("-").map(Number);
+    setRunning(true);
+    setRunMessage("");
+    setError("");
+    try {
+      const res = await markExtraWorkInvoiced({
+        company: runCompany,
+        year,
+        month,
+      });
+      setRunMessage(
+        t("list.invoice_run_marked", { count: res.invoiced_count ?? 0 }),
+      );
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function doClearInvoiced() {
+    if (runCompany === null || !billingMonth) return;
+    const [year, month] = billingMonth.split("-").map(Number);
+    setRunning(true);
+    setRunMessage("");
+    setError("");
+    try {
+      const res = await clearExtraWorkInvoiced({
+        company: runCompany,
+        year,
+        month,
+      });
+      setRunMessage(
+        t("list.invoice_run_cleared", { count: res.cleared_count ?? 0 }),
+      );
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setRunning(false);
+    }
+  }
 
   return (
     <div data-testid="extra-work-list-page">
@@ -370,6 +449,51 @@ export function ExtraWorkListPage() {
           </>
         )}
       </div>
+
+      {/* M4 — invoice-run toolbar (provider-only, when a month is picked) */}
+      {isProvider && billingMonth && (
+        <div
+          className="card"
+          data-testid="extra-work-list-invoice-run"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            {t("list.invoice_run_label", { month: billingMonth })}
+          </span>
+          <div style={{ display: "inline-flex", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={running || runCompany === null}
+              onClick={() => setPendingRun("mark")}
+            >
+              {t("list.invoice_run_mark")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={running || runCompany === null}
+              onClick={() => setPendingRun("clear")}
+            >
+              {t("list.invoice_run_clear")}
+            </button>
+          </div>
+          {rows.length > 0 && runCompany === null && (
+            <span style={{ color: "var(--text-muted)" }}>
+              {t("list.invoice_run_multi_company")}
+            </span>
+          )}
+          {runMessage && (
+            <span style={{ color: "var(--green)" }}>{runMessage}</span>
+          )}
+        </div>
+      )}
 
       {/* Empty / list */}
       {!loading && visibleRows.length === 0 && !error && (
@@ -553,6 +677,34 @@ export function ExtraWorkListPage() {
           </ul>
         </div>
       )}
+
+      <ConfirmDialog
+        ref={confirmRunRef}
+        title={
+          pendingRun === "clear"
+            ? t("list.invoice_run_clear")
+            : t("list.invoice_run_mark")
+        }
+        body={
+          pendingRun === "clear"
+            ? t("list.invoice_run_confirm_clear", { month: billingMonth })
+            : t("list.invoice_run_confirm_mark", { month: billingMonth })
+        }
+        confirmLabel={
+          pendingRun === "clear"
+            ? t("list.invoice_run_clear")
+            : t("list.invoice_run_mark")
+        }
+        busy={running}
+        onConfirm={() => {
+          confirmRunRef.current?.close();
+          const action = pendingRun;
+          setPendingRun(null);
+          if (action === "mark") void doMarkInvoiced();
+          else if (action === "clear") void doClearInvoiced();
+        }}
+        onCancel={() => setPendingRun(null)}
+      />
     </div>
   );
 }
