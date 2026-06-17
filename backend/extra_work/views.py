@@ -23,7 +23,7 @@ import logging
 
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, mixins, status, viewsets
+from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -553,6 +553,42 @@ class ExtraWorkRequestViewSet(
         return Response(
             ExtraWorkRequestDetailSerializer(
                 extra_work, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["patch"], url_path="billing")
+    def billing(self, request, *args, **kwargs):
+        # Provider-only: set or clear this EW's invoice_date (billing month).
+        # invoice_date is provider-internal (see _PROVIDER_ONLY_FIELDS) and
+        # decoupled from customer_decided_at — work done May 31 / approved
+        # Jun 7 still bills in May once the provider sets May here.
+        ew = self.get_object()  # already tenant-scoped via the viewset queryset
+        if not _is_provider_operator(request.user):
+            return Response(
+                {"detail": "Only provider operators can set the billing month."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # Validate: a date, or null to clear. "invoice_date" key required.
+        if "invoice_date" not in request.data:
+            return Response(
+                {"invoice_date": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            parsed = serializers.DateField(allow_null=True).run_validation(
+                request.data.get("invoice_date")
+            )
+        except serializers.ValidationError as exc:
+            return Response(
+                {"invoice_date": exc.detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        ew.invoice_date = parsed
+        ew.save(update_fields=["invoice_date", "updated_at"])
+        return Response(
+            ExtraWorkRequestDetailSerializer(
+                ew, context={"request": request}
             ).data,
             status=status.HTTP_200_OK,
         )

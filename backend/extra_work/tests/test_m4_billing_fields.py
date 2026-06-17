@@ -138,3 +138,61 @@ class M4BillingFieldVisibilityTests(_M4BillingFixture):
                 response.data,
                 f"customer must not see {key}",
             )
+
+
+class M4BillingPatchTests(_M4BillingFixture):
+    """M4 commit 2b — PATCH /api/extra-work/<id>/billing sets or clears the
+    EW's invoice_date (billing month). Provider-only: a CUSTOMER_USER gets
+    403 and the value is untouched. invoice_date is decoupled from the
+    customer-decision timestamps, so no EW-status gate applies."""
+
+    def _url(self) -> str:
+        return f"/api/extra-work/{self.ew.id}/billing/"
+
+    def test_provider_sets_invoice_date(self):
+        # Start from a known-clear state so the PATCH provably writes the
+        # value rather than coinciding with the fixture seed.
+        self.ew.invoice_date = None
+        self.ew.save(update_fields=["invoice_date"])
+
+        response = self._api(self.admin).patch(
+            self._url(), {"invoice_date": "2026-05-31"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.ew.refresh_from_db()
+        self.assertEqual(self.ew.invoice_date, date(2026, 5, 31))
+
+    def test_provider_clears_invoice_date(self):
+        # Fixture seeds invoice_date=2026-05-31; null clears it.
+        response = self._api(self.super_admin).patch(
+            self._url(), {"invoice_date": None}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.ew.refresh_from_db()
+        self.assertIsNone(self.ew.invoice_date)
+
+    def test_customer_cannot_set_invoice_date(self):
+        response = self._api(self.customer_user).patch(
+            self._url(), {"invoice_date": "2026-05-31"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.ew.refresh_from_db()
+        # Unchanged from the fixture seed.
+        self.assertEqual(self.ew.invoice_date, date(2026, 5, 31))
+
+    def test_invalid_date_is_400(self):
+        response = self._api(self.admin).patch(
+            self._url(), {"invoice_date": "not-a-date"}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_missing_key_is_400(self):
+        response = self._api(self.admin).patch(
+            self._url(), {}, format="json"
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
