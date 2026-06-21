@@ -6,18 +6,25 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import {
+  createCustomerCustomPrice,
   createCustomerPrice,
+  deleteCustomerCustomPrice,
   deleteCustomerPrice,
   getCustomer,
+  listCustomerCustomPrices,
   listCustomerPrices,
   listServices,
+  updateCustomerCustomPrice,
   updateCustomerPrice,
 } from "../../api/admin";
 import type {
   CustomerAdmin,
+  CustomerCustomPrice,
+  CustomerCustomPriceCreatePayload,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   Service,
+  ServiceUnitType,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
@@ -64,6 +71,47 @@ function todayISO(): string {
 function buildEmptyForm(): PriceFormState {
   return {
     service: "",
+    unit_price: "0.00",
+    vat_pct: "21.00",
+    valid_from: todayISO(),
+    valid_to: "",
+    is_active: true,
+  };
+}
+
+// M5 A — custom (non-catalog) price lines. The unit-type constants
+// mirror ServicesAdminPage; kept local here to avoid a cross-page
+// export churn (three tiny literals, no behaviour).
+const UNIT_TYPES: readonly ServiceUnitType[] = [
+  "HOURS",
+  "SQUARE_METERS",
+  "FIXED",
+  "ITEM",
+  "OTHER",
+];
+
+const UNIT_TYPE_I18N_KEY: Record<ServiceUnitType, string> = {
+  HOURS: "services.unit_type.hours",
+  SQUARE_METERS: "services.unit_type.square_meters",
+  FIXED: "services.unit_type.fixed",
+  ITEM: "services.unit_type.item",
+  OTHER: "services.unit_type.other",
+};
+
+interface CustomPriceFormState {
+  custom_name: string;
+  unit_type: ServiceUnitType;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to: string; // empty string = open-ended
+  is_active: boolean;
+}
+
+function buildEmptyCustomForm(): CustomPriceFormState {
+  return {
+    custom_name: "",
+    unit_type: "HOURS",
     unit_price: "0.00",
     vat_pct: "21.00",
     valid_from: todayISO(),
@@ -129,6 +177,22 @@ export function CustomerPricingPage() {
     useState<CustomerServicePrice | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
+  // M5 A — custom (non-catalog) price-line section. Parallel state to
+  // the catalog section above, prefixed `custom`.
+  const [customPrices, setCustomPrices] = useState<CustomerCustomPrice[]>([]);
+  const [customSelected, setCustomSelected] =
+    useState<CustomerCustomPrice | null>(null);
+  const [customMode, setCustomMode] = useState<"create" | "edit" | null>(null);
+  const [customForm, setCustomForm] =
+    useState<CustomPriceFormState>(buildEmptyCustomForm);
+  const [customFormError, setCustomFormError] = useState("");
+  const [customFormBusy, setCustomFormBusy] = useState(false);
+
+  const customDeleteDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [customDeleteTarget, setCustomDeleteTarget] =
+    useState<CustomerCustomPrice | null>(null);
+  const [customDeleteBusy, setCustomDeleteBusy] = useState(false);
+
   // Initial parallel load — customer (for title), pricing list,
   // service list (for the modal dropdown — filtered to active so
   // admins do not accidentally price a retired service).
@@ -136,19 +200,23 @@ export function CustomerPricingPage() {
     const cancelled = { current: false };
     async function load(customerId: number) {
       try {
-        const [customerData, pricesData, servicesData] = await Promise.all([
-          getCustomer(customerId),
-          listCustomerPrices(customerId),
-          // Full catalog (active + inactive). The Default-price column must
-          // resolve for pricing rows whose service was later archived, so
-          // serviceById is built from every service; the dropdown + create
-          // defaults filter down to active-only (see activeServices).
-          listServices(),
-        ]);
+        const [customerData, pricesData, servicesData, customPricesData] =
+          await Promise.all([
+            getCustomer(customerId),
+            listCustomerPrices(customerId),
+            // Full catalog (active + inactive). The Default-price column must
+            // resolve for pricing rows whose service was later archived, so
+            // serviceById is built from every service; the dropdown + create
+            // defaults filter down to active-only (see activeServices).
+            listServices(),
+            // M5 A — custom (non-catalog) price lines for this customer.
+            listCustomerCustomPrices(customerId),
+          ]);
         if (cancelled.current) return;
         setCustomer(customerData);
         setPrices(pricesData);
         setServices(servicesData);
+        setCustomPrices(customPricesData);
         setLoading(false);
       } catch (err) {
         if (!cancelled.current) {
@@ -289,6 +357,125 @@ export function CustomerPricingPage() {
       deleteDialogRef.current?.close();
     } finally {
       setDeleteBusy(false);
+    }
+  }
+
+  // ---- M5 A — custom price-line handlers (mirror the catalog flow) -------
+  function openCreateCustomModal() {
+    setCustomMode("create");
+    setCustomForm(buildEmptyCustomForm());
+    setCustomFormError("");
+  }
+
+  function openEditCustomModal(price: CustomerCustomPrice) {
+    setCustomMode("edit");
+    setCustomForm({
+      custom_name: price.custom_name,
+      unit_type: price.unit_type,
+      unit_price: price.unit_price,
+      vat_pct: price.vat_pct,
+      valid_from: price.valid_from,
+      valid_to: price.valid_to ?? "",
+      is_active: price.is_active,
+    });
+    setCustomFormError("");
+  }
+
+  function closeCustomFormModal() {
+    setCustomMode(null);
+    setCustomForm(buildEmptyCustomForm());
+    setCustomFormError("");
+  }
+
+  async function handleSubmitCustomForm(event: FormEvent) {
+    event.preventDefault();
+    if (numericId === null) return;
+    if (!customForm.custom_name.trim()) {
+      setCustomFormError(t("customer_custom_pricing.error_name_required"));
+      return;
+    }
+    if (!customForm.unit_type) {
+      setCustomFormError(t("customer_custom_pricing.error_unit_type_required"));
+      return;
+    }
+    const priceNumber = Number(customForm.unit_price);
+    if (!Number.isFinite(priceNumber) || priceNumber < 0) {
+      setCustomFormError(t("customer_pricing.error_price_invalid"));
+      return;
+    }
+    const vatNumber = Number(customForm.vat_pct);
+    if (!Number.isFinite(vatNumber) || vatNumber < 0) {
+      setCustomFormError(t("customer_pricing.error_vat_invalid"));
+      return;
+    }
+    if (!customForm.valid_from) {
+      setCustomFormError(t("customer_pricing.error_valid_from_required"));
+      return;
+    }
+    if (customForm.valid_to && customForm.valid_to < customForm.valid_from) {
+      setCustomFormError(
+        t("customer_pricing.error_valid_to_before_valid_from"),
+      );
+      return;
+    }
+    setCustomFormBusy(true);
+    setCustomFormError("");
+    const payload: CustomerCustomPriceCreatePayload = {
+      custom_name: customForm.custom_name.trim(),
+      unit_type: customForm.unit_type,
+      unit_price: customForm.unit_price.trim(),
+      vat_pct: customForm.vat_pct.trim(),
+      valid_from: customForm.valid_from,
+      valid_to: customForm.valid_to === "" ? null : customForm.valid_to,
+      is_active: customForm.is_active,
+    };
+    try {
+      if (customMode === "create") {
+        const created = await createCustomerCustomPrice(numericId, payload);
+        setCustomPrices((prev) => [created, ...prev]);
+        closeCustomFormModal();
+      } else if (customMode === "edit" && customSelected) {
+        const updated = await updateCustomerCustomPrice(
+          numericId,
+          customSelected.id,
+          payload,
+        );
+        setCustomPrices((prev) =>
+          prev.map((p) => (p.id === updated.id ? updated : p)),
+        );
+        setCustomSelected(updated);
+        closeCustomFormModal();
+      }
+    } catch (err) {
+      setCustomFormError(getApiError(err));
+    } finally {
+      setCustomFormBusy(false);
+    }
+  }
+
+  function openCustomDeleteDialog(price: CustomerCustomPrice) {
+    setCustomDeleteTarget(price);
+    customDeleteDialogRef.current?.open();
+  }
+
+  async function handleConfirmCustomDelete() {
+    if (numericId === null || !customDeleteTarget) return;
+    setCustomDeleteBusy(true);
+    try {
+      await deleteCustomerCustomPrice(numericId, customDeleteTarget.id);
+      setCustomPrices((prev) =>
+        prev.filter((p) => p.id !== customDeleteTarget.id),
+      );
+      if (customSelected?.id === customDeleteTarget.id) {
+        setCustomSelected(null);
+      }
+      customDeleteDialogRef.current?.close();
+      setCustomDeleteTarget(null);
+    } catch (err) {
+      setLoadError(getApiError(err));
+      customDeleteDialogRef.current?.close();
+    } finally {
+      setCustomDeleteBusy(false);
     }
   }
 
@@ -550,6 +737,211 @@ export function CustomerPricingPage() {
               </div>
             </section>
           )}
+
+          {/* M5 A — custom (non-catalog) price lines. Mirrors the catalog
+              section above but with a free-text name + unit-type select. */}
+          <div
+            className="page-header"
+            style={{ marginTop: 32, marginBottom: 0 }}
+          >
+            <div>
+              <h3 className="section-title" style={{ margin: 0 }}>
+                {t("customer_custom_pricing.section_title")}
+              </h3>
+            </div>
+            <div className="page-header-actions">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                data-testid="customer-custom-pricing-add-button"
+                onClick={openCreateCustomModal}
+                disabled={numericId === null}
+              >
+                {t("customer_custom_pricing.add_button")}
+              </button>
+            </div>
+          </div>
+
+          <div
+            className="card"
+            data-testid="customer-custom-pricing-list"
+            style={{ marginTop: 16 }}
+          >
+            {customPrices.length === 0 ? (
+              <div
+                style={{ padding: "32px 24px", textAlign: "center" }}
+                data-testid="customer-custom-pricing-empty"
+              >
+                <h3 style={{ marginBottom: 8 }}>
+                  {t("customer_custom_pricing.empty_title")}
+                </h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  {t("customer_custom_pricing.empty_description")}
+                </p>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("customer_custom_pricing.col_name")}</th>
+                      <th>{t("services.field_unit_type")}</th>
+                      <th>{t("customer_pricing.col_unit_price")}</th>
+                      <th>{t("customer_pricing.col_vat_pct")}</th>
+                      <th>{t("customer_pricing.col_valid_from")}</th>
+                      <th>{t("customer_pricing.col_valid_to")}</th>
+                      <th>{t("customer_pricing.col_active")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customPrices.map((price) => (
+                      <tr
+                        key={price.id}
+                        data-testid="customer-custom-pricing-row"
+                        data-price-id={price.id}
+                        onClick={() => setCustomSelected(price)}
+                      >
+                        <td>{price.custom_name}</td>
+                        <td>{t(UNIT_TYPE_I18N_KEY[price.unit_type])}</td>
+                        <td>{price.unit_price}</td>
+                        <td>{price.vat_pct}</td>
+                        <td>{formatDateOnly(price.valid_from, dateLocale)}</td>
+                        <td>
+                          {price.valid_to === null
+                            ? t("customer_pricing.valid_to_open_ended")
+                            : formatDateOnly(price.valid_to, dateLocale)}
+                        </td>
+                        <td>
+                          {price.is_active
+                            ? t("admin.status_active")
+                            : t("admin.status_inactive")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {customSelected && (
+            <section
+              className="card"
+              data-testid="customer-custom-pricing-detail"
+              style={{ marginTop: 16, padding: "20px 22px" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <div>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>
+                    {t("customer_custom_pricing.detail_title")}
+                  </div>
+                  <h3 className="section-title" style={{ margin: 0 }}>
+                    {customSelected.custom_name}
+                  </h3>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-testid="customer-custom-pricing-edit-button"
+                    onClick={() => openEditCustomModal(customSelected)}
+                  >
+                    {t("customer_pricing.edit_button")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-testid="customer-custom-pricing-delete-button"
+                    onClick={() => openCustomDeleteDialog(customSelected)}
+                  >
+                    {t("customer_pricing.delete_button")}
+                  </button>
+                </div>
+              </div>
+
+              <div className="detail-kv-list">
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("services.field_unit_type")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {t(UNIT_TYPE_I18N_KEY[customSelected.unit_type])}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.col_unit_price")}
+                  </span>
+                  <span
+                    className="detail-kv-val"
+                    data-testid="customer-custom-pricing-detail-unit-price"
+                  >
+                    {customSelected.unit_price}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.col_vat_pct")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {customSelected.vat_pct}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.col_valid_from")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {formatDateOnly(customSelected.valid_from, dateLocale)}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.col_valid_to")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {customSelected.valid_to === null
+                      ? t("customer_pricing.valid_to_open_ended")
+                      : formatDateOnly(customSelected.valid_to, dateLocale)}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.col_active")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {customSelected.is_active
+                      ? t("admin.status_active")
+                      : t("admin.status_inactive")}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.field_created_at")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {formatDate(customSelected.created_at, dateLocale)}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
+                    {t("customer_pricing.field_updated_at")}
+                  </span>
+                  <span className="detail-kv-val">
+                    {formatDate(customSelected.updated_at, dateLocale)}
+                  </span>
+                </div>
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -795,6 +1187,256 @@ export function CustomerPricingPage() {
         </div>
       )}
 
+      {/* M5 A — custom price-line create / edit modal. */}
+      {customMode !== null && (
+        <div
+          data-testid="customer-custom-pricing-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            customMode === "create"
+              ? t("customer_custom_pricing.add_modal_title")
+              : t("customer_custom_pricing.edit_modal_title")
+          }
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <form
+            onSubmit={handleSubmitCustomForm}
+            className="card"
+            style={{
+              maxWidth: 600,
+              width: "100%",
+              padding: 24,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {customMode === "create"
+                ? t("customer_custom_pricing.add_modal_title")
+                : t("customer_custom_pricing.edit_modal_title")}
+            </h3>
+
+            {customFormError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-custom-pricing-modal-error"
+              >
+                {customFormError}
+              </div>
+            )}
+
+            <div className="field">
+              <label className="field-label" htmlFor="custom-price-name">
+                {t("customer_custom_pricing.field_name")} *
+              </label>
+              <input
+                id="custom-price-name"
+                className="field-input"
+                type="text"
+                value={customForm.custom_name}
+                placeholder={t(
+                  "customer_custom_pricing.field_name_placeholder",
+                )}
+                onChange={(event) =>
+                  setCustomForm((prev) => ({
+                    ...prev,
+                    custom_name: event.target.value,
+                  }))
+                }
+                data-testid="customer-custom-pricing-input-name"
+                required
+                disabled={customFormBusy}
+              />
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="custom-price-unit-type">
+                {t("services.field_unit_type")} *
+              </label>
+              <select
+                id="custom-price-unit-type"
+                className="field-select"
+                value={customForm.unit_type}
+                onChange={(event) =>
+                  setCustomForm((prev) => ({
+                    ...prev,
+                    unit_type: event.target.value as ServiceUnitType,
+                  }))
+                }
+                data-testid="customer-custom-pricing-input-unit-type"
+                required
+                disabled={customFormBusy}
+              >
+                {UNIT_TYPES.map((ut) => (
+                  <option key={ut} value={ut}>
+                    {t(UNIT_TYPE_I18N_KEY[ut])}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-2col">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="custom-price-unit-price"
+                >
+                  {t("customer_pricing.field_unit_price")} *
+                </label>
+                <input
+                  id="custom-price-unit-price"
+                  className="field-input"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={customForm.unit_price}
+                  onChange={(event) =>
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      unit_price: event.target.value,
+                    }))
+                  }
+                  data-testid="customer-custom-pricing-input-unit-price"
+                  required
+                  disabled={customFormBusy}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="custom-price-vat-pct">
+                  {t("customer_pricing.field_vat_pct")} *
+                </label>
+                <input
+                  id="custom-price-vat-pct"
+                  className="field-input"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={customForm.vat_pct}
+                  onChange={(event) =>
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      vat_pct: event.target.value,
+                    }))
+                  }
+                  data-testid="customer-custom-pricing-input-vat-pct"
+                  required
+                  disabled={customFormBusy}
+                />
+              </div>
+            </div>
+
+            <div className="form-2col">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="custom-price-valid-from"
+                >
+                  {t("customer_pricing.field_valid_from")} *
+                </label>
+                <input
+                  id="custom-price-valid-from"
+                  className="field-input"
+                  type="date"
+                  value={customForm.valid_from}
+                  onChange={(event) =>
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      valid_from: event.target.value,
+                    }))
+                  }
+                  data-testid="customer-custom-pricing-input-valid-from"
+                  required
+                  disabled={customFormBusy}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="custom-price-valid-to">
+                  {t("customer_pricing.field_valid_to")}
+                </label>
+                <input
+                  id="custom-price-valid-to"
+                  className="field-input"
+                  type="date"
+                  value={customForm.valid_to}
+                  onChange={(event) =>
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      valid_to: event.target.value,
+                    }))
+                  }
+                  data-testid="customer-custom-pricing-input-valid-to"
+                  disabled={customFormBusy}
+                />
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("customer_pricing.field_valid_to_hint")}
+                </div>
+              </div>
+            </div>
+
+            <div className="field">
+              <label
+                style={{ display: "flex", alignItems: "center", gap: 8 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={customForm.is_active}
+                  onChange={(event) =>
+                    setCustomForm((prev) => ({
+                      ...prev,
+                      is_active: event.target.checked,
+                    }))
+                  }
+                  data-testid="customer-custom-pricing-input-is-active"
+                  disabled={customFormBusy}
+                />
+                <span>{t("customer_pricing.field_is_active")}</span>
+              </label>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={closeCustomFormModal}
+                disabled={customFormBusy}
+                data-testid="customer-custom-pricing-modal-cancel"
+              >
+                {t("customer_pricing.cancel")}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={customFormBusy}
+                data-testid="customer-custom-pricing-modal-save"
+              >
+                {customFormBusy
+                  ? t("admin_form.saving")
+                  : t("customer_pricing.save")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <ConfirmDialog
         ref={deleteDialogRef}
         title={t("customer_pricing.delete_confirm_title")}
@@ -803,6 +1445,17 @@ export function CustomerPricingPage() {
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
         busy={deleteBusy}
+        destructive
+      />
+
+      <ConfirmDialog
+        ref={customDeleteDialogRef}
+        title={t("customer_custom_pricing.delete_confirm_title")}
+        body={t("customer_custom_pricing.delete_confirm_body")}
+        confirmLabel={t("customer_pricing.delete_button")}
+        onConfirm={handleConfirmCustomDelete}
+        onCancel={() => setCustomDeleteTarget(null)}
+        busy={customDeleteBusy}
         destructive
       />
     </div>

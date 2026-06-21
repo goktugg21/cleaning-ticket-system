@@ -13,6 +13,9 @@ import type {
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
+  CustomerCustomPrice,
+  CustomerCustomPriceCreatePayload,
+  CustomerCustomPriceUpdatePayload,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
@@ -1565,4 +1568,48 @@ export async function deleteCustomerPrice(
   priceId: number,
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/pricing/${priceId}/`);
+}
+
+// ---- M5 A — Per-customer custom (non-catalog) price lines ---------------
+// `/api/customers/<customer_id>/custom-pricing/` — list + create.
+// `/api/customers/<customer_id>/custom-pricing/<custom_price_id>/` — detail.
+export async function listCustomerCustomPrices(
+  customerId: number,
+): Promise<CustomerCustomPrice[]> {
+  const response = await api.get<PaginatedResponse<CustomerCustomPrice>>(
+    `/customers/${customerId}/custom-pricing/`,
+  );
+  return response.data.results;
+}
+
+export async function createCustomerCustomPrice(
+  customerId: number,
+  payload: CustomerCustomPriceCreatePayload,
+): Promise<CustomerCustomPrice> {
+  const response = await api.post<CustomerCustomPrice>(
+    `/customers/${customerId}/custom-pricing/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function updateCustomerCustomPrice(
+  customerId: number,
+  customPriceId: number,
+  payload: CustomerCustomPriceUpdatePayload,
+): Promise<CustomerCustomPrice> {
+  const response = await api.patch<CustomerCustomPrice>(
+    `/customers/${customerId}/custom-pricing/${customPriceId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteCustomerCustomPrice(
+  customerId: number,
+  customPriceId: number,
+): Promise<void> {
+  await api.delete(
+    `/customers/${customerId}/custom-pricing/${customPriceId}/`,
+  );
 }

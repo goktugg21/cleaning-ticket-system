@@ -1791,4 +1791,36 @@ export interface CustomerServicePriceCreatePayload {
 export type CustomerServicePriceUpdatePayload =
   Partial<CustomerServicePriceCreatePayload>;
 
+// M5 A — per-customer ad-hoc / custom price line for a non-catalog
+// service. Parallel to CustomerServicePrice but with no `service` FK:
+// a free-text `custom_name` + its own `unit_type`. Provider-internal;
+// never influences the instant-ticket resolver.
+export interface CustomerCustomPrice {
+  id: number;
+  customer: number;
+  custom_name: string;
+  unit_type: ServiceUnitType;
+  unit_type_display: string;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerCustomPriceCreatePayload {
+  custom_name: string;
+  unit_type: ServiceUnitType;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to?: string | null;
+  is_active?: boolean;
+}
+
+export type CustomerCustomPriceUpdatePayload =
+  Partial<CustomerCustomPriceCreatePayload>;
+
 
