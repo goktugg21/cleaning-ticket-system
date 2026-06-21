@@ -43,14 +43,19 @@ Sprint 3B additions:
 """
 from __future__ import annotations
 
+from decimal import Decimal, ROUND_HALF_UP
+
+from django.db import transaction
 from django.db.models import ProtectedError
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from accounts.models import UserRole
 from accounts.permissions import IsSuperAdminOrCompanyAdmin
+from audit import context as audit_context
 from companies.models import Company, CompanyUserMembership
 from config.pagination import UnboundedPagination
 
@@ -68,6 +73,8 @@ ERR_CATALOG_POLICY_DISABLED = "provider_admin_catalog_management_disabled"
 ERR_CATALOG_CROSS_COMPANY = "catalog_cross_company_forbidden"
 ERR_SERVICE_COMPANY_REQUIRED = "service_company_required"
 ERR_CATEGORY_SA_ONLY = "global_category_management_super_admin_only"
+ERR_SERVICE_BULK_RAISE_AMOUNT_INVALID = "service_bulk_raise_amount_invalid"
+ERR_SERVICE_BULK_RAISE_INVALID = "service_bulk_raise_invalid"
 
 
 def _parse_bool_param(value):
@@ -320,9 +327,33 @@ def _resolve_service_create_company(user, supplied_company):
     raise PermissionDenied(detail="Forbidden.")
 
 
-# Inline import lifted to module top for the helper above; keep the
-# DRF import here so the view classes below stay readable.
-from rest_framework import serializers  # noqa: E402
+class _ServiceBulkRaiseInputSerializer(serializers.Serializer):
+    """M5 C — input for POST /api/services/bulk-raise/. Raises the
+    catalog default_unit_price of a set of Services by percentage or
+    fixed amount, in place. `services` = ids; `mode` = percent|fixed;
+    `amount` > 0.
+    """
+
+    services = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+        error_messages={
+            "empty": "At least one service id is required.",
+            "required": "Services list is required.",
+        },
+    )
+    mode = serializers.ChoiceField(choices=["percent", "fixed"])
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+    def validate_amount(self, value):
+        if value is None or value <= Decimal("0"):
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "amount must be greater than zero.",
+                    code=ERR_SERVICE_BULK_RAISE_AMOUNT_INVALID,
+                )
+            )
+        return value
 
 
 class ServiceListCreateView(generics.ListCreateAPIView):
@@ -424,3 +455,94 @@ class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ServiceBulkRaiseView(APIView):
+    """M5 C — bulk-raise the catalog default_unit_price of a set of
+    Services by a percentage or fixed amount, IN PLACE. Catalog
+    defaults are quoting-reference numbers (no validity window); this
+    updates the baseline only and does NOT touch any
+    CustomerServicePrice (what customers are billed).
+
+    POST /api/services/bulk-raise/
+    Body: { "services": [id,...], "mode": "percent"|"fixed",
+            "amount": "10.00" }
+
+    All-or-nothing: every id must be an active, in-scope catalog row,
+    else 400 (service_bulk_raise_invalid) with zero writes. Provider-
+    only — SA for any in-scope company, CA for own company via the
+    catalog-management gate; BM/STAFF/CUSTOMER_USER 403.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+
+    def _resolve_services(self, service_ids, user):
+        in_scope = {
+            s.id: s
+            for s in filter_services_for(
+                user,
+                Service.objects.filter(
+                    id__in=service_ids
+                ).select_related("company"),
+            )
+        }
+        resolved = []
+        for sid in service_ids:
+            svc = in_scope.get(sid)
+            if svc is None or not svc.is_active:
+                raise serializers.ValidationError(
+                    {
+                        "services": [
+                            serializers.ErrorDetail(
+                                f"Service id={sid} is not a valid, "
+                                "active catalog row in scope.",
+                                code=ERR_SERVICE_BULK_RAISE_INVALID,
+                            )
+                        ]
+                    }
+                )
+            _enforce_catalog_management(user, svc.company)
+            resolved.append(svc)
+        return resolved
+
+    @staticmethod
+    def _raised(old_price, mode, amount):
+        if mode == "percent":
+            new = old_price * (Decimal("1") + amount / Decimal("100"))
+        else:  # fixed
+            new = old_price + amount
+        return new.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    def post(self, request, *args, **kwargs):
+        payload = _ServiceBulkRaiseInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        service_ids = payload.validated_data["services"]
+        mode = payload.validated_data["mode"]
+        amount = payload.validated_data["amount"]
+
+        resolved = self._resolve_services(service_ids, request.user)
+
+        try:
+            audit_context.set_current_reason("service_default_bulk_raise")
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+        results = []
+        with transaction.atomic():
+            for svc in resolved:
+                old_price = svc.default_unit_price
+                new_price = self._raised(old_price, mode, amount)
+                svc.default_unit_price = new_price
+                svc.save(update_fields=["default_unit_price", "updated_at"])
+                results.append(
+                    {
+                        "service": svc.id,
+                        "old_default_unit_price": str(old_price),
+                        "new_default_unit_price": str(new_price),
+                    }
+                )
+
+        return Response(
+            {"updated_count": len(results), "results": results},
+            status=status.HTTP_200_OK,
+        )
