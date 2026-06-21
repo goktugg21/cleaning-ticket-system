@@ -1762,6 +1762,26 @@ export interface ServiceCreatePayload {
 
 export type ServiceUpdatePayload = Partial<ServiceCreatePayload>;
 
+// M5 C — bulk-raise the catalog default_unit_price of a set of Services
+// by a percentage or fixed amount, IN PLACE. Updates the quoting
+// baseline only; never touches any CustomerServicePrice (billing).
+export interface ServiceBulkRaisePayload {
+  services: number[];
+  mode: "percent" | "fixed";
+  amount: string;
+}
+
+export interface ServiceBulkRaiseResultRow {
+  service: number;
+  old_default_unit_price: string;
+  new_default_unit_price: string;
+}
+
+export interface ServiceBulkRaiseResult {
+  updated_count: number;
+  results: ServiceBulkRaiseResultRow[];
+}
+
 // Per-customer contract price. Only an active row triggers the instant-
 // ticket path (Batch 7); absence means the request must go through the
 // proposal phase. `valid_to` null means open-ended.

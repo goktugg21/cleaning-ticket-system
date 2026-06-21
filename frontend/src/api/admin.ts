@@ -32,6 +32,8 @@ import type {
   PromoteContactResponse,
   Role,
   Service,
+  ServiceBulkRaisePayload,
+  ServiceBulkRaiseResult,
   ServiceCategory,
   ServiceCategoryCreatePayload,
   ServiceCategoryUpdatePayload,
@@ -1496,6 +1498,17 @@ export async function updateService(
 
 export async function deleteService(id: number): Promise<void> {
   await api.delete(`/services/${id}/`);
+}
+
+// M5 C — bulk-raise catalog default prices (% or fixed), in place.
+export async function bulkRaiseServices(
+  payload: ServiceBulkRaisePayload,
+): Promise<ServiceBulkRaiseResult> {
+  const response = await api.post<ServiceBulkRaiseResult>(
+    `/services/bulk-raise/`,
+    payload,
+  );
+  return response.data;
 }
 
 // ---- Sprint 28 Batch 5 — Per-customer pricing ---------------------------
