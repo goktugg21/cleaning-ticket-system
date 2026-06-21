@@ -38,7 +38,7 @@
 
 ## Near-term priority — Ramazan Meeting 2 (2026-06-05) + carried-over
 
-> Ramazan wants these by **Monday**. He also wants a **live login link** to poke around himself → the deployment milestone is pulling forward. Department section is **deferred** (do it in person, after these). Re-read `ramazan_transkript (2).txt` + the SoT addendum before scoping each.
+> The **Monday** deadline no longer applies. A **dev/test live link** (`crmtest.osius.nl`) already exists and Ramazan has access, so the "live link" need is met — real **production deployment** remains its own standing milestone (no longer pulled forward for that reason). The **Department section** and a full **requirements + codebase audit** are folded into the **Fixing & Auditing Sprint** below.
 
 ### CP — Customer-permissions page (carried over) — do first, one PR (same page)
 Backend already supports granting a building a customer user isn't in (`POST /api/customers/<id>/users/<user_id>/access/ {building_id}`, gated only by the Sprint-14 customer↔building link). The FE has `addCustomerUserAccess` wired but the matrix view doesn't surface the control.
@@ -61,10 +61,11 @@ Messages on tickets / extra-work / meldingen get lost; nobody sees replies.
 ### M3 — Navigation / IA (Ramazan #1-nav)
 - [x] Move **Recurring Work** and the **customer price-quote-request** flow to live **under Extra Work** (sub-items), not as separate top-level / not performed directly in Extra Work.
 
-### M4 — Extra Work billing: monthly invoice run + billing-month (Ramazan #2)
+### M4 — Extra Work billing: monthly invoice run + billing-month (Ramazan #2) ✅ DONE
 Billing must key off a **billing month you set**, not the customer's final-approval date (work done May 31, approved Jun 7 → bills in **May**).
-- [ ] Backend: a settable **billing month / invoice date** on completed extra work (decoupled from approval); an **"invoice run" per month** concept; filters by month + status (completed / invoiced). Extends the existing EW-revenue report.
-- [ ] FE: a **monthly filter** on Extra Work (time-range select) + status filter; surface the billing-month field at completion; revenue/invoice export per month (PDF/CSV).
+- [x] Backend (commits 1 / 2a–2e): settable **billing month / `invoice_date`** on `ExtraWorkRequest` (decoupled from approval; migration 0013), provider-only redaction; per-month **invoice run** — mark/clear-invoiced by **company + month** (single source of truth `extra_work/billing.py`; earned = spawned ticket CLOSED; billing month = `COALESCE(invoice_date, completion)`); **EW list filters** (billing month + invoice status); **EW-revenue report** anchored on billing month + status filter (CSV/PDF exports track it).
+- [x] FE (commits 3a–3d): billing-month picker + invoice-status filter + invoiced column on the EW list (provider-only); **invoice-run toolbar** (mark/clear by month + in-view company, confirm-gated); itemized client-side **CSV export** of the filtered list; per-EW **billing-month override** on the detail page (via 2b).
+- Shipped on branch `feat/m4-billing-month` (12 commits); deployed + verified on the dev/test box.
 
 ### M5 — Customer pricing: custom line + category edit + bulk raise (Ramazan #3)
 Builds on #86.
@@ -100,10 +101,17 @@ Verify, then surface only what's missing.
 ---
 
 ## Standing milestones
-- [ ] **Production deployment** (pull forward — Ramazan wants a live link): VPS, TLS, real SMTP, non-root containers, `ALLOWED_HOSTS` fix for the Docker internal healthcheck (broken with `DEBUG=False`).
+- [ ] **Production deployment** (the dev/test link already covers the "live link" need; this is the real thing): VPS, TLS, real SMTP, non-root containers, `ALLOWED_HOSTS` fix for the Docker internal healthcheck (broken with `DEBUG=False`), Postgres backups.
 - [ ] **CD** via GitHub Actions (CI already runs as required PR checks: backend Django/Postgres/Redis + frontend lint/tsc/build).
 - [ ] **Sentry** DSNs (integration is merge-safe / empty-DSN no-op; needs Göktuğ to create the account + provide DSNs).
 - [ ] **Backend follow-up:** redact nested `sub_tasks` for `CUSTOMER_USER` in `TicketDetailSerializer` (like `assigned_staff`) — the FE currently does a PII-safe summary client-side.
 
 ## Deferred
-- [ ] **Department section** — do in person with Ramazan, after the Meeting-2 block.
+- [ ] **Department section** — folded into the **Fixing & Auditing Sprint** below (design + build in person with Ramazan + father there).
+
+## Fixing & Auditing Sprint (planned — after the remaining sprints)
+Opened once the remaining sprint work is done. Scope:
+- [ ] Incorporate the further changes/additions Ramazan + father want (specifics TBD — Göktuğ will provide them).
+- [ ] Codebase audit: review how everything works end-to-end; hunt for bugs / dead code / inconsistencies; confirm each shipped feature behaves as intended.
+- [ ] Reconcile this checklist against the real codebase (tick/realign every item to what's actually implemented).
+- [ ] Department section (deferred above) — design + build in person with Ramazan + father.
