@@ -39,3 +39,5 @@ backups/
 *Zone.Identifier
 docs/transkript*.txt
 docs/**/*_2026-06-05.md
+devdb.dump
+*.dump

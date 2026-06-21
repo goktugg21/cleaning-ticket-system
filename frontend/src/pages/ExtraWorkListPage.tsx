@@ -5,7 +5,7 @@
 //   Functional contract is unchanged; only the presentation layer moves.
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   CheckCircle2,
@@ -18,14 +18,24 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listExtraWork } from "../api/extraWork";
+import {
+  clearExtraWorkInvoiced,
+  listExtraWork,
+  markExtraWorkInvoiced,
+} from "../api/extraWork";
 import type {
   ExtraWorkCategory,
   ExtraWorkRequestList,
   ExtraWorkStatus,
 } from "../api/types";
 import { getApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { isProviderManagementRole } from "../auth/permissions";
 import { ClickableRow } from "../components/ClickableRow";
+import {
+  ConfirmDialog,
+  type ConfirmDialogHandle,
+} from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
@@ -109,6 +119,11 @@ function KpiCard({
 
 export function ExtraWorkListPage() {
   const { t } = useTranslation(["extra_work", "common"]);
+  const { me } = useAuth();
+  // Provider-only: the billing-month picker, invoice-status filter, and the
+  // invoiced column. The backend redacts the billing fields for CUSTOMER_USER
+  // anyway; this also hides the controls from them.
+  const isProvider = isProviderManagementRole(me?.role);
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -119,12 +134,33 @@ export function ExtraWorkListPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
 
+  // Server-side filters (M4): these drive the 2d list endpoint
+  // (?billing_period / ?invoice_status). Search / status / category stay
+  // client-side. "" = no billing-month filter.
+  const [billingMonth, setBillingMonth] = useState("");
+  const [invoiceStatus, setInvoiceStatus] = useState<
+    "ALL" | "completed" | "invoiced"
+  >("ALL");
+
+  // M4 (3b) invoice run — provider-only toolbar driving 2c's
+  // mark/clear-invoiced for the selected billing month + in-view company.
+  // `pendingRun` selects which action the shared ConfirmDialog confirms;
+  // bumping `refreshKey` re-fires the fetch so the list reflects the run.
+  const [running, setRunning] = useState(false);
+  const [runMessage, setRunMessage] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [pendingRun, setPendingRun] = useState<"mark" | "clear" | null>(null);
+  const confirmRunRef = useRef<ConfirmDialogHandle>(null);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setError("");
       try {
-        const response = await listExtraWork();
+        const response = await listExtraWork({
+          billing_period: billingMonth || undefined,
+          invoice_status: invoiceStatus === "ALL" ? undefined : invoiceStatus,
+        });
         if (!cancelled) setRows(response.results);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
@@ -136,7 +172,14 @@ export function ExtraWorkListPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [billingMonth, invoiceStatus, refreshKey]);
+
+  // Open the shared run-confirm dialog after `pendingRun` is set, so its
+  // title/body reflect the chosen action (no synchronous open-with-stale
+  // content). Closing/cancelling resets pendingRun.
+  useEffect(() => {
+    if (pendingRun) confirmRunRef.current?.open();
+  }, [pendingRun]);
 
   // KPI strip — computed from the full loaded set (not the filtered
   // view) so the operator always sees the same headline numbers
@@ -166,6 +209,14 @@ export function ExtraWorkListPage() {
     };
   }, [rows]);
 
+  // The invoice run targets ONE provider company. Derive it from the loaded
+  // rows: exactly one company in view -> that company; 0 or >1 -> null (the
+  // toolbar disables and shows a "narrow the view" hint).
+  const runCompany = useMemo(() => {
+    const companies = new Set(rows.map((r) => r.company));
+    return companies.size === 1 ? rows[0].company : null;
+  }, [rows]);
+
   const visibleRows = useMemo(() => {
     const needle = searchInput.trim().toLowerCase();
     return rows.filter((r) => {
@@ -180,6 +231,101 @@ export function ExtraWorkListPage() {
       return true;
     });
   }, [rows, searchInput, statusFilter, categoryFilter]);
+
+  async function doMarkInvoiced() {
+    if (runCompany === null || !billingMonth) return;
+    const [year, month] = billingMonth.split("-").map(Number);
+    setRunning(true);
+    setRunMessage("");
+    setError("");
+    try {
+      const res = await markExtraWorkInvoiced({
+        company: runCompany,
+        year,
+        month,
+      });
+      setRunMessage(
+        t("list.invoice_run_marked", { count: res.invoiced_count ?? 0 }),
+      );
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function doClearInvoiced() {
+    if (runCompany === null || !billingMonth) return;
+    const [year, month] = billingMonth.split("-").map(Number);
+    setRunning(true);
+    setRunMessage("");
+    setError("");
+    try {
+      const res = await clearExtraWorkInvoiced({
+        company: runCompany,
+        year,
+        month,
+      });
+      setRunMessage(
+        t("list.invoice_run_cleared", { count: res.cleared_count ?? 0 }),
+      );
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(getApiError(err));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
+  // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
+  // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
+  function exportCsv() {
+    const esc = (v: string | null | undefined) =>
+      `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const headers = [
+      t("list.column_title"),
+      t("list.column_customer"),
+      t("list.column_building"),
+      t("list.column_status"),
+      t("list.export_col_subtotal"),
+      t("list.export_col_vat"),
+      t("list.column_total"),
+      t("list.column_billing"),
+      t("list.export_col_invoice_date"),
+      t("list.column_requested"),
+    ];
+    const lines = [headers.map(esc).join(",")];
+    for (const row of visibleRows) {
+      lines.push(
+        [
+          row.title,
+          row.customer_name,
+          row.building_name,
+          t(STATUS_I18N_KEY[row.status] ?? row.status),
+          row.subtotal_amount,
+          row.vat_amount,
+          row.total_amount,
+          row.is_invoiced
+            ? t("list.billing_invoiced")
+            : t("list.billing_to_invoice"),
+          row.invoice_date ? formatDate(row.invoice_date) : "",
+          formatDate(row.requested_at),
+        ]
+          .map(esc)
+          .join(","),
+      );
+    }
+    const csv = "\uFEFF" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `extra-work_${billingMonth}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div data-testid="extra-work-list-page">
@@ -295,19 +441,135 @@ export function ExtraWorkListPage() {
             )}
           </select>
         </div>
+        {isProvider && (
+          <>
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("list.filter_billing_month")}
+              </span>
+              <span
+                style={{
+                  display: "inline-flex",
+                  gap: 6,
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  className="filter-control"
+                  type="month"
+                  value={billingMonth}
+                  onChange={(event) => setBillingMonth(event.target.value)}
+                  data-testid="extra-work-list-billing-month"
+                />
+                {billingMonth && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setBillingMonth("")}
+                  >
+                    {t("list.filter_billing_month_clear")}
+                  </button>
+                )}
+              </span>
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("list.filter_invoice_status")}
+              </span>
+              <select
+                className="filter-control"
+                value={invoiceStatus}
+                onChange={(event) =>
+                  setInvoiceStatus(
+                    event.target.value as "ALL" | "completed" | "invoiced",
+                  )
+                }
+                data-testid="extra-work-list-invoice-status"
+              >
+                <option value="ALL">{t("list.invoice_status_all")}</option>
+                <option value="completed">
+                  {t("list.invoice_status_completed")}
+                </option>
+                <option value="invoiced">
+                  {t("list.invoice_status_invoiced")}
+                </option>
+              </select>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* M4 — invoice-run toolbar (provider-only, when a month is picked) */}
+      {isProvider && billingMonth && (
+        <div
+          className="card"
+          data-testid="extra-work-list-invoice-run"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            {t("list.invoice_run_label", { month: billingMonth })}
+          </span>
+          <div style={{ display: "inline-flex", gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={running || runCompany === null}
+              onClick={() => setPendingRun("mark")}
+            >
+              {t("list.invoice_run_mark")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={running || runCompany === null}
+              onClick={() => setPendingRun("clear")}
+            >
+              {t("list.invoice_run_clear")}
+            </button>
+          </div>
+          {rows.length > 0 && runCompany === null && (
+            <span style={{ color: "var(--text-muted)" }}>
+              {t("list.invoice_run_multi_company")}
+            </span>
+          )}
+          {runMessage && (
+            <span style={{ color: "var(--green)" }}>{runMessage}</span>
+          )}
+          <div style={{ marginLeft: "auto" }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={visibleRows.length === 0}
+              onClick={exportCsv}
+              data-testid="extra-work-list-export-csv"
+            >
+              {t("list.export_csv")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Empty / list */}
       {!loading && visibleRows.length === 0 && !error && (
         <EmptyState
           icon={Sparkles}
           title={
-            rows.length === 0
-              ? t("list.empty_state")
-              : t("list.empty_filtered_title")
+            billingMonth
+              ? t("list.empty_billing_month")
+              : rows.length === 0
+                ? t("list.empty_state")
+                : t("list.empty_filtered_title")
           }
           description={
-            rows.length === 0 ? undefined : t("list.empty_filtered_desc")
+            billingMonth || rows.length === 0
+              ? undefined
+              : t("list.empty_filtered_desc")
           }
           testId="extra-work-list-empty"
         />
@@ -328,6 +590,7 @@ export function ExtraWorkListPage() {
                   <th style={{ textAlign: "right" }}>
                     {t("list.column_total")}
                   </th>
+                  {isProvider && <th>{t("list.column_billing")}</th>}
                   <th>{t("list.column_requested")}</th>
                 </tr>
               </thead>
@@ -357,6 +620,30 @@ export function ExtraWorkListPage() {
                     <td style={{ textAlign: "right" }}>
                       {formatMoney(row.total_amount)}
                     </td>
+                    {isProvider && (
+                      <td>
+                        {row.is_invoiced ? (
+                          <span className="badge badge-approved">
+                            {t("list.billing_invoiced")}
+                          </span>
+                        ) : (
+                          <span className="badge badge-normal">
+                            {t("list.billing_to_invoice")}
+                          </span>
+                        )}
+                        {row.invoice_date && (
+                          <div
+                            style={{
+                              fontSize: "0.8em",
+                              marginTop: 2,
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {formatDate(row.invoice_date)}
+                          </div>
+                        )}
+                      </td>
+                    )}
                     <td>{formatDate(row.requested_at)}</td>
                   </ClickableRow>
                 ))}
@@ -420,6 +707,25 @@ export function ExtraWorkListPage() {
                       <dt>{t("list.column_total")}</dt>
                       <dd>{formatMoney(row.total_amount)}</dd>
                     </div>
+                    {isProvider && (
+                      <div className="admin-card-meta-row">
+                        <dt>{t("list.column_billing")}</dt>
+                        <dd>
+                          {row.is_invoiced ? (
+                            <span className="badge badge-approved">
+                              {t("list.billing_invoiced")}
+                            </span>
+                          ) : (
+                            <span className="badge badge-normal">
+                              {t("list.billing_to_invoice")}
+                            </span>
+                          )}
+                          {row.invoice_date
+                            ? ` · ${formatDate(row.invoice_date)}`
+                            : ""}
+                        </dd>
+                      </div>
+                    )}
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_requested")}</dt>
                       <dd>{formatDate(row.requested_at)}</dd>
@@ -431,6 +737,34 @@ export function ExtraWorkListPage() {
           </ul>
         </div>
       )}
+
+      <ConfirmDialog
+        ref={confirmRunRef}
+        title={
+          pendingRun === "clear"
+            ? t("list.invoice_run_clear")
+            : t("list.invoice_run_mark")
+        }
+        body={
+          pendingRun === "clear"
+            ? t("list.invoice_run_confirm_clear", { month: billingMonth })
+            : t("list.invoice_run_confirm_mark", { month: billingMonth })
+        }
+        confirmLabel={
+          pendingRun === "clear"
+            ? t("list.invoice_run_clear")
+            : t("list.invoice_run_mark")
+        }
+        busy={running}
+        onConfirm={() => {
+          confirmRunRef.current?.close();
+          const action = pendingRun;
+          setPendingRun(null);
+          if (action === "mark") void doMarkInvoiced();
+          else if (action === "clear") void doClearInvoiced();
+        }}
+        onCancel={() => setPendingRun(null)}
+      />
     </div>
   );
 }

@@ -43,6 +43,8 @@ export interface ListExtraWorkParams {
   building?: number;
   status?: ExtraWorkStatus;
   routing_decision?: "INSTANT" | "PROPOSAL";
+  billing_period?: string; // "YYYY-MM" — server buckets on COALESCE(invoice_date, completion date)
+  invoice_status?: "completed" | "invoiced";
   page_size?: number;
 }
 
@@ -116,6 +118,52 @@ export async function transitionExtraWork(
   const response = await api.post<ExtraWorkRequestDetail>(
     `/extra-work/${id}/transition/`,
     payload,
+  );
+  return response.data;
+}
+
+// M4 (2c) invoice run — mark/clear every EARNED, not-yet-invoiced EW that
+// bills in a given company+month. `invoiced_count` comes back from mark,
+// `cleared_count` from clear; both return the affected `ew_ids`.
+export interface InvoiceRunResult {
+  invoiced_count?: number;
+  cleared_count?: number;
+  ew_ids: number[];
+}
+
+export async function markExtraWorkInvoiced(body: {
+  company: number;
+  year: number;
+  month: number;
+}): Promise<InvoiceRunResult> {
+  const response = await api.post<InvoiceRunResult>(
+    "/extra-work/mark-invoiced/",
+    body,
+  );
+  return response.data;
+}
+
+export async function clearExtraWorkInvoiced(body: {
+  company: number;
+  year: number;
+  month: number;
+}): Promise<InvoiceRunResult> {
+  const response = await api.post<InvoiceRunResult>(
+    "/extra-work/clear-invoiced/",
+    body,
+  );
+  return response.data;
+}
+
+// M4 (2b) provider-only billing-month override. invoice_date = "YYYY-MM-DD"
+// sets the billing month; null reverts to the completion-month default.
+export async function updateExtraWorkBilling(
+  id: number | string,
+  body: { invoice_date: string | null },
+): Promise<ExtraWorkRequestDetail> {
+  const response = await api.patch<ExtraWorkRequestDetail>(
+    `/extra-work/${id}/billing/`,
+    body,
   );
   return response.data;
 }

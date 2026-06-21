@@ -430,6 +430,19 @@ class ExtraWorkRequest(models.Model):
         default=None,
     )
 
+    # --- M4: billing month / invoice run (schema only in this commit) ---
+    # `invoice_date` is the provider-set billing date, deliberately DECOUPLED
+    # from `customer_decided_at` (final-approval): work completed May 31 but
+    # approved Jun 7 must bill in MAY. NULL until a provider sets it; the
+    # revenue report will later bucket on COALESCE(invoice_date, completion
+    # date) by month. `is_invoiced` / `invoiced_at` record that a monthly
+    # invoice run has issued this row — ORTHOGONAL to ExtraWorkStatus (no new
+    # lifecycle status), so the state machine and revenue classifier stay
+    # untouched. API/report/UI that read & write these land in later commits.
+    invoice_date = models.DateField(null=True, blank=True)
+    is_invoiced = models.BooleanField(default=False)
+    invoiced_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ["-requested_at"]
         indexes = [

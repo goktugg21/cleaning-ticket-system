@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import logging
 
+from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, mixins, status, viewsets
+from django.utils import timezone
+from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -33,6 +35,7 @@ from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 from notifications.services import emit_extra_work_requested_notifications
 
+from .billing import billing_month, build_ticket_map, is_earned
 from .classification import (
     IntentValidationError,
     classify_cart,
@@ -111,6 +114,19 @@ EXTRA_WORK_AWAITING_PRICING_STATUSES = ("REQUESTED", "UNDER_REVIEW")
 
 def _is_provider_operator(user) -> bool:
     return user.role in PROVIDER_ROLES
+
+
+def _parse_invoice_run_params(data):
+    """Returns (company_id, year, month) or None if invalid."""
+    try:
+        company_id = int(data["company"])
+        year = int(data["year"])
+        month = int(data["month"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (1 <= month <= 12):
+        return None
+    return (company_id, year, month)
 
 
 class ExtraWorkRequestViewSet(
@@ -557,6 +573,42 @@ class ExtraWorkRequestViewSet(
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["patch"], url_path="billing")
+    def billing(self, request, *args, **kwargs):
+        # Provider-only: set or clear this EW's invoice_date (billing month).
+        # invoice_date is provider-internal (see _PROVIDER_ONLY_FIELDS) and
+        # decoupled from customer_decided_at — work done May 31 / approved
+        # Jun 7 still bills in May once the provider sets May here.
+        ew = self.get_object()  # already tenant-scoped via the viewset queryset
+        if not _is_provider_operator(request.user):
+            return Response(
+                {"detail": "Only provider operators can set the billing month."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # Validate: a date, or null to clear. "invoice_date" key required.
+        if "invoice_date" not in request.data:
+            return Response(
+                {"invoice_date": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            parsed = serializers.DateField(allow_null=True).run_validation(
+                request.data.get("invoice_date")
+            )
+        except serializers.ValidationError as exc:
+            return Response(
+                {"invoice_date": exc.detail},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        ew.invoice_date = parsed
+        ew.save(update_fields=["invoice_date", "updated_at"])
+        return Response(
+            ExtraWorkRequestDetailSerializer(
+                ew, context={"request": request}
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
     @action(detail=True, methods=["get"], url_path="status-history")
     def status_history(self, request, pk=None):
         extra_work = self.get_object()  # 404 if out-of-scope
@@ -794,6 +846,82 @@ class ExtraWorkRequestViewSet(
                 }
                 for row in rows
             ],
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="mark-invoiced")
+    def mark_invoiced(self, request):
+        # Provider-only invoice run: mark every EARNED, not-yet-invoiced EW
+        # that bills in (year, month) for `company` as invoiced. Scoped to the
+        # caller's accessible EW, so a company they cannot see marks 0.
+        if not _is_provider_operator(request.user):
+            return Response(
+                {"detail": "Only provider operators can run invoicing."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        parsed = _parse_invoice_run_params(request.data)
+        if parsed is None:
+            return Response(
+                {"detail": "company (int), year (int), month (1-12) are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        company_id, year, month = parsed
+        ew_list = list(
+            scope_extra_work_for(request.user).filter(
+                company_id=company_id, deleted_at__isnull=True
+            )
+        )
+        ticket_map = build_ticket_map([e.id for e in ew_list])
+        to_mark = [
+            e for e in ew_list
+            if not e.is_invoiced
+            and is_earned(ticket_map.get(e.id))
+            and billing_month(e, ticket_map.get(e.id)) == (year, month)
+        ]
+        now = timezone.now()
+        with transaction.atomic():
+            for e in to_mark:
+                e.is_invoiced = True
+                e.invoiced_at = now
+                e.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
+        return Response(
+            {"invoiced_count": len(to_mark), "ew_ids": [e.id for e in to_mark]},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"], url_path="clear-invoiced")
+    def clear_invoiced(self, request):
+        # Provider-only inverse (corrections): un-mark invoiced EW that bill in
+        # (year, month) for `company`, by their CURRENT billing month.
+        if not _is_provider_operator(request.user):
+            return Response(
+                {"detail": "Only provider operators can run invoicing."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        parsed = _parse_invoice_run_params(request.data)
+        if parsed is None:
+            return Response(
+                {"detail": "company (int), year (int), month (1-12) are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        company_id, year, month = parsed
+        ew_list = list(
+            scope_extra_work_for(request.user).filter(
+                company_id=company_id, deleted_at__isnull=True, is_invoiced=True
+            )
+        )
+        ticket_map = build_ticket_map([e.id for e in ew_list])
+        to_clear = [
+            e for e in ew_list
+            if billing_month(e, ticket_map.get(e.id)) == (year, month)
+        ]
+        with transaction.atomic():
+            for e in to_clear:
+                e.is_invoiced = False
+                e.invoiced_at = None
+                e.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
+        return Response(
+            {"cleared_count": len(to_clear), "ew_ids": [e.id for e in to_clear]},
             status=status.HTTP_200_OK,
         )
 

@@ -117,8 +117,11 @@ services:
         VITE_DEMO_MODE: ${VITE_DEMO_MODE:-false}
     container_name: cleaning_ticket_prod_frontend
     restart: unless-stopped
+    # Bound to localhost:8080 — the host nginx (scripts/host-nginx-osius.conf)
+    # is the public front door on :80 and proxies here. Not exposed on
+    # 0.0.0.0, so the container is only reachable through host nginx.
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "127.0.0.1:8080:80"
     depends_on:
       - backend
 
