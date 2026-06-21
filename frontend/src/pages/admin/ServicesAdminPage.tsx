@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import {
+  bulkRaiseServices,
   createService,
   createServiceCategory,
   deleteService,
@@ -166,6 +167,14 @@ export function ServicesAdminPage() {
   const [deleteServiceTarget, setDeleteServiceTarget] =
     useState<Service | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // M5 C — catalog default-price bulk-raise modal (services tab only).
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
+  const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
+  const [bulkAmount, setBulkAmount] = useState("");
+  const [bulkError, setBulkError] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Initial parallel load.
   useEffect(() => {
@@ -417,7 +426,66 @@ export function ServicesAdminPage() {
     setDeleteKind(null);
   }
 
+  // -------- M5 C — catalog default bulk-raise --------
+
+  function openBulkRaise() {
+    setBulkSelectedIds(activeServices.map((s) => s.id));
+    setBulkMode("percent");
+    setBulkAmount("");
+    setBulkError("");
+    setBulkOpen(true);
+  }
+
+  function closeBulkRaise() {
+    setBulkOpen(false);
+    setBulkError("");
+  }
+
+  function toggleBulkAll(checked: boolean) {
+    setBulkSelectedIds(checked ? activeServices.map((s) => s.id) : []);
+  }
+
+  function toggleBulkRow(serviceId: number, checked: boolean) {
+    setBulkSelectedIds((prev) =>
+      checked ? [...prev, serviceId] : prev.filter((id) => id !== serviceId),
+    );
+  }
+
+  async function handleBulkRaise() {
+    if (bulkSelectedIds.length === 0) {
+      setBulkError(t("services.bulk_raise_error_no_selection"));
+      return;
+    }
+    const amountNumber = Number(bulkAmount);
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      setBulkError(t("services.bulk_raise_error_amount"));
+      return;
+    }
+    setBulkBusy(true);
+    setBulkError("");
+    try {
+      await bulkRaiseServices({
+        services: bulkSelectedIds,
+        mode: bulkMode,
+        amount: bulkAmount.trim(),
+      });
+      // Re-fetch so the updated catalog defaults surface in the table.
+      const refreshed = await listServices();
+      setServices(refreshed);
+      closeBulkRaise();
+    } catch (err) {
+      setBulkError(getApiError(err));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // -------- Render --------
+
+  // M5 C — active services are the only rows the bulk-raise modal can
+  // act on. Plain derived value (the earlier-defined openBulkRaise
+  // captures it, so a manual useMemo would trip the hooks rule).
+  const activeServices = services.filter((s) => s.is_active);
 
   return (
     <div data-testid="services-admin-page">
@@ -487,6 +555,14 @@ export function ServicesAdminPage() {
           >
             <div />
             <div className="page-header-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="services-bulk-raise-button"
+                onClick={openBulkRaise}
+              >
+                {t("services.bulk_raise_button")}
+              </button>
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
@@ -1234,6 +1310,197 @@ export function ServicesAdminPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* M5 C — catalog default-price bulk-raise modal */}
+      {bulkOpen && (
+        <div
+          data-testid="services-bulk-raise-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("services.bulk_raise_button")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 640,
+              width: "100%",
+              padding: 24,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("services.bulk_raise_button")}
+            </h3>
+
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+              {t("services.bulk_raise_intro")}
+            </p>
+
+            {bulkError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="services-bulk-raise-error"
+              >
+                {bulkError}
+              </div>
+            )}
+
+            {activeServices.length === 0 ? (
+              <div className="muted" style={{ marginBottom: 16 }}>
+                {t("services.bulk_raise_empty")}
+              </div>
+            ) : (
+              <>
+                <div className="field">
+                  <label
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="services-bulk-raise-select-all"
+                      checked={
+                        bulkSelectedIds.length === activeServices.length
+                      }
+                      onChange={(event) => toggleBulkAll(event.target.checked)}
+                      disabled={bulkBusy}
+                    />
+                    <span>{t("services.bulk_raise_select_all")}</span>
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid var(--border, #e5e7eb)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    marginBottom: 16,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
+                  {activeServices.map((service) => (
+                    <label
+                      key={service.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "4px 0",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid="services-bulk-raise-row"
+                        data-service-id={service.id}
+                        checked={bulkSelectedIds.includes(service.id)}
+                        onChange={(event) =>
+                          toggleBulkRow(service.id, event.target.checked)
+                        }
+                        disabled={bulkBusy}
+                      />
+                      <span>
+                        {service.name} —{" "}
+                        {formatDecimal(service.default_unit_price)}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="services-bulk-mode">
+                  {t("services.bulk_raise_mode_label")}
+                </label>
+                <select
+                  id="services-bulk-mode"
+                  className="field-select"
+                  value={bulkMode}
+                  onChange={(event) =>
+                    setBulkMode(
+                      event.target.value === "fixed" ? "fixed" : "percent",
+                    )
+                  }
+                  data-testid="services-bulk-raise-mode"
+                  disabled={bulkBusy}
+                >
+                  <option value="percent">
+                    {t("services.bulk_raise_mode_percent")}
+                  </option>
+                  <option value="fixed">
+                    {t("services.bulk_raise_mode_fixed")}
+                  </option>
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="services-bulk-amount">
+                  {t("services.bulk_raise_amount_label")}
+                </label>
+                <input
+                  id="services-bulk-amount"
+                  className="field-input"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={bulkAmount}
+                  onChange={(event) => setBulkAmount(event.target.value)}
+                  data-testid="services-bulk-raise-amount"
+                  disabled={bulkBusy}
+                />
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {bulkMode === "percent"
+                    ? t("services.bulk_raise_amount_percent_hint")
+                    : t("services.bulk_raise_amount_fixed_hint")}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={closeBulkRaise}
+                disabled={bulkBusy}
+                data-testid="services-bulk-raise-cancel"
+              >
+                {t("services.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleBulkRaise}
+                disabled={bulkBusy || activeServices.length === 0}
+                data-testid="services-bulk-raise-apply"
+              >
+                {bulkBusy
+                  ? t("admin_form.saving")
+                  : t("services.bulk_raise_apply")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

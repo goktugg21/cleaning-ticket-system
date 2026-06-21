@@ -780,6 +780,67 @@ class CustomerServicePrice(models.Model):
                 )
 
 
+class CustomerCustomPrice(models.Model):
+    """M5 A — per-customer ad-hoc / custom price line for a service
+    NOT in the provider catalog. Parallel to CustomerServicePrice but
+    with NO `service` FK: carries a free-text `custom_name` and its
+    own `unit_type`. Isolation: with no `service`, a row here can
+    never be returned by `resolve_price(service, customer)`, so the
+    instant-ticket / cart / proposal / billing paths are untouched.
+    Provider-internal price record for non-catalog work.
+    """
+
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="custom_prices",
+    )
+    custom_name = models.CharField(max_length=200)
+    unit_type = models.CharField(
+        max_length=20,
+        choices=ExtraWorkPricingUnitType.choices,
+    )
+    unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    vat_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("21.00"),
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    valid_from = models.DateField()
+    valid_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["customer__name", "custom_name", "-valid_from", "id"]
+        indexes = [
+            models.Index(
+                fields=["customer", "-valid_from"],
+                name="idx_ccp_lookup",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.customer.name} — {self.custom_name} @ {self.unit_price}"
+
+    def clean(self):
+        super().clean()
+        from django.core.exceptions import ValidationError
+
+        if self.valid_to is not None and self.valid_from is not None:
+            if self.valid_to < self.valid_from:
+                raise ValidationError(
+                    {"valid_to": "valid_to must be on or after valid_from."}
+                )
+
+
 class ExtraWorkStatusHistory(models.Model):
     """
     Append-only audit log of every successful state transition on an

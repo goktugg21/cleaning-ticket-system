@@ -1762,6 +1762,26 @@ export interface ServiceCreatePayload {
 
 export type ServiceUpdatePayload = Partial<ServiceCreatePayload>;
 
+// M5 C — bulk-raise the catalog default_unit_price of a set of Services
+// by a percentage or fixed amount, IN PLACE. Updates the quoting
+// baseline only; never touches any CustomerServicePrice (billing).
+export interface ServiceBulkRaisePayload {
+  services: number[];
+  mode: "percent" | "fixed";
+  amount: string;
+}
+
+export interface ServiceBulkRaiseResultRow {
+  service: number;
+  old_default_unit_price: string;
+  new_default_unit_price: string;
+}
+
+export interface ServiceBulkRaiseResult {
+  updated_count: number;
+  results: ServiceBulkRaiseResultRow[];
+}
+
 // Per-customer contract price. Only an active row triggers the instant-
 // ticket path (Batch 7); absence means the request must go through the
 // proposal phase. `valid_to` null means open-ended.
@@ -1790,5 +1810,61 @@ export interface CustomerServicePriceCreatePayload {
 
 export type CustomerServicePriceUpdatePayload =
   Partial<CustomerServicePriceCreatePayload>;
+
+// M5 A — per-customer ad-hoc / custom price line for a non-catalog
+// service. Parallel to CustomerServicePrice but with no `service` FK:
+// a free-text `custom_name` + its own `unit_type`. Provider-internal;
+// never influences the instant-ticket resolver.
+export interface CustomerCustomPrice {
+  id: number;
+  customer: number;
+  custom_name: string;
+  unit_type: ServiceUnitType;
+  unit_type_display: string;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerCustomPriceCreatePayload {
+  custom_name: string;
+  unit_type: ServiceUnitType;
+  unit_price: string;
+  vat_pct: string;
+  valid_from: string;
+  valid_to?: string | null;
+  is_active?: boolean;
+}
+
+export type CustomerCustomPriceUpdatePayload =
+  Partial<CustomerCustomPriceCreatePayload>;
+
+// M5 C — bulk-raise a customer's active catalog (CustomerServicePrice)
+// rows by a percentage or fixed amount. History-preserving: the backend
+// writes new validity-window rows rather than mutating the sources.
+export interface CustomerPriceBulkRaisePayload {
+  prices: number[];
+  mode: "percent" | "fixed";
+  amount: string;
+  valid_from: string;
+}
+
+export interface CustomerPriceBulkRaiseResultRow {
+  source_price: number;
+  service: number;
+  old_unit_price: string;
+  new_unit_price: string;
+  customer_service_price: number;
+}
+
+export interface CustomerPriceBulkRaiseResult {
+  created_count: number;
+  valid_from: string;
+  results: CustomerPriceBulkRaiseResultRow[];
+}
 
 

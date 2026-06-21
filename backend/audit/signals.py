@@ -51,6 +51,7 @@ from customers.models import (
     CustomerUserMembership,
 )
 from extra_work.models import (
+    CustomerCustomPrice,
     CustomerServicePrice,
     ExtraWorkRequestItem,
     Proposal,
@@ -1217,6 +1218,11 @@ def _connect():
         ServiceCategory,
         Service,
         CustomerServicePrice,
+        # M5 A — customer custom price lines (ad-hoc, no service FK)
+        # carry the same provider price / VAT / validity data and have
+        # create / update / soft-delete endpoints, so they get the same
+        # full CRUD audit coverage as CustomerServicePrice.
+        CustomerCustomPrice,
         # Sprint 28 Batch 6 — cart line items on ExtraWorkRequest.
         # Each row has editable fields (quantity, requested_date,
         # customer_note) so the full CRUD trio is the right shape:

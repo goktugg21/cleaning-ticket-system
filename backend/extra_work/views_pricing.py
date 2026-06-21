@@ -47,7 +47,7 @@ Sprint 4B — DELETE now SOFT-ARCHIVES.
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 from django.db.models import Q
@@ -61,6 +61,7 @@ from rest_framework.views import APIView
 from accounts.models import UserRole
 from accounts.permissions import (
     IsAuthenticatedAndActive,
+    IsSuperAdminOrCompanyAdmin,
     IsSuperAdminOrCompanyAdminForCompany,
 )
 from audit import context as audit_context
@@ -72,8 +73,11 @@ from customers.models import (
     CustomerUserMembership,
 )
 
-from .models import CustomerServicePrice, Service
-from .serializers_catalog import CustomerServicePriceSerializer
+from .models import CustomerCustomPrice, CustomerServicePrice, Service
+from .serializers_catalog import (
+    CustomerCustomPriceSerializer,
+    CustomerServicePriceSerializer,
+)
 
 
 # Sprint 3B / Sprint 4B — stable error codes surfaced from this module.
@@ -87,6 +91,8 @@ ERR_COPY_VALID_FROM_REQUIRED = "copy_from_default_valid_from_required"
 ERR_COPY_SERVICE_INVALID = "copy_from_default_service_invalid"
 ERR_COPY_FORBIDDEN = "copy_from_default_forbidden"
 ERR_SERVICE_COMPANY_MISMATCH = "service_customer_company_mismatch"
+ERR_BULK_RAISE_AMOUNT_INVALID = "bulk_raise_amount_invalid"
+ERR_BULK_RAISE_PRICE_INVALID = "bulk_raise_price_invalid"
 
 
 def _enforce_customer_price_policy(user, customer):
@@ -483,6 +489,39 @@ class _CopyFromDefaultInputSerializer(serializers.Serializer):
         return attrs
 
 
+class _BulkRaiseInputSerializer(serializers.Serializer):
+    """M5 C — input for POST /api/customers/<cid>/pricing/bulk-raise/.
+    Raises a set of the customer's active CustomerServicePrice rows by
+    a percentage or fixed amount, writing NEW validity-window rows
+    (history preserved). `prices` = CSP ids to raise; `mode` =
+    percent|fixed; `amount` > 0; `valid_from` = effective date.
+    """
+
+    prices = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+        error_messages={
+            "empty": "At least one price id is required.",
+            "required": "Prices list is required.",
+        },
+    )
+    mode = serializers.ChoiceField(choices=["percent", "fixed"])
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    valid_from = serializers.DateField(
+        error_messages={"required": "valid_from is required."}
+    )
+
+    def validate_amount(self, value):
+        if value is None or value <= Decimal("0"):
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "amount must be greater than zero.",
+                    code=ERR_BULK_RAISE_AMOUNT_INVALID,
+                )
+            )
+        return value
+
+
 class CustomerServicePriceCopyFromDefaultView(APIView):
     """Sprint 4B — bulk seed CSP rows from Service.default_unit_price
     + Service.default_vat_pct.
@@ -688,3 +727,214 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CustomerServicePriceBulkRaiseView(APIView):
+    """M5 C — bulk-raise a customer's CustomerServicePrice rows by a
+    percentage or fixed amount, writing NEW validity-window rows so
+    pricing history is preserved (the resolver picks the latest
+    valid_from from the effective date onward).
+
+    POST /api/customers/<customer_id>/pricing/bulk-raise/
+    Body: { "prices": [id,...], "mode": "percent"|"fixed",
+            "amount": "10.00", "valid_from": "YYYY-MM-DD" }
+
+    All-or-nothing: every price id must be an ACTIVE CSP row owned by
+    this customer, else 400 (bulk_raise_price_invalid) with zero
+    writes. For each, a new row is created with the same service +
+    vat_pct, unit_price = old*(1+amount/100) [percent] or old+amount
+    [fixed] rounded HALF_UP to 2dp, valid_from = the effective date,
+    valid_to = null, is_active = True. Existing rows are NOT modified.
+
+    Permission: SA always; CA of the customer's company iff the
+    customer-price toggle is on; BM/STAFF/CUSTOMER_USER 403.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        self.check_object_permissions(self.request, customer)
+        return customer
+
+    def _resolve_prices(self, price_ids, customer):
+        rows_by_id = {
+            r.id: r
+            for r in CustomerServicePrice.objects.filter(
+                id__in=price_ids, customer=customer
+            ).select_related("service")
+        }
+        # Validate every id first (active + owned) — all-or-nothing.
+        validated = []
+        for pid in price_ids:
+            row = rows_by_id.get(pid)
+            if row is None or not row.is_active:
+                raise serializers.ValidationError(
+                    {
+                        "prices": [
+                            serializers.ErrorDetail(
+                                f"Price id={pid} is not an active price "
+                                "for this customer.",
+                                code=ERR_BULK_RAISE_PRICE_INVALID,
+                            )
+                        ]
+                    }
+                )
+            validated.append(row)
+        # Collapse to ONE row per service — the latest-effective row
+        # (max valid_from, then max id), matching resolve_price's
+        # ordering. A service can have several active rows (each raise
+        # keeps the source open) and the select-all UI sends them all;
+        # raising every selected row would create multiple new rows
+        # sharing valid_from, where resolve_price's id tie-break could
+        # let the row derived from an older source win (a lower, non-
+        # compounded price). Raising only the latest source per service
+        # yields one deterministic new row per service.
+        latest_by_service = {}
+        for row in validated:
+            current = latest_by_service.get(row.service_id)
+            if current is None or (row.valid_from, row.id) > (
+                current.valid_from,
+                current.id,
+            ):
+                latest_by_service[row.service_id] = row
+        return [latest_by_service[sid] for sid in sorted(latest_by_service)]
+
+    @staticmethod
+    def _raised(old_price, mode, amount):
+        if mode == "percent":
+            new = old_price * (Decimal("1") + amount / Decimal("100"))
+        else:  # fixed
+            new = old_price + amount
+        return new.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    def post(self, request, *args, **kwargs):
+        customer = self._get_customer()
+        _enforce_customer_price_policy(request.user, customer)
+
+        payload = _BulkRaiseInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        price_ids = payload.validated_data["prices"]
+        mode = payload.validated_data["mode"]
+        amount = payload.validated_data["amount"]
+        valid_from = payload.validated_data["valid_from"]
+
+        resolved = self._resolve_prices(price_ids, customer)
+
+        try:
+            audit_context.set_current_reason("customer_price_bulk_raise")
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+        results = []
+        with transaction.atomic():
+            for src in resolved:
+                new_price = self._raised(src.unit_price, mode, amount)
+                row = CustomerServicePrice.objects.create(
+                    service=src.service,
+                    customer=customer,
+                    unit_price=new_price,
+                    vat_pct=src.vat_pct,
+                    valid_from=valid_from,
+                    valid_to=None,
+                    is_active=True,
+                )
+                results.append(
+                    {
+                        "source_price": src.id,
+                        "service": src.service_id,
+                        "old_unit_price": str(src.unit_price),
+                        "new_unit_price": str(new_price),
+                        "customer_service_price": row.id,
+                    }
+                )
+
+        return Response(
+            {
+                "created_count": len(results),
+                "valid_from": str(valid_from),
+                "results": results,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CustomerCustomPriceListCreateView(generics.ListCreateAPIView):
+    """M5 A — GET/POST at /api/customers/<customer_id>/custom-pricing/.
+    PROVIDER-ONLY (no CUSTOMER_USER / STAFF): SA always; CA for own
+    company with the customer-price toggle (via
+    _enforce_customer_price_policy on writes)."""
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    serializer_class = CustomerCustomPriceSerializer
+    pagination_class = UnboundedPagination
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        inner = IsSuperAdminOrCompanyAdminForCompany()
+        if not inner.has_object_permission(self.request, self, customer):
+            raise PermissionDenied(detail="Forbidden.")
+        return customer
+
+    def get_queryset(self):
+        customer = self._get_customer()
+        qs = CustomerCustomPrice.objects.filter(
+            customer=customer
+        ).select_related("customer")
+        flag = self.request.query_params.get("is_active")
+        if flag is not None:
+            lowered = flag.strip().lower()
+            if lowered in {"true", "1", "yes", "y"}:
+                qs = qs.filter(is_active=True)
+            elif lowered in {"false", "0", "no", "n"}:
+                qs = qs.filter(is_active=False)
+        return qs.order_by("-valid_from", "-id")
+
+    def perform_create(self, serializer):
+        customer = self._get_customer()
+        _enforce_customer_price_policy(self.request.user, customer)
+        serializer.save(customer=customer)
+
+
+class CustomerCustomPriceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """M5 A — GET/PATCH/DELETE at
+    /api/customers/<customer_id>/custom-pricing/<custom_price_id>/.
+    PROVIDER-ONLY. DELETE soft-archives (is_active=False, 204)."""
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    serializer_class = CustomerCustomPriceSerializer
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        inner = IsSuperAdminOrCompanyAdminForCompany()
+        if not inner.has_object_permission(self.request, self, customer):
+            raise PermissionDenied(detail="Forbidden.")
+        return customer
+
+    def get_object(self):
+        customer = self._get_customer()
+        return get_object_or_404(
+            CustomerCustomPrice,
+            pk=self.kwargs["custom_price_id"],
+            customer=customer,
+        )
+
+    def perform_update(self, serializer):
+        _enforce_customer_price_policy(
+            self.request.user, serializer.instance.customer
+        )
+        serializer.save()
+
+    def delete(self, request, *args, **kwargs):
+        price = self.get_object()
+        _enforce_customer_price_policy(request.user, price.customer)
+        if price.is_active:
+            try:
+                audit_context.set_current_reason(
+                    "customer_custom_price_soft_archive"
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
+            price.is_active = False
+            price.save(update_fields=["is_active", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)

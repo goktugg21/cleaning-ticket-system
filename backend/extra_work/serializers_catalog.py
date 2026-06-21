@@ -34,7 +34,12 @@ from rest_framework import serializers
 from companies.models import Company
 
 from .catalog_scope import can_view_provider_defaults
-from .models import CustomerServicePrice, Service, ServiceCategory
+from .models import (
+    CustomerCustomPrice,
+    CustomerServicePrice,
+    Service,
+    ServiceCategory,
+)
 
 
 class ServiceCategorySerializer(serializers.ModelSerializer):
@@ -273,4 +278,63 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
                         ]
                     }
                 )
+        return attrs
+
+
+class CustomerCustomPriceSerializer(serializers.ModelSerializer):
+    """M5 A — read/write serializer for CustomerCustomPrice. `customer`
+    is read-only — the URL kwarg owns the binding. valid_to (if set)
+    must be >= valid_from; unit_price / vat_pct must be non-negative.
+    """
+
+    customer = serializers.PrimaryKeyRelatedField(read_only=True)
+    unit_type_display = serializers.CharField(
+        source="get_unit_type_display", read_only=True
+    )
+
+    class Meta:
+        model = CustomerCustomPrice
+        fields = [
+            "id",
+            "custom_name",
+            "unit_type",
+            "unit_type_display",
+            "customer",
+            "unit_price",
+            "vat_pct",
+            "valid_from",
+            "valid_to",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "unit_type_display",
+            "customer",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_unit_price(self, value):
+        if value is not None and value < Decimal("0"):
+            raise serializers.ValidationError("unit_price must be non-negative.")
+        return value
+
+    def validate_vat_pct(self, value):
+        if value is not None and value < Decimal("0"):
+            raise serializers.ValidationError("vat_pct must be non-negative.")
+        return value
+
+    def validate(self, attrs):
+        valid_from = attrs.get(
+            "valid_from", getattr(self.instance, "valid_from", None)
+        )
+        valid_to = attrs.get(
+            "valid_to", getattr(self.instance, "valid_to", None)
+        )
+        if valid_from is not None and valid_to is not None and valid_to < valid_from:
+            raise serializers.ValidationError(
+                {"valid_to": "valid_to must be on or after valid_from."}
+            )
         return attrs

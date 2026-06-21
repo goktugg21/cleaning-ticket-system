@@ -13,6 +13,11 @@ import type {
   CustomerAdmin,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
+  CustomerCustomPrice,
+  CustomerCustomPriceCreatePayload,
+  CustomerCustomPriceUpdatePayload,
+  CustomerPriceBulkRaisePayload,
+  CustomerPriceBulkRaiseResult,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
@@ -27,6 +32,8 @@ import type {
   PromoteContactResponse,
   Role,
   Service,
+  ServiceBulkRaisePayload,
+  ServiceBulkRaiseResult,
   ServiceCategory,
   ServiceCategoryCreatePayload,
   ServiceCategoryUpdatePayload,
@@ -1493,6 +1500,17 @@ export async function deleteService(id: number): Promise<void> {
   await api.delete(`/services/${id}/`);
 }
 
+// M5 C — bulk-raise catalog default prices (% or fixed), in place.
+export async function bulkRaiseServices(
+  payload: ServiceBulkRaisePayload,
+): Promise<ServiceBulkRaiseResult> {
+  const response = await api.post<ServiceBulkRaiseResult>(
+    `/services/bulk-raise/`,
+    payload,
+  );
+  return response.data;
+}
+
 // ---- Sprint 28 Batch 5 — Per-customer pricing ---------------------------
 //
 // `/api/customers/<customer_id>/pricing/` — list + create.
@@ -1565,4 +1583,60 @@ export async function deleteCustomerPrice(
   priceId: number,
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/pricing/${priceId}/`);
+}
+
+// ---- M5 A — Per-customer custom (non-catalog) price lines ---------------
+// `/api/customers/<customer_id>/custom-pricing/` — list + create.
+// `/api/customers/<customer_id>/custom-pricing/<custom_price_id>/` — detail.
+export async function listCustomerCustomPrices(
+  customerId: number,
+): Promise<CustomerCustomPrice[]> {
+  const response = await api.get<PaginatedResponse<CustomerCustomPrice>>(
+    `/customers/${customerId}/custom-pricing/`,
+  );
+  return response.data.results;
+}
+
+export async function createCustomerCustomPrice(
+  customerId: number,
+  payload: CustomerCustomPriceCreatePayload,
+): Promise<CustomerCustomPrice> {
+  const response = await api.post<CustomerCustomPrice>(
+    `/customers/${customerId}/custom-pricing/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function updateCustomerCustomPrice(
+  customerId: number,
+  customPriceId: number,
+  payload: CustomerCustomPriceUpdatePayload,
+): Promise<CustomerCustomPrice> {
+  const response = await api.patch<CustomerCustomPrice>(
+    `/customers/${customerId}/custom-pricing/${customPriceId}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteCustomerCustomPrice(
+  customerId: number,
+  customPriceId: number,
+): Promise<void> {
+  await api.delete(
+    `/customers/${customerId}/custom-pricing/${customPriceId}/`,
+  );
+}
+
+// M5 C — bulk-raise a customer's contract prices (% or fixed).
+export async function bulkRaiseCustomerPrices(
+  customerId: number,
+  payload: CustomerPriceBulkRaisePayload,
+): Promise<CustomerPriceBulkRaiseResult> {
+  const response = await api.post<CustomerPriceBulkRaiseResult>(
+    `/customers/${customerId}/pricing/bulk-raise/`,
+    payload,
+  );
+  return response.data;
 }

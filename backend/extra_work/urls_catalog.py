@@ -10,6 +10,7 @@ routing detail; the model and view both live in this app.
 from django.urls import path
 
 from .views_catalog import (
+    ServiceBulkRaiseView,
     ServiceCategoryDetailView,
     ServiceCategoryListCreateView,
     ServiceDetailView,
@@ -27,6 +28,11 @@ urlpatterns = [
         "categories/<int:category_id>/",
         ServiceCategoryDetailView.as_view(),
         name="service-category-detail",
+    ),
+    path(
+        "bulk-raise/",
+        ServiceBulkRaiseView.as_view(),
+        name="service-bulk-raise",
     ),
     path(
         "",
