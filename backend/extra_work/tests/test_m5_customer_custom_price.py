@@ -34,6 +34,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import UserRole
+from audit.models import AuditAction, AuditLog
 from extra_work.models import (
     CustomerCustomPrice,
     CustomerServicePrice,
@@ -389,3 +390,91 @@ class CustomerCustomPriceResolverIsolationTests(
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.id, csp.id)
         self.assertEqual(resolved.unit_price, Decimal("42.00"))
+
+
+class CustomerCustomPriceAuditTests(
+    CustomCustomPriceFixtureMixin, APITestCase
+):
+    """P2 (PR review) — CustomerCustomPrice is registered for full-CRUD
+    audit logging, so create / update / soft-delete of custom lines
+    produce AuditLog entries like the other pricing models. Mirrors
+    test_sprint4_customer_agreed_prices::test_29_audit_records_is_active_change.
+    """
+
+    TARGET_MODEL = "extra_work.CustomerCustomPrice"
+
+    def _seed_row(self):
+        return CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Audited line",
+            unit_type=ExtraWorkPricingUnitType.FIXED,
+            unit_price=Decimal("100.00"),
+            valid_from=date(2026, 1, 1),
+        )
+
+    def test_create_writes_audit_log(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id), self.valid_payload(), format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        row_id = response.data["id"]
+        self.assertTrue(
+            AuditLog.objects.filter(
+                target_model=self.TARGET_MODEL,
+                target_id=row_id,
+                action=AuditAction.CREATE,
+            ).exists()
+        )
+
+    def test_update_writes_audit_log(self):
+        row = self._seed_row()
+        before = AuditLog.objects.filter(
+            target_model=self.TARGET_MODEL,
+            target_id=row.id,
+            action=AuditAction.UPDATE,
+        ).count()
+        self.authenticate(self.super_admin)
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {"unit_price": "150.00"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        after = AuditLog.objects.filter(
+            target_model=self.TARGET_MODEL,
+            target_id=row.id,
+            action=AuditAction.UPDATE,
+        ).count()
+        self.assertEqual(after, before + 1)
+
+    def test_soft_delete_writes_audit_log(self):
+        row = self._seed_row()
+        before = AuditLog.objects.filter(
+            target_model=self.TARGET_MODEL,
+            target_id=row.id,
+            action=AuditAction.UPDATE,
+        ).count()
+        self.authenticate(self.super_admin)
+        response = self.client.delete(detail_url(self.customer.id, row.id))
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        after = AuditLog.objects.filter(
+            target_model=self.TARGET_MODEL,
+            target_id=row.id,
+            action=AuditAction.UPDATE,
+        ).count()
+        self.assertEqual(after, before + 1)
+
+        # The soft-delete records the is_active flip in the diff.
+        last_update = (
+            AuditLog.objects.filter(
+                target_model=self.TARGET_MODEL,
+                target_id=row.id,
+                action=AuditAction.UPDATE,
+            )
+            .order_by("-id")
+            .first()
+        )
+        is_active_change = last_update.changes.get("is_active") or {}
+        self.assertEqual(is_active_change.get("before"), True)
+        self.assertEqual(is_active_change.get("after"), False)

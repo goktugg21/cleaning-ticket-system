@@ -764,7 +764,8 @@ class CustomerServicePriceBulkRaiseView(APIView):
                 id__in=price_ids, customer=customer
             ).select_related("service")
         }
-        resolved = []
+        # Validate every id first (active + owned) — all-or-nothing.
+        validated = []
         for pid in price_ids:
             row = rows_by_id.get(pid)
             if row is None or not row.is_active:
@@ -779,8 +780,25 @@ class CustomerServicePriceBulkRaiseView(APIView):
                         ]
                     }
                 )
-            resolved.append(row)
-        return resolved
+            validated.append(row)
+        # Collapse to ONE row per service — the latest-effective row
+        # (max valid_from, then max id), matching resolve_price's
+        # ordering. A service can have several active rows (each raise
+        # keeps the source open) and the select-all UI sends them all;
+        # raising every selected row would create multiple new rows
+        # sharing valid_from, where resolve_price's id tie-break could
+        # let the row derived from an older source win (a lower, non-
+        # compounded price). Raising only the latest source per service
+        # yields one deterministic new row per service.
+        latest_by_service = {}
+        for row in validated:
+            current = latest_by_service.get(row.service_id)
+            if current is None or (row.valid_from, row.id) > (
+                current.valid_from,
+                current.id,
+            ):
+                latest_by_service[row.service_id] = row
+        return [latest_by_service[sid] for sid in sorted(latest_by_service)]
 
     @staticmethod
     def _raised(old_price, mode, amount):

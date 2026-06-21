@@ -444,3 +444,128 @@ class BulkRaiseRbacTests(BulkRaiseFixtureMixin, APITestCase):
             bulk_raise_url(self.customer.id), self._payload(), format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class BulkRaiseServiceDedupTests(BulkRaiseFixtureMixin, APITestCase):
+    """P1 (PR review) — a service can have several active CSP rows (each
+    raise keeps the source open). When the select-all UI sends them all,
+    bulk-raise must collapse to ONE new row per service, derived from the
+    latest-effective source (max valid_from, then max id), so the result
+    is deterministic and order-independent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # row1 = the fixture's price_a on service_a (100.00, 2026-01-01).
+        self.row1 = self.price_a
+        # row2 = a later active row on the SAME service (110.00).
+        self.row2 = CustomerServicePrice.objects.create(
+            service=self.service_a,
+            customer=self.customer,
+            unit_price=Decimal("110.00"),
+            vat_pct=Decimal("21.00"),
+            valid_from=date(2026, 3, 1),
+            is_active=True,
+        )
+
+    def _new_rows_for_service_a(self):
+        return CustomerServicePrice.objects.filter(
+            service=self.service_a,
+            customer=self.customer,
+            valid_from=date(2026, 6, 1),
+        )
+
+    def test_both_rows_collapse_to_one_new_row_from_latest_source(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.row1.id, self.row2.id],
+                "mode": "percent",
+                "amount": "10",
+                "valid_from": "2026-06-01",
+            },
+            format="json",
+        )
+        self.assertIn(
+            response.status_code,
+            (status.HTTP_200_OK, status.HTTP_201_CREATED),
+        )
+        self.assertEqual(response.data["created_count"], 1)
+
+        new_rows = self._new_rows_for_service_a()
+        self.assertEqual(new_rows.count(), 1)
+        # Raised from the latest source (row2's 110.00), not row1's 100.00.
+        self.assertEqual(new_rows.first().unit_price, Decimal("121.00"))
+
+    def test_resolver_picks_the_single_raised_row(self):
+        self.authenticate(self.super_admin)
+        self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.row1.id, self.row2.id],
+                "mode": "percent",
+                "amount": "10",
+                "valid_from": "2026-06-01",
+            },
+            format="json",
+        )
+        resolved = resolve_price(
+            self.service_a, self.customer, on=date(2026, 6, 15)
+        )
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved.unit_price, Decimal("121.00"))
+        self.assertEqual(resolved.valid_from, date(2026, 6, 1))
+
+    def test_order_independent(self):
+        # Reversed payload yields the same single 121.00 row.
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.row2.id, self.row1.id],
+                "mode": "percent",
+                "amount": "10",
+                "valid_from": "2026-06-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.data["created_count"], 1)
+        new_rows = self._new_rows_for_service_a()
+        self.assertEqual(new_rows.count(), 1)
+        self.assertEqual(new_rows.first().unit_price, Decimal("121.00"))
+
+    def test_source_rows_preserved(self):
+        self.authenticate(self.super_admin)
+        self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.row1.id, self.row2.id],
+                "mode": "percent",
+                "amount": "10",
+                "valid_from": "2026-06-01",
+            },
+            format="json",
+        )
+        self.row1.refresh_from_db()
+        self.row2.refresh_from_db()
+        self.assertEqual(self.row1.unit_price, Decimal("100.00"))
+        self.assertEqual(self.row2.unit_price, Decimal("110.00"))
+        self.assertTrue(self.row1.is_active)
+        self.assertTrue(self.row2.is_active)
+
+    def test_dedup_only_collapses_within_a_service(self):
+        # Two different services (one active row each, via the fixture)
+        # selected together still raise BOTH — de-dup is per-service.
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.price_a.id, self.price_b.id],
+                "mode": "percent",
+                "amount": "10",
+                "valid_from": "2026-06-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.data["created_count"], 2)
