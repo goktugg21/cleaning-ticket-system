@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from extra_work.views_pricing import (
     CustomerCustomPriceDetailView,
     CustomerCustomPriceListCreateView,
+    CustomerServicePriceBulkRaiseView,
     CustomerServicePriceCopyFromDefaultView,
     CustomerServicePriceDetailView,
     CustomerServicePriceListCreateView,
@@ -126,6 +127,13 @@ urlpatterns = [
         "<int:customer_id>/pricing/copy-from-default/",
         CustomerServicePriceCopyFromDefaultView.as_view(),
         name="customer-pricing-copy-from-default",
+    ),
+    # M5 C — bulk-raise a customer's contract prices (% or fixed),
+    # writing new validity-window rows (history preserved).
+    path(
+        "<int:customer_id>/pricing/bulk-raise/",
+        CustomerServicePriceBulkRaiseView.as_view(),
+        name="customer-pricing-bulk-raise",
     ),
     # M5 A — per-customer ad-hoc / custom price lines (non-catalog).
     path(
