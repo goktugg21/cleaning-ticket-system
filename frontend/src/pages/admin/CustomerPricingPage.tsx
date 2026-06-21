@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import {
+  bulkRaiseCustomerPrices,
   createCustomerCustomPrice,
   createCustomerPrice,
   deleteCustomerCustomPrice,
@@ -176,6 +177,15 @@ export function CustomerPricingPage() {
   const [deleteTarget, setDeleteTarget] =
     useState<CustomerServicePrice | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // M5 C — bulk-raise modal state (catalog-price section only).
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
+  const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
+  const [bulkAmount, setBulkAmount] = useState("");
+  const [bulkValidFrom, setBulkValidFrom] = useState(todayISO);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // M5 A — custom (non-catalog) price-line section. Parallel state to
   // the catalog section above, prefixed `custom`.
@@ -360,6 +370,67 @@ export function CustomerPricingPage() {
     }
   }
 
+  // ---- M5 C — bulk-raise handlers (catalog-price section) ----------------
+  function openBulkRaise() {
+    setBulkSelectedIds(activePrices.map((p) => p.id));
+    setBulkMode("percent");
+    setBulkAmount("");
+    setBulkValidFrom(todayISO());
+    setBulkError("");
+    setBulkOpen(true);
+  }
+
+  function closeBulkRaise() {
+    setBulkOpen(false);
+    setBulkError("");
+  }
+
+  function toggleBulkAll(checked: boolean) {
+    setBulkSelectedIds(checked ? activePrices.map((p) => p.id) : []);
+  }
+
+  function toggleBulkRow(priceId: number, checked: boolean) {
+    setBulkSelectedIds((prev) =>
+      checked ? [...prev, priceId] : prev.filter((id) => id !== priceId),
+    );
+  }
+
+  async function handleBulkRaise() {
+    if (numericId === null) return;
+    if (bulkSelectedIds.length === 0) {
+      setBulkError(t("customer_pricing.bulk_raise_error_no_selection"));
+      return;
+    }
+    const amountNumber = Number(bulkAmount);
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
+      setBulkError(t("customer_pricing.bulk_raise_error_amount"));
+      return;
+    }
+    if (!bulkValidFrom) {
+      setBulkError(t("customer_pricing.error_valid_from_required"));
+      return;
+    }
+    setBulkBusy(true);
+    setBulkError("");
+    try {
+      await bulkRaiseCustomerPrices(numericId, {
+        prices: bulkSelectedIds,
+        mode: bulkMode,
+        amount: bulkAmount.trim(),
+        valid_from: bulkValidFrom,
+      });
+      // Re-fetch the catalog price list so the new validity-window rows
+      // surface (existing rows stay — history preserved server-side).
+      const refreshed = await listCustomerPrices(numericId);
+      setPrices(refreshed);
+      closeBulkRaise();
+    } catch (err) {
+      setBulkError(getApiError(err));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // ---- M5 A — custom price-line handlers (mirror the catalog flow) -------
   function openCreateCustomModal() {
     setCustomMode("create");
@@ -506,6 +577,11 @@ export function CustomerPricingPage() {
   // because the earlier-defined openCreateModal captures it.
   const activeServices = services.filter((s) => s.is_active);
 
+  // M5 C — active catalog prices are the only rows the bulk-raise modal
+  // can act on. Plain derived value (same rationale as activeServices:
+  // the earlier-defined openBulkRaise captures it).
+  const activePrices = prices.filter((p) => p.is_active);
+
   // Build the service name shown in the table — prefer the embedded
   // `service_name` (always present) but fall back to the dropdown
   // lookup if a stale row references a now-renamed service.
@@ -539,6 +615,15 @@ export function CustomerPricingPage() {
           </h2>
         </div>
         <div className="page-header-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            data-testid="customer-pricing-bulk-raise-button"
+            onClick={openBulkRaise}
+            disabled={loading || numericId === null}
+          >
+            {t("customer_pricing.bulk_raise_button")}
+          </button>
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -1184,6 +1269,211 @@ export function CustomerPricingPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* M5 C — bulk-raise modal (catalog-price section). */}
+      {bulkOpen && (
+        <div
+          data-testid="customer-pricing-bulk-raise-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("customer_pricing.bulk_raise_button")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 600,
+              width: "100%",
+              padding: 24,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_pricing.bulk_raise_button")}
+            </h3>
+
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+              {t("customer_pricing.bulk_raise_intro")}
+            </p>
+
+            {bulkError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-pricing-bulk-raise-error"
+              >
+                {bulkError}
+              </div>
+            )}
+
+            {activePrices.length === 0 ? (
+              <div className="muted" style={{ marginBottom: 16 }}>
+                {t("customer_pricing.bulk_raise_empty")}
+              </div>
+            ) : (
+              <>
+                <div className="field">
+                  <label
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="customer-pricing-bulk-raise-select-all"
+                      checked={bulkSelectedIds.length === activePrices.length}
+                      onChange={(event) => toggleBulkAll(event.target.checked)}
+                      disabled={bulkBusy}
+                    />
+                    <span>
+                      {t("customer_pricing.bulk_raise_select_all")}
+                    </span>
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid var(--border, #e5e7eb)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    marginBottom: 16,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
+                  {activePrices.map((price) => (
+                    <label
+                      key={price.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "4px 0",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid="customer-pricing-bulk-raise-row"
+                        data-price-id={price.id}
+                        checked={bulkSelectedIds.includes(price.id)}
+                        onChange={(event) =>
+                          toggleBulkRow(price.id, event.target.checked)
+                        }
+                        disabled={bulkBusy}
+                      />
+                      <span>
+                        {resolveServiceName(price)} — {price.unit_price}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="bulk-raise-mode">
+                  {t("customer_pricing.bulk_raise_mode_label")}
+                </label>
+                <select
+                  id="bulk-raise-mode"
+                  className="field-select"
+                  value={bulkMode}
+                  onChange={(event) =>
+                    setBulkMode(
+                      event.target.value === "fixed" ? "fixed" : "percent",
+                    )
+                  }
+                  data-testid="customer-pricing-bulk-raise-mode"
+                  disabled={bulkBusy}
+                >
+                  <option value="percent">
+                    {t("customer_pricing.bulk_raise_mode_percent")}
+                  </option>
+                  <option value="fixed">
+                    {t("customer_pricing.bulk_raise_mode_fixed")}
+                  </option>
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="bulk-raise-amount">
+                  {t("customer_pricing.bulk_raise_amount_label")}
+                </label>
+                <input
+                  id="bulk-raise-amount"
+                  className="field-input"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={bulkAmount}
+                  onChange={(event) => setBulkAmount(event.target.value)}
+                  data-testid="customer-pricing-bulk-raise-amount"
+                  disabled={bulkBusy}
+                />
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {bulkMode === "percent"
+                    ? t("customer_pricing.bulk_raise_amount_percent_hint")
+                    : t("customer_pricing.bulk_raise_amount_fixed_hint")}
+                </div>
+              </div>
+            </div>
+
+            <div className="field">
+              <label className="field-label" htmlFor="bulk-raise-valid-from">
+                {t("customer_pricing.bulk_raise_valid_from_label")}
+              </label>
+              <input
+                id="bulk-raise-valid-from"
+                className="field-input"
+                type="date"
+                value={bulkValidFrom}
+                onChange={(event) => setBulkValidFrom(event.target.value)}
+                data-testid="customer-pricing-bulk-raise-valid-from"
+                disabled={bulkBusy}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={closeBulkRaise}
+                disabled={bulkBusy}
+                data-testid="customer-pricing-bulk-raise-cancel"
+              >
+                {t("customer_pricing.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleBulkRaise}
+                disabled={bulkBusy || activePrices.length === 0}
+                data-testid="customer-pricing-bulk-raise-apply"
+              >
+                {bulkBusy
+                  ? t("admin_form.saving")
+                  : t("customer_pricing.bulk_raise_apply")}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

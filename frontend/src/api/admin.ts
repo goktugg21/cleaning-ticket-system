@@ -16,6 +16,8 @@ import type {
   CustomerCustomPrice,
   CustomerCustomPriceCreatePayload,
   CustomerCustomPriceUpdatePayload,
+  CustomerPriceBulkRaisePayload,
+  CustomerPriceBulkRaiseResult,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
@@ -1612,4 +1614,16 @@ export async function deleteCustomerCustomPrice(
   await api.delete(
     `/customers/${customerId}/custom-pricing/${customPriceId}/`,
   );
+}
+
+// M5 C — bulk-raise a customer's contract prices (% or fixed).
+export async function bulkRaiseCustomerPrices(
+  customerId: number,
+  payload: CustomerPriceBulkRaisePayload,
+): Promise<CustomerPriceBulkRaiseResult> {
+  const response = await api.post<CustomerPriceBulkRaiseResult>(
+    `/customers/${customerId}/pricing/bulk-raise/`,
+    payload,
+  );
+  return response.data;
 }

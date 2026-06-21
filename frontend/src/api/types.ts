@@ -1823,4 +1823,28 @@ export interface CustomerCustomPriceCreatePayload {
 export type CustomerCustomPriceUpdatePayload =
   Partial<CustomerCustomPriceCreatePayload>;
 
+// M5 C — bulk-raise a customer's active catalog (CustomerServicePrice)
+// rows by a percentage or fixed amount. History-preserving: the backend
+// writes new validity-window rows rather than mutating the sources.
+export interface CustomerPriceBulkRaisePayload {
+  prices: number[];
+  mode: "percent" | "fixed";
+  amount: string;
+  valid_from: string;
+}
+
+export interface CustomerPriceBulkRaiseResultRow {
+  source_price: number;
+  service: number;
+  old_unit_price: string;
+  new_unit_price: string;
+  customer_service_price: number;
+}
+
+export interface CustomerPriceBulkRaiseResult {
+  created_count: number;
+  valid_from: string;
+  results: CustomerPriceBulkRaiseResultRow[];
+}
+
 
