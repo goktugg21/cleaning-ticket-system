@@ -525,11 +525,24 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
             year, month = int(_yr), int(_mo)
             if not (1 <= month <= 12):
                 raise ValueError
+            # Build the month's date range INSIDE the try so a parseable but
+            # out-of-range year (e.g. 0000-05, 10000-05) raises ValueError ->
+            # the same 400, not an uncaught 500.
+            from_date = date_type(year, month, 1)
+            to_date = date_type(year, month, calendar.monthrange(year, month)[1])
         except (ValueError, AttributeError):
             raise ValidationError({"billing_period": "Expected YYYY-MM."})
 
-        from_date = date_type(year, month, 1)
-        to_date = date_type(year, month, calendar.monthrange(year, month)[1])
+        # Fail closed on a provided-but-unknown invoice_status (a typo like
+        # "complete") instead of silently dropping the filter and mixing
+        # invoiced + not-yet-invoiced totals in the export.
+        if invoice_status_raw and invoice_status_raw not in (
+            "completed",
+            "invoiced",
+        ):
+            raise ValidationError(
+                {"invoice_status": "Expected 'completed' or 'invoiced'."}
+            )
 
         base_qs = extra_work_for_scope(actor, scope)
         _ew_list = list(base_qs)

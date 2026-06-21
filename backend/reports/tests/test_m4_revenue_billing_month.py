@@ -172,6 +172,23 @@ class ExtraWorkRevenueBillingMonthTests(_RevenueBillingBase):
         resp = self._get(billing_period="2026-13")
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_out_of_range_year_is_400_not_500(self):
+        # Parseable YYYY-MM but the year is outside date's 1..9999 range —
+        # must fail closed (400), not raise an uncaught ValueError (500).
+        for period in ("0000-05", "10000-05"):
+            resp = self._get(billing_period=period)
+            self.assertEqual(
+                resp.status_code,
+                status.HTTP_400_BAD_REQUEST,
+                f"{period} should be 400",
+            )
+
+    def test_unknown_invoice_status_is_400(self):
+        # A typo'd status (valid period) must fail closed rather than silently
+        # dropping the filter and mixing invoiced + not-yet-invoiced totals.
+        resp = self._get(billing_period="2026-05", invoice_status="complete")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_csv_honors_billing_period(self):
         ew = self._ew(total="121.00", requested_at=_dt(2026, 3, 15))
         self._spawn(ew, TicketStatus.CLOSED, closed_at=_dt(2026, 5, 31))
