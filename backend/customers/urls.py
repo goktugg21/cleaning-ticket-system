@@ -2,6 +2,8 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from extra_work.views_pricing import (
+    CustomerCustomPriceDetailView,
+    CustomerCustomPriceListCreateView,
     CustomerServicePriceCopyFromDefaultView,
     CustomerServicePriceDetailView,
     CustomerServicePriceListCreateView,
@@ -124,5 +126,16 @@ urlpatterns = [
         "<int:customer_id>/pricing/copy-from-default/",
         CustomerServicePriceCopyFromDefaultView.as_view(),
         name="customer-pricing-copy-from-default",
+    ),
+    # M5 A — per-customer ad-hoc / custom price lines (non-catalog).
+    path(
+        "<int:customer_id>/custom-pricing/",
+        CustomerCustomPriceListCreateView.as_view(),
+        name="customer-custom-pricing-list",
+    ),
+    path(
+        "<int:customer_id>/custom-pricing/<int:custom_price_id>/",
+        CustomerCustomPriceDetailView.as_view(),
+        name="customer-custom-pricing-detail",
     ),
 ] + router.urls

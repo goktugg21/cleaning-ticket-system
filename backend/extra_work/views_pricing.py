@@ -61,6 +61,7 @@ from rest_framework.views import APIView
 from accounts.models import UserRole
 from accounts.permissions import (
     IsAuthenticatedAndActive,
+    IsSuperAdminOrCompanyAdmin,
     IsSuperAdminOrCompanyAdminForCompany,
 )
 from audit import context as audit_context
@@ -72,8 +73,11 @@ from customers.models import (
     CustomerUserMembership,
 )
 
-from .models import CustomerServicePrice, Service
-from .serializers_catalog import CustomerServicePriceSerializer
+from .models import CustomerCustomPrice, CustomerServicePrice, Service
+from .serializers_catalog import (
+    CustomerCustomPriceSerializer,
+    CustomerServicePriceSerializer,
+)
 
 
 # Sprint 3B / Sprint 4B — stable error codes surfaced from this module.
@@ -688,3 +692,84 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class CustomerCustomPriceListCreateView(generics.ListCreateAPIView):
+    """M5 A — GET/POST at /api/customers/<customer_id>/custom-pricing/.
+    PROVIDER-ONLY (no CUSTOMER_USER / STAFF): SA always; CA for own
+    company with the customer-price toggle (via
+    _enforce_customer_price_policy on writes)."""
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    serializer_class = CustomerCustomPriceSerializer
+    pagination_class = UnboundedPagination
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        inner = IsSuperAdminOrCompanyAdminForCompany()
+        if not inner.has_object_permission(self.request, self, customer):
+            raise PermissionDenied(detail="Forbidden.")
+        return customer
+
+    def get_queryset(self):
+        customer = self._get_customer()
+        qs = CustomerCustomPrice.objects.filter(
+            customer=customer
+        ).select_related("customer")
+        flag = self.request.query_params.get("is_active")
+        if flag is not None:
+            lowered = flag.strip().lower()
+            if lowered in {"true", "1", "yes", "y"}:
+                qs = qs.filter(is_active=True)
+            elif lowered in {"false", "0", "no", "n"}:
+                qs = qs.filter(is_active=False)
+        return qs.order_by("-valid_from", "-id")
+
+    def perform_create(self, serializer):
+        customer = self._get_customer()
+        _enforce_customer_price_policy(self.request.user, customer)
+        serializer.save(customer=customer)
+
+
+class CustomerCustomPriceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """M5 A — GET/PATCH/DELETE at
+    /api/customers/<customer_id>/custom-pricing/<custom_price_id>/.
+    PROVIDER-ONLY. DELETE soft-archives (is_active=False, 204)."""
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    serializer_class = CustomerCustomPriceSerializer
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        inner = IsSuperAdminOrCompanyAdminForCompany()
+        if not inner.has_object_permission(self.request, self, customer):
+            raise PermissionDenied(detail="Forbidden.")
+        return customer
+
+    def get_object(self):
+        customer = self._get_customer()
+        return get_object_or_404(
+            CustomerCustomPrice,
+            pk=self.kwargs["custom_price_id"],
+            customer=customer,
+        )
+
+    def perform_update(self, serializer):
+        _enforce_customer_price_policy(
+            self.request.user, serializer.instance.customer
+        )
+        serializer.save()
+
+    def delete(self, request, *args, **kwargs):
+        price = self.get_object()
+        _enforce_customer_price_policy(request.user, price.customer)
+        if price.is_active:
+            try:
+                audit_context.set_current_reason(
+                    "customer_custom_price_soft_archive"
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
+            price.is_active = False
+            price.save(update_fields=["is_active", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
