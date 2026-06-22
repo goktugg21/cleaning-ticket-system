@@ -85,6 +85,14 @@
   "extra_work_status_customer_rejected": "Rejected",
   "extra_work_status_cancelled": "Cancelled",
 
+  "my_work.title": "My work",
+  "my_work.tickets": "My tickets",
+  "my_work.meldingen": "My meldingen",
+  "my_work.extra_work": "My extra work",
+  "my_work.quote_requests": "My quote requests",
+  "my_work.filter_chip": "Showing only your items",
+  "my_work.filter_clear": "Clear",
+
   "work_view_label": "Operational work",
   "work_view_all": "All work",
   "work_view_tickets": "Tickets only",

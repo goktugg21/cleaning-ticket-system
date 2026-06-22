@@ -85,6 +85,14 @@
   "extra_work_status_customer_rejected": "Afgewezen",
   "extra_work_status_cancelled": "Geannuleerd",
 
+  "my_work.title": "Mijn werk",
+  "my_work.tickets": "Mijn tickets",
+  "my_work.meldingen": "Mijn meldingen",
+  "my_work.extra_work": "Mijn extra werk",
+  "my_work.quote_requests": "Mijn offerteaanvragen",
+  "my_work.filter_chip": "Alleen uw items worden getoond",
+  "my_work.filter_clear": "Wissen",
+
   "work_view_label": "Operationeel werk",
   "work_view_all": "Al het werk",
   "work_view_tickets": "Alleen tickets",
