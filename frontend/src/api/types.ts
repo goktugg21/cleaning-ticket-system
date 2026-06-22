@@ -254,6 +254,24 @@ export interface TicketConvertToExtraWorkResponse {
   operational_ticket_ids: number[];
 }
 
+// Sprint 7 — bulk manager-confirm (POST /tickets/bulk-status/). One
+// result row per (deduped) requested ticket id; `ok` is false with a
+// stable `error` code (`not_found`, `forbidden_transition`,
+// `no_op_transition`, …) for any ticket the actor was out-of-scope for
+// or whose state did not permit the transition. Mirrors the per-item
+// envelope returned by `TicketViewSet.bulk_status`.
+export interface TicketBulkStatusResultItem {
+  id: number;
+  ok: boolean;
+  error?: string;
+}
+
+export interface TicketBulkStatusResponse {
+  succeeded: number;
+  failed: number;
+  results: TicketBulkStatusResultItem[];
+}
+
 // Sprint 23B — list of staff currently assigned to a ticket via
 // TicketStaffAssignment. The backend serializer gates this list
 // through Customer.show_assigned_staff_* flags before returning

@@ -20,9 +20,11 @@ import type {
   TicketStatsByBuildingRow,
   TicketStatus,
 } from "../api/types";
+import { bulkConfirmTickets } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { SLABadge } from "../components/sla/SLABadge";
+import { useToast } from "../components/ToastProvider";
 import { formatDate, formatDateTime } from "../lib/intl";
 
 type SLAFilterValue =
@@ -44,6 +46,9 @@ const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const STATUS_OPTIONS: TicketStatus[] = [
   "OPEN",
   "IN_PROGRESS",
+  // Sprint 7 — surface the manager-review queue so provider management
+  // can preset the list to the bulk-confirm view ("te bevestigen").
+  "WAITING_MANAGER_REVIEW",
   "WAITING_CUSTOMER_APPROVAL",
   "APPROVED",
   "REJECTED",
@@ -146,6 +151,7 @@ function ExtraWorkOriginPill({
 export function DashboardPage() {
   const navigate = useNavigate();
   const { me } = useAuth();
+  const { push } = useToast();
   const { t } = useTranslation(["dashboard", "common"]);
   const userRole = me?.role ?? null;
   const tStatus = (status: TicketStatus) =>
@@ -180,6 +186,16 @@ export function DashboardPage() {
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
+
+  // Sprint 7 — bulk manager-confirm selection. Only ever surfaced when
+  // `bulkMode` is true (provider management viewing the
+  // WAITING_MANAGER_REVIEW queue). The set may legitimately hold ids no
+  // longer in the current page; everything downstream derives the
+  // submittable set from the VISIBLE rows, so stale ids are inert.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(
+    () => new Set<number>(),
+  );
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const slaFilter: SLAFilterValue = (() => {
@@ -302,6 +318,89 @@ export function DashboardPage() {
   useEffect(() => {
     loadTickets();
   }, [loadTickets]);
+
+  // Sprint 7 — bulk manager-confirm. The affordance only appears for
+  // provider management while the list is filtered to the
+  // WAITING_MANAGER_REVIEW queue. The submittable set is always derived
+  // from the currently-visible rows, so changing filters/pages can
+  // never bulk-confirm a ticket that is no longer on screen.
+  const bulkMode =
+    isProviderManagementRole(userRole) &&
+    statusFilter === "WAITING_MANAGER_REVIEW";
+  const selectedVisibleIds = useMemo(
+    () =>
+      tickets
+        .filter((ticket) => selectedIds.has(ticket.id))
+        .map((ticket) => ticket.id),
+    [tickets, selectedIds],
+  );
+  const allVisibleSelected =
+    tickets.length > 0 && selectedVisibleIds.length === tickets.length;
+
+  const toggleRowSelection = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const everyVisibleSelected =
+        tickets.length > 0 && tickets.every((ticket) => next.has(ticket.id));
+      if (everyVisibleSelected) {
+        tickets.forEach((ticket) => next.delete(ticket.id));
+      } else {
+        tickets.forEach((ticket) => next.add(ticket.id));
+      }
+      return next;
+    });
+  }, [tickets]);
+
+  const handleBulkConfirm = useCallback(async () => {
+    const ids = tickets
+      .filter((ticket) => selectedIds.has(ticket.id))
+      .map((ticket) => ticket.id);
+    if (ids.length === 0) return;
+    setBulkSubmitting(true);
+    try {
+      const result = await bulkConfirmTickets(ids);
+      if (result.failed === 0) {
+        push({
+          variant: "success",
+          title: t("bulk_confirm.toast_success_title"),
+          description: t("bulk_confirm.toast_success_desc", {
+            count: result.succeeded,
+          }),
+        });
+      } else {
+        push({
+          variant: "warning",
+          title: t("bulk_confirm.toast_partial_title"),
+          description: t("bulk_confirm.toast_partial_desc", {
+            succeeded: result.succeeded,
+            failed: result.failed,
+          }),
+        });
+      }
+      setSelectedIds(new Set<number>());
+      await loadTickets();
+    } catch (err) {
+      push({
+        variant: "error",
+        title: t("bulk_confirm.toast_error_title"),
+        description: getApiError(err),
+      });
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [tickets, selectedIds, push, t, loadTickets]);
 
   const loadStats = useCallback(async () => {
     try {
@@ -456,6 +555,8 @@ export function DashboardPage() {
     setSearchInput("");
     setSearchActive("");
     setSlaFilter("");
+    // Sprint 7 — clearing filters also leaves the bulk-confirm queue.
+    setSelectedIds(new Set<number>());
   }
 
   const hasActiveFilters = Boolean(
@@ -1069,6 +1170,10 @@ export function DashboardPage() {
                       value={statusFilter}
                       onChange={(event) => {
                         setPage(1);
+                        // Sprint 7 — a status change leaves the
+                        // bulk-confirm queue; drop any selection so it
+                        // can't carry across filters.
+                        setSelectedIds(new Set<number>());
                         setStatusFilter(event.target.value as TicketStatus | "");
                       }}
                     >
@@ -1129,6 +1234,21 @@ export function DashboardPage() {
                     <button type="submit" className="btn btn-secondary btn-sm">
                       {t("common:apply")}
                     </button>
+                    {isProviderManagementRole(userRole) &&
+                      statusFilter !== "WAITING_MANAGER_REVIEW" && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          data-testid="dashboard-manager-review-preset"
+                          onClick={() => {
+                            setPage(1);
+                            setSelectedIds(new Set<number>());
+                            setStatusFilter("WAITING_MANAGER_REVIEW");
+                          }}
+                        >
+                          {t("bulk_confirm.queue_preset")}
+                        </button>
+                      )}
                     {hasActiveFilters && (
                       <button
                         type="button"
@@ -1141,6 +1261,58 @@ export function DashboardPage() {
                   </div>
                 </form>
 
+                {bulkMode && selectedVisibleIds.length > 0 && (
+                  <div
+                    className="bulk-action-bar"
+                    data-testid="dashboard-bulk-action-bar"
+                    style={{
+                      position: "sticky",
+                      top: 8,
+                      zIndex: 10,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      flexWrap: "wrap",
+                      padding: "10px 14px",
+                      margin: "0 0 12px",
+                      borderRadius: 10,
+                      background: "var(--green-1, #0f3d2e)",
+                      color: "#fff",
+                      boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
+                    }}
+                  >
+                    <span style={{ fontWeight: 700 }}>
+                      {t("bulk_confirm.selected_count", {
+                        count: selectedVisibleIds.length,
+                      })}
+                    </span>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setSelectedIds(new Set<number>())}
+                        disabled={bulkSubmitting}
+                      >
+                        {t("bulk_confirm.clear_selection")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        data-testid="dashboard-bulk-confirm-button"
+                        onClick={handleBulkConfirm}
+                        disabled={bulkSubmitting}
+                      >
+                        {bulkSubmitting
+                          ? t("bulk_confirm.confirming")
+                          : t("bulk_confirm.confirm_action", {
+                              count: selectedVisibleIds.length,
+                            })}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {loading && (
                   <div className="loading-bar" style={{ margin: 0 }}>
                     <div className="loading-bar-fill" />
@@ -1151,6 +1323,17 @@ export function DashboardPage() {
                   <table className="data-table">
                     <thead>
                       <tr>
+                        {bulkMode && (
+                          <th style={{ width: 36 }}>
+                            <input
+                              type="checkbox"
+                              aria-label={t("bulk_confirm.select_all")}
+                              data-testid="dashboard-bulk-select-all"
+                              checked={allVisibleSelected}
+                              onChange={toggleAllVisible}
+                            />
+                          </th>
+                        )}
                         <th>{t("common:ticket_no")}</th>
                         <th>{t("common:subject")}</th>
                         <th>{t("common:priority")}</th>
@@ -1176,6 +1359,21 @@ export function DashboardPage() {
                             }
                           }}
                         >
+                          {bulkMode && (
+                            <td
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                aria-label={t("bulk_confirm.select_row", {
+                                  ticket: ticket.ticket_no,
+                                })}
+                                checked={selectedIds.has(ticket.id)}
+                                onChange={() => toggleRowSelection(ticket.id)}
+                              />
+                            </td>
+                          )}
                           <td>
                             <Link
                               to={`/tickets/${ticket.id}`}
