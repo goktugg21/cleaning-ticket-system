@@ -50,6 +50,7 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
+import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
@@ -421,6 +422,22 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerExtraWorkPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/tickets"
+            element={
+              <AdminRoute>
+                <CustomerTicketsPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/meldingen"
+            element={
+              <AdminRoute>
+                <CustomerTicketsPage meldingOnly />
               </AdminRoute>
             }
           />
