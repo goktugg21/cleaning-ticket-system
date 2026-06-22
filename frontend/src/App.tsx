@@ -23,6 +23,7 @@ import { RecurringJobDetailPage } from "./pages/planned-work/RecurringJobDetailP
 import { RecurringJobFormPage } from "./pages/planned-work/RecurringJobFormPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MyEmployeesPage } from "./pages/MyEmployeesPage";
+import { MyMeldingenPage } from "./pages/MyMeldingenPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -180,6 +181,14 @@ export default function App() {
               Caller-scoped via me.customer_ids[0]; the backend
               re-gates the customer-employees endpoint, so a plain
               ProtectedRoute is sufficient. */}
+          <Route
+            path="/my/meldingen"
+            element={
+              <ProtectedRoute>
+                <MyMeldingenPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/my/employees"
             element={
