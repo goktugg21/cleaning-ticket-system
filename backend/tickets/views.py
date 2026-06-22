@@ -40,6 +40,7 @@ from .models import (
     TicketStaffAssignment,
     TicketStatus,
     TicketStatusHistory,
+    TicketType,
 )
 from buildings.models import BuildingManagerAssignment
 from .permissions import (
@@ -205,7 +206,15 @@ class TicketViewSet(
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        ticket = serializer.save()
+        # M7 — a customer-created ticket is always a "melding" (REPORT).
+        # Enforced here (not just in the UI) so the invariant holds for a
+        # raw API call too, keeping the M6 meldingen split (meldingen =
+        # REPORT) intact. Coerce rather than reject: every customer
+        # submission becomes a melding.
+        if self.request.user.role == UserRole.CUSTOMER_USER:
+            ticket = serializer.save(type=TicketType.REPORT)
+        else:
+            ticket = serializer.save()
         send_ticket_created_email(ticket, actor=self.request.user)
 
         # Sprint 14E — audit ticket creation as an explicit business

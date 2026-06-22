@@ -14,6 +14,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import type { Building, Customer, PaginatedResponse } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
+import { isCustomerUser } from "../auth/permissions";
 
 interface CreateTicketForm {
   title: string;
@@ -91,6 +93,8 @@ const EMPTY_FORM: CreateTicketForm = {
 export function CreateTicketPage() {
   const navigate = useNavigate();
   const { t } = useTranslation(["create_ticket", "common"]);
+  const { me } = useAuth();
+  const isCustomer = isCustomerUser(me?.role);
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -317,10 +321,14 @@ export function CreateTicketPage() {
             {t("back_to_tickets")}
           </Link>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("eyebrow")}
+            {t(isCustomer ? "melding_eyebrow" : "eyebrow")}
           </div>
-          <h2 className="page-title">{t("title")}</h2>
-          <p className="page-sub">{t("subtitle")}</p>
+          <h2 className="page-title">
+            {t(isCustomer ? "melding_title" : "title")}
+          </h2>
+          <p className="page-sub">
+            {t(isCustomer ? "melding_subtitle" : "subtitle")}
+          </p>
           <p
             className="page-sub"
             style={{ marginTop: 4, opacity: 0.78, fontSize: 13 }}
@@ -397,23 +405,25 @@ export function CreateTicketPage() {
               </div>
             </div>
             <div className="form-2col">
-              <div className="field">
-                <label className="field-label" htmlFor="f-type">
-                  {t("field_category_label")}
-                </label>
-                <select
-                  id="f-type"
-                  className="field-select"
-                  value={form.type}
-                  onChange={(event) => update("type", event.target.value)}
-                >
-                  {TICKET_TYPE_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {t(TICKET_TYPE_KEYS[value])}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isCustomer && (
+                <div className="field">
+                  <label className="field-label" htmlFor="f-type">
+                    {t("field_category_label")}
+                  </label>
+                  <select
+                    id="f-type"
+                    className="field-select"
+                    value={form.type}
+                    onChange={(event) => update("type", event.target.value)}
+                  >
+                    {TICKET_TYPE_VALUES.map((value) => (
+                      <option key={value} value={value}>
+                        {t(TICKET_TYPE_KEYS[value])}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="field">
                 <label className="field-label" htmlFor="f-room">
                   {t("field_room_label")}
@@ -551,7 +561,9 @@ export function CreateTicketPage() {
               className="btn btn-primary"
               disabled={submitting || loadingOptions || noOptions}
             >
-              {submitting ? t("creating") : t("submit")}
+              {submitting
+                ? t("creating")
+                : t(isCustomer ? "melding_submit" : "submit")}
               <ArrowRight size={14} strokeWidth={2.5} />
             </button>
           </div>

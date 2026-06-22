@@ -43,6 +43,7 @@ import {
   canAccessReports,
   canAccessStaffRequestReview,
   isBuildingManager,
+  isCustomerUser,
   roleLabelKey,
 } from "../auth/permissions";
 import { useLanguageSync } from "../i18n/useLanguageSync";
@@ -386,7 +387,9 @@ export function AppShell({ children }: AppShellProps) {
                 <span className="nav-icon">
                   <PlusCircle size={16} strokeWidth={2} />
                 </span>
-                {t("nav.new_ticket")}
+                {isCustomerUser(me?.role)
+                  ? t("nav.new_melding")
+                  : t("nav.new_ticket")}
               </NavLink>
               {canAccessAgenda(me?.role) && (
                 <NavLink
@@ -634,6 +637,21 @@ export function AppShell({ children }: AppShellProps) {
                 </NavLink>
               )}
 
+              {/* Mijn meldingen — customer-facing entry. Lists the
+                  customer's own meldingen (REPORT-type tickets), scoped
+                  server-side. */}
+              {me?.role === "CUSTOMER_USER" && (
+                <NavLink
+                  to="/my/meldingen"
+                  className={navClass}
+                  data-testid="sidebar-my-meldingen"
+                >
+                  <span className="nav-icon">
+                    <Megaphone size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.my_meldingen")}
+                </NavLink>
+              )}
               {/* Employees directory — customer-facing entry. Customer
                   users get a limited nav; this is their telephone-book
                   view of the colleagues at their own customer. */}
