@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   bulkRaiseCustomerPrices,
+  copyDefaultPricesToCustomer,
   createCustomerCustomPrice,
   createCustomerPrice,
   deleteCustomerCustomPrice,
@@ -22,6 +23,7 @@ import type {
   CustomerAdmin,
   CustomerCustomPrice,
   CustomerCustomPriceCreatePayload,
+  CustomerPriceCopyFromDefaultResult,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   Service,
@@ -186,6 +188,21 @@ export function CustomerPricingPage() {
   const [bulkValidFrom, setBulkValidFrom] = useState(todayISO);
   const [bulkError, setBulkError] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Sprint 8B — copy-from-default modal state. Seeds contract prices for
+  // this customer from the provider catalog defaults (active services
+  // only). `copyResult` holds the created/skipped summary after a
+  // successful run so the per-service skip outcome stays visible.
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySelectedServiceIds, setCopySelectedServiceIds] = useState<
+    number[]
+  >([]);
+  const [copyValidFrom, setCopyValidFrom] = useState(todayISO);
+  const [copyValidTo, setCopyValidTo] = useState("");
+  const [copyError, setCopyError] = useState("");
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyResult, setCopyResult] =
+    useState<CustomerPriceCopyFromDefaultResult | null>(null);
 
   // M5 A — custom (non-catalog) price-line section. Parallel state to
   // the catalog section above, prefixed `custom`.
@@ -431,6 +448,69 @@ export function CustomerPricingPage() {
     }
   }
 
+  // ---- Sprint 8B — copy-from-default handlers ---------------------------
+  function openCopyDefault() {
+    setCopySelectedServiceIds([]);
+    setCopyValidFrom(todayISO());
+    setCopyValidTo("");
+    setCopyError("");
+    setCopyResult(null);
+    setCopyOpen(true);
+  }
+
+  function closeCopyDefault() {
+    setCopyOpen(false);
+    setCopyError("");
+    setCopyResult(null);
+  }
+
+  function toggleCopyAll(checked: boolean) {
+    setCopySelectedServiceIds(
+      checked ? activeServices.map((s) => s.id) : [],
+    );
+  }
+
+  function toggleCopyService(serviceId: number, checked: boolean) {
+    setCopySelectedServiceIds((prev) =>
+      checked ? [...prev, serviceId] : prev.filter((id) => id !== serviceId),
+    );
+  }
+
+  async function handleCopyDefault() {
+    if (numericId === null) return;
+    if (copySelectedServiceIds.length === 0) {
+      setCopyError(t("customer_pricing.copy_from_default_error_no_selection"));
+      return;
+    }
+    if (!copyValidFrom) {
+      setCopyError(t("customer_pricing.error_valid_from_required"));
+      return;
+    }
+    if (copyValidTo && copyValidTo < copyValidFrom) {
+      setCopyError(t("customer_pricing.error_valid_to_before_valid_from"));
+      return;
+    }
+    setCopyBusy(true);
+    setCopyError("");
+    try {
+      const result = await copyDefaultPricesToCustomer(numericId, {
+        services: copySelectedServiceIds,
+        valid_from: copyValidFrom,
+        valid_to: copyValidTo || null,
+      });
+      // Refresh the catalog price list so the seeded rows surface; keep
+      // the modal open so the created/skipped summary stays visible.
+      const refreshed = await listCustomerPrices(numericId);
+      setPrices(refreshed);
+      setCopyResult(result);
+      setCopySelectedServiceIds([]);
+    } catch (err) {
+      setCopyError(getApiError(err));
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
   // ---- M5 A — custom price-line handlers (mirror the catalog flow) -------
   function openCreateCustomModal() {
     setCustomMode("create");
@@ -615,6 +695,15 @@ export function CustomerPricingPage() {
           </h2>
         </div>
         <div className="page-header-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            data-testid="customer-pricing-copy-default-button"
+            onClick={openCopyDefault}
+            disabled={loading || numericId === null}
+          >
+            {t("customer_pricing.copy_from_default_button")}
+          </button>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -1471,6 +1560,203 @@ export function CustomerPricingPage() {
                 {bulkBusy
                   ? t("admin_form.saving")
                   : t("customer_pricing.bulk_raise_apply")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sprint 8B — copy-from-default modal. Seeds contract prices from
+          the provider catalog defaults for the selected ACTIVE services.
+          Mirrors the bulk-raise modal shell. */}
+      {copyOpen && (
+        <div
+          data-testid="customer-pricing-copy-default-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("customer_pricing.copy_from_default_title")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 600,
+              width: "100%",
+              padding: 24,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_pricing.copy_from_default_title")}
+            </h3>
+
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+              {t("customer_pricing.copy_from_default_intro")}
+            </p>
+
+            {copyError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-pricing-copy-default-error"
+              >
+                {copyError}
+              </div>
+            )}
+
+            {copyResult && (
+              <div
+                className="alert-info"
+                role="status"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-pricing-copy-default-result"
+              >
+                {t("customer_pricing.copy_from_default_result", {
+                  created: copyResult.created_count,
+                  skipped: copyResult.skipped_count,
+                })}
+              </div>
+            )}
+
+            {activeServices.length === 0 ? (
+              <div className="muted" style={{ marginBottom: 16 }}>
+                {t("customer_pricing.copy_from_default_empty")}
+              </div>
+            ) : (
+              <>
+                <div className="field">
+                  <label
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="customer-pricing-copy-default-select-all"
+                      checked={
+                        copySelectedServiceIds.length === activeServices.length
+                      }
+                      onChange={(event) => toggleCopyAll(event.target.checked)}
+                      disabled={copyBusy}
+                    />
+                    <span>
+                      {t("customer_pricing.copy_from_default_select_all")}
+                    </span>
+                  </label>
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid var(--border, #e5e7eb)",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    marginBottom: 16,
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
+                  {activeServices.map((service) => (
+                    <label
+                      key={service.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "4px 0",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid="customer-pricing-copy-default-row"
+                        data-service-id={service.id}
+                        checked={copySelectedServiceIds.includes(service.id)}
+                        onChange={(event) =>
+                          toggleCopyService(service.id, event.target.checked)
+                        }
+                        disabled={copyBusy}
+                      />
+                      <span>
+                        {service.name} — {service.default_unit_price}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <div className="form-2col">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="copy-default-valid-from"
+                >
+                  {t("customer_pricing.copy_from_default_valid_from_label")}
+                </label>
+                <input
+                  id="copy-default-valid-from"
+                  className="field-input"
+                  type="date"
+                  value={copyValidFrom}
+                  onChange={(event) => setCopyValidFrom(event.target.value)}
+                  data-testid="customer-pricing-copy-default-valid-from"
+                  disabled={copyBusy}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="copy-default-valid-to">
+                  {t("customer_pricing.copy_from_default_valid_to_label")}
+                </label>
+                <input
+                  id="copy-default-valid-to"
+                  className="field-input"
+                  type="date"
+                  value={copyValidTo}
+                  onChange={(event) => setCopyValidTo(event.target.value)}
+                  data-testid="customer-pricing-copy-default-valid-to"
+                  disabled={copyBusy}
+                />
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("customer_pricing.field_valid_to_hint")}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={closeCopyDefault}
+                disabled={copyBusy}
+                data-testid="customer-pricing-copy-default-cancel"
+              >
+                {t("customer_pricing.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleCopyDefault}
+                disabled={copyBusy || activeServices.length === 0}
+                data-testid="customer-pricing-copy-default-apply"
+              >
+                {copyBusy
+                  ? t("admin_form.saving")
+                  : t("customer_pricing.copy_from_default_apply")}
               </button>
             </div>
           </div>

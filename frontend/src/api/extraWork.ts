@@ -145,6 +145,28 @@ export async function transitionExtraWork(
   return response.data;
 }
 
+// Sprint 8A — provider-only entry of actual hours on hourly Extra Work
+// lines. `actual_hours` is a decimal string (DRF parses it server-side).
+// All-or-nothing: any invalid line 400s the whole batch. Returns the EW
+// via the role-aware detail serializer with the recomputed `final_*`.
+// Stable 4xx codes: `actual_hours_forbidden` (403), `final_amount_locked`,
+// `actual_hours_invalid`, `actual_hours_not_hourly` (400).
+export interface ActualHoursLineInput {
+  line_id: number;
+  actual_hours: string;
+}
+
+export async function submitActualHours(
+  id: number | string,
+  lines: ActualHoursLineInput[],
+): Promise<ExtraWorkRequestDetail> {
+  const response = await api.post<ExtraWorkRequestDetail>(
+    `/extra-work/${id}/actual-hours/`,
+    { lines },
+  );
+  return response.data;
+}
+
 // M4 (2c) invoice run — mark/clear every EARNED, not-yet-invoiced EW that
 // bills in a given company+month. `invoiced_count` comes back from mark,
 // `cleared_count` from clear; both return the affected `ew_ids`.

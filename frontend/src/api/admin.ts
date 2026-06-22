@@ -18,6 +18,8 @@ import type {
   CustomerCustomPriceUpdatePayload,
   CustomerPriceBulkRaisePayload,
   CustomerPriceBulkRaiseResult,
+  CustomerPriceCopyFromDefaultPayload,
+  CustomerPriceCopyFromDefaultResult,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
@@ -1636,6 +1638,22 @@ export async function bulkRaiseCustomerPrices(
 ): Promise<CustomerPriceBulkRaiseResult> {
   const response = await api.post<CustomerPriceBulkRaiseResult>(
     `/customers/${customerId}/pricing/bulk-raise/`,
+    payload,
+  );
+  return response.data;
+}
+
+// Sprint 8B — seed a customer's contract prices from the provider
+// catalog defaults. All-or-nothing on the wire (any invalid service
+// 400s the batch); per-service idempotency skips services that already
+// have an overlapping active price. The result reports created vs
+// skipped per service.
+export async function copyDefaultPricesToCustomer(
+  customerId: number,
+  payload: CustomerPriceCopyFromDefaultPayload,
+): Promise<CustomerPriceCopyFromDefaultResult> {
+  const response = await api.post<CustomerPriceCopyFromDefaultResult>(
+    `/customers/${customerId}/pricing/copy-from-default/`,
     payload,
   );
   return response.data;
