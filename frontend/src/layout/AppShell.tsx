@@ -43,6 +43,7 @@ import {
   canAccessReports,
   canAccessStaffRequestReview,
   isBuildingManager,
+  isCustomerUser,
   roleLabelKey,
 } from "../auth/permissions";
 import { useLanguageSync } from "../i18n/useLanguageSync";
@@ -386,7 +387,9 @@ export function AppShell({ children }: AppShellProps) {
                 <span className="nav-icon">
                   <PlusCircle size={16} strokeWidth={2} />
                 </span>
-                {t("nav.new_ticket")}
+                {isCustomerUser(me?.role)
+                  ? t("nav.new_melding")
+                  : t("nav.new_ticket")}
               </NavLink>
               {canAccessAgenda(me?.role) && (
                 <NavLink
