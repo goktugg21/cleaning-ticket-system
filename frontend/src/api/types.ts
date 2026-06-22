@@ -1896,4 +1896,27 @@ export interface CustomerPriceBulkRaiseResult {
   results: CustomerPriceBulkRaiseResultRow[];
 }
 
+// Sprint 8B — copy provider-default prices to a customer.
+// POST /api/customers/<id>/pricing/copy-from-default/. All-or-nothing
+// validation (any invalid/inactive/cross-company service → 400, zero
+// rows); per-service idempotency skips services already holding an
+// active overlapping CustomerServicePrice row.
+export interface CustomerPriceCopyFromDefaultPayload {
+  services: number[];
+  valid_from: string;
+  valid_to: string | null;
+}
+
+export interface CustomerPriceCopyFromDefaultResultRow {
+  service: number;
+  status: "created" | "skipped_existing";
+  customer_service_price?: number;
+}
+
+export interface CustomerPriceCopyFromDefaultResult {
+  created_count: number;
+  skipped_count: number;
+  results: CustomerPriceCopyFromDefaultResultRow[];
+}
+
 
