@@ -1265,29 +1265,13 @@ export function DashboardPage() {
                   <div
                     className="bulk-action-bar"
                     data-testid="dashboard-bulk-action-bar"
-                    style={{
-                      position: "sticky",
-                      top: 8,
-                      zIndex: 10,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                      flexWrap: "wrap",
-                      padding: "10px 14px",
-                      margin: "0 0 12px",
-                      borderRadius: 10,
-                      background: "var(--green-1, #0f3d2e)",
-                      color: "#fff",
-                      boxShadow: "0 6px 18px rgba(0,0,0,0.18)",
-                    }}
                   >
-                    <span style={{ fontWeight: 700 }}>
+                    <span className="bulk-action-bar-count">
                       {t("bulk_confirm.selected_count", {
                         count: selectedVisibleIds.length,
                       })}
                     </span>
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div className="bulk-action-bar-actions">
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
