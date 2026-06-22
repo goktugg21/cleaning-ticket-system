@@ -1059,6 +1059,8 @@
   "customer_view.ticket_table.col_created": "Aangemaakt",
   "my_meldingen.title": "Mijn meldingen",
   "my_meldingen.subtitle": "Gemelde problemen en verzoeken voor uw locatie.",
+  "my_meldingen.empty_no_customer_title": "Geen klantaccount",
+  "my_meldingen.empty_no_customer_desc": "Meldingen zijn beschikbaar voor klantaccounts.",
   "my_meldingen.empty_title": "Nog geen meldingen",
   "my_meldingen.empty_desc": "Meldingen voor uw locatie verschijnen hier.",
   "my_meldingen.list_title": "Meldingen",
