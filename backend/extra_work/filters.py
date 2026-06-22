@@ -41,6 +41,7 @@ class ExtraWorkRequestFilter(df.FilterSet):
             "building": ["exact"],
             "status": ["exact", "in"],
             "routing_decision": ["exact"],
+            "request_intent": ["exact", "in"],
         }
 
     def filter_billing_period(self, queryset, name, value):
