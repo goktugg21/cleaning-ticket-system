@@ -53,6 +53,7 @@ import {
   listProposalsForEw,
   listSpawnedTickets,
   retrySpawnTicketsForExtraWork,
+  submitActualHours,
   transitionExtraWork,
   updateExtraWorkBilling,
 } from "../api/extraWork";
@@ -65,6 +66,7 @@ import type {
   EwMessageType,
   ExtraWorkCategory,
   ExtraWorkRequestDetail,
+  ExtraWorkRequestItem,
   ExtraWorkStatus,
   ExtraWorkUrgency,
   Proposal,
@@ -197,6 +199,174 @@ function retrySpawnErrorCode(err: unknown): RetrySpawnErrorCode {
     }
   }
   return "spawn_generic";
+}
+
+// Sprint 8A — map the actual-hours endpoint's stable 4xx `code` to an
+// i18n key. Anything unrecognised falls back to the axios-derived
+// message via getApiError at the call site.
+const ACTUAL_HOURS_ERROR_I18N_KEY: Record<string, string> = {
+  final_amount_locked: "detail.actual_hours_error_locked",
+  actual_hours_invalid: "detail.actual_hours_error_invalid",
+  actual_hours_not_hourly: "detail.actual_hours_error_not_hourly",
+  actual_hours_forbidden: "detail.actual_hours_error_forbidden",
+};
+
+function actualHoursErrorCode(err: unknown): string | null {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data;
+    if (data && typeof data === "object") {
+      const code = (data as Record<string, unknown>).code;
+      if (typeof code === "string" && code in ACTUAL_HOURS_ERROR_I18N_KEY) {
+        return code;
+      }
+    }
+  }
+  return null;
+}
+
+// Sprint 8A — provider-only actual-hours entry for the hourly cart lines
+// of an INSTANT-routed Extra Work request (the cart is the active priced
+// set exactly when routing_decision === "INSTANT"; proposal/legacy active
+// sets need serializer exposure of `actual_hours` = a backend change, so
+// they are deferred from this FE-only surface). The parent KEYS this panel
+// by `ew.updated_at`, so a successful save (which bumps updated_at on the
+// refreshed detail) remounts the panel and re-seeds the inputs from the
+// fresh `actual_hours` — no prop-derived resync effect.
+function ActualHoursPanel({
+  ewId,
+  hourlyLines,
+  finalTotalAmount,
+  onUpdated,
+}: {
+  ewId: number;
+  hourlyLines: ExtraWorkRequestItem[];
+  finalTotalAmount: string | null;
+  onUpdated: (detail: ExtraWorkRequestDetail) => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const { push: pushToast } = useToast();
+  const [draft, setDraft] = useState<Record<number, string>>(() =>
+    Object.fromEntries(
+      hourlyLines.map((line) => [line.id, line.actual_hours ?? ""]),
+    ),
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    const lines = hourlyLines
+      .map((line) => ({
+        line_id: line.id,
+        actual_hours: (draft[line.id] ?? "").trim(),
+      }))
+      .filter((entry) => entry.actual_hours !== "");
+    if (lines.length === 0) {
+      pushToast({
+        variant: "info",
+        title: t("detail.actual_hours_none_entered"),
+      });
+      return;
+    }
+    setSaving(true);
+    try {
+      const detail = await submitActualHours(ewId, lines);
+      onUpdated(detail);
+      pushToast({
+        variant: "success",
+        title: t("detail.actual_hours_saved"),
+      });
+    } catch (err) {
+      const code = actualHoursErrorCode(err);
+      pushToast({
+        variant: "error",
+        title: code
+          ? t(ACTUAL_HOURS_ERROR_I18N_KEY[code])
+          : getApiError(err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="card"
+      style={{ marginBottom: 16 }}
+      data-testid="extra-work-actual-hours"
+    >
+      <div className="form-section">
+        <div className="form-section-title">
+          {t("detail.actual_hours_section_title")}
+        </div>
+        <p className="muted small" style={{ marginTop: 0 }}>
+          {t("detail.actual_hours_helper")}
+        </p>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>{t("detail.actual_hours_col_line")}</th>
+              <th style={{ width: 160 }}>
+                {t("detail.actual_hours_col_hours")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {hourlyLines.map((line) => (
+              <tr key={line.id} data-testid="extra-work-actual-hours-row">
+                <td>{line.service_name}</td>
+                <td>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    inputMode="decimal"
+                    className="form-control"
+                    aria-label={t("detail.actual_hours_input_aria", {
+                      line: line.service_name,
+                    })}
+                    value={draft[line.id] ?? ""}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        [line.id]: event.target.value,
+                      }))
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            marginTop: 12,
+          }}
+        >
+          <span className="muted small">
+            {t("detail.actual_hours_final_total")}{" "}
+            <strong data-testid="extra-work-actual-hours-final-total">
+              {finalTotalAmount ?? "—"}
+            </strong>
+          </span>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            data-testid="extra-work-actual-hours-save"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving
+              ? t("detail.actual_hours_saving")
+              : t("detail.actual_hours_save")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // M1 B6 — Extra Work message-thread tier vocabulary (three tiers, NO staff).
@@ -337,6 +507,18 @@ export function ExtraWorkDetailPage() {
   const isProvider = useMemo(
     () => !!me?.role && PROVIDER_ROLES.has(me.role),
     [me],
+  );
+
+  // Sprint 8A — the hourly cart lines a provider can enter actual hours
+  // for. Restricted to routing_decision === "INSTANT" because the cart
+  // line_items are the active priced set the backend's actual-hours
+  // endpoint accepts only on the instant route (see ActualHoursPanel).
+  const hourlyCartLines = useMemo<ExtraWorkRequestItem[]>(
+    () =>
+      ew && ew.routing_decision === "INSTANT"
+        ? ew.line_items.filter((line) => line.unit_type === "HOURS")
+        : [],
+    [ew],
   );
 
   // Sprint 28 Batch 4 — fetch contacts when the request loads, but
@@ -1825,6 +2007,20 @@ export function ExtraWorkDetailPage() {
               )}
             </div>
           </div>
+
+          {/* Sprint 8A — provider-only actual-hours entry for hourly cart
+              lines on an INSTANT-routed request. Keyed by `ew.updated_at`
+              so a save re-seeds the inputs from the refreshed detail
+              without a prop-derived resync effect. */}
+          {isProvider && hourlyCartLines.length > 0 && (
+            <ActualHoursPanel
+              key={ew.updated_at}
+              ewId={ew.id}
+              hourlyLines={hourlyCartLines}
+              finalTotalAmount={ew.final_total_amount}
+              onUpdated={(detail) => setEw(detail)}
+            />
+          )}
 
           {/* Draft proposal lines — read-only display of the DRAFT
               proposal's nested `lines` array. Gated on the per-record

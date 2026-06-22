@@ -1189,6 +1189,10 @@ export interface ExtraWorkRequestItem {
   price_source: PriceSource;
   contract_unit_price: string | null;
   contract_vat_pct: string | null;
+  // Sprint 8A — actual hours worked on an hourly (`unit_type === "HOURS"`)
+  // cart line. NULL until a provider enters it at finalize via
+  // POST /api/extra-work/<id>/actual-hours/; drives the EW's `final_*`.
+  actual_hours: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1262,6 +1266,13 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   // read.
   line_items: ExtraWorkRequestItem[];
   routing_decision: RoutingDecision;
+  // Sprint 8A — final billable amounts. NULL until actual hours are
+  // entered on hourly lines (or frozen at customer approval). Recomputed
+  // by POST /api/extra-work/<id>/actual-hours/ and visible to the
+  // customer per SoT §5.12.
+  final_subtotal_amount: string | null;
+  final_vat_amount: string | null;
+  final_total_amount: string | null;
   allowed_next_statuses: ExtraWorkStatus[];
   // Per-current-user, per-EW capability block — backend
   // `ExtraWorkRequestDetailSerializer.get_actions`. Optional so older
