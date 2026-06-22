@@ -1229,6 +1229,11 @@ export interface ProposalLine {
   price_source: PriceSource;
   contract_unit_price: string | null;
   contract_vat_pct: string | null;
+  // Sprint 8A-fix — actual hours worked on an hourly proposal line.
+  // Read-only; the ProposalLineAdminSerializer already emits it. NULL
+  // until a provider enters it at finalize via the actual-hours
+  // endpoint (which accepts proposal line ids for a proposal-routed EW).
+  actual_hours: string | null;
   created_at: string;
   updated_at: string;
 }

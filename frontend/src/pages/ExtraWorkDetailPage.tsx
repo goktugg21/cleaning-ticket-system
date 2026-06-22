@@ -66,7 +66,6 @@ import type {
   EwMessageType,
   ExtraWorkCategory,
   ExtraWorkRequestDetail,
-  ExtraWorkRequestItem,
   ExtraWorkStatus,
   ExtraWorkUrgency,
   Proposal,
@@ -232,6 +231,16 @@ function actualHoursErrorCode(err: unknown): string | null {
 // by `ew.updated_at`, so a successful save (which bumps updated_at on the
 // refreshed detail) remounts the panel and re-seeds the inputs from the
 // fresh `actual_hours` — no prop-derived resync effect.
+// Sprint 8A-fix — normalized hourly line shape the panel renders. Both
+// cart line items (label = service_name) and approved-proposal lines
+// (label = service_name ?? description) map into this; `id` is the
+// line_id the actual-hours endpoint accepts for whichever active set.
+type ActualHoursLine = {
+  id: number;
+  label: string;
+  actual_hours: string | null;
+};
+
 function ActualHoursPanel({
   ewId,
   hourlyLines,
@@ -239,7 +248,7 @@ function ActualHoursPanel({
   onUpdated,
 }: {
   ewId: number;
-  hourlyLines: ExtraWorkRequestItem[];
+  hourlyLines: ActualHoursLine[];
   finalTotalAmount: string | null;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
 }) {
@@ -312,7 +321,7 @@ function ActualHoursPanel({
           <tbody>
             {hourlyLines.map((line) => (
               <tr key={line.id} data-testid="extra-work-actual-hours-row">
-                <td>{line.service_name}</td>
+                <td>{line.label}</td>
                 <td>
                   <input
                     type="number"
@@ -321,7 +330,7 @@ function ActualHoursPanel({
                     inputMode="decimal"
                     className="form-control"
                     aria-label={t("detail.actual_hours_input_aria", {
-                      line: line.service_name,
+                      line: line.label,
                     })}
                     value={draft[line.id] ?? ""}
                     onChange={(event) =>
@@ -509,17 +518,109 @@ export function ExtraWorkDetailPage() {
     [me],
   );
 
-  // Sprint 8A — the hourly cart lines a provider can enter actual hours
-  // for. Restricted to routing_decision === "INSTANT" because the cart
-  // line_items are the active priced set the backend's actual-hours
-  // endpoint accepts only on the instant route (see ActualHoursPanel).
-  const hourlyCartLines = useMemo<ExtraWorkRequestItem[]>(
-    () =>
-      ew && ew.routing_decision === "INSTANT"
-        ? ew.line_items.filter((line) => line.unit_type === "HOURS")
-        : [],
-    [ew],
-  );
+  // `ewId` (hoisted Sprint 8A-fix) — the EW id, or null while loading.
+  // Used by the actual-hours active-set logic below and the proposals /
+  // spawned-tickets fetch effects further down.
+  const ewId = ew?.id ?? null;
+
+  // Sprint 8A-fix — the active hourly line set a provider can enter
+  // actual hours for, following the backend `active_priced_lines`
+  // precedence exactly (approved-proposal > INSTANT-cart > legacy). The
+  // approved-proposal case was the P1 dead-end: its lines DO gate the
+  // operational ticket's completion (`actual_hours_required`) but the
+  // old INSTANT-only guard hid the entry UI.
+  //
+  // Approved-proposal selection mirrors `final_amounts.active_priced_lines`:
+  // the latest CUSTOMER_APPROVED proposal by customer_decided_at, then by
+  // id (both descending).
+  const approvedProposal = useMemo(() => {
+    const approved = proposals.filter(
+      (p) => p.status === "CUSTOMER_APPROVED",
+    );
+    if (approved.length === 0) return null;
+    return [...approved].sort((a, b) => {
+      const ad = a.customer_decided_at ?? "";
+      const bd = b.customer_decided_at ?? "";
+      if (ad !== bd) return ad < bd ? 1 : -1;
+      return b.id - a.id;
+    })[0];
+  }, [proposals]);
+  const approvedProposalId = approvedProposal?.id ?? null;
+
+  // The approved proposal's lines (with `actual_hours`) are NOT on the EW
+  // detail payload — load them the same cancelled-guarded way the open
+  // (DRAFT/SENT) proposal detail is fetched above.
+  const [approvedProposalDetail, setApprovedProposalDetail] =
+    useState<ProposalDetail | null>(null);
+  const reloadApprovedProposalDetail = useCallback(async () => {
+    if (ewId === null || approvedProposalId === null) return;
+    try {
+      const detail = await getProposalDetail(ewId, approvedProposalId);
+      setApprovedProposalDetail(detail);
+    } catch {
+      // Keep the prior detail; a transient refresh failure must not
+      // blank the panel mid-edit.
+    }
+  }, [ewId, approvedProposalId]);
+  useEffect(() => {
+    let cancelled = false;
+    if (ewId === null || approvedProposalId === null) {
+      queueMicrotask(() => {
+        if (!cancelled) setApprovedProposalDetail(null);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    getProposalDetail(ewId, approvedProposalId)
+      .then((detail) => {
+        if (!cancelled) setApprovedProposalDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setApprovedProposalDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, approvedProposalId]);
+
+  // Normalized active hourly line set. Approved-proposal lines win;
+  // otherwise the INSTANT cart lines; otherwise none.
+  const activeHourlyLines = useMemo<ActualHoursLine[]>(() => {
+    if (!ew) return [];
+    if (approvedProposal) {
+      if (!approvedProposalDetail) return []; // detail still loading
+      return approvedProposalDetail.lines
+        .filter(
+          (line) => line.is_approved_for_spawn && line.unit_type === "HOURS",
+        )
+        .map((line) => ({
+          id: line.id,
+          label: line.service_name ?? line.description,
+          actual_hours: line.actual_hours ?? null,
+        }));
+    }
+    if (ew.routing_decision === "INSTANT") {
+      return ew.line_items
+        .filter((line) => line.unit_type === "HOURS")
+        .map((line) => ({
+          id: line.id,
+          label: line.service_name,
+          actual_hours: line.actual_hours,
+        }));
+    }
+    return [];
+  }, [ew, approvedProposal, approvedProposalDetail]);
+
+  // Remount key: changes whenever the persisted actual_hours change, so
+  // the panel re-seeds its inputs after a save WITHOUT a resync effect.
+  // Cart case keys off the refreshed EW's updated_at; proposal case off
+  // the approved lines' (id, actual_hours) signature.
+  const actualHoursPanelKey = approvedProposal
+    ? `prop:${approvedProposalId ?? "load"}:${activeHourlyLines
+        .map((line) => `${line.id}=${line.actual_hours ?? ""}`)
+        .join(",")}`
+    : `cart:${ew?.updated_at ?? "none"}`;
 
   // Sprint 28 Batch 4 — fetch contacts when the request loads, but
   // only for admin viewers (mirrors backend gate). Failures collapse
@@ -551,7 +652,7 @@ export function ExtraWorkDetailPage() {
   // empty list so the PDF card simply does not render. The endpoint
   // is open to both provider operators and the EW's customer-side
   // viewers, but the backend filters out DRAFT for customers.
-  const ewId = ew?.id ?? null;
+  // (`ewId` is hoisted above the actual-hours active-set logic.)
   useEffect(() => {
     let cancelled = false;
     if (ewId === null) {
@@ -2008,17 +2109,24 @@ export function ExtraWorkDetailPage() {
             </div>
           </div>
 
-          {/* Sprint 8A — provider-only actual-hours entry for hourly cart
-              lines on an INSTANT-routed request. Keyed by `ew.updated_at`
-              so a save re-seeds the inputs from the refreshed detail
-              without a prop-derived resync effect. */}
-          {isProvider && hourlyCartLines.length > 0 && (
+          {/* Sprint 8A-fix — provider-only actual-hours entry for the
+              active hourly line set (approved-proposal lines or INSTANT
+              cart lines). Keyed by `actualHoursPanelKey` so a save
+              re-seeds the inputs from refreshed data without a
+              prop-derived resync effect; the proposal case also re-fetches
+              the approved proposal's detail so entered hours surface. */}
+          {isProvider && activeHourlyLines.length > 0 && (
             <ActualHoursPanel
-              key={ew.updated_at}
+              key={actualHoursPanelKey}
               ewId={ew.id}
-              hourlyLines={hourlyCartLines}
+              hourlyLines={activeHourlyLines}
               finalTotalAmount={ew.final_total_amount}
-              onUpdated={(detail) => setEw(detail)}
+              onUpdated={(detail) => {
+                setEw(detail);
+                if (approvedProposalId !== null) {
+                  void reloadApprovedProposalDetail();
+                }
+              }}
             />
           )}
 
