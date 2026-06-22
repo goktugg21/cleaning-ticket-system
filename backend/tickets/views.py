@@ -171,33 +171,6 @@ class TicketViewSet(
                 "proposal_line__proposal__extra_work_request",
             )
             qs = self._apply_sla_filter(qs)
-            qs = self._apply_customer_type_filters(qs)
-        return qs
-
-    # M6.1 — customer-detail sub-tabs. `?customer=<id>` narrows to one
-    # customer; `?type=<CSV>` includes only those ticket types (the
-    # meldingen tab uses type=REPORT); `?exclude_type=<CSV>` drops them
-    # (the tickets tab uses exclude_type=REPORT so it stays disjoint from
-    # meldingen). All three apply ON TOP of `scope_tickets_for`, so they
-    # can only narrow what the role already permits — never widen it.
-    def _apply_customer_type_filters(self, qs):
-        params = self.request.query_params
-        customer = params.get("customer")
-        if customer:
-            try:
-                qs = qs.filter(customer_id=int(customer))
-            except (TypeError, ValueError):
-                qs = qs.none()
-        include = params.get("type")
-        if include:
-            values = [v.strip() for v in include.split(",") if v.strip()]
-            if values:
-                qs = qs.filter(type__in=values)
-        exclude = params.get("exclude_type")
-        if exclude:
-            values = [v.strip() for v in exclude.split(",") if v.strip()]
-            if values:
-                qs = qs.exclude(type__in=values)
         return qs
 
     # Mirrors the frontend display-state priority. Paused overrides underlying
