@@ -116,5 +116,17 @@
   "ops_type_ticket": "Ticket",
   "ops_type_extra_work": "Extra werk",
   "ops_byb_tickets_title": "Tickets per gebouw",
-  "ops_byb_extra_work_title": "Extra werk per gebouw"
+  "ops_byb_extra_work_title": "Extra werk per gebouw",
+  "bulk_confirm.queue_preset": "Te bevestigen",
+  "bulk_confirm.selected_count": "{{count}} geselecteerd",
+  "bulk_confirm.select_all": "Alle tickets in beeld selecteren",
+  "bulk_confirm.select_row": "Ticket {{ticket}} selecteren",
+  "bulk_confirm.clear_selection": "Selectie wissen",
+  "bulk_confirm.confirm_action": "Bevestigen ({{count}})",
+  "bulk_confirm.confirming": "Bezig met bevestigen…",
+  "bulk_confirm.toast_success_title": "Tickets bevestigd",
+  "bulk_confirm.toast_success_desc": "{{count}} ticket(s) doorgezet naar klantgoedkeuring.",
+  "bulk_confirm.toast_partial_title": "Gedeeltelijk bevestigd",
+  "bulk_confirm.toast_partial_desc": "{{succeeded}} bevestigd, {{failed}} kon niet worden bevestigd.",
+  "bulk_confirm.toast_error_title": "Bulkbevestiging mislukt"
 }

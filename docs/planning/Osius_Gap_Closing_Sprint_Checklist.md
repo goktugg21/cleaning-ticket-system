@@ -72,12 +72,12 @@ Builds on #86.
 - [x] **Custom/ad-hoc price line**: add a price for a service **not in the catalog** (free-text name + price + VAT), customer-specific. **DONE** (PR #94): additive `CustomerCustomPrice` model (no service FK, resolver/cart/billing-isolated), provider-only CRUD at `/api/customers/<id>/custom-pricing/` + "Custom price lines" section on the customer pricing page; full-CRUD audit.
 - [x] **Category editing** on the service catalog; a **bulk price-raise** helper (raise many catalog/customer prices at once). **DONE** (PR #94): category editing already shipped (Sprint 28); bulk-raise both **customer contract prices** (`/api/customers/<id>/pricing/bulk-raise/` — new validity-window rows, history-preserving, per-service de-dup) and **catalog defaults** (`/api/services/bulk-raise/` — in place, billing-isolated), % or fixed, with UI on the customer-pricing and services pages.
 
-### M6 — Customer detail (provider side) + dashboard "my X" (Ramazan #7)
-- [ ] On a customer's page, surface **that customer's** tickets / extra-work / **price-quote-requests** / meldingen as drill-in sub-tabs (mirror existing surfaces).
-- [ ] Dashboard: a **"my X"** aggregation (my tickets / meldingen / extra-work / requests).
+### M6 — Customer detail (provider side) + dashboard "my X" (Ramazan #7) ✅ DONE
+- [x] On a customer's page, surface **that customer's** tickets / extra-work / **price-quote-requests** / meldingen as drill-in sub-tabs (mirror existing surfaces). **DONE** (PR #95).
+- [x] Dashboard: a **"my X"** aggregation (my tickets / meldingen / extra-work / requests). **DONE** (PR #95).
 
-### M7 — Melding (Ramazan #8)
-- [ ] **Melding = a customer-created waiting ticket** (the Dutch-facing name; NOT a separate concept). Verify the customer-create-ticket path exists + is surfaced as "melding" in the customer UI; close any gap.
+### M7 — Melding (Ramazan #8) ✅ DONE
+- [x] **Melding = a customer-created waiting ticket** (the Dutch-facing name; NOT a separate concept). Verify the customer-create-ticket path exists + is surfaced as "melding" in the customer UI; close any gap. **DONE** (PR #96).
 
 ---
 

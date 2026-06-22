@@ -61,6 +61,7 @@ from .serializers import (
     TicketDetailSerializer,
     TicketListSerializer,
     TicketMessageSerializer,
+    TicketBulkStatusChangeSerializer,
     TicketScheduleInputSerializer,
     TicketStatusChangeSerializer,
 )
@@ -363,6 +364,97 @@ class TicketViewSet(
         )
         return Response(
             TicketDetailSerializer(updated, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+    @action(detail=False, methods=["post"], url_path="bulk-status")
+    def bulk_status(self, request):
+        """
+        Sprint 7 — bulk manager-confirm.
+
+        Provider management advances many WAITING_MANAGER_REVIEW tickets
+        to WAITING_CUSTOMER_APPROVAL in one call ("the select button").
+
+        PER-ITEM semantics (NOT all-or-nothing): each ticket is
+        transitioned in its own `transaction.atomic()` block via the
+        existing `apply_transition`, so a ticket the actor is
+        out-of-scope for, or one in the wrong state, fails individually
+        without aborting the batch. No permission / state-machine logic
+        is duplicated here — every per-ticket role / scope / state rule
+        is inherited from `apply_transition`. Always returns HTTP 200
+        with a per-item breakdown.
+        """
+        # Endpoint-level gate: only provider-management roles (SUPER_ADMIN
+        # / COMPANY_ADMIN / BUILDING_MANAGER) may drive the manager-confirm
+        # forward leg. CUSTOMER_USER (and STAFF) are rejected outright —
+        # neither appears in the WAITING_MANAGER_REVIEW ->
+        # WAITING_CUSTOMER_APPROVAL row of ALLOWED_TRANSITIONS, so there is
+        # no point loading the batch for them.
+        if not is_provider_management_role(request.user):
+            return Response(
+                {"detail": "Only provider management can bulk-confirm tickets."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = TicketBulkStatusChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        ticket_ids = serializer.validated_data["ticket_ids"]
+        to_status = serializer.validated_data["to_status"]
+        note = serializer.validated_data.get("note", "")
+
+        # Resolve through the SCOPED queryset (scope_tickets_for) so an
+        # out-of-scope id becomes a per-item `not_found`, never a whole-
+        # batch 404. Keyed map for O(1) lookup; the caller's id order
+        # drives the result ordering.
+        scoped = {
+            ticket.id: ticket
+            for ticket in self.get_queryset().filter(pk__in=ticket_ids)
+        }
+
+        results = []
+        succeeded = 0
+        failed = 0
+        for ticket_id in ticket_ids:
+            ticket = scoped.get(ticket_id)
+            if ticket is None:
+                results.append({"id": ticket_id, "ok": False, "error": "not_found"})
+                failed += 1
+                continue
+
+            old_status = ticket.status
+            try:
+                with transaction.atomic():
+                    updated = apply_transition(
+                        ticket,
+                        request.user,
+                        to_status,
+                        note=note,
+                    )
+            except TransitionError as exc:
+                results.append(
+                    {"id": ticket_id, "ok": False, "error": exc.code}
+                )
+                failed += 1
+                continue
+
+            # Notification parity with the single-status `change_status`
+            # action: one status-changed email per successfully
+            # transitioned ticket. The manager-confirm leg is never an
+            # `is_admin_override` case (that only applies to
+            # WAITING_CUSTOMER_APPROVAL -> APPROVED/REJECTED), so the
+            # flag stays at its default False.
+            send_ticket_status_changed_email(
+                updated,
+                old_status=old_status,
+                new_status=updated.status,
+                actor=request.user,
+            )
+            results.append({"id": ticket_id, "ok": True})
+            succeeded += 1
+
+        return Response(
+            {"succeeded": succeeded, "failed": failed, "results": results},
             status=status.HTTP_200_OK,
         )
 

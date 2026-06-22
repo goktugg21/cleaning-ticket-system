@@ -1712,6 +1712,48 @@ class TicketStatusChangeSerializer(serializers.Serializer):
             raise serializers.ValidationError({"detail": str(exc), "code": exc.code})
 
 
+class TicketBulkStatusChangeSerializer(serializers.Serializer):
+    """
+    Sprint 7 — bulk manager-confirm input envelope.
+
+    Validates the REQUEST SHAPE only: a non-empty, deduped, capped list
+    of ticket ids and a `to_status` restricted to the single
+    manager-confirm forward leg (WAITING_MANAGER_REVIEW ->
+    WAITING_CUSTOMER_APPROVAL) for v1. Per-ticket role / scope / state
+    authority is deliberately NOT decided here — the view loops and
+    calls `tickets.state_machine.apply_transition` per ticket, so every
+    existing transition rule is inherited unchanged (no duplication of
+    permission or state-machine logic).
+    """
+
+    # Cap the RAW list at 200 so an oversized batch is rejected outright
+    # (whole-request 400) before any per-item work; `validate_ticket_ids`
+    # then de-dups while preserving first-seen order for a deterministic
+    # per-item `results` ordering.
+    ticket_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=False,
+        max_length=200,
+    )
+    # v1 restricts the bulk target to the manager-confirm forward leg.
+    # apply_transition still enforces that the source status is
+    # WAITING_MANAGER_REVIEW per-ticket; this just refuses any other
+    # destination at the envelope layer.
+    to_status = serializers.ChoiceField(
+        choices=[TicketStatus.WAITING_CUSTOMER_APPROVAL.value],
+    )
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_ticket_ids(self, value):
+        seen = set()
+        deduped = []
+        for ticket_id in value:
+            if ticket_id not in seen:
+                seen.add(ticket_id)
+                deduped.append(ticket_id)
+        return deduped
+
+
 class TicketAssignableManagerSerializer(serializers.ModelSerializer):
     class Meta:
         model = User

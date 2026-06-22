@@ -116,5 +116,17 @@
   "ops_type_ticket": "Ticket",
   "ops_type_extra_work": "Extra work",
   "ops_byb_tickets_title": "Tickets by building",
-  "ops_byb_extra_work_title": "Extra work by building"
+  "ops_byb_extra_work_title": "Extra work by building",
+  "bulk_confirm.queue_preset": "Manager-review queue",
+  "bulk_confirm.selected_count": "{{count}} selected",
+  "bulk_confirm.select_all": "Select all tickets in view",
+  "bulk_confirm.select_row": "Select ticket {{ticket}}",
+  "bulk_confirm.clear_selection": "Clear selection",
+  "bulk_confirm.confirm_action": "Confirm ({{count}})",
+  "bulk_confirm.confirming": "Confirming…",
+  "bulk_confirm.toast_success_title": "Tickets confirmed",
+  "bulk_confirm.toast_success_desc": "{{count}} ticket(s) sent for customer approval.",
+  "bulk_confirm.toast_partial_title": "Partially confirmed",
+  "bulk_confirm.toast_partial_desc": "{{succeeded}} confirmed, {{failed}} could not be confirmed.",
+  "bulk_confirm.toast_error_title": "Bulk confirm failed"
 }

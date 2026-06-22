@@ -6,6 +6,7 @@
 import { api } from "./client";
 import type {
   PaginatedResponse,
+  TicketBulkStatusResponse,
   TicketConvertToExtraWorkPayload,
   TicketConvertToExtraWorkResponse,
   TicketList,
@@ -65,6 +66,23 @@ export async function convertTicketToExtraWork(
   const response = await api.post<TicketConvertToExtraWorkResponse>(
     `/tickets/${ticketId}/convert-to-extra-work/`,
     payload,
+  );
+  return response.data;
+}
+
+// Sprint 7 (frontend) — bulk manager-confirm. Provider management
+// advances many WAITING_MANAGER_REVIEW tickets to
+// WAITING_CUSTOMER_APPROVAL in one call. The backend
+// (`TicketViewSet.bulk_status`) applies PER-ITEM semantics: it always
+// returns HTTP 200 with a succeeded/failed breakdown, so the caller
+// inspects `failed` rather than relying on the HTTP status. v1 fixes
+// the target at WAITING_CUSTOMER_APPROVAL (the only permitted bulk leg).
+export async function bulkConfirmTickets(
+  ticketIds: number[],
+): Promise<TicketBulkStatusResponse> {
+  const response = await api.post<TicketBulkStatusResponse>(
+    "/tickets/bulk-status/",
+    { ticket_ids: ticketIds, to_status: "WAITING_CUSTOMER_APPROVAL" },
   );
   return response.data;
 }
