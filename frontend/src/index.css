@@ -131,11 +131,13 @@ p { line-height: 1.6; }
 .btn-lg { height: 42px; padding: 0 22px; font-size: 14px; }
 .btn:disabled { opacity: 0.5; pointer-events: none; }
 
-/* Sprint 9 — bulk-action bar (dashboard manager-review queue). Elevated
-   surface bar with a brand left-accent, fully tokenized (replaces the
-   prior inline phantom `--green-1` + hardcoded hex/shadow). The light
-   surface also restores button contrast — the ghost "clear" button read
-   poorly on the old dark-green bar. */
+/* Sprint 9 — bulk-action bar (dashboard manager-review queue). Bold
+   brand-green fill so the selection mode clearly "pops" (replaces the
+   prior inline phantom `--green-1` + hardcoded hex/shadow). The green
+   fill IS the emphasis, so no left-accent. Button treatments are scoped
+   to the bar so they stay legible on green: the ghost "clear" is an
+   outlined-white secondary, the primary "confirm" is a dominant
+   white-on-green chip. */
 .bulk-action-bar {
   position: sticky;
   top: 8px;
@@ -147,19 +149,41 @@ p { line-height: 1.6; }
   flex-wrap: wrap;
   margin: 0 0 12px;
   padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--green);
   border-radius: var(--r-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
+  background: var(--green);
+  color: #fff;
+  box-shadow: var(--shadow-lg);
 }
 .bulk-action-bar-count {
   font-family: var(--f-head);
   font-weight: 700;
   font-size: 13px;
-  color: var(--text);
+  color: #fff;
 }
 .bulk-action-bar-actions { display: flex; gap: 8px; }
+
+/* On-green button contrast — scoped to the bar so other .btn-ghost /
+   .btn-primary instances are unaffected. */
+.bulk-action-bar .btn-ghost {
+  color: #fff;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.bulk-action-bar .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.bulk-action-bar .btn-primary {
+  background: #fff;
+  color: var(--green);
+  border-color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.bulk-action-bar .btn-primary:hover {
+  background: var(--green-faint);
+  color: var(--green);
+  border-color: var(--green-faint);
+}
 
 /* Sprint 2d — per-customer Settings page polish: grouped visibility
    toggles in one bordered list + a danger accent on the lifecycle
