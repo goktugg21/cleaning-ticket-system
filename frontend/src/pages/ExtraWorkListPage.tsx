@@ -6,7 +6,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   Clock,
@@ -25,6 +25,7 @@ import {
 } from "../api/extraWork";
 import type {
   ExtraWorkCategory,
+  ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStatus,
 } from "../api/types";
@@ -120,6 +121,9 @@ function KpiCard({
 export function ExtraWorkListPage() {
   const { t } = useTranslation(["extra_work", "common"]);
   const { me } = useAuth();
+  // M6.3 — additive "my work" deep-link reads. With both params absent
+  // these resolve to undefined below, so the fetch is unchanged.
+  const [searchParams] = useSearchParams();
   // Provider-only: the billing-month picker, invoice-status filter, and the
   // invoiced column. The backend redacts the billing fields for CUSTOMER_USER
   // anyway; this also hides the controls from them.
@@ -160,6 +164,12 @@ export function ExtraWorkListPage() {
         const response = await listExtraWork({
           billing_period: billingMonth || undefined,
           invoice_status: invoiceStatus === "ALL" ? undefined : invoiceStatus,
+          created_by:
+            searchParams.get("mine") === "1" && me?.id ? me.id : undefined,
+          request_intent:
+            (searchParams.get("request_intent") as
+              | ExtraWorkRequestIntent
+              | null) ?? undefined,
         });
         if (!cancelled) setRows(response.results);
       } catch (err) {
@@ -172,7 +182,7 @@ export function ExtraWorkListPage() {
     return () => {
       cancelled = true;
     };
-  }, [billingMonth, invoiceStatus, refreshKey]);
+  }, [billingMonth, invoiceStatus, refreshKey, searchParams, me?.id]);
 
   // Open the shared run-confirm dialog after `pendingRun` is set, so its
   // title/body reflect the chosen action (no synchronous open-with-stale

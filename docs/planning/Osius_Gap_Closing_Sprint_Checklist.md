@@ -67,10 +67,10 @@ Billing must key off a **billing month you set**, not the customer's final-appro
 - [x] FE (commits 3a–3d): billing-month picker + invoice-status filter + invoiced column on the EW list (provider-only); **invoice-run toolbar** (mark/clear by month + in-view company, confirm-gated); itemized client-side **CSV export** of the filtered list; per-EW **billing-month override** on the detail page (via 2b).
 - Shipped on branch `feat/m4-billing-month` (12 commits); deployed + verified on the dev/test box.
 
-### M5 — Customer pricing: custom line + category edit + bulk raise (Ramazan #3)
+### M5 — Customer pricing: custom line + category edit + bulk raise (Ramazan #3) ✅ DONE
 Builds on #86.
-- [ ] **Custom/ad-hoc price line**: add a price for a service **not in the catalog** (free-text name + price + VAT), customer-specific.
-- [ ] **Category editing** on the service catalog; a **bulk price-raise** helper (raise many catalog/customer prices at once).
+- [x] **Custom/ad-hoc price line**: add a price for a service **not in the catalog** (free-text name + price + VAT), customer-specific. **DONE** (PR #94): additive `CustomerCustomPrice` model (no service FK, resolver/cart/billing-isolated), provider-only CRUD at `/api/customers/<id>/custom-pricing/` + "Custom price lines" section on the customer pricing page; full-CRUD audit.
+- [x] **Category editing** on the service catalog; a **bulk price-raise** helper (raise many catalog/customer prices at once). **DONE** (PR #94): category editing already shipped (Sprint 28); bulk-raise both **customer contract prices** (`/api/customers/<id>/pricing/bulk-raise/` — new validity-window rows, history-preserving, per-service de-dup) and **catalog defaults** (`/api/services/bulk-raise/` — in place, billing-isolated), % or fixed, with UI on the customer-pricing and services pages.
 
 ### M6 — Customer detail (provider side) + dashboard "my X" (Ramazan #7)
 - [ ] On a customer's page, surface **that customer's** tickets / extra-work / **price-quote-requests** / meldingen as drill-in sub-tabs (mirror existing surfaces).

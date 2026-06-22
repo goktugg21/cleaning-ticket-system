@@ -13,10 +13,12 @@ import {
   ChevronRight,
   ClipboardList,
   Contact,
+  FileText,
   LayoutGrid,
   Mail,
   MailPlus,
   MapPin,
+  Megaphone,
   Menu,
   Package,
   PlusCircle,
@@ -25,6 +27,7 @@ import {
   ShieldCheck,
   Sparkles,
   Tag,
+  Ticket,
   UserCog,
   Users,
   X,
@@ -314,6 +317,36 @@ export function AppShell({ children }: AppShellProps) {
                       <Receipt size={16} strokeWidth={2} />
                     </span>
                     {t("nav.customer_submenu.extra_work")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/quote-requests`}
+                    className={navClass}
+                    data-testid="sidebar-customer-quote-requests"
+                  >
+                    <span className="nav-icon">
+                      <FileText size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.quote_requests")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/tickets`}
+                    className={navClass}
+                    data-testid="sidebar-customer-tickets"
+                  >
+                    <span className="nav-icon">
+                      <Ticket size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.tickets")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/meldingen`}
+                    className={navClass}
+                    data-testid="sidebar-customer-meldingen"
+                  >
+                    <span className="nav-icon">
+                      <Megaphone size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.meldingen")}
                   </NavLink>
                 </>
               )}

@@ -7,6 +7,7 @@ import { api, getApiError } from "../api/client";
 import {
   getExtraWorkStats,
   getExtraWorkStatsByBuilding,
+  listExtraWork,
 } from "../api/extraWork";
 import type {
   ExtraWorkStats,
@@ -20,6 +21,7 @@ import type {
   TicketStatus,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { isProviderManagementRole } from "../auth/permissions";
 import { SLABadge } from "../components/sla/SLABadge";
 import { formatDate, formatDateTime } from "../lib/intl";
 
@@ -254,8 +256,27 @@ export function DashboardPage() {
     if (priorityFilter) params.priority = priorityFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
+    // M6.3 — "my work" deep-links. Only applied in the tickets view
+    // (where the clear chip is shown), so the toggle preserving these
+    // URL params can't silently filter All work / other views.
+    if (workView === "tickets") {
+      if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
+      const typeParam = searchParams.get("type");
+      if (typeParam) params.type = typeParam;
+      const exclTypeParam = searchParams.get("exclude_type");
+      if (exclTypeParam) params.exclude_type = exclTypeParam;
+    }
     return params;
-  }, [page, statusFilter, priorityFilter, searchActive, slaFilter]);
+  }, [
+    page,
+    statusFilter,
+    priorityFilter,
+    searchActive,
+    slaFilter,
+    searchParams,
+    me,
+    workView,
+  ]);
 
   const loadTickets = useCallback(async () => {
     if (!showTickets) return;
@@ -290,6 +311,50 @@ export function DashboardPage() {
       // KPI cards fall back to "—" placeholders if the endpoint fails.
     }
   }, []);
+
+  // M6.3 — "my work" summary counts (provider-management only). Each
+  // count is the PaginatedResponse.count for a created_by=me query;
+  // page_size:1 keeps the payload minimal (count is the full total).
+  const [myCounts, setMyCounts] = useState<{
+    tickets: number | null;
+    meldingen: number | null;
+    extraWork: number | null;
+    quoteRequests: number | null;
+  }>({
+    tickets: null,
+    meldingen: null,
+    extraWork: null,
+    quoteRequests: null,
+  });
+
+  const loadMyCounts = useCallback(async () => {
+    const meId = me?.id;
+    if (!meId || !isProviderManagementRole(userRole)) return;
+    try {
+      const [tk, ml, ew, qr] = await Promise.all([
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: { created_by: meId, exclude_type: "REPORT", page_size: 1 },
+        }),
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: { created_by: meId, type: "REPORT", page_size: 1 },
+        }),
+        listExtraWork({ created_by: meId, page_size: 1 }),
+        listExtraWork({
+          created_by: meId,
+          request_intent: "REQUEST_QUOTE",
+          page_size: 1,
+        }),
+      ]);
+      setMyCounts({
+        tickets: tk.data.count,
+        meldingen: ml.data.count,
+        extraWork: ew.count,
+        quoteRequests: qr.count,
+      });
+    } catch {
+      // Leave "—" placeholders on failure (mirrors loadStats).
+    }
+  }, [me?.id, userRole]);
 
   const loadStatsByBuilding = useCallback(async () => {
     if (!showTickets) return;
@@ -332,11 +397,13 @@ export function DashboardPage() {
     loadStatsByBuilding();
     loadExtraWorkStats();
     loadExtraWorkStatsByBuilding();
+    loadMyCounts();
   }, [
     loadStats,
     loadStatsByBuilding,
     loadExtraWorkStats,
     loadExtraWorkStatsByBuilding,
+    loadMyCounts,
   ]);
 
   useEffect(() => {
@@ -566,6 +633,63 @@ export function DashboardPage() {
             <div className="kpi-meta">{t("ops_kpi_urgent_meta")}</div>
           </div>
         </div>
+
+        {/* M6.3 — "My work" summary. Provider-management only ("my
+            created items" is a provider-admin concept). Each card links
+            into a created_by=me-filtered list view. */}
+        {isProviderManagementRole(userRole) && me?.id && (
+          <section
+            className="my-work-section"
+            data-testid="dashboard-my-work"
+            style={{ marginTop: 12 }}
+          >
+            <div className="section-head" style={{ marginBottom: 10 }}>
+              <div className="section-head-title">{t("my_work.title")}</div>
+            </div>
+            <div className="operations-kpi-grid">
+              <Link
+                to="/?view=tickets&mine=1&exclude_type=REPORT"
+                className="kpi-card"
+                data-testid="dashboard-my-tickets"
+              >
+                <div className="kpi-label">{t("my_work.tickets")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(myCounts.tickets)}</div>
+                </div>
+              </Link>
+              <Link
+                to="/?view=tickets&mine=1&type=REPORT"
+                className="kpi-card"
+                data-testid="dashboard-my-meldingen"
+              >
+                <div className="kpi-label">{t("my_work.meldingen")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(myCounts.meldingen)}</div>
+                </div>
+              </Link>
+              <Link
+                to="/extra-work?mine=1"
+                className="kpi-card"
+                data-testid="dashboard-my-extra-work"
+              >
+                <div className="kpi-label">{t("my_work.extra_work")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(myCounts.extraWork)}</div>
+                </div>
+              </Link>
+              <Link
+                to="/extra-work?mine=1&request_intent=REQUEST_QUOTE"
+                className="kpi-card"
+                data-testid="dashboard-my-quote-requests"
+              >
+                <div className="kpi-label">{t("my_work.quote_requests")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(myCounts.quoteRequests)}</div>
+                </div>
+              </Link>
+            </div>
+          </section>
+        )}
 
         {/* Work-strip — segmented control band. URL-backed. */}
         <div
@@ -912,6 +1036,17 @@ export function DashboardPage() {
                       {t("section_recent_sub")}
                     </div>
                   </div>
+                  {searchParams.get("mine") === "1" && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-mine-filter-chip"
+                    >
+                      <span>{t("my_work.filter_chip")}</span>
+                      <Link to="/?view=tickets" className="active-filter-clear">
+                        {t("my_work.filter_clear")}
+                      </Link>
+                    </div>
+                  )}
                   <span
                     style={{
                       fontFamily: "var(--f-head)",

@@ -5,9 +5,45 @@
 // mounted at `/api/tickets/` (the api client adds the `/api` prefix).
 import { api } from "./client";
 import type {
+  PaginatedResponse,
   TicketConvertToExtraWorkPayload,
   TicketConvertToExtraWorkResponse,
+  TicketList,
 } from "./types";
+
+// M6.1 (frontend) — provider customer-detail ticket lists. The backend
+// `TicketFilter` supports `customer` (exact), `type` (exact/`in`), and
+// `exclude_type` (CSV); scope is still enforced server-side via
+// `scope_tickets_for`. The customer-detail sub-tabs pass:
+//   * tickets:   { customer, exclude_type: "REPORT" }
+//   * meldingen: { customer, type: "REPORT" }
+export interface ListTicketsParams {
+  customer?: number;
+  type?: string;
+  exclude_type?: string;
+}
+
+// M6.1 + M6 review — provider customer-detail ticket lists. Drill-in
+// surface: gather EVERY matching row (following `next`) so the table and
+// its count never silently truncate at one page. Bounded to avoid an
+// unbounded loop on a malformed `next`.
+const MAX_PAGES = 100;
+
+export async function listAllTickets(
+  params: ListTicketsParams = {},
+): Promise<TicketList[]> {
+  const all: TicketList[] = [];
+  let page = 1;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const response = await api.get<PaginatedResponse<TicketList>>("/tickets/", {
+      params: { page_size: 100, ...params, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
+}
 
 // Sprint 7B (frontend) — convert a normal ticket into a NEW Extra Work
 // request. This is a DEDICATED endpoint, NOT a status transition: the

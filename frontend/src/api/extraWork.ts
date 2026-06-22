@@ -15,6 +15,7 @@ import type {
   ExtraWorkPricingLineItem,
   ExtraWorkRequestCartCreatePayload,
   ExtraWorkRequestDetail,
+  ExtraWorkRequestIntent,
   ExtraWorkRequestList,
   ExtraWorkStats,
   ExtraWorkStatsByBuildingResponse,
@@ -43,6 +44,8 @@ export interface ListExtraWorkParams {
   building?: number;
   status?: ExtraWorkStatus;
   routing_decision?: "INSTANT" | "PROPOSAL";
+  request_intent?: ExtraWorkRequestIntent;
+  created_by?: number;
   billing_period?: string; // "YYYY-MM" — server buckets on COALESCE(invoice_date, completion date)
   invoice_status?: "completed" | "invoiced";
   page_size?: number;
@@ -56,6 +59,26 @@ export async function listExtraWork(
     { params: { page_size: 100, ...params } },
   );
   return response.data;
+}
+
+// M6 review — customer-detail EW drill-in (Extra Work + Quote Requests
+// variants). Fetch EVERY matching row so the table/count never truncate
+// at one page. Bounded like listAllTickets.
+export async function listAllExtraWork(
+  params: ListExtraWorkParams = {},
+): Promise<ExtraWorkRequestList[]> {
+  const all: ExtraWorkRequestList[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<ExtraWorkRequestList>>(
+      "/extra-work/",
+      { params: { page_size: 100, ...params, page } },
+    );
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function getExtraWork(

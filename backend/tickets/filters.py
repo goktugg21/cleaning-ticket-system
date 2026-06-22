@@ -53,6 +53,13 @@ class TicketFilter(df.FilterSet):
     # naturally with the scheduled_*/agenda filters.
     my_jobs = df.BooleanFilter(method="filter_my_jobs")
 
+    # M6.1 — customer-detail sub-tabs. The tickets tab is the inverse of
+    # the meldingen tab: drop every ticket whose type is in the given CSV
+    # (the tickets tab passes exclude_type=REPORT so it stays disjoint
+    # from the meldingen tab's type=REPORT). Opt-in; runs on top of
+    # scope_tickets_for like the other filters here.
+    exclude_type = df.CharFilter(method="filter_exclude_type")
+
     class Meta:
         model = Ticket
         fields = {
@@ -98,6 +105,16 @@ class TicketFilter(df.FilterSet):
         if value == "unscheduled":
             return queryset.filter(scheduled_start_at__isnull=True)
         return queryset
+
+    def filter_exclude_type(self, queryset, name, value):
+        # M6.1 — drop the listed ticket types (CSV). A falsy value leaves
+        # the queryset untouched.
+        if value in (None, ""):
+            return queryset
+        values = [v.strip() for v in value.split(",") if v.strip()]
+        if not values:
+            return queryset
+        return queryset.exclude(type__in=values)
 
     def filter_my_jobs(self, queryset, name, value):
         # Sprint 13C — narrow to tickets where the current user holds a
