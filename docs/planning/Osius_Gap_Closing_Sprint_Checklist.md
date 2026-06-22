@@ -1,6 +1,6 @@
 # Osius — Gap-Closing Sprint Checklist
 
-**Updated 2026-06-05** — post PR #87 (Sprint 6 merged) + **Ramazan Meeting 2**.
+**Updated 2026-06-23** — post PR #98 (Sprint 8 merged). Meeting-2 block + Sprints 7–8 all shipped.
 
 **Purpose.** The living plan to close every remaining gap between the system and the Ramazan transcripts + Source of Truth, ending with a premium UI/UX polish. **CC ticks the boxes for a sprint as it completes it** (and stages this file with the commit), so we always know where we are.
 
@@ -83,20 +83,41 @@ Builds on #86.
 
 ## Original remaining sprints (after the Meeting-2 block)
 
-### Sprint 7 — Bulk select-and-approve
+### Sprint 7 — Bulk select-and-approve  ✅ DONE (PR #97)
 The father's "select" button: confirm many completions at once.
-- [ ] Backend bulk-complete/approve endpoint (provider-management; validates each; clear all-or-nothing vs per-item semantics) + tests.
-- [ ] FE multi-select + bulk-confirm on a completions/queue view; gates/e2e green; screenshots.
+- [x] Backend bulk endpoint DONE (PR #97): `POST /api/tickets/bulk-status/` advances tickets `WAITING_MANAGER_REVIEW → WAITING_CUSTOMER_APPROVAL`, per-item atomic via `apply_transition`, explicit source-status guard (Codex P1 fix: rejects wrong-state tickets even for SUPER_ADMIN), scoped not-found, gated 403 for CUSTOMER_USER/STAFF; tests added.
+- [x] FE multi-select + bulk-confirm on the dashboard manager-review queue ("Te bevestigen" preset); gates green.
 
-### Sprint 8 — Coverage verification & surface
-Verify, then surface only what's missing.
-- [ ] **Unable-to-complete**: the "couldn't finish + reason → manager notification" path is surfaced (SoT §4.4).
-- [ ] **Actual-hours**: hourly EW finalize is surfaced (SoT §5.12).
-- [ ] **Copy-from-default**: a "copy default prices to this customer" action is surfaced (SoT §5.9).
-- [ ] Occurrence **skip/cancel** surfaced; any other unsurfaced endpoint closed.
+### Sprint 8 — Coverage verification & surface  ✅ DONE (PR #98)
+- [x] **Unable-to-complete** (§4.4): already surfaced via the slot-completion path (AgendaPage) — requires a reason and fires `send_slot_unable_to_complete_email` to the manager. The legacy ticket-level `/tickets/<id>/unable-to-complete/` endpoint is superseded by the slot model and intentionally left unsurfaced.
+- [x] **Actual-hours** (§5.12): hourly EW finalize surfaced on the Extra Work detail page (provider-only panel → `POST /api/extra-work/<id>/actual-hours/`). Covers BOTH the INSTANT-cart route AND proposal-routed/auto-start hourly EWs — the active set follows `active_priced_lines`, fixing the Codex P1 dead-end where proposal-routed hourly EWs were blocked by the `actual_hours_required` completion gate with no entry UI. Legacy pricing lines stay out (no `actual_hours` column; never gate).
+- [x] **Copy-from-default** (§5.9): "Copy from defaults" action on the customer pricing page → `POST /api/customers/<id>/pricing/copy-from-default/` (active-services multi-select + valid_from/optional valid_to, all-or-nothing).
+- [x] Occurrence **skip/cancel** surfaced (`skipOccurrence`/`cancelOccurrence` on RecurringJobDetailPage); no other unsurfaced in-scope endpoint found.
 
-### Sprint 9 — Premium UI/UX polish
-- [ ] A cohesive visual polish pass for a premium look (tokens, spacing, density, consistency), with extra attention to the recurring + sub-task + new profile/notification surfaces. No behavior changes; gates/e2e green; before/after screenshots.
+### Sprint 9 — Premium UI/UX polish (light, no behavior change — runs now; PR #99)
+- [ ] A cohesive visual polish pass for a premium look (tokens, spacing, density, consistency), with extra attention to the recurring + sub-task + new profile/notification surfaces. **No behavior changes**; gates/e2e green; before/after screenshots. Feature-level layout asks (e.g. enlarging the right-side responsible-manager / assignment cards — see Backlog note #7) are DEFERRED to the Fixing & Auditing sprint, pending Ramazan + father feedback.
+
+## Roadmap — phase order (agreed 2026-06-23)
+1. **Sprint 9 — light UI/UX polish** (no behavior change) → **PR #99**, then deploy.
+2. **Feedback waiting phase** — Göktuğ collects Ramazan + father feedback (see Backlog Notes below).
+3. **Fixing & Auditing Sprint** — implement the feedback + codebase audit + reconcile this checklist + Department section.
+4. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
+5. **Production hardening** (TLS · real SMTP · non-root containers · `ALLOWED_HOSTS` healthcheck fix under `DEBUG=False` · Postgres backups) → **CD** → **Sentry DSNs**; plus the small `sub_tasks` CUSTOMER_USER redaction follow-up. → Production-ready, barring further feedback.
+
+**Ordering decision (testing vs Fixing & Auditing):** testing runs AFTER Fixing & Auditing. The missing coverage is E2E + frontend (the UI layer); the backend already has a CI test suite protecting the audit's backend changes. The Fixing & Auditing sprint mostly reshapes the UI (new dropdowns, invoice page/PDF, attachment previews, layout/density), so E2E/frontend tests written first would be invalidated by those changes — tests deliver durable value when they lock in final behavior. *Caveat — decide at the fork:* if the feedback returns small/cosmetic, the UI is already near-final and testing-first becomes reasonable; revisit when feedback lands.
+
+## Sprint 9 — Feedback & Backlog Notes (captured 2026-06-23; NOT for implementation yet)
+Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father feedback before anything is built. These feed the **Fixing & Auditing Sprint**. Several intersect shipped work — flagged inline.
+
+1. **Custom units on the Service "Other" unit type.** "Other" should accept free-text units (cm, m³, …). Possibly customer-specific — even per-room. Open: how far down unit definitions go (customer / building / room).
+2. **Dedicated invoices page + workflow.** Extra work lives in the stream today; may want its own invoice page/workflow; possible "invoiced" status on EW. (Partly built — M4 shipped a settable billing month, a per-month invoice run that marks/clears "invoiced," + an invoice-status filter & invoiced column. New asks: a standalone invoices page + item 3.)
+3. **Invoice PDF + send-to-customer.** A PDF invoice system; likely Ramazan feedback on how invoices / customer feedback get sent. Builds on M4's billing-month + run.
+4. **Notifications history / read messages.** Can't reliably see past notifications; need full history incl. already-read items → audit how the feed surfaces read vs unread + retention. (Relates to M1 / PR #90.)
+5. **Attachment in-app preview.** Clicking an attachment downloads it; want in-app viewing, with PDF preview inside the app. (Flagged deliberately — Ramazan may not raise it.)
+6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific (ties into the deferred Department section). "Event" may be a selectable event type, not a category — undecided.
+7. **Right-side card layout / density.** Assignment / responsible-manager / building-manager / scheduling / ticket-detail / add-slot / add-subcard / manager sections are good UX. Possible: make the right-side cards (responsible manager / assignment) larger with more horizontal space so they read as primary, not small technical details; maybe light explanatory copy. Decide post-feedback.
+8. **Customer surfaces — keep combined.** Separate pages for a customer's EW / quote-requests / tickets likely won't be liked; want one customer page with tabs/subsections. (Already built — M6 / PR #95 put these on the customer page as drill-in sub-tabs. Validate/refine vs Ramazan's preference, not rebuild.)
+9. **Baseline:** system is in good shape; editing customers/users + general flows are fine; no major issues right now.
 
 ---
 
@@ -115,3 +136,9 @@ Opened once the remaining sprint work is done. Scope:
 - [ ] Codebase audit: review how everything works end-to-end; hunt for bugs / dead code / inconsistencies; confirm each shipped feature behaves as intended.
 - [ ] Reconcile this checklist against the real codebase (tick/realign every item to what's actually implemented).
 - [ ] Department section (deferred above) — design + build in person with Ramazan + father.
+
+## E2E Testing Sprint (planned — after Fixing & Auditing)
+- [ ] End-to-end (Playwright) coverage of the critical full-stack flows on the settled post-feedback system: auth/login, create ticket + melding, ticket lifecycle (staff complete → manager review → customer approval), extra-work request → proposal/instant → actual-hours finalize, customer pricing (contract / custom / bulk-raise / copy-default), notification deep-links. Use the token-inject pattern (the e2e login form is flaky). Green in CI.
+
+## Frontend Testing Sprint (planned — after E2E)
+- [ ] Component/unit tests for high-value frontend logic that lacks coverage (pricing-amount display, active-priced-line selection, permission/visibility gating, the drill-in people/permissions flows, notification rendering). Establish the test runner + a CI gate; do not regress the ESLint baseline (49).
