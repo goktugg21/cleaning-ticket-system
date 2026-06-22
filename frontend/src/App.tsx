@@ -441,6 +441,14 @@ export default function App() {
               </AdminRoute>
             }
           />
+          <Route
+            path="/admin/customers/:id/quote-requests"
+            element={
+              <AdminRoute>
+                <CustomerExtraWorkPage quoteOnly />
+              </AdminRoute>
+            }
+          />
           {/* Sprint 28 Batch 12 — BM read-only contacts surface. */}
           <Route
             path="/admin/customers/:id/contacts"

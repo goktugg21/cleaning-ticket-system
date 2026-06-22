@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ClipboardList,
   Contact,
+  FileText,
   LayoutGrid,
   Mail,
   MailPlus,
@@ -316,6 +317,16 @@ export function AppShell({ children }: AppShellProps) {
                       <Receipt size={16} strokeWidth={2} />
                     </span>
                     {t("nav.customer_submenu.extra_work")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/quote-requests`}
+                    className={navClass}
+                    data-testid="sidebar-customer-quote-requests"
+                  >
+                    <span className="nav-icon">
+                      <FileText size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.quote_requests")}
                   </NavLink>
                   <NavLink
                     to={`/admin/customers/${sidebar.customerId}/tickets`}

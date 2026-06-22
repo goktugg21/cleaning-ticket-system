@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Sparkles } from "lucide-react";
+import { FileText, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -44,9 +44,20 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   OTHER: "category.other",
 };
 
-export function CustomerExtraWorkPage() {
+export function CustomerExtraWorkPage({
+  quoteOnly = false,
+}: {
+  quoteOnly?: boolean;
+}) {
   const { id } = useParams();
   const { t } = useTranslation(["common", "extra_work"]);
+
+  // M6.2 — quote-requests variant of this page. The defaults keep the
+  // extra-work tab byte-identical (same i18n + testid segments, same
+  // fetch); quoteOnly narrows the fetch to request_intent=REQUEST_QUOTE
+  // and swaps only the variant-specific copy + testids.
+  const v = quoteOnly ? "quote_requests" : "extra_work"; // i18n segment
+  const tv = quoteOnly ? "quote-requests" : "extra-work"; // testid segment
 
   const numericId = useMemo(() => {
     if (!id) return null;
@@ -79,7 +90,10 @@ export function CustomerExtraWorkPage() {
     // than a 403 — same defence-in-depth shape the ticket list uses.
     Promise.all([
       getCustomer(numericId),
-      listExtraWork({ customer: numericId }),
+      listExtraWork({
+        customer: numericId,
+        ...(quoteOnly ? { request_intent: "REQUEST_QUOTE" } : {}),
+      }),
     ])
       .then(([customerData, listResponse]) => {
         if (cancelled) return;
@@ -95,13 +109,13 @@ export function CustomerExtraWorkPage() {
     return () => {
       cancelled = true;
     };
-  }, [numericId, t]);
+  }, [numericId, quoteOnly, t]);
 
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
 
   return (
-    <div data-testid="customer-extra-work-page">
+    <div data-testid={`customer-${tv}-page`}>
       <CustomerSubPageHeader
         customerName={customerName}
         isActive={isActive}
@@ -121,33 +135,33 @@ export function CustomerExtraWorkPage() {
         <>
           <p
             className="section-explainer"
-            data-testid="customer-extra-work-explainer"
+            data-testid={`customer-${tv}-explainer`}
           >
-            {t("customer_view.extra_work.explainer", {
+            {t(`customer_view.${v}.explainer`, {
               customer: customerName,
             })}
           </p>
 
           {rows.length === 0 ? (
             <EmptyState
-              icon={Sparkles}
-              title={t("customer_view.extra_work.empty_title")}
-              description={t("customer_view.extra_work.empty_desc")}
-              testId="customer-extra-work-empty"
+              icon={quoteOnly ? FileText : Sparkles}
+              title={t(`customer_view.${v}.empty_title`)}
+              description={t(`customer_view.${v}.empty_desc`)}
+              testId={`customer-${tv}-empty`}
             />
           ) : (
             <section
               className="card"
-              data-testid="customer-extra-work-section"
+              data-testid={`customer-${tv}-section`}
               style={{ padding: "20px 22px", overflow: "hidden" }}
             >
               <div className="section-head" style={{ marginBottom: 12 }}>
                 <div>
                   <div className="section-head-title">
-                    {t("customer_view.extra_work.list_title")}
+                    {t(`customer_view.${v}.list_title`)}
                   </div>
                   <div className="section-head-sub">
-                    {t("customer_view.extra_work.list_subtitle", {
+                    {t(`customer_view.${v}.list_subtitle`, {
                       count: rows.length,
                     })}
                   </div>
@@ -157,7 +171,7 @@ export function CustomerExtraWorkPage() {
               <div className="table-wrap">
                 <table
                   className="data-table"
-                  data-testid="customer-extra-work-table"
+                  data-testid={`customer-${tv}-table`}
                 >
                   <thead>
                     <tr>
@@ -177,7 +191,7 @@ export function CustomerExtraWorkPage() {
                       <ClickableRow
                         key={row.id}
                         to={`/extra-work/${row.id}`}
-                        testId="customer-extra-work-row"
+                        testId={`customer-${tv}-row`}
                       >
                         <td className="td-subject">
                           <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
