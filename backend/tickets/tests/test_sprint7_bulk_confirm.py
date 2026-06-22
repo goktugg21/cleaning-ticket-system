@@ -256,7 +256,11 @@ class BulkManagerConfirmPerItemTests(TestCase):
         by_id = {r["id"]: r for r in body["results"]}
         self.assertTrue(by_id[good.id]["ok"])
         self.assertFalse(by_id[wrong_state.id]["ok"])
-        self.assertEqual(by_id[wrong_state.id]["error"], "forbidden_transition")
+        # Sprint 7 (Codex P2) — the explicit source-status guard fires
+        # before apply_transition, so an OPEN ticket is rejected with
+        # `not_in_review` rather than the state machine's
+        # `forbidden_transition`.
+        self.assertEqual(by_id[wrong_state.id]["error"], "not_in_review")
 
         good.refresh_from_db()
         wrong_state.refresh_from_db()
@@ -339,6 +343,96 @@ class BulkManagerConfirmPerItemTests(TestCase):
         self.assertEqual(
             out_of_building.status, TicketStatus.WAITING_MANAGER_REVIEW
         )
+        self.assertEqual(mocked_email.call_count, 1)
+
+    def test_super_admin_wrong_state_items_blocked(self):
+        # Sprint 7 (Codex P2) — a SUPER_ADMIN's can_transition allows ANY
+        # source status, so without the explicit source-status guard the
+        # endpoint would advance OPEN/CLOSED tickets too. This proves the
+        # override hole is closed: only the WAITING_MANAGER_REVIEW item
+        # advances; OPEN and CLOSED are per-item `not_in_review` failures.
+        review = self._valid_ticket()
+        open_ticket = _ticket(
+            company=self.s["company"],
+            building=self.s["b1"],
+            customer=self.s["customer"],
+            created_by=self.s["cust_user"],
+            status_value=TicketStatus.OPEN,
+        )
+        closed_ticket = _ticket(
+            company=self.s["company"],
+            building=self.s["b1"],
+            customer=self.s["customer"],
+            created_by=self.s["cust_user"],
+            status_value=TicketStatus.CLOSED,
+        )
+        sa = _mk("sa-block@example.com", UserRole.SUPER_ADMIN)
+        self.client.force_authenticate(user=sa)
+        with patch(EMAIL_PATH) as mocked_email:
+            response = self.client.post(
+                BULK_URL,
+                {
+                    "ticket_ids": [review.id, open_ticket.id, closed_ticket.id],
+                    "to_status": "WAITING_CUSTOMER_APPROVAL",
+                },
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = response.json()
+        self.assertEqual(body["succeeded"], 1)
+        self.assertEqual(body["failed"], 2)
+        by_id = {r["id"]: r for r in body["results"]}
+        self.assertTrue(by_id[review.id]["ok"])
+        self.assertFalse(by_id[open_ticket.id]["ok"])
+        self.assertFalse(by_id[closed_ticket.id]["ok"])
+        self.assertEqual(by_id[open_ticket.id]["error"], "not_in_review")
+        self.assertEqual(by_id[closed_ticket.id]["error"], "not_in_review")
+
+        review.refresh_from_db()
+        open_ticket.refresh_from_db()
+        closed_ticket.refresh_from_db()
+        self.assertEqual(review.status, TicketStatus.WAITING_CUSTOMER_APPROVAL)
+        # The wrong-state tickets are untouched.
+        self.assertEqual(open_ticket.status, TicketStatus.OPEN)
+        self.assertEqual(closed_ticket.status, TicketStatus.CLOSED)
+        self.assertEqual(mocked_email.call_count, 1)
+
+    def test_in_progress_ticket_not_advanced(self):
+        # Sprint 7 (Codex P2) — every provider role can drive the direct
+        # IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL completion leg via the
+        # single-status endpoint. The bulk endpoint must NOT expose it:
+        # the source-status guard rejects an IN_PROGRESS ticket as
+        # `not_in_review`, leaving it untouched.
+        review = self._valid_ticket()
+        in_progress = _ticket(
+            company=self.s["company"],
+            building=self.s["b1"],
+            customer=self.s["customer"],
+            created_by=self.s["cust_user"],
+            status_value=TicketStatus.IN_PROGRESS,
+        )
+        sa = _mk("sa-inprog@example.com", UserRole.SUPER_ADMIN)
+        self.client.force_authenticate(user=sa)
+        with patch(EMAIL_PATH) as mocked_email:
+            response = self.client.post(
+                BULK_URL,
+                {
+                    "ticket_ids": [review.id, in_progress.id],
+                    "to_status": "WAITING_CUSTOMER_APPROVAL",
+                },
+                format="json",
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = response.json()
+        self.assertEqual(body["succeeded"], 1)
+        self.assertEqual(body["failed"], 1)
+        by_id = {r["id"]: r for r in body["results"]}
+        self.assertTrue(by_id[review.id]["ok"])
+        self.assertFalse(by_id[in_progress.id]["ok"])
+        self.assertEqual(by_id[in_progress.id]["error"], "not_in_review")
+
+        in_progress.refresh_from_db()
+        self.assertEqual(in_progress.status, TicketStatus.IN_PROGRESS)
         self.assertEqual(mocked_email.call_count, 1)
 
 

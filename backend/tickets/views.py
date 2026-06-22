@@ -422,6 +422,18 @@ class TicketViewSet(
                 failed += 1
                 continue
 
+            # Sprint 7 (Codex P2) — manager-confirm is ONLY the
+            # WAITING_MANAGER_REVIEW -> WAITING_CUSTOMER_APPROVAL leg.
+            # apply_transition alone is an insufficient guard: a SUPER_ADMIN can
+            # transition from ANY source status, and every provider role can drive
+            # IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL directly. An explicit
+            # source-status check keeps this endpoint to its single documented leg,
+            # returning a per-item failure for anything else.
+            if str(ticket.status) != str(TicketStatus.WAITING_MANAGER_REVIEW):
+                results.append({"id": ticket_id, "ok": False, "error": "not_in_review"})
+                failed += 1
+                continue
+
             old_status = ticket.status
             try:
                 with transaction.atomic():
