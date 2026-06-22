@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
-import { listExtraWork } from "../../../api/extraWork";
+import { listAllExtraWork } from "../../../api/extraWork";
 import type {
   CustomerAdmin,
   ExtraWorkCategory,
@@ -90,15 +90,15 @@ export function CustomerExtraWorkPage({
     // than a 403 — same defence-in-depth shape the ticket list uses.
     Promise.all([
       getCustomer(numericId),
-      listExtraWork({
+      listAllExtraWork({
         customer: numericId,
         ...(quoteOnly ? { request_intent: "REQUEST_QUOTE" } : {}),
       }),
     ])
-      .then(([customerData, listResponse]) => {
+      .then(([customerData, ewRows]) => {
         if (cancelled) return;
         setCustomer(customerData);
-        setRows(listResponse.results);
+        setRows(ewRows);
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));

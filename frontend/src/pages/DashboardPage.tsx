@@ -256,15 +256,27 @@ export function DashboardPage() {
     if (priorityFilter) params.priority = priorityFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
-    // M6.3 — "my work" deep-links. All additive: with none of these
-    // params present, `params` is unchanged so the fetch is identical.
-    if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
-    const typeParam = searchParams.get("type");
-    if (typeParam) params.type = typeParam;
-    const exclTypeParam = searchParams.get("exclude_type");
-    if (exclTypeParam) params.exclude_type = exclTypeParam;
+    // M6.3 — "my work" deep-links. Only applied in the tickets view
+    // (where the clear chip is shown), so the toggle preserving these
+    // URL params can't silently filter All work / other views.
+    if (workView === "tickets") {
+      if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
+      const typeParam = searchParams.get("type");
+      if (typeParam) params.type = typeParam;
+      const exclTypeParam = searchParams.get("exclude_type");
+      if (exclTypeParam) params.exclude_type = exclTypeParam;
+    }
     return params;
-  }, [page, statusFilter, priorityFilter, searchActive, slaFilter, searchParams, me]);
+  }, [
+    page,
+    statusFilter,
+    priorityFilter,
+    searchActive,
+    slaFilter,
+    searchParams,
+    me,
+    workView,
+  ]);
 
   const loadTickets = useCallback(async () => {
     if (!showTickets) return;

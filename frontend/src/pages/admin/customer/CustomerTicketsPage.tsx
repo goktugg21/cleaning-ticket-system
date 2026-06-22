@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
-import { listTickets } from "../../../api/tickets";
+import { listAllTickets } from "../../../api/tickets";
 import type { CustomerAdmin, TicketList } from "../../../api/types";
 import { ClickableRow } from "../../../components/ClickableRow";
 import { EmptyState } from "../../../components/EmptyState";
@@ -90,15 +90,15 @@ export function CustomerTicketsPage({
     // out-of-scope caller gets zero rows rather than a 403.
     Promise.all([
       getCustomer(numericId),
-      listTickets({
+      listAllTickets({
         customer: numericId,
         ...(meldingOnly ? { type: "REPORT" } : { exclude_type: "REPORT" }),
       }),
     ])
-      .then(([customerData, ticketResponse]) => {
+      .then(([customerData, ticketRows]) => {
         if (cancelled) return;
         setCustomer(customerData);
-        setRows(ticketResponse.results ?? []);
+        setRows(ticketRows ?? []);
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));

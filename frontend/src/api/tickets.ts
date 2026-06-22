@@ -23,13 +23,26 @@ export interface ListTicketsParams {
   exclude_type?: string;
 }
 
-export async function listTickets(
+// M6.1 + M6 review — provider customer-detail ticket lists. Drill-in
+// surface: gather EVERY matching row (following `next`) so the table and
+// its count never silently truncate at one page. Bounded to avoid an
+// unbounded loop on a malformed `next`.
+const MAX_PAGES = 100;
+
+export async function listAllTickets(
   params: ListTicketsParams = {},
-): Promise<PaginatedResponse<TicketList>> {
-  const response = await api.get<PaginatedResponse<TicketList>>("/tickets/", {
-    params: { page_size: 100, ...params },
-  });
-  return response.data;
+): Promise<TicketList[]> {
+  const all: TicketList[] = [];
+  let page = 1;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const response = await api.get<PaginatedResponse<TicketList>>("/tickets/", {
+      params: { page_size: 100, ...params, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 // Sprint 7B (frontend) — convert a normal ticket into a NEW Extra Work
