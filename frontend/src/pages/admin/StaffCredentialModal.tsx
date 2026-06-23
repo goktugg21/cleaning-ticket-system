@@ -555,7 +555,7 @@ export function StaffCredentialModal({
               <button
                 type="button"
                 className="btn btn-ghost"
-                style={{ marginRight: "auto", color: "var(--red, #b42318)" }}
+                style={{ marginRight: "auto", color: "var(--red)" }}
                 onClick={() => deleteRef.current?.open()}
                 disabled={saving || deleting}
                 data-testid="credential-delete-button"

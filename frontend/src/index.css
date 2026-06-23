@@ -131,6 +131,60 @@ p { line-height: 1.6; }
 .btn-lg { height: 42px; padding: 0 22px; font-size: 14px; }
 .btn:disabled { opacity: 0.5; pointer-events: none; }
 
+/* Sprint 9 — bulk-action bar (dashboard manager-review queue). Bold
+   brand-green fill so the selection mode clearly "pops" (replaces the
+   prior inline phantom `--green-1` + hardcoded hex/shadow). The green
+   fill IS the emphasis, so no left-accent. Button treatments are scoped
+   to the bar so they stay legible on green: the ghost "clear" is an
+   outlined-white secondary, the primary "confirm" is a dominant
+   white-on-green chip. */
+.bulk-action-bar {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  background: var(--green);
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+}
+.bulk-action-bar-count {
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+}
+.bulk-action-bar-actions { display: flex; gap: 8px; }
+
+/* On-green button contrast — scoped to the bar so other .btn-ghost /
+   .btn-primary instances are unaffected. */
+.bulk-action-bar .btn-ghost {
+  color: #fff;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.bulk-action-bar .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.bulk-action-bar .btn-primary {
+  background: #fff;
+  color: var(--green);
+  border-color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.bulk-action-bar .btn-primary:hover {
+  background: var(--green-faint);
+  color: var(--green);
+  border-color: var(--green-faint);
+}
+
 /* Sprint 2d — per-customer Settings page polish: grouped visibility
    toggles in one bordered list + a danger accent on the lifecycle
    (deactivate) zone. Cosmetic only; no behaviour/testid change. */
@@ -4427,21 +4481,32 @@ table.data-table {
 .notif-page-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 13px 16px;
+  padding: 14px 18px;
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--border);
+  /* Sprint 9 — softer inner divider, consistent with .data-table /
+     .section-head / .notification-row. */
+  border-bottom: 1px solid var(--border-soft);
   cursor: pointer;
   color: var(--text);
   transition: background 120ms ease;
 }
+/* Sprint 9 — drop the trailing divider above the pager. */
+.notif-page-row:last-child { border-bottom: none; }
 .notif-page-row:hover { background: var(--surface-2); }
-.notif-page-row-unread { background: color-mix(in srgb, var(--green) 7%, transparent); }
+.notif-page-row-unread {
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+  /* Sprint 9 — brand left-accent for the unread state, reusing the
+     .toast accent language. */
+  box-shadow: inset 3px 0 0 var(--green);
+}
 .notif-page-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .notif-page-row-summary { font-size: 14px; line-height: 1.4; }
+/* Sprint 9 — unread summaries read slightly heavier for scannability. */
+.notif-page-row-unread .notif-page-row-summary { font-weight: 600; }
 .notif-page-row-meta { font-size: 12px; color: var(--text-muted); }
 
 @media (max-width: 720px) {
