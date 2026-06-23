@@ -119,6 +119,18 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 8. **Customer surfaces — keep combined.** Separate pages for a customer's EW / quote-requests / tickets likely won't be liked; want one customer page with tabs/subsections. (Already built — M6 / PR #95 put these on the customer page as drill-in sub-tabs. Validate/refine vs Ramazan's preference, not rebuild.)
 9. **Baseline:** system is in good shape; editing customers/users + general flows are fine; no major issues right now.
 
+### Received feedback (logged as it arrives — reconcile into the Fixing & Auditing Sprint)
+
+**RF-1 — Notifications "messages" overview, WhatsApp-style (father, received 2026-06-23, voice memo).** He wants the main messages view to work like a WhatsApp chat list (WhatsApp used as the explicit analogy):
+- A conversation-list view where **each row is a ticket** (a ticket ≈ a WhatsApp chat).
+- Each row shows the **ticket name**, an **avatar** — the person who last acted on the ticket, or (preferably) the **customer company logo**; possibly both — and an **unread-count badge** (1, 2, … like WhatsApp).
+- At a glance an admin sees: **which tickets have messages**, **who wrote the latest message**, and **who hasn't read it** (per-recipient read state — who is the one that hasn't read, not just an unread flag).
+- **Searchable / filterable** (a ticket filter on this view).
+- Goal: *"see all the messages in one place"* — a chat-style aggregated inbox over tickets. Messages still live inside their tickets; this is a unified inbox **surface into** them, not a new home for messages.
+- Sharpens backlog **#4** (notifications history / read-state) + the **M1** notification center. Note: per-recipient read tracking ("who hasn't read") is a real capability distinct from a simple unread badge (roster-level read receipts).
+
+**RF-2 — Fold custom price lines into the regular "Add price" flow (Göktuğ, 2026-06-23).** On the customer pricing page, merge the separate "add custom price" surface into the regular **Add price line** flow: the service dropdown gains an **"Other" / "Custom"** option, and selecting it lets the user type a **free-text custom service name** and a **free-text custom unit name** — one unified add-price flow for both catalog services and ad-hoc custom lines. Ties into backlog **#1** (custom units on the "Other" unit type). Note: M5 (PR #94) shipped these today as a separate "Custom price lines" section (the `CustomerCustomPrice` model); this is a UX consolidation, not net-new pricing capability.
+
 ---
 
 ## Standing milestones
