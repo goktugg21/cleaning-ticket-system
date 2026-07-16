@@ -130,6 +130,21 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          {/* RF-3 (Ramazan 2026-06-23) — top-level Tickets LIST page.
+              Reuses the dashboard's tickets surface (filters / presets /
+              bulk-confirm / pagination) via the `variant` prop instead of a
+              duplicated second implementation; New Ticket is reached from
+              inside it. Same ProtectedRoute gate as the dashboard — scoping
+              stays backend-side. Defined ABOVE /tickets/new and /tickets/:id
+              (exact static path; RRv6 ranks it correctly regardless). */}
+          <Route
+            path="/tickets"
+            element={
+              <ProtectedRoute>
+                <DashboardPage variant="tickets-page" />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/tickets/new"
             element={
