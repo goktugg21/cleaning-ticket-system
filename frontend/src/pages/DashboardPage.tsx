@@ -147,8 +147,20 @@ function ExtraWorkOriginPill({
  *      varies by view (unified Recent ops table in `view=all`, the
  *      existing Sprint 12 surface in `view=tickets`, the existing EW
  *      surface in `view=extra-work`).
+ *
+ * RF-3 (Ramazan 2026-06-23) — the same component powers a focused
+ * top-level Tickets LIST page. `variant="tickets-page"` locks the view
+ * to `tickets` and hides the dashboard-level chrome (KPI hero, "my
+ * work", work-strip toggle), reusing the existing ticket surface
+ * (filters / presets / bulk-confirm / pagination) instead of a
+ * duplicated second implementation. Default `"dashboard"` is unchanged.
  */
-export function DashboardPage() {
+export function DashboardPage({
+  variant = "dashboard",
+}: {
+  variant?: "dashboard" | "tickets-page";
+} = {}) {
+  const isTicketsPage = variant === "tickets-page";
   const navigate = useNavigate();
   const { me } = useAuth();
   const { push } = useToast();
@@ -222,6 +234,10 @@ export function DashboardPage() {
   // the active value is "all" (cleaner deep links).
   type WorkView = "all" | "tickets" | "extra-work";
   const workView: WorkView = (() => {
+    // RF-3 — the dedicated Tickets page is always the tickets surface,
+    // regardless of any ?view= param, so the work-strip toggle (hidden
+    // here) can never switch it away.
+    if (isTicketsPage) return "tickets";
     const raw = searchParams.get("view") || "";
     if (raw === "tickets" || raw === "extra-work") return raw;
     return "all";
@@ -627,12 +643,18 @@ export function DashboardPage() {
             <span className="breadcrumb-sep">›</span>
             <span>{t("breadcrumb_operations")}</span>
             <span className="breadcrumb-sep">›</span>
-            <span className="breadcrumb-current">{t("breadcrumb_current")}</span>
+            <span className="breadcrumb-current">
+              {isTicketsPage
+                ? t("tickets_page.breadcrumb_current")
+                : t("breadcrumb_current")}
+            </span>
           </nav>
           <div className="eyebrow" style={{ marginBottom: 8 }}>
-            {t("eyebrow")}
+            {isTicketsPage ? t("tickets_page.eyebrow") : t("eyebrow")}
           </div>
-          <h2 className="page-title">{t("title")}</h2>
+          <h2 className="page-title">
+            {isTicketsPage ? t("tickets_page.title") : t("title")}
+          </h2>
           <p className="page-sub">
             {loading
               ? t("loading_data")
@@ -688,6 +710,11 @@ export function DashboardPage() {
       )}
 
       <div className="operations-dashboard">
+        {/* RF-3 — the Tickets page hides the dashboard-level chrome (KPI
+            hero, "my work", work-strip toggle) and leads straight with the
+            ticket surface below. The dashboard at "/" is unchanged. */}
+        {!isTicketsPage && (
+          <>
         {/* Top KPI strip — five cards, single visual block. Derived
             from existing stats endpoints; never aggregated from a
             single page of /tickets/ results. */}
@@ -830,6 +857,8 @@ export function DashboardPage() {
             </button>
           </div>
         </div>
+          </>
+        )}
 
         {/* Work area — three layouts depending on workView. */}
         {workView === "all" && showTickets && (

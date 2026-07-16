@@ -383,14 +383,30 @@ export function AppShell({ children }: AppShellProps) {
                 </span>
                 {t("nav.dashboard")}
               </NavLink>
-              <NavLink to="/tickets/new" className={navClass}>
-                <span className="nav-icon">
-                  <PlusCircle size={16} strokeWidth={2} />
-                </span>
-                {isCustomerUser(me?.role)
-                  ? t("nav.new_melding")
-                  : t("nav.new_ticket")}
-              </NavLink>
+              {/* RF-3 (Ramazan 2026-06-23) — providers/staff open a
+                  top-level Tickets LIST (New Ticket lives inside it),
+                  mirroring the Extra Work entry, instead of the old bare
+                  jump straight to the create form. Customers keep the
+                  fast melding-create entry (their list is My meldingen). */}
+              {isCustomerUser(me?.role) ? (
+                <NavLink to="/tickets/new" className={navClass}>
+                  <span className="nav-icon">
+                    <PlusCircle size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.new_melding")}
+                </NavLink>
+              ) : (
+                <NavLink
+                  to="/tickets"
+                  className={navClass}
+                  data-testid="sidebar-tickets"
+                >
+                  <span className="nav-icon">
+                    <Ticket size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.tickets")}
+                </NavLink>
+              )}
               {canAccessAgenda(me?.role) && (
                 <NavLink
                   to="/agenda"
