@@ -6,6 +6,10 @@
   "priority_long_urgent": "Kritieke prioriteit",
 
   "card_activity_title": "Activiteitstijdlijn",
+  "activity_show": "Tonen",
+  "activity_hide": "Verbergen",
+  "activity_show_system_events": "Toon {{count}} systeemgebeurtenissen",
+  "activity_hide_system_events": "Systeemgebeurtenissen verbergen",
   "timeline_created": "<b>{{name}}</b> heeft het ticket aangemaakt.",
   "timeline_status_changed_from_to": " heeft de status gewijzigd van ",
   "timeline_status_to": " naar ",

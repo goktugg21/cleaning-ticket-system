@@ -2126,6 +2126,28 @@ table.data-table {
   font-weight: 700;
   color: var(--green);
 }
+/* RF-4 — the Activity card header doubles as the collapse toggle. Reset the
+   button chrome but keep the card-head-icon separator + layout. */
+.card-head-toggle {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.card-head-toggle:hover .card-head-icon-title { color: var(--green); }
+.card-head-icon-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.activity-system-toggle {
+  padding: 12px 22px 16px;
+}
 
 /* Activity timeline */
 .timeline {

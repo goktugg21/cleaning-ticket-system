@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowRightLeft,
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   MapPin,
@@ -253,6 +255,22 @@ function getFileExtension(filename: string): string {
   return (parts.pop() || "FILE").slice(0, 4).toUpperCase();
 }
 
+// RF-4 (Ramazan 2026-06-23) — the unified audit timeline carries low-signal
+// system rows (e.g. "Created · Ticketmanagerassignment — No tracked field
+// changed"): an audit_log entry with no diffed fields and no reason. We hide
+// these by default and reveal them behind a "show system events" toggle, so
+// the (already collapsed) Activity drawer reads cleanly when opened. Nothing
+// is removed — the full set is one click away.
+function isLowSignalAuditRow(row: TicketTimelineRow): boolean {
+  if (row.source !== "audit_log") return false;
+  const hasChanges =
+    !!row.changes &&
+    typeof row.changes === "object" &&
+    Object.keys(row.changes).length > 0;
+  const hasReason = !!(row.reason && row.reason.trim());
+  return !hasChanges && !hasReason;
+}
+
 // Sprint 22 final polish: status-history notes set by the seed
 // (`seed_demo_data → IN_PROGRESS`) and any other transition note
 // that contains a raw enum value or an internal marker string are
@@ -329,6 +347,13 @@ export function TicketDetailPage() {
     ticketId: number;
     rows: TicketTimelineRow[];
   } | null>(null);
+  // RF-4 (Ramazan 2026-06-23) — the Activity timeline is a good, transparent
+  // feature but should not dominate the page at first glance. It now lives in
+  // a drawer collapsed by default ("at a glance minimal, depth behind a
+  // click"); `showSystemEvents` reveals the low-signal no-op audit rows that
+  // are otherwise condensed away while the drawer is open.
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [showSystemEvents, setShowSystemEvents] = useState(false);
   // Bumped on every ticket reload that follows an audited mutation (message,
   // attachment, assignment, status/override, completion). Drives a timeline
   // refetch so non-status audit rows appear without a full page reload, in
@@ -1591,14 +1616,39 @@ export function TicketDetailPage() {
           </div>
 
           <div className="card">
-            <div className="card-head-icon">
+            {/* RF-4 (Ramazan 2026-06-23) — the audit timeline is valuable but
+                should not dominate the page at first glance. It now lives in a
+                drawer collapsed by default: the header IS the toggle; the
+                timeline body is revealed on demand ("at a glance minimal,
+                depth behind a click"). */}
+            <button
+              type="button"
+              className="card-head-icon card-head-toggle"
+              aria-expanded={activityOpen}
+              aria-controls="ticket-activity-body"
+              onClick={() => setActivityOpen((open) => !open)}
+              data-testid="ticket-activity-toggle"
+            >
               <span className="card-head-icon-glyph">
                 <Clock size={14} strokeWidth={2.2} />
               </span>
               <span className="card-head-icon-title">
                 {t("card_activity_title")}
               </span>
-            </div>
+              <span className="card-head-icon-spacer" />
+              <span className="card-head-icon-link">
+                {activityOpen ? t("activity_hide") : t("activity_show")}
+              </span>
+              <span className="card-head-icon-chevron" aria-hidden="true">
+                {activityOpen ? (
+                  <ChevronDown size={16} strokeWidth={2.2} />
+                ) : (
+                  <ChevronRight size={16} strokeWidth={2.2} />
+                )}
+              </span>
+            </button>
+            {activityOpen && (
+              <div id="ticket-activity-body">
             <div className="timeline">
               {/* Sprint 32 — provider-audit roles see the UNIFIED timeline
                   (status history + audit_log + Extra Work + planned
@@ -1611,7 +1661,15 @@ export function TicketDetailPage() {
               auditTimeline !== null &&
               auditTimeline.ticketId === ticket.id &&
               auditTimeline.rows.length > 0 ? (
-                <UnifiedTimeline rows={auditTimeline.rows} />
+                <UnifiedTimeline
+                  rows={
+                    showSystemEvents
+                      ? auditTimeline.rows
+                      : auditTimeline.rows.filter(
+                          (row) => !isLowSignalAuditRow(row),
+                        )
+                  }
+                />
               ) : ticket.status_history.length === 0 ? (
                 <div className="timeline-row" data-color="green">
                   <div className="timeline-dot" />
@@ -1719,6 +1777,35 @@ export function TicketDetailPage() {
                 ))
               )}
             </div>
+            {/* RF-4 — reveal the condensed low-signal system rows on demand
+                (only meaningful on the provider-audit unified timeline; the
+                status-history fallback has no such rows). */}
+            {isProviderAudit &&
+              auditTimeline !== null &&
+              auditTimeline.ticketId === ticket.id &&
+              (() => {
+                const hiddenCount =
+                  auditTimeline.rows.filter(isLowSignalAuditRow).length;
+                if (hiddenCount === 0) return null;
+                return (
+                  <div className="activity-system-toggle">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setShowSystemEvents((shown) => !shown)}
+                      data-testid="ticket-activity-system-toggle"
+                    >
+                      {showSystemEvents
+                        ? t("activity_hide_system_events")
+                        : t("activity_show_system_events", {
+                            count: hiddenCount,
+                          })}
+                    </button>
+                  </div>
+                );
+              })()}
+              </div>
+            )}
           </div>
         </div>
 

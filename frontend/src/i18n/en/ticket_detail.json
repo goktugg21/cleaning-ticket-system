@@ -6,6 +6,10 @@
   "priority_long_urgent": "Critical Priority",
 
   "card_activity_title": "Activity Timeline",
+  "activity_show": "Show",
+  "activity_hide": "Hide",
+  "activity_show_system_events": "Show {{count}} system events",
+  "activity_hide_system_events": "Hide system events",
   "timeline_created": "<b>{{name}}</b> created the ticket.",
   "timeline_status_changed_from_to": " changed status from ",
   "timeline_status_to": " to ",
