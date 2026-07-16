@@ -97,12 +97,15 @@ The father's "select" button: confirm many completions at once.
 ### Sprint 9 — Premium UI/UX polish (light, no behavior change — runs now; PR #99)
 - [ ] A cohesive visual polish pass for a premium look (tokens, spacing, density, consistency), with extra attention to the recurring + sub-task + new profile/notification surfaces. **No behavior changes**; gates/e2e green; before/after screenshots. Feature-level layout asks (e.g. enlarging the right-side responsible-manager / assignment cards — see Backlog note #7) are DEFERRED to the Fixing & Auditing sprint, pending Ramazan + father feedback.
 
-## Roadmap — phase order (agreed 2026-06-23)
-1. **Sprint 9 — light UI/UX polish** (no behavior change) → **PR #99**, then deploy.
-2. **Feedback waiting phase** — Göktuğ collects Ramazan + father feedback (see Backlog Notes below).
-3. **Fixing & Auditing Sprint** — implement the feedback + codebase audit + reconcile this checklist + Department section.
-4. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
-5. **Production hardening** (TLS · real SMTP · non-root containers · `ALLOWED_HOSTS` healthcheck fix under `DEBUG=False` · Postgres backups) → **CD** → **Sentry DSNs**; plus the small `sub_tasks` CUSTOMER_USER redaction follow-up. → Production-ready, barring further feedback.
+## Roadmap — phase order (updated 2026-06-23 after the Ramazan mini-meeting)
+1. ✅ **Sprint 9 — light UI/UX polish** → PR #99, deployed.
+2. **Quick-wins sprint** (from received feedback that further feedback can't invalidate) → **PR #100**, then deploy: **RF-3** Tickets top-level page · **RF-4** tuck the ticket audit timeline away · **RF-5** attachment type + in-app preview (recon the backend serving path).
+3. **Proposal-preview sprint** → **PR #101**, then deploy: **RF-6** split-screen live proposal preview.
+4. *(Optional, if the full batch is slow to arrive)* **RF-2** — unified Add-price flow with an "Other/Custom" option (small, self-contained).
+5. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
+6. **Fixing & Auditing Sprint** — the full batch + **RF-1** WhatsApp-style message inbox (needs per-recipient read state — real backend work) + **RF-8** module/permission presentation + **RF-9**/backlog #7 density + Department + RF-7 + codebase audit + reconcile this checklist.
+7. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
+8. **Production hardening** (TLS · real SMTP · non-root containers · `ALLOWED_HOSTS` healthcheck fix under `DEBUG=False` · Postgres backups) → **CD** → **Sentry DSNs**; plus the small `sub_tasks` CUSTOMER_USER redaction follow-up. → Production-ready, barring further feedback.
 
 **Ordering decision (testing vs Fixing & Auditing):** testing runs AFTER Fixing & Auditing. The missing coverage is E2E + frontend (the UI layer); the backend already has a CI test suite protecting the audit's backend changes. The Fixing & Auditing sprint mostly reshapes the UI (new dropdowns, invoice page/PDF, attachment previews, layout/density), so E2E/frontend tests written first would be invalidated by those changes — tests deliver durable value when they lock in final behavior. *Caveat — decide at the fork:* if the feedback returns small/cosmetic, the UI is already near-final and testing-first becomes reasonable; revisit when feedback lands.
 
@@ -130,6 +133,22 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 - Sharpens backlog **#4** (notifications history / read-state) + the **M1** notification center. Note: per-recipient read tracking ("who hasn't read") is a real capability distinct from a simple unread badge (roster-level read receipts).
 
 **RF-2 — Fold custom price lines into the regular "Add price" flow (Göktuğ, 2026-06-23).** On the customer pricing page, merge the separate "add custom price" surface into the regular **Add price line** flow: the service dropdown gains an **"Other" / "Custom"** option, and selecting it lets the user type a **free-text custom service name** and a **free-text custom unit name** — one unified add-price flow for both catalog services and ad-hoc custom lines. Ties into backlog **#1** (custom units on the "Other" unit type). Note: M5 (PR #94) shipped these today as a separate "Custom price lines" section (the `CustomerCustomPrice` model); this is a UX consolidation, not net-new pricing capability.
+
+**RF-3 — Tickets as a top-level page (Ramazan, 2026-06-23, in-person).** The sidebar jumps straight to "New Ticket"; there is no Tickets page (the list lives on the dashboard). Mirror Extra Work: a top-level **Tickets** page (list) with **New Ticket** reached from inside it.
+
+**RF-4 — Ticket detail: the audit timeline dominates the page (Ramazan, 2026-06-23; raised twice).** The "who did what / changed what" timeline is a good, transparent feature but currently occupies the **entire main column** of the ticket detail (the actual ticket details sit in the right sidebar), which overwhelms at first glance. Move it to a discreet spot — a right-corner control, a tab, or a collapsed drawer — visible on demand ("ileride lazım oluyor ama ilk bakışta lazım değil"). His stated general principle: **at a glance, minimal; depth behind a click** — apply it to dense surfaces. Build-time note: the timeline also carries low-signal rows (e.g. "Created · Ticketmanagerassignment — No tracked field changed") worth condensing/pruning while relocating.
+
+**RF-5 — Attachment preview (Ramazan, 2026-06-23; CONFIRMS backlog #5).** He hit it live: attaching a file was non-obvious at first, and clicking an attachment downloads it. Promised in-meeting: show the **file type without clicking**, and clicking opens an **in-app view** (PDF inline) instead of downloading. May need a small backend tweak (inline Content-Disposition / preview endpoint) — recon at build time.
+
+**RF-6 — Live proposal-PDF preview, split screen (Ramazan, 2026-06-23).** While building a price proposal, the right half of the screen shows the proposal **rendered as it will look** (a visual preview, not an opened PDF file), updating as lines are entered. He was very enthusiastic; agreed in-meeting. The proposal-PDF endpoint already exists — this is a preview pane over it (v1 may refresh on save rather than per keystroke).
+
+**RF-7 — Extra Work detail: pricing section "big tabs" (Ramazan, 2026-06-23; location confirmed, element TBC).** In the **Extra Work detail page's pricing area**, big tab/block elements appeared where he prefers click-in navigation ("üstüne basıp gir; burayı çıkartalım"). Göktuğ confirms it's the EW pricing section; the **exact element is still to be pinpointed** (likely the pricing/proposal blocks) — clarify with Ramazan's full review before acting.
+
+**RF-8 — Simplified module/permission surface + future modules (Ramazan, 2026-06-23).** Think of melding / extra work as **modules** (not every customer gets extra work); future third modules possible (e.g. **DKS** — assumed: their daily quality-control system, Dagelijks Controle Systeem). One user-management surface grants module access — no access ⇒ the module disappears entirely for that user. Keep the visible permission UI to **3-4 coarse toggles per module** (e.g. can open EW / can close / can act / can respond), bundling the fine-grained permissions behind them: "simple at a glance; the depth exists but the user never needs to see it" — incl. hiding the delegated who-can-grant-what depth. Osius already enforces fine-grained permissions and hides inaccessible surfaces — the ask is a simpler **presentation layer** (presets/bundles). Design with Ramazan in the Fixing & Auditing sprint (ties into Department / backlog #6).
+
+**RF-9 — Assignment/slot page density (Ramazan, 2026-06-23; CONFIRMS backlog #7).** Too much info at once on the assignment surface; hard to parse what's what. Ideas: enlarge/clarify the sub-task/detail areas (Göktuğ) or a simple "assign to someone" button flow (Ramazan). Stays deferred to Fixing & Auditing per backlog #7 — now with his confirmation.
+
+**Meeting notes (2026-06-23, for the audit sprint):** Department/event are **category-like** fields; names must stay editable/customer-flexible ("herkese uymuyor") — refines backlog #6. Ramazan will do a **full side-by-side review** vs their current system and deliver the complete gap list at once (the agreed batch — Göktuğ implements it in one pass). He validated the pricing work (bulk raise, customer-specific prices, **price history preserved — old EWs keep their old prices**). The credentials/permissions area of their *current* tool is their worst pain point; he'll study ours as the reference.
 
 ---
 
