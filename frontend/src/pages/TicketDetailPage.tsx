@@ -271,6 +271,23 @@ function isLowSignalAuditRow(row: TicketTimelineRow): boolean {
   return !hasChanges && !hasReason;
 }
 
+// RF-5 — how an attachment can be previewed in-app, derived from its stored
+// MIME type. PDFs render in an <iframe>; browser-native raster images render
+// in an <img>. HEIC/HEIF (allowed on upload but not decodable by most
+// browsers) and anything else fall back to a download-only notice.
+type AttachmentPreviewKind = "pdf" | "image" | "unsupported";
+function attachmentPreviewKind(mimeType: string): AttachmentPreviewKind {
+  if (mimeType === "application/pdf") return "pdf";
+  if (
+    mimeType === "image/jpeg" ||
+    mimeType === "image/png" ||
+    mimeType === "image/webp"
+  ) {
+    return "image";
+  }
+  return "unsupported";
+}
+
 // Sprint 22 final polish: status-history notes set by the seed
 // (`seed_demo_data → IN_PROGRESS`) and any other transition note
 // that contains a raw enum value or an internal marker string are
@@ -534,6 +551,19 @@ export function TicketDetailPage() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [downloadingAttachmentId, setDownloadingAttachmentId] =
     useState<number | null>(null);
+  // RF-5 (Ramazan 2026-06-23) — in-app attachment preview. Clicking a tile
+  // opens a modal that renders the file IN the app (PDF inline / image
+  // inline) over an authenticated blob object URL, instead of triggering a
+  // download. The bytes are fetched the same way the download path already
+  // does (authenticated axios blob), so no backend change is needed. The
+  // object URL is tracked in a ref so it can be revoked on close AND on
+  // unmount without a setState-in-effect.
+  const [previewItem, setPreviewItem] = useState<TicketAttachment | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const previewUrlRef = useRef<string | null>(null);
+  const previewDialogRef = useRef<HTMLDialogElement>(null);
   // M2 P5 — busy marker for a staff credential/property document
   // download (keyed by document_url; one in flight at a time).
   const [downloadingStaffDocUrl, setDownloadingStaffDocUrl] = useState<
@@ -1181,6 +1211,67 @@ export function TicketDetailPage() {
     }
   }
 
+  // RF-5 — revoke the current preview object URL and drop the ref. Called on
+  // close and (via the unmount effect) when the page goes away.
+  function revokePreviewUrl() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+  }
+
+  // RF-5 — open the in-app preview modal for an attachment. The fetch is
+  // driven by this click handler (never an effect), so there is no
+  // setState-in-effect; the modal opens immediately in a loading state and
+  // fills in once the authenticated blob resolves.
+  async function openAttachmentPreview(item: TicketAttachment) {
+    if (!id) return;
+    revokePreviewUrl();
+    setPreviewItem(item);
+    setPreviewUrl(null);
+    setPreviewError("");
+    setPreviewLoading(true);
+    previewDialogRef.current?.showModal();
+    try {
+      const response = await api.get(
+        `/tickets/${id}/attachments/${item.id}/download/`,
+        { responseType: "blob" },
+      );
+      const blobUrl = URL.createObjectURL(response.data);
+      previewUrlRef.current = blobUrl;
+      setPreviewUrl(blobUrl);
+    } catch (err) {
+      setPreviewError(getApiError(err));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  // Buttons / backdrop request a close; the real cleanup runs in the
+  // dialog's onClose handler so Esc-to-close is handled the same way.
+  function requestPreviewClose() {
+    previewDialogRef.current?.close();
+  }
+
+  function handlePreviewClosed() {
+    revokePreviewUrl();
+    setPreviewUrl(null);
+    setPreviewItem(null);
+    setPreviewError("");
+    setPreviewLoading(false);
+  }
+
+  // RF-5 — revoke a still-open preview URL if the page unmounts mid-preview.
+  // Empty deps + cleanup-only body ⇒ no setState in an effect.
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, []);
+
   // M2 P5 — download a staff credential / property document from the
   // `document_url` the customer-facing assigned-staff payload carries.
   // Failures surface as a toast (the section is small; an inline page
@@ -1531,12 +1622,18 @@ export function TicketDetailPage() {
             <div className="att-thumb-grid">
               {attachments.map((item) => (
                 <div className="att-thumb" key={item.id}>
+                  {/* RF-5 — the tile opens the in-app preview; the file type
+                      is shown up-front via the extension badge (no click
+                      needed). A separate Download action stays available on
+                      every tile. */}
                   <button
                     type="button"
                     className={`att-thumb-tile ${item.is_hidden ? "internal" : ""}`}
-                    onClick={() => downloadAttachment(item)}
-                    disabled={downloadingAttachmentId === item.id}
-                    aria-label={`Download ${item.original_filename}`}
+                    onClick={() => openAttachmentPreview(item)}
+                    aria-label={t("preview_file_aria", {
+                      name: item.original_filename,
+                    })}
+                    data-testid="attachment-preview-open"
                   >
                     <span className="att-thumb-ext">
                       {getFileExtension(item.original_filename)}
@@ -1547,14 +1644,30 @@ export function TicketDetailPage() {
                       </span>
                     )}
                   </button>
-                  <div className="att-thumb-name">
-                    {downloadingAttachmentId === item.id
-                      ? t("downloading")
-                      : item.original_filename}
-                  </div>
-                  <div className="att-thumb-size">
-                    {formatBytes(item.file_size)} ·{" "}
-                    {formatDate(item.created_at)}
+                  <div className="att-thumb-name">{item.original_filename}</div>
+                  <div className="att-thumb-meta-row">
+                    <span className="att-thumb-size">
+                      {formatBytes(item.file_size)} ·{" "}
+                      {formatDate(item.created_at)}
+                    </span>
+                    <button
+                      type="button"
+                      className="att-thumb-download"
+                      onClick={() => downloadAttachment(item)}
+                      disabled={downloadingAttachmentId === item.id}
+                      aria-label={t("download_file_aria", {
+                        name: item.original_filename,
+                      })}
+                      title={t("download")}
+                    >
+                      {downloadingAttachmentId === item.id ? (
+                        <span className="att-thumb-download-busy">
+                          {t("downloading")}
+                        </span>
+                      ) : (
+                        <Download size={13} strokeWidth={2.2} />
+                      )}
+                    </button>
                   </div>
                 </div>
               ))}
@@ -3320,6 +3433,85 @@ export function TicketDetailPage() {
         }
         destructive
       />
+
+      {/* RF-5 — in-app attachment preview. Renders the file inline (PDF in an
+          iframe, images in an img) over the authenticated blob object URL;
+          unsupported types (e.g. HEIC/HEIF) fall back to a download notice.
+          An explicit Download stays available for everything. */}
+      <dialog
+        ref={previewDialogRef}
+        className="att-preview-dialog"
+        onClose={handlePreviewClosed}
+        aria-label={
+          previewItem ? previewItem.original_filename : t("preview_title")
+        }
+      >
+        <div className="att-preview-head">
+          <div className="att-preview-head-info">
+            <span className="att-thumb-ext">
+              {previewItem
+                ? getFileExtension(previewItem.original_filename)
+                : "FILE"}
+            </span>
+            <span className="att-preview-name">
+              {previewItem?.original_filename ?? t("preview_title")}
+            </span>
+          </div>
+          <div className="att-preview-head-actions">
+            {previewItem && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => downloadAttachment(previewItem)}
+                disabled={downloadingAttachmentId === previewItem.id}
+              >
+                <Download size={14} strokeWidth={2.2} />
+                <span style={{ marginLeft: 6 }}>
+                  {downloadingAttachmentId === previewItem.id
+                    ? t("downloading")
+                    : t("download")}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={requestPreviewClose}
+            >
+              {t("preview_close")}
+            </button>
+          </div>
+        </div>
+        <div className="att-preview-body">
+          {previewLoading ? (
+            <div className="att-preview-status">{t("preview_loading")}</div>
+          ) : previewError ? (
+            <div className="att-preview-status att-preview-status-error">
+              {previewError}
+            </div>
+          ) : previewUrl && previewItem ? (
+            attachmentPreviewKind(previewItem.mime_type) === "pdf" ? (
+              <iframe
+                className="att-preview-frame"
+                src={previewUrl}
+                title={previewItem.original_filename}
+                data-testid="attachment-preview-pdf"
+              />
+            ) : attachmentPreviewKind(previewItem.mime_type) === "image" ? (
+              <img
+                className="att-preview-image"
+                src={previewUrl}
+                alt={previewItem.original_filename}
+                data-testid="attachment-preview-image"
+              />
+            ) : (
+              <div className="att-preview-status">
+                {t("preview_unsupported")}
+              </div>
+            )
+          ) : null}
+        </div>
+      </dialog>
     </div>
   );
 }
