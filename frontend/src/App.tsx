@@ -25,6 +25,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MyEmployeesPage } from "./pages/MyEmployeesPage";
 import { MyMeldingenPage } from "./pages/MyMeldingenPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
+import { InboxPage } from "./pages/InboxPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TicketDetailPage } from "./pages/TicketDetailPage";
@@ -177,6 +178,18 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <NotificationsPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* RF-1 — WhatsApp-style aggregated message inbox. Caller-scoped
+              (the backend scopes threads to the viewer), so a plain
+              ProtectedRoute is sufficient. Visible to provider + customer
+              roles via the sidebar Berichten entry. */}
+          <Route
+            path="/inbox"
+            element={
+              <ProtectedRoute>
+                <InboxPage />
               </ProtectedRoute>
             }
           />

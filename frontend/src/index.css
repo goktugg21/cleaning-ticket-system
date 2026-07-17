@@ -6943,3 +6943,206 @@ table.data-table {
    admin table) so this scroll surface is consistent. */
 
 /* --- End invoice-row foundation -------------------------------- */
+
+/* ===================================================================
+   RF-1 — message inbox, avatars, nav badge
+   =================================================================== */
+
+/* Sidebar unread badge (mirrors .notif-badge, inline in the nav row). */
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--red);
+  color: #fff;
+  font-family: var(--f-head);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* Shared avatar primitive. */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  object-fit: cover;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--surface-3);
+}
+.avatar-fallback {
+  color: #fff;
+  font-family: var(--f-head);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* Inbox thread avatar: customer logo + last-author overlay. */
+.inbox-thread-avatar {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.inbox-thread-avatar-overlay {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--surface);
+  background: var(--surface);
+  line-height: 0;
+}
+
+/* Filters */
+.inbox-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.inbox-kind-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.inbox-kind-btn {
+  padding: 7px 14px;
+  font-family: var(--f-head);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: none;
+  cursor: pointer;
+  border-left: 1px solid var(--border);
+}
+.inbox-kind-btn:first-child { border-left: none; }
+.inbox-kind-btn.active { background: var(--green); color: #fff; }
+.inbox-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+}
+.inbox-search svg { position: absolute; left: 10px; color: var(--text-faint); }
+.inbox-search .field-input { padding-left: 30px; width: 100%; }
+.inbox-date {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.inbox-unread-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+/* List + rows */
+.inbox-list { list-style: none; margin: 0; padding: 0; }
+.inbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  margin-bottom: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.14s, border-color 0.14s;
+}
+.inbox-row:hover { box-shadow: var(--shadow-sm); border-color: var(--border); }
+.inbox-row.unread { background: var(--green-faint); border-color: var(--green-soft); }
+.inbox-row-main { flex: 1 1 auto; min-width: 0; }
+.inbox-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.inbox-row-title {
+  font-family: var(--f-head);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-row.unread .inbox-row-title { color: var(--green); }
+.inbox-row-time { font-size: 11.5px; color: var(--text-faint); flex-shrink: 0; }
+.inbox-row-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+.inbox-kind-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+.inbox-kind-tag-ticket { background: var(--teal-soft); color: var(--teal); }
+.inbox-kind-tag-extra_work { background: var(--amber-soft); color: var(--amber); }
+.inbox-row-customer { font-size: 11.5px; color: var(--text-muted); }
+.inbox-row-snippet {
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox-row-author { font-weight: 600; color: var(--text); }
+.inbox-row-receipts {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--amber);
+  font-weight: 600;
+}
+.inbox-row-badge {
+  align-self: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--green);
+  color: #fff;
+  font-family: var(--f-head);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 56px 24px;
+  text-align: center;
+  color: var(--text-faint);
+}
+.inbox-empty h3 { margin: 6px 0 0; color: var(--text-2); }

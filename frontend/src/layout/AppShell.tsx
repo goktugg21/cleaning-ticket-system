@@ -19,6 +19,7 @@ import {
   MailPlus,
   MapPin,
   Megaphone,
+  MessagesSquare,
   Menu,
   Package,
   PlusCircle,
@@ -49,6 +50,7 @@ import {
 import { useLanguageSync } from "../i18n/useLanguageSync";
 import { UserMenu } from "../components/UserMenu";
 import { NotificationBell } from "../components/NotificationBell";
+import { InboxNavBadge } from "../components/InboxNavBadge";
 import { getCompany, getCustomer } from "../api/admin";
 import { getInitials } from "../lib/initials";
 
@@ -424,6 +426,15 @@ export function AppShell({ children }: AppShellProps) {
                   <Bell size={16} strokeWidth={2} />
                 </span>
                 {t("nav.notifications")}
+              </NavLink>
+              {/* RF-1 — aggregated message inbox. Visible to all roles;
+                  the badge polls the unread-count endpoint. */}
+              <NavLink to="/inbox" className={navClass} data-testid="sidebar-inbox">
+                <span className="nav-icon">
+                  <MessagesSquare size={16} strokeWidth={2} />
+                </span>
+                {t("nav.inbox")}
+                <InboxNavBadge />
               </NavLink>
               {/* M3 (SoT Addendum A.5) — "Extra Work" is a nav GROUP
                   with three indented children. Routes are unchanged;

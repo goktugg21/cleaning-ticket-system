@@ -41,6 +41,7 @@ import axios from "axios";
 
 import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
+import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
   createEwMessage,
   createProposal,
@@ -742,6 +743,15 @@ export function ExtraWorkDetailPage() {
     return () => {
       cancelled = true;
     };
+  }, [ewId]);
+
+  // RF-1 — opening the thread marks it read for this user (advance the
+  // inbox cursor) and refreshes the sidebar badge. No setState here.
+  useEffect(() => {
+    if (ewId === null) return;
+    void markThreadRead("extra_work", ewId)
+      .then(() => notifyInboxUnreadChanged())
+      .catch(() => {});
   }, [ewId]);
 
   // Refetch the directed-recipients picker whenever the effective tier

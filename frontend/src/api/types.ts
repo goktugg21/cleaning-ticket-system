@@ -83,6 +83,8 @@ export interface Me {
   company_ids: number[];
   building_ids: number[];
   customer_ids: number[];
+  // RF-1 — authed avatar URL (null when unset).
+  profile_photo_url: string | null;
   date_joined: string;
   last_login: string | null;
 }
@@ -137,6 +139,8 @@ export interface Customer {
   phone: string;
   language: string;
   is_active: boolean;
+  // RF-1 — customer company logo URL (null when unset).
+  logo_url?: string | null;
   // Per-current-user, per-customer capability block. Optional so
   // older /me / non-customer-scoped responses don't break typing.
   actions?: CustomerActions;
@@ -641,6 +645,8 @@ export interface CompanyAdmin {
   provider_admin_may_manage_catalog: boolean;
   provider_admin_may_manage_customer_prices: boolean;
   provider_admin_may_quote_override_start: boolean;
+  // RF-1 — provider company logo URL (null when unset).
+  logo_url?: string | null;
 }
 
 // The four SUPER_ADMIN-only provider-policy flags, in display order. The
@@ -684,6 +690,8 @@ export interface CustomerAdmin {
   show_assigned_staff_name: boolean;
   show_assigned_staff_email: boolean;
   show_assigned_staff_phone: boolean;
+  // RF-1 — customer company logo URL (null when unset).
+  logo_url?: string | null;
   created_at: string;
   updated_at: string;
   // Per-current-user, per-customer capability block from the
@@ -1930,3 +1938,56 @@ export interface CustomerPriceCopyFromDefaultResult {
 }
 
 
+
+// ---- RF-1 — message inbox ------------------------------------------------
+export type InboxThreadKind = "ticket" | "extra_work";
+
+export interface InboxAuthor {
+  name: string | null;
+  photo_url: string | null;
+}
+
+export interface InboxLastMessage {
+  id: number;
+  author: InboxAuthor;
+  snippet: string;
+  message_type: string;
+  created_at: string;
+}
+
+export interface InboxRosterUser {
+  id: number;
+  name: string;
+  photo_url: string | null;
+}
+
+export interface InboxRow {
+  kind: InboxThreadKind;
+  id: number;
+  title: string;
+  customer: { id: number; name: string; logo_url: string | null } | null;
+  building: { id: number; name: string } | null;
+  last_message: InboxLastMessage | null;
+  unread_count: number;
+  // Present ONLY for provider-management viewers (SA / CA / BM). A
+  // customer viewer never receives this key — they see only their own
+  // unread_count.
+  unread_by?: InboxRosterUser[];
+}
+
+export interface InboxResponse {
+  count: number;
+  offset: number;
+  page_size: number;
+  results: InboxRow[];
+}
+
+export interface InboxFilters {
+  kind?: InboxThreadKind;
+  date_from?: string;
+  date_to?: string;
+  q?: string;
+  unread_only?: boolean;
+  offset?: number;
+  page_size?: number;
+}
