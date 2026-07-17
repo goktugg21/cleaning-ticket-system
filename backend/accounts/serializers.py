@@ -80,16 +80,34 @@ class ScopedTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    # RF-1 — avatar URL (null when the user has no photo). Absolute so the
+    # frontend can fetch the authed blob directly.
+    profile_photo_url = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "role", "language", "is_active"]
+        fields = [
+            "id",
+            "email",
+            "full_name",
+            "role",
+            "language",
+            "is_active",
+            "profile_photo_url",
+        ]
         read_only_fields = fields
+
+    def get_profile_photo_url(self, obj):
+        from .media_urls import profile_photo_url
+
+        return profile_photo_url(obj, self.context.get("request"))
 
 
 class MeSerializer(serializers.ModelSerializer):
     company_ids = serializers.SerializerMethodField()
     building_ids = serializers.SerializerMethodField()
     customer_ids = serializers.SerializerMethodField()
+    profile_photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -103,10 +121,16 @@ class MeSerializer(serializers.ModelSerializer):
             "company_ids",
             "building_ids",
             "customer_ids",
+            "profile_photo_url",
             "date_joined",
             "last_login",
         ]
         read_only_fields = fields
+
+    def get_profile_photo_url(self, obj):
+        from .media_urls import profile_photo_url
+
+        return profile_photo_url(obj, self.context.get("request"))
 
     # Routed through scope_*_for so /api/auth/me/ returns the same id sets the
     # matching list endpoints expose. After CHANGE-6, those scope helpers

@@ -58,6 +58,12 @@ class UserManager(BaseUserManager):
         return self._create_user(email, password, **extra_fields)
 
 
+def profile_photo_upload_path(instance, filename):
+    # RF-1 — per-user avatar. uuid filename (never trust the client name).
+    ext = FilePath(filename).suffix.lower()
+    return f"profile_photos/{instance.pk}/{uuid4().hex}{ext}"
+
+
 class User(AbstractUser):
     username = models.CharField(max_length=150, blank=True)
     email = models.EmailField(unique=True)
@@ -81,6 +87,15 @@ class User(AbstractUser):
         null=True,
         blank=True,
         related_name="deleted_users",
+    )
+
+    # RF-1 — optional avatar. Any role may carry one; set only through the
+    # authed photo-upload endpoint (magic-byte-validated, 2 MB cap). The
+    # column is additive/nullable — existing users keep no photo.
+    profile_photo = models.ImageField(
+        upload_to=profile_photo_upload_path,
+        null=True,
+        blank=True,
     )
 
     USERNAME_FIELD = "email"

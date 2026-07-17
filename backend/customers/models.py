@@ -1,6 +1,15 @@
+from pathlib import Path as FilePath
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+
+
+def customer_logo_upload_path(instance, filename):
+    # RF-1 — per-customer logo. uuid filename (never trust the client name).
+    ext = FilePath(filename).suffix.lower()
+    return f"customer_logos/{instance.pk}/{uuid4().hex}{ext}"
 
 
 class Customer(models.Model):
@@ -50,6 +59,16 @@ class Customer(models.Model):
     contact_email = models.EmailField(blank=True)
     phone = models.CharField(max_length=64, blank=True)
     language = models.CharField(max_length=8, default="nl")
+
+    # RF-1 — customer company logo, shown as the inbox avatar for this
+    # customer's threads. Additive/nullable; set only via the authed
+    # logo-upload endpoint (that customer's CUSTOMER_COMPANY_ADMIN or
+    # SUPER_ADMIN).
+    logo = models.ImageField(
+        upload_to=customer_logo_upload_path,
+        null=True,
+        blank=True,
+    )
 
     is_active = models.BooleanField(default=True)
 

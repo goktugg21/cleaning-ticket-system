@@ -28,6 +28,9 @@ class CompanySerializer(serializers.ModelSerializer):
     """
 
     slug = serializers.SlugField(required=False, allow_blank=False, max_length=255)
+    # RF-1 — provider company logo URL (null when unset). Absolute so the
+    # frontend fetches the authed blob directly.
+    logo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Company
@@ -37,6 +40,7 @@ class CompanySerializer(serializers.ModelSerializer):
             "slug",
             "default_language",
             "is_active",
+            "logo_url",
             "provider_admin_may_manage_customer_company_admins",
             "provider_admin_may_manage_catalog",
             "provider_admin_may_manage_customer_prices",
@@ -44,7 +48,18 @@ class CompanySerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "is_active", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "is_active",
+            "logo_url",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_logo_url(self, obj):
+        from .media_urls import company_logo_url
+
+        return company_logo_url(obj, self.context.get("request"))
 
     def _require_super_admin(self, field_label: str):
         """Sprint 3B — shared SA-only policy guard. Mirrors the B5

@@ -11,6 +11,7 @@ from extra_work.views_pricing import (
 )
 
 from .views import CustomerViewSet
+from .views_media import CustomerLogoView
 from .views_contacts import (
     CustomerContactDetailView,
     CustomerContactListCreateView,
@@ -42,6 +43,12 @@ urlpatterns = [
         "<int:customer_id>/employees/",
         CustomerEmployeesView.as_view(),
         name="customer-employees",
+    ),
+    # RF-1 — customer logo (GET serve / POST upload / DELETE remove).
+    path(
+        "<int:customer_id>/logo/",
+        CustomerLogoView.as_view(),
+        name="customer-logo",
     ),
     path(
         "<int:customer_id>/users/",

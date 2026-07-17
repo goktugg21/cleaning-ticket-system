@@ -22,6 +22,7 @@ from accounts.views_credentials import (
     UserPropertyGrantListCreateView,
     UserPropertyListCreateView,
 )
+from accounts.views_media import UserPhotoView
 from accounts.views_permission_matrix import PermissionMatrixView
 from accounts.views_users import UserViewSet
 from config.health import liveness, readiness
@@ -125,6 +126,12 @@ urlpatterns = [
         "api/users/<int:user_id>/properties/<int:pk>/download/",
         UserPropertyDownloadView.as_view(),
         name="user-property-download",
+    ),
+    # RF-1 — profile photo (GET serve / POST upload / DELETE remove).
+    path(
+        "api/users/<int:user_id>/photo/",
+        UserPhotoView.as_view(),
+        name="user-photo",
     ),
     path(
         "api/users/<int:user_id>/properties/<int:pk>/grants/",
