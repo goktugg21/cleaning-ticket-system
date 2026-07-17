@@ -456,11 +456,19 @@ def _render_line(pdf: FPDF, line: ProposalLine) -> None:
 
     explanation = (line.customer_explanation or "").strip()
     if explanation:
-        # Indented secondary row for the customer-visible explanation.
-        # The internal_note field is never referenced.
+        # Indented, full-width secondary row for the customer-visible
+        # explanation. `new_x="LMARGIN"` resets x to the page left margin
+        # afterwards so the NEXT line's row starts flush — otherwise the
+        # residual x offset from the multi_cell shifted every following row
+        # rightwards (and clipped it off the page). The internal_note field
+        # is never referenced.
         pdf.set_font("Helvetica", "I", 8)
-        # Leave a small left indent so the explanation visually attaches
-        # to its parent row.
-        pdf.cell(5, 5, "")
-        pdf.multi_cell(0, 5, _safe_pdf_text(explanation))
+        pdf.set_x(pdf.l_margin + 2)
+        pdf.multi_cell(
+            0,
+            5,
+            _safe_pdf_text(explanation),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
         pdf.set_font("Helvetica", "", 9)
