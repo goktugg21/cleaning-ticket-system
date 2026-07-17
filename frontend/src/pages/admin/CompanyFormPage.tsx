@@ -24,6 +24,8 @@ import {
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { ImageUploadField } from "../../components/ImageUploadField";
+import { deleteCompanyLogo, uploadCompanyLogo } from "../../api/media";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
@@ -114,6 +116,16 @@ export function CompanyFormPage() {
   });
   const company = form.entity;
   const numericId = form.numericId;
+
+  // RF-1 — company logo (same override pattern as the customer form).
+  const [logoOverride, setLogoOverride] = useState<string | null | undefined>(
+    undefined,
+  );
+  const logoUrl =
+    logoOverride !== undefined ? logoOverride : (company?.logo_url ?? null);
+  // Show to SUPER_ADMIN or a COMPANY_ADMIN (backend checks membership).
+  const canManageLogo =
+    me?.role === "SUPER_ADMIN" || me?.role === "COMPANY_ADMIN";
 
   // Membership section state. Independent of the main form.
   const [members, setMembers] = useState<CompanyAdminMembership[]>([]);
@@ -273,6 +285,28 @@ export function CompanyFormPage() {
         </div>
       ) : (
         <form className="card" onSubmit={form.handleSubmit}>
+          {/* RF-1 — company logo (edit mode only; needs an existing id). */}
+          {!isCreate && company && canManageLogo && (
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("company_form.logo_title")}
+              </div>
+              <ImageUploadField
+                imageUrl={logoUrl}
+                name={company.name}
+                rounded={false}
+                testId="company-logo-upload"
+                onUpload={async (file) => {
+                  const url = await uploadCompanyLogo(company.id, file);
+                  setLogoOverride(url);
+                }}
+                onRemove={async () => {
+                  await deleteCompanyLogo(company.id);
+                  setLogoOverride(null);
+                }}
+              />
+            </div>
+          )}
           <div className="form-section">
             <div className="form-section-title">{t("company_form.card_label_title")}</div>
             <div className="form-section-helper">{t("company_form.card_label_desc")}</div>

@@ -45,6 +45,8 @@ import type {
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { ImageUploadField } from "../../components/ImageUploadField";
+import { deleteCustomerLogo, uploadCustomerLogo } from "../../api/media";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
@@ -139,6 +141,21 @@ export function CustomerFormPage() {
   });
   const customer = form.entity;
   const numericId = form.numericId;
+
+  // RF-1 — customer logo. `undefined` override means "use the loaded
+  // customer's value"; upload/remove set an explicit override so the
+  // Avatar refetches without an effect-sync.
+  const [logoOverride, setLogoOverride] = useState<string | null | undefined>(
+    undefined,
+  );
+  const logoUrl =
+    logoOverride !== undefined ? logoOverride : (customer?.logo_url ?? null);
+  // Show the logo control to SUPER_ADMIN, or to a customer-side company
+  // admin of this customer. The backend enforces the rule regardless.
+  const canManageLogo =
+    me?.role === "SUPER_ADMIN" ||
+    (me?.role === "CUSTOMER_USER" &&
+      !!customer?.actions?.can_manage_customer_company_admins);
 
   const deactivateDialogRef = useRef<ConfirmDialogHandle>(null);
   const reactivateDialogRef = useRef<ConfirmDialogHandle>(null);
@@ -670,6 +687,28 @@ export function CustomerFormPage() {
         </div>
       ) : (
         <form className="card" onSubmit={form.handleSubmit}>
+          {/* RF-1 — customer logo (edit mode only; needs an existing id). */}
+          {!isCreate && customer && canManageLogo && (
+            <div className="form-section">
+              <div className="form-section-title">
+                {t("customer_form.logo_title")}
+              </div>
+              <ImageUploadField
+                imageUrl={logoUrl}
+                name={customer.name}
+                rounded={false}
+                testId="customer-logo-upload"
+                onUpload={async (file) => {
+                  const url = await uploadCustomerLogo(customer.id, file);
+                  setLogoOverride(url);
+                }}
+                onRemove={async () => {
+                  await deleteCustomerLogo(customer.id);
+                  setLogoOverride(null);
+                }}
+              />
+            </div>
+          )}
           <div className="form-section">
             <div className="form-section-title">{t("customer_form.card_label_title")}</div>
             <div className="form-section-helper">{t("customer_form.card_label_desc")}</div>
