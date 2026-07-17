@@ -37,6 +37,7 @@ from .catalog_scope import can_view_provider_defaults
 from .models import (
     CustomerCustomPrice,
     CustomerServicePrice,
+    ExtraWorkPricingUnitType,
     Service,
     ServiceCategory,
 )
@@ -285,6 +286,11 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
     """M5 A — read/write serializer for CustomerCustomPrice. `customer`
     is read-only — the URL kwarg owns the binding. valid_to (if set)
     must be >= valid_from; unit_price / vat_pct must be non-negative.
+
+    RF-2 — `custom_unit_label` is the operator-supplied unit name and is
+    only meaningful when `unit_type == OTHER`; for any other unit type
+    it is forced blank rather than rejected, so switching an existing
+    OTHER row to a concrete unit cannot strand a stale label.
     """
 
     customer = serializers.PrimaryKeyRelatedField(read_only=True)
@@ -299,6 +305,7 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
             "custom_name",
             "unit_type",
             "unit_type_display",
+            "custom_unit_label",
             "customer",
             "unit_price",
             "vat_pct",
@@ -333,6 +340,19 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
         valid_to = attrs.get(
             "valid_to", getattr(self.instance, "valid_to", None)
         )
+        # RF-2 — the unit label only carries meaning for OTHER. Resolve
+        # the effective unit_type (a PATCH may change either field
+        # independently) and blank the label for every concrete unit so
+        # a row can never persist a label that contradicts its unit.
+        unit_type = attrs.get(
+            "unit_type", getattr(self.instance, "unit_type", None)
+        )
+        if unit_type != ExtraWorkPricingUnitType.OTHER:
+            if "custom_unit_label" in attrs or self.instance is not None:
+                attrs["custom_unit_label"] = ""
+        elif "custom_unit_label" in attrs:
+            attrs["custom_unit_label"] = (attrs["custom_unit_label"] or "").strip()
+
         if valid_from is not None and valid_to is not None and valid_to < valid_from:
             raise serializers.ValidationError(
                 {"valid_to": "valid_to must be on or after valid_from."}
