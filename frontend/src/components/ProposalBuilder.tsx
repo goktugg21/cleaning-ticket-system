@@ -10,14 +10,15 @@
 //
 // Only `ProposalBuilder` is exported (react-refresh/only-export-
 // components); the row/add-line helpers stay local to this file.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Plus } from "lucide-react";
+import { Check, FileText, Plus, RefreshCw } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
   createProposalLine,
   deleteProposalLine,
+  fetchProposalPdf,
   transitionProposal,
   type ProposalLineWritePayload,
 } from "../api/extraWork";
@@ -362,6 +363,110 @@ function ProposalAddLine({
   );
 }
 
+// RF-6 (Ramazan 2026-06-24) — split-screen live PDF preview. Fetches the
+// proposal PDF as an authenticated blob and shows it in an iframe next to the
+// builder. Refreshes when `refreshNonce` changes (bumped after each saved
+// mutation) plus a manual button — never per keystroke. The DRAFT PDF is
+// already served to provider roles (backend `_resolve_proposal_or_404` only
+// 404s DRAFT for customers), so no backend change is needed. Object URL is
+// revoked on refresh + unmount; the fetch is cancelled-guarded.
+function ProposalPreviewPane({
+  ewId,
+  proposalId,
+  refreshNonce,
+}: {
+  ewId: number | string;
+  proposalId: number;
+  refreshNonce: number;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [manualNonce, setManualNonce] = useState(0);
+  const urlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const blob = await fetchProposalPdf(ewId, proposalId);
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        urlRef.current = objectUrl;
+        setUrl(objectUrl);
+      } catch (err) {
+        if (!cancelled) setError(getApiError(err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [ewId, proposalId, refreshNonce, manualNonce]);
+
+  // Revoke the object URL on unmount (ref avoids a stale closure).
+  useEffect(() => {
+    return () => {
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <div className="proposal-preview-pane" data-testid="proposal-live-preview">
+      <div className="proposal-preview-head">
+        <span className="proposal-preview-title">
+          <FileText size={14} strokeWidth={2.2} />
+          <span style={{ marginLeft: 6 }}>{t("detail.live_preview_title")}</span>
+        </span>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => setManualNonce((n) => n + 1)}
+          disabled={loading}
+          data-testid="proposal-live-preview-refresh"
+        >
+          <RefreshCw size={13} strokeWidth={2.2} />
+          <span style={{ marginLeft: 6 }}>
+            {t("detail.live_preview_refresh")}
+          </span>
+        </button>
+      </div>
+      <div className="proposal-preview-body">
+        {error ? (
+          <div className="proposal-preview-status proposal-preview-status-error">
+            {error}
+          </div>
+        ) : (
+          <>
+            {loading && !url && (
+              <div className="proposal-preview-status">
+                {t("detail.live_preview_loading")}
+              </div>
+            )}
+            {url && (
+              <iframe
+                className="proposal-preview-frame"
+                src={url}
+                title={t("detail.live_preview_title")}
+                data-testid="proposal-live-preview-frame"
+              />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ProposalBuilder({
   ewId,
   proposal,
@@ -383,6 +488,9 @@ export function ProposalBuilder({
     "CUSTOMER_APPROVED" | "CUSTOMER_REJECTED" | null
   >(null);
   const [overrideReason, setOverrideReason] = useState("");
+  // RF-6 — bumped after every successful mutation (via `run`) so the live
+  // PDF preview refetches. Not per-keystroke: only settled saves move it.
+  const [previewNonce, setPreviewNonce] = useState(0);
 
   const { me } = useAuth();
   const isProvider =
@@ -404,6 +512,9 @@ export function ProposalBuilder({
     try {
       await fn();
       await onChanged();
+      // RF-6 — a settled mutation (line add/edit/remove, transition) is the
+      // signal to refresh the live PDF preview.
+      setPreviewNonce((n) => n + 1);
     } catch (err) {
       setError(getApiError(err));
     } finally {
@@ -480,6 +591,7 @@ export function ProposalBuilder({
   };
 
   return (
+    <div className="proposal-split" data-testid="extra-work-proposal-split">
     <div
       className="card"
       style={{ marginBottom: 16 }}
@@ -681,6 +793,12 @@ export function ProposalBuilder({
           </div>
         )}
       </div>
+    </div>
+      <ProposalPreviewPane
+        ewId={ewId}
+        proposalId={proposal.id}
+        refreshNonce={previewNonce}
+      />
     </div>
   );
 }
