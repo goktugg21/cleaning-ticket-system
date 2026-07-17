@@ -7156,3 +7156,64 @@ table.data-table {
 .image-upload-body { flex: 1 1 auto; min-width: 0; }
 .image-upload-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .image-upload-hint { font-size: 11.5px; margin: 8px 0 0; }
+
+/* RF-11 — Extra Work Messages card, inbox design language. */
+.ew-messages-card .ew-message-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+.ew-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ew-msg-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+}
+/* Tier tint on the bubble for at-a-glance visibility (internal tiers). */
+.ew-msg.internal .ew-msg-body { background: var(--amber-soft); border-color: var(--amber-border); }
+.ew-msg-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.ew-msg-author {
+  font-family: var(--f-head);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ew-msg-tier {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+.ew-msg-tier.internal { background: var(--amber); color: #fff; }
+.ew-msg-private {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--red-soft);
+  color: var(--red);
+  border: 1px solid var(--red-border);
+}
+.ew-msg-time { margin-left: auto; font-size: 11px; color: var(--text-faint); }
+.ew-msg-text { font-size: 13px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+.ew-msg-directed { margin-top: 4px; }

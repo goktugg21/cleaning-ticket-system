@@ -85,7 +85,8 @@ import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatDateTime } from "../lib/intl";
+import { formatDate, formatDateTime, formatRelative, useLocaleCode } from "../lib/intl";
+import { Avatar } from "../components/Avatar";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
 // any of these is considered "done" for the cancel-warning gate; only
@@ -413,6 +414,7 @@ export function ExtraWorkDetailPage() {
   const { me } = useAuth();
   const { t } = useTranslation(["extra_work", "common"]);
   const { push: pushToast } = useToast();
+  const messageLocale = useLocaleCode();
 
   const [ew, setEw] = useState<ExtraWorkRequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1844,13 +1846,16 @@ export function ExtraWorkDetailPage() {
               messages this viewer receives; the composer offers only the
               tiers the backend will accept. */}
           <section
-            className="card"
+            className="card ew-messages-card"
             data-testid="extra-work-messages-panel"
             style={{ marginBottom: 16 }}
           >
             <div className="form-section">
               <div className="form-section-title">{t("messages.title")}</div>
 
+              {/* RF-11 — restyled in the inbox design language: per-message
+                  avatars, explicit visibility badges, tighter layout.
+                  Presentation only — posting/visibility unchanged. */}
               <div className="ew-message-thread" data-testid="ew-message-thread">
                 {ewMessages.length === 0 ? (
                   <p className="muted small">{t("messages.empty")}</p>
@@ -1858,31 +1863,39 @@ export function ExtraWorkDetailPage() {
                   ewMessages.map((m) => (
                     <div
                       key={m.id}
-                      className={`note-bubble ${EW_TIER_TONE_CLASS[m.message_type]}`}
+                      className={`ew-msg ${EW_TIER_TONE_CLASS[m.message_type]}`}
                       data-testid="ew-message-row"
-                      style={{ marginBottom: 8 }}
                     >
-                      <div className="note-bubble-meta muted small">
-                        <span className="note-tag">
-                          {t(EW_TIER_BADGE_KEY[m.message_type])}
-                        </span>{" "}
-                        {m.author_email}
-                        {m.visibility_mode === "RESTRICTED" && (
-                          <span className="note-private-badge">
-                            {" "}
-                            · {t("messages.private_badge")}
+                      <Avatar name={m.author_email} size={34} />
+                      <div className="ew-msg-body">
+                        <div className="ew-msg-head">
+                          <span className="ew-msg-author">
+                            {m.author_email}
                           </span>
+                          <span
+                            className={`ew-msg-tier ${EW_TIER_TONE_CLASS[m.message_type]}`}
+                          >
+                            {t(EW_TIER_BADGE_KEY[m.message_type])}
+                          </span>
+                          {m.visibility_mode === "RESTRICTED" && (
+                            <span className="ew-msg-private">
+                              {t("messages.private_badge")}
+                            </span>
+                          )}
+                          <span className="ew-msg-time">
+                            {formatRelative(m.created_at, messageLocale)}
+                          </span>
+                        </div>
+                        <div className="ew-msg-text">{m.message}</div>
+                        {m.directed_to_detail.length > 0 && (
+                          <div className="ew-msg-directed muted small">
+                            {t("messages.directed_prefix")}{" "}
+                            {m.directed_to_detail
+                              .map((d) => d.full_name)
+                              .join(", ")}
+                          </div>
                         )}
                       </div>
-                      <div className="note-bubble-body">{m.message}</div>
-                      {m.directed_to_detail.length > 0 && (
-                        <div className="muted small">
-                          {t("messages.directed_prefix")}{" "}
-                          {m.directed_to_detail
-                            .map((d) => d.full_name)
-                            .join(", ")}
-                        </div>
-                      )}
                     </div>
                   ))
                 )}
