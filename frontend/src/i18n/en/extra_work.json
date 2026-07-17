@@ -197,6 +197,9 @@
 
   "detail.proposal_lines_section_title": "Draft proposal lines",
   "detail.proposal_builder_title": "Pricing proposal",
+  "detail.live_preview_title": "Live preview",
+  "detail.live_preview_refresh": "Refresh",
+  "detail.live_preview_loading": "Loading preview…",
   "detail.proposal_builder_helper": "Contract-priced lines are pre-filled. Set a price for the custom lines, remove any you don't need, then send the proposal to the customer.",
   "detail.proposal_builder_empty": "No proposal lines yet. Add a line below.",
   "detail.proposal_add_line": "Add line",
