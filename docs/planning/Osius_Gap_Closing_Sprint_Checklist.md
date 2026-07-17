@@ -100,7 +100,7 @@ The father's "select" button: confirm many completions at once.
 ## Roadmap — phase order (updated 2026-06-23 after the Ramazan mini-meeting)
 1. ✅ **Sprint 9 — light UI/UX polish** → PR #99, deployed.
 2. **Quick-wins sprint** (from received feedback that further feedback can't invalidate) → **PR #100**, then deploy: **RF-3** Tickets top-level page · **RF-4** tuck the ticket audit timeline away · **RF-5** attachment type + in-app preview (recon the backend serving path).
-3. **Proposal-preview sprint** → **PR #101**, then deploy: **RF-6** split-screen live proposal preview.
+3. **PDF & Preview sprint** → **PR #101**, then deploy: **RF-10** proposal-PDF quality (Dutch-only) · **RF-6** split-screen live proposal preview · **RF-12** attachment thumbnails.
 4. *(Optional, if the full batch is slow to arrive)* **RF-2** — unified Add-price flow with an "Other/Custom" option (small, self-contained).
 5. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
 6. **Fixing & Auditing Sprint** — the full batch + **RF-1** WhatsApp-style message inbox (needs per-recipient read state — real backend work) + **RF-8** module/permission presentation + **RF-9**/backlog #7 density + Department + RF-7 + codebase audit + reconcile this checklist.
@@ -147,6 +147,16 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 **RF-8 — Simplified module/permission surface + future modules (Ramazan, 2026-06-23).** Think of melding / extra work as **modules** (not every customer gets extra work); future third modules possible (e.g. **DKS** — assumed: their daily quality-control system, Dagelijks Controle Systeem). One user-management surface grants module access — no access ⇒ the module disappears entirely for that user. Keep the visible permission UI to **3-4 coarse toggles per module** (e.g. can open EW / can close / can act / can respond), bundling the fine-grained permissions behind them: "simple at a glance; the depth exists but the user never needs to see it" — incl. hiding the delegated who-can-grant-what depth. Osius already enforces fine-grained permissions and hides inaccessible surfaces — the ask is a simpler **presentation layer** (presets/bundles). Design with Ramazan in the Fixing & Auditing sprint (ties into Department / backlog #6).
 
 **RF-9 — Assignment/slot page density (Ramazan, 2026-06-23; CONFIRMS backlog #7).** Too much info at once on the assignment surface; hard to parse what's what. Ideas: enlarge/clarify the sub-task/detail areas (Göktuğ) or a simple "assign to someone" button flow (Ramazan). Stays deferred to Fixing & Auditing per backlog #7 — now with his confirmation.
+
+**RF-10 — Proposal PDF: text overlap + professional pass, Dutch-only (Göktuğ + Ramazan, 2026-06-24).** Root cause verified: `proposal_pdf.py` writes `"{qty} x {UNIT_ENUM}"` into a fixed 22mm fpdf2 cell with no width fitting — long enums (SQUARE_METERS) overflow into the Unit-price column (proposal-12 broken; proposal-10 fits only because `1.00 x OTHER` is short). Fix in the PDF & Preview sprint: humanized **Dutch** unit labels + width-aware cells; all labels/status/urgency in Dutch (PDF is Dutch-only, like the emails); Dutch number/money formatting (€, comma decimals) with the font question (€ glyph / charset) decided at recon; a modest professional layout pass (numeric right-alignment, consistent rows, footer). Otherwise the PDF structure is fine per Göktuğ.
+
+**RF-11 — EW detail: Messages card looks out of place (Göktuğ, 2026-06-24).** The Messages section on the Extra Work detail page sits awkwardly (full-width card between Details and Notify-people). DEFERRED to Fixing & Auditing: messaging UX is being rethought there anyway (RF-1 WhatsApp-style inbox) — restyle once, not twice.
+
+**RF-12 — Attachment thumbnails without a click (Göktuğ, 2026-06-24).** Post-#100, click-to-view + download work well. New ask: the attachment cards should show a real preview with no click — images render the actual image as the card; PDFs render a first-page thumbnail (client-side render feasibility decided at recon; graceful fallback to the type badge). Ships in the PDF & Preview sprint.
+
+**RF-13 — Invoices get their own page (Göktuğ, 2026-06-24).** Confirms backlog #2: a dedicated invoices page/workflow is the direction. Waits on the father's invoice-integration answers; designed in Fixing & Auditing.
+
+*(Note: proposal-10's `f — 1.00 x OTHER @ 0.00` line was confirmed junk demo data, not a bug.)*
 
 **Meeting notes (2026-06-23, for the audit sprint):** Department/event are **category-like** fields; names must stay editable/customer-flexible ("herkese uymuyor") — refines backlog #6. Ramazan will do a **full side-by-side review** vs their current system and deliver the complete gap list at once (the agreed batch — Göktuğ implements it in one pass). He validated the pricing work (bulk raise, customer-specific prices, **price history preserved — old EWs keep their old prices**). The credentials/permissions area of their *current* tool is their worst pain point; he'll study ours as the reference.
 
