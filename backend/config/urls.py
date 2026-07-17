@@ -52,6 +52,8 @@ urlpatterns = [
     # M1 B1 — in-app notification / message-center feed (bell + page).
     # Recipient-scoped: every endpoint operates on request.user only.
     path("api/notifications/", include("notifications.urls")),
+    # RF-1 — aggregated message inbox (tickets + Extra Work).
+    path("api/inbox/", include("notifications.urls_inbox")),
     # Sprint 28 Batch 5 — provider service catalog (ServiceCategory +
     # Service CRUD). Per-customer pricing rows are under
     # /api/customers/<id>/pricing/ — see customers/urls.py.

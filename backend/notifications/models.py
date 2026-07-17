@@ -248,3 +248,73 @@ class NotificationPreference(models.Model):
     def __str__(self):
         state = "muted" if self.muted else "unmuted"
         return f"{self.user_id}/{self.event_type} → {state}"
+
+
+class MessageReadCursor(models.Model):
+    """RF-1 — a per-user, per-thread high-watermark for the message inbox.
+
+    One row = "this user has read <thread>'s messages up to
+    `last_read_at`". A thread is EITHER a ticket OR an Extra Work request
+    (exactly one FK set — the CheckConstraint enforces it). The inbox
+    computes a thread's unread count as the number of viewer-VISIBLE
+    messages newer than this cursor (excluding the viewer's own), so the
+    cursor is the aggregated sibling of `Notification.read_at` (which is
+    per-notification): advancing the cursor to now() marks the whole
+    thread read for that user.
+
+    Kept in the notifications app because it is the cross-cutting
+    attention/read-state module (it already owns `Notification` with the
+    same nullable ticket/extra_work dual-FK shape and a read_at surface).
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="message_read_cursors",
+    )
+    ticket = models.ForeignKey(
+        "tickets.Ticket",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="message_read_cursors",
+    )
+    extra_work = models.ForeignKey(
+        "extra_work.ExtraWorkRequest",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="message_read_cursors",
+    )
+    last_read_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            # Exactly one target — a cursor points at a ticket XOR an EW.
+            models.CheckConstraint(
+                name="mrc_exactly_one_target",
+                check=(
+                    models.Q(ticket__isnull=False, extra_work__isnull=True)
+                    | models.Q(ticket__isnull=True, extra_work__isnull=False)
+                ),
+            ),
+            # One cursor per (user, thread).
+            models.UniqueConstraint(
+                fields=["user", "ticket"],
+                condition=models.Q(ticket__isnull=False),
+                name="mrc_unique_user_ticket",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "extra_work"],
+                condition=models.Q(extra_work__isnull=False),
+                name="mrc_unique_user_extra_work",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "ticket"]),
+            models.Index(fields=["user", "extra_work"]),
+        ]
+
+    def __str__(self):
+        target = f"ticket={self.ticket_id}" if self.ticket_id else f"ew={self.extra_work_id}"
+        return f"cursor u={self.user_id} {target} @ {self.last_read_at:%Y-%m-%d %H:%M}"
