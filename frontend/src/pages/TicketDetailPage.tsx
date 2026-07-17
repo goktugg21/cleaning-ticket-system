@@ -57,6 +57,7 @@ import {
   isProviderManagementRole,
   isStaff as isStaffRoleFn,
 } from "../auth/permissions";
+import { AttachmentThumb } from "../components/AttachmentThumb";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
@@ -1635,9 +1636,18 @@ export function TicketDetailPage() {
                     })}
                     data-testid="attachment-preview-open"
                   >
-                    <span className="att-thumb-ext">
-                      {getFileExtension(item.original_filename)}
-                    </span>
+                    {/* RF-12 — real preview with no click: image cards render
+                        the image, PDFs a first-page thumbnail; the extension
+                        badge is the graceful fallback. */}
+                    <AttachmentThumb
+                      ticketId={id ?? ""}
+                      attachment={item}
+                      fallback={
+                        <span className="att-thumb-ext">
+                          {getFileExtension(item.original_filename)}
+                        </span>
+                      }
+                    />
                     {item.is_hidden && (
                       <span className="att-thumb-internal-pill">
                         {t("internal_pill")}

@@ -2355,6 +2355,16 @@ table.data-table {
   border-color: var(--green);
   box-shadow: 0 0 0 1px rgba(11,107,66,0.12);
 }
+/* RF-12 — real image / PDF-first-page thumbnail fills the square tile
+   (top-anchored crop, like a document preview). */
+.att-thumb-img,
+.att-thumb-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
 .att-thumb-name { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .att-thumb-size { font-size: 11px; color: var(--text-faint); font-weight: 600; }
 /* RF-5 — per-tile meta row: file size/date + an always-available Download
