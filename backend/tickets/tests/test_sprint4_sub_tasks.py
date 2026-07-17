@@ -600,3 +600,111 @@ class AutoCompleteFlagTests(SubTaskFixture):
         self.assertEqual(len(resp.data["sub_tasks"]), 1)
         self.assertTrue(resp.data["sub_tasks"][0]["is_done"])
         self.assertEqual(len(resp.data["sub_tasks"][0]["staff_assignments"]), 1)
+
+
+# ===========================================================================
+# sub_tasks redaction for CUSTOMER_USER (privacy follow-up)
+# ===========================================================================
+
+
+class SubTaskCustomerRedactionTests(SubTaskFixture):
+    """`sub_tasks` is provider-internal work breakdown: each row nests
+    staff identity (ungated by the customer's `show_assigned_staff_*`
+    flags) plus internal free-text (`assignment_note`,
+    `completion_note`, `unable_to_complete_reason`). A CUSTOMER_USER
+    must receive an empty list; provider roles (incl. STAFF) unchanged.
+    """
+
+    def _detail_url(self, ticket):
+        return f"/api/tickets/{ticket.id}/"
+
+    def _seed(self):
+        """A sub-task carrying a completed slot with internal free-text."""
+        st = SubTask.objects.create(
+            ticket=self.ticket_a,
+            title="Descale the boiler room",
+            description="Internal work breakdown",
+        )
+        slot = self._mk_slot(self.ticket_a, sub_task=st, slot_status=COMPLETED)
+        slot.assignment_note = "INTERNAL-ASSIGNMENT-NOTE"
+        slot.completion_note = "INTERNAL-COMPLETION-NOTE"
+        slot.unable_to_complete_reason = "INTERNAL-BLOCKED-REASON"
+        slot.save(
+            update_fields=[
+                "assignment_note",
+                "completion_note",
+                "unable_to_complete_reason",
+            ]
+        )
+        return st, slot
+
+    def test_customer_sees_empty_sub_tasks(self):
+        self._seed()
+        resp = self._api(self.cust_user_a).get(self._detail_url(self.ticket_a))
+        self.assertEqual(resp.status_code, 200)
+        # The key stays on the wire (stable response shape), but empty.
+        self.assertIn("sub_tasks", resp.data)
+        self.assertEqual(resp.data["sub_tasks"], [])
+
+    def test_customer_response_leaks_no_sub_task_content(self):
+        """Byte-level guard: no sub-task title, staff identity, or
+        internal free-text may survive anywhere in the rendered body.
+
+        The customer's `show_assigned_staff_*` flags are turned OFF so
+        the sibling `assigned_staff` payload (which is deliberately
+        flag-gated, and covered elsewhere) cannot legitimately emit the
+        staff email. Any staff identity left in the body could then only
+        have arrived via `sub_tasks[].staff_assignments[]` — the exact
+        flag-bypass this redaction closes.
+        """
+        self.customer_a.show_assigned_staff_name = False
+        self.customer_a.show_assigned_staff_email = False
+        self.customer_a.show_assigned_staff_phone = False
+        self.customer_a.save(
+            update_fields=[
+                "show_assigned_staff_name",
+                "show_assigned_staff_email",
+                "show_assigned_staff_phone",
+            ]
+        )
+        self._seed()
+        resp = self._api(self.cust_user_a).get(self._detail_url(self.ticket_a))
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        for needle in (
+            "Descale the boiler room",
+            "Internal work breakdown",
+            "INTERNAL-ASSIGNMENT-NOTE",
+            "INTERNAL-COMPLETION-NOTE",
+            "INTERNAL-BLOCKED-REASON",
+            "staff-a@example.com",
+        ):
+            self.assertNotIn(needle, body, f"leaked {needle!r} to CUSTOMER_USER")
+
+    def test_provider_roles_still_see_sub_tasks(self):
+        st, _slot = self._seed()
+        for actor in (self.super_admin, self.admin_a, self.manager_a, self.staff_a):
+            with self.subTest(role=actor.role):
+                resp = self._api(actor).get(self._detail_url(self.ticket_a))
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(len(resp.data["sub_tasks"]), 1)
+                row = resp.data["sub_tasks"][0]
+                self.assertEqual(row["id"], st.id)
+                self.assertEqual(row["title"], "Descale the boiler room")
+                self.assertTrue(row["is_done"])
+                self.assertEqual(len(row["staff_assignments"]), 1)
+                self.assertEqual(
+                    row["staff_assignments"][0]["completion_note"],
+                    "INTERNAL-COMPLETION-NOTE",
+                )
+
+    def test_customer_redaction_does_not_disturb_sibling_fields(self):
+        """The ticket stays fully readable — redaction is scoped to
+        `sub_tasks`, not a blanket customer downgrade.
+        """
+        self._seed()
+        resp = self._api(self.cust_user_a).get(self._detail_url(self.ticket_a))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["id"], self.ticket_a.id)
+        self.assertEqual(resp.data["title"], "Ticket A")
+        self.assertIn("auto_complete_on_subtasks", resp.data)

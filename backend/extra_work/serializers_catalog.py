@@ -37,6 +37,7 @@ from .catalog_scope import can_view_provider_defaults
 from .models import (
     CustomerCustomPrice,
     CustomerServicePrice,
+    ExtraWorkPricingUnitType,
     Service,
     ServiceCategory,
 )
@@ -285,6 +286,17 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
     """M5 A — read/write serializer for CustomerCustomPrice. `customer`
     is read-only — the URL kwarg owns the binding. valid_to (if set)
     must be >= valid_from; unit_price / vat_pct must be non-negative.
+
+    RF-2 — `custom_unit_label` is the operator-supplied unit name and is
+    only meaningful when `unit_type == OTHER`. Two symmetric rules on the
+    effective unit type (a PATCH may move either field independently):
+    OTHER REQUIRES a non-empty label (HTTP 400 with code
+    `custom_unit_label_required`) — an "Other" unit with no name renders
+    as nothing on the price line; any concrete unit type forces the
+    label blank rather than rejecting, so switching an existing OTHER row
+    to a concrete unit cannot strand a stale label. A legacy empty-label
+    OTHER row (created before this rule) must therefore supply a label on
+    its next update — intentional.
     """
 
     customer = serializers.PrimaryKeyRelatedField(read_only=True)
@@ -299,6 +311,7 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
             "custom_name",
             "unit_type",
             "unit_type_display",
+            "custom_unit_label",
             "customer",
             "unit_price",
             "vat_pct",
@@ -333,6 +346,38 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
         valid_to = attrs.get(
             "valid_to", getattr(self.instance, "valid_to", None)
         )
+        # RF-2 — the unit label only carries meaning for OTHER. Resolve
+        # the effective unit_type + label (a PATCH may change either field
+        # independently). For a concrete unit type the label is forced
+        # blank so a row can never persist a label that contradicts its
+        # unit. For OTHER the (stripped) label is REQUIRED — an "Other"
+        # unit with no name renders as nothing on the price line.
+        unit_type = attrs.get(
+            "unit_type", getattr(self.instance, "unit_type", None)
+        )
+        if unit_type != ExtraWorkPricingUnitType.OTHER:
+            if "custom_unit_label" in attrs or self.instance is not None:
+                attrs["custom_unit_label"] = ""
+        else:
+            label = attrs.get(
+                "custom_unit_label",
+                getattr(self.instance, "custom_unit_label", ""),
+            )
+            label = (label or "").strip()
+            if not label:
+                raise serializers.ValidationError(
+                    {
+                        "custom_unit_label": [
+                            serializers.ErrorDetail(
+                                "A unit name is required when the unit "
+                                "type is Other.",
+                                code="custom_unit_label_required",
+                            )
+                        ]
+                    }
+                )
+            attrs["custom_unit_label"] = label
+
         if valid_from is not None and valid_to is not None and valid_to < valid_from:
             raise serializers.ValidationError(
                 {"valid_to": "valid_to must be on or after valid_from."}

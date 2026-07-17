@@ -54,14 +54,44 @@ import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
  * create / detail call.
  */
 
+/**
+ * RF-2 — the sentinel `service` value for the "Other / Custom…" option
+ * at the foot of the service dropdown. Picking it swaps the shared form
+ * over to the custom-price shape (free-text name + its own unit type)
+ * and routes the submit to the custom-price endpoint. A real service id
+ * is always a number, so the sentinel cannot collide.
+ */
+const CUSTOM_SERVICE_SENTINEL = "__custom__" as const;
+
+type ServiceSelection = number | "" | typeof CUSTOM_SERVICE_SENTINEL;
+
+/**
+ * RF-2 — one form state backs both price kinds. `service` discriminates:
+ * the sentinel means custom (uses `custom_name` / `unit_type` /
+ * `custom_unit_label`), a number means a catalog contract price (which
+ * ignores those three). The price / VAT / validity fields are shared —
+ * they were already identical in both flows.
+ */
 interface PriceFormState {
-  service: number | "";
+  service: ServiceSelection;
+  custom_name: string;
+  unit_type: ServiceUnitType;
+  custom_unit_label: string;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
   valid_to: string; // empty string = open-ended
   is_active: boolean;
 }
+
+/**
+ * RF-2 — a row in the unified pricing list. Contract and custom rows
+ * live on separate endpoints and have different shapes, so they are
+ * discriminated rather than merged into one loose type.
+ */
+type PricingRow =
+  | { kind: "contract"; row: CustomerServicePrice }
+  | { kind: "custom"; row: CustomerCustomPrice };
 
 function todayISO(): string {
   const d = new Date();
@@ -74,6 +104,9 @@ function todayISO(): string {
 function buildEmptyForm(): PriceFormState {
   return {
     service: "",
+    custom_name: "",
+    unit_type: "HOURS",
+    custom_unit_label: "",
     unit_price: "0.00",
     vat_pct: "21.00",
     valid_from: todayISO(),
@@ -82,9 +115,8 @@ function buildEmptyForm(): PriceFormState {
   };
 }
 
-// M5 A — custom (non-catalog) price lines. The unit-type constants
-// mirror ServicesAdminPage; kept local here to avoid a cross-page
-// export churn (three tiny literals, no behaviour).
+// The unit-type constants mirror ServicesAdminPage; kept local here to
+// avoid a cross-page export churn (three tiny literals, no behaviour).
 const UNIT_TYPES: readonly ServiceUnitType[] = [
   "HOURS",
   "SQUARE_METERS",
@@ -101,27 +133,6 @@ const UNIT_TYPE_I18N_KEY: Record<ServiceUnitType, string> = {
   OTHER: "services.unit_type.other",
 };
 
-interface CustomPriceFormState {
-  custom_name: string;
-  unit_type: ServiceUnitType;
-  unit_price: string;
-  vat_pct: string;
-  valid_from: string;
-  valid_to: string; // empty string = open-ended
-  is_active: boolean;
-}
-
-function buildEmptyCustomForm(): CustomPriceFormState {
-  return {
-    custom_name: "",
-    unit_type: "HOURS",
-    unit_price: "0.00",
-    vat_pct: "21.00",
-    valid_from: todayISO(),
-    valid_to: "",
-    is_active: true,
-  };
-}
 
 function formatDate(value: string, locale: string): string {
   if (!value) return "—";
@@ -168,7 +179,8 @@ export function CustomerPricingPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const [selected, setSelected] = useState<CustomerServicePrice | null>(null);
+  // RF-2 — one selection / modal / delete-dialog for both price kinds.
+  const [selected, setSelected] = useState<PricingRow | null>(null);
 
   const [mode, setMode] = useState<"create" | "edit" | null>(null);
   const [form, setForm] = useState<PriceFormState>(buildEmptyForm);
@@ -176,8 +188,7 @@ export function CustomerPricingPage() {
   const [formBusy, setFormBusy] = useState(false);
 
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [deleteTarget, setDeleteTarget] =
-    useState<CustomerServicePrice | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PricingRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   // M5 C — bulk-raise modal state (catalog-price section only).
@@ -204,21 +215,10 @@ export function CustomerPricingPage() {
   const [copyResult, setCopyResult] =
     useState<CustomerPriceCopyFromDefaultResult | null>(null);
 
-  // M5 A — custom (non-catalog) price-line section. Parallel state to
-  // the catalog section above, prefixed `custom`.
+  // Custom (non-catalog) price lines — rendered in the same unified
+  // list as the contract rows above; only the source list is separate
+  // (they live on their own endpoint).
   const [customPrices, setCustomPrices] = useState<CustomerCustomPrice[]>([]);
-  const [customSelected, setCustomSelected] =
-    useState<CustomerCustomPrice | null>(null);
-  const [customMode, setCustomMode] = useState<"create" | "edit" | null>(null);
-  const [customForm, setCustomForm] =
-    useState<CustomPriceFormState>(buildEmptyCustomForm);
-  const [customFormError, setCustomFormError] = useState("");
-  const [customFormBusy, setCustomFormBusy] = useState(false);
-
-  const customDeleteDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [customDeleteTarget, setCustomDeleteTarget] =
-    useState<CustomerCustomPrice | null>(null);
-  const [customDeleteBusy, setCustomDeleteBusy] = useState(false);
 
   // Initial parallel load — customer (for title), pricing list,
   // service list (for the modal dropdown — filtered to active so
@@ -282,16 +282,34 @@ export function CustomerPricingPage() {
     setFormError("");
   }
 
-  function openEditModal(price: CustomerServicePrice) {
+  function openEditModal(entry: PricingRow) {
     setMode("edit");
-    setForm({
-      service: price.service,
-      unit_price: price.unit_price,
-      vat_pct: price.vat_pct,
-      valid_from: price.valid_from,
-      valid_to: price.valid_to ?? "",
-      is_active: price.is_active,
-    });
+    if (entry.kind === "custom") {
+      const price = entry.row;
+      setForm({
+        ...buildEmptyForm(),
+        service: CUSTOM_SERVICE_SENTINEL,
+        custom_name: price.custom_name,
+        unit_type: price.unit_type,
+        custom_unit_label: price.custom_unit_label,
+        unit_price: price.unit_price,
+        vat_pct: price.vat_pct,
+        valid_from: price.valid_from,
+        valid_to: price.valid_to ?? "",
+        is_active: price.is_active,
+      });
+    } else {
+      const price = entry.row;
+      setForm({
+        ...buildEmptyForm(),
+        service: price.service,
+        unit_price: price.unit_price,
+        vat_pct: price.vat_pct,
+        valid_from: price.valid_from,
+        valid_to: price.valid_to ?? "",
+        is_active: price.is_active,
+      });
+    }
     setFormError("");
   }
 
@@ -307,6 +325,24 @@ export function CustomerPricingPage() {
     if (form.service === "") {
       setFormError(t("customer_pricing.error_service_required"));
       return;
+    }
+    const isCustom = form.service === CUSTOM_SERVICE_SENTINEL;
+    if (isCustom) {
+      if (!form.custom_name.trim()) {
+        setFormError(t("customer_custom_pricing.error_name_required"));
+        return;
+      }
+      if (!form.unit_type) {
+        setFormError(t("customer_custom_pricing.error_unit_type_required"));
+        return;
+      }
+      // A bare "Other" unit renders as nothing on the price line, so the
+      // label is required exactly when OTHER is chosen. The backend
+      // blanks it for every other unit type, so it is not sent then.
+      if (form.unit_type === "OTHER" && !form.custom_unit_label.trim()) {
+        setFormError(t("customer_custom_pricing.error_unit_label_required"));
+        return;
+      }
     }
     const priceNumber = Number(form.unit_price);
     if (!Number.isFinite(priceNumber) || priceNumber < 0) {
@@ -331,8 +367,9 @@ export function CustomerPricingPage() {
     }
     setFormBusy(true);
     setFormError("");
-    const payload: CustomerServicePriceCreatePayload = {
-      service: Number(form.service),
+    // Shared across both payload shapes — these fields were already
+    // identical in the two flows this form replaces.
+    const shared = {
       unit_price: form.unit_price.trim(),
       vat_pct: form.vat_pct.trim(),
       valid_from: form.valid_from,
@@ -340,21 +377,53 @@ export function CustomerPricingPage() {
       is_active: form.is_active,
     };
     try {
-      if (mode === "create") {
-        const created = await createCustomerPrice(numericId, payload);
-        setPrices((prev) => [created, ...prev]);
-        closeFormModal();
-      } else if (mode === "edit" && selected) {
-        const updated = await updateCustomerPrice(
-          numericId,
-          selected.id,
-          payload,
-        );
-        setPrices((prev) =>
-          prev.map((p) => (p.id === updated.id ? updated : p)),
-        );
-        setSelected(updated);
-        closeFormModal();
+      if (isCustom) {
+        const payload: CustomerCustomPriceCreatePayload = {
+          ...shared,
+          custom_name: form.custom_name.trim(),
+          unit_type: form.unit_type,
+          // Only OTHER carries a label; the backend forces it blank for
+          // every concrete unit type, so send it only where meaningful.
+          custom_unit_label:
+            form.unit_type === "OTHER" ? form.custom_unit_label.trim() : "",
+        };
+        if (mode === "create") {
+          const created = await createCustomerCustomPrice(numericId, payload);
+          setCustomPrices((prev) => [created, ...prev]);
+          closeFormModal();
+        } else if (mode === "edit" && selected?.kind === "custom") {
+          const updated = await updateCustomerCustomPrice(
+            numericId,
+            selected.row.id,
+            payload,
+          );
+          setCustomPrices((prev) =>
+            prev.map((p) => (p.id === updated.id ? updated : p)),
+          );
+          setSelected({ kind: "custom", row: updated });
+          closeFormModal();
+        }
+      } else {
+        const payload: CustomerServicePriceCreatePayload = {
+          ...shared,
+          service: Number(form.service),
+        };
+        if (mode === "create") {
+          const created = await createCustomerPrice(numericId, payload);
+          setPrices((prev) => [created, ...prev]);
+          closeFormModal();
+        } else if (mode === "edit" && selected?.kind === "contract") {
+          const updated = await updateCustomerPrice(
+            numericId,
+            selected.row.id,
+            payload,
+          );
+          setPrices((prev) =>
+            prev.map((p) => (p.id === updated.id ? updated : p)),
+          );
+          setSelected({ kind: "contract", row: updated });
+          closeFormModal();
+        }
       }
     } catch (err) {
       setFormError(getApiError(err));
@@ -363,18 +432,24 @@ export function CustomerPricingPage() {
     }
   }
 
-  function openDeleteDialog(price: CustomerServicePrice) {
-    setDeleteTarget(price);
+  function openDeleteDialog(entry: PricingRow) {
+    setDeleteTarget(entry);
     deleteDialogRef.current?.open();
   }
 
   async function handleConfirmDelete() {
     if (numericId === null || !deleteTarget) return;
     setDeleteBusy(true);
+    const targetId = deleteTarget.row.id;
     try {
-      await deleteCustomerPrice(numericId, deleteTarget.id);
-      setPrices((prev) => prev.filter((p) => p.id !== deleteTarget.id));
-      if (selected?.id === deleteTarget.id) {
+      if (deleteTarget.kind === "custom") {
+        await deleteCustomerCustomPrice(numericId, targetId);
+        setCustomPrices((prev) => prev.filter((p) => p.id !== targetId));
+      } else {
+        await deleteCustomerPrice(numericId, targetId);
+        setPrices((prev) => prev.filter((p) => p.id !== targetId));
+      }
+      if (selected?.kind === deleteTarget.kind && selected.row.id === targetId) {
         setSelected(null);
       }
       deleteDialogRef.current?.close();
@@ -511,125 +586,6 @@ export function CustomerPricingPage() {
     }
   }
 
-  // ---- M5 A — custom price-line handlers (mirror the catalog flow) -------
-  function openCreateCustomModal() {
-    setCustomMode("create");
-    setCustomForm(buildEmptyCustomForm());
-    setCustomFormError("");
-  }
-
-  function openEditCustomModal(price: CustomerCustomPrice) {
-    setCustomMode("edit");
-    setCustomForm({
-      custom_name: price.custom_name,
-      unit_type: price.unit_type,
-      unit_price: price.unit_price,
-      vat_pct: price.vat_pct,
-      valid_from: price.valid_from,
-      valid_to: price.valid_to ?? "",
-      is_active: price.is_active,
-    });
-    setCustomFormError("");
-  }
-
-  function closeCustomFormModal() {
-    setCustomMode(null);
-    setCustomForm(buildEmptyCustomForm());
-    setCustomFormError("");
-  }
-
-  async function handleSubmitCustomForm(event: FormEvent) {
-    event.preventDefault();
-    if (numericId === null) return;
-    if (!customForm.custom_name.trim()) {
-      setCustomFormError(t("customer_custom_pricing.error_name_required"));
-      return;
-    }
-    if (!customForm.unit_type) {
-      setCustomFormError(t("customer_custom_pricing.error_unit_type_required"));
-      return;
-    }
-    const priceNumber = Number(customForm.unit_price);
-    if (!Number.isFinite(priceNumber) || priceNumber < 0) {
-      setCustomFormError(t("customer_pricing.error_price_invalid"));
-      return;
-    }
-    const vatNumber = Number(customForm.vat_pct);
-    if (!Number.isFinite(vatNumber) || vatNumber < 0) {
-      setCustomFormError(t("customer_pricing.error_vat_invalid"));
-      return;
-    }
-    if (!customForm.valid_from) {
-      setCustomFormError(t("customer_pricing.error_valid_from_required"));
-      return;
-    }
-    if (customForm.valid_to && customForm.valid_to < customForm.valid_from) {
-      setCustomFormError(
-        t("customer_pricing.error_valid_to_before_valid_from"),
-      );
-      return;
-    }
-    setCustomFormBusy(true);
-    setCustomFormError("");
-    const payload: CustomerCustomPriceCreatePayload = {
-      custom_name: customForm.custom_name.trim(),
-      unit_type: customForm.unit_type,
-      unit_price: customForm.unit_price.trim(),
-      vat_pct: customForm.vat_pct.trim(),
-      valid_from: customForm.valid_from,
-      valid_to: customForm.valid_to === "" ? null : customForm.valid_to,
-      is_active: customForm.is_active,
-    };
-    try {
-      if (customMode === "create") {
-        const created = await createCustomerCustomPrice(numericId, payload);
-        setCustomPrices((prev) => [created, ...prev]);
-        closeCustomFormModal();
-      } else if (customMode === "edit" && customSelected) {
-        const updated = await updateCustomerCustomPrice(
-          numericId,
-          customSelected.id,
-          payload,
-        );
-        setCustomPrices((prev) =>
-          prev.map((p) => (p.id === updated.id ? updated : p)),
-        );
-        setCustomSelected(updated);
-        closeCustomFormModal();
-      }
-    } catch (err) {
-      setCustomFormError(getApiError(err));
-    } finally {
-      setCustomFormBusy(false);
-    }
-  }
-
-  function openCustomDeleteDialog(price: CustomerCustomPrice) {
-    setCustomDeleteTarget(price);
-    customDeleteDialogRef.current?.open();
-  }
-
-  async function handleConfirmCustomDelete() {
-    if (numericId === null || !customDeleteTarget) return;
-    setCustomDeleteBusy(true);
-    try {
-      await deleteCustomerCustomPrice(numericId, customDeleteTarget.id);
-      setCustomPrices((prev) =>
-        prev.filter((p) => p.id !== customDeleteTarget.id),
-      );
-      if (customSelected?.id === customDeleteTarget.id) {
-        setCustomSelected(null);
-      }
-      customDeleteDialogRef.current?.close();
-      setCustomDeleteTarget(null);
-    } catch (err) {
-      setLoadError(getApiError(err));
-      customDeleteDialogRef.current?.close();
-    } finally {
-      setCustomDeleteBusy(false);
-    }
-  }
-
   const serviceNameById = useMemo(() => {
     const map = new Map<number, string>();
     for (const s of services) {
@@ -669,6 +625,52 @@ export function CustomerPricingPage() {
     if (price.service_name) return price.service_name;
     return serviceNameById.get(price.service) ?? `#${price.service}`;
   }
+
+  // RF-2 — the display name for either row kind.
+  function resolveRowName(entry: PricingRow): string {
+    return entry.kind === "custom"
+      ? entry.row.custom_name
+      : resolveServiceName(entry.row);
+  }
+
+  /**
+   * RF-2 — the unit a row is priced in. A custom OTHER row renders its
+   * operator-supplied `custom_unit_label` ("m3"); every other row falls
+   * back to the translated unit-type label. A contract row takes its
+   * unit from the catalog service (archived services still resolve via
+   * the full `serviceById` map).
+   */
+  function resolveUnitLabel(entry: PricingRow): string {
+    if (entry.kind === "custom") {
+      if (entry.row.unit_type === "OTHER" && entry.row.custom_unit_label) {
+        return entry.row.custom_unit_label;
+      }
+      return t(UNIT_TYPE_I18N_KEY[entry.row.unit_type]);
+    }
+    const unitType = serviceById.get(entry.row.service)?.unit_type;
+    return unitType ? t(UNIT_TYPE_I18N_KEY[unitType]) : "—";
+  }
+
+  // RF-2 — the single list backing the unified table. Contract rows
+  // first, then custom rows; each source list keeps its own API
+  // ordering. Plain derived value (same rationale as activeServices).
+  const unifiedRows: PricingRow[] = [
+    ...prices.map((row): PricingRow => ({ kind: "contract", row })),
+    ...customPrices.map((row): PricingRow => ({ kind: "custom", row })),
+  ];
+
+  const isCustomForm = form.service === CUSTOM_SERVICE_SENTINEL;
+
+  // RF-2 — the modal title follows the chosen kind: with "Other /
+  // Custom…" selected the form is no longer adding a contract price,
+  // so the contract copy would be actively wrong.
+  const formModalTitle = isCustomForm
+    ? mode === "create"
+      ? t("customer_custom_pricing.add_modal_title")
+      : t("customer_custom_pricing.edit_modal_title")
+    : mode === "create"
+      ? t("customer_pricing.add_modal_title")
+      : t("customer_pricing.edit_modal_title");
 
   const customerName = customer?.name ?? "";
 
@@ -718,12 +720,10 @@ export function CustomerPricingPage() {
             className="btn btn-primary btn-sm"
             data-testid="customer-pricing-add-button"
             onClick={openCreateModal}
-            disabled={loading || numericId === null || services.length === 0}
-            title={
-              services.length === 0
-                ? t("customer_pricing.no_services_hint")
-                : undefined
-            }
+            // RF-2 — no longer gated on the catalog having services: the
+            // "Other / Custom…" option is always available, so an empty
+            // catalog must not block adding a custom price line.
+            disabled={loading || numericId === null}
           >
             {t("customer_pricing.add_button")}
           </button>
@@ -743,7 +743,7 @@ export function CustomerPricingPage() {
       ) : (
         <>
           <div className="card" data-testid="customer-pricing-list">
-            {prices.length === 0 ? (
+            {unifiedRows.length === 0 ? (
               <div
                 style={{ padding: "32px 24px", textAlign: "center" }}
                 data-testid="customer-pricing-empty"
@@ -761,6 +761,7 @@ export function CustomerPricingPage() {
                   <thead>
                     <tr>
                       <th>{t("customer_pricing.col_service")}</th>
+                      <th>{t("customer_pricing.col_unit")}</th>
                       <th>{t("customer_pricing.col_unit_price")}</th>
                       <th>{t("customer_pricing.col_default_price")}</th>
                       <th>{t("customer_pricing.col_vat_pct")}</th>
@@ -770,28 +771,45 @@ export function CustomerPricingPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {prices.map((price) => (
+                    {unifiedRows.map((entry) => (
                       <tr
-                        key={price.id}
+                        key={`${entry.kind}-${entry.row.id}`}
                         data-testid="customer-pricing-row"
-                        data-price-id={price.id}
-                        onClick={() => setSelected(price)}
+                        data-price-id={entry.row.id}
+                        data-price-kind={entry.kind}
+                        onClick={() => setSelected(entry)}
                       >
-                        <td>{resolveServiceName(price)}</td>
-                        <td>{price.unit_price}</td>
                         <td>
-                          {serviceById.get(price.service)?.default_unit_price ??
-                            "—"}
+                          {resolveRowName(entry)}
+                          {entry.kind === "custom" && (
+                            <span
+                              className="badge badge-muted"
+                              style={{ marginLeft: 8 }}
+                              data-testid="customer-pricing-custom-tag"
+                            >
+                              {t("customer_pricing.tag_custom")}
+                            </span>
+                          )}
                         </td>
-                        <td>{price.vat_pct}</td>
-                        <td>{formatDateOnly(price.valid_from, dateLocale)}</td>
+                        <td>{resolveUnitLabel(entry)}</td>
+                        <td>{entry.row.unit_price}</td>
                         <td>
-                          {price.valid_to === null
+                          {entry.kind === "custom"
+                            ? "—"
+                            : (serviceById.get(entry.row.service)
+                                ?.default_unit_price ?? "—")}
+                        </td>
+                        <td>{entry.row.vat_pct}</td>
+                        <td>
+                          {formatDateOnly(entry.row.valid_from, dateLocale)}
+                        </td>
+                        <td>
+                          {entry.row.valid_to === null
                             ? t("customer_pricing.valid_to_open_ended")
-                            : formatDateOnly(price.valid_to, dateLocale)}
+                            : formatDateOnly(entry.row.valid_to, dateLocale)}
                         </td>
                         <td>
-                          {price.is_active
+                          {entry.row.is_active
                             ? t("admin.status_active")
                             : t("admin.status_inactive")}
                         </td>
@@ -820,10 +838,12 @@ export function CustomerPricingPage() {
               >
                 <div>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>
-                    {t("customer_pricing.detail_title")}
+                    {selected.kind === "custom"
+                      ? t("customer_custom_pricing.detail_title")
+                      : t("customer_pricing.detail_title")}
                   </div>
                   <h3 className="section-title" style={{ margin: 0 }}>
-                    {resolveServiceName(selected)}
+                    {resolveRowName(selected)}
                   </h3>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -849,27 +869,38 @@ export function CustomerPricingPage() {
               <div className="detail-kv-list">
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
+                    {t("customer_pricing.col_unit")}
+                  </span>
+                  <span
+                    className="detail-kv-val"
+                    data-testid="customer-pricing-detail-unit"
+                  >
+                    {resolveUnitLabel(selected)}
+                  </span>
+                </div>
+                <div className="detail-kv-row">
+                  <span className="detail-kv-label">
                     {t("customer_pricing.col_unit_price")}
                   </span>
                   <span
                     className="detail-kv-val"
                     data-testid="customer-pricing-detail-unit-price"
                   >
-                    {selected.unit_price}
+                    {selected.row.unit_price}
                   </span>
                 </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
                     {t("customer_pricing.col_vat_pct")}
                   </span>
-                  <span className="detail-kv-val">{selected.vat_pct}</span>
+                  <span className="detail-kv-val">{selected.row.vat_pct}</span>
                 </div>
                 <div className="detail-kv-row">
                   <span className="detail-kv-label">
                     {t("customer_pricing.col_valid_from")}
                   </span>
                   <span className="detail-kv-val">
-                    {formatDateOnly(selected.valid_from, dateLocale)}
+                    {formatDateOnly(selected.row.valid_from, dateLocale)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -877,9 +908,9 @@ export function CustomerPricingPage() {
                     {t("customer_pricing.col_valid_to")}
                   </span>
                   <span className="detail-kv-val">
-                    {selected.valid_to === null
+                    {selected.row.valid_to === null
                       ? t("customer_pricing.valid_to_open_ended")
-                      : formatDateOnly(selected.valid_to, dateLocale)}
+                      : formatDateOnly(selected.row.valid_to, dateLocale)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -887,7 +918,7 @@ export function CustomerPricingPage() {
                     {t("customer_pricing.col_active")}
                   </span>
                   <span className="detail-kv-val">
-                    {selected.is_active
+                    {selected.row.is_active
                       ? t("admin.status_active")
                       : t("admin.status_inactive")}
                   </span>
@@ -897,7 +928,7 @@ export function CustomerPricingPage() {
                     {t("customer_pricing.field_created_at")}
                   </span>
                   <span className="detail-kv-val">
-                    {formatDate(selected.created_at, dateLocale)}
+                    {formatDate(selected.row.created_at, dateLocale)}
                   </span>
                 </div>
                 <div className="detail-kv-row">
@@ -905,217 +936,13 @@ export function CustomerPricingPage() {
                     {t("customer_pricing.field_updated_at")}
                   </span>
                   <span className="detail-kv-val">
-                    {formatDate(selected.updated_at, dateLocale)}
+                    {formatDate(selected.row.updated_at, dateLocale)}
                   </span>
                 </div>
               </div>
             </section>
           )}
 
-          {/* M5 A — custom (non-catalog) price lines. Mirrors the catalog
-              section above but with a free-text name + unit-type select. */}
-          <div
-            className="page-header"
-            style={{ marginTop: 32, marginBottom: 0 }}
-          >
-            <div>
-              <h3 className="section-title" style={{ margin: 0 }}>
-                {t("customer_custom_pricing.section_title")}
-              </h3>
-            </div>
-            <div className="page-header-actions">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                data-testid="customer-custom-pricing-add-button"
-                onClick={openCreateCustomModal}
-                disabled={numericId === null}
-              >
-                {t("customer_custom_pricing.add_button")}
-              </button>
-            </div>
-          </div>
-
-          <div
-            className="card"
-            data-testid="customer-custom-pricing-list"
-            style={{ marginTop: 16 }}
-          >
-            {customPrices.length === 0 ? (
-              <div
-                style={{ padding: "32px 24px", textAlign: "center" }}
-                data-testid="customer-custom-pricing-empty"
-              >
-                <h3 style={{ marginBottom: 8 }}>
-                  {t("customer_custom_pricing.empty_title")}
-                </h3>
-                <p className="muted" style={{ margin: 0 }}>
-                  {t("customer_custom_pricing.empty_description")}
-                </p>
-              </div>
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>{t("customer_custom_pricing.col_name")}</th>
-                      <th>{t("services.field_unit_type")}</th>
-                      <th>{t("customer_pricing.col_unit_price")}</th>
-                      <th>{t("customer_pricing.col_vat_pct")}</th>
-                      <th>{t("customer_pricing.col_valid_from")}</th>
-                      <th>{t("customer_pricing.col_valid_to")}</th>
-                      <th>{t("customer_pricing.col_active")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {customPrices.map((price) => (
-                      <tr
-                        key={price.id}
-                        data-testid="customer-custom-pricing-row"
-                        data-price-id={price.id}
-                        onClick={() => setCustomSelected(price)}
-                      >
-                        <td>{price.custom_name}</td>
-                        <td>{t(UNIT_TYPE_I18N_KEY[price.unit_type])}</td>
-                        <td>{price.unit_price}</td>
-                        <td>{price.vat_pct}</td>
-                        <td>{formatDateOnly(price.valid_from, dateLocale)}</td>
-                        <td>
-                          {price.valid_to === null
-                            ? t("customer_pricing.valid_to_open_ended")
-                            : formatDateOnly(price.valid_to, dateLocale)}
-                        </td>
-                        <td>
-                          {price.is_active
-                            ? t("admin.status_active")
-                            : t("admin.status_inactive")}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {customSelected && (
-            <section
-              className="card"
-              data-testid="customer-custom-pricing-detail"
-              style={{ marginTop: 16, padding: "20px 22px" }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  marginBottom: 12,
-                }}
-              >
-                <div>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>
-                    {t("customer_custom_pricing.detail_title")}
-                  </div>
-                  <h3 className="section-title" style={{ margin: 0 }}>
-                    {customSelected.custom_name}
-                  </h3>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-custom-pricing-edit-button"
-                    onClick={() => openEditCustomModal(customSelected)}
-                  >
-                    {t("customer_pricing.edit_button")}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-custom-pricing-delete-button"
-                    onClick={() => openCustomDeleteDialog(customSelected)}
-                  >
-                    {t("customer_pricing.delete_button")}
-                  </button>
-                </div>
-              </div>
-
-              <div className="detail-kv-list">
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("services.field_unit_type")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {t(UNIT_TYPE_I18N_KEY[customSelected.unit_type])}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.col_unit_price")}
-                  </span>
-                  <span
-                    className="detail-kv-val"
-                    data-testid="customer-custom-pricing-detail-unit-price"
-                  >
-                    {customSelected.unit_price}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.col_vat_pct")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {customSelected.vat_pct}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.col_valid_from")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {formatDateOnly(customSelected.valid_from, dateLocale)}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.col_valid_to")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {customSelected.valid_to === null
-                      ? t("customer_pricing.valid_to_open_ended")
-                      : formatDateOnly(customSelected.valid_to, dateLocale)}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.col_active")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {customSelected.is_active
-                      ? t("admin.status_active")
-                      : t("admin.status_inactive")}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.field_created_at")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {formatDate(customSelected.created_at, dateLocale)}
-                  </span>
-                </div>
-                <div className="detail-kv-row">
-                  <span className="detail-kv-label">
-                    {t("customer_pricing.field_updated_at")}
-                  </span>
-                  <span className="detail-kv-val">
-                    {formatDate(customSelected.updated_at, dateLocale)}
-                  </span>
-                </div>
-              </div>
-            </section>
-          )}
         </>
       )}
 
@@ -1126,11 +953,7 @@ export function CustomerPricingPage() {
           data-testid="customer-pricing-modal"
           role="dialog"
           aria-modal="true"
-          aria-label={
-            mode === "create"
-              ? t("customer_pricing.add_modal_title")
-              : t("customer_pricing.edit_modal_title")
-          }
+          aria-label={formModalTitle}
           style={{
             position: "fixed",
             inset: 0,
@@ -1153,10 +976,11 @@ export function CustomerPricingPage() {
               overflowY: "auto",
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
-              {mode === "create"
-                ? t("customer_pricing.add_modal_title")
-                : t("customer_pricing.edit_modal_title")}
+            <h3
+              style={{ marginTop: 0, marginBottom: 12 }}
+              data-testid="customer-pricing-modal-title"
+            >
+              {formModalTitle}
             </h3>
 
             {formError && (
@@ -1184,6 +1008,17 @@ export function CustomerPricingPage() {
                     setForm((prev) => ({ ...prev, service: "" }));
                     return;
                   }
+                  // RF-2 — the "Other / Custom…" sentinel swaps the form
+                  // to the custom shape. Leave the price + VAT the admin
+                  // may already have typed; there is no catalog default
+                  // to re-default from.
+                  if (v === CUSTOM_SERVICE_SENTINEL) {
+                    setForm((prev) => ({
+                      ...prev,
+                      service: CUSTOM_SERVICE_SENTINEL,
+                    }));
+                    return;
+                  }
                   const nextId = Number(v);
                   const svc = serviceById.get(nextId);
                   setForm((prev) => ({
@@ -1209,6 +1044,11 @@ export function CustomerPricingPage() {
                     {s.name} — {s.default_unit_price}
                   </option>
                 ))}
+                {/* RF-2 — always last: the escape hatch for work that is
+                    not in the catalog. */}
+                <option value={CUSTOM_SERVICE_SENTINEL}>
+                  {t("customer_pricing.option_custom")}
+                </option>
               </select>
               {mode === "edit" && (
                 <div className="muted small" style={{ marginTop: 4 }}>
@@ -1216,6 +1056,96 @@ export function CustomerPricingPage() {
                 </div>
               )}
             </div>
+
+            {/* RF-2 — the custom-price fields. Only rendered once the
+                "Other / Custom…" option is chosen, so the common
+                catalog path is unchanged. */}
+            {isCustomForm && (
+              <>
+                <div className="field">
+                  <label className="field-label" htmlFor="price-custom-name">
+                    {t("customer_custom_pricing.field_name")} *
+                  </label>
+                  <input
+                    id="price-custom-name"
+                    className="field-input"
+                    type="text"
+                    maxLength={200}
+                    value={form.custom_name}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        custom_name: event.target.value,
+                      }))
+                    }
+                    placeholder={t(
+                      "customer_custom_pricing.field_name_placeholder",
+                    )}
+                    data-testid="customer-pricing-input-custom-name"
+                    required
+                    disabled={formBusy}
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="field-label" htmlFor="price-unit-type">
+                    {t("services.field_unit_type")} *
+                  </label>
+                  <select
+                    id="price-unit-type"
+                    className="field-select"
+                    value={form.unit_type}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        unit_type: event.target.value as ServiceUnitType,
+                      }))
+                    }
+                    data-testid="customer-pricing-input-unit-type"
+                    required
+                    disabled={formBusy}
+                  >
+                    {UNIT_TYPES.map((ut) => (
+                      <option key={ut} value={ut}>
+                        {t(UNIT_TYPE_I18N_KEY[ut])}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* "Other" is an opaque unit with nothing to render, so
+                    it takes an operator-supplied name ("m3", "pallet"). */}
+                {form.unit_type === "OTHER" && (
+                  <div className="field">
+                    <label
+                      className="field-label"
+                      htmlFor="price-custom-unit-label"
+                    >
+                      {t("customer_custom_pricing.field_unit_label")} *
+                    </label>
+                    <input
+                      id="price-custom-unit-label"
+                      className="field-input"
+                      type="text"
+                      maxLength={50}
+                      value={form.custom_unit_label}
+                      onChange={(event) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          custom_unit_label: event.target.value,
+                        }))
+                      }
+                      placeholder={t(
+                        "customer_custom_pricing.field_unit_label_placeholder",
+                      )}
+                      data-testid="customer-pricing-input-custom-unit-label"
+                      required
+                      disabled={formBusy}
+                    />
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="form-2col">
               <div className="field">
@@ -1763,275 +1693,25 @@ export function CustomerPricingPage() {
         </div>
       )}
 
-      {/* M5 A — custom price-line create / edit modal. */}
-      {customMode !== null && (
-        <div
-          data-testid="customer-custom-pricing-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label={
-            customMode === "create"
-              ? t("customer_custom_pricing.add_modal_title")
-              : t("customer_custom_pricing.edit_modal_title")
-          }
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
-        >
-          <form
-            onSubmit={handleSubmitCustomForm}
-            className="card"
-            style={{
-              maxWidth: 600,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
-              {customMode === "create"
-                ? t("customer_custom_pricing.add_modal_title")
-                : t("customer_custom_pricing.edit_modal_title")}
-            </h3>
 
-            {customFormError && (
-              <div
-                className="alert-error"
-                role="alert"
-                style={{ marginBottom: 12 }}
-                data-testid="customer-custom-pricing-modal-error"
-              >
-                {customFormError}
-              </div>
-            )}
-
-            <div className="field">
-              <label className="field-label" htmlFor="custom-price-name">
-                {t("customer_custom_pricing.field_name")} *
-              </label>
-              <input
-                id="custom-price-name"
-                className="field-input"
-                type="text"
-                value={customForm.custom_name}
-                placeholder={t(
-                  "customer_custom_pricing.field_name_placeholder",
-                )}
-                onChange={(event) =>
-                  setCustomForm((prev) => ({
-                    ...prev,
-                    custom_name: event.target.value,
-                  }))
-                }
-                data-testid="customer-custom-pricing-input-name"
-                required
-                disabled={customFormBusy}
-              />
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="custom-price-unit-type">
-                {t("services.field_unit_type")} *
-              </label>
-              <select
-                id="custom-price-unit-type"
-                className="field-select"
-                value={customForm.unit_type}
-                onChange={(event) =>
-                  setCustomForm((prev) => ({
-                    ...prev,
-                    unit_type: event.target.value as ServiceUnitType,
-                  }))
-                }
-                data-testid="customer-custom-pricing-input-unit-type"
-                required
-                disabled={customFormBusy}
-              >
-                {UNIT_TYPES.map((ut) => (
-                  <option key={ut} value={ut}>
-                    {t(UNIT_TYPE_I18N_KEY[ut])}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-2col">
-              <div className="field">
-                <label
-                  className="field-label"
-                  htmlFor="custom-price-unit-price"
-                >
-                  {t("customer_pricing.field_unit_price")} *
-                </label>
-                <input
-                  id="custom-price-unit-price"
-                  className="field-input"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={customForm.unit_price}
-                  onChange={(event) =>
-                    setCustomForm((prev) => ({
-                      ...prev,
-                      unit_price: event.target.value,
-                    }))
-                  }
-                  data-testid="customer-custom-pricing-input-unit-price"
-                  required
-                  disabled={customFormBusy}
-                />
-              </div>
-              <div className="field">
-                <label className="field-label" htmlFor="custom-price-vat-pct">
-                  {t("customer_pricing.field_vat_pct")} *
-                </label>
-                <input
-                  id="custom-price-vat-pct"
-                  className="field-input"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={customForm.vat_pct}
-                  onChange={(event) =>
-                    setCustomForm((prev) => ({
-                      ...prev,
-                      vat_pct: event.target.value,
-                    }))
-                  }
-                  data-testid="customer-custom-pricing-input-vat-pct"
-                  required
-                  disabled={customFormBusy}
-                />
-              </div>
-            </div>
-
-            <div className="form-2col">
-              <div className="field">
-                <label
-                  className="field-label"
-                  htmlFor="custom-price-valid-from"
-                >
-                  {t("customer_pricing.field_valid_from")} *
-                </label>
-                <input
-                  id="custom-price-valid-from"
-                  className="field-input"
-                  type="date"
-                  value={customForm.valid_from}
-                  onChange={(event) =>
-                    setCustomForm((prev) => ({
-                      ...prev,
-                      valid_from: event.target.value,
-                    }))
-                  }
-                  data-testid="customer-custom-pricing-input-valid-from"
-                  required
-                  disabled={customFormBusy}
-                />
-              </div>
-              <div className="field">
-                <label className="field-label" htmlFor="custom-price-valid-to">
-                  {t("customer_pricing.field_valid_to")}
-                </label>
-                <input
-                  id="custom-price-valid-to"
-                  className="field-input"
-                  type="date"
-                  value={customForm.valid_to}
-                  onChange={(event) =>
-                    setCustomForm((prev) => ({
-                      ...prev,
-                      valid_to: event.target.value,
-                    }))
-                  }
-                  data-testid="customer-custom-pricing-input-valid-to"
-                  disabled={customFormBusy}
-                />
-                <div className="muted small" style={{ marginTop: 4 }}>
-                  {t("customer_pricing.field_valid_to_hint")}
-                </div>
-              </div>
-            </div>
-
-            <div className="field">
-              <label
-                style={{ display: "flex", alignItems: "center", gap: 8 }}
-              >
-                <input
-                  type="checkbox"
-                  checked={customForm.is_active}
-                  onChange={(event) =>
-                    setCustomForm((prev) => ({
-                      ...prev,
-                      is_active: event.target.checked,
-                    }))
-                  }
-                  data-testid="customer-custom-pricing-input-is-active"
-                  disabled={customFormBusy}
-                />
-                <span>{t("customer_pricing.field_is_active")}</span>
-              </label>
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-                marginTop: 12,
-              }}
-            >
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={closeCustomFormModal}
-                disabled={customFormBusy}
-                data-testid="customer-custom-pricing-modal-cancel"
-              >
-                {t("customer_pricing.cancel")}
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={customFormBusy}
-                data-testid="customer-custom-pricing-modal-save"
-              >
-                {customFormBusy
-                  ? t("admin_form.saving")
-                  : t("customer_pricing.save")}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
+      {/* RF-2 — one dialog for both kinds; the copy follows the target
+          because the two deletes differ (a custom line is archived). */}
       <ConfirmDialog
         ref={deleteDialogRef}
-        title={t("customer_pricing.delete_confirm_title")}
-        body={t("customer_pricing.delete_confirm_body")}
+        title={
+          deleteTarget?.kind === "custom"
+            ? t("customer_custom_pricing.delete_confirm_title")
+            : t("customer_pricing.delete_confirm_title")
+        }
+        body={
+          deleteTarget?.kind === "custom"
+            ? t("customer_custom_pricing.delete_confirm_body")
+            : t("customer_pricing.delete_confirm_body")
+        }
         confirmLabel={t("customer_pricing.delete_button")}
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
         busy={deleteBusy}
-        destructive
-      />
-
-      <ConfirmDialog
-        ref={customDeleteDialogRef}
-        title={t("customer_custom_pricing.delete_confirm_title")}
-        body={t("customer_custom_pricing.delete_confirm_body")}
-        confirmLabel={t("customer_pricing.delete_button")}
-        onConfirm={handleConfirmCustomDelete}
-        onCancel={() => setCustomDeleteTarget(null)}
-        busy={customDeleteBusy}
         destructive
       />
     </div>

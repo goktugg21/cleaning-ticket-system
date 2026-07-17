@@ -1855,6 +1855,10 @@ export interface CustomerCustomPrice {
   custom_name: string;
   unit_type: ServiceUnitType;
   unit_type_display: string;
+  // RF-2 — the operator-supplied unit name, only meaningful when
+  // `unit_type === "OTHER"` (e.g. "m3"). The backend forces it blank
+  // for every concrete unit type, so it is always "" for those.
+  custom_unit_label: string;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -1867,6 +1871,7 @@ export interface CustomerCustomPrice {
 export interface CustomerCustomPriceCreatePayload {
   custom_name: string;
   unit_type: ServiceUnitType;
+  custom_unit_label?: string;
   unit_price: string;
   vat_pct: string;
   valid_from: string;

@@ -568,15 +568,25 @@ class TicketDetailSerializer(serializers.ModelSerializer):
         # explanation — `tickets/models.py` documents it as the operator
         # explanation) and `rescheduled_from` (the prior operational
         # date). Provider-side roles (incl. STAFF) keep the full fields.
-        # The staff "unable to complete" reason and other internal notes
-        # ride on `status_history` rows and are already redacted by
-        # `TicketStatusHistorySerializer.to_representation`.
+        # Internal notes on `status_history` rows are separately redacted
+        # by `TicketStatusHistorySerializer.to_representation`.
+        #
+        # `sub_tasks` is provider-internal work breakdown in its entirety:
+        # each row nests `staff_assignments` carrying staff identity
+        # (`user_email` / `user_full_name`) ungated by the customer's
+        # `show_assigned_staff_*` flags, plus internal free-text
+        # (`assignment_note`, `completion_note`,
+        # `unable_to_complete_reason`). A CUSTOMER_USER gets an empty
+        # list — the key stays on the wire so the response shape is
+        # stable across roles. Provider-side roles (incl. STAFF) are
+        # unchanged.
         data = super().to_representation(instance)
         request = self.context.get("request")
         viewer = getattr(request, "user", None) if request else None
         if getattr(viewer, "role", None) == UserRole.CUSTOMER_USER:
             data["reschedule_reason"] = ""
             data["rescheduled_from"] = None
+            data["sub_tasks"] = []
         return data
 
     def _resolve_allowed_next_statuses(self, obj):

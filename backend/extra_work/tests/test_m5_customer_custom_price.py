@@ -478,3 +478,275 @@ class CustomerCustomPriceAuditTests(
         is_active_change = last_update.changes.get("is_active") or {}
         self.assertEqual(is_active_change.get("before"), True)
         self.assertEqual(is_active_change.get("after"), False)
+
+
+class CustomerCustomPriceCustomUnitLabelTests(
+    CustomCustomPriceFixtureMixin, APITestCase
+):
+    """RF-2 — `custom_unit_label` is the operator-supplied unit name for
+    `unit_type == OTHER` (e.g. "cm", "m3"). It is only meaningful for
+    OTHER; for any concrete unit type the serializer forces it blank
+    rather than rejecting, so a row can never persist a label that
+    contradicts its unit.
+    """
+
+    def test_create_with_other_keeps_label(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(
+                unit_type=ExtraWorkPricingUnitType.OTHER,
+                custom_unit_label="m3",
+            ),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "m3")
+        row = CustomerCustomPrice.objects.get(pk=response.data["id"])
+        self.assertEqual(row.custom_unit_label, "m3")
+
+    def test_create_with_other_strips_whitespace(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(
+                unit_type=ExtraWorkPricingUnitType.OTHER,
+                custom_unit_label="  pallet  ",
+            ),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "pallet")
+
+    def test_create_forces_label_blank_for_concrete_unit_type(self):
+        """A label sent alongside a concrete unit type is silently
+        dropped, not rejected — the unit type is the authority.
+        """
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(
+                unit_type=ExtraWorkPricingUnitType.HOURS,
+                custom_unit_label="m3",
+            ),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "")
+        row = CustomerCustomPrice.objects.get(pk=response.data["id"])
+        self.assertEqual(row.custom_unit_label, "")
+
+    def test_create_without_label_defaults_blank(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "")
+
+    def test_patch_label_on_other_row(self):
+        self.authenticate(self.super_admin)
+        row = CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Sand delivery",
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m3",
+            unit_price=Decimal("80.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {"custom_unit_label": "ton"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_unit_label"], "ton")
+        row.refresh_from_db()
+        self.assertEqual(row.custom_unit_label, "ton")
+
+    def test_patch_away_from_other_clears_stale_label(self):
+        """Switching an OTHER row to a concrete unit must not strand the
+        old label — otherwise the row would render "45.00 per m3" while
+        being priced by the hour.
+        """
+        self.authenticate(self.super_admin)
+        row = CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Sand delivery",
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m3",
+            unit_price=Decimal("80.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {"unit_type": ExtraWorkPricingUnitType.HOURS},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_unit_label"], "")
+        row.refresh_from_db()
+        self.assertEqual(row.custom_unit_label, "")
+
+    def test_patch_unrelated_field_preserves_label_on_other_row(self):
+        """A PATCH that touches neither unit_type nor the label must
+        leave an OTHER row's label intact.
+        """
+        self.authenticate(self.super_admin)
+        row = CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Sand delivery",
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m3",
+            unit_price=Decimal("80.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {"unit_price": "90.00"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_unit_label"], "m3")
+        row.refresh_from_db()
+        self.assertEqual(row.custom_unit_label, "m3")
+
+    def test_label_is_listed(self):
+        self.authenticate(self.super_admin)
+        CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Sand delivery",
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m3",
+            unit_price=Decimal("80.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.get(list_url(self.customer.id))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"][0]["custom_unit_label"], "m3")
+
+    # RF-2 / Codex P2 — OTHER REQUIRES a non-empty effective label. The
+    # UI blocks a blank OTHER label, but a direct API call bypassed the
+    # UI and could persist an OTHER row that renders as nothing.
+
+    def test_create_other_without_label_rejected(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(unit_type=ExtraWorkPricingUnitType.OTHER),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("custom_unit_label", response.data)
+        self.assertEqual(
+            response.data["custom_unit_label"][0].code,
+            "custom_unit_label_required",
+        )
+
+    def test_create_other_with_whitespace_only_label_rejected(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(
+                unit_type=ExtraWorkPricingUnitType.OTHER,
+                custom_unit_label="   ",
+            ),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["custom_unit_label"][0].code,
+            "custom_unit_label_required",
+        )
+
+    def test_create_other_with_label_accepted(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            list_url(self.customer.id),
+            self.valid_payload(
+                unit_type=ExtraWorkPricingUnitType.OTHER,
+                custom_unit_label="m3",
+            ),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "m3")
+
+    def test_patch_to_other_without_label_rejected(self):
+        """Switching a concrete-unit row to OTHER without supplying a
+        label must be rejected — the instance's label is "" (forced
+        blank while it was concrete), so there is nothing to fall back
+        on.
+        """
+        self.authenticate(self.super_admin)
+        row = CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Hourly help",
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            custom_unit_label="",
+            unit_price=Decimal("40.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {"unit_type": ExtraWorkPricingUnitType.OTHER},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["custom_unit_label"][0].code,
+            "custom_unit_label_required",
+        )
+        row.refresh_from_db()
+        self.assertEqual(row.unit_type, ExtraWorkPricingUnitType.HOURS)
+
+    def test_patch_to_other_with_label_accepted(self):
+        self.authenticate(self.super_admin)
+        row = CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Hourly help",
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            custom_unit_label="",
+            unit_price=Decimal("40.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {
+                "unit_type": ExtraWorkPricingUnitType.OTHER,
+                "custom_unit_label": "pallet",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_unit_label"], "pallet")
+        row.refresh_from_db()
+        self.assertEqual(row.unit_type, ExtraWorkPricingUnitType.OTHER)
+        self.assertEqual(row.custom_unit_label, "pallet")
+
+    def test_patch_price_only_on_other_row_keeps_label(self):
+        """A price-only PATCH on an OTHER row that already carries a
+        label must succeed and leave the label untouched — the required
+        rule falls back to the instance's existing label.
+        """
+        self.authenticate(self.super_admin)
+        row = CustomerCustomPrice.objects.create(
+            customer=self.customer,
+            custom_name="Sand delivery",
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m3",
+            unit_price=Decimal("80.00"),
+            valid_from=date(2026, 1, 1),
+        )
+        response = self.client.patch(
+            detail_url(self.customer.id, row.id),
+            {"unit_price": "90.00"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_unit_label"], "m3")
+        self.assertEqual(response.data["unit_price"], "90.00")
+        row.refresh_from_db()
+        self.assertEqual(row.custom_unit_label, "m3")
