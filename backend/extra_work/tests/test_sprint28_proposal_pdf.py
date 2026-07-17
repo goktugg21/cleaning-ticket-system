@@ -428,3 +428,49 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content[:200])
         self.assertTrue(response.content.startswith(b"%PDF"))
+
+
+class ProposalPdfWidthFitTest(TestCase):
+    """RF-10 (2026-06-24) — the humanized Dutch qty+unit label must fit
+    inside the fixed-width Qty column at any realistic quantity. The old
+    code wrote the RAW unit enum (e.g. '1.00 x SQUARE_METERS') into a 22mm
+    cell with no width fitting, overflowing into the Unit-price column."""
+
+    def test_qty_unit_label_fits_qty_column(self):
+        from fpdf import FPDF
+
+        from extra_work.models import ProposalLine
+        from extra_work.proposal_pdf import (
+            QTY_COL_WIDTH,
+            _fit_font_size,
+            _fmt_qty_unit,
+        )
+
+        pdf = FPDF(unit="mm", format="A4")
+        pdf.add_page()
+        pdf.set_font("Helvetica", "", 9)
+
+        # Longest unit label (m²) with large, thousands-grouped quantities.
+        for qty in ("2.00", "12.00", "99999.99"):
+            line = ProposalLine(
+                quantity=Decimal(qty),
+                unit_type=ExtraWorkPricingUnitType.SQUARE_METERS,
+            )
+            label = _fmt_qty_unit(line)
+            # Humanized Dutch label, not the raw enum.
+            self.assertNotIn("SQUARE_METERS", label)
+            self.assertTrue(label.endswith("m²"))
+            size = _fit_font_size(pdf, label, QTY_COL_WIDTH, 9.0, 6.0)
+            pdf.set_font_size(size)
+            self.assertLessEqual(
+                pdf.get_string_width(label),
+                QTY_COL_WIDTH - 1.2,
+                f"qty label {label!r} overflows the {QTY_COL_WIDTH}mm column",
+            )
+
+        # Dutch number formatting: '.' thousands, ',' decimals.
+        line = ProposalLine(
+            quantity=Decimal("1234.50"),
+            unit_type=ExtraWorkPricingUnitType.ITEM,
+        )
+        self.assertEqual(_fmt_qty_unit(line), "1.234,50 stuks")

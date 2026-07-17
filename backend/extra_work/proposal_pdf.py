@@ -1,5 +1,6 @@
 """
 Sprint 28 Batch 14 — Proposal PDF renderer.
+RF-10 (2026-06-24) — Dutch localization, width-safe layout, professional pass.
 
 Pure rendering layer. The HTTP wrapper lives in
 `views_proposals.ProposalPdfView`. This module exposes a single
@@ -15,11 +16,22 @@ Hard rules (mirrored from the Batch 14 brief):
     not introduce a code path that could read the field.
   * Customers do not see the override block (override reason +
     override actor email). Provider operators do.
-  * No `EUR` glyph (`€`). The default fpdf2 core fonts are
-    Latin-1 and `€` triggers a `Character ... not in font`
-    crash. We use the ASCII string "EUR" everywhere.
-  * No PDF compression — the byte-search tests grep the raw output
-    for sentinel strings.
+  * No `EUR` glyph (`€`). fpdf2's core Helvetica is Latin-1 and `€`
+    (U+20AC) raises `Character ... not in font`. We render the ASCII
+    string "EUR" everywhere. This is a deliberate, documented
+    constraint: the byte-search tests grep the RAW (uncompressed) PDF
+    for sentinel strings, which only works while text is stored as
+    readable Latin-1 bytes — an embedded Unicode TTF would encode text
+    as glyph-IDs and break them. See the memory note
+    "proposal-pdf-font-constraint" for the DejaVu+pypdf follow-up.
+  * No PDF compression — the byte-search tests grep the raw output.
+
+RF-10 — the PDF is **Dutch-only** (like the transactional emails):
+static labels, status/urgency enums, and unit types render as Dutch
+human labels; money/quantity use Dutch number formatting
+("EUR 1.234,56", comma decimals). Latin-1 renders `m²` natively; the
+`_safe_pdf_text` net still maps any remaining non-Latin-1 glyph
+(e.g. Turkish `ş/ğ`) to "?".
 """
 from __future__ import annotations
 
@@ -28,6 +40,41 @@ from decimal import Decimal
 from fpdf import FPDF
 
 from .models import Proposal, ProposalLine
+
+
+# ---------------------------------------------------------------------------
+# Dutch label maps (fallback to the raw enum when unknown, never crash).
+# ---------------------------------------------------------------------------
+_UNIT_LABELS_NL: dict[str, str] = {
+    "HOURS": "uur",
+    "SQUARE_METERS": "m²",  # m² — U+00B2 is in Latin-1, renders natively
+    "FIXED": "vast",
+    "ITEM": "stuks",
+    "OTHER": "overig",
+}
+_STATUS_LABELS_NL: dict[str, str] = {
+    "DRAFT": "Concept",
+    "SENT": "Verzonden",
+    "CUSTOMER_APPROVED": "Goedgekeurd door klant",
+    "CUSTOMER_REJECTED": "Afgewezen door klant",
+    "CANCELLED": "Geannuleerd",
+}
+_URGENCY_LABELS_NL: dict[str, str] = {
+    "NORMAL": "Normaal",
+    "HIGH": "Hoog",
+    "URGENT": "Urgent",
+}
+
+# Lines-table column widths (mm). Sum = 189mm, within the 190mm usable
+# width of an A4 page at the default fpdf2 10mm side margins. Exposed so the
+# width-fit regression test can assert against the real Qty column width.
+QTY_COL_WIDTH = 22.0
+_COL_LABEL = 60.0
+_COL_UNIT_PRICE = 25.0
+_COL_VAT_PCT = 15.0
+_COL_SUBTOTAL = 22.0
+_COL_VAT = 20.0
+_COL_TOTAL = 25.0
 
 
 # ---------------------------------------------------------------------------
@@ -65,10 +112,33 @@ def _safe_pdf_text(value: object) -> str:
     return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
+# ---------------------------------------------------------------------------
+# Dutch number / money formatting
+# ---------------------------------------------------------------------------
+def _nl_number(value: Decimal, places: int = 2) -> str:
+    """Format a Decimal in Dutch convention: '.' thousands, ',' decimals.
+
+    e.g. Decimal('1234.5') -> '1.234,50'. Negative sign preserved.
+    """
+    if value is None:
+        value = Decimal("0")
+    quant = Decimal(1).scaleb(-places)  # 0.01 for places=2
+    q = value.quantize(quant)
+    # US grouping first ('1,234.50'), then swap separators via a sentinel.
+    us = f"{q:,.{places}f}"
+    return us.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def _fmt_money(amount: Decimal | None) -> str:
     if amount is None:
         amount = Decimal("0.00")
-    return f"EUR {amount:.2f}"
+    return f"EUR {_nl_number(amount, 2)}"
+
+
+def _fmt_qty_unit(line: ProposalLine) -> str:
+    """Humanized Dutch 'quantity unit' label, e.g. '12,00 m²'."""
+    unit = _UNIT_LABELS_NL.get(line.unit_type, str(line.unit_type))
+    return f"{_nl_number(line.quantity, 2)} {unit}"
 
 
 def _fmt_iso_date(value) -> str:
@@ -80,6 +150,72 @@ def _fmt_iso_date(value) -> str:
         return value.date().isoformat()
     except AttributeError:
         return str(value)
+
+
+# ---------------------------------------------------------------------------
+# Width-aware cell rendering — no overflow at any realistic quantity.
+# ---------------------------------------------------------------------------
+def _fit_font_size(
+    pdf: FPDF,
+    text: str,
+    width: float,
+    base_size: float,
+    min_size: float = 6.0,
+    pad: float = 1.2,
+) -> float:
+    """Largest font size <= base_size (in 0.5 steps, floored at min_size)
+    at which `text` fits within `width - pad` mm. Requires the font family
+    + style to already be set; only the size is probed."""
+    avail = max(width - pad, 1.0)
+    size = base_size
+    pdf.set_font_size(size)
+    while size > min_size and pdf.get_string_width(text) > avail:
+        size -= 0.5
+        pdf.set_font_size(size)
+    return size
+
+
+def _fitted_cell(
+    pdf: FPDF,
+    width: float,
+    height: float,
+    text: str,
+    *,
+    align: str = "L",
+    border: int = 0,
+    fill: bool = False,
+    base_size: float = 9.0,
+    min_size: float = 6.0,
+) -> None:
+    """Render one table cell, shrinking the font (down to `min_size`) so the
+    text never overflows the column. Restores `base_size` afterwards so the
+    row stays visually consistent. This is the RF-10 fix for the raw-enum
+    overflow bug (a long unit label used to bleed into the next column)."""
+    safe = _safe_pdf_text(text)
+    _fit_font_size(pdf, safe, width, base_size, min_size)
+    pdf.cell(width, height, safe, border=border, align=align, fill=fill)
+    pdf.set_font_size(base_size)
+
+
+# ---------------------------------------------------------------------------
+# PDF subclass — footer (page number + provider name).
+# ---------------------------------------------------------------------------
+class _ProposalPDF(FPDF):
+    provider_name: str = ""
+
+    def footer(self) -> None:  # noqa: D401 — fpdf2 hook
+        self.set_y(-12)
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(120, 120, 120)
+        half = self.epw / 2.0
+        self.cell(half, 6, _safe_pdf_text(f"Pagina {self.page_no()}"))
+        self.cell(
+            half,
+            6,
+            _safe_pdf_text(self.provider_name),
+            align="R",
+        )
+        self.set_text_color(0, 0, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -98,79 +234,65 @@ def render_proposal_pdf(
     customer-explanation field (per line) IS rendered for both
     audiences. The internal_note field is never read for either.
     """
-    pdf = FPDF(unit="mm", format="A4")
+    extra_work = proposal.extra_work_request
+    company_name = getattr(extra_work.company, "name", "") or ""
+    customer_name = getattr(extra_work.customer, "name", "") or ""
+    building_name = getattr(extra_work.building, "name", "") or ""
+
+    pdf = _ProposalPDF(unit="mm", format="A4")
+    pdf.provider_name = company_name
     # Disable compression so test byte-search can grep raw PDF bytes.
-    # fpdf2 2.8+ exposes both `set_compression()` and the `compress`
-    # attribute — use the documented setter.
     pdf.set_compression(False)
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
 
     # ------------------------------------------------------------------
     # Title row — proposal id (left) / status (right).
     # ------------------------------------------------------------------
+    status_nl = _STATUS_LABELS_NL.get(proposal.status, str(proposal.status))
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(120, 10, _safe_pdf_text(f"Proposal #{proposal.pk}"))
+    pdf.cell(120, 10, _safe_pdf_text(f"Voorstel #{proposal.pk}"))
     pdf.set_font("Helvetica", "", 12)
     pdf.cell(
         0,
         10,
-        _safe_pdf_text(f"Status: {proposal.status}"),
+        _safe_pdf_text(f"Status: {status_nl}"),
         align="R",
         new_x="LMARGIN",
         new_y="NEXT",
     )
-    pdf.ln(2)
+    # Subtle divider under the title.
+    pdf.set_draw_color(200, 200, 200)
+    y = pdf.get_y() + 1
+    pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.ln(3)
 
     # ------------------------------------------------------------------
     # Header block — provider/customer/building (left) +
     # created/sent/decided dates (right).
     # ------------------------------------------------------------------
-    extra_work = proposal.extra_work_request
-    company_name = getattr(extra_work.company, "name", "")
-    customer_name = getattr(extra_work.customer, "name", "")
-    building_name = getattr(extra_work.building, "name", "")
+    def _kv_row(label_l: str, value_l: str, label_r: str, value_r: str) -> None:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(28, 6, _safe_pdf_text(label_l))
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(67, 6, _safe_pdf_text(value_l))
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(38, 6, _safe_pdf_text(label_r))
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 6, _safe_pdf_text(value_r), new_x="LMARGIN", new_y="NEXT")
 
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(95, 6, _safe_pdf_text("Provider:"))
-    pdf.cell(0, 6, _safe_pdf_text("Created:"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(95, 6, _safe_pdf_text(company_name))
-    pdf.cell(
-        0,
-        6,
-        _safe_pdf_text(_fmt_iso_date(proposal.created_at)),
-        new_x="LMARGIN",
-        new_y="NEXT",
+    _kv_row(
+        "Aanbieder:", company_name,
+        "Aangemaakt:", _fmt_iso_date(proposal.created_at),
     )
-
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(95, 6, _safe_pdf_text("Customer:"))
-    pdf.cell(0, 6, _safe_pdf_text("Sent:"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(95, 6, _safe_pdf_text(customer_name))
-    pdf.cell(
-        0,
-        6,
-        _safe_pdf_text(_fmt_iso_date(proposal.sent_at)),
-        new_x="LMARGIN",
-        new_y="NEXT",
+    _kv_row(
+        "Klant:", customer_name,
+        "Verzonden:", _fmt_iso_date(proposal.sent_at),
     )
-
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(95, 6, _safe_pdf_text("Building:"))
-    pdf.cell(
-        0, 6, _safe_pdf_text("Customer decided:"),
-        new_x="LMARGIN", new_y="NEXT",
-    )
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(95, 6, _safe_pdf_text(building_name))
-    pdf.cell(
-        0,
-        6,
-        _safe_pdf_text(_fmt_iso_date(proposal.customer_decided_at)),
-        new_x="LMARGIN",
-        new_y="NEXT",
+    _kv_row(
+        "Gebouw:", building_name,
+        "Klantbeslissing:", _fmt_iso_date(proposal.customer_decided_at),
     )
     pdf.ln(4)
 
@@ -178,21 +300,20 @@ def render_proposal_pdf(
     # Parent Extra Work context.
     # ------------------------------------------------------------------
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(0, 6, _safe_pdf_text("Request:"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, _safe_pdf_text("Aanvraag:"), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
     description = (extra_work.description or "")[:200]
     pdf.multi_cell(0, 5, _safe_pdf_text(description))
     pdf.ln(1)
 
+    urgency_nl = _URGENCY_LABELS_NL.get(
+        extra_work.urgency, str(extra_work.urgency)
+    )
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(30, 6, _safe_pdf_text("Urgency:"))
+    pdf.cell(30, 6, _safe_pdf_text("Urgentie:"))
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(
-        0,
-        6,
-        _safe_pdf_text(extra_work.urgency),
-        new_x="LMARGIN",
-        new_y="NEXT",
+        0, 6, _safe_pdf_text(urgency_nl), new_x="LMARGIN", new_y="NEXT",
     )
     pdf.ln(4)
 
@@ -203,19 +324,23 @@ def render_proposal_pdf(
     # this block. Adding it would break the privacy-lock byte-search
     # tests AND the Batch 14 contract.
     # ------------------------------------------------------------------
+    # Header row — bold, light fill, numeric columns right-aligned.
     pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(235, 237, 235)
     headers = (
-        ("Service / Description", 60),
-        ("Qty", 22),
-        ("Unit price", 25),
-        ("VAT %", 15),
-        ("Subtotal", 22),
-        ("VAT", 20),
-        ("Total", 25),
+        ("Dienst / Omschrijving", _COL_LABEL, "L"),
+        ("Aantal", QTY_COL_WIDTH, "R"),
+        ("Eenheidsprijs", _COL_UNIT_PRICE, "R"),
+        ("BTW %", _COL_VAT_PCT, "R"),
+        ("Subtotaal", _COL_SUBTOTAL, "R"),
+        ("BTW", _COL_VAT, "R"),
+        ("Totaal", _COL_TOTAL, "R"),
     )
-    for label, width in headers:
-        pdf.cell(width, 6, _safe_pdf_text(label), border=1)
-    pdf.ln(6)
+    for label, width, align in headers:
+        _fitted_cell(
+            pdf, width, 7, label, align=align, border=1, fill=True, base_size=9.0
+        )
+    pdf.ln(7)
 
     pdf.set_font("Helvetica", "", 9)
     for line in proposal.lines.all().select_related("service"):
@@ -224,26 +349,27 @@ def render_proposal_pdf(
     pdf.ln(4)
 
     # ------------------------------------------------------------------
-    # Totals footer.
+    # Totals footer — right-aligned numeric block.
     # ------------------------------------------------------------------
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(140, 6, _safe_pdf_text("Subtotal"), align="R")
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(
-        0, 6, _safe_pdf_text(_fmt_money(proposal.subtotal_amount)),
-        align="R", new_x="LMARGIN", new_y="NEXT",
-    )
+    def _total_row(label: str, amount, *, bold_label: bool, size: int) -> None:
+        pdf.set_font("Helvetica", "B" if bold_label else "", size)
+        pdf.cell(140, 6, _safe_pdf_text(label), align="R")
+        pdf.set_font("Helvetica", "", size)
+        pdf.cell(
+            0, 6, _safe_pdf_text(_fmt_money(amount)),
+            align="R", new_x="LMARGIN", new_y="NEXT",
+        )
 
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(140, 6, _safe_pdf_text("VAT"), align="R")
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(
-        0, 6, _safe_pdf_text(_fmt_money(proposal.vat_amount)),
-        align="R", new_x="LMARGIN", new_y="NEXT",
-    )
-
+    _total_row("Subtotaal", proposal.subtotal_amount, bold_label=True, size=10)
+    _total_row("BTW", proposal.vat_amount, bold_label=True, size=10)
+    # Grand total — slightly larger, with a thin rule above it.
+    pdf.set_draw_color(200, 200, 200)
+    ty = pdf.get_y() + 0.5
+    pdf.line(pdf.w - pdf.r_margin - 70, ty, pdf.w - pdf.r_margin, ty)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.ln(1)
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(140, 7, _safe_pdf_text("Total"), align="R")
+    pdf.cell(140, 7, _safe_pdf_text("Totaal"), align="R")
     pdf.cell(
         0, 7, _safe_pdf_text(_fmt_money(proposal.total_amount)),
         align="R", new_x="LMARGIN", new_y="NEXT",
@@ -259,7 +385,7 @@ def render_proposal_pdf(
         pdf.cell(
             0,
             6,
-            _safe_pdf_text("Override reason:"),
+            _safe_pdf_text("Reden override:"),
             new_x="LMARGIN",
             new_y="NEXT",
         )
@@ -275,7 +401,7 @@ def render_proposal_pdf(
                 override_actor_email = ""
         if override_actor_email:
             pdf.set_font("Helvetica", "B", 10)
-            pdf.cell(35, 6, _safe_pdf_text("Override by:"))
+            pdf.cell(35, 6, _safe_pdf_text("Override door:"))
             pdf.set_font("Helvetica", "", 10)
             pdf.cell(
                 0,
@@ -285,7 +411,7 @@ def render_proposal_pdf(
                 new_y="NEXT",
             )
 
-    output = pdf.output(dest="S")
+    output = pdf.output()
     # fpdf2 2.x returns `bytearray`; cast to bytes for the HttpResponse.
     return bytes(output)
 
@@ -307,17 +433,25 @@ def _render_line(pdf: FPDF, line: ProposalLine) -> None:
 
     `line.internal_note` is intentionally NOT read here. See the
     module docstring + the Batch 14 brief for the load-bearing
-    privacy contract.
+    privacy contract. Every cell is width-fitted (`_fitted_cell`) so a
+    long service name or unit can never bleed into the next column.
     """
     label = _line_label(line)
-    qty_label = f"{line.quantity:.2f} x {line.unit_type}"
-    pdf.cell(60, 6, _safe_pdf_text(label), border=1)
-    pdf.cell(22, 6, _safe_pdf_text(qty_label), border=1)
-    pdf.cell(25, 6, _safe_pdf_text(_fmt_money(line.unit_price)), border=1)
-    pdf.cell(15, 6, _safe_pdf_text(f"{line.vat_pct:.2f}"), border=1)
-    pdf.cell(22, 6, _safe_pdf_text(_fmt_money(line.line_subtotal)), border=1)
-    pdf.cell(20, 6, _safe_pdf_text(_fmt_money(line.line_vat)), border=1)
-    pdf.cell(25, 6, _safe_pdf_text(_fmt_money(line.line_total)), border=1)
+    _fitted_cell(pdf, _COL_LABEL, 6, label, align="L", border=1)
+    _fitted_cell(pdf, QTY_COL_WIDTH, 6, _fmt_qty_unit(line), align="R", border=1)
+    _fitted_cell(
+        pdf, _COL_UNIT_PRICE, 6, _fmt_money(line.unit_price), align="R", border=1
+    )
+    _fitted_cell(
+        pdf, _COL_VAT_PCT, 6, f"{_nl_number(line.vat_pct, 2)}", align="R", border=1
+    )
+    _fitted_cell(
+        pdf, _COL_SUBTOTAL, 6, _fmt_money(line.line_subtotal), align="R", border=1
+    )
+    _fitted_cell(pdf, _COL_VAT, 6, _fmt_money(line.line_vat), align="R", border=1)
+    _fitted_cell(
+        pdf, _COL_TOTAL, 6, _fmt_money(line.line_total), align="R", border=1
+    )
     pdf.ln(6)
 
     explanation = (line.customer_explanation or "").strip()
