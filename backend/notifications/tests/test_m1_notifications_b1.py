@@ -106,12 +106,18 @@ class _MsgNotifFixture(TenantFixtureMixin, APITestCase):
         )
 
     def _mk_notif(self, recipient, **kw):
+        # IA 2026-06-25 — undirected TICKET_MESSAGE rows are hidden from
+        # the feed by default (see views._feed_queryset). These fixture
+        # rows default to is_directed=True so the feed-MECHANICS tests
+        # (recipient scoping, pagination, read-all) keep exercising
+        # feed-visible rows; the default-hidden semantics themselves are
+        # covered by test_ia_feed_defaults.
         return Notification.objects.create(
             recipient=recipient,
             actor=kw.get("actor", self.manager),
             event_type=NotificationType.TICKET_MESSAGE,
             ticket=kw.get("ticket", self.ticket),
-            is_directed=kw.get("is_directed", False),
+            is_directed=kw.get("is_directed", True),
             summary=kw.get("summary", "x"),
             read_at=kw.get("read_at", None),
         )
