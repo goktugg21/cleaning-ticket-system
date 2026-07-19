@@ -75,6 +75,7 @@ import type {
   TicketList,
   TicketStatus,
 } from "../api/types";
+import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
@@ -85,7 +86,7 @@ import { RejectReasonDialog } from "../components/RejectReasonDialog";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatDateTime, formatRelative, useLocaleCode } from "../lib/intl";
+import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
 import { Avatar } from "../components/Avatar";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
@@ -2078,24 +2079,44 @@ export function ExtraWorkDetailPage() {
             </div>
           )}
 
-          {/* ----- Cart line items (Sprint 28 Batch 6) ----- */}
-          <div
-            className="card"
-            style={{ marginBottom: 16 }}
-            data-testid="extra-work-detail-line-items"
+          {/* ----- Cart line items (Sprint 28 Batch 6; RF-14 collapsible:
+              open while the request is still pre-decision, collapsed once
+              it moved on — the header keeps count + final total visible.
+              Keyed by EW id so navigating between EWs re-derives the
+              default state instead of carrying the previous card's.) ----- */}
+          <CollapsibleCard
+            key={`cart-${ew.id}`}
+            title={t("detail.line_items_section_title")}
+            meta={
+              <>
+                {t("detail.card_lines_count", {
+                  count: ew.line_items.length,
+                })}
+                {ew.final_total_amount != null && (
+                  <>
+                    {" · "}
+                    {t("detail.pricing_column_total")}:{" "}
+                    {formatMoney(ew.final_total_amount)}
+                  </>
+                )}
+              </>
+            }
+            defaultOpen={
+              ew.status === "REQUESTED" ||
+              ew.status === "UNDER_REVIEW" ||
+              ew.status === "PRICING_PROPOSED"
+            }
+            testId="extra-work-detail-line-items"
           >
-            <div className="form-section">
-              <div className="form-section-title">
-                {t("detail.line_items_section_title")}
+            {ew.line_items.length === 0 ? (
+              <div
+                className="muted small"
+                data-testid="extra-work-detail-line-items-empty"
+              >
+                {t("detail.line_items_empty")}
               </div>
-              {ew.line_items.length === 0 ? (
-                <div
-                  className="muted small"
-                  data-testid="extra-work-detail-line-items-empty"
-                >
-                  {t("detail.line_items_empty")}
-                </div>
-              ) : (
+            ) : (
+              <div className="ew-table-scroll">
                 <table className="data-table ew-pricing-table">
                   <thead>
                     <tr>
@@ -2128,9 +2149,9 @@ export function ExtraWorkDetailPage() {
                     ))}
                   </tbody>
                 </table>
-              )}
-            </div>
-          </div>
+              </div>
+            )}
+          </CollapsibleCard>
 
           {/* Sprint 8A-fix — provider-only actual-hours entry for the
               active hourly line set (approved-proposal lines or INSTANT
@@ -2174,6 +2195,7 @@ export function ExtraWorkDetailPage() {
             draftProposalDetail.actions?.can_view_proposal_pricing ===
               true && (
               <ProposalBuilder
+                key={`proposal-${draftProposalDetail.id}`}
                 ewId={ewId}
                 proposal={draftProposalDetail}
                 onChanged={reloadProposals}

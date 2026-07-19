@@ -2464,17 +2464,37 @@ table.data-table {
 }
 .att-preview-status-error { color: var(--red); }
 
-/* RF-6 — proposal builder split-screen live PDF preview. */
+/* RF-6 — proposal builder split-screen live PDF preview.
+   RF-14 — the preview column narrowed (44% -> 40%) and became
+   toggleable: `.proposal-split-single` (preview hidden) gives the
+   builder the full card width. The split now lives INSIDE the
+   collapsible pricing card, so the builder column is a plain flex
+   stack instead of its own `.card`. */
 .proposal-split {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 20px;
   align-items: start;
 }
 @media (min-width: 1100px) {
-  .proposal-split {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 44%);
+  .proposal-split:not(.proposal-split-single) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
   }
+}
+.proposal-builder-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.proposal-preview-show-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.proposal-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .proposal-preview-pane {
   position: sticky;
@@ -2522,6 +2542,70 @@ table.data-table {
   text-align: center;
 }
 .proposal-preview-status-error { color: var(--red); }
+
+/* RF-14 — collapsible section cards (Requested services / Pricing
+   proposal). The header is a full-width toggle (chevron + title +
+   count/total meta); the body unmounts when closed, leaving a compact
+   one-line card. */
+.collapsible-card { margin-bottom: 16px; }
+.collapsible-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 22px;
+}
+.collapsible-card-toggle {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.collapsible-card-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+  transform: rotate(-90deg);
+}
+.collapsible-card:not(.collapsible-card-closed) .collapsible-card-chevron {
+  transform: none;
+}
+.collapsible-card-title {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-2);
+  letter-spacing: -0.01em;
+}
+.collapsible-card-meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.collapsible-card-body { padding: 0 22px 22px; }
+
+/* RF-14 — long pricing tables: cap the height at roughly 8 rows and
+   scroll internally with a pinned header (mirrors the sticky thead of
+   .permissions-matrix-table; .data-table thead th already carries a
+   solid --surface-2 background). Short tables render unchanged — the
+   cap only bites once the content is taller than the container. */
+.ew-table-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+}
+.ew-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
 .att-thumb-ext {
   font-family: var(--f-head);
   font-size: 14px;
@@ -6187,7 +6271,8 @@ table.data-table {
 .ew-pricing-table thead th:nth-child(10) { width: 9%; }  /* ACTIONS */
 .ew-pricing-table th,
 .ew-pricing-table td {
-  padding: 12px 14px;
+  /* RF-14 comfort pass — a touch more air per row. */
+  padding: 13px 16px;
 }
 .ew-pricing-table .ew-pricing-totals-row td {
   padding-top: 16px;

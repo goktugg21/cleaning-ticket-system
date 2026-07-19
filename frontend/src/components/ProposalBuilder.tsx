@@ -12,7 +12,7 @@
 // components); the row/add-line helpers stay local to this file.
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, FileText, Plus, RefreshCw } from "lucide-react";
+import { Check, FileText, Plus, RefreshCw, X } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
@@ -25,9 +25,15 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import type { ExtraWorkUnitType, ProposalDetail, ProposalLine } from "../api/types";
 import { formatMoney } from "../lib/intl";
+import { CollapsibleCard } from "./CollapsibleCard";
 import { InvoiceLineRow, InvoiceLineTotalsRow } from "./InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "./invoiceLineColumns";
 import { NoteEditorDialog } from "./NoteEditorDialog";
+
+// RF-14 — the live preview pane's visibility survives navigation within
+// a tab session (sessionStorage), so an operator who prefers the full-
+// width builder is not forced to re-hide the pane on every EW.
+const PREVIEW_OPEN_KEY = "ew-proposal-preview-open";
 
 const UNIT_TYPE_VALUES: ExtraWorkUnitType[] = [
   "HOURS",
@@ -374,10 +380,13 @@ function ProposalPreviewPane({
   ewId,
   proposalId,
   refreshNonce,
+  onHide,
 }: {
   ewId: number | string;
   proposalId: number;
   refreshNonce: number;
+  // RF-14 — hides the pane entirely (builder takes the full width).
+  onHide: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [url, setUrl] = useState<string | null>(null);
@@ -427,18 +436,30 @@ function ProposalPreviewPane({
           <FileText size={14} strokeWidth={2.2} />
           <span style={{ marginLeft: 6 }}>{t("detail.live_preview_title")}</span>
         </span>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={() => setManualNonce((n) => n + 1)}
-          disabled={loading}
-          data-testid="proposal-live-preview-refresh"
-        >
-          <RefreshCw size={13} strokeWidth={2.2} />
-          <span style={{ marginLeft: 6 }}>
-            {t("detail.live_preview_refresh")}
-          </span>
-        </button>
+        <span className="proposal-preview-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => setManualNonce((n) => n + 1)}
+            disabled={loading}
+            data-testid="proposal-live-preview-refresh"
+          >
+            <RefreshCw size={13} strokeWidth={2.2} />
+            <span style={{ marginLeft: 6 }}>
+              {t("detail.live_preview_refresh")}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onHide}
+            aria-label={t("detail.live_preview_hide")}
+            title={t("detail.live_preview_hide")}
+            data-testid="proposal-live-preview-hide"
+          >
+            <X size={14} strokeWidth={2.2} />
+          </button>
+        </span>
       </div>
       <div className="proposal-preview-body">
         {error ? (
@@ -491,6 +512,17 @@ export function ProposalBuilder({
   // RF-6 — bumped after every successful mutation (via `run`) so the live
   // PDF preview refetches. Not per-keystroke: only settled saves move it.
   const [previewNonce, setPreviewNonce] = useState(0);
+  // RF-14 — whether the live preview pane is shown at all. Hidden, the
+  // builder takes the full card width and the PDF is not fetched.
+  const [previewOpen, setPreviewOpen] = useState(
+    () => sessionStorage.getItem(PREVIEW_OPEN_KEY) !== "0",
+  );
+  const togglePreview = () =>
+    setPreviewOpen((o) => {
+      const next = !o;
+      sessionStorage.setItem(PREVIEW_OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
 
   const { me } = useAuth();
   const isProvider =
@@ -590,17 +622,51 @@ export function ProposalBuilder({
     );
   };
 
+  // RF-14 — the whole pricing area (builder + preview) is a collapsible
+  // card: open while the proposal still needs action (pricing a DRAFT,
+  // deciding a SENT one), collapsed for anything historical.
+  const actionPending =
+    proposal.status === "DRAFT" || proposal.status === "SENT";
+
   return (
-    <div className="proposal-split" data-testid="extra-work-proposal-split">
-    <div
-      className="card"
-      style={{ marginBottom: 16 }}
-      data-testid="extra-work-proposal-builder"
+    <CollapsibleCard
+      title={t("detail.proposal_builder_title")}
+      meta={
+        <>
+          {t("detail.card_lines_count", { count: proposal.lines.length })}
+          {" · "}
+          {t("detail.pricing_column_total")}:{" "}
+          {formatMoney(proposal.total_amount)}
+        </>
+      }
+      defaultOpen={actionPending}
+      testId="extra-work-proposal-card"
     >
-      <div className="form-section">
-        <div className="form-section-title">
-          {t("detail.proposal_builder_title")}
-        </div>
+    <div
+      className={
+        previewOpen ? "proposal-split" : "proposal-split proposal-split-single"
+      }
+      data-testid="extra-work-proposal-split"
+    >
+      <div
+        className="proposal-builder-main"
+        data-testid="extra-work-proposal-builder"
+      >
+        {!previewOpen && (
+          <div className="proposal-preview-show-row">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={togglePreview}
+              data-testid="proposal-live-preview-show"
+            >
+              <FileText size={13} strokeWidth={2.2} />
+              <span style={{ marginLeft: 6 }}>
+                {t("detail.live_preview_show")}
+              </span>
+            </button>
+          </div>
+        )}
         <p className="muted small" style={{ marginTop: 0 }}>
           {t("detail.proposal_builder_helper")}
         </p>
@@ -618,33 +684,35 @@ export function ProposalBuilder({
         {proposal.lines.length === 0 ? (
           <p className="muted small">{t("detail.proposal_builder_empty")}</p>
         ) : (
-          <table className="data-table ew-pricing-table">
-            <thead>
-              <tr>
-                {INVOICE_LINE_COLUMN_KEYS.map((key) => (
-                  <th key={key}>{t(key)}</th>
+          <div className="ew-table-scroll">
+            <table className="data-table ew-pricing-table">
+              <thead>
+                <tr>
+                  {INVOICE_LINE_COLUMN_KEYS.map((key) => (
+                    <th key={key}>{t(key)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {proposal.lines.map((line) => (
+                  <InvoiceLineRow
+                    key={line.id}
+                    lineKind="proposal"
+                    line={line}
+                    editable={canEdit}
+                    onRemove={canEdit ? () => removeLine(line.id) : undefined}
+                    rowTestId="extra-work-proposal-line-row"
+                    subLabel={renderNoteSub(line)}
+                  />
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {proposal.lines.map((line) => (
-                <InvoiceLineRow
-                  key={line.id}
-                  lineKind="proposal"
-                  line={line}
-                  editable={canEdit}
-                  onRemove={canEdit ? () => removeLine(line.id) : undefined}
-                  rowTestId="extra-work-proposal-line-row"
-                  subLabel={renderNoteSub(line)}
+                <InvoiceLineTotalsRow
+                  subtotal={proposal.subtotal_amount}
+                  vatAmount={proposal.vat_amount}
+                  total={proposal.total_amount}
                 />
-              ))}
-              <InvoiceLineTotalsRow
-                subtotal={proposal.subtotal_amount}
-                vatAmount={proposal.vat_amount}
-                total={proposal.total_amount}
-              />
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         )}
 
         {/* Add-line composer — the ONLY editing surface. Live per-line
@@ -793,12 +861,15 @@ export function ProposalBuilder({
           </div>
         )}
       </div>
+      {previewOpen && (
+        <ProposalPreviewPane
+          ewId={ewId}
+          proposalId={proposal.id}
+          refreshNonce={previewNonce}
+          onHide={togglePreview}
+        />
+      )}
     </div>
-      <ProposalPreviewPane
-        ewId={ewId}
-        proposalId={proposal.id}
-        refreshNonce={previewNonce}
-      />
-    </div>
+    </CollapsibleCard>
   );
 }

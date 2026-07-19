@@ -102,10 +102,16 @@ The father's "select" button: confirm many completions at once.
 2. **Quick-wins sprint** (from received feedback that further feedback can't invalidate) → **PR #100**, then deploy: **RF-3** Tickets top-level page · **RF-4** tuck the ticket audit timeline away · **RF-5** attachment type + in-app preview (recon the backend serving path).
 3. **PDF & Preview sprint** → **PR #101**, then deploy: **RF-10** proposal-PDF quality (Dutch-only) · **RF-6** split-screen live proposal preview · **RF-12** attachment thumbnails.
 4. **Continue-without-feedback work (agreed 2026-06-24):** ~~**PR #102** — `sub_tasks` CUSTOMER_USER redaction (privacy) + **RF-2** unified Add-price flow with "Other/Custom" (adds an additive free-text `custom_unit_label` to CustomerCustomPrice — also delivers the core of backlog #1).~~ **DONE — PR #102, deployed to crmtest.** ~~Then **PR #103** — **RF-1** WhatsApp-style message inbox (per-recipient read state, aggregation endpoint, logo avatars) with **RF-11** (EW Messages card restyle) riding along.~~ **DONE — PR #103, deployed to crmtest.** ~~Then **PR #104** — **IA & Effectiveness** consolidation: disjoint Notificaties/Berichten (message events out of the feed by default), customer-detail content tabs 4→2 with filter chips, inbox unread-toggle + mark-all-read, clarity pass (subtitles, SA empty-state, terminology sweep).~~ **DONE — PR #104, deployed to crmtest.**
-5. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
-6. **Fixing & Auditing Sprint** — the full batch + **RF-8** module/permission presentation + **RF-9**/backlog #7 density + Department + RF-7 + codebase audit + reconcile this checklist.
-7. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
-8. **Production hardening** (TLS · real SMTP · non-root containers · `ALLOWED_HOSTS` healthcheck fix under `DEBUG=False` · Postgres backups) → **CD** → **Sentry DSNs**. → Production-ready, barring further feedback.
+5. **Post-#104 queue (agreed with Göktuğ, 2026-06-25):**
+   - **PR #105** — **RF-14** EW-detail comfort (collapsible Requested-services/Pricing-proposal cards, scrollable long tables, preview-pane toggle + relaxed spacing) + **RF-15** formal branded PDFs (Osius logo header, embedded font with real €, both PDF families).
+   - **PR #106** — **RF-8** module/permission presentation: design+build now (bundle list pending Göktuğ's sign-off).
+   - **PR #107** — **RF-9** assignment density: simple-first assign flow AND enlarged detail areas, combined.
+   - **PR #108** — **RF-13** invoices v1: overview page, filterable by customer AND building. Tickets get NO invoiced status — billing stays on EW; convert-to-EW is the bridge.
+   - **PR #109** — **RF-16** Dashboard vs Tickets distinction/polish (after the run above).
+6. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
+7. **Fixing & Auditing Sprint** — the full batch + Department + RF-7 + codebase audit + reconcile this checklist. (RF-8 and RF-9 pulled forward into the #105–#109 queue above.)
+8. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
+9. **Production hardening** (TLS · real SMTP · non-root containers · `ALLOWED_HOSTS` healthcheck fix under `DEBUG=False` · Postgres backups) → **CD** → **Sentry DSNs**. → Production-ready, barring further feedback.
 
 **Ordering decision (testing vs Fixing & Auditing):** testing runs AFTER Fixing & Auditing. The missing coverage is E2E + frontend (the UI layer); the backend already has a CI test suite protecting the audit's backend changes. The Fixing & Auditing sprint mostly reshapes the UI (new dropdowns, invoice page/PDF, attachment previews, layout/density), so E2E/frontend tests written first would be invalidated by those changes — tests deliver durable value when they lock in final behavior. *Caveat — decide at the fork:* if the feedback returns small/cosmetic, the UI is already near-final and testing-first becomes reasonable; revisit when feedback lands.
 
@@ -158,6 +164,14 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 **RF-12 — Attachment thumbnails without a click (Göktuğ, 2026-06-24).** Post-#100, click-to-view + download work well. New ask: the attachment cards should show a real preview with no click — images render the actual image as the card; PDFs render a first-page thumbnail (client-side render feasibility decided at recon; graceful fallback to the type badge). Ships in the PDF & Preview sprint.
 
 **RF-13 — Invoices get their own page (Göktuğ, 2026-06-24).** Confirms backlog #2: a dedicated invoices page/workflow is the direction. Waits on the father's invoice-integration answers; designed in Fixing & Auditing.
+
+**RF-14 — EW detail pricing area: preview squeeze + long-list comfort (Göktuğ, 2026-06-25).** The live proposal preview (RF-6) squeezes the Pricing proposal section; relax it. Make **Requested services** + **Pricing proposal** collapsible/scrollable for long lists. May be what RF-7 meant — **RF-7 itself stays open** for Ramazan to pinpoint.
+
+**RF-15 — Formal branded PDFs (Göktuğ, 2026-06-25).** Osius logo header + embedded font with real € across **proposal PDFs and report PDF exports** — a formal, branded document pass on both PDF families.
+
+**RF-16 — Dashboard and Tickets show nearly the same content (Göktuğ, 2026-06-25).** Distinction/polish between the two surfaces — queued after the current run.
+
+**Decisions (with Göktuğ, 2026-06-25):** **RF-8** = design+build now (bundle list pending Göktuğ's sign-off); **RF-9** = simple-first AND enlarged details, combined; **RF-13** = v1 invoices overview now, filterable by customer AND building; tickets get **NO** invoiced status (billing stays on EW; convert-to-EW is the bridge).
 
 *(Note: proposal-10's `f — 1.00 x OTHER @ 0.00` line was confirmed junk demo data, not a bug.)*
 

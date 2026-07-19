@@ -7,16 +7,19 @@ The 11 cases below pin:
     inherits the parent EW 404).
   * DRAFT invisibility for customers (proposal-detail parity).
   * Privacy lock: `internal_note` is NEVER present in the rendered
-    PDF bytes — for ANY caller. (Two tests prove this for both the
-    provider and customer audience.)
+    PDF — for ANY caller. (Two tests prove this for both the provider
+    and customer audience.) RF-15 embedded a Unicode TTF, which stores
+    text as glyph IDs, so sentinel PRESENCE is now proven against the
+    pypdf-extracted page text; sentinel ABSENCE is asserted on both
+    the extracted text AND the raw bytes (defense in depth).
   * Provider-only override block (override_reason is rendered for
     provider; stripped for customer).
   * Read-only contract: no `ProposalTimelineEvent` is emitted on a
     customer PDF read of a SENT proposal — even though
     `ProposalDetailView` DOES emit `CUSTOMER_VIEWED` for the same
     customer + same proposal.
-  * Unicode safety: the safe-text helper kills the classic fpdf2
-    `Character ... not in font` crash on `€` / en-dash inputs.
+  * Unicode rendering: the embedded DejaVu face renders `€` and the
+    full charset (Turkish characters) instead of mapping them away.
 
 Fixture mirrors `test_sprint28_proposal.py` to keep the surface
 familiar.
@@ -25,9 +28,11 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from pypdf import PdfReader
 from rest_framework.test import APIClient
 
 from accounts.models import UserRole
@@ -56,10 +61,20 @@ from extra_work.models import (
 User = get_user_model()
 PASSWORD = "StrongerTestPassword123!"
 
-# Sentinel strings the byte-search tests grep on the raw PDF output.
+# Sentinel strings the privacy-lock tests search for in the rendered
+# PDF (extracted text for presence; extracted text + raw bytes for
+# absence).
 EXPLANATION_SENTINEL = "EXPLANATION-PUBLIC-XYZ"
 INTERNAL_SENTINEL = "SECRET-PROVIDER-XYZ"
 OVERRIDE_SENTINEL = "OVERRIDE-REASON-ABC123"
+
+
+def _pdf_text(data: bytes) -> str:
+    """All page text of `data`, extracted via pypdf. The embedded
+    DejaVu font writes a ToUnicode CMap, so extraction round-trips the
+    original strings (including € and Turkish characters)."""
+    reader = PdfReader(BytesIO(data))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 def _mk(email: str, role: str, **extra) -> User:
@@ -311,10 +326,13 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
             self._pdf_url(ew.id, proposal.id)
         )
         self.assertEqual(response.status_code, 200)
-        # internal_note is NEVER rendered, even for the provider.
+        text = _pdf_text(response.content)
+        # internal_note is NEVER rendered, even for the provider —
+        # absent from the extracted text AND the raw bytes.
+        self.assertNotIn(INTERNAL_SENTINEL, text)
         self.assertNotIn(INTERNAL_SENTINEL.encode(), response.content)
         # The customer-visible explanation IS rendered for the provider.
-        self.assertIn(EXPLANATION_SENTINEL.encode(), response.content)
+        self.assertIn(EXPLANATION_SENTINEL, text)
 
     # ------------------------------------------------------------------
     # 7. Privacy lock — customer read
@@ -328,8 +346,10 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
             self._pdf_url(ew.id, proposal.id)
         )
         self.assertEqual(response.status_code, 200)
+        text = _pdf_text(response.content)
+        self.assertNotIn(INTERNAL_SENTINEL, text)
         self.assertNotIn(INTERNAL_SENTINEL.encode(), response.content)
-        self.assertIn(EXPLANATION_SENTINEL.encode(), response.content)
+        self.assertIn(EXPLANATION_SENTINEL, text)
 
     # ------------------------------------------------------------------
     # 8. Override block — visible to provider
@@ -346,7 +366,7 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
             self._pdf_url(ew.id, proposal.id)
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(OVERRIDE_SENTINEL.encode(), response.content)
+        self.assertIn(OVERRIDE_SENTINEL, _pdf_text(response.content))
 
     # ------------------------------------------------------------------
     # 9. Override block — stripped for customer
@@ -363,6 +383,7 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
             self._pdf_url(ew.id, proposal.id)
         )
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn(OVERRIDE_SENTINEL, _pdf_text(response.content))
         self.assertNotIn(OVERRIDE_SENTINEL.encode(), response.content)
 
     # ------------------------------------------------------------------
@@ -384,13 +405,13 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
         self.assertEqual(ProposalTimelineEvent.objects.count(), before)
 
     # ------------------------------------------------------------------
-    # 11. Unicode safety — no font-glyph crash
+    # 11. Unicode rendering — € + full charset (RF-15)
     # ------------------------------------------------------------------
     def test_pdf_handles_unicode_safely(self):
         ew = self._make_ew()
-        # The default Latin-1 PDF core font cannot render `€` or the
-        # en-dash — without the safe-text helper this would raise
-        # `Character ... not in font` mid-render.
+        # RF-15 — the embedded DejaVu face must RENDER the euro sign
+        # and Turkish characters (the old Latin-1 core font mapped €
+        # to "EUR" and Turkish glyphs to "?").
         proposal = Proposal.objects.create(
             extra_work_request=ew,
             created_by=self.admin,
@@ -410,7 +431,7 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
             unit_type=ExtraWorkPricingUnitType.HOURS,
             unit_price=Decimal("50.00"),
             vat_pct=Decimal("21.00"),
-            customer_explanation="Cafe — EUR 50 €",
+            customer_explanation="Şükrü's Café — İş ğüşiöç € 50",
             internal_note="should-not-render-XYZ",
         )
         proposal.recompute_totals()
@@ -428,17 +449,28 @@ class ProposalPdfTests(ProposalPdfFixtureMixin, TestCase):
         )
         self.assertEqual(response.status_code, 200, response.content[:200])
         self.assertTrue(response.content.startswith(b"%PDF"))
+        text = _pdf_text(response.content)
+        # Real glyphs survive the render + extraction round-trip.
+        self.assertIn("Şükrü's Café", text)
+        self.assertIn("İş ğüşiöç € 50", text)
+        # Money strings use the real euro sign, not the "EUR" fallback.
+        self.assertIn("€ 50,00", text)
 
 
 class ProposalPdfWidthFitTest(TestCase):
     """RF-10 (2026-06-24) — the humanized Dutch qty+unit label must fit
     inside the fixed-width Qty column at any realistic quantity. The old
     code wrote the RAW unit enum (e.g. '1.00 x SQUARE_METERS') into a 22mm
-    cell with no width fitting, overflowing into the Unit-price column."""
+    cell with no width fitting, overflowing into the Unit-price column.
+
+    RF-15 — probes with the embedded DejaVu face (the font the renderer
+    actually uses), whose metrics are wider than core Helvetica, so the
+    worst-case width check stays meaningful after the rebrand."""
 
     def test_qty_unit_label_fits_qty_column(self):
         from fpdf import FPDF
 
+        from config.pdf_branding import FONT_FAMILY, register_fonts
         from extra_work.models import ProposalLine
         from extra_work.proposal_pdf import (
             QTY_COL_WIDTH,
@@ -447,8 +479,9 @@ class ProposalPdfWidthFitTest(TestCase):
         )
 
         pdf = FPDF(unit="mm", format="A4")
+        register_fonts(pdf)
         pdf.add_page()
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font(FONT_FAMILY, "", 9)
 
         # Longest unit label (m²) with large, thousands-grouped quantities.
         for qty in ("2.00", "12.00", "99999.99"):
