@@ -2854,6 +2854,53 @@ table.data-table {
   border: 1px solid var(--green);
 }
 
+/* RF-19 — stable two-row add-line grid (proposal composer). Fixed
+   grid templates: cells compress as the builder column narrows (e.g.
+   preview open vs collapsed); the form never re-wraps, so the note
+   row and actions hold their position while values change. */
+.proposal-addline-top {
+  display: grid;
+  grid-template-columns:
+    minmax(110px, 2fr)
+    minmax(84px, 1.1fr)
+    minmax(56px, 0.7fr)
+    minmax(68px, 0.8fr)
+    minmax(52px, 0.6fr)
+    minmax(76px, 0.9fr)
+    minmax(76px, 0.9fr)
+    minmax(80px, 0.9fr);
+  gap: 10px;
+  align-items: end;
+}
+.proposal-addline-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 10px;
+}
+.proposal-addline-top .field,
+.proposal-addline-bottom .field {
+  min-width: 0;
+}
+.proposal-addline-top .field-input {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.proposal-addline-actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .proposal-addline-top {
+    grid-template-columns: 1fr 1fr;
+  }
+  .proposal-addline-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* RF-18 — dashboard info-widget row (compact count/euro + label). */
 .widget-row {
   display: grid;

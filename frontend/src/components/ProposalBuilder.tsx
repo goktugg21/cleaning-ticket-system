@@ -11,6 +11,7 @@
 // Only `ProposalBuilder` is exported (react-refresh/only-export-
 // components); the row/add-line helpers stay local to this file.
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, FileText, Plus, RefreshCw, X } from "lucide-react";
 
@@ -165,16 +166,25 @@ function NoteBox({
 }
 
 // Shared field cluster for the add-line form.
+//
+// RF-19 (#107) — fixed two-row grid instead of one wrapping flex row:
+// row 1 = description / unit / qty / unit price / VAT % / computed
+// subtotal-VAT-total; row 2 (always present, fixed position) = the two
+// note triggers + the caller's actions (actionsSlot). Cells compress
+// via the grid template as the column narrows — the form never
+// re-wraps, so nothing jumps when values or the preview pane change.
 function LineFields({
   form,
   setForm,
   disabled,
   showInternal,
+  actionsSlot,
 }: {
   form: LineFormState;
   setForm: (next: LineFormState) => void;
   disabled: boolean;
   showInternal: boolean;
+  actionsSlot?: ReactNode;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   // Which note modal (if any) is open for THIS line editor instance.
@@ -186,6 +196,7 @@ function LineFields({
   const money = liveLineMoney(form.quantity, form.unit_price, form.vat_pct);
   return (
     <>
+    <div className="proposal-addline-top">
       <div className="field ew-line-field-grow">
         <span className="field-label">{t("detail.pricing_form_description")}</span>
         <input
@@ -250,6 +261,8 @@ function LineFields({
       <MoneyBox label={t("detail.pricing_column_subtotal")} value={money.subtotal} />
       <MoneyBox label={t("detail.pricing_column_vat")} value={money.vat} />
       <MoneyBox label={t("detail.pricing_column_total")} value={money.total} />
+    </div>
+    <div className="proposal-addline-bottom">
       <NoteBox
         label={t("detail.pricing_customer_note_button")}
         value={form.customer_explanation}
@@ -266,6 +279,8 @@ function LineFields({
           testId="proposal-line-internal-note-box"
         />
       )}
+      {actionsSlot}
+    </div>
       {noteModal === "customer" && (
         <NoteEditorDialog
           title={t("detail.pricing_customer_note_modal_title")}
@@ -336,7 +351,7 @@ function ProposalAddLine({
   });
   return (
     <div
-      className="ew-line-row ew-line-row-card"
+      className="ew-line-row-card proposal-addline"
       data-testid="proposal-add-line-form"
       style={{ marginTop: 12 }}
     >
@@ -345,26 +360,28 @@ function ProposalAddLine({
         setForm={setForm}
         disabled={disabled}
         showInternal
+        actionsSlot={
+          <div className="proposal-addline-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={disabled || !form.description.trim()}
+              onClick={() => onAdd(payloadFromForm(form, true))}
+              data-testid="proposal-add-line-submit"
+            >
+              {t("detail.proposal_add_line")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={disabled}
+              onClick={onCancel}
+            >
+              {t("common:cancel")}
+            </button>
+          </div>
+        }
       />
-      <div className="ew-line-row-actions" style={{ display: "flex", gap: 8 }}>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          disabled={disabled || !form.description.trim()}
-          onClick={() => onAdd(payloadFromForm(form, true))}
-          data-testid="proposal-add-line-submit"
-        >
-          {t("detail.proposal_add_line")}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={disabled}
-          onClick={onCancel}
-        >
-          {t("common:cancel")}
-        </button>
-      </div>
     </div>
   );
 }
