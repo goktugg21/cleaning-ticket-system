@@ -4,7 +4,9 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Layers, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+import { getMySlots } from "../api/admin";
 import { getExtraWorkStats, listExtraWork } from "../api/extraWork";
+import { getInboxUnreadCount } from "../api/inbox";
 import { listNotifications, notificationHref } from "../api/notifications";
 import type {
   ExtraWorkStats,
@@ -18,10 +20,16 @@ import type {
 } from "../api/types";
 import { bulkConfirmTickets } from "../api/tickets";
 import { useAuth } from "../auth/AuthContext";
-import { isProviderManagementRole } from "../auth/permissions";
+import {
+  canAccessBilling,
+  canAccessExtraWork,
+  isProviderManagementRole,
+  isStaffRole,
+} from "../auth/permissions";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatDateTime } from "../lib/intl";
+import { currentMonth, splitOpenInvoiced } from "../lib/billing";
+import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
 type SLAFilterValue =
   | ""
@@ -472,6 +480,46 @@ export function DashboardPage({
     null,
   );
 
+  // RF-18 (#107) — info-widget data (dashboard variant only). One fetch
+  // per widget on mount (+ the shared auto-refresh); role-ineligible
+  // widgets never fetch; failures keep the "—" placeholder.
+  const [inboxUnread, setInboxUnread] = useState<number | null>(null);
+  const [billingMonthTotals, setBillingMonthTotals] = useState<{
+    openTotal: number;
+    invoicedTotal: number;
+  } | null>(null);
+  const [todaySlotCount, setTodaySlotCount] = useState<number | null>(null);
+
+  const loadWidgets = useCallback(async () => {
+    if (isTicketsPage) return;
+    const localDateKey = (iso: string | null): string | null => {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return null;
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    const [inbox, billing, slots] = await Promise.allSettled([
+      getInboxUnreadCount(),
+      canAccessBilling(userRole)
+        ? listExtraWork({ billing_period: currentMonth(), page_size: 500 })
+        : Promise.resolve(null),
+      isStaffRole(userRole) ? getMySlots() : Promise.resolve(null),
+    ]);
+    if (inbox.status === "fulfilled") setInboxUnread(inbox.value);
+    if (billing.status === "fulfilled" && billing.value !== null) {
+      setBillingMonthTotals(splitOpenInvoiced(billing.value.results));
+    }
+    if (slots.status === "fulfilled" && slots.value !== null) {
+      const today = localDateKey(new Date().toISOString());
+      setTodaySlotCount(
+        slots.value.filter(
+          (s) => localDateKey(s.scheduled_start_at) === today,
+        ).length,
+      );
+    }
+  }, [isTicketsPage, userRole]);
+
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
@@ -506,12 +554,14 @@ export function DashboardPage({
     loadExtraWorkStats();
     loadMyCounts();
     loadAttention();
+    loadWidgets();
   }, [
     loadStats,
     loadStatsByBuilding,
     loadExtraWorkStats,
     loadMyCounts,
     loadAttention,
+    loadWidgets,
   ]);
 
   useEffect(() => {
@@ -521,6 +571,7 @@ export function DashboardPage({
       loadStatsByBuilding();
       loadExtraWorkStats();
       loadAttention();
+      loadWidgets();
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => {
       window.clearInterval(handle);
@@ -531,6 +582,7 @@ export function DashboardPage({
     loadStatsByBuilding,
     loadExtraWorkStats,
     loadAttention,
+    loadWidgets,
   ]);
 
   useEffect(() => {
@@ -759,6 +811,81 @@ export function DashboardPage({
             <div className="kpi-meta">{t("ops_kpi_urgent_meta")}</div>
           </div>
         </div>
+
+        {/* RF-18 (#107) — compact info widgets: count/euro + label +
+            deep link with the right preset. Role-aware (a widget the
+            role cannot act on never renders or fetches); complements
+            the KPI hero and attention cards. */}
+        <section
+          className="widget-row"
+          data-testid="dashboard-widget-row"
+          style={{ marginTop: 12 }}
+        >
+          <Link to="/inbox" className="info-widget" data-testid="widget-inbox">
+            <span className="info-widget-value">{fmt(inboxUnread)}</span>
+            <span className="info-widget-label">{t("widgets.inbox")}</span>
+          </Link>
+          {canAccessExtraWork(userRole) && (
+            <Link
+              to="/extra-work?status=UNDER_REVIEW"
+              className="info-widget"
+              data-testid="widget-awaiting-pricing"
+            >
+              <span className="info-widget-value">
+                {fmt(extraWorkStats?.awaiting_pricing ?? null)}
+              </span>
+              <span className="info-widget-label">
+                {t("widgets.awaiting_pricing")}
+              </span>
+            </Link>
+          )}
+          {canAccessExtraWork(userRole) && (
+            <Link
+              to="/extra-work?status=PRICING_PROPOSED"
+              className="info-widget"
+              data-testid="widget-awaiting-customer"
+            >
+              <span className="info-widget-value">
+                {fmt(extraWorkStats?.awaiting_customer_approval ?? null)}
+              </span>
+              <span className="info-widget-label">
+                {t("widgets.awaiting_customer")}
+              </span>
+            </Link>
+          )}
+          {canAccessBilling(userRole) && (
+            <Link
+              to="/invoices"
+              className="info-widget"
+              data-testid="widget-billing"
+            >
+              <span className="info-widget-value">
+                {billingMonthTotals
+                  ? formatMoney(billingMonthTotals.openTotal)
+                  : "—"}
+              </span>
+              <span className="info-widget-label">
+                {billingMonthTotals
+                  ? t("widgets.billing_month", {
+                      invoiced: formatMoney(billingMonthTotals.invoicedTotal),
+                    })
+                  : t("widgets.billing_month_loading")}
+              </span>
+            </Link>
+          )}
+          {isStaffRole(userRole) && (
+            <Link
+              to="/agenda"
+              className="info-widget"
+              data-testid="widget-today-slots"
+            >
+              <span className="info-widget-value">{fmt(todaySlotCount)}</span>
+              <span className="info-widget-label">
+                {t("widgets.today_slots")}
+              </span>
+            </Link>
+          )}
+        </section>
 
         {/* M6.3 — "My work" summary. Provider-management only ("my
             created items" is a provider-admin concept). Each card links

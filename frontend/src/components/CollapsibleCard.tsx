@@ -19,6 +19,7 @@ export function CollapsibleCard({
   defaultOpen,
   testId,
   headerExtra,
+  persistKey,
   children,
 }: {
   title: string;
@@ -26,9 +27,24 @@ export function CollapsibleCard({
   defaultOpen: boolean;
   testId?: string;
   headerExtra?: ReactNode;
+  // RF-17 — optional sessionStorage key: the collapse state survives
+  // navigation within the tab session. Omitted = per-mount state only.
+  persistKey?: string;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(() => {
+    if (persistKey) {
+      const stored = sessionStorage.getItem(persistKey);
+      if (stored !== null) return stored === "1";
+    }
+    return defaultOpen;
+  });
+  const toggle = () =>
+    setOpen((o) => {
+      const next = !o;
+      if (persistKey) sessionStorage.setItem(persistKey, next ? "1" : "0");
+      return next;
+    });
   return (
     <section
       className={
@@ -43,7 +59,7 @@ export function CollapsibleCard({
         <button
           type="button"
           className="collapsible-card-toggle"
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggle}
           aria-expanded={open}
           data-testid={testId ? `${testId}-toggle` : undefined}
         >

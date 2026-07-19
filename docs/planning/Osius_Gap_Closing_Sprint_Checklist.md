@@ -172,6 +172,14 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 
 **Decisions (with Göktuğ, 2026-06-26 — the #106 combined sprint):** **RF-8 bundle design approved:** module cards **Meldingen** + **Extra werk**, each a master on/off + 3 coarse toggles, all existing depth behind an **Advanced** ("Geavanceerd") section. **RF-9 direction:** simple-first AND enlarged details combined (collapsed summary + prominent Toewijzen; expand for the enlarged detail layout). **RF-13 v1 scope:** overview page, customer+building filters, the existing mark-invoiced granularity — no new billing model. **RF-16 direction:** dashboard = overview/attention cards ("Te bevestigen", "Niet toegewezen", "Recente activiteit"); the full lists live exclusively on the Tickets / Extra Work pages.
 
+**RF-17 — Ticket-detail right-side sections not collapsible, narrow column (Göktuğ, 2026-06-27).** The right-side sections (Workflow, Scheduling, Ticket Details, Assignment, Responsible managers, …) are not collapsible and waste horizontal space — make them collapsible and widen the column. Fulfills the card half of backlog #7 (owner's call, without waiting for Ramazan).
+
+**RF-18 — Dashboard too empty (Göktuğ, 2026-06-27).** Add compact info widgets from existing endpoints: unread messages, awaiting pricing, proposals awaiting customer, month billing open/invoiced, today's slots.
+
+**RF-19 — Proposal-builder add-line form reflows (Göktuğ, 2026-06-27).** The add-line form reflows as content grows, pushing the Internal/Customer note down — stabilize the grid.
+
+**#106 review (Göktuğ, 2026-06-27):** #106 deployed + owner-reviewed; the invoices page and settings approved as-is. → Sprint #107 = RF-17 + RF-18 + RF-19 (frontend-only).
+
 *(Note: proposal-10's `f — 1.00 x OTHER @ 0.00` line was confirmed junk demo data, not a bug.)*
 
 **Meeting notes (2026-06-23, for the audit sprint):** Department/event are **category-like** fields; names must stay editable/customer-flexible ("herkese uymuyor") — refines backlog #6. Ramazan will do a **full side-by-side review** vs their current system and deliver the complete gap list at once (the agreed batch — Göktuğ implements it in one pass). He validated the pricing work (bulk raise, customer-specific prices, **price history preserved — old EWs keep their old prices**). The credentials/permissions area of their *current* tool is their worst pain point; he'll study ours as the reference.

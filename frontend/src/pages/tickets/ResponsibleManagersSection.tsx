@@ -12,9 +12,10 @@
 // async callbacks (no synchronous setState in an effect body).
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { Users, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { CollapsibleCard } from "../../components/CollapsibleCard";
 import { getApiError } from "../../api/client";
 import {
   addManagerAssignments,
@@ -128,15 +129,13 @@ export function ResponsibleManagersSection({
   }
 
   return (
-    <div className="card" data-testid="responsible-managers-section">
-      <div className="section-head">
-        <div className="card-head-icon">
-          <span className="card-head-icon-glyph">
-            <Users size={14} strokeWidth={2.2} />
-          </span>
-          <span className="card-head-icon-title">{t("resp_mgr.title")}</span>
-        </div>
-      </div>
+    <CollapsibleCard
+      title={t("resp_mgr.title")}
+      meta={t("resp_mgr.count", { count: rows.length })}
+      defaultOpen
+      persistKey="ticket-side-resp-mgr"
+      testId="responsible-managers-section"
+    >
       <div style={{ padding: "0 18px 14px" }}>
         <p className="muted small" style={{ margin: "0 0 10px" }}>
           {t("resp_mgr.desc")}
@@ -242,6 +241,6 @@ export function ResponsibleManagersSection({
           </button>
         </form>
       </div>
-    </div>
+    </CollapsibleCard>
   );
 }

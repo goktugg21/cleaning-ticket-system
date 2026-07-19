@@ -102,6 +102,12 @@
   "attention.view_all": "Alles bekijken",
   "attention.empty": "Niets op dit moment",
   "attention.unassigned_chip": "Alleen niet-toegewezen items worden getoond",
+  "widgets.inbox": "Ongelezen berichten",
+  "widgets.awaiting_pricing": "Wacht op prijsvoorstel",
+  "widgets.awaiting_customer": "Wacht op klantbeslissing",
+  "widgets.billing_month": "open deze maand · {{invoiced}} gefactureerd",
+  "widgets.billing_month_loading": "Facturatie deze maand",
+  "widgets.today_slots": "Werkblokken vandaag",
 
   "work_view_label": "Operationeel werk",
   "work_view_all": "Al het werk",

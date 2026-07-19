@@ -26,6 +26,7 @@ import { getApiError } from "../../api/client";
 import { setTicketSchedule, clearTicketSchedule } from "../../api/admin";
 import { formatDate } from "../../lib/intl";
 import type { TicketDetail, TicketStatus } from "../../api/types";
+import { CollapsibleCard } from "../../components/CollapsibleCard";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 
@@ -183,22 +184,17 @@ export function TicketScheduleCard({
     busy || !dateValue || (isReschedule && !reason.trim());
 
   return (
-    <div className="card" data-testid="ticket-schedule-card">
-      <div className="section-head">
-        <div
-          className="section-head-title"
-          style={{
-            fontSize: 11,
-            fontWeight: 800,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            color: "var(--text-faint)",
-          }}
-        >
-          {t("schedule.card_title")}
-        </div>
-      </div>
-
+    <CollapsibleCard
+      title={t("schedule.card_title")}
+      meta={
+        ticket.scheduled_start_at
+          ? formatScheduledDate(ticket.scheduled_start_at)
+          : t("schedule.not_scheduled")
+      }
+      defaultOpen
+      persistKey="ticket-side-schedule"
+      testId="ticket-schedule-card"
+    >
       <div style={{ padding: "14px 18px 16px" }}>
         {/* Current value (read-only for everyone). */}
         <div
@@ -416,6 +412,6 @@ export function TicketScheduleCard({
         busy={clearBusy}
         destructive
       />
-    </div>
+    </CollapsibleCard>
   );
 }

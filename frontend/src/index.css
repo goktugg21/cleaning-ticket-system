@@ -2089,7 +2089,10 @@ table.data-table {
    element entirely rather than leaving a prominent void below the title. */
 .detail-header-desc:empty { display: none; }
 
-.detail-grid { display: grid; grid-template-columns: 1fr 296px; gap: 22px; align-items: start; }
+/* RF-17 — the side column grows on wide screens (was a fixed 296px):
+   clamp keeps 296px as the floor and lets it take ~32% up to 460px so
+   the right-rail cards read as primary content. */
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) clamp(296px, 32%, 460px); gap: 22px; align-items: start; }
 .detail-main { display: flex; flex-direction: column; gap: 18px; }
 .detail-side { display: flex; flex-direction: column; gap: 14px; }
 
@@ -2851,6 +2854,85 @@ table.data-table {
   border: 1px solid var(--green);
 }
 
+/* RF-19 — stable two-row add-line grid (proposal composer). Fixed
+   grid templates: cells compress as the builder column narrows (e.g.
+   preview open vs collapsed); the form never re-wraps, so the note
+   row and actions hold their position while values change. */
+.proposal-addline-top {
+  display: grid;
+  grid-template-columns:
+    minmax(110px, 2fr)
+    minmax(84px, 1.1fr)
+    minmax(56px, 0.7fr)
+    minmax(68px, 0.8fr)
+    minmax(52px, 0.6fr)
+    minmax(76px, 0.9fr)
+    minmax(76px, 0.9fr)
+    minmax(80px, 0.9fr);
+  gap: 10px;
+  align-items: end;
+}
+.proposal-addline-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 10px;
+}
+.proposal-addline-top .field,
+.proposal-addline-bottom .field {
+  min-width: 0;
+}
+.proposal-addline-top .field-input {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.proposal-addline-actions {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .proposal-addline-top {
+    grid-template-columns: 1fr 1fr;
+  }
+  .proposal-addline-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* RF-18 — dashboard info-widget row (compact count/euro + label). */
+.widget-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.info-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.info-widget:hover {
+  border-color: var(--green);
+}
+.info-widget-value {
+  font-family: var(--f-head);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.info-widget-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* RF-16 — dashboard attention cards (replace the big work lists). */
 .attention-grid {
   display: grid;
@@ -2996,6 +3078,18 @@ a.attention-row:hover {
 /* Detail kv list */
 .detail-kv-list { display: flex; flex-direction: column; gap: 14px; padding: 6px 2px 2px; }
 .detail-kv-row { display: flex; flex-direction: column; gap: 4px; }
+/* RF-17 — with the wider side column, label + value share one line
+   (mirrors the SLA meta grid's auto/1fr pattern). Below the stack
+   breakpoint the column narrows again, so the stacked layout returns. */
+@media (min-width: 1101px) {
+  .detail-kv-list { gap: 10px; }
+  .detail-kv-row {
+    display: grid;
+    grid-template-columns: minmax(96px, auto) 1fr;
+    align-items: baseline;
+    gap: 4px 12px;
+  }
+}
 .detail-kv-label {
   font-family: var(--f-head);
   font-size: 10px;
