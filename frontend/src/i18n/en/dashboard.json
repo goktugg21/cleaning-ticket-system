@@ -95,6 +95,12 @@
   "my_work.quote_requests": "My quote requests",
   "my_work.filter_chip": "Showing only your items",
   "my_work.filter_clear": "Clear",
+  "attention.review_title": "To confirm",
+  "attention.unassigned_title": "Unassigned",
+  "attention.activity_title": "Recent activity",
+  "attention.view_all": "View all",
+  "attention.empty": "Nothing right now",
+  "attention.unassigned_chip": "Showing only unassigned",
 
   "work_view_label": "Operational work",
   "work_view_all": "All work",

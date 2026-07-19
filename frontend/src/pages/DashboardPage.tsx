@@ -4,15 +4,11 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Layers, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
-import {
-  getExtraWorkStats,
-  getExtraWorkStatsByBuilding,
-  listExtraWork,
-} from "../api/extraWork";
+import { getExtraWorkStats, listExtraWork } from "../api/extraWork";
+import { listNotifications, notificationHref } from "../api/notifications";
 import type {
   ExtraWorkStats,
-  ExtraWorkStatsByBuildingResponse,
-  ExtraWorkStatusValue,
+  Notification,
   PaginatedResponse,
   TicketList,
   TicketStats,
@@ -56,28 +52,8 @@ const STATUS_OPTIONS: TicketStatus[] = [
   "REOPENED_BY_ADMIN",
 ];
 
-// Sprint 28 Batch 9 — Extra Work status vocabulary for the dashboard
-// breakdown.
-const EXTRA_WORK_STATUS_ORDER: ExtraWorkStatusValue[] = [
-  "REQUESTED",
-  "UNDER_REVIEW",
-  "PRICING_PROPOSED",
-  "CUSTOMER_APPROVED",
-  "CUSTOMER_REJECTED",
-  "CANCELLED",
-];
-
-const EXTRA_WORK_STATUS_KEY: Record<ExtraWorkStatusValue, string> = {
-  REQUESTED: "extra_work_status_requested",
-  UNDER_REVIEW: "extra_work_status_under_review",
-  PRICING_PROPOSED: "extra_work_status_pricing_proposed",
-  CUSTOMER_APPROVED: "extra_work_status_customer_approved",
-  // Sprint 29 Batch 29.8 — operational segment dashboard labels.
-  IN_PROGRESS: "extra_work_status_in_progress",
-  COMPLETED: "extra_work_status_completed",
-  CUSTOMER_REJECTED: "extra_work_status_customer_rejected",
-  CANCELLED: "extra_work_status_cancelled",
-};
+// (RF-16 removed the dashboard Extra Work status breakdown — the EW
+// status vocabulary now lives with the list on ExtraWorkListPage.)
 
 const PRIORITY_OPTIONS: Priority[] = ["NORMAL", "HIGH", "URGENT"];
 
@@ -189,12 +165,22 @@ export function DashboardPage({
   const [extraWorkStats, setExtraWorkStats] = useState<ExtraWorkStats | null>(
     null,
   );
-  const [extraWorkByBuilding, setExtraWorkByBuilding] =
-    useState<ExtraWorkStatsByBuildingResponse | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
 
-  const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
+  // RF-16 (#106) — the Tickets page accepts ?status= and ?unassigned=1
+  // presets so the dashboard's attention cards can deep-link into the
+  // full list with the right filter applied (read once at mount; the
+  // dropdowns own the state afterwards).
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
+    const raw = new URLSearchParams(window.location.search).get("status");
+    return raw && (STATUS_OPTIONS as string[]).includes(raw)
+      ? (raw as TicketStatus)
+      : "";
+  });
+  const [unassignedFilter, setUnassignedFilter] = useState(
+    () => new URLSearchParams(window.location.search).get("unassigned") === "1",
+  );
   const [priorityFilter, setPriorityFilter] = useState<Priority | "">("");
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
@@ -226,36 +212,10 @@ export function DashboardPage({
       : "";
   })();
 
-  // Sprint 28 Batch 13 (rework) — URL-backed work-view segmented
-  // control. The "all" view renders one unified Recent operational
-  // items table (tickets share columns with an Extra Work shortcut
-  // row); "tickets" and "extra-work" each focus a single half of the
-  // operation. Defaults to "all" and never appears in the URL when
-  // the active value is "all" (cleaner deep links).
-  type WorkView = "all" | "tickets" | "extra-work";
-  const workView: WorkView = (() => {
-    // RF-3 — the dedicated Tickets page is always the tickets surface,
-    // regardless of any ?view= param, so the work-strip toggle (hidden
-    // here) can never switch it away.
-    if (isTicketsPage) return "tickets";
-    const raw = searchParams.get("view") || "";
-    if (raw === "tickets" || raw === "extra-work") return raw;
-    return "all";
-  })();
-  const setWorkView = useCallback(
-    (value: WorkView) => {
-      const nextParams = new URLSearchParams(searchParams);
-      if (value === "all") {
-        nextParams.delete("view");
-      } else {
-        nextParams.set("view", value);
-      }
-      setSearchParams(nextParams, { replace: true });
-    },
-    [searchParams, setSearchParams],
-  );
-  const showTickets = workView === "all" || workView === "tickets";
-  const showExtraWork = workView === "all" || workView === "extra-work";
+  // RF-16 (#106) — the work-view segmented control is gone: the full
+  // list views are exclusive to the Tickets / Extra Work pages, and
+  // the dashboard renders attention cards instead. The old ?view=
+  // deep links simply land on the overview now (no route changes).
   const setSlaFilter = useCallback(
     (value: SLAFilterValue) => {
       const nextSearch = new URLSearchParams(searchParams);
@@ -288,10 +248,12 @@ export function DashboardPage({
     if (priorityFilter) params.priority = priorityFilter;
     if (searchActive.trim()) params.search = searchActive.trim();
     if (slaFilter) params.sla = slaFilter;
-    // M6.3 — "my work" deep-links. Only applied in the tickets view
-    // (where the clear chip is shown), so the toggle preserving these
-    // URL params can't silently filter All work / other views.
-    if (workView === "tickets") {
+    // RF-16 — unassigned preset (attention-card deep link). Uses the
+    // backend filterset's assigned_to isnull lookup.
+    if (unassignedFilter) params.assigned_to__isnull = "true";
+    // M6.3 — "my work" deep-links. Only applied on the Tickets page
+    // (where the clear chip is shown).
+    if (isTicketsPage) {
       if (searchParams.get("mine") === "1" && me?.id) params.created_by = me.id;
       const typeParam = searchParams.get("type");
       if (typeParam) params.type = typeParam;
@@ -305,13 +267,15 @@ export function DashboardPage({
     priorityFilter,
     searchActive,
     slaFilter,
+    unassignedFilter,
     searchParams,
     me,
-    workView,
+    isTicketsPage,
   ]);
 
   const loadTickets = useCallback(async () => {
-    if (!showTickets) return;
+    // RF-16 — the ticket LIST only renders on the Tickets page now.
+    if (!isTicketsPage) return;
     setLoading(true);
     setError("");
 
@@ -329,7 +293,7 @@ export function DashboardPage({
     } finally {
       setLoading(false);
     }
-  }, [queryParams, showTickets]);
+  }, [queryParams, isTicketsPage]);
 
   useEffect(() => {
     loadTickets();
@@ -472,7 +436,8 @@ export function DashboardPage({
   }, [me?.id, userRole]);
 
   const loadStatsByBuilding = useCallback(async () => {
-    if (!showTickets) return;
+    // The by-building side panel renders on the Tickets page only.
+    if (!isTicketsPage) return;
     try {
       const response = await api.get<TicketStatsByBuildingResponse>(
         "/tickets/stats/by-building/",
@@ -481,7 +446,7 @@ export function DashboardPage({
     } catch {
       // Card empties out if the endpoint fails.
     }
-  }, [showTickets]);
+  }, [isTicketsPage]);
 
   const loadExtraWorkStats = useCallback(async () => {
     try {
@@ -492,33 +457,61 @@ export function DashboardPage({
     }
   }, []);
 
-  const loadExtraWorkStatsByBuilding = useCallback(async () => {
-    if (!showExtraWork) return;
+  // RF-16 (#106) — attention-card data: the manager-review queue, the
+  // unassigned-open queue (count + top rows each, via the established
+  // count-query pattern) and the recent-activity feed. Dashboard only.
+  const [attnReview, setAttnReview] = useState<{
+    count: number;
+    rows: TicketList[];
+  } | null>(null);
+  const [attnUnassigned, setAttnUnassigned] = useState<{
+    count: number;
+    rows: TicketList[];
+  } | null>(null);
+  const [attnActivity, setAttnActivity] = useState<Notification[] | null>(
+    null,
+  );
+
+  const loadAttention = useCallback(async () => {
+    if (isTicketsPage) return;
     try {
-      const data = await getExtraWorkStatsByBuilding();
-      setExtraWorkByBuilding(data);
+      const [rev, una, act] = await Promise.all([
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: { status: "WAITING_MANAGER_REVIEW", page_size: 3 },
+        }),
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: {
+            status: "OPEN",
+            assigned_to__isnull: "true",
+            page_size: 3,
+          },
+        }),
+        listNotifications({ page: 1 }),
+      ]);
+      setAttnReview({ count: rev.data.count, rows: rev.data.results });
+      setAttnUnassigned({ count: una.data.count, rows: una.data.results });
+      setAttnActivity(act.results.slice(0, 3));
     } catch {
-      // Card empties out if the endpoint fails.
+      // Cards keep their "—" placeholders on failure (mirrors loadStats).
     }
-  }, [showExtraWork]);
+  }, [isTicketsPage]);
 
   useEffect(() => {
-    // Top KPI row needs BOTH ticket and extra-work stats regardless of
-    // the active work-view (it is a 5-card unified row), so the stats
-    // loaders run unconditionally. The byBuilding loaders are still
-    // view-gated so we skip wasted network reads when the side panel
-    // is not on screen.
+    // Top KPI row needs BOTH ticket and extra-work stats (it is a
+    // 5-card unified row), so the stats loaders run unconditionally.
+    // The by-building loader is Tickets-page-gated; the attention
+    // loader is dashboard-gated.
     loadStats();
     loadStatsByBuilding();
     loadExtraWorkStats();
-    loadExtraWorkStatsByBuilding();
     loadMyCounts();
+    loadAttention();
   }, [
     loadStats,
     loadStatsByBuilding,
     loadExtraWorkStats,
-    loadExtraWorkStatsByBuilding,
     loadMyCounts,
+    loadAttention,
   ]);
 
   useEffect(() => {
@@ -527,7 +520,7 @@ export function DashboardPage({
       loadStats();
       loadStatsByBuilding();
       loadExtraWorkStats();
-      loadExtraWorkStatsByBuilding();
+      loadAttention();
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => {
       window.clearInterval(handle);
@@ -537,7 +530,7 @@ export function DashboardPage({
     loadStats,
     loadStatsByBuilding,
     loadExtraWorkStats,
-    loadExtraWorkStatsByBuilding,
+    loadAttention,
   ]);
 
   useEffect(() => {
@@ -571,12 +564,14 @@ export function DashboardPage({
     setSearchInput("");
     setSearchActive("");
     setSlaFilter("");
+    setUnassignedFilter(false);
     // Sprint 7 — clearing filters also leaves the bulk-confirm queue.
     setSelectedIds(new Set<number>());
   }
 
   const hasActiveFilters = Boolean(
-    statusFilter || priorityFilter || searchActive || slaFilter,
+    statusFilter || priorityFilter || searchActive || slaFilter ||
+      unassignedFilter,
   );
 
   // Sprint 28 Batch 13 (rework) — operations-level KPI summary. Derived
@@ -619,7 +614,6 @@ export function DashboardPage({
   const fmt = (value: number | null): string =>
     value === null ? "—" : String(value);
 
-  const ewOpenCount = extraWorkStats?.active ?? 0;
   const focusItems = useMemo(
     () =>
       tickets
@@ -776,7 +770,7 @@ export function DashboardPage({
             </div>
             <div className="operations-kpi-grid">
               <Link
-                to="/?view=tickets&mine=1&exclude_type=REPORT"
+                to="/tickets?mine=1&exclude_type=REPORT"
                 className="kpi-card"
                 data-testid="dashboard-my-tickets"
               >
@@ -786,7 +780,7 @@ export function DashboardPage({
                 </div>
               </Link>
               <Link
-                to="/?view=tickets&mine=1&type=REPORT"
+                to="/tickets?mine=1&type=REPORT"
                 className="kpi-card"
                 data-testid="dashboard-my-meldingen"
               >
@@ -819,338 +813,130 @@ export function DashboardPage({
           </section>
         )}
 
-        {/* Work-strip — segmented control band. URL-backed. */}
-        <div
-          className="work-strip"
-          role="group"
-          aria-label={t("work_view_label")}
-          data-testid="dashboard-work-view-toggle"
+        {/* RF-16 (#106) — attention cards replace the dashboard's big
+            lists (which now live exclusively on the Tickets / Extra
+            Work pages). Each card: count + top rows + a deep link into
+            the full page with the right preset applied. */}
+        <section
+          className="attention-grid"
+          data-testid="dashboard-attention"
+          style={{ marginTop: 12 }}
         >
-          <span className="work-strip-label">{t("work_view_label")}</span>
-          <div className="work-strip-toggle">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              aria-pressed={workView === "all"}
-              data-testid="dashboard-work-view-all"
-              onClick={() => setWorkView("all")}
+          <div className="card attention-card" data-testid="attention-review">
+            <div className="attention-card-head">
+              <span className="attention-card-title">
+                {t("attention.review_title")}
+              </span>
+              <span className="attention-card-count">
+                {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
+              </span>
+            </div>
+            <ul className="attention-card-list">
+              {(attnReview?.rows ?? []).map((ticket) => (
+                <li key={ticket.id}>
+                  <Link to={`/tickets/${ticket.id}`} className="attention-row">
+                    <span className="attention-row-title">{ticket.title}</span>
+                    <span className="muted small">
+                      {formatDate(ticket.created_at)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              {attnReview !== null && attnReview.rows.length === 0 && (
+                <li className="muted small">{t("attention.empty")}</li>
+              )}
+            </ul>
+            <Link
+              to="/tickets?status=WAITING_MANAGER_REVIEW"
+              className="attention-card-link"
+              data-testid="attention-review-link"
             >
-              {t("work_view_all")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              aria-pressed={workView === "tickets"}
-              data-testid="dashboard-work-view-tickets"
-              onClick={() => setWorkView("tickets")}
-            >
-              {t("work_view_tickets")}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              aria-pressed={workView === "extra-work"}
-              data-testid="dashboard-work-view-extra-work"
-              onClick={() => setWorkView("extra-work")}
-            >
-              {t("work_view_extra_work")}
-            </button>
+              {t("attention.view_all")}
+            </Link>
           </div>
-        </div>
+
+          <div
+            className="card attention-card"
+            data-testid="attention-unassigned"
+          >
+            <div className="attention-card-head">
+              <span className="attention-card-title">
+                {t("attention.unassigned_title")}
+              </span>
+              <span className="attention-card-count">
+                {attnUnassigned === null ? "—" : attnUnassigned.count}
+              </span>
+            </div>
+            <ul className="attention-card-list">
+              {(attnUnassigned?.rows ?? []).map((ticket) => (
+                <li key={ticket.id}>
+                  <Link to={`/tickets/${ticket.id}`} className="attention-row">
+                    <span className="attention-row-title">{ticket.title}</span>
+                    <span className="muted small">
+                      {formatDate(ticket.created_at)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              {attnUnassigned !== null && attnUnassigned.rows.length === 0 && (
+                <li className="muted small">{t("attention.empty")}</li>
+              )}
+            </ul>
+            <Link
+              to="/tickets?status=OPEN&unassigned=1"
+              className="attention-card-link"
+              data-testid="attention-unassigned-link"
+            >
+              {t("attention.view_all")}
+            </Link>
+          </div>
+
+          <div className="card attention-card" data-testid="attention-activity">
+            <div className="attention-card-head">
+              <span className="attention-card-title">
+                {t("attention.activity_title")}
+              </span>
+            </div>
+            <ul className="attention-card-list">
+              {(attnActivity ?? []).map((item) => {
+                const href = notificationHref(item);
+                const body = (
+                  <>
+                    <span className="attention-row-title">{item.summary}</span>
+                    <span className="muted small">
+                      {formatDate(item.created_at)}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={item.id}>
+                    {href ? (
+                      <Link to={href} className="attention-row">
+                        {body}
+                      </Link>
+                    ) : (
+                      <span className="attention-row">{body}</span>
+                    )}
+                  </li>
+                );
+              })}
+              {attnActivity !== null && attnActivity.length === 0 && (
+                <li className="muted small">{t("attention.empty")}</li>
+              )}
+            </ul>
+            <Link
+              to="/notifications"
+              className="attention-card-link"
+              data-testid="attention-activity-link"
+            >
+              {t("attention.view_all")}
+            </Link>
+          </div>
+        </section>
           </>
         )}
 
-        {/* Work area — three layouts depending on workView. */}
-        {workView === "all" && showTickets && (
-          <section
-            className="work-layout"
-            data-testid="dashboard-tickets-section"
-          >
-            <div className="dash-main">
-              <div
-                className="card"
-                data-testid="dashboard-recent-ops"
-                style={{ overflow: "hidden" }}
-              >
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("ops_recent_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("ops_recent_sub")}
-                    </div>
-                  </div>
-                  <Link
-                    to="/?view=tickets"
-                    className="btn btn-ghost btn-sm"
-                    style={{ fontWeight: 600 }}
-                  >
-                    {t("ops_recent_view_all_tickets")}
-                  </Link>
-                </div>
-
-                {loading && (
-                  <div className="loading-bar" style={{ margin: 0 }}>
-                    <div className="loading-bar-fill" />
-                  </div>
-                )}
-
-                <div className="table-wrap ticket-list-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>{t("common:type")}</th>
-                        <th>{t("common:subject")}</th>
-                        <th>{t("common:customer")}</th>
-                        <th>{t("common:facility")}</th>
-                        <th>{t("common:status")}</th>
-                        <th>{t("common:updated")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tickets.slice(0, 8).map((ticket) => (
-                        <tr
-                          key={ticket.id}
-                          className="ticket-row-clickable"
-                          role="link"
-                          tabIndex={0}
-                          onClick={() => navigate(`/tickets/${ticket.id}`)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              navigate(`/tickets/${ticket.id}`);
-                            }
-                          }}
-                        >
-                          <td>
-                            {ticket.extra_work_origin ? (
-                              <ExtraWorkOriginPill
-                                ewId={
-                                  ticket.extra_work_origin
-                                    .extra_work_request_id
-                                }
-                                testId="ticket-queue-extra-work-origin"
-                              />
-                            ) : (
-                              <span className="work-type-pill work-type-pill-ticket">
-                                {t("ops_type_ticket")}
-                              </span>
-                            )}
-                          </td>
-                          <td className="td-subject">
-                            <Link to={`/tickets/${ticket.id}`}>
-                              {ticket.title}
-                            </Link>
-                            {userRole === "STAFF" &&
-                              me?.id != null &&
-                              ticket.assigned_to === me.id && (
-                                <span
-                                  className="cell-tag cell-tag-open"
-                                  style={{ marginLeft: 8 }}
-                                  data-testid="ticket-row-assigned-to-you"
-                                >
-                                  <i />
-                                  {t("common:tickets.assigned_to_you")}
-                                </span>
-                              )}
-                          </td>
-                          <td className="td-customer">{ticket.customer_name}</td>
-                          <td className="td-facility">{ticket.building_name}</td>
-                          <td>
-                            <span className={statusCellClass(ticket.status)}>
-                              <i />
-                              {tStatus(ticket.status)}
-                            </span>
-                          </td>
-                          <td className="td-date">
-                            {formatDate(ticket.updated_at)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {!loading && tickets.length === 0 && (
-                  <div className="empty-state">
-                    <div className="empty-icon">＋</div>
-                    <div className="empty-title">
-                      {t("empty_no_tickets_title")}
-                    </div>
-                    <p className="empty-sub">{t("empty_no_tickets_sub")}</p>
-                    <Link className="btn btn-primary btn-sm" to="/tickets/new">
-                      {t("create_ticket_cta")}
-                    </Link>
-                  </div>
-                )}
-
-                {/* Extra-work shortcut row inside the same card.
-                    Honestly reflects the API limitation (no mixed-
-                    feed endpoint) without inventing a second
-                    "section". */}
-                <div className="recent-ops-extra-work-row">
-                  <span>
-                    {ewOpenCount > 0
-                      ? t("ops_recent_extra_work_link", { count: ewOpenCount })
-                      : t("ops_recent_extra_work_link_zero")}
-                  </span>
-                  <Link to="/extra-work">
-                    {t("work_view_extra_work")}
-                  </Link>
-                </div>
-              </div>
-            </div>
-
-            <div className="dash-side">
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("ops_byb_tickets_title")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "var(--text-faint)",
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {byBuilding
-                      ? t("byb_sites", { count: byBuilding.length })
-                      : ""}
-                  </span>
-                </div>
-                <div style={{ padding: "14px 18px 18px" }}>
-                  {byBuilding === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : byBuilding.length === 0 ? (
-                    <p className="muted small">{t("byb_no_buildings")}</p>
-                  ) : (
-                    <div className="bld-list">
-                      {byBuilding.slice(0, 5).map((row) => {
-                        const active =
-                          row.open +
-                          row.in_progress +
-                          row.waiting_customer_approval;
-                        const total = Math.max(active, 1);
-                        return (
-                          <div key={row.building_id}>
-                            <div className="bld-row-head">
-                              <span className="bld-row-name">
-                                {row.building_name}
-                              </span>
-                              <span className="bld-row-count">
-                                {t("byb_active_count", { count: active })}
-                              </span>
-                            </div>
-                            <div className="bld-bar">
-                              {row.open > 0 && (
-                                <div
-                                  className="bld-bar-seg no"
-                                  style={{
-                                    width: `${(row.open / total) * 100}%`,
-                                  }}
-                                />
-                              )}
-                              {row.in_progress > 0 && (
-                                <div
-                                  className="bld-bar-seg hi"
-                                  style={{
-                                    width: `${(row.in_progress / total) * 100}%`,
-                                  }}
-                                />
-                              )}
-                              {row.waiting_customer_approval > 0 && (
-                                <div
-                                  className="bld-bar-seg urg"
-                                  style={{
-                                    width: `${
-                                      (row.waiting_customer_approval / total) *
-                                      100
-                                    }%`,
-                                  }}
-                                />
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Sprint 28 Batch 13 rework: the Extra Work side card
-                  in view=all wears the legacy `dashboard-extra-work-
-                  section` testid so the existing Sprint 28 Batch 9
-                  smoke spec (which asserts the section is present
-                  alongside the tickets section) keeps resolving. The
-                  card is visually a peer side-card under the
-                  unified KPI strip — not a "pasted dashboard". */}
-              <section
-                className="card"
-                data-testid="dashboard-extra-work-section"
-              >
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("ops_byb_extra_work_title")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "var(--text-faint)",
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {extraWorkByBuilding
-                      ? t("byb_sites", {
-                          count: extraWorkByBuilding.length,
-                        })
-                      : ""}
-                  </span>
-                </div>
-                <div style={{ padding: "14px 18px 18px" }}>
-                  {extraWorkByBuilding === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : extraWorkByBuilding.length === 0 ? (
-                    <p className="muted small">
-                      {t("extra_work_byb_no_buildings")}
-                    </p>
-                  ) : (
-                    <div className="bld-list">
-                      {extraWorkByBuilding.slice(0, 5).map((row) => (
-                        <div key={row.building_id}>
-                          <div className="bld-row-head">
-                            <span className="bld-row-name">
-                              {row.building_name}
-                            </span>
-                            <span className="bld-row-count">
-                              {t("extra_work_byb_active_count", {
-                                count: row.active,
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </section>
-            </div>
-          </section>
-        )}
-
-        {workView === "tickets" && (
+        {isTicketsPage && (
           <section
             className="work-layout"
             data-testid="dashboard-tickets-section"
@@ -1172,9 +958,27 @@ export function DashboardPage({
                       data-testid="dashboard-mine-filter-chip"
                     >
                       <span>{t("my_work.filter_chip")}</span>
-                      <Link to="/?view=tickets" className="active-filter-clear">
+                      <Link to="/tickets" className="active-filter-clear">
                         {t("my_work.filter_clear")}
                       </Link>
+                    </div>
+                  )}
+                  {unassignedFilter && (
+                    <div
+                      className="active-filter-chip"
+                      data-testid="dashboard-unassigned-filter-chip"
+                    >
+                      <span>{t("attention.unassigned_chip")}</span>
+                      <button
+                        type="button"
+                        className="active-filter-clear"
+                        onClick={() => {
+                          setPage(1);
+                          setUnassignedFilter(false);
+                        }}
+                      >
+                        {t("my_work.filter_clear")}
+                      </button>
                     </div>
                   )}
                   <span
@@ -1786,136 +1590,6 @@ export function DashboardPage({
           </section>
         )}
 
-        {showExtraWork && workView === "extra-work" && (
-          <section
-            className="work-layout"
-            data-testid="dashboard-extra-work-section"
-          >
-            <div className="dash-main">
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("ops_byb_extra_work_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("extra_work_byb_sub")}
-                    </div>
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--f-head)",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "var(--text-faint)",
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {extraWorkByBuilding
-                      ? t("byb_sites", { count: extraWorkByBuilding.length })
-                      : ""}
-                  </span>
-                </div>
-                <div style={{ padding: "16px 20px 18px" }}>
-                  {extraWorkStats === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : extraWorkStats.total === 0 ? (
-                    <div
-                      className="empty-state"
-                      data-testid="dashboard-extra-work-section-empty"
-                    >
-                      <div className="empty-icon">＋</div>
-                      <div className="empty-title">
-                        {t("extra_work_section_empty")}
-                      </div>
-                    </div>
-                  ) : extraWorkByBuilding === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : extraWorkByBuilding.length === 0 ? (
-                    <p className="muted small">
-                      {t("extra_work_byb_no_buildings")}
-                    </p>
-                  ) : (
-                    <div className="bld-list">
-                      {extraWorkByBuilding.map((row) => (
-                        <div key={row.building_id}>
-                          <div className="bld-row-head">
-                            <span className="bld-row-name">
-                              {row.building_name}
-                            </span>
-                            <span className="bld-row-count">
-                              {t("extra_work_byb_active_count", {
-                                count: row.active,
-                              })}
-                            </span>
-                          </div>
-                          <div className="bld-row-foot">
-                            {row.awaiting_pricing > 0 && (
-                              <span className="hi">
-                                {t("extra_work_byb_awaiting_pricing", {
-                                  count: row.awaiting_pricing,
-                                })}
-                              </span>
-                            )}
-                            {row.awaiting_customer_approval > 0 && (
-                              <span className="urg">
-                                {t("extra_work_byb_awaiting_customer", {
-                                  count: row.awaiting_customer_approval,
-                                })}
-                              </span>
-                            )}
-                            {row.urgent > 0 && (
-                              <span className="urg">
-                                {t("extra_work_byb_urgent", {
-                                  count: row.urgent,
-                                })}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="dash-side">
-              <div className="card">
-                <div className="section-head">
-                  <div>
-                    <div className="section-head-title">
-                      {t("section_status_title")}
-                    </div>
-                    <div className="section-head-sub">
-                      {t("extra_work_section_sub")}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "14px 18px 18px" }}>
-                  {extraWorkStats === null ? (
-                    <p className="muted small">{t("loading")}</p>
-                  ) : (
-                    <div className="bld-list">
-                      {EXTRA_WORK_STATUS_ORDER.map((key) => {
-                        const value = extraWorkStats.by_status[key] ?? 0;
-                        return (
-                          <div key={key} className="bld-row-head">
-                            <span className="bld-row-name">
-                              {t(EXTRA_WORK_STATUS_KEY[key])}
-                            </span>
-                            <span className="bld-row-count">{value}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );
