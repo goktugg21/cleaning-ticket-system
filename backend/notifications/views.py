@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics
@@ -6,12 +7,44 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsAuthenticatedAndActive
 
-from .models import Notification
+from .models import Notification, NotificationPreference
 from .serializers import NotificationSerializer
 
 
+def _feed_queryset(user):
+    """IA 2026-06-25 — THE read-side chokepoint for the notification feed.
+
+    Message-type events (TICKET_MESSAGE / EXTRA_WORK_MESSAGE) are hidden
+    from the feed and every count by DEFAULT — they duplicate the
+    Berichten inbox. Two exceptions:
+      * DIRECTED rows (is_directed=True — someone explicitly addressed
+        this user) always show; this is also the only way a SUPER_ADMIN
+        receives message notifications (the fan-out excludes SA by
+        design).
+      * an explicit opt-in row (muted=False) for that event type brings
+        the type back — including its history, since suppression is
+        read-time and rows keep being emitted.
+
+    Every feed/count consumer (list, unread-count, mark-all-read) MUST
+    route through this helper so the rule cannot drift.
+    """
+    qs = Notification.objects.filter(recipient=user)
+    hidden_types = [
+        et
+        for et in NotificationPreference.USER_MUTABLE_INAPP_EVENT_TYPES
+        if not NotificationPreference.objects.filter(
+            user=user, event_type=et, muted=False
+        ).exists()
+    ]
+    if hidden_types:
+        qs = qs.exclude(
+            Q(event_type__in=hidden_types) & Q(is_directed=False)
+        )
+    return qs
+
+
 def _unread_count(user):
-    return Notification.objects.filter(recipient=user, read_at__isnull=True).count()
+    return _feed_queryset(user).filter(read_at__isnull=True).count()
 
 
 class NotificationListView(generics.ListAPIView):
@@ -19,7 +52,8 @@ class NotificationListView(generics.ListAPIView):
 
     Hard scoping: the queryset is filtered to `recipient=request.user`, so a
     user can only ever see their own notifications. The paginated response is
-    augmented with `unread_count` for the caller.
+    augmented with `unread_count` for the caller. Message-type events are
+    excluded per `_feed_queryset` unless directed or opted-in.
     """
 
     serializer_class = NotificationSerializer
@@ -27,7 +61,7 @@ class NotificationListView(generics.ListAPIView):
 
     def get_queryset(self):
         return (
-            Notification.objects.filter(recipient=self.request.user)
+            _feed_queryset(self.request.user)
             .select_related("actor", "ticket")
             .order_by("-created_at")
         )
@@ -69,12 +103,14 @@ class NotificationMarkReadView(APIView):
 
 class NotificationMarkAllReadView(APIView):
     """POST /api/notifications/read-all/ — mark all the caller's unread
-    notifications read; returns the number updated."""
+    FEED-VISIBLE notifications read; returns the number updated. Routed
+    through `_feed_queryset` so "mark all read" cannot silently consume a
+    hidden message notification the user might later opt back in to."""
 
     permission_classes = [IsAuthenticatedAndActive]
 
     def post(self, request):
-        updated = Notification.objects.filter(
-            recipient=request.user, read_at__isnull=True
+        updated = _feed_queryset(request.user).filter(
+            read_at__isnull=True
         ).update(read_at=timezone.now())
         return Response({"updated": updated})

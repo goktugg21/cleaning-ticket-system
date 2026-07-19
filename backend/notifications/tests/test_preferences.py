@@ -16,7 +16,12 @@ from test_utils import TenantFixtureMixin
 
 
 class NotificationPreferencesGetTests(TenantFixtureMixin, APITestCase):
-    def test_authenticated_user_gets_all_user_mutable_types_with_default_unmuted(self):
+    def test_authenticated_user_gets_all_user_mutable_types_with_defaults(self):
+        # IA 2026-06-25 — the endpoint now also carries the two in-app
+        # feed toggles. Email types default unmuted; in-app message types
+        # default MUTED (message events left the feed by default).
+        from notifications.models import NotificationType
+
         self.authenticate(self.customer_user)
 
         response = self.client.get(reverse("auth_notification_prefs"))
@@ -32,10 +37,16 @@ class NotificationPreferencesGetTests(TenantFixtureMixin, APITestCase):
                 NotificationEventType.TICKET_STATUS_CHANGED,
                 NotificationEventType.TICKET_ASSIGNED,
                 NotificationEventType.TICKET_UNASSIGNED,
+                NotificationType.TICKET_MESSAGE,
+                NotificationType.EXTRA_WORK_MESSAGE,
             },
         )
+        inapp = set(NotificationPreference.USER_MUTABLE_INAPP_EVENT_TYPES)
         for entry in prefs:
-            self.assertFalse(entry["muted"])
+            if entry["event_type"] in inapp:
+                self.assertTrue(entry["muted"])
+            else:
+                self.assertFalse(entry["muted"])
             self.assertTrue(entry["label"])
 
     def test_get_reflects_stored_preference(self):
