@@ -2681,6 +2681,63 @@ table.data-table {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* RF-9 — calm assignment area: summary-first slot / sub-task rows in
+   the ticket-detail StaffSlotEditor. Collapsed = one line (who / when /
+   status) behind a chevron; expanded = the enlarged detail block. */
+.slot-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+.slot-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+}
+.slot-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.slot-chevron-open {
+  transform: none;
+}
+.slot-summary-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-summary-when {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px dashed var(--border-soft);
+}
+.slot-assign-primary {
+  width: 100%;
+  justify-content: center;
+}
 .att-thumb-ext {
   font-family: var(--f-head);
   font-size: 14px;
