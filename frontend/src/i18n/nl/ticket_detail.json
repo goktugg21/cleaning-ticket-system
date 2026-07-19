@@ -259,7 +259,7 @@
   "directed.side_customer": "klant",
   "directed.private_label": "Privé (alleen de geselecteerde personen zien dit)",
   "directed.private_on_hint": "Alleen jij en de personen die je selecteert kunnen dit bericht zien.",
-  "directed.private_off_hint": "Iedereen die dit ticket kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een melding.",
+  "directed.private_off_hint": "Iedereen die dit ticket kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een notificatie.",
   "directed.private_disabled_hint": "Selecteer minstens één persoon om dit bericht privé te maken.",
   "directed.private_badge": "Privé",
   "directed.bubble_prefix": "Gericht aan:"

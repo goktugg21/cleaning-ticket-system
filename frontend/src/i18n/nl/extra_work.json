@@ -423,7 +423,7 @@
   "messages.directed_prefix": "Gericht aan:",
   "messages.private_disabled_hint": "Selecteer minstens één persoon om dit bericht privé te maken.",
   "messages.private_on_hint": "Alleen jij en de geselecteerde personen kunnen dit bericht zien.",
-  "messages.private_off_hint": "Iedereen die dit Extra Werk kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een melding.",
+  "messages.private_off_hint": "Iedereen die dit Extra Werk kan zien, ziet dit bericht; de geselecteerde personen krijgen ook een notificatie.",
   "messages.post": "Bericht plaatsen",
   "messages.sending": "Verzenden…",
   "messages.posted": "Bericht geplaatst"
