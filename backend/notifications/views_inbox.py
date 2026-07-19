@@ -143,3 +143,59 @@ class InboxMarkReadView(APIView):
             {"unread_count": inbox_logic.total_unread_count(viewer)},
             status=status.HTTP_200_OK,
         )
+
+
+class InboxMarkAllReadView(APIView):
+    """POST /api/inbox/mark-all-read/ — advance (or create) this user's
+    read cursor to now() for EVERY thread currently visible in their
+    inbox. Reuses the inbox thread enumeration (scope + the canonical
+    visibility chokepoints), so a caller can only ever mark threads they
+    can see; idempotent — a second call just re-advances watermarks.
+    """
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def post(self, request):
+        viewer = request.user
+        now = timezone.now()
+
+        cursors_t, cursors_e = inbox_logic._load_cursors(viewer)
+        ticket_ids = set(
+            inbox_logic._ticket_candidates(viewer, cursors_t).keys()
+        )
+        ew_ids = set(inbox_logic._ew_candidates(viewer, cursors_e).keys())
+
+        # Advance every existing cursor for these threads in one UPDATE...
+        MessageReadCursor.objects.filter(
+            user=viewer, ticket_id__in=ticket_ids
+        ).update(last_read_at=now)
+        MessageReadCursor.objects.filter(
+            user=viewer, extra_work_id__in=ew_ids
+        ).update(last_read_at=now)
+
+        # ...and create the missing ones in one bulk_create. Recomputing
+        # "existing" AFTER the update keeps the create set race-tight.
+        have_t = set(
+            MessageReadCursor.objects.filter(
+                user=viewer, ticket_id__in=ticket_ids
+            ).values_list("ticket_id", flat=True)
+        )
+        have_e = set(
+            MessageReadCursor.objects.filter(
+                user=viewer, extra_work_id__in=ew_ids
+            ).values_list("extra_work_id", flat=True)
+        )
+        MessageReadCursor.objects.bulk_create(
+            [
+                MessageReadCursor(user=viewer, ticket_id=tid, last_read_at=now)
+                for tid in ticket_ids - have_t
+            ]
+            + [
+                MessageReadCursor(user=viewer, extra_work_id=eid, last_read_at=now)
+                for eid in ew_ids - have_e
+            ]
+        )
+        return Response(
+            {"unread_count": inbox_logic.total_unread_count(viewer)},
+            status=status.HTTP_200_OK,
+        )

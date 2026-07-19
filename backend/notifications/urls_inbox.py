@@ -7,6 +7,7 @@ from django.urls import path
 
 from .views_inbox import (
     InboxListView,
+    InboxMarkAllReadView,
     InboxMarkReadView,
     InboxUnreadCountView,
 )
@@ -19,4 +20,9 @@ urlpatterns = [
         name="inbox-unread-count",
     ),
     path("mark-read/", InboxMarkReadView.as_view(), name="inbox-mark-read"),
+    path(
+        "mark-all-read/",
+        InboxMarkAllReadView.as_view(),
+        name="inbox-mark-all-read",
+    ),
 ]
