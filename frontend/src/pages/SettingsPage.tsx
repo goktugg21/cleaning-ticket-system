@@ -15,14 +15,18 @@ import type {
   NotificationPreferencesResponse,
 } from "../api/types";
 
-// The four user-mutable event types map to settings.json keys. The API
+// The user-mutable event types map to settings.json keys. The API
 // response also carries a label, but we override with the locale-specific
-// translation so the toggle list matches the rest of the UI.
+// translation so the toggle list matches the rest of the UI. The two
+// *_MESSAGE entries are the IA 2026-06-25 in-app feed toggles — their
+// labels spell out the default-off ("also show ... in Notifications").
 const EVENT_LABEL_KEYS: Record<NotificationEventType, string> = {
   TICKET_CREATED: "event_ticket_created",
   TICKET_STATUS_CHANGED: "event_ticket_status_changed",
   TICKET_ASSIGNED: "event_ticket_assigned",
   TICKET_UNASSIGNED: "event_ticket_unassigned",
+  TICKET_MESSAGE: "event_ticket_message_feed",
+  EXTRA_WORK_MESSAGE: "event_extra_work_message_feed",
 };
 
 type FieldErrors = Record<string, string | undefined>;

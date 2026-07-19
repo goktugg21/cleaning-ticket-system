@@ -213,11 +213,22 @@ class Notification(models.Model):
 class NotificationPreference(models.Model):
     """Per-user mute toggle for a notification event type.
 
-    Absence of a row is the default (unmuted). A row with muted=True silences
-    that event for the user. Only the user-mutable event types are stored
-    here; transactional types (PASSWORD_RESET, INVITATION_SENT) are never
+    EMAIL types (USER_MUTABLE_EVENT_TYPES): absence of a row is the
+    default (unmuted). A row with muted=True silences that event for the
+    user. Transactional types (PASSWORD_RESET, INVITATION_SENT) are never
     read from this table — those mails always go out for security and
     onboarding reasons.
+
+    IN-APP FEED types (IA 2026-06-25, USER_MUTABLE_INAPP_EVENT_TYPES):
+    the polarity is INVERTED — absence of a row means MUTED. Message
+    events (TICKET_MESSAGE / EXTRA_WORK_MESSAGE) left the notification
+    feed by default because they duplicate the Berichten inbox; a row
+    with muted=False is an explicit opt-in that brings them back.
+    Suppression is READ-time (the feed/count chokepoint in views.py),
+    not emit-time: rows keep being written, so an opt-in also restores
+    history, no data migration was needed to cover existing users, and
+    DIRECTED rows (is_directed=True — someone explicitly addressed you)
+    always show regardless of this preference.
     """
 
     USER_MUTABLE_EVENT_TYPES = (
@@ -227,6 +238,14 @@ class NotificationPreference(models.Model):
         NotificationEventType.TICKET_UNASSIGNED,
     )
 
+    # In-app feed toggles (default OFF — see docstring). Stored in the
+    # same table; the NotificationType values cannot collide with the
+    # email enum's values.
+    USER_MUTABLE_INAPP_EVENT_TYPES = (
+        NotificationType.TICKET_MESSAGE,
+        NotificationType.EXTRA_WORK_MESSAGE,
+    )
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -234,7 +253,16 @@ class NotificationPreference(models.Model):
     )
     event_type = models.CharField(
         max_length=64,
-        choices=NotificationEventType.choices,
+        choices=(
+            NotificationEventType.choices
+            + [
+                (NotificationType.TICKET_MESSAGE, "Ticket message (in-app feed)"),
+                (
+                    NotificationType.EXTRA_WORK_MESSAGE,
+                    "Extra work message (in-app feed)",
+                ),
+            ]
+        ),
     )
     muted = models.BooleanField(default=False)
     updated_at = models.DateTimeField(auto_now=True)

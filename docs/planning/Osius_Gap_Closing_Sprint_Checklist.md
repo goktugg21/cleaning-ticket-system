@@ -101,7 +101,7 @@ The father's "select" button: confirm many completions at once.
 1. ✅ **Sprint 9 — light UI/UX polish** → PR #99, deployed.
 2. **Quick-wins sprint** (from received feedback that further feedback can't invalidate) → **PR #100**, then deploy: **RF-3** Tickets top-level page · **RF-4** tuck the ticket audit timeline away · **RF-5** attachment type + in-app preview (recon the backend serving path).
 3. **PDF & Preview sprint** → **PR #101**, then deploy: **RF-10** proposal-PDF quality (Dutch-only) · **RF-6** split-screen live proposal preview · **RF-12** attachment thumbnails.
-4. **Continue-without-feedback work (agreed 2026-06-24):** ~~**PR #102** — `sub_tasks` CUSTOMER_USER redaction (privacy) + **RF-2** unified Add-price flow with "Other/Custom" (adds an additive free-text `custom_unit_label` to CustomerCustomPrice — also delivers the core of backlog #1).~~ **DONE — PR #102, deployed to crmtest.** Then **PR #103** — **RF-1** WhatsApp-style message inbox (per-recipient read state, aggregation endpoint, logo avatars) with **RF-11** (EW Messages card restyle) riding along.
+4. **Continue-without-feedback work (agreed 2026-06-24):** ~~**PR #102** — `sub_tasks` CUSTOMER_USER redaction (privacy) + **RF-2** unified Add-price flow with "Other/Custom" (adds an additive free-text `custom_unit_label` to CustomerCustomPrice — also delivers the core of backlog #1).~~ **DONE — PR #102, deployed to crmtest.** ~~Then **PR #103** — **RF-1** WhatsApp-style message inbox (per-recipient read state, aggregation endpoint, logo avatars) with **RF-11** (EW Messages card restyle) riding along.~~ **DONE — PR #103, deployed to crmtest.** Then **PR #104** — **IA & Effectiveness** consolidation: disjoint Notificaties/Berichten (message events out of the feed by default), customer-detail content tabs 4→2 with filter chips, inbox unread-toggle + mark-all-read, clarity pass (subtitles, SA empty-state, terminology sweep).
 5. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
 6. **Fixing & Auditing Sprint** — the full batch + **RF-1** WhatsApp-style message inbox (needs per-recipient read state — real backend work) + **RF-8** module/permission presentation + **RF-9**/backlog #7 density + Department + RF-7 + codebase audit + reconcile this checklist.
 7. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
@@ -123,6 +123,8 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 9. **Baseline:** system is in good shape; editing customers/users + general flows are fine; no major issues right now.
 
 ### Received feedback (logged as it arrives — reconcile into the Fixing & Auditing Sprint)
+
+**IA decisions (2026-06-25):** Notifications + Messages both stay, disjoint — message-type events default OFF in the feed (user-mutable opt-in); names locked Notificaties / Berichten / Melding-reserved; customer detail content tabs merged 4→2 with filter chips; inbox gets unread toggle + mark-all-read; Request-a-Quote nav stays (Ramazan); SA notification-emptiness confirmed BY DESIGN (deliberate fan-out exclusion, directed messages bypass it) — documented, not changed.
 
 **RF-1 — Notifications "messages" overview, WhatsApp-style (father, received 2026-06-23, voice memo).** He wants the main messages view to work like a WhatsApp chat list (WhatsApp used as the explicit analogy):
 - A conversation-list view where **each row is a ticket** (a ticket ≈ a WhatsApp chat).

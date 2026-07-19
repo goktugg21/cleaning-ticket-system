@@ -13,7 +13,6 @@ import {
   ChevronRight,
   ClipboardList,
   Contact,
-  FileText,
   LayoutGrid,
   Mail,
   MailPlus,
@@ -311,6 +310,8 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.customer_submenu.pricing")}
                   </NavLink>
+                  {/* IA 2026-06-25 — Meldingen and Offerteaanvragen merged
+                      into these two as filter chips (4 content tabs -> 2). */}
                   <NavLink
                     to={`/admin/customers/${sidebar.customerId}/extra-work`}
                     className={navClass}
@@ -322,16 +323,6 @@ export function AppShell({ children }: AppShellProps) {
                     {t("nav.customer_submenu.extra_work")}
                   </NavLink>
                   <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/quote-requests`}
-                    className={navClass}
-                    data-testid="sidebar-customer-quote-requests"
-                  >
-                    <span className="nav-icon">
-                      <FileText size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.quote_requests")}
-                  </NavLink>
-                  <NavLink
                     to={`/admin/customers/${sidebar.customerId}/tickets`}
                     className={navClass}
                     data-testid="sidebar-customer-tickets"
@@ -340,16 +331,6 @@ export function AppShell({ children }: AppShellProps) {
                       <Ticket size={16} strokeWidth={2} />
                     </span>
                     {t("nav.customer_submenu.tickets")}
-                  </NavLink>
-                  <NavLink
-                    to={`/admin/customers/${sidebar.customerId}/meldingen`}
-                    className={navClass}
-                    data-testid="sidebar-customer-meldingen"
-                  >
-                    <span className="nav-icon">
-                      <Megaphone size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.customer_submenu.meldingen")}
                   </NavLink>
                 </>
               )}

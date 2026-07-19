@@ -28,13 +28,15 @@
   "password_saving": "Opslaan…",
 
   "notifications_title": "Notificatievoorkeuren",
-  "notifications_helper": "Kies welke gebeurtenissen u per e-mail wilt ontvangen. Beveiligings- en uitnodigingsmails worden altijd verzonden.",
+  "notifications_helper": "Kies welke gebeurtenissen u per e-mail wilt ontvangen en of berichten ook in Notificaties verschijnen. Beveiligings- en uitnodigingsmails worden altijd verzonden.",
   "notifications_on": "Aan",
   "notifications_off": "Uit",
   "event_ticket_created": "Ticket aangemaakt",
   "event_ticket_status_changed": "Ticketstatus gewijzigd",
   "event_ticket_assigned": "Ticket toegewezen",
   "event_ticket_unassigned": "Ticket niet meer toegewezen",
+  "event_ticket_message_feed": "Ticketberichten ook in Notificaties tonen (standaard uit)",
+  "event_extra_work_message_feed": "Extra werk-berichten ook in Notificaties tonen (standaard uit)",
   "notifications_saved": "Notificatievoorkeuren opgeslagen.",
   "notifications_save": "Voorkeuren opslaan",
   "notifications_saving": "Opslaan…"

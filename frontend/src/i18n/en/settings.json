@@ -28,13 +28,15 @@
   "password_saving": "Saving…",
 
   "notifications_title": "Notification preferences",
-  "notifications_helper": "Choose which events trigger an email to you. Security and onboarding emails are always sent.",
+  "notifications_helper": "Choose which events trigger an email to you and whether messages also appear in Notifications. Security and onboarding emails are always sent.",
   "notifications_on": "On",
   "notifications_off": "Off",
   "event_ticket_created": "Ticket created",
   "event_ticket_status_changed": "Ticket status changed",
   "event_ticket_assigned": "Ticket assigned",
   "event_ticket_unassigned": "Ticket unassigned",
+  "event_ticket_message_feed": "Also show ticket messages in Notifications (off by default)",
+  "event_extra_work_message_feed": "Also show extra-work messages in Notifications (off by default)",
   "notifications_saved": "Notification preferences saved.",
   "notifications_save": "Save preferences",
   "notifications_saving": "Saving…"

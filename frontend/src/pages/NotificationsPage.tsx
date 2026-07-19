@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { BellOff, CheckCheck } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import {
   listNotifications,
   markAllNotificationsRead,
@@ -26,6 +27,7 @@ import { formatRelative } from "../lib/intl";
 
 export function NotificationsPage() {
   const { t } = useTranslation("common");
+  const { me } = useAuth();
   const navigate = useNavigate();
   const [items, setItems] = useState<Notification[]>([]);
   const [count, setCount] = useState(0);
@@ -127,7 +129,14 @@ export function NotificationsPage() {
           <EmptyState
             icon={BellOff}
             title={t("notifications.empty")}
-            description={t("notifications.empty_sub")}
+            description={
+              // IA 2026-06-25 — SA-only explainer: an empty SA feed is BY
+              // DESIGN (the fan-out deliberately excludes SUPER_ADMIN;
+              // only directed messages reach them), not a defect.
+              me?.role === "SUPER_ADMIN"
+                ? t("notifications.sa_empty_hint")
+                : t("notifications.empty_sub")
+            }
             testId="notification-empty"
           />
         ) : (

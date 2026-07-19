@@ -246,23 +246,47 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
 _EVENT_TYPE_LABELS = dict(NotificationEventType.choices)
 
+# IA 2026-06-25 — the in-app feed toggles ride on the same endpoint. The
+# full mutable set = email types (default unmuted) + in-app message types
+# (default MUTED — absence of a row hides message events from the feed;
+# an explicit muted=False row is the opt-in).
+_ALL_MUTABLE_EVENT_TYPES = (
+    NotificationPreference.USER_MUTABLE_EVENT_TYPES
+    + NotificationPreference.USER_MUTABLE_INAPP_EVENT_TYPES
+)
+_INAPP_LABELS = {
+    "TICKET_MESSAGE": "Ticket messages in the notification feed",
+    "EXTRA_WORK_MESSAGE": "Extra-work messages in the notification feed",
+}
+
+
+def _label_for(event_type):
+    return _INAPP_LABELS.get(
+        event_type, _EVENT_TYPE_LABELS.get(event_type, event_type)
+    )
+
+
+def _default_muted(event_type):
+    # In-app message types: absence of a row = MUTED (feed default OFF).
+    return event_type in NotificationPreference.USER_MUTABLE_INAPP_EVENT_TYPES
+
 
 class NotificationPreferenceEntrySerializer(serializers.Serializer):
     """Single entry in the read or write payload for /auth/notification-preferences/.
 
-    The label is read-only and derived from NotificationEventType.choices so
-    the UI can render a human-readable name without re-encoding the enum
-    on the frontend.
+    The label is read-only and derived from the enum choices so the UI can
+    render a human-readable name without re-encoding the enum on the
+    frontend.
     """
 
     event_type = serializers.ChoiceField(
-        choices=[(value, value) for value in NotificationPreference.USER_MUTABLE_EVENT_TYPES],
+        choices=[(value, value) for value in _ALL_MUTABLE_EVENT_TYPES],
     )
     label = serializers.SerializerMethodField()
     muted = serializers.BooleanField()
 
     def get_label(self, obj):
-        return _EVENT_TYPE_LABELS.get(obj["event_type"], obj["event_type"])
+        return _label_for(obj["event_type"])
 
 
 class NotificationPreferencesUpdateSerializer(serializers.Serializer):
@@ -284,7 +308,7 @@ class NotificationPreferencesUpdateSerializer(serializers.Serializer):
         for index, entry in enumerate(value):
             event_type = entry.get("event_type")
             muted = entry.get("muted")
-            if event_type not in NotificationPreference.USER_MUTABLE_EVENT_TYPES:
+            if event_type not in _ALL_MUTABLE_EVENT_TYPES:
                 raise serializers.ValidationError(
                     f"preferences[{index}].event_type "
                     f"'{event_type}' is not a user-mutable notification type."
@@ -308,25 +332,26 @@ class NotificationPreferencesUpdateSerializer(serializers.Serializer):
 
 
 def serialize_notification_preferences(user):
-    """Build the GET payload — one entry per USER_MUTABLE event type.
+    """Build the GET payload — one entry per mutable event type.
 
-    Missing rows fill in muted=False so the client always sees the full set
-    and never has to know which event types exist. Stored rows take
-    precedence over the default.
+    Missing rows fill in the per-type default (email types: muted=False;
+    in-app message types: muted=True — the IA 2026-06-25 feed default) so
+    the client always sees the full set and never has to know which event
+    types exist. Stored rows take precedence over the default.
     """
     stored = {
         pref.event_type: pref.muted
         for pref in NotificationPreference.objects.filter(
             user=user,
-            event_type__in=NotificationPreference.USER_MUTABLE_EVENT_TYPES,
+            event_type__in=_ALL_MUTABLE_EVENT_TYPES,
         )
     }
     entries = [
         {
             "event_type": event_type,
-            "label": _EVENT_TYPE_LABELS.get(event_type, event_type),
-            "muted": stored.get(event_type, False),
+            "label": _label_for(event_type),
+            "muted": stored.get(event_type, _default_muted(event_type)),
         }
-        for event_type in NotificationPreference.USER_MUTABLE_EVENT_TYPES
+        for event_type in _ALL_MUTABLE_EVENT_TYPES
     ]
     return {"preferences": entries}

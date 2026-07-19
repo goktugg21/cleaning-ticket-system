@@ -410,3 +410,75 @@ class InboxUnreadCountEndpointTests(_InboxFixture):
         self.authenticate(self.company_admin)
         resp = self.client.get(UNREAD)
         self.assertEqual(resp.data["unread_count"], 0)
+
+
+MARK_ALL = "/api/inbox/mark-all-read/"
+
+
+class InboxMarkAllReadTests(_InboxFixture):
+    def test_all_unread_to_zero_across_both_kinds(self):
+        self._tmsg(self.company_admin, MT.PUBLIC_REPLY, 1)
+        self._tmsg(self.company_admin, MT.PUBLIC_REPLY, 2)
+        self._ewmsg(self.company_admin, EMT.PUBLIC_REPLY, 3)
+        self.authenticate(self.cust_lm)
+        before = self.client.get(UNREAD).data["unread_count"]
+        self.assertEqual(before, 3)
+        resp = self.client.post(MARK_ALL)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["unread_count"], 0)
+        data = self._inbox(self.cust_lm)
+        self.assertTrue(all(r["unread_count"] == 0 for r in data["results"]))
+
+    def test_second_call_harmless(self):
+        self._tmsg(self.company_admin, MT.PUBLIC_REPLY, 1)
+        self.authenticate(self.cust_lm)
+        first = self.client.post(MARK_ALL)
+        second = self.client.post(MARK_ALL)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.data["unread_count"], 0)
+        self.assertEqual(first.data["unread_count"], 0)
+        # Exactly one cursor per thread survives both calls.
+        self.assertEqual(
+            MessageReadCursor.objects.filter(
+                user=self.cust_lm, ticket=self.ticket
+            ).count(),
+            1,
+        )
+
+    def test_scoping_bm_only_their_threads(self):
+        # A message on the OTHER tenant's ticket must not gain a cursor
+        # when the Building-A manager marks all read.
+        TicketMessage.objects.create(
+            ticket=self.other_ticket, author=self.other_company_admin,
+            message_type=MT.PUBLIC_REPLY, message="other tenant",
+        )
+        self._tmsg(self.customer_user, MT.PUBLIC_REPLY, 1)
+        self.authenticate(self.manager)
+        resp = self.client.post(MARK_ALL)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(
+            MessageReadCursor.objects.filter(
+                user=self.manager, ticket=self.ticket
+            ).exists()
+        )
+        self.assertFalse(
+            MessageReadCursor.objects.filter(
+                user=self.manager, ticket=self.other_ticket
+            ).exists()
+        )
+
+    def test_does_not_touch_other_users_cursors(self):
+        self._tmsg(self.company_admin, MT.PUBLIC_REPLY, 1)
+        self.authenticate(self.cust_lm)
+        self.client.post(MARK_ALL)
+        self.assertFalse(
+            MessageReadCursor.objects.filter(user=self.customer_user).exists()
+        )
+
+    def test_customer_caller_ok(self):
+        self._tmsg(self.company_admin, MT.PUBLIC_REPLY, 1)
+        self._ewmsg(self.company_admin, EMT.PUBLIC_REPLY, 2)
+        self.authenticate(self.customer_user)
+        resp = self.client.post(MARK_ALL)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["unread_count"], 0)

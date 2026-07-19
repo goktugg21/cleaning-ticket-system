@@ -1,4 +1,10 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useParams,
+} from "react-router-dom";
 import { Suspense, lazy } from "react";
 import type { ReactNode } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -109,6 +115,28 @@ function ByRole({
 }) {
   const { me } = useAuth();
   return <>{me?.role === "BUILDING_MANAGER" ? bm : admin}</>;
+}
+
+/**
+ * IA 2026-06-25 — param-preserving redirect for the retired customer
+ * content tabs (/meldingen -> /tickets?filter=meldingen,
+ * /quote-requests -> /extra-work?filter=quote_requests). A plain
+ * <Navigate to="literal"> cannot carry the :id param, hence the wrapper.
+ */
+function CustomerScopedRedirect({
+  to,
+  filter,
+}: {
+  to: string;
+  filter: string;
+}) {
+  const { id } = useParams();
+  return (
+    <Navigate
+      to={`/admin/customers/${id}/${to}?filter=${filter}`}
+      replace
+    />
+  );
 }
 
 export default function App() {
@@ -470,20 +498,19 @@ export default function App() {
               </AdminRoute>
             }
           />
+          {/* IA 2026-06-25 — the Meldingen and Quote-requests tabs merged
+              into Tickets / Extra werk (filter chips). The retired routes
+              redirect with the chip pre-applied so no deep link breaks. */}
           <Route
             path="/admin/customers/:id/meldingen"
             element={
-              <AdminRoute>
-                <CustomerTicketsPage meldingOnly />
-              </AdminRoute>
+              <CustomerScopedRedirect to="tickets" filter="meldingen" />
             }
           />
           <Route
             path="/admin/customers/:id/quote-requests"
             element={
-              <AdminRoute>
-                <CustomerExtraWorkPage quoteOnly />
-              </AdminRoute>
+              <CustomerScopedRedirect to="extra-work" filter="quote_requests" />
             }
           />
           {/* Sprint 28 Batch 12 — BM read-only contacts surface. */}

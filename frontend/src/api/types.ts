@@ -920,7 +920,11 @@ export type NotificationEventType =
   | "TICKET_CREATED"
   | "TICKET_STATUS_CHANGED"
   | "TICKET_ASSIGNED"
-  | "TICKET_UNASSIGNED";
+  | "TICKET_UNASSIGNED"
+  // IA 2026-06-25 — in-app feed toggles (default muted: message events
+  // left the notification feed; an unmuted row is the opt-in).
+  | "TICKET_MESSAGE"
+  | "EXTRA_WORK_MESSAGE";
 
 export interface NotificationPreferenceEntry {
   event_type: NotificationEventType;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { FileText, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -44,18 +44,23 @@ const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   OTHER: "category.other",
 };
 
-export function CustomerExtraWorkPage({
-  quoteOnly = false,
-}: {
-  quoteOnly?: boolean;
-}) {
+type EwChip = "all" | "quote_requests";
+
+export function CustomerExtraWorkPage() {
   const { id } = useParams();
   const { t } = useTranslation(["common", "extra_work"]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // M6.2 — quote-requests variant of this page. The defaults keep the
-  // extra-work tab byte-identical (same i18n + testid segments, same
-  // fetch); quoteOnly narrows the fetch to request_intent=REQUEST_QUOTE
-  // and swaps only the variant-specific copy + testids.
+  // IA 2026-06-25 — the separate Quote-requests tab merged into this
+  // page (one model, sliced by request_intent). Chip state rides in
+  // ?filter= so the retired /quote-requests route redirects here with
+  // the chip pre-applied.
+  const chip: EwChip =
+    searchParams.get("filter") === "quote_requests" ? "quote_requests" : "all";
+  const setChip = (next: EwChip) => {
+    setSearchParams(next === "all" ? {} : { filter: next }, { replace: true });
+  };
+  const quoteOnly = chip === "quote_requests";
   const v = quoteOnly ? "quote_requests" : "extra_work"; // i18n segment
   const tv = quoteOnly ? "quote-requests" : "extra-work"; // testid segment
 
@@ -115,7 +120,7 @@ export function CustomerExtraWorkPage({
   const isActive = customer?.is_active ?? true;
 
   return (
-    <div data-testid={`customer-${tv}-page`}>
+    <div data-testid="customer-extra-work-page">
       <CustomerSubPageHeader
         customerName={customerName}
         isActive={isActive}
@@ -141,6 +146,26 @@ export function CustomerExtraWorkPage({
               customer: customerName,
             })}
           </p>
+
+          {/* IA — the merged filter strip (Alle / Offerteaanvragen). */}
+          <div
+            className="work-strip-toggle"
+            style={{ marginBottom: 14 }}
+            data-testid="customer-extra-work-chips"
+          >
+            {(["all", "quote_requests"] as EwChip[]).map((c) => (
+              <button
+                key={c}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-pressed={chip === c}
+                onClick={() => setChip(c)}
+                data-testid={`customer-extra-work-chip-${c}`}
+              >
+                {t(`customer_view.chip_${c === "all" ? "all" : "quote_requests"}`)}
+              </button>
+            ))}
+          </div>
 
           {rows.length === 0 ? (
             <EmptyState

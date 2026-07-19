@@ -35,6 +35,15 @@ export async function markThreadRead(
   return response.data.unread_count;
 }
 
+// IA 2026-06-25 — mark every currently-visible thread read. Returns the
+// (now zero) global unread count.
+export async function markAllThreadsRead(): Promise<number> {
+  const response = await api.post<{ unread_count: number }>(
+    "/inbox/mark-all-read/",
+  );
+  return response.data.unread_count;
+}
+
 // RF-1 — a decoupled "the inbox unread count may have changed" signal.
 // The sidebar badge listens for this and refreshes immediately, so a
 // mark-read on a detail page updates the badge without a shared store.
