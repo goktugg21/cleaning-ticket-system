@@ -2854,6 +2854,38 @@ table.data-table {
   border: 1px solid var(--green);
 }
 
+/* RF-18 — dashboard info-widget row (compact count/euro + label). */
+.widget-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.info-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+}
+.info-widget:hover {
+  border-color: var(--green);
+}
+.info-widget-value {
+  font-family: var(--f-head);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.info-widget-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* RF-16 — dashboard attention cards (replace the big work lists). */
 .attention-grid {
   display: grid;

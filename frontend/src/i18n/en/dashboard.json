@@ -102,6 +102,12 @@
   "attention.view_all": "View all",
   "attention.empty": "Nothing right now",
   "attention.unassigned_chip": "Showing only unassigned",
+  "widgets.inbox": "Unread messages",
+  "widgets.awaiting_pricing": "Awaiting pricing",
+  "widgets.awaiting_customer": "Awaiting customer decision",
+  "widgets.billing_month": "open this month · {{invoiced}} invoiced",
+  "widgets.billing_month_loading": "This month's billing",
+  "widgets.today_slots": "Slots today",
 
   "work_view_label": "Operational work",
   "work_view_all": "All work",

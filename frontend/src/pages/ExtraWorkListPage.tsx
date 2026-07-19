@@ -135,7 +135,14 @@ export function ExtraWorkListPage() {
   // Filter state (client-side; the backend list endpoint is unpaginated
   // for MVP — filtering happens in the page).
   const [searchInput, setSearchInput] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
+  // read once at mount (validated), the dropdown owns the state after.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
+    const raw = new URLSearchParams(window.location.search).get("status");
+    return raw && (STATUS_FILTER_OPTIONS as readonly string[]).includes(raw)
+      ? (raw as StatusFilter)
+      : "ALL";
+  });
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
 
   // Server-side filters (M4): these drive the 2d list endpoint
