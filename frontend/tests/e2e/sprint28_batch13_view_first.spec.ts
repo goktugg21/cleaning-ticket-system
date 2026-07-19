@@ -157,6 +157,12 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
 
+    // RF-8 (#106) — the detailed policy grid moved behind the collapsed
+    // "Geavanceerd" card; open it before asserting the toggles.
+    await page
+      .locator('[data-testid="customer-permissions-advanced-toggle"]')
+      .click();
+
     // At least one policy toggle resolves — the policy panel has
     // four booleans wired through this testid.
     const policyToggles = page.getByTestId("customer-policy-toggle");
@@ -245,66 +251,39 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
   });
 });
 
-test.describe("Sprint 28 Batch 13 — dashboard work-view toggle", () => {
-  test("dashboard work view toggle and unified ops KPI strip", async ({
+test.describe("Sprint 28 Batch 13 — dashboard overview (RF-16 rework)", () => {
+  test("dashboard shows unified ops KPI strip + attention cards", async ({
     page,
   }) => {
     test.setTimeout(120_000);
     await loginAs(page, DEMO_USERS.super);
     await page.goto("/");
 
-    // Unified KPI strip is always visible — same five testids no
-    // matter the active work-view.
+    // Unified KPI strip is always visible.
     await expect(page.getByTestId("dashboard-ops-kpi-row")).toBeVisible({
       timeout: 15_000,
     });
-    await expect(
-      page.getByTestId("dashboard-ops-kpi-total"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("dashboard-ops-kpi-tickets"),
-    ).toBeVisible();
+    await expect(page.getByTestId("dashboard-ops-kpi-total")).toBeVisible();
+    await expect(page.getByTestId("dashboard-ops-kpi-tickets")).toBeVisible();
     await expect(
       page.getByTestId("dashboard-ops-kpi-extra-work"),
     ).toBeVisible();
-    await expect(
-      page.getByTestId("dashboard-ops-kpi-awaiting"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("dashboard-ops-kpi-urgent"),
-    ).toBeVisible();
+    await expect(page.getByTestId("dashboard-ops-kpi-awaiting")).toBeVisible();
+    await expect(page.getByTestId("dashboard-ops-kpi-urgent")).toBeVisible();
 
-    // Default view=all renders the unified Recent operational items
-    // card AND the dashboard-tickets-section wrapper that the legacy
-    // contract still expects.
-    await expect(page.getByTestId("dashboard-recent-ops")).toBeVisible();
+    // RF-16 — attention cards replace the work lists; the work-view
+    // toggle and the unified recent-ops table are gone.
+    await expect(page.getByTestId("dashboard-attention")).toBeVisible();
+    await expect(page.getByTestId("dashboard-recent-ops")).toHaveCount(0);
     await expect(
-      page.getByTestId("dashboard-tickets-section"),
-    ).toBeVisible();
-
-    // Switch to tickets-only — extra-work section gone.
-    await page.getByTestId("dashboard-work-view-tickets").click();
-    await expect(
-      page.getByTestId("dashboard-tickets-section"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("dashboard-extra-work-section"),
+      page.getByTestId("dashboard-work-view-toggle"),
     ).toHaveCount(0);
+    await expect(page.getByTestId("dashboard-tickets-section")).toHaveCount(0);
 
-    // Switch to extra-work-only — tickets section gone.
-    await page.getByTestId("dashboard-work-view-extra-work").click();
-    await expect(
-      page.getByTestId("dashboard-extra-work-section"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("dashboard-tickets-section"),
-    ).toHaveCount(0);
-
-    // Back to all.
-    await page.getByTestId("dashboard-work-view-all").click();
-    await expect(
-      page.getByTestId("dashboard-tickets-section"),
-    ).toBeVisible();
-    await expect(page.getByTestId("dashboard-recent-ops")).toBeVisible();
+    // The full list (with its locked wrapper testid) lives on /tickets.
+    await page.goto("/tickets");
+    await expect(page.getByTestId("dashboard-tickets-section")).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });

@@ -2606,6 +2606,327 @@ table.data-table {
   top: 0;
   z-index: 1;
 }
+
+/* RF-8 — simple permission-bundle module cards (CP page primary view). */
+.module-bundle-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 900px) {
+  .module-bundle-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.module-bundle-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.module-bundle-card-off {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+.module-bundle-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.module-bundle-icon {
+  display: inline-flex;
+  color: var(--green);
+}
+.module-bundle-card-off .module-bundle-icon {
+  color: var(--text-faint);
+}
+.module-bundle-title {
+  flex: 1;
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-2);
+  letter-spacing: -0.01em;
+}
+.module-bundle-master {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.module-bundle-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.module-bundle-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.module-bundle-toggle-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.module-bundle-off-note {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* RF-9 — calm assignment area: summary-first slot / sub-task rows in
+   the ticket-detail StaffSlotEditor. Collapsed = one line (who / when /
+   status) behind a chevron; expanded = the enlarged detail block. */
+.slot-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+.slot-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+}
+.slot-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.slot-chevron-open {
+  transform: none;
+}
+.slot-summary-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-summary-when {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px dashed var(--border-soft);
+}
+.slot-assign-primary {
+  width: 100%;
+  justify-content: center;
+}
+
+/* RF-13 — invoices ("Facturen") overview. */
+.invoices-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+}
+.invoices-toolbar-field {
+  min-width: 160px;
+}
+.invoices-month-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.invoices-month-summary-money {
+  font-variant-numeric: tabular-nums;
+}
+.invoices-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.invoices-group {
+  margin-bottom: 12px;
+}
+.invoices-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 14px 18px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+}
+.invoices-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.invoices-chevron-open {
+  transform: none;
+}
+.invoices-group-name {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invoices-group-total {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.invoices-group-body {
+  padding: 0 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.invoices-building-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.invoices-building-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+.invoices-table th.invoices-num,
+.invoices-table td.invoices-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.invoices-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.invoices-badge-open {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.invoices-badge-invoiced {
+  background: var(--green-faint);
+  color: var(--green-2);
+  border: 1px solid var(--green);
+}
+
+/* RF-16 — dashboard attention cards (replace the big work lists). */
+.attention-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+@media (min-width: 980px) {
+  .attention-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+.attention-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  gap: 10px;
+}
+.attention-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.attention-card-title {
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.attention-card-count {
+  font-family: var(--f-head);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text-2);
+}
+.attention-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.attention-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+}
+a.attention-row:hover {
+  background: var(--green-faint);
+}
+.attention-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.attention-card-link {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--green-2);
+  text-decoration: none;
+}
+.attention-card-link:hover {
+  text-decoration: underline;
+}
 .att-thumb-ext {
   font-family: var(--f-head);
   font-size: 14px;

@@ -26,7 +26,15 @@
 //     keep a read-only display.
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, ListChecks, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronDown,
+  ListChecks,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import {
   addTicketStaffAssignment,
@@ -161,6 +169,31 @@ export function StaffSlotEditor({
   const [removeSubTaskTarget, setRemoveSubTaskTarget] = useState<SubTask | null>(
     null,
   );
+
+  // RF-9 — collapsed/summary-first presentation. A slot or sub-task
+  // group renders as a one-line summary (who / when / status) until
+  // expanded; editing forces expansion. Pure presentation — no data or
+  // mutation flow changes.
+  const [expandedSlotIds, setExpandedSlotIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [expandedSubTaskIds, setExpandedSubTaskIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const toggleSlotExpanded = (id: number) =>
+    setExpandedSlotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleSubTaskExpanded = (id: number) =>
+    setExpandedSubTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // Auto-complete-on-sub-tasks opt-in. Seeded from the prop; updated from the
   // setAutoCompleteFlag response (no effect-body setState).
@@ -444,188 +477,193 @@ export function StaffSlotEditor({
   }
 
   // One slot row — reused by the flat list, each sub-task group, and the
-  // General group. Closes over editing/handlers state.
+  // General group. Closes over editing/handlers state. RF-9: renders a
+  // one-line summary (who / when / status); the enlarged detail
+  // (schedule, notes, evidence, edit form, actions) mounts on expand.
+  // Editing keeps the row expanded regardless of the toggle.
   function renderSlot(slot: TicketStaffAssignmentAdmin) {
+    const expanded = expandedSlotIds.has(slot.id) || editingSlotId === slot.id;
     return (
       <li
         key={slot.id}
+        className="slot-row"
         data-testid="staff-slot-card"
         data-staff-id={slot.user_id}
         data-slot-id={slot.id}
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 10,
-          marginBottom: 8,
-        }}
+        data-expanded={expanded ? "true" : "false"}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-          }}
+        <button
+          type="button"
+          className="slot-summary"
+          onClick={() => toggleSlotExpanded(slot.id)}
+          aria-expanded={expanded}
+          data-testid="staff-slot-summary"
         >
-          <strong>{slotName(slot)}</strong>
+          <ChevronDown
+            size={14}
+            strokeWidth={2.2}
+            className={
+              expanded ? "slot-chevron slot-chevron-open" : "slot-chevron"
+            }
+            aria-hidden="true"
+          />
+          <strong className="slot-summary-name">{slotName(slot)}</strong>
+          <span className="muted small slot-summary-when">
+            {windowText(slot)}
+          </span>
           <SlotStatusBadge status={slot.slot_status} />
-        </div>
-        <div
-          className="muted small"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            marginTop: 4,
-          }}
-        >
-          <CalendarClock size={13} strokeWidth={2} />
-          {windowText(slot)}
-        </div>
-        {slot.assignment_note && (
-          <div className="small" style={{ marginTop: 4 }}>
-            {slot.assignment_note}
-          </div>
-        )}
-        {slot.slot_status === "COMPLETED" && (
-          <div
-            className="muted small"
-            style={{ marginTop: 4 }}
-            data-testid="staff-slot-completion"
-          >
-            {t("editor.completed_at", {
-              when: formatDateTime(slot.completed_at),
-            })}
-            {slot.completion_note ? ` · ${slot.completion_note}` : ""}
-          </div>
-        )}
-        {slot.slot_status === "UNABLE_TO_COMPLETE" &&
-          slot.unable_to_complete_reason && (
+        </button>
+
+        {expanded && (
+          <div className="slot-detail">
             <div
               className="muted small"
-              style={{ marginTop: 4 }}
-              data-testid="staff-slot-unable"
+              style={{ display: "flex", alignItems: "center", gap: 6 }}
             >
-              {t("editor.unable_reason", {
-                reason: slot.unable_to_complete_reason,
-              })}
+              <CalendarClock size={13} strokeWidth={2} />
+              {windowText(slot)}
             </div>
-          )}
+            {slot.assignment_note && (
+              <div className="small">{slot.assignment_note}</div>
+            )}
+            {slot.slot_status === "COMPLETED" && (
+              <div className="muted small" data-testid="staff-slot-completion">
+                {t("editor.completed_at", {
+                  when: formatDateTime(slot.completed_at),
+                })}
+                {slot.completion_note ? ` · ${slot.completion_note}` : ""}
+              </div>
+            )}
+            {slot.slot_status === "UNABLE_TO_COMPLETE" &&
+              slot.unable_to_complete_reason && (
+                <div className="muted small" data-testid="staff-slot-unable">
+                  {t("editor.unable_reason", {
+                    reason: slot.unable_to_complete_reason,
+                  })}
+                </div>
+              )}
 
-        {editingSlotId === slot.id ? (
-          <SlotFields
-            form={editForm}
-            setForm={setEditForm}
-            disabled={busy}
-            idPrefix={`edit-${slot.id}`}
-            subTasks={subTasks}
-            showSubTaskSelect={subTasks.length > 0 && !isTerminal}
-          />
-        ) : null}
+            {editingSlotId === slot.id ? (
+              <SlotFields
+                form={editForm}
+                setForm={setEditForm}
+                disabled={busy}
+                idPrefix={`edit-${slot.id}`}
+                subTasks={subTasks}
+                showSubTaskSelect={subTasks.length > 0 && !isTerminal}
+              />
+            ) : null}
 
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          {editingSlotId === slot.id ? (
-            <>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => handleSaveEdit(slot)}
-                disabled={busy}
-                data-testid="staff-slot-save"
-              >
-                {busy ? t("common:save") + "…" : t("common:save")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setEditingSlotId(null)}
-                disabled={busy}
-              >
-                {t("common:cancel")}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => startEdit(slot)}
-                disabled={busy}
-                data-testid="staff-slot-edit"
-              >
-                <Pencil size={13} strokeWidth={2} />
-                {t("editor.edit_slot")}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  setRemoveTarget(slot);
-                  removeRef.current?.open();
-                }}
-                disabled={busy}
-                data-testid="staff-slot-remove"
-              >
-                <Trash2 size={13} strokeWidth={2} />
-                {t("editor.remove_slot")}
-              </button>
-            </>
-          )}
-        </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 2,
+                flexWrap: "wrap",
+              }}
+            >
+              {editingSlotId === slot.id ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleSaveEdit(slot)}
+                    disabled={busy}
+                    data-testid="staff-slot-save"
+                  >
+                    {busy ? t("common:save") + "…" : t("common:save")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setEditingSlotId(null)}
+                    disabled={busy}
+                  >
+                    {t("common:cancel")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => startEdit(slot)}
+                    disabled={busy}
+                    data-testid="staff-slot-edit"
+                  >
+                    <Pencil size={13} strokeWidth={2} />
+                    {t("editor.edit_slot")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      setRemoveTarget(slot);
+                      removeRef.current?.open();
+                    }}
+                    disabled={busy}
+                    data-testid="staff-slot-remove"
+                  >
+                    <Trash2 size={13} strokeWidth={2} />
+                    {t("editor.remove_slot")}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </li>
     );
   }
 
   // One sub-task group — its header (title + computed status badge + manager
-  // edit/delete) and the slots placed into it.
+  // edit/delete) and the slots placed into it. RF-9: header is a
+  // one-line summary (title, slot count, status); the description,
+  // manager actions and the slot list mount on expand. Editing keeps
+  // the group expanded.
   function renderSubTaskGroup(st: SubTask) {
     const groupSlots = slots.filter((s) => s.sub_task === st.id);
     const badge = subTaskBadge(st);
     const editing = editingSubTaskId === st.id;
+    const expanded = expandedSubTaskIds.has(st.id) || editing;
     return (
       <div
         key={st.id}
+        className="slot-row"
         data-testid="subtask-group"
         data-subtask-id={st.id}
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 10,
-          marginBottom: 8,
-        }}
+        data-expanded={expanded ? "true" : "false"}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-          }}
+        <button
+          type="button"
+          className="slot-summary"
+          onClick={() => toggleSubTaskExpanded(st.id)}
+          aria-expanded={expanded}
+          data-testid="subtask-group-summary"
         >
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}
-          >
-            <ListChecks size={14} strokeWidth={2} />
-            <strong style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-              {st.title}
-            </strong>
-          </div>
+          <ChevronDown
+            size={14}
+            strokeWidth={2.2}
+            className={
+              expanded ? "slot-chevron slot-chevron-open" : "slot-chevron"
+            }
+            aria-hidden="true"
+          />
+          <ListChecks size={14} strokeWidth={2} aria-hidden="true" />
+          <strong className="slot-summary-name">{st.title}</strong>
+          <span className="muted small slot-summary-when">
+            {t("editor.slot_count", { count: groupSlots.length })}
+          </span>
           <StatusBadge
             variant="cell"
             status={{ kind: "generic", tone: badge.tone, label: badge.label }}
           />
-        </div>
+        </button>
+
+        {expanded && (
+        <div className="slot-detail">
         {st.description && (
-          <div className="muted small" style={{ marginTop: 4 }}>
-            {st.description}
-          </div>
+          <div className="muted small">{st.description}</div>
         )}
 
         {editing ? (
@@ -700,6 +738,8 @@ export function StaffSlotEditor({
             {groupSlots.map(renderSlot)}
           </ul>
         )}
+        </div>
+        )}
       </div>
     );
   }
@@ -751,75 +791,30 @@ export function StaffSlotEditor({
               {t("subtasks.add")}
             </button>
           )}
-          {!showAdd && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => {
-                setShowAdd(true);
-                setError("");
-              }}
-              disabled={busy || candidates.length === 0}
-              data-testid="staff-slot-add-toggle"
-            >
-              <Plus size={14} strokeWidth={2.2} />
-              {t("editor.add_slot")}
-            </button>
-          )}
         </div>
       </div>
       <p className="muted small" style={{ margin: 0 }}>
         {t("editor.desc")}
       </p>
 
-      {/* Auto-complete-on-sub-tasks opt-in (PA/SA write; BM read-only). */}
-      <div
-        data-testid="subtask-auto-complete"
-        style={{
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 10,
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-        }}
-      >
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            cursor:
-              canSetAutoCompleteFlag && !isTerminal && !flagBusy
-                ? "pointer"
-                : "default",
+      {/* RF-9 — the prominent primary assign action ("Toewijzen"):
+          same flow as before (opens the add-slot form), promoted from
+          a small header button to the section's primary affordance. */}
+      {!showAdd && (
+        <button
+          type="button"
+          className="btn btn-primary slot-assign-primary"
+          onClick={() => {
+            setShowAdd(true);
+            setError("");
           }}
+          disabled={busy || candidates.length === 0}
+          data-testid="staff-slot-add-toggle"
         >
-          <input
-            type="checkbox"
-            checked={autoFlag}
-            disabled={!canSetAutoCompleteFlag || isTerminal || flagBusy}
-            onChange={(event) => handleToggleAutoComplete(event.target.checked)}
-            data-testid="subtask-auto-complete-toggle"
-          />
-          <span className="small" style={{ fontWeight: 600 }}>
-            {t("subtasks.auto_complete_label")}
-          </span>
-        </label>
-        <p className="muted small" style={{ margin: 0 }}>
-          {t("subtasks.auto_complete_desc")}
-        </p>
-        {!canSetAutoCompleteFlag && (
-          <p className="muted small" style={{ margin: 0 }}>
-            {t("subtasks.auto_complete_pa_only")}
-          </p>
-        )}
-        {flagError && (
-          <div className="alert-error" role="alert">
-            {flagError}
-          </div>
-        )}
-      </div>
+          <Plus size={15} strokeWidth={2.2} />
+          {t("editor.assign_primary")}
+        </button>
+      )}
 
       {error && (
         <div className="alert-error" role="alert" style={{ marginTop: 2 }}>
@@ -999,6 +994,57 @@ export function StaffSlotEditor({
           </div>
         </div>
       )}
+
+      {/* Auto-complete-on-sub-tasks opt-in (PA/SA write; BM read-only).
+          RF-9 moved it below the work list so the assignment surface
+          leads with the slots themselves. */}
+      <div
+        data-testid="subtask-auto-complete"
+        style={{
+          border: "1px solid var(--border-soft)",
+          borderRadius: 8,
+          padding: 10,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor:
+              canSetAutoCompleteFlag && !isTerminal && !flagBusy
+                ? "pointer"
+                : "default",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={autoFlag}
+            disabled={!canSetAutoCompleteFlag || isTerminal || flagBusy}
+            onChange={(event) => handleToggleAutoComplete(event.target.checked)}
+            data-testid="subtask-auto-complete-toggle"
+          />
+          <span className="small" style={{ fontWeight: 600 }}>
+            {t("subtasks.auto_complete_label")}
+          </span>
+        </label>
+        <p className="muted small" style={{ margin: 0 }}>
+          {t("subtasks.auto_complete_desc")}
+        </p>
+        {!canSetAutoCompleteFlag && (
+          <p className="muted small" style={{ margin: 0 }}>
+            {t("subtasks.auto_complete_pa_only")}
+          </p>
+        )}
+        {flagError && (
+          <div className="alert-error" role="alert">
+            {flagError}
+          </div>
+        )}
+      </div>
 
       <ConfirmDialog
         ref={removeRef}

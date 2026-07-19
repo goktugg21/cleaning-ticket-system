@@ -76,6 +76,12 @@ test.describe("Sprint 29 Batch 29.1 — polish & papercuts", () => {
       .waitForLoadState("networkidle", { timeout: 10_000 })
       .catch(() => {});
 
+    // RF-8 (#106) — the technical-keys toggle + policy grid moved
+    // behind the collapsed "Geavanceerd" card; open it first.
+    await page
+      .locator('[data-testid="customer-permissions-advanced-toggle"]')
+      .click();
+
     const toggle = page.locator('[data-testid="show-technical-keys-toggle"]');
     await expect(toggle).toBeVisible();
 

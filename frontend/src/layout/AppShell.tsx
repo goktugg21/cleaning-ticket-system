@@ -40,6 +40,7 @@ import {
   canAccessAuditLogs,
   canAccessExtraWork,
   canAccessPlannedWork,
+  canAccessBilling,
   canAccessReports,
   canAccessStaffRequestReview,
   isBuildingManager,
@@ -523,6 +524,14 @@ export function AppShell({ children }: AppShellProps) {
                     <BarChart3 size={16} strokeWidth={2} />
                   </span>
                   {t("nav.reports")}
+                </NavLink>
+              )}
+              {canAccessBilling(me?.role) && (
+                <NavLink to="/invoices" className={navClass}>
+                  <span className="nav-icon">
+                    <BadgeEuro size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.invoices")}
                 </NavLink>
               )}
               <NavLink to="/settings" className={navClass}>

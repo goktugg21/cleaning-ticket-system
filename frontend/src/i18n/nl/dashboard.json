@@ -9,6 +9,7 @@
   "tickets_page.breadcrumb_current": "Tickets",
   "loading_data": "Operationele tickets laden…",
   "subtitle_counts": "{{count}} totaal · {{visible}} zichtbaar · pagina {{page}} van {{pages}}",
+  "subtitle_overview": "Overzicht van uw operatie — volledige lijsten vindt u onder Tickets en Extra werk.",
   "new_ticket": "Nieuw ticket",
   "admin_required_banner": "Dit gedeelte is alleen voor beheerders.",
 
@@ -95,6 +96,12 @@
   "my_work.quote_requests": "Mijn offerteaanvragen",
   "my_work.filter_chip": "Alleen uw items worden getoond",
   "my_work.filter_clear": "Wissen",
+  "attention.review_title": "Te bevestigen",
+  "attention.unassigned_title": "Niet toegewezen",
+  "attention.activity_title": "Recente activiteit",
+  "attention.view_all": "Alles bekijken",
+  "attention.empty": "Niets op dit moment",
+  "attention.unassigned_chip": "Alleen niet-toegewezen items worden getoond",
 
   "work_view_label": "Operationeel werk",
   "work_view_all": "Al het werk",

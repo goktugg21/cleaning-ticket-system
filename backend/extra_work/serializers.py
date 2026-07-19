@@ -541,6 +541,16 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "subtotal_amount",
             "vat_amount",
             "total_amount",
+            # RF-13 (#106) — final (actual-hours) amounts on the list
+            # shape so the invoices overview can compute month totals
+            # with the same final-with-quoted-fallback rule the revenue
+            # report uses, without a per-row detail fetch. NOT redacted
+            # for customers — parity with the detail serializer, where
+            # final_* is visible to the customer (it is their invoice
+            # amount); only the billing metadata below is provider-only.
+            "final_subtotal_amount",
+            "final_vat_amount",
+            "final_total_amount",
             "created_by",
             "created_by_email",
             "requested_at",

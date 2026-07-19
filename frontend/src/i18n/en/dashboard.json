@@ -9,6 +9,7 @@
   "tickets_page.breadcrumb_current": "Tickets",
   "loading_data": "Loading operational ticket data…",
   "subtitle_counts": "{{count}} total tickets · {{visible}} visible · page {{page}} of {{pages}}",
+  "subtitle_overview": "Overview of your operation — the full lists live under Tickets and Extra Work.",
   "new_ticket": "New ticket",
   "admin_required_banner": "This area is for admins only.",
 
@@ -90,11 +91,17 @@
 
   "my_work.title": "My work",
   "my_work.tickets": "My tickets",
-  "my_work.meldingen": "My meldingen",
+  "my_work.meldingen": "My reports",
   "my_work.extra_work": "My extra work",
   "my_work.quote_requests": "My quote requests",
   "my_work.filter_chip": "Showing only your items",
   "my_work.filter_clear": "Clear",
+  "attention.review_title": "To confirm",
+  "attention.unassigned_title": "Unassigned",
+  "attention.activity_title": "Recent activity",
+  "attention.view_all": "View all",
+  "attention.empty": "Nothing right now",
+  "attention.unassigned_chip": "Showing only unassigned",
 
   "work_view_label": "Operational work",
   "work_view_all": "All work",

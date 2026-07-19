@@ -1,5 +1,5 @@
 import { expect, request, test } from "@playwright/test";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 
 import { DEMO_PASSWORD, DEMO_USERS } from "./fixtures/demoUsers";
 import { loginAs } from "./fixtures/login";
@@ -34,6 +34,15 @@ async function apiAs(
   });
 }
 
+// RF-8 (#106) — the detailed policy grid + user matrix moved behind the
+// collapsed "Geavanceerd" card on the permissions page; open it before
+// touching those surfaces (the simple module-bundle cards are primary).
+async function openAdvanced(page: Page): Promise<void> {
+  await page
+    .locator('[data-testid="customer-permissions-advanced-toggle"]')
+    .click();
+}
+
 async function resolveFirstCustomerId(api: APIRequestContext): Promise<number> {
   const response = await api.get("/api/customers/?page_size=1");
   expect(response.status()).toBe(200);
@@ -55,6 +64,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
+    await openAdvanced(page);
 
     await expect(
       page.locator('[data-testid="customer-permissions-page"]'),
@@ -81,6 +91,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
+    await openAdvanced(page);
 
     const toggles = page.locator('[data-testid="customer-policy-toggle"]');
     await expect(toggles).toHaveCount(4);
@@ -108,6 +119,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
+    await openAdvanced(page);
 
     const saveBar = page.locator('[data-testid="customer-policy-save-bar"]');
     await expect(saveBar).toHaveCount(0);
@@ -140,6 +152,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
+    await openAdvanced(page);
 
     const firstOverridesButton = page
       .locator('[data-testid="customer-access-overrides-button"]')
@@ -172,6 +185,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
+    await openAdvanced(page);
 
     // Sprint 31 Phase 6 — pill click opens the modal directly.
     await page
@@ -202,6 +216,7 @@ test.describe("Sprint 28 Batch 15.2 — Permissions page rebuild", () => {
 
     await loginAs(page, DEMO_USERS.super);
     await page.goto(`/admin/customers/${id}/permissions`);
+    await openAdvanced(page);
 
     // Sprint 31 Phase 6 — pill click opens the modal directly.
     await page

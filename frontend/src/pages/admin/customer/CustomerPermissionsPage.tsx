@@ -26,6 +26,7 @@ import type {
 } from "../../../api/types";
 import { CUSTOMER_PERMISSION_KEYS } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
+import { CollapsibleCard } from "../../../components/CollapsibleCard";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EmptyState } from "../../../components/EmptyState";
@@ -34,6 +35,7 @@ import { useToast } from "../../../components/ToastProvider";
 import { useTechnicalKeysToggle } from "../../../hooks/useTechnicalKeysToggle";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
+import { ModuleBundleCards } from "./permissions/ModuleBundleCards";
 import { PermissionEditorModal } from "./permissions/PermissionEditorModal";
 import type { OverrideDraft } from "./permissions/PermissionEditorModal";
 import { PermissionsMatrix } from "./permissions/PermissionsMatrix";
@@ -145,6 +147,15 @@ export function CustomerPermissionsPage() {
   // "Affects: customer.ticket.approve_own, ..." sub-lines on
   // each policy card. Default OFF; persisted in localStorage.
   const [showTechKeys, setShowTechKeys] = useTechnicalKeysToggle();
+
+  // RF-8 — the Advanced card is collapsed by default, but a focus_user
+  // deep-link (e.g. a contact's "Manage permissions") must land on a
+  // VISIBLE matrix row, so the card opens when the param is present at
+  // first render (read from location directly: the param is consumed
+  // later by the focus effect).
+  const [advancedDefaultOpen] = useState(() =>
+    new URLSearchParams(window.location.search).has("focus_user"),
+  );
 
   // ------- Initial load -------
   useEffect(() => {
@@ -600,27 +611,18 @@ export function CustomerPermissionsPage() {
             })}
           </p>
 
-          {/* ------------------- Zone 1 — Policy --------------------- */}
+          {/* ------------- Zone 1 — Module bundles (RF-8 primary) -----
+              Two module cards over the same policy draft; the detailed
+              per-flag grid moved behind Advanced. The StickySaveBar
+              stays here because it saves the draft BOTH surfaces edit. */}
           <section
             className="card permissions-zone permissions-zone-policy"
             data-testid="section-customer-company-policy"
           >
             <ZoneHeader
-              title={t("customer_permissions.zone_policy_title")}
-              helper={t("customer_permissions.zone_policy_helper")}
+              title={t("customer_permissions.modules_zone_title")}
+              helper={t("customer_permissions.modules_zone_helper")}
             />
-
-            <label
-              className="tech-keys-toggle"
-              data-testid="show-technical-keys-toggle"
-            >
-              <input
-                type="checkbox"
-                checked={showTechKeys}
-                onChange={(e) => setShowTechKeys(e.target.checked)}
-              />
-              <span>{t("customer_permissions.show_technical_keys")}</span>
-            </label>
 
             {policyError && (
               <div className="alert-error" role="alert">
@@ -634,11 +636,10 @@ export function CustomerPermissionsPage() {
               </div>
             ) : (
               <>
-                <PolicyToggleGrid
+                <ModuleBundleCards
                   draft={policyDraft}
                   setDraft={setPolicyDraft}
                   disabled={policySaving}
-                  showTechnicalKeys={showTechKeys}
                 />
                 <StickySaveBar
                   dirty={isPolicyDirty}
@@ -664,26 +665,70 @@ export function CustomerPermissionsPage() {
             )}
           </section>
 
-          {/* ------------------- Zone 2 — Permissions matrix --------- */}
-          <section
-            className="card permissions-zone permissions-zone-users"
-            data-testid="section-customer-users"
+          {/* ------------- Geavanceerd (RF-8) — everything else -------
+              The full depth (per-flag policy grid, technical keys,
+              per-user matrix + overrides) lives here, collapsed by
+              default, fully functional when opened. */}
+          <CollapsibleCard
+            title={t("customer_permissions.advanced_title")}
+            meta={t("customer_permissions.advanced_helper")}
+            defaultOpen={advancedDefaultOpen}
+            testId="customer-permissions-advanced"
           >
-            <ZoneHeader
-              title={t("customer_permissions.zone_users_title")}
-              helper={t("customer_permissions.zone_users_helper")}
-            />
-
-            {members.length === 0 ? (
-              <EmptyState
-                icon={UsersIcon}
-                title={t("customer_permissions.no_members_yet")}
-                description={t("customer_view.users.explainer", {
-                  customer: customerName,
-                })}
+            <div
+              className="permissions-zone permissions-zone-policy"
+              data-testid="section-customer-policy-detail"
+            >
+              <ZoneHeader
+                title={t("customer_permissions.zone_policy_title")}
+                helper={t("customer_permissions.zone_policy_helper")}
               />
-            ) : (
-              <PermissionsMatrix
+
+              <label
+                className="tech-keys-toggle"
+                data-testid="show-technical-keys-toggle"
+              >
+                <input
+                  type="checkbox"
+                  checked={showTechKeys}
+                  onChange={(e) => setShowTechKeys(e.target.checked)}
+                />
+                <span>{t("customer_permissions.show_technical_keys")}</span>
+              </label>
+
+              {policyLoading || !policy ? (
+                <div className="loading-bar">
+                  <div className="loading-bar-fill" />
+                </div>
+              ) : (
+                <PolicyToggleGrid
+                  draft={policyDraft}
+                  setDraft={setPolicyDraft}
+                  disabled={policySaving}
+                  showTechnicalKeys={showTechKeys}
+                />
+              )}
+            </div>
+
+            <div
+              className="permissions-zone permissions-zone-users"
+              data-testid="section-customer-users"
+            >
+              <ZoneHeader
+                title={t("customer_permissions.zone_users_title")}
+                helper={t("customer_permissions.zone_users_helper")}
+              />
+
+              {members.length === 0 ? (
+                <EmptyState
+                  icon={UsersIcon}
+                  title={t("customer_permissions.no_members_yet")}
+                  description={t("customer_view.users.explainer", {
+                    customer: customerName,
+                  })}
+                />
+              ) : (
+                <PermissionsMatrix
                 members={members}
                 accessByUserId={accessByUserId}
                 linkedBuildings={linkedBuildings}
@@ -706,8 +751,9 @@ export function CustomerPermissionsPage() {
                   handleAddAccess(membership, buildingId)
                 }
               />
-            )}
-          </section>
+              )}
+            </div>
+          </CollapsibleCard>
 
           {/* ------------------- Zone 3 — Permission editor modal ---- */}
           <PermissionEditorModal
