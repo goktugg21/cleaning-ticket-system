@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Megaphone, Ticket } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -15,17 +15,19 @@ import { formatDate } from "../../../lib/intl";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * M6.1 — Customer Tickets / Meldingen tabs (provider side).
- *
- * One shared page switched by `meldingOnly`. It mirrors the customer
- * Extra Work sub-page and consumes the M6.1 ticket filters:
+ * M6.1 / IA 2026-06-25 — the customer Tickets tab, now the SINGLE
+ * ticket-content surface for a customer (the separate Meldingen tab
+ * merged into it — they were one model sliced two ways). A filter-chip
+ * strip narrows the same list:
+ *   * Alle      → GET /api/tickets/?customer=<id>
  *   * Tickets   → GET /api/tickets/?customer=<id>&exclude_type=REPORT
  *   * Meldingen → GET /api/tickets/?customer=<id>&type=REPORT
- * The two surfaces are deliberately disjoint (a melding is a REPORT-type
- * ticket). Scope is enforced server-side by `scope_tickets_for` BEFORE
- * the filterset narrows, so a caller without access to this customer
- * gets zero rows rather than a 403. View-first: each row links to the
- * existing `/tickets/<id>` detail page.
+ * The chip state lives in the `?filter=` search param so the retired
+ * /meldingen route can redirect here with the chip pre-applied and deep
+ * links stay shareable. Scope is enforced server-side by
+ * `scope_tickets_for` BEFORE the filterset narrows, so a caller without
+ * access to this customer gets zero rows rather than a 403. View-first:
+ * each row links to the existing `/tickets/<id>` detail page.
  */
 
 // Ticket sub-type label keys — the canonical map lives in the create
@@ -46,13 +48,12 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
   QUOTE_REQUEST: "type_quote_request",
 };
 
-export function CustomerTicketsPage({
-  meldingOnly = false,
-}: {
-  meldingOnly?: boolean;
-}) {
+type TicketChip = "all" | "tickets" | "meldingen";
+
+export function CustomerTicketsPage() {
   const { id } = useParams();
   const { t } = useTranslation(["common", "create_ticket"]);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const numericId = useMemo(() => {
     if (!id) return null;
@@ -60,8 +61,18 @@ export function CustomerTicketsPage({
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, [id]);
 
-  // i18n + testid variant key.
-  const v = meldingOnly ? "meldingen" : "tickets";
+  // Chip state rides in ?filter= so the retired /meldingen route (and
+  // any old bookmark) can land here with the chip pre-applied.
+  const raw = searchParams.get("filter");
+  const chip: TicketChip =
+    raw === "meldingen" || raw === "tickets" ? raw : "all";
+  const setChip = (next: TicketChip) => {
+    setSearchParams(next === "all" ? {} : { filter: next }, { replace: true });
+  };
+
+  // i18n variant key: the "Alle" view reuses the tickets copy (the chips
+  // themselves communicate the narrowing); Meldingen keeps its own.
+  const v = chip === "meldingen" ? "meldingen" : "tickets";
 
   const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
   const [rows, setRows] = useState<TicketList[]>([]);
@@ -92,7 +103,11 @@ export function CustomerTicketsPage({
       getCustomer(numericId),
       listAllTickets({
         customer: numericId,
-        ...(meldingOnly ? { type: "REPORT" } : { exclude_type: "REPORT" }),
+        ...(chip === "meldingen"
+          ? { type: "REPORT" }
+          : chip === "tickets"
+            ? { exclude_type: "REPORT" }
+            : {}),
       }),
     ])
       .then(([customerData, ticketRows]) => {
@@ -109,13 +124,13 @@ export function CustomerTicketsPage({
     return () => {
       cancelled = true;
     };
-  }, [numericId, meldingOnly, t]);
+  }, [numericId, chip, t]);
 
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
 
   return (
-    <div data-testid={`customer-${v}-page`}>
+    <div data-testid="customer-tickets-page">
       <CustomerSubPageHeader customerName={customerName} isActive={isActive} />
 
       {error && (
@@ -134,9 +149,29 @@ export function CustomerTicketsPage({
             {t(`customer_view.${v}.explainer`, { customer: customerName })}
           </p>
 
+          {/* IA — the merged filter strip (Alle / Tickets / Meldingen). */}
+          <div
+            className="work-strip-toggle"
+            style={{ marginBottom: 14 }}
+            data-testid="customer-tickets-chips"
+          >
+            {(["all", "tickets", "meldingen"] as TicketChip[]).map((c) => (
+              <button
+                key={c}
+                type="button"
+                className="btn btn-secondary btn-sm"
+                aria-pressed={chip === c}
+                onClick={() => setChip(c)}
+                data-testid={`customer-tickets-chip-${c}`}
+              >
+                {t(`customer_view.chip_${c}`)}
+              </button>
+            ))}
+          </div>
+
           {rows.length === 0 ? (
             <EmptyState
-              icon={meldingOnly ? Megaphone : Ticket}
+              icon={chip === "meldingen" ? Megaphone : Ticket}
               title={t(`customer_view.${v}.empty_title`)}
               description={t(`customer_view.${v}.empty_desc`)}
               testId={`customer-${v}-empty`}
