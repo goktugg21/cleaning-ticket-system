@@ -2089,7 +2089,10 @@ table.data-table {
    element entirely rather than leaving a prominent void below the title. */
 .detail-header-desc:empty { display: none; }
 
-.detail-grid { display: grid; grid-template-columns: 1fr 296px; gap: 22px; align-items: start; }
+/* RF-17 — the side column grows on wide screens (was a fixed 296px):
+   clamp keeps 296px as the floor and lets it take ~32% up to 460px so
+   the right-rail cards read as primary content. */
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) clamp(296px, 32%, 460px); gap: 22px; align-items: start; }
 .detail-main { display: flex; flex-direction: column; gap: 18px; }
 .detail-side { display: flex; flex-direction: column; gap: 14px; }
 
@@ -2996,6 +2999,18 @@ a.attention-row:hover {
 /* Detail kv list */
 .detail-kv-list { display: flex; flex-direction: column; gap: 14px; padding: 6px 2px 2px; }
 .detail-kv-row { display: flex; flex-direction: column; gap: 4px; }
+/* RF-17 — with the wider side column, label + value share one line
+   (mirrors the SLA meta grid's auto/1fr pattern). Below the stack
+   breakpoint the column narrows again, so the stacked layout returns. */
+@media (min-width: 1101px) {
+  .detail-kv-list { gap: 10px; }
+  .detail-kv-row {
+    display: grid;
+    grid-template-columns: minmax(96px, auto) 1fr;
+    align-items: baseline;
+    gap: 4px 12px;
+  }
+}
 .detail-kv-label {
   font-family: var(--f-head);
   font-size: 10px;

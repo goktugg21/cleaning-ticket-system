@@ -57,6 +57,8 @@
   "internal_pill": "Intern",
 
   "card_assignment_title": "Toewijzing",
+  "side_summary_assignment_one": "{{count}} medewerker",
+  "side_summary_assignment_other": "{{count}} medewerkers",
   "assignment_section_bm_heading": "Gebouwbeheerder",
   "assignment_section_field_staff_heading": "Toegewezen {{companyName}}-medewerkers",
   "assignment_section_field_staff_heading_unknown": "Toegewezen veldmedewerkers",
@@ -178,6 +180,8 @@
   "timeline_occurrence_reference": "Voortgekomen uit geplande uitvoering #{{id}} · {{date}}",
 
   "resp_mgr.title": "Verantwoordelijke beheerders",
+  "resp_mgr.count_one": "{{count}} beheerder",
+  "resp_mgr.count_other": "{{count}} beheerders",
   "resp_mgr.desc": "Gebouwbeheerders die samen verantwoordelijk zijn voor dit ticket. Dit staat los van de primaire toewijzing hierboven.",
   "resp_mgr.empty": "Nog geen verantwoordelijke beheerders.",
   "resp_mgr.add_label": "Verantwoordelijke beheerder toevoegen",

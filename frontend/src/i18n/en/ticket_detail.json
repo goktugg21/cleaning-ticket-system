@@ -57,6 +57,8 @@
   "internal_pill": "Internal",
 
   "card_assignment_title": "Assignment",
+  "side_summary_assignment_one": "{{count}} staff member",
+  "side_summary_assignment_other": "{{count}} staff members",
   "assignment_section_bm_heading": "Building manager",
   "assignment_section_field_staff_heading": "Assigned {{companyName}} staff",
   "assignment_section_field_staff_heading_unknown": "Assigned field staff",
@@ -178,6 +180,8 @@
   "timeline_occurrence_reference": "Originated from planned occurrence #{{id}} · {{date}}",
 
   "resp_mgr.title": "Responsible managers",
+  "resp_mgr.count_one": "{{count}} manager",
+  "resp_mgr.count_other": "{{count}} managers",
   "resp_mgr.desc": "Building managers jointly responsible for this ticket. This is separate from the primary assignee above.",
   "resp_mgr.empty": "No responsible managers yet.",
   "resp_mgr.add_label": "Add a responsible manager",

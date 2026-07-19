@@ -59,6 +59,7 @@ import {
   isStaff as isStaffRoleFn,
 } from "../auth/permissions";
 import { AttachmentThumb } from "../components/AttachmentThumb";
+import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
@@ -1955,21 +1956,15 @@ export function TicketDetailPage() {
               dispatch). The field-staff heading interpolates the
               ticket's providing company name to remove the prior
               hardcoded "OSIUS" multi-tenant bug. */}
-          <div className="card">
-            <div className="section-head">
-              <div
-                className="section-head-title"
-                style={{
-                  fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                }}
-              >
-                {t("card_assignment_title")}
-              </div>
-            </div>
+          <CollapsibleCard
+            title={t("card_assignment_title")}
+            meta={t("side_summary_assignment", {
+              count: ticket.assigned_staff?.length ?? 0,
+            })}
+            defaultOpen
+            persistKey="ticket-side-assignment"
+            testId="side-card-assignment"
+          >
 
             {/* --- Subsection 1: Building manager (owner) --- */}
             <div className="assign-body">
@@ -2509,7 +2504,7 @@ export function TicketDetailPage() {
             </div>
             {/* close Sprint 30 Batch 30.1.1 assigned-staff-card subsection wrapper */}
             </div>
-          </div>
+          </CollapsibleCard>
 
           {/* #7 Part B — Responsible managers (M:N), distinct from the
               primary "Assigned" field above. Self-gates to provider-
@@ -2548,21 +2543,12 @@ export function TicketDetailPage() {
               contacts on file." line). The Delete affordance lives at
               the card footer as a small text link; the confirmation
               dialog is unchanged. */}
-          <div className="card">
-            <div className="section-head">
-              <div
-                className="section-head-title"
-                style={{
-                  fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                }}
-              >
-                {t("card_details_title")}
-              </div>
-            </div>
+          <CollapsibleCard
+            title={t("card_details_title")}
+            defaultOpen
+            persistKey="ticket-side-details"
+            testId="side-card-details"
+          >
             <div style={{ padding: "14px 18px 16px" }}>
               <div className="detail-kv-list">
                 <div className="detail-kv-row">
@@ -2814,25 +2800,19 @@ export function TicketDetailPage() {
                 </button>
               </div>
             )}
-          </div>
+          </CollapsibleCard>
 
-          <div className="card">
-            <div className="section-head">
-              <div
-                className="section-head-title"
-                style={{
-                  fontSize: 11,
-                  fontWeight: 800,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  color: "var(--text-faint)",
-                }}
-              >
-                {canShowCompleteWorkButton
-                  ? t("card_workflow_title_staff_complete")
-                  : t("card_workflow_title")}
-              </div>
-            </div>
+          <CollapsibleCard
+            title={
+              canShowCompleteWorkButton
+                ? t("card_workflow_title_staff_complete")
+                : t("card_workflow_title")
+            }
+            meta={t(`common:status.${ticket.status.toLowerCase()}`)}
+            defaultOpen
+            persistKey="ticket-side-workflow"
+            testId="side-card-workflow"
+          >
             <div className="workflow-body">
               {/* Sprint 28 Batch 11 — STAFF "Complete work" entry
                   point. Renders only for the assigned STAFF actor on
@@ -3210,7 +3190,7 @@ export function TicketDetailPage() {
                 </>
               )}
             </div>
-          </div>
+          </CollapsibleCard>
 
           {/* Sprint 30 Batch 30.1.3 — the standalone provider override
               card has been folded INTO the workflow card. The
