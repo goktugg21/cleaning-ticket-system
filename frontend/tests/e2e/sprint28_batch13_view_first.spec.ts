@@ -157,6 +157,12 @@ test.describe("Sprint 28 Batch 13 — view-first customer pages", () => {
       timeout: 15_000,
     });
 
+    // RF-8 (#106) — the detailed policy grid moved behind the collapsed
+    // "Geavanceerd" card; open it before asserting the toggles.
+    await page
+      .locator('[data-testid="customer-permissions-advanced-toggle"]')
+      .click();
+
     // At least one policy toggle resolves — the policy panel has
     // four booleans wired through this testid.
     const policyToggles = page.getByTestId("customer-policy-toggle");
