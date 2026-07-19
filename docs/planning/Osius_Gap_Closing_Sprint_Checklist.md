@@ -102,12 +102,9 @@ The father's "select" button: confirm many completions at once.
 2. **Quick-wins sprint** (from received feedback that further feedback can't invalidate) → **PR #100**, then deploy: **RF-3** Tickets top-level page · **RF-4** tuck the ticket audit timeline away · **RF-5** attachment type + in-app preview (recon the backend serving path).
 3. **PDF & Preview sprint** → **PR #101**, then deploy: **RF-10** proposal-PDF quality (Dutch-only) · **RF-6** split-screen live proposal preview · **RF-12** attachment thumbnails.
 4. **Continue-without-feedback work (agreed 2026-06-24):** ~~**PR #102** — `sub_tasks` CUSTOMER_USER redaction (privacy) + **RF-2** unified Add-price flow with "Other/Custom" (adds an additive free-text `custom_unit_label` to CustomerCustomPrice — also delivers the core of backlog #1).~~ **DONE — PR #102, deployed to crmtest.** ~~Then **PR #103** — **RF-1** WhatsApp-style message inbox (per-recipient read state, aggregation endpoint, logo avatars) with **RF-11** (EW Messages card restyle) riding along.~~ **DONE — PR #103, deployed to crmtest.** ~~Then **PR #104** — **IA & Effectiveness** consolidation: disjoint Notificaties/Berichten (message events out of the feed by default), customer-detail content tabs 4→2 with filter chips, inbox unread-toggle + mark-all-read, clarity pass (subtitles, SA empty-state, terminology sweep).~~ **DONE — PR #104, deployed to crmtest.**
-5. **Post-#104 queue (agreed with Göktuğ, 2026-06-25):**
-   - **PR #105** — **RF-14** EW-detail comfort (collapsible Requested-services/Pricing-proposal cards, scrollable long tables, preview-pane toggle + relaxed spacing) + **RF-15** formal branded PDFs (Osius logo header, embedded font with real €, both PDF families).
-   - **PR #106** — **RF-8** module/permission presentation: design+build now (bundle list pending Göktuğ's sign-off).
-   - **PR #107** — **RF-9** assignment density: simple-first assign flow AND enlarged detail areas, combined.
-   - **PR #108** — **RF-13** invoices v1: overview page, filterable by customer AND building. Tickets get NO invoiced status — billing stays on EW; convert-to-EW is the bridge.
-   - **PR #109** — **RF-16** Dashboard vs Tickets distinction/polish (after the run above).
+5. **Post-#104 queue (agreed with Göktuğ, 2026-06-25; queue collapsed 2026-06-26):**
+   - ~~**PR #105** — **RF-14** EW-detail comfort (collapsible Requested-services/Pricing-proposal cards, scrollable long tables, preview-pane toggle + relaxed spacing) + **RF-15** formal branded PDFs (Osius logo header, embedded font with real €, both PDF families).~~ **DONE — PR #105, deployed to crmtest.**
+   - **PR #106** — **combined queue sprint** (the former #106–#109 collapsed into one): **RF-8** permission bundles (module cards, approved design below) + **RF-9** calm assignment area (simple-first AND enlarged details) + **RF-13** invoices v1 (Facturen overview, customer+building filters, existing mark-invoiced granularity) + **RF-16** dashboard = overview/attention cards, full lists exclusive to Tickets / Extra Work pages.
 6. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
 7. **Fixing & Auditing Sprint** — the full batch + Department + RF-7 + codebase audit + reconcile this checklist. (RF-8 and RF-9 pulled forward into the #105–#109 queue above.)
 8. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
@@ -172,6 +169,8 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 **RF-16 — Dashboard and Tickets show nearly the same content (Göktuğ, 2026-06-25).** Distinction/polish between the two surfaces — queued after the current run.
 
 **Decisions (with Göktuğ, 2026-06-25):** **RF-8** = design+build now (bundle list pending Göktuğ's sign-off); **RF-9** = simple-first AND enlarged details, combined; **RF-13** = v1 invoices overview now, filterable by customer AND building; tickets get **NO** invoiced status (billing stays on EW; convert-to-EW is the bridge).
+
+**Decisions (with Göktuğ, 2026-06-26 — the #106 combined sprint):** **RF-8 bundle design approved:** module cards **Meldingen** + **Extra werk**, each a master on/off + 3 coarse toggles, all existing depth behind an **Advanced** ("Geavanceerd") section. **RF-9 direction:** simple-first AND enlarged details combined (collapsed summary + prominent Toewijzen; expand for the enlarged detail layout). **RF-13 v1 scope:** overview page, customer+building filters, the existing mark-invoiced granularity — no new billing model. **RF-16 direction:** dashboard = overview/attention cards ("Te bevestigen", "Niet toegewezen", "Recente activiteit"); the full lists live exclusively on the Tickets / Extra Work pages.
 
 *(Note: proposal-10's `f — 1.00 x OTHER @ 0.00` line was confirmed junk demo data, not a bug.)*
 
