@@ -19,6 +19,7 @@ import {
 import axios from "axios";
 import { Trans, useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
+import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
   cancelStaffAssignmentRequest,
   createStaffAssignmentRequest,
@@ -711,6 +712,16 @@ export function TicketDetailPage() {
     setLoading(true);
     loadTicket();
   }, [loadTicket]);
+
+  // RF-1 — opening the ticket marks its message thread read for this user
+  // (advance the inbox cursor) and refreshes the sidebar badge. Async, no
+  // setState here.
+  useEffect(() => {
+    if (!id) return;
+    void markThreadRead("ticket", Number(id))
+      .then(() => notifyInboxUnreadChanged())
+      .catch(() => {});
+  }, [id]);
 
   // Sprint 32 — provider-audit roles (SA / CA / BM, mirroring the backend
   // IsTicketAuditConsumer) get the UNIFIED audit timeline. STAFF /

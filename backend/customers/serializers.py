@@ -160,6 +160,10 @@ class CustomerSerializer(serializers.ModelSerializer):
     # user-management / CCA-management UI surfaces without
     # re-implementing the H-7 / B4 / B5 rules.
     actions = serializers.SerializerMethodField()
+    # RF-1 — customer logo URL (null when unset). The inbox avatar for
+    # this customer's threads. Absolute so the frontend fetches the
+    # authed blob directly.
+    logo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Customer
@@ -175,6 +179,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             "contact_email",
             "phone",
             "language",
+            "logo_url",
             "is_active",
             # Sprint 23B — assigned-staff contact-visibility policy.
             # The CustomerViewSet permission gate is already
@@ -193,6 +198,7 @@ class CustomerSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "linked_building_ids",
+            "logo_url",
             "is_active",
             "actions",
             "created_at",
@@ -219,6 +225,11 @@ class CustomerSerializer(serializers.ModelSerializer):
         if obj.building_id is not None:
             return [obj.building_id]
         return []
+
+    def get_logo_url(self, obj: Customer):
+        from .media_urls import customer_logo_url
+
+        return customer_logo_url(obj, self.context.get("request"))
 
     def get_actions(self, obj: Customer) -> dict:
         request = self.context.get("request")

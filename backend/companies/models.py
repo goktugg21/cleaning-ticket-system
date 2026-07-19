@@ -1,5 +1,14 @@
+from pathlib import Path as FilePath
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
+
+
+def company_logo_upload_path(instance, filename):
+    # RF-1 — provider company logo. uuid filename (never trust the client name).
+    ext = FilePath(filename).suffix.lower()
+    return f"company_logos/{instance.pk}/{uuid4().hex}{ext}"
 
 
 class Company(models.Model):
@@ -7,6 +16,15 @@ class Company(models.Model):
     slug = models.SlugField(max_length=255, unique=True)
     default_language = models.CharField(max_length=8, default="nl")
     is_active = models.BooleanField(default=True)
+
+    # RF-1 — provider company logo. Additive/nullable; set only via the
+    # authed logo-upload endpoint (this company's COMPANY_ADMIN or
+    # SUPER_ADMIN).
+    logo = models.ImageField(
+        upload_to=company_logo_upload_path,
+        null=True,
+        blank=True,
+    )
 
     # B5 — Super Admin-controlled policy toggle.
     #

@@ -1,6 +1,28 @@
+import io
+
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
+from PIL import Image
 
 from accounts.models import UserRole
+
+
+def make_image_upload(
+    name="avatar.png", fmt="PNG", content_type="image/png", size=(8, 8)
+):
+    """RF-1 test helper — a genuine (Pillow-encoded) image as a
+    multipart upload, so the content-verify step in
+    `validate_image_upload` passes for the happy path.
+    """
+    buf = io.BytesIO()
+    Image.new("RGB", size, (120, 90, 200)).save(buf, format=fmt)
+    return SimpleUploadedFile(name, buf.getvalue(), content_type=content_type)
+
+
+def make_fake_upload(name, content_type, payload=b"not-a-real-image"):
+    """RF-1 test helper — bytes that are NOT a valid image, for
+    content-rejection tests (e.g. a PDF renamed .png)."""
+    return SimpleUploadedFile(name, payload, content_type=content_type)
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
 from customers.models import (

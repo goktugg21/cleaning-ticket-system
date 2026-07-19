@@ -5,6 +5,9 @@ import axios from "axios";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { Avatar } from "../components/Avatar";
+import { ImageUploadField } from "../components/ImageUploadField";
+import { deleteProfilePhoto, uploadProfilePhoto } from "../api/media";
 import { roleLabelKeyNs } from "../auth/permissions";
 import type {
   NotificationEventType,
@@ -44,17 +47,6 @@ function errorPayload(err: unknown): unknown {
   return undefined;
 }
 
-function getInitials(fullName: string, email: string): string {
-  const cleaned = (fullName || "").trim();
-  if (cleaned) {
-    const parts = cleaned.split(/\s+/);
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-    }
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-  return (email.split("@")[0] || "?").slice(0, 2).toUpperCase();
-}
 
 function formatJoinDate(iso: string, lang: string): string {
   try {
@@ -278,9 +270,12 @@ export function SettingsPage() {
           {me && (
             <section className="card account-overview">
               <div className="account-overview-header">
-                <div className="account-avatar">
-                  {getInitials(me.full_name, me.email)}
-                </div>
+                <Avatar
+                  imageUrl={me.profile_photo_url}
+                  name={me.full_name || me.email}
+                  size={56}
+                  className="account-avatar-img"
+                />
                 <div className="account-identity">
                   {me.full_name?.trim() && (
                     <div className="account-name">{me.full_name}</div>
@@ -292,6 +287,29 @@ export function SettingsPage() {
                     </span>
                   )}
                 </div>
+              </div>
+
+              <div className="account-overview-divider" />
+
+              {/* RF-1 — own profile photo (always self-service). */}
+              <div className="account-photo-section">
+                <div className="account-meta-label" style={{ marginBottom: 8 }}>
+                  {t("common:settings.photo_title")}
+                </div>
+                <ImageUploadField
+                  imageUrl={me.profile_photo_url}
+                  name={me.full_name || me.email}
+                  size={72}
+                  testId="profile-photo-upload"
+                  onUpload={async (file) => {
+                    await uploadProfilePhoto(me.id, file);
+                    await reloadMe();
+                  }}
+                  onRemove={async () => {
+                    await deleteProfilePhoto(me.id);
+                    await reloadMe();
+                  }}
+                />
               </div>
 
               <div className="account-overview-divider" />
