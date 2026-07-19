@@ -7042,15 +7042,6 @@ table.data-table {
   font-weight: 600;
   color: var(--text-muted);
 }
-.inbox-unread-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-2);
-  cursor: pointer;
-}
 
 /* List + rows */
 .inbox-list { list-style: none; margin: 0; padding: 0; }
@@ -7217,3 +7208,54 @@ table.data-table {
 .ew-msg-time { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 .ew-msg-text { font-size: 13px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
 .ew-msg-directed { margin-top: 4px; }
+
+/* IA 2026-06-25 — inbox unread filter as a proper toggle switch. The
+   real checkbox stays for a11y/keyboard; the track/knob render it. */
+.inbox-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+.inbox-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.inbox-switch-track {
+  width: 34px;
+  height: 20px;
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.inbox-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+  transition: transform 0.15s;
+}
+.inbox-switch input:checked + .inbox-switch-track {
+  background: var(--green);
+  border-color: var(--green);
+}
+.inbox-switch input:checked + .inbox-switch-track .inbox-switch-knob {
+  transform: translateX(14px);
+}
+.inbox-switch input:focus-visible + .inbox-switch-track {
+  outline: 2px solid var(--green-2);
+  outline-offset: 2px;
+}

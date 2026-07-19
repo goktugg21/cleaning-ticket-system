@@ -10,11 +10,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { MessagesSquare, Search } from "lucide-react";
+import { CheckCheck, MessagesSquare, Search } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
   listInbox,
+  markAllThreadsRead,
   markThreadRead,
   notifyInboxUnreadChanged,
 } from "../api/inbox";
@@ -83,6 +84,21 @@ export function InboxPage() {
     };
   }, [filters]);
 
+  async function markAllRead() {
+    // Confirm-less by design: the action is safe (idempotent, only
+    // advances read state) and instantly reflected. Optimistic zeroing;
+    // the backend response reconciles the badge via the shared event.
+    setRows((prev) =>
+      prev.map((r) => ({ ...r, unread_count: 0, unread_by: undefined })),
+    );
+    try {
+      await markAllThreadsRead();
+      notifyInboxUnreadChanged();
+    } catch (err) {
+      setError(getApiError(err));
+    }
+  }
+
   async function openThread(row: InboxRow) {
     // Optimistically clear the row's unread badge + refresh the nav badge,
     // then open the detail. The detail page also marks read (idempotent).
@@ -112,6 +128,18 @@ export function InboxPage() {
             {t("nav.messages_group")}
           </div>
           <h2 className="page-title">{t("inbox.title")}</h2>
+          <p className="page-sub">{t("inbox.subtitle")}</p>
+        </div>
+        <div className="page-header-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={markAllRead}
+            data-testid="inbox-mark-all-read"
+          >
+            <CheckCheck size={15} strokeWidth={2} />
+            {t("inbox.mark_all_read")}
+          </button>
         </div>
       </div>
 
@@ -163,13 +191,18 @@ export function InboxPage() {
           />
         </label>
 
-        <label className="inbox-unread-toggle">
+        {/* IA — proper switch. Still a real checkbox for a11y/keyboard;
+            the track/knob are pure CSS over the hidden input. */}
+        <label className="inbox-switch">
           <input
             type="checkbox"
             checked={unreadOnly}
             onChange={(e) => setUnreadOnly(e.target.checked)}
             data-testid="inbox-unread-only"
           />
+          <span className="inbox-switch-track" aria-hidden="true">
+            <span className="inbox-switch-knob" />
+          </span>
           {t("inbox.unread_only")}
         </label>
       </div>
