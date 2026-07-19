@@ -1,6 +1,9 @@
 """
 Sprint 28 Batch 14 — Proposal PDF renderer.
 RF-10 (2026-06-24) — Dutch localization, width-safe layout, professional pass.
+RF-15 (2026-06-25) — formal branded pass: Osius logo header, embedded
+DejaVu Sans (real euro sign + full charset), accent rule, refined table
+header, page footer with generation date.
 
 Pure rendering layer. The HTTP wrapper lives in
 `views_proposals.ProposalPdfView`. This module exposes a single
@@ -11,33 +14,39 @@ function:
 Hard rules (mirrored from the Batch 14 brief):
 
   * `internal_note` is NEVER read or rendered. For ANY caller. Even
-    in the provider-side branch. The privacy-lock byte-search tests
-    in `tests/test_sprint28_proposal_pdf.py` are load-bearing — do
-    not introduce a code path that could read the field.
+    in the provider-side branch. The privacy-lock tests in
+    `tests/test_sprint28_proposal_pdf.py` are load-bearing — do not
+    introduce a code path that could read the field.
   * Customers do not see the override block (override reason +
     override actor email). Provider operators do.
-  * No `EUR` glyph (`€`). fpdf2's core Helvetica is Latin-1 and `€`
-    (U+20AC) raises `Character ... not in font`. We render the ASCII
-    string "EUR" everywhere. This is a deliberate, documented
-    constraint: the byte-search tests grep the RAW (uncompressed) PDF
-    for sentinel strings, which only works while text is stored as
-    readable Latin-1 bytes — an embedded Unicode TTF would encode text
-    as glyph-IDs and break them. See the memory note
-    "proposal-pdf-font-constraint" for the DejaVu+pypdf follow-up.
-  * No PDF compression — the byte-search tests grep the raw output.
+  * RF-15 replaced the Latin-1 core-font constraint: DejaVu Sans is
+    embedded via `config.pdf_branding.register_fonts`, so the real
+    euro sign and the full charset (Turkish names included) render
+    natively. The privacy tests now extract TEXT via pypdf instead of
+    grepping raw bytes, so glyph-ID encoding and stream compression
+    are no longer constraints.
 
 RF-10 — the PDF is **Dutch-only** (like the transactional emails):
 static labels, status/urgency enums, and unit types render as Dutch
 human labels; money/quantity use Dutch number formatting
-("EUR 1.234,56", comma decimals). Latin-1 renders `m²` natively; the
-`_safe_pdf_text` net still maps any remaining non-Latin-1 glyph
-(e.g. Turkish `ş/ğ`) to "?".
+("€ 1.234,56", comma decimals).
 """
 from __future__ import annotations
 
 from decimal import Decimal
 
+from django.utils import timezone
 from fpdf import FPDF
+
+from config.pdf_branding import (
+    ACCENT_RGB,
+    ACCENT_TINT_RGB,
+    FONT_FAMILY,
+    LOGO_WIDTH_MM,
+    accent_rule,
+    draw_logo,
+    register_fonts,
+)
 
 from .models import Proposal, ProposalLine
 
@@ -47,7 +56,7 @@ from .models import Proposal, ProposalLine
 # ---------------------------------------------------------------------------
 _UNIT_LABELS_NL: dict[str, str] = {
     "HOURS": "uur",
-    "SQUARE_METERS": "m²",  # m² — U+00B2 is in Latin-1, renders natively
+    "SQUARE_METERS": "m²",
     "FIXED": "vast",
     "ITEM": "stuks",
     "OTHER": "overig",
@@ -76,12 +85,17 @@ _COL_SUBTOTAL = 22.0
 _COL_VAT = 20.0
 _COL_TOTAL = 25.0
 
+# Light border tone for the lines table (reset to black afterwards).
+_TABLE_BORDER_RGB = (208, 200, 206)
+
 
 # ---------------------------------------------------------------------------
 # Safe-text helper
 # ---------------------------------------------------------------------------
+# Typographic normalization only — the embedded DejaVu face renders the
+# full charset, so nothing is mapped away for font reasons anymore
+# (RF-15 deleted the old €->"EUR" mapping and the Latin-1 round-trip).
 _GLYPH_SUBSTITUTIONS: tuple[tuple[str, str], ...] = (
-    ("€", "EUR"),   # €
     ("–", "-"),      # –  EN DASH
     ("—", "-"),      # —  EM DASH
     ("“", '"'),      # “
@@ -93,23 +107,17 @@ _GLYPH_SUBSTITUTIONS: tuple[tuple[str, str], ...] = (
 
 def _safe_pdf_text(value: object) -> str:
     """
-    Coerce a user-supplied string into a form the default Latin-1 PDF
-    core font can render without raising `Character ... not in font`.
-
-    1. Explicit substitutions for common typographic glyphs that are
-       outside Latin-1 (euro sign, smart quotes, en/em dashes).
-    2. Final defensive pass via Latin-1 encode/decode with `errors=
-       "replace"` so any remaining non-Latin-1 glyph becomes `?`
-       instead of crashing fpdf2 mid-render.
+    Coerce a user-supplied value into a rendering-safe string:
+    None becomes "", and common typographic glyphs are normalized to
+    their plain ASCII forms. No charset narrowing happens here — the
+    embedded Unicode font renders €, m², Turkish characters, etc.
     """
     if value is None:
         return ""
     text = str(value)
     for needle, replacement in _GLYPH_SUBSTITUTIONS:
         text = text.replace(needle, replacement)
-    # Final defensive pass — anything still outside Latin-1 becomes
-    # a literal "?" via the encode/decode round-trip.
-    return text.encode("latin-1", errors="replace").decode("latin-1")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +140,7 @@ def _nl_number(value: Decimal, places: int = 2) -> str:
 def _fmt_money(amount: Decimal | None) -> str:
     if amount is None:
         amount = Decimal("0.00")
-    return f"EUR {_nl_number(amount, 2)}"
+    return f"€ {_nl_number(amount, 2)}"
 
 
 def _fmt_qty_unit(line: ProposalLine) -> str:
@@ -198,23 +206,27 @@ def _fitted_cell(
 
 
 # ---------------------------------------------------------------------------
-# PDF subclass — footer (page number + provider name).
+# PDF subclass — footer (page number + generation date + provider name).
 # ---------------------------------------------------------------------------
 class _ProposalPDF(FPDF):
     provider_name: str = ""
+    generated_on: str = ""
 
     def footer(self) -> None:  # noqa: D401 — fpdf2 hook
         self.set_y(-12)
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(120, 120, 120)
-        half = self.epw / 2.0
-        self.cell(half, 6, _safe_pdf_text(f"Pagina {self.page_no()}"))
+        self.set_font(FONT_FAMILY, "", 7.5)
+        self.set_text_color(130, 125, 129)
+        third = self.epw / 3.0
+        self.cell(third, 6, _safe_pdf_text(f"Pagina {self.page_no()}"))
         self.cell(
-            half,
+            third,
             6,
-            _safe_pdf_text(self.provider_name),
-            align="R",
+            _safe_pdf_text(
+                f"Gegenereerd op {self.generated_on}" if self.generated_on else ""
+            ),
+            align="C",
         )
+        self.cell(third, 6, _safe_pdf_text(self.provider_name), align="R")
         self.set_text_color(0, 0, 0)
 
 
@@ -240,46 +252,55 @@ def render_proposal_pdf(
     building_name = getattr(extra_work.building, "name", "") or ""
 
     pdf = _ProposalPDF(unit="mm", format="A4")
+    register_fonts(pdf)
     pdf.provider_name = company_name
-    # Disable compression so test byte-search can grep raw PDF bytes.
-    pdf.set_compression(False)
+    pdf.generated_on = timezone.localdate().isoformat()
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
 
     # ------------------------------------------------------------------
-    # Title row — proposal id (left) / status (right).
+    # Branded header — logo top-left, provider block beside it,
+    # proposal meta right-aligned, accent rule underneath.
     # ------------------------------------------------------------------
+    logo_bottom = draw_logo(pdf, y=10.0)
+
+    provider_x = pdf.l_margin + LOGO_WIDTH_MM + 8.0
+    pdf.set_xy(provider_x, 11.0)
+    pdf.set_font(FONT_FAMILY, "B", 11)
+    pdf.cell(80, 6, _safe_pdf_text(company_name))
+    pdf.set_xy(provider_x, 17.0)
+    pdf.set_font(FONT_FAMILY, "", 8.5)
+    pdf.set_text_color(120, 114, 118)
+    pdf.cell(80, 4, _safe_pdf_text("Prijsvoorstel extra werk"))
+    pdf.set_text_color(0, 0, 0)
+
     status_nl = _STATUS_LABELS_NL.get(proposal.status, str(proposal.status))
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(120, 10, _safe_pdf_text(f"Voorstel #{proposal.pk}"))
-    pdf.set_font("Helvetica", "", 12)
-    pdf.cell(
-        0,
-        10,
-        _safe_pdf_text(f"Status: {status_nl}"),
-        align="R",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
-    # Subtle divider under the title.
-    pdf.set_draw_color(200, 200, 200)
-    y = pdf.get_y() + 1
-    pdf.line(pdf.l_margin, y, pdf.w - pdf.r_margin, y)
-    pdf.set_draw_color(0, 0, 0)
-    pdf.ln(3)
+    meta_x = pdf.w - pdf.r_margin - 80.0
+    pdf.set_xy(meta_x, 10.0)
+    pdf.set_font(FONT_FAMILY, "B", 15)
+    pdf.set_text_color(*ACCENT_RGB)
+    pdf.cell(80, 8, _safe_pdf_text(f"Voorstel #{proposal.pk}"), align="R")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_xy(meta_x, 18.5)
+    pdf.set_font(FONT_FAMILY, "", 9.5)
+    pdf.cell(80, 5, _safe_pdf_text(f"Status: {status_nl}"), align="R")
+
+    rule_y = max(logo_bottom, 25.0) + 3.0
+    accent_rule(pdf, rule_y)
+    pdf.set_y(rule_y + 5.0)
 
     # ------------------------------------------------------------------
     # Header block — provider/customer/building (left) +
     # created/sent/decided dates (right).
     # ------------------------------------------------------------------
     def _kv_row(label_l: str, value_l: str, label_r: str, value_r: str) -> None:
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font(FONT_FAMILY, "B", 10)
         pdf.cell(28, 6, _safe_pdf_text(label_l))
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font(FONT_FAMILY, "", 10)
         pdf.cell(67, 6, _safe_pdf_text(value_l))
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font(FONT_FAMILY, "B", 10)
         pdf.cell(38, 6, _safe_pdf_text(label_r))
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font(FONT_FAMILY, "", 10)
         pdf.cell(0, 6, _safe_pdf_text(value_r), new_x="LMARGIN", new_y="NEXT")
 
     _kv_row(
@@ -299,9 +320,9 @@ def render_proposal_pdf(
     # ------------------------------------------------------------------
     # Parent Extra Work context.
     # ------------------------------------------------------------------
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(FONT_FAMILY, "B", 10)
     pdf.cell(0, 6, _safe_pdf_text("Aanvraag:"), new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(FONT_FAMILY, "", 10)
     description = (extra_work.description or "")[:200]
     pdf.multi_cell(0, 5, _safe_pdf_text(description))
     pdf.ln(1)
@@ -309,9 +330,9 @@ def render_proposal_pdf(
     urgency_nl = _URGENCY_LABELS_NL.get(
         extra_work.urgency, str(extra_work.urgency)
     )
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font(FONT_FAMILY, "B", 10)
     pdf.cell(30, 6, _safe_pdf_text("Urgentie:"))
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(FONT_FAMILY, "", 10)
     pdf.cell(
         0, 6, _safe_pdf_text(urgency_nl), new_x="LMARGIN", new_y="NEXT",
     )
@@ -321,12 +342,15 @@ def render_proposal_pdf(
     # Lines table.
     #
     # NOTE — `line.internal_note` is intentionally NOT referenced in
-    # this block. Adding it would break the privacy-lock byte-search
-    # tests AND the Batch 14 contract.
+    # this block. Adding it would break the privacy-lock tests AND the
+    # Batch 14 contract.
     # ------------------------------------------------------------------
-    # Header row — bold, light fill, numeric columns right-aligned.
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_fill_color(235, 237, 235)
+    # Header row — bold, accent-tinted fill, accent text, numeric
+    # columns right-aligned. Light table borders throughout.
+    pdf.set_draw_color(*_TABLE_BORDER_RGB)
+    pdf.set_font(FONT_FAMILY, "B", 8.5)
+    pdf.set_fill_color(*ACCENT_TINT_RGB)
+    pdf.set_text_color(*ACCENT_RGB)
     headers = (
         ("Dienst / Omschrijving", _COL_LABEL, "L"),
         ("Aantal", QTY_COL_WIDTH, "R"),
@@ -338,13 +362,16 @@ def render_proposal_pdf(
     )
     for label, width, align in headers:
         _fitted_cell(
-            pdf, width, 7, label, align=align, border=1, fill=True, base_size=9.0
+            pdf, width, 7, label, align=align, border=1, fill=True,
+            base_size=8.5,
         )
     pdf.ln(7)
+    pdf.set_text_color(0, 0, 0)
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font(FONT_FAMILY, "", 9)
     for line in proposal.lines.all().select_related("service"):
         _render_line(pdf, line)
+    pdf.set_draw_color(0, 0, 0)
 
     pdf.ln(4)
 
@@ -352,9 +379,9 @@ def render_proposal_pdf(
     # Totals footer — right-aligned numeric block.
     # ------------------------------------------------------------------
     def _total_row(label: str, amount, *, bold_label: bool, size: int) -> None:
-        pdf.set_font("Helvetica", "B" if bold_label else "", size)
+        pdf.set_font(FONT_FAMILY, "B" if bold_label else "", size)
         pdf.cell(140, 6, _safe_pdf_text(label), align="R")
-        pdf.set_font("Helvetica", "", size)
+        pdf.set_font(FONT_FAMILY, "", size)
         pdf.cell(
             0, 6, _safe_pdf_text(_fmt_money(amount)),
             align="R", new_x="LMARGIN", new_y="NEXT",
@@ -362,13 +389,13 @@ def render_proposal_pdf(
 
     _total_row("Subtotaal", proposal.subtotal_amount, bold_label=True, size=10)
     _total_row("BTW", proposal.vat_amount, bold_label=True, size=10)
-    # Grand total — slightly larger, with a thin rule above it.
-    pdf.set_draw_color(200, 200, 200)
+    # Grand total — slightly larger, with a thin accent rule above it.
+    pdf.set_draw_color(*ACCENT_RGB)
     ty = pdf.get_y() + 0.5
     pdf.line(pdf.w - pdf.r_margin - 70, ty, pdf.w - pdf.r_margin, ty)
     pdf.set_draw_color(0, 0, 0)
     pdf.ln(1)
-    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_font(FONT_FAMILY, "B", 11)
     pdf.cell(140, 7, _safe_pdf_text("Totaal"), align="R")
     pdf.cell(
         0, 7, _safe_pdf_text(_fmt_money(proposal.total_amount)),
@@ -381,7 +408,7 @@ def render_proposal_pdf(
     # ------------------------------------------------------------------
     if (not viewer_is_customer) and (proposal.override_reason or "").strip():
         pdf.ln(6)
-        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_font(FONT_FAMILY, "B", 10)
         pdf.cell(
             0,
             6,
@@ -389,7 +416,7 @@ def render_proposal_pdf(
             new_x="LMARGIN",
             new_y="NEXT",
         )
-        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font(FONT_FAMILY, "", 10)
         pdf.multi_cell(0, 5, _safe_pdf_text(proposal.override_reason))
 
         override_actor_email = ""
@@ -400,9 +427,9 @@ def render_proposal_pdf(
             except Exception:  # noqa: BLE001 — defensive only
                 override_actor_email = ""
         if override_actor_email:
-            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_font(FONT_FAMILY, "B", 10)
             pdf.cell(35, 6, _safe_pdf_text("Override door:"))
-            pdf.set_font("Helvetica", "", 10)
+            pdf.set_font(FONT_FAMILY, "", 10)
             pdf.cell(
                 0,
                 6,
@@ -462,7 +489,7 @@ def _render_line(pdf: FPDF, line: ProposalLine) -> None:
         # residual x offset from the multi_cell shifted every following row
         # rightwards (and clipped it off the page). The internal_note field
         # is never referenced.
-        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_font(FONT_FAMILY, "I", 8)
         pdf.set_x(pdf.l_margin + 2)
         pdf.multi_cell(
             0,
@@ -471,4 +498,4 @@ def _render_line(pdf: FPDF, line: ProposalLine) -> None:
             new_x="LMARGIN",
             new_y="NEXT",
         )
-        pdf.set_font("Helvetica", "", 9)
+        pdf.set_font(FONT_FAMILY, "", 9)

@@ -8,14 +8,13 @@ the tests in `tests/test_dimensions_export.py` pin them.
 
 PDFs use `fpdf2` (pure Python, ~1MB, no system deps; chosen over
 reportlab because reportlab pulls in extra weight the project does
-not need for these table-first reports). The PDFs are intentionally
-NOT pixel-perfect:
-- A4 portrait, default Helvetica
-- Title, period, generated_at, scope summary
+not need for these table-first reports). RF-15 gave them the shared
+formal branding (`config.pdf_branding`): Osius logo header, embedded
+DejaVu Sans, accent rule, tinted table headers, page footer with the
+generation timestamp. Still intentionally table-first:
+- A4 portrait
+- Branded header, period + scope summary
 - Single table with the same logical columns as the CSV
-
-The fallback reason for picking fpdf2 is documented in
-docs/deployment.md / pilot-readiness-roadmap.md when it lands.
 """
 from __future__ import annotations
 
@@ -24,6 +23,16 @@ import io
 from typing import Iterable
 
 from fpdf import FPDF
+
+from config.pdf_branding import (
+    ACCENT_RGB,
+    ACCENT_TINT_RGB,
+    FONT_FAMILY,
+    LOGO_WIDTH_MM,
+    accent_rule,
+    draw_logo,
+    register_fonts,
+)
 
 
 CSV_BOM = "﻿"  # Excel-friendly UTF-8 marker.
@@ -224,37 +233,74 @@ def _scope_summary_lines(scope: dict) -> list:
     return parts or ["Scope: All"]
 
 
-def _new_pdf(title: str, payload: dict) -> FPDF:
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
+class _ReportPDF(FPDF):
+    """RF-15 — branded report PDF: footer with page number + the
+    report's `generated_at` timestamp on every page."""
+
+    generated_on: str = ""
+
+    def footer(self) -> None:  # noqa: D401 — fpdf2 hook
+        self.set_y(-12)
+        self.set_font(FONT_FAMILY, "", 7.5)
+        self.set_text_color(130, 125, 129)
+        half = self.epw / 2.0
+        self.cell(half, 6, f"Page {self.page_no()}")
+        self.cell(half, 6, self.generated_on, align="R")
+        self.set_text_color(0, 0, 0)
+
+
+def _branded_pdf(title: str, generated_at: object) -> _ReportPDF:
+    """Shared RF-15 header: logo top-left, title beside it, accent rule."""
+    pdf = _ReportPDF(orientation="P", unit="mm", format="A4")
+    register_fonts(pdf)
+    pdf.generated_on = str(generated_at or "")
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, title, ln=1)
+    logo_bottom = draw_logo(pdf, y=10.0)
+    pdf.set_xy(pdf.l_margin + LOGO_WIDTH_MM + 8.0, 12.0)
+    pdf.set_font(FONT_FAMILY, "B", 15)
+    pdf.cell(0, 8, title)
 
-    pdf.set_font("helvetica", "", 10)
-    pdf.cell(0, 6, f"Period: {payload['from']} -- {payload['to']}", ln=1)
-    pdf.cell(0, 6, f"Generated at: {payload['generated_at']}", ln=1)
+    rule_y = max(logo_bottom, 25.0) + 3.0
+    accent_rule(pdf, rule_y)
+    pdf.set_y(rule_y + 5.0)
+    return pdf
+
+
+def _new_pdf(title: str, payload: dict) -> FPDF:
+    pdf = _branded_pdf(title, payload["generated_at"])
+
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0, 6, f"Period: {payload['from']} -- {payload['to']}",
+        new_x="LMARGIN", new_y="NEXT",
+    )
     for line in _scope_summary_lines(payload["scope"]):
-        pdf.cell(0, 6, line, ln=1)
-    pdf.cell(0, 6, f"Total: {payload['total']}", ln=1)
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Total: {payload['total']}", new_x="LMARGIN", new_y="NEXT")
 
     pdf.ln(2)
     return pdf
 
 
 def _pdf_bytes(pdf: FPDF) -> bytes:
-    out = pdf.output(dest="S")
+    out = pdf.output()
     # fpdf2 returns a bytearray; coerce to immutable bytes for HttpResponse.
     return bytes(out)
 
 
 def _draw_table(pdf: FPDF, headers: list, widths: list, rows: list) -> None:
-    pdf.set_font("helvetica", "B", 10)
+    # RF-15 — tinted, accent-colored header row + light borders.
+    pdf.set_draw_color(208, 200, 206)
+    pdf.set_fill_color(*ACCENT_TINT_RGB)
+    pdf.set_text_color(*ACCENT_RGB)
+    pdf.set_font(FONT_FAMILY, "B", 9.5)
     for header, width in zip(headers, widths):
-        pdf.cell(width, 7, header, border=1)
+        pdf.cell(width, 7, header, border=1, fill=True)
     pdf.ln()
-    pdf.set_font("helvetica", "", 9)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font(FONT_FAMILY, "", 9)
     for row in rows:
         for value, width in zip(row, widths):
             text = str(value) if value is not None else ""
@@ -265,6 +311,7 @@ def _draw_table(pdf: FPDF, headers: list, widths: list, rows: list) -> None:
                 text = text[:39] + "…"
             pdf.cell(width, 6, text, border=1)
         pdf.ln()
+    pdf.set_draw_color(0, 0, 0)
 
 
 # ---- PDF: tickets-by-type --------------------------------------------------
@@ -364,24 +411,21 @@ _REVENUE_STATE_PDF_LABELS = {
 
 
 def build_extra_work_revenue_pdf(payload: dict) -> bytes:
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
+    pdf = _branded_pdf("Extra Work Revenue", payload["generated_at"])
 
-    pdf.set_font("helvetica", "B", 16)
-    pdf.cell(0, 10, "Extra Work Revenue", ln=1)
-
-    pdf.set_font("helvetica", "", 10)
-    pdf.cell(0, 6, f"Period: {payload['from']} -- {payload['to']}", ln=1)
-    pdf.cell(0, 6, f"Generated at: {payload['generated_at']}", ln=1)
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0, 6, f"Period: {payload['from']} -- {payload['to']}",
+        new_x="LMARGIN", new_y="NEXT",
+    )
     for line in _scope_summary_lines(payload["scope"]):
-        pdf.cell(0, 6, line, ln=1)
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
     totals = payload["totals"]
     pdf.cell(
         0,
         6,
         f"Total: {totals['count']} request(s) / {totals['total']} revenue",
-        ln=1,
+        new_x="LMARGIN", new_y="NEXT",
     )
     pdf.ln(2)
 
