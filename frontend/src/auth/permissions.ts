@@ -176,6 +176,13 @@ export function canAccessReports(role: Role | null | undefined): boolean {
   return isProviderManagementRole(role);
 }
 
+// RF-13 (#106) — `/invoices` ("Facturen") overview. Mirrors report
+// access: SA/CA/BM may view (BM sees it read-only — the mark/clear
+// actions are additionally gated on isProviderAdmin in the page).
+export function canAccessBilling(role: Role | null | undefined): boolean {
+  return isProviderManagementRole(role);
+}
+
 // `/planned-work` — provider-only recurring/planned work. Backend:
 // `planned_work.permissions.IsProviderManager` admits SUPER_ADMIN /
 // COMPANY_ADMIN / scoped BUILDING_MANAGER and 403s STAFF + CUSTOMER_USER

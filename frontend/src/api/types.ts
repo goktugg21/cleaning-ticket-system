@@ -1109,6 +1109,13 @@ export interface ExtraWorkRequestList {
   subtotal_amount: string;
   vat_amount: string;
   total_amount: string;
+  // RF-13 (#106) — final (actual-hours) amounts on the list shape so
+  // the invoices overview can apply the final-with-quoted-fallback
+  // rule without a per-row detail fetch. Present for every audience
+  // (parity with the detail serializer).
+  final_subtotal_amount: string | null;
+  final_vat_amount: string | null;
+  final_total_amount: string | null;
   created_by: number;
   created_by_email: string;
   requested_at: string;

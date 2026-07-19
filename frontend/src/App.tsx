@@ -13,6 +13,7 @@ import { AdminRoute } from "./components/AdminRoute";
 import { CustomerReadRoute } from "./components/CustomerReadRoute";
 import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
 import { PlannedWorkRoute } from "./components/PlannedWorkRoute";
+import { BillingRoute } from "./components/BillingRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
@@ -77,6 +78,12 @@ import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 // way to keep the initial bundle small.
 const ReportsPage = lazy(() =>
   import("./pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
+);
+
+// RF-13 (#106) — invoices overview, split like ReportsPage to keep the
+// initial bundle small.
+const InvoicesPage = lazy(() =>
+  import("./pages/InvoicesPage").then((m) => ({ default: m.InvoicesPage })),
 );
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -636,6 +643,22 @@ export default function App() {
                   <ReportsPage />
                 </Suspense>
               </ReportsRoute>
+            }
+          />
+          <Route
+            path="/invoices"
+            element={
+              <BillingRoute>
+                <Suspense
+                  fallback={
+                    <div className="loading-bar">
+                      <div className="loading-bar-fill" />
+                    </div>
+                  }
+                >
+                  <InvoicesPage />
+                </Suspense>
+              </BillingRoute>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

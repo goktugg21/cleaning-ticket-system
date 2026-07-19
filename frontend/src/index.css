@@ -2738,6 +2738,118 @@ table.data-table {
   width: 100%;
   justify-content: center;
 }
+
+/* RF-13 — invoices ("Facturen") overview. */
+.invoices-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+}
+.invoices-toolbar-field {
+  min-width: 160px;
+}
+.invoices-month-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.invoices-month-summary-money {
+  font-variant-numeric: tabular-nums;
+}
+.invoices-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.invoices-group {
+  margin-bottom: 12px;
+}
+.invoices-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 14px 18px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+}
+.invoices-chevron {
+  flex: none;
+  color: var(--text-faint);
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+.invoices-chevron-open {
+  transform: none;
+}
+.invoices-group-name {
+  font-family: var(--f-head);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invoices-group-total {
+  margin-left: auto;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.invoices-group-body {
+  padding: 0 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.invoices-building-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+.invoices-building-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+.invoices-table th.invoices-num,
+.invoices-table td.invoices-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.invoices-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.invoices-badge-open {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.invoices-badge-invoiced {
+  background: var(--green-faint);
+  color: var(--green-2);
+  border: 1px solid var(--green);
+}
 .att-thumb-ext {
   font-family: var(--f-head);
   font-size: 14px;

@@ -163,6 +163,34 @@ class ListBillingFieldVisibilityTests(_InvoiceRunFixture):
             for key in _BILLING_KEYS:
                 self.assertIn(key, row, f"provider should see {key}")
 
+    def test_list_rows_carry_final_amounts_for_both_audiences(self):
+        # RF-13 (#106) — the invoices overview computes month totals from
+        # the LIST shape with the final-with-quoted-fallback rule, so the
+        # three final_* keys must be present on list rows. They are NOT
+        # provider-only (parity with the detail serializer: the final
+        # amount is the customer's own invoice amount).
+        self._make_ew_with_ticket(
+            ticket_status=TicketStatus.CLOSED,
+            closed_at=_dt(2026, 5, 31),
+            created_by=self.customer_user,
+        )
+        final_keys = (
+            "final_subtotal_amount",
+            "final_vat_amount",
+            "final_total_amount",
+        )
+        for actor, label in (
+            (self.admin, "provider"),
+            (self.customer_user, "customer"),
+        ):
+            resp = self._api(actor).get(LIST_URL)
+            self.assertEqual(resp.status_code, status.HTTP_200_OK)
+            results = resp.data["results"]
+            self.assertGreaterEqual(len(results), 1)
+            for row in results:
+                for key in final_keys:
+                    self.assertIn(key, row, f"{label} should see {key}")
+
     def test_customer_does_not_see_billing_keys(self):
         # The customer sees EW they CREATED (view_own scope); seed one with
         # billing metadata so the redaction assertion is meaningful.
