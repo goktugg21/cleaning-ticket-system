@@ -9,6 +9,7 @@
   "tickets_page.breadcrumb_current": "Tickets",
   "loading_data": "Operationele tickets laden…",
   "subtitle_counts": "{{count}} totaal · {{visible}} zichtbaar · pagina {{page}} van {{pages}}",
+  "subtitle_overview": "Overzicht van uw operatie — volledige lijsten vindt u onder Tickets en Extra werk.",
   "new_ticket": "Nieuw ticket",
   "admin_required_banner": "Dit gedeelte is alleen voor beheerders.",
 

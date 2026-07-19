@@ -9,6 +9,7 @@
   "tickets_page.breadcrumb_current": "Tickets",
   "loading_data": "Loading operational ticket data…",
   "subtitle_counts": "{{count}} total tickets · {{visible}} visible · page {{page}} of {{pages}}",
+  "subtitle_overview": "Overview of your operation — the full lists live under Tickets and Extra Work.",
   "new_ticket": "New ticket",
   "admin_required_banner": "This area is for admins only.",
 

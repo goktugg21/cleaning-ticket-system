@@ -650,14 +650,18 @@ export function DashboardPage({
             {isTicketsPage ? t("tickets_page.title") : t("title")}
           </h2>
           <p className="page-sub">
-            {loading
-              ? t("loading_data")
-              : t("subtitle_counts", {
-                  count,
-                  visible: tickets.length,
-                  page,
-                  pages: pageCount,
-                })}
+            {/* RF-16 — the dashboard loads no list, so the list-count
+                subtitle only makes sense on the Tickets page. */}
+            {!isTicketsPage
+              ? t("subtitle_overview")
+              : loading
+                ? t("loading_data")
+                : t("subtitle_counts", {
+                    count,
+                    visible: tickets.length,
+                    page,
+                    pages: pageCount,
+                  })}
           </p>
         </div>
         <div className="page-header-actions">
