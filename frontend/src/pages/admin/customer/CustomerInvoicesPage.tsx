@@ -5,19 +5,16 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
 import type { CustomerAdmin } from "../../../api/types";
-import { InvoicesPage } from "../../InvoicesPage";
+import { FacturenPage } from "../../FacturenPage";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * #108 Part E — the customer-detail Invoices tab: the Facturen view
- * scoped to THIS customer (month picker, per-building breakdown,
- * totals via lib/billing, status filter), strictly VIEW-ONLY. The
- * mark/clear-invoiced endpoints act at company+month granularity —
- * running them from a customer page would mark other customers' work
- * too — so this tab renders a pointer link to the Facturen page
- * instead of the actions. All rendering is the shared InvoicesPage
- * with `customerId` + `embedded` (reuse, not a copy).
+ * Invoicing Phase 4b — the customer-detail Invoices tab: the new Facturen
+ * invoice list scoped to THIS customer (view-only). The due panel + the
+ * generate control live on the standalone Facturen page — this embedded
+ * variant shows a pointer link to it instead. All rendering is the shared
+ * FacturenPage with `customerId` + `embedded` (reuse, not a copy).
  */
 export function CustomerInvoicesPage() {
   const { id } = useParams();
@@ -67,7 +64,7 @@ export function CustomerInvoicesPage() {
           {error}
         </div>
       )}
-      <InvoicesPage customerId={numericId} embedded />
+      <FacturenPage customerId={numericId} embedded />
     </div>
   );
 }

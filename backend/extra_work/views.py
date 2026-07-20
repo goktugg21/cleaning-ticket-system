@@ -115,19 +115,6 @@ def _is_provider_operator(user) -> bool:
     return user.role in PROVIDER_ROLES
 
 
-def _parse_invoice_run_params(data):
-    """Returns (company_id, year, month) or None if invalid."""
-    try:
-        company_id = int(data["company"])
-        year = int(data["year"])
-        month = int(data["month"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if not (1 <= month <= 12):
-        return None
-    return (company_id, year, month)
-
-
 class ExtraWorkRequestViewSet(
     mixins.CreateModelMixin,
     mixins.ListModelMixin,
@@ -845,55 +832,6 @@ class ExtraWorkRequestViewSet(
                 }
                 for row in rows
             ],
-            status=status.HTTP_200_OK,
-        )
-
-    @action(detail=False, methods=["post"], url_path="mark-invoiced")
-    def mark_invoiced(self, request):
-        # DEPRECATED NO-OP (Invoicing Option 1, Phase 2a). The invoice is now
-        # the SINGLE source of "invoiced" — a row is invoiced iff it is
-        # claimed by a live InvoiceLine (see invoicing/selectors.py +
-        # services.generate_draft_invoices). This legacy bulk run therefore
-        # no longer mutates is_invoiced/invoiced_at. The route + provider gate
-        # + response SHAPE are kept ONLY so the deployed Facturen page keeps
-        # working; this endpoint and that page are removed together in Phase 4.
-        if not _is_provider_operator(request.user):
-            return Response(
-                {"detail": "Only provider operators can run invoicing."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        parsed = _parse_invoice_run_params(request.data)
-        if parsed is None:
-            return Response(
-                {"detail": "company (int), year (int), month (1-12) are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # No mutation — return the same shape with a zero count.
-        return Response(
-            {"invoiced_count": 0, "ew_ids": []},
-            status=status.HTTP_200_OK,
-        )
-
-    @action(detail=False, methods=["post"], url_path="clear-invoiced")
-    def clear_invoiced(self, request):
-        # DEPRECATED NO-OP (Invoicing Option 1, Phase 2a) — see mark_invoiced.
-        # Superseded by the invoice flow: releasing/deleting a draft invoice
-        # is what returns EW to the unbilled pool now. Route + gate + response
-        # SHAPE kept for the deployed Facturen page; removed in Phase 4.
-        if not _is_provider_operator(request.user):
-            return Response(
-                {"detail": "Only provider operators can run invoicing."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        parsed = _parse_invoice_run_params(request.data)
-        if parsed is None:
-            return Response(
-                {"detail": "company (int), year (int), month (1-12) are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # No mutation — return the same shape with a zero count.
-        return Response(
-            {"cleared_count": 0, "ew_ids": []},
             status=status.HTTP_200_OK,
         )
 

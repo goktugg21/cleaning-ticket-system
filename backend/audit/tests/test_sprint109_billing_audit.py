@@ -7,10 +7,12 @@ backend/audit/signals.py. These tests lock:
 
   * the billing-month PATCH writes one AuditLog UPDATE row with actor
     + before/after invoice_date;
-  * a mark-invoiced run writes one row per changed EW;
-  * a clear-invoiced run writes one row per changed EW;
   * a plain status transition writes NO ExtraWorkRequest audit row
     (H-11 separation: ExtraWorkStatusHistory owns workflow changes).
+
+(The mark-/clear-invoiced bulk-run audit tests were dropped with the
+endpoints themselves in Invoicing Phase 4b; the invoice_date field handler
+they also exercised stays covered by BillingPatchAuditTests above.)
 """
 from __future__ import annotations
 
@@ -72,63 +74,6 @@ class BillingPatchAuditTests(_InvoiceRunFixture):
         self.assertEqual(
             row.changes["invoice_date"],
             {"before": "2026-06-15", "after": None},
-        )
-
-
-class InvoiceRunAuditTests(_InvoiceRunFixture):
-    def test_mark_run_writes_one_row_per_changed_ew(self):
-        ew1 = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 10)
-        )
-        ew2 = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 20)
-        )
-        # A different-month EW the run must not touch (and must not
-        # produce an audit row for).
-        ew_other = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 6, 20)
-        )
-        AuditLog.objects.all().delete()
-        api = self._api(self.admin)
-        resp = api.post(
-            "/api/extra-work/mark-invoiced/",
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertEqual(resp.data["invoiced_count"], 2)
-
-        for ew in (ew1, ew2):
-            row = _ew_audit_rows(ew.id).get()
-            self.assertEqual(row.action, AuditAction.UPDATE)
-            self.assertEqual(row.actor, self.admin)
-            self.assertEqual(
-                row.changes["is_invoiced"], {"before": False, "after": True}
-            )
-            self.assertIsNone(row.changes["invoiced_at"]["before"])
-            self.assertIsNotNone(row.changes["invoiced_at"]["after"])
-        self.assertFalse(_ew_audit_rows(ew_other.id).exists())
-
-    def test_clear_run_writes_rows(self):
-        ew = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 10)
-        )
-        api = self._api(self.admin)
-        api.post(
-            "/api/extra-work/mark-invoiced/",
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        AuditLog.objects.all().delete()
-        resp = api.post(
-            "/api/extra-work/clear-invoiced/",
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, 200, resp.content)
-        row = _ew_audit_rows(ew.id).get()
-        self.assertEqual(
-            row.changes["is_invoiced"], {"before": True, "after": False}
         )
 
 
