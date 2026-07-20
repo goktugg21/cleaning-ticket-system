@@ -1330,5 +1330,16 @@
   "multi_select.select_all": "Alles selecteren",
   "multi_select.clear_all": "Alles wissen",
   "multi_select.selected_count": "{{count}} geselecteerd",
-  "multi_select.filter_placeholder": "Filteren…"
+  "multi_select.filter_placeholder": "Filteren…",
+  "nav.customer_submenu.invoices": "Facturen",
+  "nav.customer_submenu.reports": "Rapporten",
+  "billing.manage_on_invoices": "Beheren op de Facturen-pagina →",
+  "customer_reports.helper": "Omzet uit extra werk voor deze klant, gebaseerd op de factuurmaand (verdiend werk). Bedragen volgen dezelfde regels als de Facturen-pagina.",
+  "customer_reports.kpi_earned": "Verdiend deze maand",
+  "customer_reports.kpi_earned_meta": "{{count}} aanvragen",
+  "customer_reports.kpi_open_meta": "{{count}} nog niet gefactureerd",
+  "customer_reports.kpi_invoiced_meta": "{{count}} gefactureerd",
+  "customer_reports.kpi_vat": "BTW",
+  "customer_reports.kpi_vat_meta": "Subtotaal {{subtotal}}",
+  "customer_reports.full_reports_link": "Volledige rapporten →"
 }

@@ -1330,5 +1330,16 @@
   "multi_select.select_all": "Select all",
   "multi_select.clear_all": "Clear all",
   "multi_select.selected_count": "{{count}} selected",
-  "multi_select.filter_placeholder": "Filter…"
+  "multi_select.filter_placeholder": "Filter…",
+  "nav.customer_submenu.invoices": "Invoices",
+  "nav.customer_submenu.reports": "Reports",
+  "billing.manage_on_invoices": "Manage on the Invoices page →",
+  "customer_reports.helper": "Extra-work revenue for this customer, anchored on the billing month (earned work). Amounts follow the same rules as the Invoices page.",
+  "customer_reports.kpi_earned": "Earned this month",
+  "customer_reports.kpi_earned_meta": "{{count}} requests",
+  "customer_reports.kpi_open_meta": "{{count}} not yet invoiced",
+  "customer_reports.kpi_invoiced_meta": "{{count}} invoiced",
+  "customer_reports.kpi_vat": "VAT",
+  "customer_reports.kpi_vat_meta": "Subtotal {{subtotal}}",
+  "customer_reports.full_reports_link": "Full reports →"
 }
