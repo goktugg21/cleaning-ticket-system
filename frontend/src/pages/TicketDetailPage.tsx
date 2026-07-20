@@ -1955,12 +1955,15 @@ export function TicketDetailPage() {
               dispatch). The field-staff heading interpolates the
               ticket's providing company name to remove the prior
               hardcoded "OSIUS" multi-tenant bug. */}
+          {/* #108 Part F — right-column cards default COLLAPSED
+              (Workflow below stays open); the persistKey override wins
+              once the user touches a card. */}
           <CollapsibleCard
             title={t("card_assignment_title")}
             meta={t("side_summary_assignment", {
               count: ticket.assigned_staff?.length ?? 0,
             })}
-            defaultOpen
+            defaultOpen={false}
             persistKey="ticket-side-assignment"
             testId="side-card-assignment"
           >
@@ -2544,7 +2547,7 @@ export function TicketDetailPage() {
               dialog is unchanged. */}
           <CollapsibleCard
             title={t("card_details_title")}
-            defaultOpen
+            defaultOpen={false}
             persistKey="ticket-side-details"
             testId="side-card-details"
           >
