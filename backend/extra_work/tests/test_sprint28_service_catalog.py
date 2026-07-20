@@ -439,3 +439,99 @@ class ServiceCategoryProtectsServiceTests(TenantFixtureMixin, APITestCase):
             CATEGORY_DETAIL_URL.format(cat_id=self.cat.id)
         )
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+
+class ServiceCustomUnitLabelTests(TenantFixtureMixin, APITestCase):
+    """RF-2 (mirror of CustomerCustomPrice) — `Service.custom_unit_label` is
+    the operator-supplied unit name for `unit_type == OTHER`. OTHER REQUIRES a
+    non-blank label (stable code `custom_unit_label_required`); a concrete unit
+    type forces it blank rather than rejecting."""
+
+    def setUp(self):
+        super().setUp()
+        self.cat = ServiceCategory.objects.create(name="Custom-unit cat")
+
+    def _payload(self, **over):
+        base = {
+            "company": self.company.id,
+            "category": self.cat.id,
+            "name": "Sand delivery",
+            "unit_type": ExtraWorkPricingUnitType.OTHER,
+            "custom_unit_label": "m3",
+            "default_unit_price": "80.00",
+            "default_vat_pct": "21.00",
+        }
+        base.update(over)
+        return base
+
+    def test_create_other_without_label_rejected(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            SERVICE_LIST_URL, self._payload(custom_unit_label=""), format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("custom_unit_label", response.data)
+        self.assertEqual(
+            response.data["custom_unit_label"][0].code,
+            "custom_unit_label_required",
+        )
+
+    def test_create_other_with_whitespace_label_rejected(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            SERVICE_LIST_URL,
+            self._payload(custom_unit_label="   "),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["custom_unit_label"][0].code,
+            "custom_unit_label_required",
+        )
+
+    def test_create_other_with_label_accepted_and_stripped(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            SERVICE_LIST_URL,
+            self._payload(custom_unit_label="  pallet  "),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "pallet")
+        svc = Service.objects.get(pk=response.data["id"])
+        self.assertEqual(svc.custom_unit_label, "pallet")
+
+    def test_create_concrete_unit_forces_label_blank(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            SERVICE_LIST_URL,
+            self._payload(
+                unit_type=ExtraWorkPricingUnitType.HOURS,
+                custom_unit_label="m3",
+            ),
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["custom_unit_label"], "")
+        svc = Service.objects.get(pk=response.data["id"])
+        self.assertEqual(svc.custom_unit_label, "")
+
+    def test_patch_away_from_other_clears_stale_label(self):
+        self.authenticate(self.super_admin)
+        svc = Service.objects.create(
+            company=self.company,
+            category=self.cat,
+            name="Sand delivery",
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m3",
+            default_unit_price=Decimal("80.00"),
+        )
+        response = self.client.patch(
+            SERVICE_DETAIL_URL.format(svc_id=svc.id),
+            {"unit_type": ExtraWorkPricingUnitType.HOURS},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["custom_unit_label"], "")
+        svc.refresh_from_db()
+        self.assertEqual(svc.custom_unit_label, "")

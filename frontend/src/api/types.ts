@@ -1803,6 +1803,9 @@ export interface Service {
   name: string;
   description: string;
   unit_type: ServiceUnitType;
+  // RF-2 (mirror) — operator-supplied unit name; only meaningful for
+  // unit_type === "OTHER" (blank otherwise, enforced server-side).
+  custom_unit_label: string;
   // DRF serializes Decimal as a string to preserve precision; the form
   // converts to/from number locally and re-emits as a string on submit.
   default_unit_price: string;
@@ -1817,6 +1820,9 @@ export interface ServiceCreatePayload {
   name: string;
   description?: string;
   unit_type: ServiceUnitType;
+  // RF-2 (mirror) — sent for unit_type === "OTHER"; the backend forces it
+  // blank for concrete unit types and requires it for OTHER.
+  custom_unit_label?: string;
   default_unit_price: string;
   default_vat_pct: string;
   is_active?: boolean;
