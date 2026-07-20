@@ -1,15 +1,17 @@
-"""M4 commit 2c — the Extra Work invoice run (mark-invoiced / clear-invoiced).
+"""M4 invoice run — mark-invoiced / clear-invoiced.
 
-POST /api/extra-work/mark-invoiced and /clear-invoiced let a provider operator
-mark (or un-mark) every EARNED, not-yet-invoiced EW that bills in a given
-company+month. Billing month = COALESCE(invoice_date, spawned-ticket
-closed_at); "earned" == the spawned operational ticket is CLOSED. The run is
-provider-only, scoped via scope_extra_work_for (a company the caller cannot
-see marks 0), and idempotent.
+Sprint history: these provider-only bulk endpoints once marked/un-marked
+`is_invoiced` on earned EW by company+month. Invoicing Phase 2a (Option 1)
+made the INVOICE the single source of "invoiced" (a row is invoiced iff a
+live InvoiceLine claims it), so these two endpoints are now DEPRECATED
+NO-OPS: the routes, the provider-operator gate, the param validation, and
+the response SHAPE are kept ONLY so the deployed Facturen page keeps working
+— but they no longer mutate is_invoiced/invoiced_at. Endpoint + old Facturen
+page are removed together in Phase 4.
 
-Fixture/style mirrors test_m4_billing_fields.py; the spawned operational
-Ticket follows the Ticket.objects.create pattern from
-test_sprint6_one_ticket_per_request.py.
+These tests therefore assert the NO-OP contract: a provider gets HTTP 200
+with a zero count and NOTHING changes; a non-operator still gets 403; bad
+params still 400.
 """
 from __future__ import annotations
 
@@ -161,9 +163,10 @@ class _InvoiceRunFixture(TestCase):
         return ew
 
 
-class MarkInvoicedTests(_InvoiceRunFixture):
-    def test_headline_marks_in_completion_month(self):
-        # Earned (ticket CLOSED) May 31, no invoice_date override.
+class MarkInvoicedNoOpTests(_InvoiceRunFixture):
+    def test_mark_is_noop_returns_zero(self):
+        # Earned May 31: pre-Option-1 this marked 1. Now it is a no-op —
+        # HTTP 200, zero count, and is_invoiced is NOT set.
         ew = self._make_ew_with_ticket(
             ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 31)
         )
@@ -173,59 +176,36 @@ class MarkInvoicedTests(_InvoiceRunFixture):
             format="json",
         )
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data["invoiced_count"], 1)
-        self.assertIn(ew.id, resp.data["ew_ids"])
-        ew.refresh_from_db()
-        self.assertTrue(ew.is_invoiced)
-        self.assertIsNotNone(ew.invoiced_at)
-
-    def test_does_not_mark_in_approval_month(self):
-        # The run buckets by COMPLETION month (May), never the approval
-        # month — a June run must not touch a May-completed EW.
-        ew = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 31)
-        )
-        resp = self._api(self.admin).post(
-            MARK_URL,
-            {"company": self.company.id, "year": 2026, "month": 6},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["invoiced_count"], 0)
+        self.assertEqual(resp.data["ew_ids"], [])
         ew.refresh_from_db()
         self.assertFalse(ew.is_invoiced)
+        self.assertIsNone(ew.invoiced_at)
 
-    def test_invoice_date_override_wins(self):
-        # Earned May 31 but provider set invoice_date=Jun 15: bills in June.
+    def test_mark_noop_ignores_invoice_date(self):
+        # Even with an invoice_date override that would once have bucketed to
+        # June, the no-op mutates nothing.
         ew = self._make_ew_with_ticket(
             ticket_status=TicketStatus.CLOSED,
             closed_at=_dt(2026, 5, 31),
             invoice_date=date(2026, 6, 15),
         )
-        may = self._api(self.admin).post(
-            MARK_URL,
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(may.data["invoiced_count"], 0)
-
-        jun = self._api(self.admin).post(
+        resp = self._api(self.admin).post(
             MARK_URL,
             {"company": self.company.id, "year": 2026, "month": 6},
             format="json",
         )
-        self.assertEqual(jun.data["invoiced_count"], 1)
-        self.assertIn(ew.id, jun.data["ew_ids"])
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["invoiced_count"], 0)
         ew.refresh_from_db()
-        self.assertTrue(ew.is_invoiced)
+        self.assertFalse(ew.is_invoiced)
 
-    def test_not_earned_excluded(self):
-        # Ticket NOT closed (OPEN) => not earned. invoice_date resolves to
-        # May, but the run still excludes it because it is not earned.
+    def test_mark_does_not_clear_a_preset_invoiced_row(self):
+        # A legacy-settled row (is_invoiced=True) is untouched by the no-op.
         ew = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.OPEN,
-            closed_at=None,
-            invoice_date=date(2026, 5, 10),
+            ticket_status=TicketStatus.CLOSED,
+            closed_at=_dt(2026, 5, 31),
+            is_invoiced=True,
         )
         resp = self._api(self.admin).post(
             MARK_URL,
@@ -235,28 +215,10 @@ class MarkInvoicedTests(_InvoiceRunFixture):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["invoiced_count"], 0)
         ew.refresh_from_db()
-        self.assertFalse(ew.is_invoiced)
-
-    def test_idempotent(self):
-        ew = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 31)
-        )
-        first = self._api(self.admin).post(
-            MARK_URL,
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(first.data["invoiced_count"], 1)
-        self.assertIn(ew.id, first.data["ew_ids"])
-
-        second = self._api(self.admin).post(
-            MARK_URL,
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(second.data["invoiced_count"], 0)
+        self.assertTrue(ew.is_invoiced)  # unchanged
 
     def test_customer_forbidden(self):
+        # Provider gate is retained.
         resp = self._api(self.customer_user).post(
             MARK_URL,
             {"company": self.company.id, "year": 2026, "month": 5},
@@ -264,54 +226,33 @@ class MarkInvoicedTests(_InvoiceRunFixture):
         )
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_other_company_marks_zero(self):
-        # Company B has its own earned-in-May EW. The Company-A admin asking
-        # to invoice company=B marks 0 — B's EW is outside A's scope (H-1).
-        ew_b = self._make_ew_with_ticket(
+
+class ClearInvoicedNoOpTests(_InvoiceRunFixture):
+    def test_clear_is_noop_leaves_invoiced_state(self):
+        # Seed an already-invoiced row; clear-invoiced no longer un-marks it.
+        ew = self._make_ew_with_ticket(
             ticket_status=TicketStatus.CLOSED,
             closed_at=_dt(2026, 5, 31),
-            company=self.company_b,
-            building=self.building_b,
-            customer=self.customer_b,
-            created_by=self.admin_b,
+            is_invoiced=True,
         )
         resp = self._api(self.admin).post(
-            MARK_URL,
-            {"company": self.company_b.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data["invoiced_count"], 0)
-        ew_b.refresh_from_db()
-        self.assertFalse(ew_b.is_invoiced)
-
-
-class ClearInvoicedTests(_InvoiceRunFixture):
-    def test_clear_reverses_mark(self):
-        ew = self._make_ew_with_ticket(
-            ticket_status=TicketStatus.CLOSED, closed_at=_dt(2026, 5, 31)
-        )
-        mark = self._api(self.admin).post(
-            MARK_URL,
-            {"company": self.company.id, "year": 2026, "month": 5},
-            format="json",
-        )
-        self.assertEqual(mark.data["invoiced_count"], 1)
-        ew.refresh_from_db()
-        self.assertTrue(ew.is_invoiced)
-        self.assertIsNotNone(ew.invoiced_at)
-
-        clear = self._api(self.admin).post(
             CLEAR_URL,
             {"company": self.company.id, "year": 2026, "month": 5},
             format="json",
         )
-        self.assertEqual(clear.status_code, status.HTTP_200_OK)
-        self.assertEqual(clear.data["cleared_count"], 1)
-        self.assertIn(ew.id, clear.data["ew_ids"])
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["cleared_count"], 0)
+        self.assertEqual(resp.data["ew_ids"], [])
         ew.refresh_from_db()
-        self.assertFalse(ew.is_invoiced)
-        self.assertIsNone(ew.invoiced_at)
+        self.assertTrue(ew.is_invoiced)  # unchanged
+
+    def test_customer_forbidden(self):
+        resp = self._api(self.customer_user).post(
+            CLEAR_URL,
+            {"company": self.company.id, "year": 2026, "month": 5},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
 
 class InvoiceRunParamTests(_InvoiceRunFixture):

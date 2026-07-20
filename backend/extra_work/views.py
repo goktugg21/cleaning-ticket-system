@@ -35,7 +35,6 @@ from accounts.permissions import IsAuthenticatedAndActive
 from accounts.permissions_v2 import user_has_osius_permission
 from notifications.services import emit_extra_work_requested_notifications
 
-from .billing import billing_month, build_ticket_map, is_earned
 from .classification import (
     IntentValidationError,
     classify_cart,
@@ -851,9 +850,13 @@ class ExtraWorkRequestViewSet(
 
     @action(detail=False, methods=["post"], url_path="mark-invoiced")
     def mark_invoiced(self, request):
-        # Provider-only invoice run: mark every EARNED, not-yet-invoiced EW
-        # that bills in (year, month) for `company` as invoiced. Scoped to the
-        # caller's accessible EW, so a company they cannot see marks 0.
+        # DEPRECATED NO-OP (Invoicing Option 1, Phase 2a). The invoice is now
+        # the SINGLE source of "invoiced" — a row is invoiced iff it is
+        # claimed by a live InvoiceLine (see invoicing/selectors.py +
+        # services.generate_draft_invoices). This legacy bulk run therefore
+        # no longer mutates is_invoiced/invoiced_at. The route + provider gate
+        # + response SHAPE are kept ONLY so the deployed Facturen page keeps
+        # working; this endpoint and that page are removed together in Phase 4.
         if not _is_provider_operator(request.user):
             return Response(
                 {"detail": "Only provider operators can run invoicing."},
@@ -865,34 +868,18 @@ class ExtraWorkRequestViewSet(
                 {"detail": "company (int), year (int), month (1-12) are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        company_id, year, month = parsed
-        ew_list = list(
-            scope_extra_work_for(request.user).filter(
-                company_id=company_id, deleted_at__isnull=True
-            )
-        )
-        ticket_map = build_ticket_map([e.id for e in ew_list])
-        to_mark = [
-            e for e in ew_list
-            if not e.is_invoiced
-            and is_earned(ticket_map.get(e.id))
-            and billing_month(e, ticket_map.get(e.id)) == (year, month)
-        ]
-        now = timezone.now()
-        with transaction.atomic():
-            for e in to_mark:
-                e.is_invoiced = True
-                e.invoiced_at = now
-                e.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
+        # No mutation — return the same shape with a zero count.
         return Response(
-            {"invoiced_count": len(to_mark), "ew_ids": [e.id for e in to_mark]},
+            {"invoiced_count": 0, "ew_ids": []},
             status=status.HTTP_200_OK,
         )
 
     @action(detail=False, methods=["post"], url_path="clear-invoiced")
     def clear_invoiced(self, request):
-        # Provider-only inverse (corrections): un-mark invoiced EW that bill in
-        # (year, month) for `company`, by their CURRENT billing month.
+        # DEPRECATED NO-OP (Invoicing Option 1, Phase 2a) — see mark_invoiced.
+        # Superseded by the invoice flow: releasing/deleting a draft invoice
+        # is what returns EW to the unbilled pool now. Route + gate + response
+        # SHAPE kept for the deployed Facturen page; removed in Phase 4.
         if not _is_provider_operator(request.user):
             return Response(
                 {"detail": "Only provider operators can run invoicing."},
@@ -904,24 +891,9 @@ class ExtraWorkRequestViewSet(
                 {"detail": "company (int), year (int), month (1-12) are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        company_id, year, month = parsed
-        ew_list = list(
-            scope_extra_work_for(request.user).filter(
-                company_id=company_id, deleted_at__isnull=True, is_invoiced=True
-            )
-        )
-        ticket_map = build_ticket_map([e.id for e in ew_list])
-        to_clear = [
-            e for e in ew_list
-            if billing_month(e, ticket_map.get(e.id)) == (year, month)
-        ]
-        with transaction.atomic():
-            for e in to_clear:
-                e.is_invoiced = False
-                e.invoiced_at = None
-                e.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
+        # No mutation — return the same shape with a zero count.
         return Response(
-            {"cleared_count": len(to_clear), "ew_ids": [e.id for e in to_clear]},
+            {"cleared_count": 0, "ew_ids": []},
             status=status.HTTP_200_OK,
         )
 
