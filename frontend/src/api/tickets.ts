@@ -22,6 +22,12 @@ export interface ListTicketsParams {
   customer?: number;
   type?: string;
   exclude_type?: string;
+  // Sprint 111 — building-manager "My tickets": narrows to tickets the
+  // caller MANAGES (union of the legacy `Ticket.assigned_to` FK and the
+  // responsible-manager `TicketManagerAssignment` M:N). Backend filter:
+  // `tickets/filters.py::TicketFilter.my_managed`. Runs on top of
+  // `scope_tickets_for`, so it can only narrow within the caller's scope.
+  my_managed?: boolean;
 }
 
 // M6.1 + M6 review — provider customer-detail ticket lists. Drill-in

@@ -43,6 +43,16 @@
   "agenda.mark_done": "Voltooid melden",
   "agenda.cant_complete": "Kan niet voltooien",
 
+  "agenda.manager_title": "Mijn tickets",
+  "agenda.manager_subtitle": "Tickets waaraan u bent toegewezen.",
+  "agenda.manager_empty_title": "Geen tickets toegewezen",
+  "agenda.manager_empty_desc": "Zodra u aan een ticket wordt toegewezen — als beheerder of als verantwoordelijke manager — verschijnt het hier.",
+  "agenda.manager_list_title": "Toegewezen tickets",
+  "agenda.manager_list_subtitle_one": "{{count}} ticket",
+  "agenda.manager_list_subtitle_other": "{{count}} tickets",
+  "agenda.role_guard_title": "Niet beschikbaar voor uw rol",
+  "agenda.role_guard_desc": "Mijn werk is alleen beschikbaar voor medewerkers en gebouwbeheerders.",
+
   "complete.dialog_title": "Werkblok als voltooid markeren",
   "complete.dialog_desc": "Voeg een afrondingsnotitie en/of foto's toe als bewijs van het werk. Ten minste één is verplicht. Dit sluit het ticket niet — uw beheerder controleert het.",
   "complete.note_label": "Afrondingsnotitie",
