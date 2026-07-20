@@ -32,10 +32,54 @@ from __future__ import annotations
 
 from django.db.models import Exists, OuterRef
 
+from accounts.models import UserRole
+from buildings.models import BuildingManagerAssignment
+from companies.models import CompanyUserMembership
 from extra_work.billing import billing_month, build_ticket_map, is_earned
 from extra_work.scoping import scope_extra_work_for
 
-from .models import InvoiceLine
+from .models import Invoice, InvoiceLine
+
+
+def _is_anonymous(user) -> bool:
+    return user is None or not getattr(user, "is_authenticated", False)
+
+
+def scope_invoices_for(user):
+    """
+    Return the queryset of (non-soft-deleted) Invoices visible to `user`,
+    tenant-scoped by COMPANY (mirrors the provider branches of
+    scope_extra_work_for, but at company granularity so both customer-level
+    (building=NULL) and per-building invoices are covered uniformly):
+
+      * SUPER_ADMIN      -> every invoice.
+      * COMPANY_ADMIN    -> invoices of the companies they belong to.
+      * BUILDING_MANAGER -> invoices of the companies they manage a building
+        in (company-level, so a customer-level invoice with building=NULL is
+        still reachable).
+      * everyone else (STAFF / CUSTOMER_USER / anon) -> none. Customer
+        visibility is Phase 5; the fetch endpoint additionally gates on
+        _is_provider_operator, so non-operators 403 before scope matters.
+
+    A soft-deleted invoice (a released draft) is never fetchable; a reversed
+    original stays SENT and IS fetchable.
+    """
+    if _is_anonymous(user):
+        return Invoice.objects.none()
+    base = Invoice.objects.filter(deleted_at__isnull=True)
+    if user.role == UserRole.SUPER_ADMIN:
+        return base
+    if user.role == UserRole.COMPANY_ADMIN:
+        company_ids = CompanyUserMembership.objects.filter(
+            user=user
+        ).values_list("company_id", flat=True)
+        return base.filter(company_id__in=company_ids)
+    if user.role == UserRole.BUILDING_MANAGER:
+        company_ids = BuildingManagerAssignment.objects.filter(
+            user=user
+        ).values_list("building__company_id", flat=True)
+        return base.filter(company_id__in=company_ids)
+    return Invoice.objects.none()
 
 
 def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id=None):
