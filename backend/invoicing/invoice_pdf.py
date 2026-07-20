@@ -37,11 +37,11 @@ from django.utils import timezone
 from fpdf import FPDF
 
 from config.pdf_branding import (
-    ACCENT_RGB,
-    ACCENT_TINT_RGB,
     FONT_FAMILY,
     LOGO_WIDTH_MM,
+    accent_rgb_for,
     accent_rule,
+    accent_tint_for,
     draw_logo,
     register_fonts,
 )
@@ -128,10 +128,15 @@ class _InvoicePDF(FPDF):
         self.set_text_color(0, 0, 0)
 
 
-def _draw_header(pdf, *, company_name, doc_title, number_text, status_text):
+def _draw_header(
+    pdf, *, company, brand_accent, company_name, doc_title, number_text, status_text
+):
     """Branded header: logo top-left, provider block, doc title + number
-    right-aligned, accent rule underneath. Mirrors proposal_pdf's header."""
-    logo_bottom = draw_logo(pdf, y=10.0)
+    right-aligned, accent rule underneath. Company-aware — the platform
+    (OSIUS) logo/pink only for the platform company; any other company uses
+    its own logo (or a name-only header) + the neutral accent. Mirrors
+    proposal_pdf's header."""
+    logo_bottom = draw_logo(pdf, company, y=10.0)
 
     provider_x = pdf.l_margin + LOGO_WIDTH_MM + 8.0
     pdf.set_xy(provider_x, 11.0)
@@ -146,7 +151,7 @@ def _draw_header(pdf, *, company_name, doc_title, number_text, status_text):
     meta_x = pdf.w - pdf.r_margin - 80.0
     pdf.set_xy(meta_x, 10.0)
     pdf.set_font(FONT_FAMILY, "B", 15)
-    pdf.set_text_color(*ACCENT_RGB)
+    pdf.set_text_color(*brand_accent)
     pdf.cell(80, 8, _safe_pdf_text(number_text), align="R")
     pdf.set_text_color(0, 0, 0)
     pdf.set_xy(meta_x, 18.5)
@@ -154,7 +159,7 @@ def _draw_header(pdf, *, company_name, doc_title, number_text, status_text):
     pdf.cell(80, 5, _safe_pdf_text(status_text), align="R")
 
     rule_y = max(logo_bottom, 25.0) + 3.0
-    accent_rule(pdf, rule_y)
+    accent_rule(pdf, rule_y, brand_accent)
     pdf.set_y(rule_y + 5.0)
 
 
@@ -167,7 +172,12 @@ _STATUS_LABELS_NL = {
 
 def render_invoice_pdf(invoice: Invoice) -> bytes:
     """Render `invoice` as a two-page Dutch PDF. Read-only — no mutations."""
-    company_name = getattr(invoice.company, "name", "") or ""
+    company = invoice.company
+    company_name = getattr(company, "name", "") or ""
+    # Company-aware branding — OSIUS pink/logo only for the platform company;
+    # any other company uses its own logo (or a name-only header) + neutral.
+    brand_accent = accent_rgb_for(company)
+    brand_tint = accent_tint_for(company)
     customer_name = getattr(invoice.customer, "name", "") or ""
     building_name = (
         getattr(invoice.building, "name", "") if invoice.building_id else ""
@@ -196,6 +206,8 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     pdf.add_page()
     _draw_header(
         pdf,
+        company=company,
+        brand_accent=brand_accent,
         company_name=company_name,
         doc_title=doc_title + " extra werk",
         number_text=number_text,
@@ -204,8 +216,8 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
 
     # Prominent draft banner.
     if is_draft:
-        pdf.set_fill_color(*ACCENT_TINT_RGB)
-        pdf.set_text_color(*ACCENT_RGB)
+        pdf.set_fill_color(*brand_tint)
+        pdf.set_text_color(*brand_accent)
         pdf.set_font(FONT_FAMILY, "B", 10)
         pdf.cell(
             0,
@@ -297,7 +309,7 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     pdf.ln(2)
     _total_row("Subtotaal", invoice.subtotal_amount, size=10)
     _total_row("BTW", invoice.vat_amount, size=10)
-    pdf.set_draw_color(*ACCENT_RGB)
+    pdf.set_draw_color(*brand_accent)
     ty = pdf.get_y() + 0.5
     pdf.line(pdf.w - pdf.r_margin - 70, ty, pdf.w - pdf.r_margin, ty)
     pdf.set_draw_color(0, 0, 0)
@@ -315,6 +327,8 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     pdf.add_page()
     _draw_header(
         pdf,
+        company=company,
+        brand_accent=brand_accent,
         company_name=company_name,
         doc_title=doc_title + " — specificatie",
         number_text=number_text,
@@ -328,8 +342,8 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     # Table header row.
     pdf.set_draw_color(*_TABLE_BORDER_RGB)
     pdf.set_font(FONT_FAMILY, "B", 8.0)
-    pdf.set_fill_color(*ACCENT_TINT_RGB)
-    pdf.set_text_color(*ACCENT_RGB)
+    pdf.set_fill_color(*brand_tint)
+    pdf.set_text_color(*brand_accent)
     headers = (
         ("EW-maand", _COL_MONTH, "L"),
         ("Uitgevoerd werk", _COL_WORK, "L"),

@@ -25,10 +25,10 @@ from typing import Iterable
 from fpdf import FPDF
 
 from config.pdf_branding import (
-    ACCENT_RGB,
-    ACCENT_TINT_RGB,
     FONT_FAMILY,
     LOGO_WIDTH_MM,
+    NEUTRAL_ACCENT_RGB,
+    NEUTRAL_TINT_RGB,
     accent_rule,
     draw_logo,
     register_fonts,
@@ -250,20 +250,22 @@ class _ReportPDF(FPDF):
 
 
 def _branded_pdf(title: str, generated_at: object) -> _ReportPDF:
-    """Shared RF-15 header: logo top-left, title beside it, accent rule."""
+    """Shared RF-15 header: title top-left, neutral accent rule. A report is
+    CROSS-COMPANY (it spans providers), so it has NO single brand: no logo
+    (company=None) and the NEUTRAL accent, never the OSIUS pink/logo."""
     pdf = _ReportPDF(orientation="P", unit="mm", format="A4")
     register_fonts(pdf)
     pdf.generated_on = str(generated_at or "")
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    logo_bottom = draw_logo(pdf, y=10.0)
+    logo_bottom = draw_logo(pdf, None, y=10.0)
     pdf.set_xy(pdf.l_margin + LOGO_WIDTH_MM + 8.0, 12.0)
     pdf.set_font(FONT_FAMILY, "B", 15)
     pdf.cell(0, 8, title)
 
     rule_y = max(logo_bottom, 25.0) + 3.0
-    accent_rule(pdf, rule_y)
+    accent_rule(pdf, rule_y, NEUTRAL_ACCENT_RGB)
     pdf.set_y(rule_y + 5.0)
     return pdf
 
@@ -291,10 +293,11 @@ def _pdf_bytes(pdf: FPDF) -> bytes:
 
 
 def _draw_table(pdf: FPDF, headers: list, widths: list, rows: list) -> None:
-    # RF-15 — tinted, accent-colored header row + light borders.
+    # RF-15 — tinted, neutral-accent header row + light borders (cross-company
+    # report → never the OSIUS pink).
     pdf.set_draw_color(208, 200, 206)
-    pdf.set_fill_color(*ACCENT_TINT_RGB)
-    pdf.set_text_color(*ACCENT_RGB)
+    pdf.set_fill_color(*NEUTRAL_TINT_RGB)
+    pdf.set_text_color(*NEUTRAL_ACCENT_RGB)
     pdf.set_font(FONT_FAMILY, "B", 9.5)
     for header, width in zip(headers, widths):
         pdf.cell(width, 7, header, border=1, fill=True)

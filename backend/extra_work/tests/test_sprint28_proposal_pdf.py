@@ -31,9 +31,11 @@ from decimal import Decimal
 from io import BytesIO
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from pypdf import PdfReader
 from rest_framework.test import APIClient
+
+from extra_work.proposal_pdf import render_proposal_pdf
 
 from accounts.models import UserRole
 from buildings.models import Building
@@ -534,3 +536,34 @@ class ProposalPdfWidthFitTest(TestCase):
             QTY_COL_WIDTH - 1.2,
             f"custom-unit label {label!r} overflows the qty column",
         )
+
+
+class ProposalPdfBrandingTests(ProposalPdfFixtureMixin, TestCase):
+    """Change 2 — company-aware branding on the proposal PDF. The fixture
+    company (`prov-b14`) is NON-platform by default (neutral / name-only
+    header); overriding PLATFORM_BRAND_SLUG to its slug exercises the OSIUS
+    branded path. Both must still render valid %PDF bytes (behaviour, not
+    pixels)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    def _built_proposal(self):
+        ew = self._make_ew()
+        return self._create_proposal(ew)
+
+    def test_render_non_platform_proposal_is_pdf(self):
+        pdf = render_proposal_pdf(
+            self._built_proposal(), viewer_is_customer=False
+        )
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        self.assertGreater(len(pdf), 1000)
+
+    @override_settings(PLATFORM_BRAND_SLUG="prov-b14")
+    def test_render_platform_proposal_is_pdf(self):
+        # Treat the fixture company AS the platform -> OSIUS branded path.
+        pdf = render_proposal_pdf(
+            self._built_proposal(), viewer_is_customer=False
+        )
+        self.assertTrue(pdf.startswith(b"%PDF"))

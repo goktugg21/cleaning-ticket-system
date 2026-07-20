@@ -194,6 +194,15 @@ LOGGING = {
 
 AUTH_USER_MODEL = "accounts.User"
 
+# PDF branding — the OSIUS platform company's slug. Only this company's
+# single-company PDFs (proposal / invoice) use the OSIUS designed branding
+# (osius_logo.png + pink accent); every other company uses its own
+# Company.logo (or a name-only header) with a neutral accent. Env-overridable
+# for other deployments; defaults to the verified OSIUS slug ("osius" = the
+# "Osius Facilities" company, matching the vendored logo). See
+# config/pdf_branding.py.
+PLATFORM_BRAND_SLUG = os.environ.get("PLATFORM_BRAND_SLUG", "osius").strip()
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
