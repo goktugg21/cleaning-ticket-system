@@ -3112,17 +3112,21 @@ a.attention-row:hover {
 }
 
 /* #108 Option A — provider dashboard: 4-card hero, the "Aandacht
-   nodig" priority list beside the "Vandaag" column, "Mijn werk" chips. */
-.option-a-hero {
+   nodig" priority list beside the "Vandaag" column, "Mijn werk" chips.
+   Compound selector: the base .operations-kpi-grid media rules are
+   declared LATER in this file and would otherwise win the cascade at
+   equal specificity, forcing 3 narrow columns that clip the money
+   value. */
+.operations-kpi-grid.option-a-hero {
   grid-template-columns: repeat(4, 1fr);
 }
 @media (max-width: 1280px) {
-  .option-a-hero {
+  .operations-kpi-grid.option-a-hero {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 @media (max-width: 720px) {
-  .option-a-hero {
+  .operations-kpi-grid.option-a-hero {
     grid-template-columns: 1fr;
   }
 }

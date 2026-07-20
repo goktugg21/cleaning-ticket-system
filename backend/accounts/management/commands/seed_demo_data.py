@@ -1286,6 +1286,7 @@ class Command(BaseCommand):
             Service,
         )
         from extra_work.billing import billing_month, build_ticket_map, is_earned
+        from extra_work.classification import classify_line
         from extra_work.proposal_state_machine import (
             apply_proposal_transition,
         )
@@ -1332,6 +1333,28 @@ class Command(BaseCommand):
                 "Osius demo fixtures incomplete."
             ))
             return
+
+        def _stamped_item_kwargs(service, requested_date):
+            """Sprint 2A snapshot stamping via the REAL classifier —
+            byte-identical to the cart-create serializer's write, so
+            agreed-priced lines carry snapshot_unit_price/_vat_pct and
+            recompute_final_amounts produces real money."""
+            c = classify_line(
+                service=service,
+                customer=customer,
+                requested_date=requested_date,
+                custom_description="",
+            )
+            return {
+                "line_price_source": c.source,
+                "snapshot_unit_price": c.snapshot_unit_price,
+                "snapshot_vat_pct": c.snapshot_vat_pct,
+                "snapshot_service_name": c.snapshot_service_name,
+                "snapshot_service_category_name": (
+                    c.snapshot_service_category_name
+                ),
+                "snapshot_customer_service_price": c.contract,
+            }
 
         # ---- (1) Attention-list + "Mijn werk" tickets ----------------
         # (title, building, creator, type, target status)
@@ -1420,6 +1443,9 @@ class Command(BaseCommand):
                 unit_type=svc_specialty.unit_type,
                 requested_date=date.today() + timedelta(days=7),
                 customer_note="Graag buiten kantooruren.",
+                **_stamped_item_kwargs(
+                    svc_specialty, date.today() + timedelta(days=7)
+                ),
             )
             ew = ew_apply(ew, super_admin, ExtraWorkStatus.UNDER_REVIEW,
                           note="seed #108 Part G — awaiting pricing")
@@ -1458,6 +1484,9 @@ class Command(BaseCommand):
                 unit_type=svc_carpet.unit_type,
                 requested_date=date.today() + timedelta(days=10),
                 customer_note="",
+                **_stamped_item_kwargs(
+                    svc_carpet, date.today() + timedelta(days=10)
+                ),
             )
             ew = ew_apply(ew, super_admin, ExtraWorkStatus.UNDER_REVIEW,
                           note="seed #108 Part G")
@@ -1515,6 +1544,9 @@ class Command(BaseCommand):
                 unit_type=svc_specialty.unit_type,
                 requested_date=date.today() + timedelta(days=21),
                 customer_note="",
+                **_stamped_item_kwargs(
+                    svc_specialty, date.today() + timedelta(days=21)
+                ),
             )
             summary["extra_work"] += 1
         else:
@@ -1569,13 +1601,15 @@ class Command(BaseCommand):
                 status=ExtraWorkStatus.REQUESTED,
                 routing_decision=ExtraWorkRoutingDecision.INSTANT,
             )
+            item_date = min(month_start + timedelta(days=9), today)
             item = ExtraWorkRequestItem.objects.create(
                 extra_work_request=ew,
                 service=svc_deep,
                 quantity=Decimal("6.00"),
                 unit_type=svc_deep.unit_type,
-                requested_date=min(month_start + timedelta(days=9), today),
+                requested_date=item_date,
                 customer_note="",
+                **_stamped_item_kwargs(svc_deep, item_date),
             )
             spawned = spawn_tickets_for_request(ew, actor=tom)
             # Finalized: actual hours entered + final_* recomputed via
