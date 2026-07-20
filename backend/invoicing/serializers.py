@@ -81,6 +81,87 @@ class InvoiceSerializer(serializers.ModelSerializer):
         return obj.building.name if obj.building_id else None
 
 
+class CustomerInvoiceLineSerializer(serializers.ModelSerializer):
+    """Phase 5 — REDACTED customer read shape for one invoice line.
+
+    Exposes only what a customer should see on their own invoice. Dropped vs
+    the provider `InvoiceLineSerializer`:
+      * `extra_work` — the internal ExtraWorkRequest id (a provider-internal
+        reference; the customer must never see it). THE key redaction.
+      * `id` / `ordering` — internal line plumbing; the customer needs neither
+        (the list renders in model order; no line-level actions exist).
+      * `created_at` / `updated_at` — internal row timestamps.
+    """
+
+    class Meta:
+        model = InvoiceLine
+        fields = [
+            "description",
+            "quantity",
+            "unit_price",
+            "vat_pct",
+            "line_subtotal",
+            "line_vat",
+            "line_total",
+            "period_year",
+            "period_month",
+            "performed_on",
+        ]
+        read_only_fields = fields
+
+
+class CustomerInvoiceSerializer(serializers.ModelSerializer):
+    """Phase 5 — REDACTED customer read shape for one invoice (with lines).
+
+    Keeps `id` (needed to link to the customer detail / PDF endpoints) plus the
+    customer-facing document fields. Dropped vs the provider `InvoiceSerializer`
+    (each for a reason):
+      * `company` — the provider's internal company id (tenant reference).
+      * `customer` — the customer's own id; not needed for display
+        (customer_name is shown) — kept to display-only fields.
+      * `year` — the internal numbering year, already encoded in `number`
+        ("YYYY-NNNN").
+      * `reverses` — the internal id of the original invoice a credit note
+        reverses; would leak another invoice's pk.
+      * `created_at` / `updated_at` — internal row timestamps; the
+        customer-relevant dates are `issued_at` / `sent_at`.
+      * line-level `extra_work` / `id` / `ordering` / timestamps — see
+        `CustomerInvoiceLineSerializer`.
+    `status` is always SENT in this scope (kept; harmless) and `is_reversal`
+    is kept so a credit note reads as such.
+    """
+
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    building_name = serializers.SerializerMethodField()
+    lines = CustomerInvoiceLineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Invoice
+        fields = [
+            "id",
+            "number",
+            "status",
+            "customer_name",
+            "building_name",
+            "period_year",
+            "period_month",
+            "subtotal_amount",
+            "vat_amount",
+            "total_amount",
+            "optional_fee_label",
+            "optional_fee_amount",
+            "summary_text",
+            "is_reversal",
+            "issued_at",
+            "sent_at",
+            "lines",
+        ]
+        read_only_fields = fields
+
+    def get_building_name(self, obj: Invoice):
+        return obj.building.name if obj.building_id else None
+
+
 class InvoiceLineWriteSerializer(serializers.Serializer):
     """Validate an add / update line body. No defaults: only the keys the
     client actually sent land in `validated_data`, so the Part B services

@@ -33,6 +33,7 @@ from __future__ import annotations
 from django.db.models import Exists, OuterRef
 
 from accounts.models import UserRole
+from accounts.scoping import scope_customers_for
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
 from extra_work.billing import billing_month, build_ticket_map, is_earned
@@ -80,6 +81,47 @@ def scope_invoices_for(user):
         ).values_list("building__company_id", flat=True)
         return base.filter(company_id__in=company_ids)
     return Invoice.objects.none()
+
+
+def scope_customer_invoices_for(user):
+    """
+    Phase 5 — the CUSTOMER read scope (SEPARATE from the provider
+    `scope_invoices_for`; this one does NOT widen provider visibility).
+
+    Returns the queryset of invoices a CUSTOMER_USER may see in the customer
+    portal. MEMBERSHIP-LEVEL ownership (owner decision): a customer sees an
+    invoice iff they are a MEMBER of that invoice's customer — resolved via
+    `accounts.scoping.scope_customers_for` (the same CustomerUserMembership
+    axis used everywhere else), NOT per-building access. An invoice is a
+    financial document of the customer as a legal entity, so this covers the
+    customer-level invoice (building=NULL) AND every per-building invoice of
+    that customer uniformly.
+
+    Three HARD INVARIANTS baked in here:
+      1. status == SENT only — a customer NEVER sees a DRAFT or an ISSUED
+         invoice (a reversal is created ISSUED, so a credit note surfaces to
+         the customer only if/when it is SENT — acceptable for v1).
+      2. their own customer(s) only — `customer_id` must be in the caller's
+         membership scope (no cross-tenant, no other customers of the same
+         provider they aren't a member of).
+      3. never a soft-deleted invoice (`deleted_at IS NULL`).
+
+    NON-customer roles (SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER /
+    STAFF / anon) get `.none()` — this helper is the CUSTOMER path ONLY; the
+    provider path stays `scope_invoices_for`.
+    """
+    if _is_anonymous(user):
+        return Invoice.objects.none()
+    if user.role != UserRole.CUSTOMER_USER:
+        return Invoice.objects.none()
+    # scope_customers_for resolves the caller's CustomerUserMembership set
+    # (active customers only) — reuse it verbatim as the ownership axis.
+    customer_ids = scope_customers_for(user).values_list("id", flat=True)
+    return Invoice.objects.filter(
+        deleted_at__isnull=True,
+        status=Invoice.Status.SENT,
+        customer_id__in=customer_ids,
+    )
 
 
 def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id=None):
