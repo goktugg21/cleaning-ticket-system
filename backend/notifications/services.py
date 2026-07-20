@@ -79,6 +79,33 @@ def _without_actor(users, actor):
     return [user for user in users if user.id != actor.id]
 
 
+def subscribed_super_admins(company_id):
+    """#109 Part D — active SUPER_ADMIN users who explicitly opted in
+    to `company_id`'s in-app notification stream via
+    SuperAdminCompanySubscription.
+
+    Role is re-checked at read time so a stale subscription row for a
+    demoted user is inert. Unioned into the FOUR in-app
+    provider-management emit paths ONLY (ticket messages, EW requested,
+    EW decision, EW messages) — deliberately NOT into the shared
+    resolvers `_ticket_staff_users` / `_extra_work_provider_users` /
+    the *_message_audience helpers, because those also feed the email
+    senders, the directed-recipients pickers and the inbox read-receipt
+    rosters, all of which must stay unchanged.
+    """
+    from .models import SuperAdminCompanySubscription  # noqa: F401 (model app-local)
+
+    return list(
+        _active_users()
+        .filter(
+            role=UserRole.SUPER_ADMIN,
+            sa_company_subscriptions__company_id=company_id,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
 def _ticket_staff_users(ticket):
     return _active_users().filter(
         Q(
@@ -145,7 +172,8 @@ def ticket_message_audience(ticket, message_type):
     and the read-visibility table can never drift.
 
     Composition per tier (SUPER_ADMIN is deliberately NOT auto-notified —
-    email-path parity; SA still reads everything):
+    email-path parity; SA still reads everything. #109 Part D: an SA who
+    SUBSCRIBED to the company is unioned in at the EMIT body, not here):
 
       message_type        provider-mgmt   assigned-staff   customer-side
       ------------------   -------------   --------------   -------------
@@ -204,7 +232,8 @@ def emit_ticket_message_notifications(message, actor=None):
     "provider-mgmt" reuses `_ticket_staff_users` (the email-path resolver =
     the ticket's COMPANY_ADMIN + BUILDING_MANAGER). SUPER_ADMIN is
     deliberately not auto-notified, matching the existing email behaviour;
-    SA can still read every message directly.
+    SA can still read every message directly. #109 Part D: SAs subscribed
+    to the ticket's company ARE unioned in below.
 
     HARD invariants (M1 B5): an INTERNAL_NOTE never notifies STAFF or
     customer; a STAFF_OPERATIONAL never notifies a customer; a PUBLIC_REPLY
@@ -227,6 +256,16 @@ def emit_ticket_message_notifications(message, actor=None):
     # recipients endpoint + the read chokepoint use), so emit can never
     # drift from read-visibility.
     audience = list(ticket_message_audience(ticket, message_type))
+    # #109 Part D — subscribed SUPER_ADMINs join the provider-management
+    # tier of the fan-out (every tier except the customer-only
+    # CUSTOMER_INTERNAL). Patched HERE at the emit body, not inside
+    # ticket_message_audience: that helper also feeds the B3
+    # directed-recipients picker and the inbox read-receipt roster,
+    # which must not change. Unsubscribed SAs keep the historical
+    # exclusion; the downstream role/scope gates admit SA by
+    # construction (forensic read-everything).
+    if message_type != TicketMessageType.CUSTOMER_INTERNAL:
+        audience.extend(subscribed_super_admins(ticket.company_id))
 
     directed = [
         u
@@ -310,7 +349,9 @@ def emit_ticket_message_notifications(message, actor=None):
 def _extra_work_provider_users(ew):
     """Active provider-management users for `ew`: COMPANY_ADMIN of the EW's
     company + BUILDING_MANAGER assigned to the EW's building. Same shape as
-    `_ticket_staff_users`, keyed on the EW's own FKs. SUPER_ADMIN excluded."""
+    `_ticket_staff_users`, keyed on the EW's own FKs. SUPER_ADMIN excluded
+    (#109 Part D: subscribed SAs are unioned at the EMIT bodies, never
+    here — this resolver also feeds the picker + inbox rosters)."""
     return (
         _active_users()
         .filter(
@@ -417,9 +458,13 @@ def emit_extra_work_requested_notifications(ew, actor=None):
     summary = (
         f"New extra-work request: {title}" if title else "New extra-work request"
     )
+    # #109 Part D — subscribed SAs join the provider-management set.
     return _emit_extra_work_notifications(
         ew,
-        recipients=list(_extra_work_provider_users(ew)),
+        recipients=(
+            list(_extra_work_provider_users(ew))
+            + subscribed_super_admins(ew.company_id)
+        ),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_REQUESTED,
         summary=summary,
@@ -459,9 +504,13 @@ def emit_extra_work_decision_notifications(ew, actor=None, *, approved):
         summary = f"{decider} {verb} {title}".strip()
     else:
         summary = f"Extra work {verb}: {title}".strip()
+    # #109 Part D — subscribed SAs join the provider-management set.
     return _emit_extra_work_notifications(
         ew,
-        recipients=list(_extra_work_provider_users(ew)),
+        recipients=(
+            list(_extra_work_provider_users(ew))
+            + subscribed_super_admins(ew.company_id)
+        ),
         actor=actor,
         event_type=NotificationType.EXTRA_WORK_DECISION,
         summary=summary,
@@ -512,7 +561,8 @@ def emit_extra_work_message_notifications(message, actor=None):
     minus the author, deduped, active only. Two gates make the notified set
     EXACTLY the read-visible set: the ROLE gate
     (`ew_message_type_visible_to_user`) and the EW SCOPE gate
-    (`_extra_work_visible_to`). SUPER_ADMIN is not auto-notified.
+    (`_extra_work_visible_to`). SUPER_ADMIN is not auto-notified unless
+    subscribed to the EW's company (#109 Part D).
     """
     from extra_work.message_permissions import ew_message_type_visible_to_user
     from extra_work.models import ExtraWorkMessageVisibility
@@ -521,6 +571,14 @@ def emit_extra_work_message_notifications(message, actor=None):
     message_type = message.message_type
 
     audience = list(ew_message_audience(ew, message_type))
+    # #109 Part D — subscribed SUPER_ADMINs join the provider-management
+    # tier (never the customer-only CUSTOMER_INTERNAL). Patched at the
+    # emit body — ew_message_audience also feeds the EW recipients
+    # picker + the inbox roster, which must not change.
+    from extra_work.models import ExtraWorkMessageType
+
+    if message_type != ExtraWorkMessageType.CUSTOMER_INTERNAL:
+        audience.extend(subscribed_super_admins(ew.company_id))
     directed = [
         u
         for u in message.directed_to.all()

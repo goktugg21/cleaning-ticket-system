@@ -184,6 +184,10 @@ export function CustomerUserManageModal({
           padding: 24,
           marginTop: 32,
           marginBottom: 32,
+          // #109 Part F — standard admin-modal cap (every other admin
+          // modal card already scrolls at 90vh).
+          maxHeight: "90vh",
+          overflowY: "auto",
         }}
         onClick={(event) => event.stopPropagation()}
       >

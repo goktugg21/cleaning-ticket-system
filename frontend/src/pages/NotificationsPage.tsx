@@ -13,16 +13,20 @@ import { useTranslation } from "react-i18next";
 import { BellOff, CheckCheck } from "lucide-react";
 
 import { getApiError } from "../api/client";
+import { listCompanies } from "../api/admin";
 import { useAuth } from "../auth/AuthContext";
 import {
+  getCompanySubscriptions,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
   notificationHref,
+  setCompanySubscription,
 } from "../api/notifications";
-import type { Notification } from "../api/types";
+import type { CompanyAdmin, Notification } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
+import { Toggle } from "../components/Toggle";
 import { formatRelative } from "../lib/intl";
 
 export function NotificationsPage() {
@@ -38,13 +42,49 @@ export function NotificationsPage() {
   const [error, setError] = useState("");
   const [markingAll, setMarkingAll] = useState(false);
 
+  // #109 Part D — SA-only: provider-company filter (switches the feed
+  // into the read-only view-as mode) + per-company subscription state.
+  // Hidden for every other role; fetches never fire for non-SA.
+  const isSuperAdmin = me?.role === "SUPER_ADMIN";
+  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companyFilter, setCompanyFilter] = useState<number | "">("");
+  const [subscribedIds, setSubscribedIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [subscriptionBusy, setSubscriptionBusy] = useState(false);
+  const viewAsMode = isSuperAdmin && companyFilter !== "";
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    let cancelled = false;
+    Promise.all([
+      listCompanies({ page_size: 200 }),
+      getCompanySubscriptions(),
+    ])
+      .then(([companyData, subscribed]) => {
+        if (cancelled) return;
+        setCompanies(companyData.results);
+        setSubscribedIds(new Set(subscribed));
+      })
+      .catch(() => {
+        // The selector simply stays empty on failure; the own feed
+        // below is unaffected.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSuperAdmin]);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
       setError("");
       try {
-        const data = await listNotifications({ page });
+        const data = await listNotifications({
+          page,
+          ...(viewAsMode ? { company: companyFilter as number } : {}),
+        });
         if (cancelled) return;
         setItems(data.results);
         setCount(data.count);
@@ -60,10 +100,17 @@ export function NotificationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [page]);
+  }, [page, viewAsMode, companyFilter]);
 
   const handleSelect = useCallback(
     async (notification: Notification) => {
+      if (viewAsMode) {
+        // #109 Part D — view-as rows are read-only (they belong to
+        // other recipients); deep-link without touching read state.
+        const href = notificationHref(notification);
+        if (href) navigate(href);
+        return;
+      }
       if (!notification.is_read) {
         setItems((prev) =>
           prev.map((item) =>
@@ -80,7 +127,7 @@ export function NotificationsPage() {
       const href = notificationHref(notification);
       if (href) navigate(href);
     },
-    [navigate],
+    [navigate, viewAsMode],
   );
 
   const handleMarkAll = useCallback(async () => {
@@ -103,18 +150,106 @@ export function NotificationsPage() {
         title={t("notifications.title")}
         subtitle={t("notifications.subtitle")}
         actions={
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleMarkAll}
-            disabled={markingAll || unread === 0}
-            data-testid="notification-mark-all"
-          >
-            <CheckCheck size={15} strokeWidth={2} />
-            {t("notifications.mark_all_read")}
-          </button>
+          !viewAsMode ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleMarkAll}
+              disabled={markingAll || unread === 0}
+              data-testid="notification-mark-all"
+            >
+              <CheckCheck size={15} strokeWidth={2} />
+              {t("notifications.mark_all_read")}
+            </button>
+          ) : undefined
         }
       />
+
+      {/* #109 Part D — SA-only: company view-as filter + the
+          per-company subscribe Toggle (platform rule: a boolean state
+          is a Toggle). Hidden for every other role. */}
+      {isSuperAdmin && (
+        <div
+          className="card"
+          style={{
+            padding: 16,
+            marginBottom: 16,
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 16,
+            alignItems: "flex-end",
+          }}
+          data-testid="notifications-sa-controls"
+        >
+          <label className="field" style={{ minWidth: 240 }}>
+            <span className="field-label">
+              {t("notifications.company_filter_label")}
+            </span>
+            <select
+              className="field-select"
+              value={companyFilter === "" ? "" : String(companyFilter)}
+              onChange={(event) => {
+                setPage(1);
+                setCompanyFilter(
+                  event.target.value === ""
+                    ? ""
+                    : Number(event.target.value),
+                );
+              }}
+              data-testid="notifications-company-filter"
+            >
+              <option value="">
+                {t("notifications.company_filter_own")}
+              </option>
+              {companies.map((company) => (
+                <option key={company.id} value={String(company.id)}>
+                  {company.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {viewAsMode && (
+            <>
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingBottom: 6,
+                }}
+              >
+                <Toggle
+                  checked={subscribedIds.has(companyFilter as number)}
+                  disabled={subscriptionBusy}
+                  onChange={async (event) => {
+                    const next = event.target.checked;
+                    const companyId = companyFilter as number;
+                    setSubscriptionBusy(true);
+                    try {
+                      await setCompanySubscription(companyId, next);
+                      setSubscribedIds((prev) => {
+                        const draft = new Set(prev);
+                        if (next) draft.add(companyId);
+                        else draft.delete(companyId);
+                        return draft;
+                      });
+                    } catch (err) {
+                      setError(getApiError(err));
+                    } finally {
+                      setSubscriptionBusy(false);
+                    }
+                  }}
+                  data-testid="notifications-subscribe-toggle"
+                />
+                <span>{t("notifications.subscribe_toggle")}</span>
+              </label>
+              <span className="muted small" style={{ paddingBottom: 10 }}>
+                {t("notifications.company_view_hint")}
+              </span>
+            </>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="alert alert-error" role="alert">
@@ -146,12 +281,14 @@ export function NotificationsPage() {
                 key={notification.id}
                 type="button"
                 className={`notif-page-row${
-                  notification.is_read ? "" : " notif-page-row-unread"
+                  !viewAsMode && !notification.is_read
+                    ? " notif-page-row-unread"
+                    : ""
                 }`}
                 onClick={() => handleSelect(notification)}
                 data-testid="notification-row"
               >
-                {!notification.is_read && (
+                {!viewAsMode && !notification.is_read && (
                   <span className="notif-item-dot" aria-hidden="true" />
                 )}
                 <span className="notif-page-row-main">

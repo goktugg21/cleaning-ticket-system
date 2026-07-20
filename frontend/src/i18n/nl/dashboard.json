@@ -97,5 +97,11 @@
   "my_work.chip_tickets": "Tickets",
   "my_work.chip_meldingen": "Meldingen",
   "my_work.chip_extra_work": "Extra werk",
-  "my_work.chip_quotes": "Offertes"
+  "my_work.chip_quotes": "Offertes",
+  "hero.split_open": "Open {{amount}}",
+  "hero.split_invoiced": "Gefactureerd {{amount}}",
+  "bottom.billing_title": "Facturatie {{month}}",
+  "bottom.billing_empty": "Geen facturatie deze maand.",
+  "bottom.billing_open_count": "{{count}} open",
+  "bottom.recent_title": "Laatste tickets / extra werk"
 }

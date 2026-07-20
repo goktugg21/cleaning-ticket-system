@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, FileText, Plus, RefreshCw, X } from "lucide-react";
+import { FileText, Plus, RefreshCw, X } from "lucide-react";
 
 import { getApiError } from "../api/client";
 import {
@@ -490,8 +490,9 @@ function ProposalAddLine({
         disabled={disabled}
         showInternal
         actionsSlot={
-          // #108 Part B — compact icon actions so the single row holds
-          // at the preview-open width. Labels live on title/aria-label.
+          // #109 Part E — the pre-#108 LABELED buttons restored (owner
+          // point 1): the preview now lives BELOW the composer, so the
+          // single row has the full card width and the labels fit.
           <div className="proposal-addline-actions">
             <button
               type="button"
@@ -499,20 +500,16 @@ function ProposalAddLine({
               disabled={disabled || !form.description.trim()}
               onClick={() => onAdd(payloadFromForm(form, true))}
               data-testid="proposal-add-line-submit"
-              title={t("detail.proposal_add_line")}
-              aria-label={t("detail.proposal_add_line")}
             >
-              <Check size={14} strokeWidth={2.4} />
+              {t("detail.proposal_add_line")}
             </button>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               disabled={disabled}
               onClick={onCancel}
-              title={t("common:cancel")}
-              aria-label={t("common:cancel")}
             >
-              <X size={14} strokeWidth={2.4} />
+              {t("common:cancel")}
             </button>
           </div>
         }

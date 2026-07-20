@@ -48,12 +48,34 @@ export function diffNewNotifications(
 }
 
 export async function listNotifications(
-  params?: { page?: number },
+  // #109 Part D — `company` switches the feed into the SA-only
+  // view-as-company mode (deduplicated per event, view-only). The
+  // backend ignores the param for non-SA callers.
+  params?: { page?: number; company?: number },
 ): Promise<NotificationListResponse> {
   const response = await api.get<NotificationListResponse>("/notifications/", {
     params,
   });
   return response.data;
+}
+
+// #109 Part D — SA-only per-company subscription state.
+export async function getCompanySubscriptions(): Promise<number[]> {
+  const response = await api.get<{ subscribed_company_ids: number[] }>(
+    "/notifications/company-subscriptions/",
+  );
+  return response.data.subscribed_company_ids;
+}
+
+export async function setCompanySubscription(
+  companyId: number,
+  subscribed: boolean,
+): Promise<void> {
+  if (subscribed) {
+    await api.put(`/notifications/company-subscriptions/${companyId}/`);
+  } else {
+    await api.delete(`/notifications/company-subscriptions/${companyId}/`);
+  }
 }
 
 export async function getUnreadCount(): Promise<number> {

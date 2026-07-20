@@ -236,8 +236,11 @@ class ExtraWorkRequestRoutingDecisionAuditTests(
 
     def test_request_routing_decision_write_is_not_audited_yet(self):
         request = self._create_request_with_one_line()
-        # No AuditLog rows for the parent request itself (the model is
-        # not registered for audit in Batch 6).
+        # No AuditLog rows for the parent request itself. #109 Part B
+        # registered a BILLING-ONLY targeted handler (invoice_date /
+        # is_invoiced / invoiced_at, UPDATE-only) — cart CREATEs and the
+        # routing_decision write remain deliberately unaudited, so this
+        # contract still holds.
         self.assertFalse(
             AuditLog.objects.filter(
                 target_model="extra_work.ExtraWorkRequest",

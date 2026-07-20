@@ -16,11 +16,16 @@ export interface UseReportResult<TResponse> {
 }
 
 function filtersKey(filters: ReportFilters): string {
+  // #109 Part H — customer + billing_period added so a change refetches;
+  // origin was previously (incorrectly) omitted, added here too.
   return [
     filters.from ?? "",
     filters.to ?? "",
     filters.company ?? "",
     filters.building ?? "",
+    filters.origin ?? "",
+    filters.customer ?? "",
+    filters.billing_period ?? "",
   ].join("|");
 }
 

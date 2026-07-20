@@ -420,12 +420,16 @@ export function ContactPermissionsPanel({
           </p>
         </div>
       ) : (
+        /* #109 Part F — capped internal scroll (a 30-building customer
+           used to grow the CustomerUserManageModal card to ~3000px).
+           Taller than the standard 260px multi-select cap because each
+           row is an interactive card (.multi-select-list-tall). */
         <ul
           data-testid="contact-permissions-building-list"
+          className="multi-select-list multi-select-list-tall"
           style={{
             listStyle: "none",
             margin: 0,
-            padding: 0,
             display: "flex",
             flexDirection: "column",
             gap: 8,

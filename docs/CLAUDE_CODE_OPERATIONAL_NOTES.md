@@ -90,3 +90,49 @@ incomplete run (e.g. user 3 left soft-deleted), restore via the Django
 shell snippet in the README. The audit's deactivate/reactivate flow leaves
 state consistent on a successful run, but a failed run mid-flow can leave
 artifacts.
+
+## Frontend gate (node:22-alpine) and the measured-geometry rule
+
+The frontend gate is three checks run inside a throwaway `node:22-alpine`
+container against the bind-mounted `frontend/`:
+
+```
+sg docker -c "docker run --rm -v \"$(pwd)/frontend:/app\" -w /app node:22-alpine \
+  sh -c 'npx tsc --noEmit -p tsconfig.app.json && npx eslint .'"
+```
+
+- `tsc --noEmit -p tsconfig.app.json` (Tier 1) must pass clean.
+- `npx eslint .` must report **exactly 49 problems (47 errors, 2
+  warnings)** — the frozen baseline. Capture it before AND after every
+  commit and diff the per-file violation counts (`grep -oE
+  '^/app/src/[^:]+' | sort | uniq -c`); the set must be identical modulo
+  line-number shifts. Zero new violations, and (a standing rule since
+  #109 Part J) **no new `eslint-disable` comments** — refactor to the
+  starts-true loading idiom / guarded render-time state reset instead.
+- `npm run build` (Tier 1 too) is the production build; run it before a
+  screenshot/measurement pass since the preview server serves `dist/`.
+
+Two eslint rules from the React-Compiler plugin bite easily and are NOT
+suppressible without a disable comment:
+- `react-hooks/set-state-in-effect` — no synchronous `setState` at the
+  top of an effect body. Clear/So set state inside the settled promise
+  (`.then`/`.catch`/`.finally`) or start the state at its initial value.
+- `react-hooks/preserve-manual-memoization` — do not add a `setState`
+  call into an existing `useCallback` that the compiler had memoized;
+  reset that state via a guarded render-time adjustment keyed on the id
+  instead (the React "adjust state when a prop changes" pattern).
+
+**Measured-geometry rule (standing since #109).** For any layout /
+geometry / density claim — "full width", "no overflow", "the list
+scrolls", "the preview is below the composer" — MEASURE the rendered
+geometry with browser tooling and report the numbers; a screenshot
+alone does not count. Drive the built `dist/` via `vite preview` + the
+dev backend (see the branch-screenshots memory / token-inject pattern)
+and read `boundingBox()` widths, `scrollHeight` vs `clientHeight`, or
+`document.documentElement.scrollWidth > clientWidth`. To prove a scroll
+cap bites regardless of seeded data, inject ≥50 synthetic rows into the
+list via `page.evaluate` and confirm `clientHeight <= cap` with
+`scrollHeight` far larger. Watch for cascade/specificity traps: a later
+same-specificity rule can silently win (the #108 hero-grid used a
+compound `.operations-kpi-grid.option-a-hero` selector to beat the base
+`.operations-kpi-grid` media rules declared later in the file).

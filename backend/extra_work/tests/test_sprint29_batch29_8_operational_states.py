@@ -429,11 +429,21 @@ class AutoTriggerAllTerminalTests(_OperationalFixtureMixin, TestCase):
             note="done — please review",
         )
         ticket.refresh_from_db()
+        # #109 Part A — the customer-decision gate now requires the
+        # actor to RESOLVE customer.ticket.approve_own/approve_location.
+        # These tickets are created_by the provider admin (not cust_user)
+        # and cust_user is a plain CUSTOMER_USER (approve_location not
+        # granted), so drive the final APPROVED leg via the provider
+        # operator override path — which is what this helper's own
+        # docstring already says ("via the provider operator path").
+        # The EW auto-trigger under test is indifferent to the approving
+        # actor; only the ticket reaching APPROVED matters.
         ticket_apply_transition(
             ticket,
-            self.cust_user,
+            self.admin,
             TicketStatus.APPROVED,
             note="ok",
+            override_reason="provider approved on behalf (test fixture)",
         )
 
     def test_ew_stays_in_progress_until_all_terminal(self):

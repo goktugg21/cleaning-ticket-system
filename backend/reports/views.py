@@ -18,6 +18,8 @@ from tickets.models import TicketStatus
 from .dimensions import (
     DimensionFilters,
     OriginInvalid,
+    _first_param,
+    _resolve_customer,
     compute_extra_work_revenue,
     compute_tickets_by_building,
     compute_tickets_by_customer,
@@ -82,6 +84,14 @@ class StatusDistributionView(_ReportView):
     def get(self, request):
         scope = self._resolved_scope(request)
         qs = tickets_for_scope(request.user, scope)
+        # #109 Part H — optional customer narrowing (same _resolve_customer
+        # 403/400 contract as the dimension reports).
+        customer = _resolve_customer(
+            request.user,
+            _first_param(request.query_params, "customer", "customer_id"),
+        )
+        if customer is not None:
+            qs = qs.filter(customer_id=customer.id)
         counts = dict(qs.values_list("status").annotate(c=Count("id")))
         buckets = [
             {
@@ -165,6 +175,13 @@ class TicketsOverTimeView(_ReportView):
         qs = tickets_for_scope(request.user, scope).filter(
             created_at__gte=bound_lo, created_at__lt=bound_hi
         )
+        # #109 Part H — optional customer narrowing.
+        customer = _resolve_customer(
+            request.user,
+            _first_param(request.query_params, "customer", "customer_id"),
+        )
+        if customer is not None:
+            qs = qs.filter(customer_id=customer.id)
         # Aggregate by local date so the series buckets line up with the
         # YYYY-MM-DD presentation.
         rows = (

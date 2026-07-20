@@ -97,5 +97,11 @@
   "my_work.chip_tickets": "Tickets",
   "my_work.chip_meldingen": "Reports",
   "my_work.chip_extra_work": "Extra work",
-  "my_work.chip_quotes": "Quotes"
+  "my_work.chip_quotes": "Quotes",
+  "hero.split_open": "Open {{amount}}",
+  "hero.split_invoiced": "Invoiced {{amount}}",
+  "bottom.billing_title": "Billing {{month}}",
+  "bottom.billing_empty": "No billing this month.",
+  "bottom.billing_open_count": "{{count}} open",
+  "bottom.recent_title": "Latest tickets / extra work"
 }

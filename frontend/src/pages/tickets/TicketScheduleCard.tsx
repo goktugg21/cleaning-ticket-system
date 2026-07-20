@@ -192,7 +192,6 @@ export function TicketScheduleCard({
           : t("schedule.not_scheduled")
       }
       defaultOpen
-      persistKey="ticket-side-schedule"
       testId="ticket-schedule-card"
     >
       <div style={{ padding: "14px 18px 16px" }}>

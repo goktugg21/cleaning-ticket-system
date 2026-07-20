@@ -25,6 +25,15 @@ export interface ReportFilters {
   // by `paramsFor`, so the JSON fetch and `downloadDimensionExport` stay in
   // lockstep. The standalone by-origin report does not use this.
   origin?: TicketOrigin;
+  // #109 Part H — lock a report to one customer. Honored server-side by
+  // the extra-work-revenue, tickets-over-time and status-distribution
+  // endpoints (403 out-of-scope, 400 non-integer). Serialized by
+  // paramsFor so the JSON fetch and the export download stay in lockstep.
+  customer?: number;
+  // #109 Part H — billing-month mode for the extra-work-revenue report
+  // (COALESCE(invoice_date, spawned-ticket completion) bucketing), so a
+  // customer Reports page can share the same billing month as its KPIs.
+  billing_period?: string;
 }
 
 function paramsFor(filters: ReportFilters): Record<string, string> {
@@ -34,6 +43,8 @@ function paramsFor(filters: ReportFilters): Record<string, string> {
   if (filters.company !== undefined) out.company = String(filters.company);
   if (filters.building !== undefined) out.building = String(filters.building);
   if (filters.origin) out.origin = filters.origin;
+  if (filters.customer !== undefined) out.customer = String(filters.customer);
+  if (filters.billing_period) out.billing_period = filters.billing_period;
   return out;
 }
 
