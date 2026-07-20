@@ -9,6 +9,8 @@ is CLOSED.
 """
 from __future__ import annotations
 
+from django.utils import timezone
+
 from tickets.models import Ticket, TicketStatus
 
 
@@ -40,6 +42,10 @@ def billing_month(ew, ticket):
     if ew.invoice_date is not None:
         return (ew.invoice_date.year, ew.invoice_date.month)
     if ticket is not None and ticket.closed_at is not None:
-        d = ticket.closed_at.date()
+        # #109 Part C (audit P3-1) — bucket on the Europe/Amsterdam
+        # LOCAL date, not the UTC date. A ticket closed 00:30 local on
+        # the 1st is 22:30/23:30 UTC on the previous day; naive .date()
+        # on the UTC value would bill it a month early.
+        d = timezone.localtime(ticket.closed_at).date()
         return (d.year, d.month)
     return None
