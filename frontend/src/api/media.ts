@@ -39,3 +39,26 @@ export function uploadCompanyLogo(companyId: number, file: File) {
 export async function deleteCompanyLogo(companyId: number): Promise<void> {
   await api.delete(`/companies/${companyId}/logo/`);
 }
+
+// Invoicing Phase 4b — the customer informational contract PDF (multipart
+// `file`, application/pdf). Upload returns the new contract-PDF URL (with a
+// fresh ?v= marker); mirrors the logo upload but with its own response key.
+export async function uploadCustomerContractPdf(
+  customerId: number,
+  file: File,
+): Promise<string | null> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await api.post<{ contract_pdf_url?: string }>(
+    `/customers/${customerId}/contract-pdf/`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return response.data.contract_pdf_url ?? null;
+}
+
+export async function deleteCustomerContractPdf(
+  customerId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/contract-pdf/`);
+}

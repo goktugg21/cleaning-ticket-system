@@ -692,6 +692,11 @@ export interface CustomerAdmin {
   show_assigned_staff_phone: boolean;
   // RF-1 — customer company logo URL (null when unset).
   logo_url?: string | null;
+  // Invoicing Phase 4a — billing schedule (writable by OSIUS admins) +
+  // read-only contract-PDF URL. `invoice_day_rule` is "" when unset.
+  invoice_day_rule?: InvoiceDayRule | "";
+  invoice_granularity_default?: InvoiceGranularity;
+  contract_pdf_url?: string | null;
   created_at: string;
   updated_at: string;
   // Per-current-user, per-customer capability block from the
@@ -2009,4 +2014,75 @@ export interface InboxFilters {
   unread_only?: boolean;
   offset?: number;
   page_size?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Invoicing (Phase 4a REST surface — see backend/invoicing/serializers.py +
+// backend/invoicing/views.py::InvoiceViewSet). All money/decimal fields are
+// DRF decimal STRINGS; date/datetime are ISO strings. Consumed by the
+// Facturen page + the invoice-detail page (Phase 4b).
+// ---------------------------------------------------------------------------
+export type InvoiceStatus = "DRAFT" | "ISSUED" | "SENT";
+export type InvoiceGranularity = "CUSTOMER" | "PER_BUILDING";
+export type InvoiceDayRule = "FIRST_OF_MONTH" | "LAST_OF_MONTH";
+
+export interface InvoiceLine {
+  id: number;
+  ordering: number;
+  description: string;
+  // Source Extra Work id (NULL for a hand-added line).
+  extra_work: number | null;
+  quantity: string;
+  unit_price: string;
+  vat_pct: string;
+  line_subtotal: string;
+  line_vat: string;
+  line_total: string;
+  period_year: number | null;
+  period_month: number | null;
+  performed_on: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Invoice {
+  id: number;
+  status: InvoiceStatus;
+  number: string | null;
+  year: number | null;
+  company: number;
+  customer: number;
+  customer_name: string;
+  building: number | null;
+  building_name: string | null;
+  period_year: number | null;
+  period_month: number | null;
+  subtotal_amount: string;
+  vat_amount: string;
+  total_amount: string;
+  optional_fee_label: string;
+  optional_fee_amount: string | null;
+  summary_text: string;
+  is_reversal: boolean;
+  reverses: number | null;
+  issued_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+  updated_at: string;
+  lines: InvoiceLine[];
+}
+
+// One row of GET /api/invoices/due/ — informational "who's due" data
+// (driven by Customer.invoice_day_rule; gates nothing).
+export interface InvoiceDueRow {
+  customer: number;
+  customer_name: string;
+  company: number;
+  invoice_day_rule: InvoiceDayRule | "";
+  invoice_granularity_default: InvoiceGranularity;
+  period_year: number;
+  period_month: number;
+  unbilled_count: number;
+  unbilled_total: string;
+  is_due: boolean;
 }

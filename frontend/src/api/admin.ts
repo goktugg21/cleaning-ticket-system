@@ -28,6 +28,8 @@ import type {
   CustomerUserMembership,
   EmploymentType,
   InvitationAdmin,
+  InvoiceDayRule,
+  InvoiceGranularity,
   PaginatedResponse,
   ProviderEmployee,
   PromoteContactPayload,
@@ -248,6 +250,10 @@ export interface CustomerWritePayload {
   show_assigned_staff_name?: boolean;
   show_assigned_staff_email?: boolean;
   show_assigned_staff_phone?: boolean;
+  // Invoicing Phase 4b — billing schedule (PATCH by OSIUS admins only; the
+  // CustomerViewSet write gate enforces it). "" clears the day rule.
+  invoice_day_rule?: InvoiceDayRule | "";
+  invoice_granularity_default?: InvoiceGranularity;
 }
 
 export async function listCustomers(
