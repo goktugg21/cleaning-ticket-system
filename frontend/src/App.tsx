@@ -83,9 +83,15 @@ const ReportsPage = lazy(() =>
 );
 
 // Invoicing Phase 4b — the provider "Facturen" page (due panel + invoice
-// list). Split like ReportsPage to keep the initial bundle small.
+// list) + the dedicated invoice-detail page. Split like ReportsPage to keep
+// the initial bundle small.
 const FacturenPage = lazy(() =>
   import("./pages/FacturenPage").then((m) => ({ default: m.FacturenPage })),
+);
+const InvoiceDetailPage = lazy(() =>
+  import("./pages/InvoiceDetailPage").then((m) => ({
+    default: m.InvoiceDetailPage,
+  })),
 );
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -677,6 +683,22 @@ export default function App() {
                   }
                 >
                   <FacturenPage />
+                </Suspense>
+              </BillingRoute>
+            }
+          />
+          <Route
+            path="/invoices/:id"
+            element={
+              <BillingRoute>
+                <Suspense
+                  fallback={
+                    <div className="loading-bar">
+                      <div className="loading-bar-fill" />
+                    </div>
+                  }
+                >
+                  <InvoiceDetailPage />
                 </Suspense>
               </BillingRoute>
             }
