@@ -2072,6 +2072,42 @@ export interface Invoice {
   lines: InvoiceLine[];
 }
 
+// Phase 5 — the REDACTED customer read shape (GET /api/invoices/my/...).
+// Mirrors backend CustomerInvoiceSerializer: no company/customer/year/reverses/
+// timestamps, and lines carry no extra_work / id / ordering / timestamps.
+export interface CustomerInvoiceLine {
+  description: string;
+  quantity: string;
+  unit_price: string;
+  vat_pct: string;
+  line_subtotal: string;
+  line_vat: string;
+  line_total: string;
+  period_year: number | null;
+  period_month: number | null;
+  performed_on: string | null;
+}
+
+export interface CustomerInvoice {
+  id: number;
+  number: string | null;
+  status: InvoiceStatus; // always "SENT" in this scope
+  customer_name: string;
+  building_name: string | null;
+  period_year: number | null;
+  period_month: number | null;
+  subtotal_amount: string;
+  vat_amount: string;
+  total_amount: string;
+  optional_fee_label: string;
+  optional_fee_amount: string | null;
+  summary_text: string;
+  is_reversal: boolean;
+  issued_at: string | null;
+  sent_at: string | null;
+  lines: CustomerInvoiceLine[];
+}
+
 // One row of GET /api/invoices/due/ — informational "who's due" data
 // (driven by Customer.invoice_day_rule; gates nothing).
 export interface InvoiceDueRow {

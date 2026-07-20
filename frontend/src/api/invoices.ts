@@ -7,6 +7,7 @@
 // is provider-operator-gated + tenant-scoped server-side.
 import { api } from "./client";
 import type {
+  CustomerInvoice,
   Invoice,
   InvoiceDueRow,
   InvoiceGranularity,
@@ -146,6 +147,30 @@ export async function updateInvoiceMeta(
 // inline object-URL preview / download).
 export async function fetchInvoicePdf(id: number | string): Promise<Blob> {
   const response = await api.get<Blob>(`/invoices/${id}/pdf/`, {
+    responseType: "blob",
+  });
+  return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — the CUSTOMER read helpers (GET /api/invoices/my/...). A
+// CUSTOMER_USER's own SENT invoices only; the backend redacts + scopes. The
+// list is a flat array (not paginated).
+// ---------------------------------------------------------------------------
+export async function listMyInvoices(): Promise<CustomerInvoice[]> {
+  const response = await api.get<CustomerInvoice[]>("/invoices/my/");
+  return response.data;
+}
+
+export async function getMyInvoice(
+  id: number | string,
+): Promise<CustomerInvoice> {
+  const response = await api.get<CustomerInvoice>(`/invoices/my/${id}/`);
+  return response.data;
+}
+
+export async function fetchMyInvoicePdf(id: number | string): Promise<Blob> {
+  const response = await api.get<Blob>(`/invoices/my/${id}/pdf/`, {
     responseType: "blob",
   });
   return response.data;

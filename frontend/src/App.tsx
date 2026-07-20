@@ -14,6 +14,7 @@ import { CustomerReadRoute } from "./components/CustomerReadRoute";
 import { ExtraWorkRoute } from "./components/ExtraWorkRoute";
 import { PlannedWorkRoute } from "./components/PlannedWorkRoute";
 import { BillingRoute } from "./components/BillingRoute";
+import { CustomerRoute } from "./components/CustomerRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
@@ -30,6 +31,8 @@ import { RecurringJobDetailPage } from "./pages/planned-work/RecurringJobDetailP
 import { RecurringJobFormPage } from "./pages/planned-work/RecurringJobFormPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MyEmployeesPage } from "./pages/MyEmployeesPage";
+import { MyInvoiceDetailPage } from "./pages/MyInvoiceDetailPage";
+import { MyInvoicesPage } from "./pages/MyInvoicesPage";
 import { MyMeldingenPage } from "./pages/MyMeldingenPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { InboxPage } from "./pages/InboxPage";
@@ -266,6 +269,25 @@ export default function App() {
               <ProtectedRoute>
                 <MyEmployeesPage />
               </ProtectedRoute>
+            }
+          />
+          {/* Invoicing Phase 5 — the customer "Facturen" surface (read-only).
+              CustomerRoute admits ONLY CUSTOMER_USER; everyone else bounces
+              to "/". The backend also returns an empty scope for non-customers. */}
+          <Route
+            path="/my/facturen"
+            element={
+              <CustomerRoute>
+                <MyInvoicesPage />
+              </CustomerRoute>
+            }
+          />
+          <Route
+            path="/my/facturen/:id"
+            element={
+              <CustomerRoute>
+                <MyInvoiceDetailPage />
+              </CustomerRoute>
             }
           />
           {/* Sprint 26C — Extra Work MVP. STAFF is excluded by the
