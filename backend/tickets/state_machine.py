@@ -6,7 +6,6 @@ from django.utils import timezone
 from accounts.models import UserRole
 from buildings.models import BuildingManagerAssignment
 from companies.models import CompanyUserMembership
-from customers.models import CustomerUserBuildingAccess
 
 from .models import Ticket, TicketStatus, TicketStatusHistory
 
@@ -214,18 +213,35 @@ def _user_passes_scope(user, ticket, scope):
 
         if ticket.customer_id in company_admin_customer_ids(user):
             return True
-        # Sprint 15: customer-user transitions (approve / reject) require
-        # the EXACT (customer, building) pair access, not just any
-        # CustomerUserMembership for the customer. A user with membership
-        # to Customer X but only CustomerUserBuildingAccess for B3 must
-        # not be able to approve a B1 ticket of the same customer. This
-        # mirrors accounts/scoping.py::scope_tickets_for so visibility
-        # and action authority stay aligned.
-        return CustomerUserBuildingAccess.objects.filter(
-            membership__user=user,
-            membership__customer_id=ticket.customer_id,
-            building_id=ticket.building_id,
-        ).exists()
+        # #109 Part A (audit P2-2) — mirror the Extra Work machine's
+        # `_user_can_drive_transition` customer-decision gate: a bare
+        # CustomerUserBuildingAccess row is no longer enough; the
+        # (customer, building) pair must RESOLVE the approve permission
+        # through `customers.permissions.user_can`, which honors the
+        # per-building access-role defaults, per-user
+        # permission_overrides AND the CustomerCompanyPolicy family
+        # (customer_users_can_approve_ticket_completion). A user with
+        # no access row for this exact (customer, building) pair still
+        # resolves False (Sprint 15 pair-exactness is subsumed). This
+        # scope is used EXCLUSIVELY by the customer-decision pair
+        # (WAITING_CUSTOMER_APPROVAL -> APPROVED / REJECTED); the
+        # provider-driven override path runs on its own role scopes
+        # and stays untouched.
+        from customers.permissions import user_can
+
+        if ticket.created_by_id == user.id and user_can(
+            user,
+            ticket.customer_id,
+            ticket.building_id,
+            "customer.ticket.approve_own",
+        ):
+            return True
+        return user_can(
+            user,
+            ticket.customer_id,
+            ticket.building_id,
+            "customer.ticket.approve_location",
+        )
     if scope == SCOPE_STAFF_ASSIGNED:
         # Sprint 28 Batch 11 — STAFF may drive a completion only when
         # they hold an explicit `TicketStaffAssignment` row for the
@@ -243,6 +259,15 @@ def _user_passes_scope(user, ticket, scope):
 def can_transition(user, ticket, to_status):
     # SUPER_ADMIN_CAN_TRANSITION_ANY_STATUS
     if getattr(user, "role", None) == UserRole.SUPER_ADMIN:
+        # #109 Part C (audit P3-3) — CONVERTED_TO_EXTRA_WORK is excluded
+        # from the bypass in BOTH directions: only the convert machinery
+        # (extra_work.conversion, a direct write inside its own atomic
+        # block) may enter it, and it stays terminal — no transition
+        # leaves it, not even for a SUPER_ADMIN. The generic status
+        # endpoint can therefore never fabricate or undo a conversion.
+        converted = str(TicketStatus.CONVERTED_TO_EXTRA_WORK)
+        if str(to_status) == converted or str(ticket.status) == converted:
+            return False
         return str(to_status) != str(ticket.status)
 
     key = (ticket.status, to_status)
