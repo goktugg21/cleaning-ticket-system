@@ -211,6 +211,28 @@ These surfaced during the #109 audit and are intentional — recorded so a futur
 
 ---
 
+## Invoicing subsystem (in progress — single branch `feat/invoicing`, ONE PR after Phase 5)
+
+Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`; the owner opens ONE PR after Phase 5 (no PR per phase).
+
+**Phases:**
+- [x] **Phase 1 — data model** (THIS): `invoicing` app (`Invoice`, `InvoiceLine`) + `Customer` billing-schedule (`invoice_day_rule`, `invoice_granularity_default`) + `Customer.contract_pdf` + numbering scaffolding (`number` NULL-while-draft, `year`, per-company unique). Migrations `invoicing/0001_initial`, `customers/0012`. NO generation/lifecycle/UI/PDF.
+- [ ] **Phase 2 — generation + lifecycle**: state machine (DRAFT→ISSUED→SENT), numbering assignment at ISSUE (gapless per-company per-year), EW claim/release, reversal logic.
+- [ ] **Phase 3 — two-page PDF** (page 1 summary; page 2 detail = EW month / work performed / date).
+- [ ] **Phase 4 — provider "Facturen" UI** + the "who's due" list (driven by the billing schedule).
+- [ ] **Phase 5 — customer-portal visibility** (SEND).
+
+**LOCKED DECISIONS (do NOT re-litigate; build to these):**
+- No contract entity. A contract is just an uploaded PDF on the customer (informational, ZERO behavioral effect). The billing schedule is a simple setting on the customer.
+- Invoices sum unbilled EXTRA WORK (Phase 2) + an optional free-text fee (amount + label). No recurring contract-fee amount exists in the system.
+- Lifecycle DRAFT → ISSUED → SENT. Numbering assigned AT ISSUE (not draft), sequential, gapless, per-COMPANY per-YEAR. SENT invoices are immutable (reversal only).
+- Reversal = auto-generated NEGATIVE counter-invoice, editable, releases the claimed EW back to unbilled (Phase 2 logic). A reversal is TERMINAL (cannot reverse a reversal).
+- Draft claims its EW rows on creation; releasing/deleting a draft releases them (Phase 2). Invoice total is the source of truth once issued. Billing-schedule due date is informational (drives the "who's due" list, gates nothing).
+- One active contract PDF per customer, replace-on-reupload, no version history.
+- **DEFERRED: invoice email delivery.** SEND = customer-portal visibility only; v1 does NOT email invoices. (Recorded in `invoicing/models.py` docstring too so it is not lost.)
+
+---
+
 ## Standing milestones
 - [ ] **Production deployment** (the dev/test link already covers the "live link" need; this is the real thing): VPS, TLS, real SMTP, non-root containers, `ALLOWED_HOSTS` fix for the Docker internal healthcheck (broken with `DEBUG=False`), Postgres backups.
 - [ ] **CD** via GitHub Actions (CI already runs as required PR checks: backend Django/Postgres/Redis + frontend lint/tsc/build).
