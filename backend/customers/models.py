@@ -12,6 +12,12 @@ def customer_logo_upload_path(instance, filename):
     return f"customer_logos/{instance.pk}/{uuid4().hex}{ext}"
 
 
+def customer_contract_upload_path(instance, filename):
+    # Invoicing Phase 1 — informational contract PDF. uuid filename (never
+    # trust the client name); always `.pdf`. Mirrors customer_logo_upload_path.
+    return f"customer_contracts/{instance.pk}/{uuid4().hex}.pdf"
+
+
 class Customer(models.Model):
     """
     Sprint 14 — model semantics changed.
@@ -84,6 +90,41 @@ class Customer(models.Model):
     show_assigned_staff_name = models.BooleanField(default=True)
     show_assigned_staff_email = models.BooleanField(default=True)
     show_assigned_staff_phone = models.BooleanField(default=True)
+
+    # ---- Invoicing Phase 1 (data model only) ----
+    # Billing schedule is a simple INFORMATIONAL setting: it drives the
+    # Phase 4 "who's due" list and gates NOTHING. There is no contract
+    # entity and no recurring contract-fee amount anywhere in the system.
+    class InvoiceDayRule(models.TextChoices):
+        FIRST_OF_MONTH = "FIRST_OF_MONTH", "First of month"
+        LAST_OF_MONTH = "LAST_OF_MONTH", "Last of month"
+
+    class InvoiceGranularity(models.TextChoices):
+        CUSTOMER = "CUSTOMER", "Customer-level"
+        PER_BUILDING = "PER_BUILDING", "Per building"
+
+    # blank (default "") = schedule unset.
+    invoice_day_rule = models.CharField(
+        max_length=16,
+        choices=InvoiceDayRule.choices,
+        blank=True,
+        default="",
+        help_text="Informational billing-day rule; drives the 'who's due' list, gates nothing.",
+    )
+    invoice_granularity_default = models.CharField(
+        max_length=16,
+        choices=InvoiceGranularity.choices,
+        default=InvoiceGranularity.CUSTOMER,
+        help_text="Default invoice granularity (customer-level vs per-building) for Phase 2 generation.",
+    )
+    # Informational contract PDF: ZERO behavioural effect. One active PDF,
+    # replace-on-reupload, NO version history (mirrors the `logo` pattern).
+    contract_pdf = models.FileField(
+        upload_to=customer_contract_upload_path,
+        null=True,
+        blank=True,
+        help_text="Informational contract PDF only; zero behavioural effect.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

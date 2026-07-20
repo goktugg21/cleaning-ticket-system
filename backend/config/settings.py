@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     "sla",
     "planned_work",
     "audit",
+    "invoicing",
 ]
 
 MIDDLEWARE = [
