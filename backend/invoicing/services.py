@@ -23,6 +23,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
@@ -35,6 +36,45 @@ from .models import Invoice, InvoiceLine
 from .selectors import unbilled_extra_work
 
 _TWO_PLACES = Decimal("0.01")
+
+
+def recompute_invoice_totals(invoice):
+    """Recompute + persist the invoice's FROZEN subtotal/vat/total from its
+    LIVE lines plus the optional fee, and return the invoice.
+
+    This is the editable-draft source-of-truth recompute (Phase 4a): after
+    any line add/edit/remove or a fee change, the invoice's own totals are
+    re-derived from the current lines so the invoice stays the single source
+    of truth. DRAFT-only callers (the line/meta services guard the status);
+    issued/sent invoices are immutable.
+
+    FEE-VAT TREATMENT (documented decision): the optional fee is treated as a
+    VAT-exempt (0% BTW) additional post. It is added to BOTH the subtotal and
+    the total and contributes NOTHING to the VAT figure. This is the
+    least-surprising rule and keeps the invariant `subtotal + vat == total`
+    intact:  (Σ line_subtotal + fee) + (Σ line_vat) == Σ line_total + fee.
+    The page-1 fee box is a free-text amount with no VAT breakdown, so rolling
+    it in VAT-free matches exactly what the provider typed.
+    """
+    agg = invoice.lines.aggregate(
+        sub=Sum("line_subtotal"), vat=Sum("line_vat"), tot=Sum("line_total")
+    )
+    subtotal = agg["sub"] or Decimal("0.00")
+    vat = agg["vat"] or Decimal("0.00")
+    total = agg["tot"] or Decimal("0.00")
+    fee = invoice.optional_fee_amount or Decimal("0.00")
+    invoice.subtotal_amount = (subtotal + fee).quantize(_TWO_PLACES)
+    invoice.vat_amount = vat.quantize(_TWO_PLACES)
+    invoice.total_amount = (total + fee).quantize(_TWO_PLACES)
+    invoice.save(
+        update_fields=[
+            "subtotal_amount",
+            "vat_amount",
+            "total_amount",
+            "updated_at",
+        ]
+    )
+    return invoice
 
 
 def _earned_amounts(ew):

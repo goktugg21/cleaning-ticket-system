@@ -116,6 +116,12 @@ class Invoice(models.Model):
         max_digits=12, decimal_places=2, null=True, blank=True
     )
 
+    # Phase 4a — Ramazan's hand-written page-1 summary (the "samenvatting").
+    # While DRAFT the provider may set this; the two-page PDF prefers it over
+    # the auto-composed one-line summary when non-empty (see invoice_pdf.py).
+    # Blank ("") = unset -> the PDF falls back to the auto-composed line.
+    summary_text = models.TextField(blank=True, default="")
+
     # Reversal linkage. A reversal is an auto-generated NEGATIVE counter-
     # invoice pointing at the original via `reverses`; it releases the
     # original's claimed EW back to unbilled (Phase 2). A reversal is

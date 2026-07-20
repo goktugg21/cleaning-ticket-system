@@ -248,18 +248,24 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     )
     pdf.ln(4)
 
-    # Summary line — Ramazan's one-line overview.
+    # Summary line — Ramazan's overview. Phase 4a: prefer the hand-written
+    # `summary_text` when set; otherwise fall back to the auto-composed line.
     pdf.set_font(FONT_FAMILY, "B", 10)
     pdf.cell(0, 6, _safe_pdf_text("Samenvatting:"), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font(FONT_FAMILY, "", 10)
-    scope_text = building_name if building_name else "alle gebouwen"
+    hand_summary = (invoice.summary_text or "").strip()
+    if hand_summary:
+        summary_body = hand_summary
+    else:
+        scope_text = building_name if building_name else "alle gebouwen"
+        summary_body = (
+            f"Factuur voor {customer_name} ({scope_text}) — periode "
+            f"{period_text}. Totaal {_fmt_money(invoice.total_amount)}."
+        )
     pdf.multi_cell(
         0,
         5,
-        _safe_pdf_text(
-            f"Factuur voor {customer_name} ({scope_text}) — periode "
-            f"{period_text}. Totaal {_fmt_money(invoice.total_amount)}."
-        ),
+        _safe_pdf_text(summary_body),
         new_x="LMARGIN",
         new_y="NEXT",
     )
