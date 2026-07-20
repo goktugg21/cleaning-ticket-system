@@ -448,6 +448,12 @@ class Command(BaseCommand):
         self._seed_service_catalog()
         self._seed_demo_extra_work(User, super_admin)
 
+        # #108 Part G — enrich the demo dataset so the Option-A
+        # dashboard (hero, "Aandacht nodig", "Mijn werk"), the inbox
+        # and the Facturen page all have content on a fresh seed.
+        # Idempotent (marker titles / marker message bodies).
+        self._seed_owner_batch2_enrichment(User, super_admin)
+
         self._print_summary(prune_summary=prune_summary)
 
     # -----------------------------------------------------------------
@@ -1227,6 +1233,482 @@ class Command(BaseCommand):
         }
 
     # -----------------------------------------------------------------
+    # #108 Part G — owner-batch-2 enrichment
+    # -----------------------------------------------------------------
+    def _seed_owner_batch2_enrichment(self, User, super_admin):
+        """
+        Enrich the Osius demo so the #108 surfaces have content on a
+        fresh seed:
+
+          * "Aandacht nodig" — a WAITING_MANAGER_REVIEW ticket, extra
+            unassigned OPEN tickets, an EW awaiting pricing
+            (UNDER_REVIEW) and an EW awaiting the customer decision
+            (PRICING_PROPOSED, proposal SENT through the real proposal
+            state machine).
+          * "Mijn werk" — tickets / a melding / EW / a quote request
+            created by the provider personas (super admin + Ramazan).
+          * Billing history — two PAST months plus the CURRENT month
+            with completed (spawned ticket CLOSED = earned), finalized
+            (actual_hours + recompute_final_amounts) and
+            invoice_date-set EWs; the OLDEST month is marked invoiced
+            using the same is_earned/billing_month predicates the
+            invoice run applies. Facturen shows history; the dashboard
+            month widget shows non-zero open EUR.
+          * Notifications + unread messages — real emit_* fan-out for
+            the workflow events and a handful of ticket/EW messages
+            across roles (customer -> provider and provider ->
+            customer), so the feed, the inbox badge and "Recente
+            activiteit" are populated.
+
+        Idempotent: every created row is guarded by a stable marker
+        title (tickets / EW) or marker message body. Snapshot prices
+        come from CustomerServicePrice rows and every state mutation
+        goes through the real state machines / spawn helper.
+        """
+        from datetime import date, timedelta
+        from decimal import Decimal
+
+        from extra_work.instant_tickets import spawn_tickets_for_request
+        from extra_work.models import (
+            CustomerServicePrice,
+            ExtraWorkCategory,
+            ExtraWorkMessage,
+            ExtraWorkMessageType,
+            ExtraWorkMessageVisibility,
+            ExtraWorkRequest,
+            ExtraWorkRequestIntent,
+            ExtraWorkRequestItem,
+            ExtraWorkRoutingDecision,
+            ExtraWorkStatus,
+            Proposal,
+            ProposalLine,
+            ProposalStatus,
+            Service,
+        )
+        from extra_work.billing import billing_month, build_ticket_map, is_earned
+        from extra_work.proposal_state_machine import (
+            apply_proposal_transition,
+        )
+        from extra_work.state_machine import apply_transition as ew_apply
+        from notifications.services import (
+            emit_extra_work_message_notifications,
+            emit_extra_work_proposal_sent_notifications,
+            emit_extra_work_requested_notifications,
+            emit_ticket_message_notifications,
+        )
+        from tickets.models import (
+            TicketMessage,
+            TicketMessageType,
+            TicketMessageVisibility,
+        )
+        from tickets.state_machine import apply_transition as ticket_apply
+
+        summary = {
+            "tickets": 0,
+            "extra_work": 0,
+            "billing_months": [],
+            "invoiced_month": None,
+            "messages": 0,
+            "skipped": [],
+        }
+
+        company = Company.objects.filter(slug="osius-demo").first()
+        customer = (
+            Customer.objects.filter(company=company, name="B Amsterdam").first()
+            if company
+            else None
+        )
+        b1 = Building.objects.filter(company=company, name="B1 Amsterdam").first()
+        b2 = Building.objects.filter(company=company, name="B2 Amsterdam").first()
+        ramazan = User.objects.filter(
+            email="ramazan-admin-osius@b-amsterdam.demo"
+        ).first()
+        tom = User.objects.filter(
+            email="tom-customer-b-amsterdam@b-amsterdam.demo"
+        ).first()
+        if not all([company, customer, b1, b2, ramazan, tom]):
+            self.stdout.write(self.style.WARNING(
+                "seed_demo_data: skipping owner-batch-2 enrichment — "
+                "Osius demo fixtures incomplete."
+            ))
+            return
+
+        # ---- (1) Attention-list + "Mijn werk" tickets ----------------
+        # (title, building, creator, type, target status)
+        ticket_specs = [
+            (
+                f"{DEMO_TICKET_PREFIX} Te bevestigen — trappenhuis kelder",
+                b1,
+                ramazan,
+                TicketType.REQUEST,
+                TicketStatus.WAITING_MANAGER_REVIEW,
+            ),
+            (
+                f"{DEMO_TICKET_PREFIX} Melding — koffiehoek bijvullen",
+                b2,
+                super_admin,
+                TicketType.REPORT,
+                TicketStatus.OPEN,
+            ),
+            (
+                f"{DEMO_TICKET_PREFIX} Inspectie plantenbakken atrium",
+                b1,
+                super_admin,
+                TicketType.REQUEST,
+                TicketStatus.OPEN,
+            ),
+        ]
+        for title, building, creator, ttype, target in ticket_specs:
+            if Ticket.objects.filter(customer=customer, title=title).exists():
+                summary["skipped"].append(title)
+                continue
+            ticket = Ticket.objects.create(
+                company=company,
+                building=building,
+                customer=customer,
+                created_by=creator,
+                title=title,
+                description=f"Seeded by seed_demo_data (#108 Part G): {title}",
+                type=ttype,
+                priority=TicketPriority.NORMAL,
+                status=TicketStatus.OPEN,
+            )
+            if target == TicketStatus.WAITING_MANAGER_REVIEW:
+                ticket = ticket_apply(
+                    ticket,
+                    super_admin,
+                    TicketStatus.IN_PROGRESS,
+                    note="seed #108 Part G",
+                )
+                ticket_apply(
+                    ticket,
+                    super_admin,
+                    TicketStatus.WAITING_MANAGER_REVIEW,
+                    note="seed #108 Part G — awaiting manager review",
+                )
+            summary["tickets"] += 1
+
+        # ---- (2) EW awaiting pricing (UNDER_REVIEW) -------------------
+        # Same lookup style as _seed_demo_extra_work: by name first,
+        # cheapest-id fallback. Deliberately NOT company-filtered — on a
+        # long-lived dev DB the catalog may be pinned to an older first
+        # company (the seed's _seed_service_catalog picks
+        # Company.objects.order_by("id").first()).
+        svc_specialty = (
+            Service.objects.filter(name="Emergency call-out").first()
+            or Service.objects.order_by("id").first()
+        )
+        ew_pricing_title = f"{DEMO_TICKET_PREFIX} Wacht op prijs — gevelreiniging"
+        if svc_specialty and not ExtraWorkRequest.objects.filter(
+            company=company, title=ew_pricing_title
+        ).exists():
+            ew = ExtraWorkRequest.objects.create(
+                company=company,
+                building=b1,
+                customer=customer,
+                created_by=tom,
+                title=ew_pricing_title,
+                description="Gevel oostzijde reinigen na waterschade.",
+                category=ExtraWorkCategory.DEEP_CLEANING,
+                status=ExtraWorkStatus.REQUESTED,
+                routing_decision=ExtraWorkRoutingDecision.PROPOSAL,
+            )
+            ExtraWorkRequestItem.objects.create(
+                extra_work_request=ew,
+                service=svc_specialty,
+                quantity=Decimal("8.00"),
+                unit_type=svc_specialty.unit_type,
+                requested_date=date.today() + timedelta(days=7),
+                customer_note="Graag buiten kantooruren.",
+            )
+            ew = ew_apply(ew, super_admin, ExtraWorkStatus.UNDER_REVIEW,
+                          note="seed #108 Part G — awaiting pricing")
+            emit_extra_work_requested_notifications(ew, actor=tom)
+            summary["extra_work"] += 1
+        else:
+            summary["skipped"].append(ew_pricing_title)
+
+        # ---- (3) EW awaiting customer decision (PRICING_PROPOSED) ----
+        svc_carpet = (
+            Service.objects.filter(name="Carpet shampoo").first()
+            or svc_specialty
+        )
+        ew_sent_title = f"{DEMO_TICKET_PREFIX} Offerte verstuurd — tapijtreiniging"
+        if svc_carpet and not ExtraWorkRequest.objects.filter(
+            company=company, title=ew_sent_title
+        ).exists():
+            ew = ExtraWorkRequest.objects.create(
+                company=company,
+                building=b2,
+                customer=customer,
+                created_by=super_admin,
+                title=ew_sent_title,
+                description=(
+                    "Tapijt 2e etage dieptereiniging — omgezet vanuit een "
+                    "melding door de provider."
+                ),
+                category=ExtraWorkCategory.DEEP_CLEANING,
+                status=ExtraWorkStatus.REQUESTED,
+                routing_decision=ExtraWorkRoutingDecision.PROPOSAL,
+            )
+            ExtraWorkRequestItem.objects.create(
+                extra_work_request=ew,
+                service=svc_carpet,
+                quantity=Decimal("85.00"),
+                unit_type=svc_carpet.unit_type,
+                requested_date=date.today() + timedelta(days=10),
+                customer_note="",
+            )
+            ew = ew_apply(ew, super_admin, ExtraWorkStatus.UNDER_REVIEW,
+                          note="seed #108 Part G")
+            proposal = Proposal.objects.create(
+                extra_work_request=ew,
+                status=ProposalStatus.DRAFT,
+                created_by=ramazan,
+            )
+            ProposalLine.objects.create(
+                proposal=proposal,
+                service=svc_carpet,
+                description="",
+                quantity=Decimal("85.00"),
+                unit_type=svc_carpet.unit_type,
+                unit_price=Decimal("4.75"),
+                vat_pct=Decimal("21.00"),
+                customer_explanation="Inclusief meubels verplaatsen.",
+                internal_note="Marge gecontroleerd — standaardtarief.",
+            )
+            proposal.recompute_totals()
+            apply_proposal_transition(
+                proposal, ramazan, ProposalStatus.SENT,
+                note="seed #108 Part G — proposal sent",
+            )
+            ew.refresh_from_db()
+            emit_extra_work_proposal_sent_notifications(ew, actor=ramazan)
+            summary["extra_work"] += 1
+        else:
+            summary["skipped"].append(ew_sent_title)
+
+        # ---- (4) Provider quote request ("Mijn werk" — Offertes) -----
+        ew_quote_title = (
+            f"{DEMO_TICKET_PREFIX} Offerteaanvraag — glazen scheidingswand"
+        )
+        if svc_specialty and not ExtraWorkRequest.objects.filter(
+            company=company, title=ew_quote_title
+        ).exists():
+            ew = ExtraWorkRequest.objects.create(
+                company=company,
+                building=b1,
+                customer=customer,
+                created_by=super_admin,
+                title=ew_quote_title,
+                description="Prijsindicatie gevraagd voor glazen wand begane grond.",
+                category=ExtraWorkCategory.OTHER,
+                category_other_text="Glazen scheidingswand plaatsen",
+                status=ExtraWorkStatus.REQUESTED,
+                routing_decision=ExtraWorkRoutingDecision.PROPOSAL,
+                request_intent=ExtraWorkRequestIntent.REQUEST_QUOTE,
+            )
+            ExtraWorkRequestItem.objects.create(
+                extra_work_request=ew,
+                service=svc_specialty,
+                quantity=Decimal("1.00"),
+                unit_type=svc_specialty.unit_type,
+                requested_date=date.today() + timedelta(days=21),
+                customer_note="",
+            )
+            summary["extra_work"] += 1
+        else:
+            summary["skipped"].append(ew_quote_title)
+
+        # ---- (5) Billing history — two past months + current month ---
+        svc_deep = (
+            Service.objects.filter(name="Deep cleaning").first()
+            or svc_specialty
+        )
+        today = date.today()
+
+        def _month_shift(base: date, months_back: int) -> date:
+            y, m = base.year, base.month - months_back
+            while m <= 0:
+                y -= 1
+                m += 12
+            return date(y, m, 1)
+
+        billing_targets = [_month_shift(today, 2), _month_shift(today, 1),
+                           date(today.year, today.month, 1)]
+        if svc_deep:
+            # One open-ended contract row valid before the OLDEST month
+            # so resolve_price succeeds for every requested_date below.
+            CustomerServicePrice.objects.update_or_create(
+                service=svc_deep,
+                customer=customer,
+                valid_from=billing_targets[0] - timedelta(days=15),
+                defaults={
+                    "unit_price": Decimal("42.00"),
+                    "vat_pct": Decimal("21.00"),
+                    "valid_to": None,
+                    "is_active": True,
+                },
+            )
+        for month_start in billing_targets:
+            label = f"{month_start.year}-{month_start.month:02d}"
+            title = f"{DEMO_TICKET_PREFIX} Facturatie {label} — dieptereiniging"
+            if svc_deep is None or ExtraWorkRequest.objects.filter(
+                company=company, title=title
+            ).exists():
+                summary["skipped"].append(title)
+                continue
+            ew = ExtraWorkRequest.objects.create(
+                company=company,
+                building=b2,
+                customer=customer,
+                created_by=tom,
+                title=title,
+                description=f"Maandelijkse dieptereiniging ({label}).",
+                category=ExtraWorkCategory.DEEP_CLEANING,
+                status=ExtraWorkStatus.REQUESTED,
+                routing_decision=ExtraWorkRoutingDecision.INSTANT,
+            )
+            item = ExtraWorkRequestItem.objects.create(
+                extra_work_request=ew,
+                service=svc_deep,
+                quantity=Decimal("6.00"),
+                unit_type=svc_deep.unit_type,
+                requested_date=min(month_start + timedelta(days=9), today),
+                customer_note="",
+            )
+            spawned = spawn_tickets_for_request(ew, actor=tom)
+            # Finalized: actual hours entered + final_* recomputed via
+            # the real recompute helper. MUST happen before the ticket
+            # walk — the Sprint 8B completion gate blocks
+            # IN_PROGRESS -> WAITING_CUSTOMER_APPROVAL while an hourly
+            # line still lacks actual_hours.
+            item.actual_hours = Decimal("6.50")
+            item.actual_hours_entered_by = super_admin
+            item.actual_hours_entered_at = timezone.now()
+            item.save(update_fields=[
+                "actual_hours",
+                "actual_hours_entered_by",
+                "actual_hours_entered_at",
+            ])
+            ew.refresh_from_db()
+            ew.recompute_final_amounts()
+            # Completed: drive the spawned ticket to CLOSED so the EW
+            # is EARNED (the invoice run's own predicate).
+            for spawned_ticket in spawned:
+                t = spawned_ticket
+                for stop in (
+                    TicketStatus.IN_PROGRESS,
+                    TicketStatus.WAITING_CUSTOMER_APPROVAL,
+                    TicketStatus.APPROVED,
+                    TicketStatus.CLOSED,
+                ):
+                    t = ticket_apply(
+                        t,
+                        super_admin,
+                        stop,
+                        note=f"seed #108 Part G — billing fixture {label}",
+                        override_reason="seed #108 Part G billing fixture",
+                    )
+            ew.refresh_from_db()
+            # Billing month pinned via the provider-set invoice_date
+            # (COALESCE(invoice_date, completion) — M4 rule).
+            ew.invoice_date = month_start + timedelta(days=24)
+            ew.save(update_fields=["invoice_date", "updated_at"])
+            summary["billing_months"].append(label)
+
+        # Mark the OLDEST month invoiced with the SAME predicates the
+        # invoice run uses (earned + bills-in-month + not yet invoiced).
+        oldest = billing_targets[0]
+        oldest_key = (oldest.year, oldest.month)
+        ew_list = list(
+            ExtraWorkRequest.objects.filter(
+                company=company, deleted_at__isnull=True
+            )
+        )
+        ticket_map = build_ticket_map([e.id for e in ew_list])
+        to_mark = [
+            e for e in ew_list
+            if not e.is_invoiced
+            and is_earned(ticket_map.get(e.id))
+            and billing_month(e, ticket_map.get(e.id)) == oldest_key
+        ]
+        if to_mark:
+            now = timezone.now()
+            for e in to_mark:
+                e.is_invoiced = True
+                e.invoiced_at = now
+                e.save(update_fields=["is_invoiced", "invoiced_at", "updated_at"])
+            summary["invoiced_month"] = f"{oldest.year}-{oldest.month:02d}"
+
+        # ---- (6) Unread messages across roles -------------------------
+        # Customer -> provider, provider -> customer, and one
+        # provider-internal note. Real emit_* fan-out populates the
+        # notification feed; absence of MessageReadCursor rows makes
+        # them count as unread in the inbox.
+        wca_ticket = Ticket.objects.filter(
+            customer=customer,
+            title=f"{DEMO_TICKET_PREFIX} Pantry zeepdispenser",
+        ).first()
+        open_ticket = Ticket.objects.filter(
+            customer=customer,
+            title=f"{DEMO_TICKET_PREFIX} Open lobby light",
+        ).first()
+        message_specs = [
+            (
+                wca_ticket,
+                tom,
+                TicketMessageType.PUBLIC_REPLY,
+                "Kunt u aangeven wanneer dit wordt opgepakt? (seed #108)",
+            ),
+            (
+                open_ticket,
+                ramazan,
+                TicketMessageType.PUBLIC_REPLY,
+                "Wij plannen dit deze week in. (seed #108)",
+            ),
+            (
+                open_ticket,
+                super_admin,
+                TicketMessageType.INTERNAL_NOTE,
+                "Interne notitie: lamp type L-204 bestellen. (seed #108)",
+            ),
+        ]
+        for ticket, author, mtype, body in message_specs:
+            if ticket is None:
+                continue
+            if TicketMessage.objects.filter(ticket=ticket, message=body).exists():
+                continue
+            msg = TicketMessage.objects.create(
+                ticket=ticket,
+                author=author,
+                message=body,
+                message_type=mtype,
+                visibility_mode=TicketMessageVisibility.NORMAL,
+            )
+            emit_ticket_message_notifications(msg, actor=author)
+            summary["messages"] += 1
+
+        ew_sent = ExtraWorkRequest.objects.filter(
+            company=company, title=ew_sent_title
+        ).first()
+        ew_msg_body = "Is verplaatsen van de kasten inbegrepen? (seed #108)"
+        if ew_sent is not None and not ExtraWorkMessage.objects.filter(
+            extra_work=ew_sent, message=ew_msg_body
+        ).exists():
+            msg = ExtraWorkMessage.objects.create(
+                extra_work=ew_sent,
+                author=tom,
+                message=ew_msg_body,
+                message_type=ExtraWorkMessageType.PUBLIC_REPLY,
+                visibility_mode=ExtraWorkMessageVisibility.NORMAL,
+            )
+            emit_extra_work_message_notifications(msg, actor=tom)
+            summary["messages"] += 1
+
+        self._owner_batch2_summary = summary
+
+    # -----------------------------------------------------------------
     # Output
     # -----------------------------------------------------------------
     def _print_summary(self, *, prune_summary=None):
@@ -1239,6 +1721,26 @@ class Command(BaseCommand):
                 f"Service catalog: {catalog['categories']} categories, "
                 f"{catalog['services']} services."
             )
+        batch2 = getattr(self, "_owner_batch2_summary", None)
+        if batch2:
+            out("")
+            out(
+                "#108 enrichment: "
+                f"{batch2['tickets']} tickets, "
+                f"{batch2['extra_work']} extra-work requests, "
+                f"billing months {batch2['billing_months'] or '(existing)'}"
+                + (
+                    f" (invoiced: {batch2['invoiced_month']})"
+                    if batch2["invoiced_month"]
+                    else ""
+                )
+                + f", {batch2['messages']} messages."
+            )
+            if batch2["skipped"]:
+                out(
+                    f"  already present (skipped): {len(batch2['skipped'])} "
+                    "marker rows."
+                )
         demo_ew = getattr(self, "_demo_extra_work_summary", None)
         if demo_ew:
             out("")
