@@ -1659,6 +1659,98 @@ table.data-table {
 }
 .toggle-switch input:checked + .toggle-switch-slider { background: var(--green); }
 .toggle-switch input:checked + .toggle-switch-slider::before { transform: translateX(20px); }
+/* #108 Part D — the toggle is now the platform-wide boolean control
+   (components/Toggle.tsx); disabled + focus states for the sweep. */
+.toggle-switch input:disabled + .toggle-switch-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.toggle-switch input:focus-visible + .toggle-switch-slider {
+  outline: 2px solid var(--green-2);
+  outline-offset: 2px;
+}
+
+/* #108 Part D — the platform SELECTION checkbox (multi-select rows).
+   One shared pattern: consistent size, rounded, accent check. Applied
+   via the .checkbox-input class — behavior untouched. */
+.checkbox-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  cursor: pointer;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  transition: background 0.12s, border-color 0.12s;
+  vertical-align: middle;
+}
+.checkbox-input::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  transform: scale(0);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: #fff;
+  transition: transform 0.1s;
+}
+.checkbox-input:hover:not(:disabled) {
+  border-color: var(--green);
+}
+.checkbox-input:checked {
+  background: var(--green);
+  border-color: var(--green);
+}
+.checkbox-input:checked::before {
+  transform: scale(1);
+}
+.checkbox-input:focus-visible {
+  outline: 2px solid var(--green-2);
+  outline-offset: 2px;
+}
+.checkbox-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* #108 Part D — long multi-select lists: internal scroll + the shared
+   toolbar (Select all / Clear all / count / optional filter). */
+.multi-select-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.multi-select-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.multi-select-filter {
+  margin-left: auto;
+  max-width: 200px;
+  min-width: 120px;
+}
+.multi-select-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.multi-select-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
 
 /* ====================================================================
    Settings notification preference row
@@ -5560,12 +5652,10 @@ a.attn-row:hover {
   text-transform: uppercase;
   color: var(--warn, #C97A23);
 }
+/* #108 Part D — now a shared Toggle wrapper (span), not a raw 18px
+   checkbox; only the alignment remains. */
 .policy-toggle-card-switch {
   align-self: center;
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  margin: 0;
 }
 
 @media (max-width: 720px) {
@@ -7851,41 +7941,5 @@ a.attn-row:hover {
   cursor: pointer;
   user-select: none;
 }
-.inbox-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-}
-.inbox-switch-track {
-  width: 34px;
-  height: 20px;
-  border-radius: var(--r-pill);
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  position: relative;
-  transition: background 0.15s, border-color 0.15s;
-  flex-shrink: 0;
-}
-.inbox-switch-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: var(--shadow-xs);
-  transition: transform 0.15s;
-}
-.inbox-switch input:checked + .inbox-switch-track {
-  background: var(--green);
-  border-color: var(--green);
-}
-.inbox-switch input:checked + .inbox-switch-track .inbox-switch-knob {
-  transform: translateX(14px);
-}
-.inbox-switch input:focus-visible + .inbox-switch-track {
-  outline: 2px solid var(--green-2);
-  outline-offset: 2px;
-}
+/* #108 Part D — the bespoke track/knob rules moved to the shared
+   platform Toggle (.toggle-switch); only the label layout remains. */

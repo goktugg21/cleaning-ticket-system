@@ -15,6 +15,7 @@ import type { SubTask, SubTaskAssignment } from "../../api/admin";
 import { SlotStatusBadge } from "../../components/SlotStatusBadge";
 import { StatusBadge } from "../../components/StatusBadge";
 import { formatDateTime } from "../../lib/intl";
+import { Toggle } from "../../components/Toggle";
 
 function assignmentWindow(
   slot: SubTaskAssignment,
@@ -101,11 +102,10 @@ export function SubTaskReadOnly({
           <label
             style={{ display: "flex", alignItems: "center", gap: 8 }}
           >
-            <input
-              type="checkbox"
+            <Toggle
               checked={autoCompleteOnSubtasks}
+              onChange={() => {}}
               disabled
-              readOnly
             />
             <span className="small" style={{ fontWeight: 600 }}>
               {t("subtasks.auto_complete_label")}

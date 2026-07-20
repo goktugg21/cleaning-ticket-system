@@ -4,6 +4,7 @@ import { BadgeCheck, Ticket, Wallet, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { CustomerCompanyPolicyAdmin } from "../../../../api/types";
+import { Toggle } from "../../../../components/Toggle";
 
 /**
  * Sprint 28 Batch 15.2 — replaces the 4 stacked checkboxes that
@@ -137,8 +138,7 @@ export function PolicyToggleGrid({
                 </span>
               )}
             </span>
-            <input
-              type="checkbox"
+            <Toggle
               className="policy-toggle-card-switch"
               data-testid="customer-policy-toggle"
               data-policy-field={card.field}

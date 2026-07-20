@@ -49,6 +49,7 @@ import { ImageUploadField } from "../../components/ImageUploadField";
 import { deleteCustomerLogo, uploadCustomerLogo } from "../../api/media";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { Toggle } from "../../components/Toggle";
 
 export function CustomerFormPage() {
   const navigate = useNavigate();
@@ -889,8 +890,7 @@ export function CustomerFormPage() {
                   cursor: "pointer",
                 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showAssignedStaffName}
                   onChange={(event) =>
                     setShowAssignedStaffName(event.target.checked)
@@ -909,8 +909,7 @@ export function CustomerFormPage() {
                   cursor: "pointer",
                 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showAssignedStaffEmail}
                   onChange={(event) =>
                     setShowAssignedStaffEmail(event.target.checked)
@@ -929,8 +928,7 @@ export function CustomerFormPage() {
                   cursor: "pointer",
                 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showAssignedStaffPhone}
                   onChange={(event) =>
                     setShowAssignedStaffPhone(event.target.checked)
@@ -1218,8 +1216,7 @@ export function CustomerFormPage() {
                                       "customer_form.access_active_hint",
                                     )}
                                   >
-                                    <input
-                                      type="checkbox"
+                                    <Toggle
                                       data-testid="customer-access-active-toggle"
                                       data-user-id={membership.user_id}
                                       data-building-id={access.building_id}

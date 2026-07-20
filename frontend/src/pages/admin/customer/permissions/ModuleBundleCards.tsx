@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../../components/ConfirmDialog";
 import type { PolicyDraft } from "./PolicyToggleGrid";
+import { Toggle } from "../../../../components/Toggle";
 
 /**
  * RF-8 (approved 2026-06-26) — the simple permission-bundle view.
@@ -129,8 +130,7 @@ export function ModuleBundleCards({
                     ? t("customer_permissions.modules.master_on")
                     : t("customer_permissions.modules.master_off")}
                 </span>
-                <input
-                  type="checkbox"
+                <Toggle
                   data-testid="module-bundle-master"
                   data-module={module.key}
                   checked={masterOn}
@@ -151,8 +151,7 @@ export function ModuleBundleCards({
                       : "module-bundle-toggle module-bundle-toggle-disabled"
                   }
                 >
-                  <input
-                    type="checkbox"
+                  <Toggle
                     data-testid="module-bundle-toggle"
                     data-policy-field={toggle.field}
                     checked={draft[toggle.field]}

@@ -20,6 +20,7 @@ import {
   type PermissionKeyRow,
 } from "./permissionKeyLabels";
 import { PermissionBubble } from "./PermissionBubble";
+import { Toggle } from "../../../../components/Toggle";
 
 /**
  * Sprint 31 Phase 6 — Excel-style permission matrix.
@@ -319,8 +320,7 @@ function MatrixRow(props: MatrixRowProps) {
             className="permissions-matrix-active"
             title={t("customer_permissions.active_toggle_label")}
           >
-            <input
-              type="checkbox"
+            <Toggle
               data-testid="customer-access-active-toggle"
               data-user-id={props.membership.user_id}
               data-building-id={props.access.building_id}

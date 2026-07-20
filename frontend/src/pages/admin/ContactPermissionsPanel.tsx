@@ -45,6 +45,7 @@ import {
   buildOverridesPayload,
   draftValueFromOverride,
 } from "./customer/permissions/effectiveResolver";
+import { Toggle } from "../../components/Toggle";
 
 export function ContactPermissionsPanel({
   customerId,
@@ -525,8 +526,7 @@ export function ContactPermissionsPanel({
                     style={{ display: "flex", gap: 4, alignItems: "center" }}
                     title={t("customer_permissions.active_toggle_label")}
                   >
-                    <input
-                      type="checkbox"
+                    <Toggle
                       data-testid="contact-permissions-active-toggle"
                       data-building-id={access.building_id}
                       checked={isActive}

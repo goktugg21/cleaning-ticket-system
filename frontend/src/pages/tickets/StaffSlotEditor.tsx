@@ -63,6 +63,7 @@ import { SlotStatusBadge } from "../../components/SlotStatusBadge";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useToast } from "../../components/ToastProvider";
 import { formatDateTime } from "../../lib/intl";
+import { Toggle } from "../../components/Toggle";
 
 // Frontend mirror of the backend TERMINAL_TICKET_STATUSES. Sub-task CRUD,
 // sub_task placement, and the auto-complete flag all 400 on these (matching
@@ -1020,8 +1021,7 @@ export function StaffSlotEditor({
                 : "default",
           }}
         >
-          <input
-            type="checkbox"
+          <Toggle
             checked={autoFlag}
             disabled={!canSetAutoCompleteFlag || isTerminal || flagBusy}
             onChange={(event) => handleToggleAutoComplete(event.target.checked)}

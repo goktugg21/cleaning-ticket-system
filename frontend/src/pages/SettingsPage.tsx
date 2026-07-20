@@ -9,6 +9,7 @@ import { Avatar } from "../components/Avatar";
 import { ImageUploadField } from "../components/ImageUploadField";
 import { deleteProfilePhoto, uploadProfilePhoto } from "../api/media";
 import { roleLabelKeyNs } from "../auth/permissions";
+import { Toggle } from "../components/Toggle";
 import type {
   NotificationEventType,
   NotificationPreferenceEntry,
@@ -624,14 +625,10 @@ export function SettingsPage() {
                       className="notification-row"
                     >
                       <span className="notification-row-label">{label}</span>
-                      <span className="toggle-switch">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => togglePreference(entry.event_type)}
-                        />
-                        <span className="toggle-switch-slider" />
-                      </span>
+                      <Toggle
+                        checked={checked}
+                        onChange={() => togglePreference(entry.event_type)}
+                      />
                     </label>
                   );
                 })}

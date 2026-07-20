@@ -803,7 +803,6 @@
   "services.bulk_raise_button": "Adjust prices",
   "services.bulk_raise_intro": "Select services to raise or lower their default catalog price. This updates the quoting baseline; customer-specific prices are not affected.",
   "services.bulk_raise_empty": "No active services to adjust yet.",
-  "services.bulk_raise_select_all": "Select all",
   "services.bulk_raise_mode_label": "Adjust by",
   "services.bulk_raise_mode_percent": "Percentage",
   "services.bulk_raise_mode_fixed": "Fixed amount",
@@ -909,7 +908,6 @@
   "customer_pricing.bulk_raise_button": "Adjust prices",
   "customer_pricing.bulk_raise_intro": "Select the prices you want to raise or lower. New price rows are created from the effective date; existing prices are kept for history.",
   "customer_pricing.bulk_raise_empty": "No active prices to adjust yet.",
-  "customer_pricing.bulk_raise_select_all": "Select all",
   "customer_pricing.bulk_raise_mode_label": "Adjust by",
   "customer_pricing.bulk_raise_mode_percent": "Percentage",
   "customer_pricing.bulk_raise_mode_fixed": "Fixed amount",
@@ -927,7 +925,6 @@
   "customer_pricing.copy_from_default_button": "Copy from defaults",
   "customer_pricing.copy_from_default_title": "Copy default prices",
   "customer_pricing.copy_from_default_intro": "Seed this customer's contract prices from the catalog default prices. Services that already have an overlapping active price are skipped.",
-  "customer_pricing.copy_from_default_select_all": "Select all services",
   "customer_pricing.copy_from_default_empty": "No active services in the catalog yet.",
   "customer_pricing.copy_from_default_valid_from_label": "Effective from",
   "customer_pricing.copy_from_default_valid_to_label": "Valid to",
@@ -1329,5 +1326,9 @@
   "notifications.bell_aria_unread": "Notifications, {{count}} unread",
   "notifications.prev": "Previous",
   "notifications.next": "Next",
-  "notifications.page_of": "Page {{page}} of {{total}}"
+  "notifications.page_of": "Page {{page}} of {{total}}",
+  "multi_select.select_all": "Select all",
+  "multi_select.clear_all": "Clear all",
+  "multi_select.selected_count": "{{count}} selected",
+  "multi_select.filter_placeholder": "Filter…"
 }

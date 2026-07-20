@@ -5,6 +5,7 @@ import { Building2, Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { Toggle } from "../components/Toggle";
 import heroImage from "../assets/login_page_photo.png";
 
 // Sprint 16: demo helper visibility is gated on VITE_DEMO_MODE. The
@@ -540,11 +541,10 @@ export function LoginPage() {
             </div>
 
             <label className="login-check">
-              {/* TODO(backend): wire this checkbox to a "remember device" flag once
+              {/* TODO(backend): wire this toggle to a "remember device" flag once
                   the auth API exposes one. For now it stays visual-only and does
                   not affect the existing refresh-token flow. */}
-              <input
-                type="checkbox"
+              <Toggle
                 checked={remember}
                 onChange={(event) => setRemember(event.target.checked)}
               />

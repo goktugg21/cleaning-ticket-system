@@ -803,7 +803,6 @@
   "services.bulk_raise_button": "Prijzen aanpassen",
   "services.bulk_raise_intro": "Selecteer diensten om hun standaard catalogusprijs te verhogen of te verlagen. Dit werkt de basisprijs voor offertes bij; klantspecifieke prijzen worden niet beïnvloed.",
   "services.bulk_raise_empty": "Nog geen actieve diensten om aan te passen.",
-  "services.bulk_raise_select_all": "Alles selecteren",
   "services.bulk_raise_mode_label": "Aanpassen met",
   "services.bulk_raise_mode_percent": "Percentage",
   "services.bulk_raise_mode_fixed": "Vast bedrag",
@@ -909,7 +908,6 @@
   "customer_pricing.bulk_raise_button": "Prijzen aanpassen",
   "customer_pricing.bulk_raise_intro": "Selecteer de prijzen die u wilt verhogen of verlagen. Er worden nieuwe prijsregels aangemaakt vanaf de ingangsdatum; bestaande prijzen blijven bewaard voor de historie.",
   "customer_pricing.bulk_raise_empty": "Nog geen actieve prijzen om aan te passen.",
-  "customer_pricing.bulk_raise_select_all": "Alles selecteren",
   "customer_pricing.bulk_raise_mode_label": "Aanpassen met",
   "customer_pricing.bulk_raise_mode_percent": "Percentage",
   "customer_pricing.bulk_raise_mode_fixed": "Vast bedrag",
@@ -927,7 +925,6 @@
   "customer_pricing.copy_from_default_button": "Standaardprijzen kopiëren",
   "customer_pricing.copy_from_default_title": "Standaardprijzen kopiëren",
   "customer_pricing.copy_from_default_intro": "Vul de contractprijzen van deze klant met de standaardprijzen uit de catalogus. Diensten die al een overlappende actieve prijs hebben, worden overgeslagen.",
-  "customer_pricing.copy_from_default_select_all": "Alle diensten selecteren",
   "customer_pricing.copy_from_default_empty": "Nog geen actieve diensten in de catalogus.",
   "customer_pricing.copy_from_default_valid_from_label": "Geldig vanaf",
   "customer_pricing.copy_from_default_valid_to_label": "Geldig tot",
@@ -1329,5 +1326,9 @@
   "notifications.bell_aria_unread": "Notificaties, {{count}} ongelezen",
   "notifications.prev": "Vorige",
   "notifications.next": "Volgende",
-  "notifications.page_of": "Pagina {{page}} van {{total}}"
+  "notifications.page_of": "Pagina {{page}} van {{total}}",
+  "multi_select.select_all": "Alles selecteren",
+  "multi_select.clear_all": "Alles wissen",
+  "multi_select.selected_count": "{{count}} geselecteerd",
+  "multi_select.filter_placeholder": "Filteren…"
 }

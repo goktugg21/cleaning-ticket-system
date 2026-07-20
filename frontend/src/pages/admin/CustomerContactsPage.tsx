@@ -26,6 +26,7 @@ import type {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { accessRoleLabelKey } from "../../lib/enumLabels";
 import { ContactPermissionsPanel } from "./ContactPermissionsPanel";
 
@@ -138,6 +139,10 @@ export function CustomerContactsPage() {
   const [form, setForm] = useState<ContactFormState>(EMPTY_FORM);
   const [formError, setFormError] = useState("");
   const [formBusy, setFormBusy] = useState(false);
+  // #108 Part D — display-only building filters for the two pickers;
+  // hidden-but-selected buildings stay selected (never changes what is
+  // submitted).
+  const [buildingFilter, setBuildingFilter] = useState("");
 
   // Delete confirmation.
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
@@ -155,6 +160,7 @@ export function CustomerContactsPage() {
     phone: "",
   });
   const [promoteBusy, setPromoteBusy] = useState(false);
+  const [promoteBuildingFilter, setPromoteBuildingFilter] = useState("");
   const [promoteError, setPromoteError] = useState("");
   const [promotePhoneError, setPromotePhoneError] = useState("");
   const [promoteRoleError, setPromoteRoleError] = useState("");
@@ -257,6 +263,7 @@ export function CustomerContactsPage() {
   function openCreateModal() {
     setMode("create");
     setForm(EMPTY_FORM);
+    setBuildingFilter("");
     setFormError("");
   }
 
@@ -270,6 +277,7 @@ export function CustomerContactsPage() {
       notes: contact.notes,
       building_ids: [...(contact.linked_building_ids ?? [])],
     });
+    setBuildingFilter("");
     setFormError("");
   }
 
@@ -371,6 +379,7 @@ export function CustomerContactsPage() {
       building_ids: [...contact.linked_building_ids],
       phone: contact.phone ?? "",
     });
+    setPromoteBuildingFilter("");
     setPromoteError("");
     setPromotePhoneError("");
     setPromoteRoleError("");
@@ -1033,40 +1042,57 @@ export function CustomerContactsPage() {
                   {t("customer_contacts.promote_no_buildings")}
                 </div>
               ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                    maxHeight: 180,
-                    overflowY: "auto",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                  }}
-                  data-testid="customer-contact-input-buildings"
-                >
-                  {linkedBuildings.map((link) => (
-                    <label
-                      key={link.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={form.building_ids.includes(link.building_id)}
-                        onChange={() => toggleFormBuilding(link.building_id)}
-                        disabled={formBusy}
-                        data-testid={`customer-contact-input-building-${link.building_id}`}
-                      />
-                      <span>{link.building_name}</span>
-                    </label>
-                  ))}
-                </div>
+                <>
+                  {/* #108 Part D — shared multi-select treatment. */}
+                  <MultiSelectToolbar
+                    selectedCount={form.building_ids.length}
+                    onSelectAll={() =>
+                      setForm((prev) => ({
+                        ...prev,
+                        building_ids: linkedBuildings.map(
+                          (l) => l.building_id,
+                        ),
+                      }))
+                    }
+                    onClearAll={() =>
+                      setForm((prev) => ({ ...prev, building_ids: [] }))
+                    }
+                    disabled={formBusy}
+                    filterValue={buildingFilter}
+                    onFilterChange={setBuildingFilter}
+                    testIdPrefix="customer-contact-input-buildings"
+                  />
+                  <div
+                    className="multi-select-list"
+                    data-testid="customer-contact-input-buildings"
+                  >
+                    {linkedBuildings
+                      .filter(
+                        (link) =>
+                          !buildingFilter.trim() ||
+                          link.building_name
+                            .toLowerCase()
+                            .includes(buildingFilter.trim().toLowerCase()),
+                      )
+                      .map((link) => (
+                        <label key={link.id}>
+                          <input
+                            type="checkbox"
+                            className="checkbox-input"
+                            checked={form.building_ids.includes(
+                              link.building_id,
+                            )}
+                            onChange={() =>
+                              toggleFormBuilding(link.building_id)
+                            }
+                            disabled={formBusy}
+                            data-testid={`customer-contact-input-building-${link.building_id}`}
+                          />
+                          <span>{link.building_name}</span>
+                        </label>
+                      ))}
+                  </div>
+                </>
               )}
               <div className="muted small" style={{ marginTop: 4 }}>
                 {t("customer_contacts.field_building_optional")}
@@ -1253,44 +1279,62 @@ export function CustomerContactsPage() {
                     {t("customer_contacts.promote_no_buildings")}
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                      maxHeight: 180,
-                      overflowY: "auto",
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      padding: "8px 10px",
-                    }}
-                    data-testid="customer-contact-promote-buildings"
-                  >
-                    {linkedBuildings.map((link) => (
-                      <label
-                        key={link.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          cursor: "pointer",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={promoteForm.building_ids.includes(
-                            link.building_id,
-                          )}
-                          onChange={() =>
-                            togglePromoteBuilding(link.building_id)
-                          }
-                          disabled={promoteBusy}
-                          data-testid={`customer-contact-promote-building-${link.building_id}`}
-                        />
-                        <span>{link.building_name}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <>
+                    {/* #108 Part D — shared multi-select treatment. */}
+                    <MultiSelectToolbar
+                      selectedCount={promoteForm.building_ids.length}
+                      onSelectAll={() =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          building_ids: linkedBuildings.map(
+                            (l) => l.building_id,
+                          ),
+                        }))
+                      }
+                      onClearAll={() =>
+                        setPromoteForm((prev) => ({
+                          ...prev,
+                          building_ids: [],
+                        }))
+                      }
+                      disabled={promoteBusy}
+                      filterValue={promoteBuildingFilter}
+                      onFilterChange={setPromoteBuildingFilter}
+                      testIdPrefix="customer-contact-promote-buildings"
+                    />
+                    <div
+                      className="multi-select-list"
+                      data-testid="customer-contact-promote-buildings"
+                    >
+                      {linkedBuildings
+                        .filter(
+                          (link) =>
+                            !promoteBuildingFilter.trim() ||
+                            link.building_name
+                              .toLowerCase()
+                              .includes(
+                                promoteBuildingFilter.trim().toLowerCase(),
+                              ),
+                        )
+                        .map((link) => (
+                          <label key={link.id}>
+                            <input
+                              type="checkbox"
+                              className="checkbox-input"
+                              checked={promoteForm.building_ids.includes(
+                                link.building_id,
+                              )}
+                              onChange={() =>
+                                togglePromoteBuilding(link.building_id)
+                              }
+                              disabled={promoteBusy}
+                              data-testid={`customer-contact-promote-building-${link.building_id}`}
+                            />
+                            <span>{link.building_name}</span>
+                          </label>
+                        ))}
+                    </div>
+                  </>
                 )}
                 <div className="muted small" style={{ marginTop: 4 }}>
                   {t("customer_contacts.promote_field_buildings_hint")}

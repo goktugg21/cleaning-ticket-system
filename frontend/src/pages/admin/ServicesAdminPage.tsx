@@ -23,7 +23,9 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
+import { Toggle } from "../../components/Toggle";
 
 /**
  * Sprint 28 Batch 5 — Provider-wide Service catalog admin page.
@@ -180,6 +182,9 @@ export function ServicesAdminPage() {
   const [bulkAmount, setBulkAmount] = useState("");
   const [bulkError, setBulkError] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  // #108 Part D — display-only row filter for the long service list;
+  // hidden-but-selected rows stay selected (never changes submission).
+  const [bulkFilter, setBulkFilter] = useState("");
 
   // Initial parallel load.
   useEffect(() => {
@@ -438,6 +443,7 @@ export function ServicesAdminPage() {
     setBulkMode("percent");
     setBulkDirection("raise");
     setBulkAmount("");
+    setBulkFilter("");
     setBulkError("");
     setBulkOpen(true);
   }
@@ -1026,8 +1032,7 @@ export function ServicesAdminPage() {
               <label
                 style={{ display: "flex", alignItems: "center", gap: 8 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={categoryForm.is_active}
                   onChange={(event) =>
                     setCategoryForm((prev) => ({
@@ -1282,8 +1287,7 @@ export function ServicesAdminPage() {
               <label
                 style={{ display: "flex", alignItems: "center", gap: 8 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={serviceForm.is_active}
                   onChange={(event) =>
                     setServiceForm((prev) => ({
@@ -1383,45 +1387,31 @@ export function ServicesAdminPage() {
               </div>
             ) : (
               <>
-                <div className="field">
-                  <label
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
-                  >
-                    <input
-                      type="checkbox"
-                      data-testid="services-bulk-raise-select-all"
-                      checked={
-                        bulkSelectedIds.length === activeServices.length
-                      }
-                      onChange={(event) => toggleBulkAll(event.target.checked)}
-                      disabled={bulkBusy}
-                    />
-                    <span>{t("services.bulk_raise_select_all")}</span>
-                  </label>
-                </div>
-
-                <div
-                  style={{
-                    border: "1px solid var(--border, #e5e7eb)",
-                    borderRadius: 8,
-                    padding: "8px 12px",
-                    marginBottom: 16,
-                    maxHeight: 220,
-                    overflowY: "auto",
-                  }}
-                >
-                  {activeServices.map((service) => (
-                    <label
-                      key={service.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "4px 0",
-                      }}
-                    >
+                {/* #108 Part D — shared multi-select treatment: Select
+                    all / Clear all + count + filter, internal scroll. */}
+                <MultiSelectToolbar
+                  selectedCount={bulkSelectedIds.length}
+                  onSelectAll={() => toggleBulkAll(true)}
+                  onClearAll={() => toggleBulkAll(false)}
+                  disabled={bulkBusy}
+                  filterValue={bulkFilter}
+                  onFilterChange={setBulkFilter}
+                  testIdPrefix="services-bulk-raise"
+                />
+                <div className="multi-select-list">
+                  {activeServices
+                    .filter(
+                      (service) =>
+                        !bulkFilter.trim() ||
+                        service.name
+                          .toLowerCase()
+                          .includes(bulkFilter.trim().toLowerCase()),
+                    )
+                    .map((service) => (
+                    <label key={service.id}>
                       <input
                         type="checkbox"
+                        className="checkbox-input"
                         data-testid="services-bulk-raise-row"
                         data-service-id={service.id}
                         checked={bulkSelectedIds.includes(service.id)}

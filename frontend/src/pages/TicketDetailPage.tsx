@@ -61,6 +61,7 @@ import {
 import { AttachmentThumb } from "../components/AttachmentThumb";
 import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Toggle } from "../components/Toggle";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { useToast } from "../components/ToastProvider";
@@ -1490,8 +1491,7 @@ export function TicketDetailPage() {
                   {canUsePrivate && (
                     <>
                       <label className="composer-private-toggle">
-                        <input
-                          type="checkbox"
+                        <Toggle
                           checked={effectivePrivate}
                           disabled={directedTo.length === 0}
                           onChange={(event) => setIsPrivate(event.target.checked)}
@@ -1727,8 +1727,7 @@ export function TicketDetailPage() {
                 >
                   {ticket?.actions?.can_upload_hidden_attachment && (
                     <label className="login-check" style={{ margin: 0 }}>
-                      <input
-                        type="checkbox"
+                      <Toggle
                         checked={attachmentHidden}
                         onChange={(event) =>
                           setAttachmentHidden(event.target.checked)

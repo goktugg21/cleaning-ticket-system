@@ -52,6 +52,7 @@ import { PermissionsRollupSummary } from "../../components/PermissionsRollupSumm
 import { RoleBadge } from "../../components/RoleBadge";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { formatDateTime } from "../../lib/intl";
+import { Toggle } from "../../components/Toggle";
 
 /**
  * Sprint 29 Batch 29.6 — User Detail page (read-only view).
@@ -810,8 +811,7 @@ export function UserDetailPage() {
                                   cursor: busy ? "wait" : "pointer",
                                 }}
                               >
-                                <input
-                                  type="checkbox"
+                                <Toggle
                                   checked={preparedGranted}
                                   disabled={busy}
                                   onChange={(event) =>
@@ -851,8 +851,7 @@ export function UserDetailPage() {
                                   cursor: busy ? "wait" : "pointer",
                                 }}
                               >
-                                <input
-                                  type="checkbox"
+                                <Toggle
                                   checked={overrideGranted}
                                   disabled={busy}
                                   onChange={(event) =>

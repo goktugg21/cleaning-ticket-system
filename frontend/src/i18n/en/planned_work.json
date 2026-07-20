@@ -25,11 +25,9 @@
   "list.empty_filtered_title": "No recurring jobs match your filters",
   "list.empty_filtered_desc": "Try a different status filter or clear the search.",
   "list.loading": "Loading recurring jobs…",
-
   "frequency.WEEKLY": "Weekly",
   "frequency.BIWEEKLY": "Biweekly",
   "frequency.MONTHLY": "Monthly",
-
   "weekday_short.1": "Mon",
   "weekday_short.2": "Tue",
   "weekday_short.3": "Wed",
@@ -37,18 +35,15 @@
   "weekday_short.5": "Fri",
   "weekday_short.6": "Sat",
   "weekday_short.7": "Sun",
-
   "pricing_mode.CONTRACT_INCLUDED": "Included in contract",
   "pricing_mode.FIXED": "Fixed price",
   "pricing_mode.HOURLY": "Hourly",
-
   "pricing.included": "Included in contract",
   "pricing.ex_vat_suffix": "excl. VAT",
   "pricing.subtotal": "Subtotal (excl. VAT)",
   "pricing.vat": "VAT",
   "pricing.total": "Total (incl. VAT)",
   "pricing.vat_pct_label": "VAT %",
-
   "occ_status.PLANNED": "Planned",
   "occ_status.TICKET_CREATED": "Ticket created",
   "occ_status.COMPLETED": "Completed",
@@ -56,7 +51,6 @@
   "occ_status.RESCHEDULED": "Rescheduled",
   "occ_status.SKIPPED": "Skipped",
   "occ_status.CANCELLED": "Cancelled",
-
   "calendar.title": "Occurrence calendar",
   "calendar.desc": "The schedule rule pre-fills the ticks. Untick a date to skip it, re-tick to restore it, or tick an off-rule date to add one. Each change applies to the whole date.",
   "calendar.loading": "Loading calendar…",
@@ -72,7 +66,6 @@
   "calendar.toast_added": "Date planned",
   "calendar.toast_skipped": "Date skipped",
   "calendar.toast_cleared": "Date reset",
-
   "form.create_title": "New recurring job",
   "form.edit_title": "Edit {{title}}",
   "form.back_to_list": "Back to recurring work",
@@ -132,7 +125,6 @@
   "form.crew_load_failed": "Could not load eligible crew for this building.",
   "form.no_staff_options": "No eligible staff",
   "form.no_manager_options": "No eligible managers",
-  "form.selected_count": "{{count}} selected",
   "form.submit_create": "Create recurring job",
   "form.submit_edit": "Save changes",
   "form.saving": "Saving…",
@@ -147,7 +139,6 @@
   "form.created_toast_desc": "Open it to generate occurrences.",
   "form.saved_toast_title": "Changes saved",
   "form.saved_toast_desc": "The recurring job was updated.",
-
   "detail.back_to_list": "Back to recurring work",
   "detail.edit": "Edit",
   "detail.archive": "Archive",
@@ -195,7 +186,6 @@
   "detail.action_skip": "Skip",
   "detail.action_cancel": "Cancel",
   "detail.action_override": "Override",
-
   "generate.dialog_title": "Generate occurrences",
   "generate.dialog_body": "Materialize occurrences for this job within the horizon and spawn their tickets. This is idempotent — re-running never duplicates.",
   "generate.field_days_ahead": "Days ahead",
@@ -203,19 +193,16 @@
   "generate.confirm": "Generate",
   "generate.result_toast_title": "Occurrences generated",
   "generate.result_toast_desc": "Created {{occurrences}} occurrence(s) and {{tickets}} ticket(s).",
-
   "skip.dialog_title": "Skip occurrence",
   "skip.dialog_desc": "Skipping marks this planned date as not performed. A reason is required and recorded on the occurrence history.",
   "skip.dialog_placeholder": "Why is this occurrence skipped?",
   "skip.dialog_confirm": "Skip occurrence",
   "skip.toast_title": "Occurrence skipped",
-
   "cancel.dialog_title": "Cancel occurrence",
   "cancel.dialog_desc": "Cancelling removes this planned date from the schedule. A reason is required and recorded on the occurrence history.",
   "cancel.dialog_placeholder": "Why is this occurrence cancelled?",
   "cancel.dialog_confirm": "Cancel occurrence",
   "cancel.toast_title": "Occurrence cancelled",
-
   "override.dialog_title": "Override occurrence",
   "override.dialog_desc": "This changes the planned-work calendar for this occurrence only (e.g. a one-off price or \"this date after 09:00\"). It does NOT reschedule a ticket that has already been created.",
   "override.field_pricing_mode": "Pricing mode",
@@ -226,13 +213,11 @@
   "override.confirm": "Save override",
   "override.saving": "Saving…",
   "override.toast_title": "Occurrence updated",
-
   "archive.dialog_title": "Archive recurring job?",
   "archive.dialog_body": "The job stops generating new occurrences. Existing occurrences are preserved for reporting. You can unarchive it later.",
   "archive.confirm": "Archive",
   "archive.toast_archived": "Recurring job archived",
   "archive.toast_unarchived": "Recurring job restored",
-
   "errors.load_failed": "Could not load planned work.",
   "errors.generic": "Something went wrong. Please try again."
 }

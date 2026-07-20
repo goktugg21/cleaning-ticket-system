@@ -41,6 +41,7 @@ import type {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
+import { Toggle } from "../../components/Toggle";
 
 export interface StaffCredentialModalProps {
   userId: number;
@@ -487,8 +488,7 @@ export function StaffCredentialModal({
                   cursor: canEdit ? "pointer" : "default",
                 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={photocopyVisible}
                   onChange={(event) =>
                     setPhotocopyVisible(event.target.checked)

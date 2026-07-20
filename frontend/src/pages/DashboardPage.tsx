@@ -1527,6 +1527,7 @@ export function DashboardPage({
                           <th style={{ width: 36 }}>
                             <input
                               type="checkbox"
+                              className="checkbox-input"
                               aria-label={t("bulk_confirm.select_all")}
                               data-testid="dashboard-bulk-select-all"
                               checked={allVisibleSelected}
@@ -1566,6 +1567,7 @@ export function DashboardPage({
                             >
                               <input
                                 type="checkbox"
+                                className="checkbox-input"
                                 aria-label={t("bulk_confirm.select_row", {
                                   ticket: ticket.ticket_no,
                                 })}
