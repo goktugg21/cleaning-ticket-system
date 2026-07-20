@@ -374,3 +374,106 @@ class ServiceBulkRaiseRbacTests(ServiceBulkRaiseFixtureMixin, APITestCase):
             BULK_RAISE_URL, self._payload(), format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class ServiceBulkAdjustLowerTests(ServiceBulkRaiseFixtureMixin, APITestCase):
+    """#108 Part C — `direction: lower` on the catalog endpoint (raise
+    stays the default). Lowering updates default_unit_price in place
+    exactly like raising; guards: percent lower must be < 100, and a
+    result at or below zero rejects the whole batch (zero writes)."""
+
+    def test_percent_lower_updates_in_place(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            BULK_RAISE_URL,
+            {
+                "services": [self.service_a.id, self.service_b.id],
+                "mode": "percent",
+                "amount": "10",
+                "direction": "lower",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["updated_count"], 2)
+        self.service_a.refresh_from_db()
+        self.service_b.refresh_from_db()
+        # 100.00 * 0.9 = 90.00; 33.33 * 0.9 = 29.997 -> HALF_UP 30.00.
+        self.assertEqual(self.service_a.default_unit_price, Decimal("90.00"))
+        self.assertEqual(self.service_b.default_unit_price, Decimal("30.00"))
+
+    def test_fixed_lower_updates_in_place(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            BULK_RAISE_URL,
+            {
+                "services": [self.service_a.id],
+                "mode": "fixed",
+                "amount": "5.00",
+                "direction": "lower",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.service_a.refresh_from_db()
+        self.assertEqual(self.service_a.default_unit_price, Decimal("95.00"))
+
+    def test_percent_lower_at_or_above_100_rejected(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            BULK_RAISE_URL,
+            {
+                "services": [self.service_a.id],
+                "mode": "percent",
+                "amount": "100",
+                "direction": "lower",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["amount"][0].code,
+            "service_bulk_raise_amount_invalid",
+        )
+        self.service_a.refresh_from_db()
+        self.assertEqual(self.service_a.default_unit_price, Decimal("100.00"))
+
+    def test_zero_floor_rejects_whole_batch(self):
+        # 33.33 - 50.00 goes negative -> the WHOLE batch (incl. the
+        # still-positive 100.00 row) is rejected with zero writes.
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            BULK_RAISE_URL,
+            {
+                "services": [self.service_a.id, self.service_b.id],
+                "mode": "fixed",
+                "amount": "50.00",
+                "direction": "lower",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["amount"][0].code,
+            "service_bulk_raise_result_invalid",
+        )
+        self.service_a.refresh_from_db()
+        self.service_b.refresh_from_db()
+        self.assertEqual(self.service_a.default_unit_price, Decimal("100.00"))
+        self.assertEqual(self.service_b.default_unit_price, Decimal("33.33"))
+
+    def test_explicit_raise_direction_matches_default(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            BULK_RAISE_URL,
+            {
+                "services": [self.service_a.id],
+                "mode": "percent",
+                "amount": "10",
+                "direction": "raise",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.service_a.refresh_from_db()
+        self.assertEqual(self.service_a.default_unit_price, Decimal("110.00"))

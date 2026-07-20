@@ -93,6 +93,9 @@ ERR_COPY_FORBIDDEN = "copy_from_default_forbidden"
 ERR_SERVICE_COMPANY_MISMATCH = "service_customer_company_mismatch"
 ERR_BULK_RAISE_AMOUNT_INVALID = "bulk_raise_amount_invalid"
 ERR_BULK_RAISE_PRICE_INVALID = "bulk_raise_price_invalid"
+# #108 Part C — a lower that would push any selected price to zero or
+# below rejects the WHOLE batch (all-or-nothing, zero writes).
+ERR_BULK_RAISE_RESULT_INVALID = "bulk_raise_result_invalid"
 
 
 def _enforce_customer_price_policy(user, customer):
@@ -490,11 +493,15 @@ class _CopyFromDefaultInputSerializer(serializers.Serializer):
 
 
 class _BulkRaiseInputSerializer(serializers.Serializer):
-    """M5 C — input for POST /api/customers/<cid>/pricing/bulk-raise/.
-    Raises a set of the customer's active CustomerServicePrice rows by
-    a percentage or fixed amount, writing NEW validity-window rows
-    (history preserved). `prices` = CSP ids to raise; `mode` =
-    percent|fixed; `amount` > 0; `valid_from` = effective date.
+    """M5 C / #108 Part C — input for POST
+    /api/customers/<cid>/pricing/bulk-raise/. Adjusts (raises OR
+    lowers) a set of the customer's active CustomerServicePrice rows
+    by a percentage or fixed amount, writing NEW validity-window rows
+    (history preserved). `prices` = CSP ids to adjust; `mode` =
+    percent|fixed; `amount` > 0 always; `direction` = raise|lower
+    (defaults to raise so pre-#108 clients stay valid); `valid_from` =
+    effective date. A percent LOWER must stay below 100 — a 100%+ cut
+    can only zero or negate a price.
     """
 
     prices = serializers.ListField(
@@ -507,6 +514,9 @@ class _BulkRaiseInputSerializer(serializers.Serializer):
     )
     mode = serializers.ChoiceField(choices=["percent", "fixed"])
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    direction = serializers.ChoiceField(
+        choices=["raise", "lower"], default="raise"
+    )
     valid_from = serializers.DateField(
         error_messages={"required": "valid_from is required."}
     )
@@ -520,6 +530,25 @@ class _BulkRaiseInputSerializer(serializers.Serializer):
                 )
             )
         return value
+
+    def validate(self, attrs):
+        if (
+            attrs.get("direction") == "lower"
+            and attrs.get("mode") == "percent"
+            and attrs.get("amount") is not None
+            and attrs["amount"] >= Decimal("100")
+        ):
+            raise serializers.ValidationError(
+                {
+                    "amount": [
+                        serializers.ErrorDetail(
+                            "A percentage lower must be below 100.",
+                            code=ERR_BULK_RAISE_AMOUNT_INVALID,
+                        )
+                    ]
+                }
+            )
+        return attrs
 
 
 class CustomerServicePriceCopyFromDefaultView(APIView):
@@ -730,21 +759,28 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
 
 
 class CustomerServicePriceBulkRaiseView(APIView):
-    """M5 C — bulk-raise a customer's CustomerServicePrice rows by a
-    percentage or fixed amount, writing NEW validity-window rows so
-    pricing history is preserved (the resolver picks the latest
-    valid_from from the effective date onward).
+    """M5 C / #108 Part C — bulk-ADJUST (raise or lower) a customer's
+    CustomerServicePrice rows by a percentage or fixed amount, writing
+    NEW validity-window rows so pricing history is preserved (the
+    resolver picks the latest valid_from from the effective date
+    onward).
 
     POST /api/customers/<customer_id>/pricing/bulk-raise/
     Body: { "prices": [id,...], "mode": "percent"|"fixed",
-            "amount": "10.00", "valid_from": "YYYY-MM-DD" }
+            "amount": "10.00", "direction": "raise"|"lower",
+            "valid_from": "YYYY-MM-DD" }
+    (`direction` defaults to "raise" — the pre-#108 wire shape is
+    unchanged; the URL keeps its historical name.)
 
     All-or-nothing: every price id must be an ACTIVE CSP row owned by
     this customer, else 400 (bulk_raise_price_invalid) with zero
     writes. For each, a new row is created with the same service +
-    vat_pct, unit_price = old*(1+amount/100) [percent] or old+amount
+    vat_pct, unit_price = old*(1±amount/100) [percent] or old±amount
     [fixed] rounded HALF_UP to 2dp, valid_from = the effective date,
     valid_to = null, is_active = True. Existing rows are NOT modified.
+    A lower that would take ANY selected price to zero or below
+    rejects the whole batch (400 bulk_raise_result_invalid, zero
+    writes); a percent lower >= 100 is rejected at input validation.
 
     Permission: SA always; CA of the customer's company iff the
     customer-price toggle is on; BM/STAFF/CUSTOMER_USER 403.
@@ -801,11 +837,12 @@ class CustomerServicePriceBulkRaiseView(APIView):
         return [latest_by_service[sid] for sid in sorted(latest_by_service)]
 
     @staticmethod
-    def _raised(old_price, mode, amount):
+    def _adjusted(old_price, mode, amount, direction):
+        signed = amount if direction == "raise" else -amount
         if mode == "percent":
-            new = old_price * (Decimal("1") + amount / Decimal("100"))
+            new = old_price * (Decimal("1") + signed / Decimal("100"))
         else:  # fixed
-            new = old_price + amount
+            new = old_price + signed
         return new.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def post(self, request, *args, **kwargs):
@@ -817,9 +854,33 @@ class CustomerServicePriceBulkRaiseView(APIView):
         price_ids = payload.validated_data["prices"]
         mode = payload.validated_data["mode"]
         amount = payload.validated_data["amount"]
+        direction = payload.validated_data["direction"]
         valid_from = payload.validated_data["valid_from"]
 
         resolved = self._resolve_prices(price_ids, customer)
+
+        # #108 Part C — zero-floor guard, all-or-nothing: compute every
+        # new price BEFORE writing anything; one non-positive result
+        # rejects the whole batch.
+        adjusted = [
+            (src, self._adjusted(src.unit_price, mode, amount, direction))
+            for src in resolved
+        ]
+        for src, new_price in adjusted:
+            if new_price <= Decimal("0"):
+                raise serializers.ValidationError(
+                    {
+                        "amount": [
+                            serializers.ErrorDetail(
+                                f"Lowering price id={src.id} "
+                                f"({src.unit_price}) by this amount "
+                                "would result in a non-positive unit "
+                                "price; the batch was rejected.",
+                                code=ERR_BULK_RAISE_RESULT_INVALID,
+                            )
+                        ]
+                    }
+                )
 
         try:
             audit_context.set_current_reason("customer_price_bulk_raise")
@@ -828,8 +889,7 @@ class CustomerServicePriceBulkRaiseView(APIView):
 
         results = []
         with transaction.atomic():
-            for src in resolved:
-                new_price = self._raised(src.unit_price, mode, amount)
+            for src, new_price in adjusted:
                 row = CustomerServicePrice.objects.create(
                     service=src.service,
                     customer=customer,

@@ -23,6 +23,7 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 
 /**
  * Sprint 28 Batch 5 — Provider-wide Service catalog admin page.
@@ -172,6 +173,10 @@ export function ServicesAdminPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
   const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
+  // #108 Part C — raise vs lower.
+  const [bulkDirection, setBulkDirection] = useState<"raise" | "lower">(
+    "raise",
+  );
   const [bulkAmount, setBulkAmount] = useState("");
   const [bulkError, setBulkError] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -431,6 +436,7 @@ export function ServicesAdminPage() {
   function openBulkRaise() {
     setBulkSelectedIds(activeServices.map((s) => s.id));
     setBulkMode("percent");
+    setBulkDirection("raise");
     setBulkAmount("");
     setBulkError("");
     setBulkOpen(true);
@@ -461,6 +467,16 @@ export function ServicesAdminPage() {
       setBulkError(t("services.bulk_raise_error_amount"));
       return;
     }
+    // #108 Part C — client mirror of the backend guard (the server
+    // re-checks): a percent lower must stay below 100.
+    if (
+      bulkDirection === "lower" &&
+      bulkMode === "percent" &&
+      amountNumber >= 100
+    ) {
+      setBulkError(t("services.bulk_raise_error_percent_lower"));
+      return;
+    }
     setBulkBusy(true);
     setBulkError("");
     try {
@@ -468,6 +484,7 @@ export function ServicesAdminPage() {
         services: bulkSelectedIds,
         mode: bulkMode,
         amount: bulkAmount.trim(),
+        direction: bulkDirection,
       });
       // Re-fetch so the updated catalog defaults surface in the table.
       const refreshed = await listServices();
@@ -1416,6 +1433,35 @@ export function ServicesAdminPage() {
                       <span>
                         {service.name} —{" "}
                         {formatDecimal(service.default_unit_price)}
+                        {/* #108 Part C — live effect preview. Backend
+                            HALF_UP is authoritative; a result at or
+                            below zero shows red (the server rejects
+                            the whole batch). */}
+                        {bulkSelectedIds.includes(service.id) &&
+                          (() => {
+                            const next = previewAdjustedPrice(
+                              service.default_unit_price,
+                              bulkMode,
+                              bulkAmount,
+                              bulkDirection,
+                            );
+                            if (next === null) return null;
+                            return (
+                              <span
+                                style={{
+                                  color:
+                                    next <= 0
+                                      ? "var(--red)"
+                                      : "var(--green-2)",
+                                  fontWeight: 600,
+                                }}
+                                data-testid="services-bulk-raise-preview"
+                              >
+                                {" "}
+                                → {next.toFixed(2)}
+                              </span>
+                            );
+                          })()}
                       </span>
                     </label>
                   ))}
@@ -1424,6 +1470,33 @@ export function ServicesAdminPage() {
             )}
 
             <div className="form-2col">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="services-bulk-direction"
+                >
+                  {t("services.bulk_raise_direction_label")}
+                </label>
+                <select
+                  id="services-bulk-direction"
+                  className="field-select"
+                  value={bulkDirection}
+                  onChange={(event) =>
+                    setBulkDirection(
+                      event.target.value === "lower" ? "lower" : "raise",
+                    )
+                  }
+                  data-testid="services-bulk-raise-direction"
+                  disabled={bulkBusy}
+                >
+                  <option value="raise">
+                    {t("services.bulk_raise_direction_raise")}
+                  </option>
+                  <option value="lower">
+                    {t("services.bulk_raise_direction_lower")}
+                  </option>
+                </select>
+              </div>
               <div className="field">
                 <label className="field-label" htmlFor="services-bulk-mode">
                   {t("services.bulk_raise_mode_label")}

@@ -75,6 +75,9 @@ ERR_SERVICE_COMPANY_REQUIRED = "service_company_required"
 ERR_CATEGORY_SA_ONLY = "global_category_management_super_admin_only"
 ERR_SERVICE_BULK_RAISE_AMOUNT_INVALID = "service_bulk_raise_amount_invalid"
 ERR_SERVICE_BULK_RAISE_INVALID = "service_bulk_raise_invalid"
+# #108 Part C — a lower that would push any selected default price to
+# zero or below rejects the WHOLE batch (all-or-nothing, zero writes).
+ERR_SERVICE_BULK_RAISE_RESULT_INVALID = "service_bulk_raise_result_invalid"
 
 
 def _parse_bool_param(value):
@@ -328,10 +331,12 @@ def _resolve_service_create_company(user, supplied_company):
 
 
 class _ServiceBulkRaiseInputSerializer(serializers.Serializer):
-    """M5 C — input for POST /api/services/bulk-raise/. Raises the
-    catalog default_unit_price of a set of Services by percentage or
-    fixed amount, in place. `services` = ids; `mode` = percent|fixed;
-    `amount` > 0.
+    """M5 C / #108 Part C — input for POST /api/services/bulk-raise/.
+    Adjusts (raises OR lowers) the catalog default_unit_price of a set
+    of Services by percentage or fixed amount, in place. `services` =
+    ids; `mode` = percent|fixed; `amount` > 0 always; `direction` =
+    raise|lower (defaults to raise so pre-#108 clients stay valid). A
+    percent LOWER must stay below 100.
     """
 
     services = serializers.ListField(
@@ -344,6 +349,9 @@ class _ServiceBulkRaiseInputSerializer(serializers.Serializer):
     )
     mode = serializers.ChoiceField(choices=["percent", "fixed"])
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    direction = serializers.ChoiceField(
+        choices=["raise", "lower"], default="raise"
+    )
 
     def validate_amount(self, value):
         if value is None or value <= Decimal("0"):
@@ -354,6 +362,25 @@ class _ServiceBulkRaiseInputSerializer(serializers.Serializer):
                 )
             )
         return value
+
+    def validate(self, attrs):
+        if (
+            attrs.get("direction") == "lower"
+            and attrs.get("mode") == "percent"
+            and attrs.get("amount") is not None
+            and attrs["amount"] >= Decimal("100")
+        ):
+            raise serializers.ValidationError(
+                {
+                    "amount": [
+                        serializers.ErrorDetail(
+                            "A percentage lower must be below 100.",
+                            code=ERR_SERVICE_BULK_RAISE_AMOUNT_INVALID,
+                        )
+                    ]
+                }
+            )
+        return attrs
 
 
 class ServiceListCreateView(generics.ListCreateAPIView):
@@ -458,20 +485,26 @@ class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 class ServiceBulkRaiseView(APIView):
-    """M5 C — bulk-raise the catalog default_unit_price of a set of
-    Services by a percentage or fixed amount, IN PLACE. Catalog
-    defaults are quoting-reference numbers (no validity window); this
-    updates the baseline only and does NOT touch any
-    CustomerServicePrice (what customers are billed).
+    """M5 C / #108 Part C — bulk-ADJUST (raise or lower) the catalog
+    default_unit_price of a set of Services by a percentage or fixed
+    amount, IN PLACE. Catalog defaults are quoting-reference numbers
+    (no validity window); this updates the baseline only and does NOT
+    touch any CustomerServicePrice (what customers are billed).
 
     POST /api/services/bulk-raise/
     Body: { "services": [id,...], "mode": "percent"|"fixed",
-            "amount": "10.00" }
+            "amount": "10.00", "direction": "raise"|"lower" }
+    (`direction` defaults to "raise" — the pre-#108 wire shape is
+    unchanged; the URL keeps its historical name.)
 
     All-or-nothing: every id must be an active, in-scope catalog row,
-    else 400 (service_bulk_raise_invalid) with zero writes. Provider-
-    only — SA for any in-scope company, CA for own company via the
-    catalog-management gate; BM/STAFF/CUSTOMER_USER 403.
+    else 400 (service_bulk_raise_invalid) with zero writes. A lower
+    that would take ANY selected default price to zero or below
+    rejects the whole batch (400 service_bulk_raise_result_invalid,
+    zero writes); a percent lower >= 100 is rejected at input
+    validation. Provider-only — SA for any in-scope company, CA for
+    own company via the catalog-management gate; BM/STAFF/
+    CUSTOMER_USER 403.
     """
 
     permission_classes = [IsSuperAdminOrCompanyAdmin]
@@ -506,11 +539,12 @@ class ServiceBulkRaiseView(APIView):
         return resolved
 
     @staticmethod
-    def _raised(old_price, mode, amount):
+    def _adjusted(old_price, mode, amount, direction):
+        signed = amount if direction == "raise" else -amount
         if mode == "percent":
-            new = old_price * (Decimal("1") + amount / Decimal("100"))
+            new = old_price * (Decimal("1") + signed / Decimal("100"))
         else:  # fixed
-            new = old_price + amount
+            new = old_price + signed
         return new.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     def post(self, request, *args, **kwargs):
@@ -519,8 +553,37 @@ class ServiceBulkRaiseView(APIView):
         service_ids = payload.validated_data["services"]
         mode = payload.validated_data["mode"]
         amount = payload.validated_data["amount"]
+        direction = payload.validated_data["direction"]
 
         resolved = self._resolve_services(service_ids, request.user)
+
+        # #108 Part C — zero-floor guard, all-or-nothing: compute every
+        # new price BEFORE writing anything; one non-positive result
+        # rejects the whole batch.
+        adjusted = [
+            (
+                svc,
+                self._adjusted(
+                    svc.default_unit_price, mode, amount, direction
+                ),
+            )
+            for svc in resolved
+        ]
+        for svc, new_price in adjusted:
+            if new_price <= Decimal("0"):
+                raise serializers.ValidationError(
+                    {
+                        "amount": [
+                            serializers.ErrorDetail(
+                                f"Lowering service id={svc.id} "
+                                f"({svc.default_unit_price}) by this "
+                                "amount would result in a non-positive "
+                                "default price; the batch was rejected.",
+                                code=ERR_SERVICE_BULK_RAISE_RESULT_INVALID,
+                            )
+                        ]
+                    }
+                )
 
         try:
             audit_context.set_current_reason("service_default_bulk_raise")
@@ -529,9 +592,8 @@ class ServiceBulkRaiseView(APIView):
 
         results = []
         with transaction.atomic():
-            for svc in resolved:
+            for svc, new_price in adjusted:
                 old_price = svc.default_unit_price
-                new_price = self._raised(old_price, mode, amount)
                 svc.default_unit_price = new_price
                 svc.save(update_fields=["default_unit_price", "updated_at"])
                 results.append(

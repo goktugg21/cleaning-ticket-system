@@ -569,3 +569,166 @@ class BulkRaiseServiceDedupTests(BulkRaiseFixtureMixin, APITestCase):
             format="json",
         )
         self.assertEqual(response.data["created_count"], 2)
+
+
+class BulkAdjustLowerTests(BulkRaiseFixtureMixin, APITestCase):
+    """#108 Part C — the bulk endpoint accepts `direction: lower`
+    (raise stays the default, so the pre-#108 wire shape is a raise).
+    Lowering writes NEW validity rows exactly like raising; guards:
+    percent lower must be < 100, and a result at or below zero rejects
+    the whole batch (all-or-nothing, zero writes)."""
+
+    def _count(self):
+        return CustomerServicePrice.objects.count()
+
+    def test_percent_lower_creates_new_rows(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.price_a.id, self.price_b.id],
+                "mode": "percent",
+                "amount": "10",
+                "direction": "lower",
+                "valid_from": "2026-07-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["created_count"], 2)
+
+        # 100.00 * 0.9 = 90.00; 33.33 * 0.9 = 29.997 -> HALF_UP 30.00.
+        new_a = CustomerServicePrice.objects.get(
+            service=self.service_a,
+            customer=self.customer,
+            valid_from=date(2026, 7, 1),
+        )
+        self.assertEqual(new_a.unit_price, Decimal("90.00"))
+        new_b = CustomerServicePrice.objects.get(
+            service=self.service_b,
+            customer=self.customer,
+            valid_from=date(2026, 7, 1),
+        )
+        self.assertEqual(new_b.unit_price, Decimal("30.00"))
+        # History semantics unchanged: sources untouched.
+        self.price_a.refresh_from_db()
+        self.price_b.refresh_from_db()
+        self.assertEqual(self.price_a.unit_price, Decimal("100.00"))
+        self.assertEqual(self.price_b.unit_price, Decimal("33.33"))
+        self.assertTrue(self.price_a.is_active)
+
+    def test_fixed_lower_creates_new_rows(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.price_a.id, self.price_b.id],
+                "mode": "fixed",
+                "amount": "5.00",
+                "direction": "lower",
+                "valid_from": "2026-07-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        new_a = CustomerServicePrice.objects.get(
+            service=self.service_a,
+            customer=self.customer,
+            valid_from=date(2026, 7, 1),
+        )
+        self.assertEqual(new_a.unit_price, Decimal("95.00"))
+        new_b = CustomerServicePrice.objects.get(
+            service=self.service_b,
+            customer=self.customer,
+            valid_from=date(2026, 7, 1),
+        )
+        self.assertEqual(new_b.unit_price, Decimal("28.33"))
+
+    def test_percent_lower_at_or_above_100_rejected(self):
+        self.authenticate(self.super_admin)
+        before = self._count()
+        for amount in ("100", "150"):
+            response = self.client.post(
+                bulk_raise_url(self.customer.id),
+                {
+                    "prices": [self.price_a.id],
+                    "mode": "percent",
+                    "amount": amount,
+                    "direction": "lower",
+                    "valid_from": "2026-07-01",
+                },
+                format="json",
+            )
+            self.assertEqual(
+                response.status_code, status.HTTP_400_BAD_REQUEST
+            )
+            self.assertEqual(
+                response.data["amount"][0].code, "bulk_raise_amount_invalid"
+            )
+        self.assertEqual(self._count(), before)
+
+    def test_zero_floor_rejects_whole_batch(self):
+        # 33.33 - 50.00 goes negative -> the WHOLE batch (incl. the
+        # still-positive 100.00 row) is rejected with zero writes.
+        self.authenticate(self.super_admin)
+        before = self._count()
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.price_a.id, self.price_b.id],
+                "mode": "fixed",
+                "amount": "50.00",
+                "direction": "lower",
+                "valid_from": "2026-07-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["amount"][0].code, "bulk_raise_result_invalid"
+        )
+        self.assertEqual(self._count(), before)
+
+    def test_exact_zero_result_rejected(self):
+        # 100.00 - 100.00 == 0.00 -> unit prices must stay > 0.
+        self.authenticate(self.super_admin)
+        before = self._count()
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.price_a.id],
+                "mode": "fixed",
+                "amount": "100.00",
+                "direction": "lower",
+                "valid_from": "2026-07-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["amount"][0].code, "bulk_raise_result_invalid"
+        )
+        self.assertEqual(self._count(), before)
+
+    def test_explicit_raise_direction_matches_default(self):
+        # Regression: direction="raise" behaves exactly like the
+        # pre-#108 default (percent +10 -> 110.00).
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            bulk_raise_url(self.customer.id),
+            {
+                "prices": [self.price_a.id],
+                "mode": "percent",
+                "amount": "10",
+                "direction": "raise",
+                "valid_from": "2026-07-01",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        new_a = CustomerServicePrice.objects.get(
+            service=self.service_a,
+            customer=self.customer,
+            valid_from=date(2026, 7, 1),
+        )
+        self.assertEqual(new_a.unit_price, Decimal("110.00"))

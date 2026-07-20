@@ -12,7 +12,6 @@
   "user_menu.lang_nl": "NL",
   "user_menu.lang_en": "EN",
   "change_diff.empty": "Geen gevolgde velden zijn gewijzigd.",
-
   "nav.operations_group": "Operaties",
   "nav.admin_group": "Beheer",
   "nav.dashboard": "Dashboard",
@@ -91,7 +90,6 @@
   "nav.my_meldingen": "Mijn meldingen",
   "nav.invitations": "Uitnodigingen",
   "nav.audit_logs": "Auditlog",
-
   "nav.customer_submenu.back": "Terug naar klanten",
   "nav.customer_submenu.scoped_to": "Beperkt tot",
   "nav.customer_submenu.overview": "Overzicht",
@@ -103,42 +101,34 @@
   "nav.customer_submenu.tickets": "Tickets",
   "nav.customer_submenu.contacts": "Contacten",
   "nav.customer_submenu.settings": "Instellingen",
-
   "customer_subpage_placeholder.title": "Binnenkort beschikbaar",
   "customer_subpage_placeholder.description": "Deze sectie wordt in een toekomstige sprint geïmplementeerd. De navigatie-structuur wordt eerst opgeleverd.",
-
   "topbar.online": "Online",
   "topbar.brand_tag": "Schoonmaakoperaties",
   "topbar.user_fallback": "Facility-gebruiker",
   "sidebar_open": "Menu openen",
   "sidebar_close": "Menu sluiten",
-
   "roles.super_admin": "Superbeheerder",
   "roles.company_admin": "Providerbeheerder",
   "roles.building_manager": "Gebouwbeheerder",
   "roles.customer_user": "Klantgebruiker",
   "roles.staff": "Medewerker",
   "roles.fallback": "Gebruiker",
-
   "role_side.provider": "Provider",
   "role_side.customer": "Klant",
   "role_side.fallback": "Gebruiker",
-
   "access_role.customer_user": "Klantgebruiker",
   "access_role.customer_location_manager": "Locatiebeheerder",
   "access_role.customer_company_admin": "Klantbeheerder",
   "access_role.fallback": "Klantgebruiker",
-
   "employment_type.internal_staff": "Intern",
   "employment_type.zzp": "ZZP",
   "employment_type.inhuur": "Inhuur",
   "employment_type.fallback": "—",
-
   "visibility_level.assigned_only": "Alleen toegewezen tickets",
   "visibility_level.building_read": "Gebouwtickets lezen",
   "visibility_level.building_read_and_assign": "Lezen & zelf toewijzen",
   "visibility_level.fallback": "Standaardzichtbaarheid",
-
   "ticket_status.open": "Open",
   "ticket_status.in_progress": "In behandeling",
   "ticket_status.waiting_manager_review": "Wacht op beheerder",
@@ -148,12 +138,10 @@
   "ticket_status.closed": "Gesloten",
   "ticket_status.reopened_by_admin": "Heropend",
   "ticket_status.fallback": "Onbekende status",
-
   "route_badge.instant": "Direct",
   "route_badge.proposal": "Voorstel",
   "route_badge.instant_helper": "Alle aangevraagde diensten waren al geprijsd — tickets zijn meteen aangemaakt.",
   "route_badge.proposal_helper": "Ten minste één regel had geen afgesproken prijs — er is een voorstel van de aanbieder nodig voordat het werk kan beginnen.",
-
   "extra_work_status.requested": "Aangevraagd",
   "extra_work_status.under_review": "In behandeling",
   "extra_work_status.pricing_proposed": "Prijsvoorstel",
@@ -163,20 +151,16 @@
   "extra_work_status.customer_rejected": "Klant geweigerd",
   "extra_work_status.cancelled": "Geannuleerd",
   "extra_work_status.fallback": "Onbekende status",
-
   "priority.normal": "Normaal",
   "priority.high": "Hoog",
   "priority.urgent": "Urgent",
   "priority.fallback": "Normaal",
-
   "brand.name": "CleanOps",
   "brand.tagline": "Operationele console",
   "brand.system_short": "CleanOps Console",
   "brand.system_version": "v1.0",
-
   "provider_only_zone.label": "Alleen provider",
   "provider_only_zone.hint": "Dit gedeelte is niet zichtbaar voor klantgebruikers.",
-
   "search": "Zoeken",
   "filter": "Filter",
   "status": "Status",
@@ -197,12 +181,10 @@
   "all_sla_states": "Alle SLA-statussen",
   "apply": "Toepassen",
   "clear": "Wissen",
-  "cancel": "Annuleren",
   "previous": "Vorige",
   "next": "Volgende",
   "refresh": "Vernieuwen",
   "back_to_tickets": "Terug naar tickets",
-
   "status.open": "Open",
   "status.in_progress": "In behandeling",
   "status.waiting_manager_review": "Wachten op manager-review",
@@ -212,11 +194,6 @@
   "status.closed": "Gesloten",
   "status.reopened_by_admin": "Heropend",
   "status.converted_to_extra_work": "Geconverteerd naar Extra Werk",
-
-  "priority.normal": "Normaal",
-  "priority.high": "Hoog",
-  "priority.urgent": "Urgent",
-
   "sla.on_track": "Op schema",
   "sla.at_risk": "Risico",
   "sla.breached": "Overschreden",
@@ -226,11 +203,9 @@
   "sla.left": "resterend",
   "sla.overdue": "te laat",
   "sla.due_now": "Nu te leveren",
-
   "sla_tooltip_historical": "Dit ticket dateert van vóór de SLA-engine.",
   "sla_tooltip_paused": "Wacht op klant; SLA-klok gepauzeerd.",
   "sla_tooltip_completed": "Ticket heeft een eindstatus bereikt.",
-
   "invitations.total": "uitnodigingen totaal",
   "invitations.pending_label": "In afwachting",
   "invitations.accepted_label": "Geaccepteerd",
@@ -281,7 +256,6 @@
   "invitations.dialog_revoke_title_no_email": "Deze uitnodiging intrekken?",
   "invitations.dialog_revoke_body": "De uitnodigingslink werkt direct niet meer. U kunt een nieuwe uitnodiging sturen als u zich bedenkt.",
   "invitations.dialog_revoke_confirm": "Uitnodiging intrekken",
-
   "account.member_since": "Lid sinds",
   "account.last_sign_in": "Laatste aanmelding",
   "account.never_signed_in": "Nooit",
@@ -292,7 +266,6 @@
   "account.buildings_other": "gebouwen",
   "account.customers_one": "klant",
   "account.customers_other": "klanten",
-
   "time.just_now": "Zojuist",
   "time.minutes_ago_one": "{{count}} minuut geleden",
   "time.minutes_ago_other": "{{count}} minuten geleden",
@@ -300,7 +273,6 @@
   "time.hours_ago_other": "{{count}} uur geleden",
   "time.days_ago_one": "{{count}} dag geleden",
   "time.days_ago_other": "{{count}} dagen geleden",
-
   "admin.create_new": "Nieuw aanmaken",
   "admin.edit": "Bewerken",
   "admin.view": "Bekijken",
@@ -314,7 +286,6 @@
   "admin.col_name": "Naam",
   "admin.col_address": "Adres",
   "admin.col_actions": "Acties",
-
   "users.invite_user": "Gebruiker uitnodigen",
   "users.loading": "Gebruikers laden…",
   "users.count_one": "{{count}} gebruiker",
@@ -344,7 +315,6 @@
   "users.group_provider": "Providergebruikers",
   "users.group_customer": "Klantgebruikers",
   "ops": "Operaties",
-
   "companies.loading": "Bedrijven laden…",
   "companies.count_one": "{{count}} bedrijf",
   "companies.count_other": "{{count}} bedrijven",
@@ -359,7 +329,6 @@
   "companies.banner_saved": "Bedrijf opgeslagen.",
   "companies.banner_deactivated": "Bedrijf gedeactiveerd.",
   "companies.banner_reactivated": "Bedrijf geactiveerd.",
-
   "buildings.loading": "Gebouwen laden…",
   "buildings.count_one": "{{count}} gebouw",
   "buildings.count_other": "{{count}} gebouwen",
@@ -372,7 +341,6 @@
   "buildings.banner_saved": "Gebouw opgeslagen.",
   "buildings.banner_deactivated": "Gebouw gedeactiveerd.",
   "buildings.banner_reactivated": "Gebouw geactiveerd.",
-
   "customers.loading": "Klanten laden…",
   "customers.count_one": "{{count}} klant",
   "customers.count_other": "{{count}} klanten",
@@ -386,7 +354,6 @@
   "customers.banner_saved": "Klant opgeslagen.",
   "customers.banner_deactivated": "Klant gedeactiveerd.",
   "customers.banner_reactivated": "Klant geactiveerd.",
-
   "admin_form.deactivate": "Deactiveren",
   "admin_form.reactivate": "Heractiveren",
   "admin_form.save_changes": "Wijzigingen opslaan",
@@ -398,7 +365,6 @@
   "admin_form.select_user": "Selecteer een gebruiker…",
   "admin_form.col_added": "Toegevoegd",
   "admin_form.col_assigned": "Toegewezen",
-
   "user_form.back": "Terug naar gebruikers",
   "user_form.card_label_title": "Profiel",
   "user_form.card_label_desc": "E-mail, naam, taal en rol van deze gebruiker.",
@@ -413,7 +379,6 @@
   "user_form.dialog_deactivate_body": "Zij verliezen direct toegang. Hun gegevens en geschiedenis blijven behouden; een superbeheerder kan ze later heractiveren.",
   "user_form.dialog_reactivate_title": "{{email}} heractiveren?",
   "user_form.dialog_reactivate_body": "Heractiveren herstelt hun account. Zij krijgen weer toegang met hun bestaande wachtwoord (of kunnen een reset aanvragen).",
-
   "company_form.back": "Terug naar bedrijven",
   "company_form.card_label_title": "Bedrijf",
   "company_form.card_label_desc": "Naam, slug en standaardtaal.",
@@ -445,7 +410,6 @@
   "company_form.dialog_reactivate_body": "Heractiveren herstelt het voor alle rollen. Bestaande lidmaatschappen en tickets blijven ongewijzigd.",
   "company_form.dialog_remove_title": "{{email}} verwijderen uit {{name}}?",
   "company_form.dialog_remove_body": "Hun andere lidmaatschappen blijven onaangetast. Ze kunnen later opnieuw worden toegevoegd.",
-
   "building_form.back": "Terug naar gebouwen",
   "building_form.card_label_title": "Gebouw",
   "building_form.card_label_desc": "Bedrijf, naam en adres van deze locatie.",
@@ -465,7 +429,6 @@
   "building_form.dialog_reactivate_body": "Heractiveren herstelt het voor alle rollen. Bestaande lidmaatschappen en tickets blijven ongewijzigd.",
   "building_form.dialog_remove_title": "{{email}} verwijderen uit {{name}}?",
   "building_form.dialog_remove_body": "Hun andere lidmaatschappen blijven onaangetast. Ze kunnen later opnieuw worden toegevoegd.",
-
   "customer_form.back": "Terug naar klanten",
   "customer_form.card_label_title": "Klant",
   "customer_form.card_label_desc": "Bedrijf, gebouw en contactgegevens.",
@@ -504,7 +467,6 @@
   "customer_form.access_role_edit_label": "Gebouwtoegangsrol wijzigen",
   "customer_form.dialog_revoke_access_title": "Toegang van {{email}} tot {{building}} intrekken?",
   "customer_form.dialog_revoke_access_body": "Ze zien geen tickets meer voor dit gebouw onder deze klant. Andere gebouwentoegang blijft onveranderd.",
-
   "customer_form.access_active_label": "Actief",
   "customer_form.access_active_hint": "Schakel uit om deze gebouwentoegang op te schorten zonder verwijderen. De rij blijft staan; de resolver evalueert elke permissie als False zolang deze inactief is.",
   "customer_form.access_overrides_button": "Permissies bewerken",
@@ -535,7 +497,6 @@
   "customer_form.permission_key.customer.users.manage": "Klantgebruikers beheren",
   "customer_form.permission_key.customer.users.assign_location_role": "Locatie-managerrol toekennen",
   "customer_form.permission_key.customer.users.manage_permissions": "Klantpermissies beheren",
-
   "customer_form.policy_title": "Klantbeleid",
   "customer_form.policy_helper": "Beleidsschakelaars beperken wat alle klantgebruikers onder deze klant mogen. Per-gebruiker overrides hierboven kunnen één gebruiker opnieuw toelaten zelfs als het beleid de actie voor het bedrijf uitschakelt.",
   "customer_form.policy_saved_banner": "Beleid opgeslagen.",
@@ -544,7 +505,6 @@
   "customer_form.policy_field_approve_ticket_completion": "Sta klantgebruikers toe ticketvoltooiing goed te keuren",
   "customer_form.policy_field_create_extra_work": "Sta klantgebruikers toe meerwerk aan te maken",
   "customer_form.policy_field_approve_extra_work_pricing": "Sta klantgebruikers toe meerwerkprijzen goed te keuren",
-
   "accept_invitation.loading_title": "Uitnodiging laden",
   "accept_invitation.loading_sub": "Een ogenblik.",
   "accept_invitation.missing_token_title": "Uitnodigingslink is onvolledig",
@@ -576,11 +536,9 @@
   "accept_invitation.error_generic_title": "Er is iets misgegaan",
   "accept_invitation.error_generic_desc": "We konden de uitnodiging niet accepteren. Probeer het opnieuw of neem contact op met support.",
   "accept_invitation.error_generic_retry": "Probeer opnieuw",
-
   "error_boundary.title": "Er is iets misgegaan",
   "error_boundary.description": "Door een onverwachte fout kon de pagina niet worden geladen. Vernieuw om het opnieuw te proberen. Als dit blijft gebeuren, neem dan contact op met support.",
   "error_boundary.reload": "Applicatie vernieuwen",
-
   "audit_logs.title": "Auditlog",
   "audit_logs.subtitle_loading": "Auditlog laden…",
   "audit_logs.count_one": "{{count}} auditregel",
@@ -622,7 +580,6 @@
   "audit_logs.empty_filtered_title": "Geen auditregels passen bij je filters",
   "audit_logs.empty_filtered_desc": "Probeer het datumbereik te verbreden of de filters te wissen.",
   "audit_logs.empty_clear": "Filters wissen",
-
   "api_error.session_expired": "Uw sessie is verlopen. Log opnieuw in om verder te gaan.",
   "api_error.not_allowed": "U hebt geen rechten om deze actie uit te voeren.",
   "api_error.not_found": "We kunnen niet vinden wat u zoekt. Het is mogelijk verwijderd of verplaatst.",
@@ -631,14 +588,10 @@
   "api_error.server_unavailable": "De server heeft op dit moment problemen. Probeer het over een paar seconden opnieuw.",
   "api_error.network": "We kunnen de server niet bereiken. Controleer uw verbinding en probeer het opnieuw.",
   "api_error.unexpected": "Er is iets onverwachts gebeurd. Probeer het opnieuw.",
-
   "tickets.assigned_team_anonymous": "Toegewezen aan het {{companyName}}-team",
   "tickets.assigned_team_anonymous_unknown": "Toegewezen aan het veldteam",
   "tickets.assigned_to_you": "Toegewezen aan jou",
-
   "nav.staff_requests": "Medewerker-aanvragen",
-
-
   "staff_requests.title": "Medewerker-toewijzingsaanvragen",
   "staff_requests.subtitle_loading": "Aanvragen laden…",
   "staff_requests.count_one": "{{count}} aanvraag",
@@ -676,14 +629,12 @@
   "staff_requests.reviewer_note_empty": "Geen notitie achtergelaten",
   "staff_requests.banner_approved": "Aanvraag van {{staff}} voor {{ticket}} goedgekeurd.",
   "staff_requests.banner_rejected": "Aanvraag van {{staff}} voor {{ticket}} afgewezen.",
-
   "customer_form.contact_visibility_title": "Zichtbaarheid van toegewezen medewerker voor deze klant",
   "customer_form.contact_visibility_helper": "Kies wat de gebruikers van de klant zien van de {{companyName}}-veldmedewerker die aan hun tickets is toegewezen. Als alles uit staat, wordt een generiek label 'Toegewezen aan het {{companyName}}-team' getoond.",
   "customer_form.contact_visibility_helper_unknown": "Kies wat de gebruikers van de klant zien van de veldmedewerker die aan hun tickets is toegewezen. Als alles uit staat, wordt een generiek label 'Toegewezen aan het veldteam' getoond.",
   "customer_form.show_assigned_staff_name": "Naam medewerker tonen",
   "customer_form.show_assigned_staff_email": "E-mail medewerker tonen",
   "customer_form.show_assigned_staff_phone": "Telefoonnummer medewerker tonen",
-
   "staff_admin.profile_title": "Gegevens medewerker",
   "staff_admin.profile_desc": "Contactgegevens en operationele instellingen voor deze medewerker. Klanten zien alleen de velden die je op de klantkaart aanzet.",
   "staff_admin.field_phone": "Telefoon",
@@ -695,7 +646,6 @@
   "staff_admin.field_is_active": "Profiel actief",
   "staff_admin.field_is_active_hint": "Uitschakelen pauzeert de medewerker operationeel. Hun account kan nog inloggen; gebruik Deactiveren hierboven om volledig uit te schakelen.",
   "staff_admin.banner_profile_saved": "Medewerkergegevens opgeslagen.",
-
   "staff_admin.visibility_title": "Gebouwen waar deze medewerker mag werken",
   "staff_admin.visibility_desc": "Elk gebouw hieronder geeft deze medewerker leestoegang tot de tickets en de mogelijkheid om zich daarvoor aan te melden. Voeg gebouwen toe of verwijder ze om aan te passen waar deze medewerker actief kan zijn.",
   "staff_admin.visibility_no_rows": "Nog geen gebouwen — deze medewerker ziet alleen tickets waaraan ze direct zijn toegewezen.",
@@ -718,7 +668,6 @@
   "staff_admin.level.building_read_and_assign": "Alle gebouwtickets + toewijzen",
   "staff_admin.routes_to_customer_label": "Voltooiing gaat direct naar klant",
   "staff_admin.routes_to_customer_hint": "Indien aan, gaat het IN_PROGRESS -> voltooid-verzoek van deze medewerker in dit gebouw rechtstreeks naar klantgoedkeuring, zonder tussenkomst van de manager.",
-
   "employees.page_title": "Medewerkers",
   "employees.loading": "Medewerkers laden…",
   "employees.count_one": "{{count}} medewerker",
@@ -739,7 +688,6 @@
   "employees.empty_initial_title": "Nog geen medewerkers",
   "employees.empty_initial_desc": "Gebruikers aan de leverancierszijde verschijnen hier zodra ze zijn aangemaakt.",
   "employees.empty_filtered_title": "Geen medewerkers komen overeen met je filters",
-
   "customer_employees.loading": "Medewerkers laden…",
   "customer_employees.count_one": "{{count}} medewerker",
   "customer_employees.count_other": "{{count}} medewerkers",
@@ -757,7 +705,6 @@
   "customer_employees.empty_initial_title": "Nog geen medewerkers",
   "customer_employees.empty_initial_desc": "Gebruikers met inloggegevens bij deze klant verschijnen hier.",
   "customer_employees.empty_filtered_title": "Geen medewerkers komen overeen met je filters",
-
   "customer_people.manage_button": "Beheren",
   "customer_people.manage_modal.eyebrow": "Persoon beheren",
   "customer_people.manage_modal.title": "{{user}} beheren",
@@ -776,12 +723,10 @@
   "customer_people.company_admin.demote_confirm_body": "De gebruiker behoudt het account maar verliest bedrijfsbrede beheertoegang. Je kunt daarna desgewenst toegang per gebouw verlenen.",
   "customer_people.company_admin.toast_granted": "{{user}} is nu bedrijfsbeheerder.",
   "customer_people.company_admin.toast_revoked": "{{user}} is geen bedrijfsbeheerder meer.",
-
   "my_employees.page_title": "Medewerkers",
   "my_employees.subtitle": "Collega's binnen jouw organisatie met inloggegevens.",
   "my_employees.empty_no_customer_title": "Geen organisatie gekoppeld",
   "my_employees.empty_no_customer_desc": "Je account is niet aan een klantorganisatie gekoppeld, dus er is geen medewerkersoverzicht om te tonen.",
-
   "customer_contacts.page_title": "Contacten",
   "customer_contacts.add_button": "Contact toevoegen",
   "customer_contacts.filter_building_label": "Gebouw",
@@ -850,23 +795,26 @@
   "customer_contacts.promote_error_phone_required": "Een telefoonnummer is vereist om een gebruiker te maken.",
   "customer_contacts.promote_error_phone_invalid": "Voer een geldig Nederlands telefoonnummer in.",
   "customer_contacts.promote_error_invalid_role": "Selecteer een geldige toegangsrol.",
-
   "services.page_title": "Dienstencatalogus",
   "services.tabs_aria": "Tabs van de dienstencatalogus",
   "services.tab_services": "Diensten",
   "services.tab_categories": "Categorieën",
   "services.add_service_button": "Dienst toevoegen",
-  "services.bulk_raise_button": "Prijzen verhogen",
-  "services.bulk_raise_intro": "Selecteer diensten om hun standaard catalogusprijs te verhogen. Dit werkt de basisprijs voor offertes bij; klantspecifieke prijzen worden niet beïnvloed.",
-  "services.bulk_raise_empty": "Nog geen actieve diensten om te verhogen.",
+  "services.bulk_raise_button": "Prijzen aanpassen",
+  "services.bulk_raise_intro": "Selecteer diensten om hun standaard catalogusprijs te verhogen of te verlagen. Dit werkt de basisprijs voor offertes bij; klantspecifieke prijzen worden niet beïnvloed.",
+  "services.bulk_raise_empty": "Nog geen actieve diensten om aan te passen.",
   "services.bulk_raise_select_all": "Alles selecteren",
-  "services.bulk_raise_mode_label": "Verhogen met",
+  "services.bulk_raise_mode_label": "Aanpassen met",
   "services.bulk_raise_mode_percent": "Percentage",
   "services.bulk_raise_mode_fixed": "Vast bedrag",
+  "services.bulk_raise_direction_label": "Richting",
+  "services.bulk_raise_direction_raise": "Verhogen",
+  "services.bulk_raise_direction_lower": "Verlagen",
+  "services.bulk_raise_error_percent_lower": "Een percentageverlaging moet kleiner zijn dan 100.",
   "services.bulk_raise_amount_label": "Bedrag",
-  "services.bulk_raise_amount_percent_hint": "Percentageverhoging, bijv. 10 voor +10%.",
-  "services.bulk_raise_amount_fixed_hint": "Bedrag dat bij elke standaardprijs wordt opgeteld.",
-  "services.bulk_raise_apply": "Prijzen verhogen",
+  "services.bulk_raise_amount_percent_hint": "Percentage, bijv. 10 voor 10%.",
+  "services.bulk_raise_amount_fixed_hint": "Bedrag dat bij elke standaardprijs wordt opgeteld of ervan wordt afgetrokken.",
+  "services.bulk_raise_apply": "Prijzen aanpassen",
   "services.bulk_raise_error_no_selection": "Selecteer minimaal één dienst.",
   "services.bulk_raise_error_amount": "Voer een bedrag groter dan nul in.",
   "services.add_category_button": "Categorie toevoegen",
@@ -917,7 +865,6 @@
   "services.error_category_required": "Kies een categorie.",
   "services.error_price_invalid": "Voer een niet-negatieve referentieprijs in.",
   "services.error_vat_invalid": "Voer een niet-negatief BTW-percentage in.",
-
   "customer_pricing.page_title": "Prijzen",
   "customer_pricing.add_button": "Prijs toevoegen",
   "customer_pricing.add_modal_title": "Contractprijs toevoegen",
@@ -959,19 +906,22 @@
   "customer_pricing.error_vat_invalid": "Voer een niet-negatief BTW-percentage in.",
   "customer_pricing.error_valid_from_required": "Kies een startdatum.",
   "customer_pricing.error_valid_to_before_valid_from": "Geldig-tot moet op of na geldig-vanaf liggen.",
-
-  "customer_pricing.bulk_raise_button": "Prijzen verhogen",
-  "customer_pricing.bulk_raise_intro": "Selecteer de prijzen die u wilt verhogen. Er worden nieuwe prijsregels aangemaakt vanaf de ingangsdatum; bestaande prijzen blijven bewaard voor de historie.",
-  "customer_pricing.bulk_raise_empty": "Nog geen actieve prijzen om te verhogen.",
+  "customer_pricing.bulk_raise_button": "Prijzen aanpassen",
+  "customer_pricing.bulk_raise_intro": "Selecteer de prijzen die u wilt verhogen of verlagen. Er worden nieuwe prijsregels aangemaakt vanaf de ingangsdatum; bestaande prijzen blijven bewaard voor de historie.",
+  "customer_pricing.bulk_raise_empty": "Nog geen actieve prijzen om aan te passen.",
   "customer_pricing.bulk_raise_select_all": "Alles selecteren",
-  "customer_pricing.bulk_raise_mode_label": "Verhogen met",
+  "customer_pricing.bulk_raise_mode_label": "Aanpassen met",
   "customer_pricing.bulk_raise_mode_percent": "Percentage",
   "customer_pricing.bulk_raise_mode_fixed": "Vast bedrag",
+  "customer_pricing.bulk_raise_direction_label": "Richting",
+  "customer_pricing.bulk_raise_direction_raise": "Verhogen",
+  "customer_pricing.bulk_raise_direction_lower": "Verlagen",
+  "customer_pricing.bulk_raise_error_percent_lower": "Een percentageverlaging moet kleiner zijn dan 100.",
   "customer_pricing.bulk_raise_amount_label": "Bedrag",
-  "customer_pricing.bulk_raise_amount_percent_hint": "Percentageverhoging, bijv. 10 voor +10%.",
-  "customer_pricing.bulk_raise_amount_fixed_hint": "Bedrag dat bij elke geselecteerde prijs wordt opgeteld.",
+  "customer_pricing.bulk_raise_amount_percent_hint": "Percentage, bijv. 10 voor 10%.",
+  "customer_pricing.bulk_raise_amount_fixed_hint": "Bedrag dat bij elke geselecteerde prijs wordt opgeteld of ervan wordt afgetrokken.",
   "customer_pricing.bulk_raise_valid_from_label": "Geldig vanaf",
-  "customer_pricing.bulk_raise_apply": "Prijzen verhogen",
+  "customer_pricing.bulk_raise_apply": "Prijzen aanpassen",
   "customer_pricing.bulk_raise_error_no_selection": "Selecteer minimaal één prijs.",
   "customer_pricing.bulk_raise_error_amount": "Voer een bedrag groter dan nul in.",
   "customer_pricing.copy_from_default_button": "Standaardprijzen kopiëren",
@@ -984,7 +934,6 @@
   "customer_pricing.copy_from_default_apply": "Prijzen kopiëren",
   "customer_pricing.copy_from_default_error_no_selection": "Selecteer minimaal één dienst.",
   "customer_pricing.copy_from_default_result": "{{created}} prijs(en) aangemaakt, {{skipped}} overgeslagen die er al een hadden.",
-
   "customer_custom_pricing.detail_title": "Aangepaste prijsregel",
   "customer_custom_pricing.add_modal_title": "Aangepaste prijsregel toevoegen",
   "customer_custom_pricing.edit_modal_title": "Aangepaste prijsregel bewerken",
@@ -997,7 +946,6 @@
   "customer_custom_pricing.error_unit_type_required": "Selecteer een eenheidtype.",
   "customer_custom_pricing.delete_confirm_title": "Aangepaste prijsregel verwijderen?",
   "customer_custom_pricing.delete_confirm_body": "Hiermee wordt de aangepaste prijsregel gearchiveerd zodat deze niet meer kan worden gebruikt.",
-
   "ticket_staff_complete.button_label": "Werk voltooien",
   "ticket_staff_complete.modal_title": "Werk markeren als voltooid",
   "ticket_staff_complete.note_label": "Voltooiingsnotitie",
@@ -1015,14 +963,11 @@
   "ticket_staff_complete.error_route_mismatch": "De routering is gewijzigd. Vernieuw de pagina en probeer opnieuw.",
   "ticket_staff_complete.attachment_hint": "Als je een foto hebt, upload deze dan via de bijlagenkaart op deze pagina voordat je verstuurt.",
   "ticket_staff_complete.attachment_hint_satisfied": "Er is al een foto bijgevoegd — je kunt versturen zonder een notitie te typen.",
-
   "manager_review.label_sent_at": "Verstuurd voor manager-review op",
-
   "bm_customers.eyebrow": "Beheerder-weergave",
   "bm_customers.title": "Klanten in je toegewezen gebouwen",
   "bm_customers.readonly_hint": "Alleen-lezen — je kunt klanten en hun contactpersonen bekijken in de gebouwen die jij beheert.",
   "bm_customers.empty": "Er zijn nog geen klanten gekoppeld aan jouw toegewezen gebouwen.",
-
   "bm_customer_detail.back": "Terug naar klanten",
   "bm_customer_detail.invalid_id": "Ongeldige klant.",
   "bm_customer_detail.readonly_hint": "Alleen-lezen klantoverzicht.",
@@ -1036,14 +981,12 @@
   "bm_customer_detail.section_contacts_title": "Contactpersonen",
   "bm_customer_detail.contacts_hint": "Bekijk de contactpersonen voor deze klant in jouw toegewezen gebouwen.",
   "bm_customer_detail.contacts_link": "Contactpersonen bekijken",
-
   "bm_customer_contacts.back": "Terug naar {{name}}",
   "bm_customer_contacts.invalid_id": "Ongeldige klant.",
   "bm_customer_contacts.title": "Contactpersonen",
   "bm_customer_contacts.readonly_hint": "Alleen-lezen — klik op een rij om de details van het contact te zien.",
   "bm_customer_contacts.empty": "Er zijn nog geen contactpersonen geregistreerd voor deze klant.",
   "bm_customer_contacts.notes_label": "Notities",
-
   "customer_view.back": "Terug naar klanten",
   "customer_view.overview.title_active": "Klantoverzicht",
   "customer_view.overview.title_inactive_suffix": " (inactief)",
@@ -1077,7 +1020,6 @@
   "customer_view.buildings.title": "Gekoppelde gebouwen",
   "customer_view.settings.title": "Klantinstellingen",
   "customer_view.settings.contact_visibility_title": "Zichtbaarheid toegewezen personeel",
-
   "customer_view.overview.explainer_with_provider": "{{customer}} wordt bediend door {{provider}} op {{count}} gekoppelde gebouw(en). Dit is het alleen-lezen startscherm — kies hieronder een beheergebied.",
   "customer_view.overview.explainer_generic": "{{customer}} wordt bediend door je leverancier op {{count}} gekoppelde gebouw(en). Dit is het alleen-lezen startscherm — kies hieronder een beheergebied.",
   "customer_view.overview.stat_linked_buildings": "Gekoppelde gebouwen",
@@ -1152,7 +1094,6 @@
   "customer_view.settings.lifecycle_title": "Levenscyclus",
   "customer_view.settings.deactivate_consequence": "Deactiveren schakelt inloggen uit voor de gebruikers van deze klant en verbergt ze uit standaardlijsten. Actieve tickets worden NIET automatisch gesloten.",
   "customer_view.settings.reactivate_consequence": "Reactiveren herstelt inloggen en haalt deze klant terug in de standaardlijsten.",
-
   "customer_permissions.zone_policy_title": "Klantbedrijf-beleid",
   "customer_permissions.zone_policy_helper": "Beleidsregels beperken wat alle klantgebruikers bij deze klant mogen doen. Met overrides hieronder kan je per gebruiker en gebouw alsnog toegang geven, ook als het beleid het standaard uitschakelt.",
   "customer_permissions.zone_users_title": "Gebruikers en gebouwtoegang",
@@ -1262,12 +1203,10 @@
   "customer_permissions.toast_access_added": "Gebouwtoegang toegevoegd",
   "customer_permissions.toast_access_removed": "Gebouwtoegang verwijderd",
   "customer_permissions.toast_save_failed": "Wijzigingen konden niet worden opgeslagen — probeer het opnieuw",
-
   "customer_permissions.policy_card.create_tickets.helper": "Klantgebruikers bij deze klant kunnen nieuwe tickets aanmaken.",
   "customer_permissions.policy_card.approve_ticket_completion.helper": "Klantgebruikers kunnen voltooiing van tickets goedkeuren of afwijzen.",
   "customer_permissions.policy_card.create_extra_work.helper": "Klantgebruikers kunnen extra werk aanvragen buiten het standaardcontract.",
   "customer_permissions.policy_card.approve_extra_work_pricing.helper": "Klantgebruikers kunnen prijsvoorstellen voor extra werk goedkeuren of afwijzen.",
-
   "customer_permissions.permission_keys.customer.ticket.create.label": "Tickets aanmaken",
   "customer_permissions.permission_keys.customer.ticket.create.description": "Nieuwe tickets openen voor dit gebouw.",
   "customer_permissions.permission_keys.customer.ticket.view_own.label": "Eigen tickets bekijken",
@@ -1392,14 +1331,3 @@
   "notifications.next": "Volgende",
   "notifications.page_of": "Pagina {{page}} van {{total}}"
 }
-
-
-
-
-
-
-
-
-
-
-

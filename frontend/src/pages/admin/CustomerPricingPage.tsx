@@ -31,6 +31,7 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 
 /**
  * Sprint 28 Batch 5 — Per-customer contract pricing.
@@ -191,10 +192,14 @@ export function CustomerPricingPage() {
   const [deleteTarget, setDeleteTarget] = useState<PricingRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  // M5 C — bulk-raise modal state (catalog-price section only).
+  // M5 C / #108 Part C — bulk-adjust modal state (catalog-price
+  // section only). `bulkDirection` picks raise vs lower.
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
   const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
+  const [bulkDirection, setBulkDirection] = useState<"raise" | "lower">(
+    "raise",
+  );
   const [bulkAmount, setBulkAmount] = useState("");
   const [bulkValidFrom, setBulkValidFrom] = useState(todayISO);
   const [bulkError, setBulkError] = useState("");
@@ -462,10 +467,12 @@ export function CustomerPricingPage() {
     }
   }
 
-  // ---- M5 C — bulk-raise handlers (catalog-price section) ----------------
+  // ---- M5 C / #108 Part C — bulk-adjust handlers (catalog-price
+  // section) ----------------
   function openBulkRaise() {
     setBulkSelectedIds(activePrices.map((p) => p.id));
     setBulkMode("percent");
+    setBulkDirection("raise");
     setBulkAmount("");
     setBulkValidFrom(todayISO());
     setBulkError("");
@@ -498,6 +505,16 @@ export function CustomerPricingPage() {
       setBulkError(t("customer_pricing.bulk_raise_error_amount"));
       return;
     }
+    // #108 Part C — client mirrors of the backend guards (the server
+    // re-checks both): a percent lower must stay below 100.
+    if (
+      bulkDirection === "lower" &&
+      bulkMode === "percent" &&
+      amountNumber >= 100
+    ) {
+      setBulkError(t("customer_pricing.bulk_raise_error_percent_lower"));
+      return;
+    }
     if (!bulkValidFrom) {
       setBulkError(t("customer_pricing.error_valid_from_required"));
       return;
@@ -509,6 +526,7 @@ export function CustomerPricingPage() {
         prices: bulkSelectedIds,
         mode: bulkMode,
         amount: bulkAmount.trim(),
+        direction: bulkDirection,
         valid_from: bulkValidFrom,
       });
       // Re-fetch the catalog price list so the new validity-window rows
@@ -1393,6 +1411,35 @@ export function CustomerPricingPage() {
                       />
                       <span>
                         {resolveServiceName(price)} — {price.unit_price}
+                        {/* #108 Part C — live effect preview. Backend
+                            HALF_UP is authoritative; a result at or
+                            below zero shows red (the server rejects
+                            the whole batch). */}
+                        {bulkSelectedIds.includes(price.id) &&
+                          (() => {
+                            const next = previewAdjustedPrice(
+                              price.unit_price,
+                              bulkMode,
+                              bulkAmount,
+                              bulkDirection,
+                            );
+                            if (next === null) return null;
+                            return (
+                              <span
+                                style={{
+                                  color:
+                                    next <= 0
+                                      ? "var(--red)"
+                                      : "var(--green-2)",
+                                  fontWeight: 600,
+                                }}
+                                data-testid="customer-pricing-bulk-raise-preview"
+                              >
+                                {" "}
+                                → {next.toFixed(2)}
+                              </span>
+                            );
+                          })()}
                       </span>
                     </label>
                   ))}
@@ -1401,6 +1448,33 @@ export function CustomerPricingPage() {
             )}
 
             <div className="form-2col">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="bulk-raise-direction"
+                >
+                  {t("customer_pricing.bulk_raise_direction_label")}
+                </label>
+                <select
+                  id="bulk-raise-direction"
+                  className="field-select"
+                  value={bulkDirection}
+                  onChange={(event) =>
+                    setBulkDirection(
+                      event.target.value === "lower" ? "lower" : "raise",
+                    )
+                  }
+                  data-testid="customer-pricing-bulk-raise-direction"
+                  disabled={bulkBusy}
+                >
+                  <option value="raise">
+                    {t("customer_pricing.bulk_raise_direction_raise")}
+                  </option>
+                  <option value="lower">
+                    {t("customer_pricing.bulk_raise_direction_lower")}
+                  </option>
+                </select>
+              </div>
               <div className="field">
                 <label className="field-label" htmlFor="bulk-raise-mode">
                   {t("customer_pricing.bulk_raise_mode_label")}

@@ -1826,6 +1826,8 @@ export interface ServiceBulkRaisePayload {
   services: number[];
   mode: "percent" | "fixed";
   amount: string;
+  // #108 Part C — omitted means "raise" (pre-#108 wire shape).
+  direction?: "raise" | "lower";
 }
 
 export interface ServiceBulkRaiseResultRow {
@@ -1912,6 +1914,8 @@ export interface CustomerPriceBulkRaisePayload {
   prices: number[];
   mode: "percent" | "fixed";
   amount: string;
+  // #108 Part C — omitted means "raise" (pre-#108 wire shape).
+  direction?: "raise" | "lower";
   valid_from: string;
 }
 
