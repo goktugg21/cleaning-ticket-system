@@ -191,7 +191,9 @@ export function TicketScheduleCard({
           ? formatScheduledDate(ticket.scheduled_start_at)
           : t("schedule.not_scheduled")
       }
-      defaultOpen
+      // #110 Part A — default COLLAPSED like the other right-column
+      // cards. No persistKey; remounts per ticket via the keyed wrapper.
+      defaultOpen={false}
       testId="ticket-schedule-card"
     >
       <div style={{ padding: "14px 18px 16px" }}>
