@@ -346,3 +346,43 @@ class MessageReadCursor(models.Model):
     def __str__(self):
         target = f"ticket={self.ticket_id}" if self.ticket_id else f"ew={self.extra_work_id}"
         return f"cursor u={self.user_id} {target} @ {self.last_read_at:%Y-%m-%d %H:%M}"
+
+
+class SuperAdminCompanySubscription(models.Model):
+    """#109 Part D — a SUPER_ADMIN's opt-in to ONE provider company's
+    in-app notification stream.
+
+    By default the in-app fan-out deliberately excludes SUPER_ADMIN
+    (email-path parity; SA can read everything directly). This row is
+    the explicit opt-in: while it exists, the four in-app
+    provider-management emit paths (ticket messages, EW requested, EW
+    decision, EW messages) union the subscribed SA into their recipient
+    set for events of that company. The EMAIL path is untouched, and
+    the role gate lives at the endpoint (only a SUPER_ADMIN can create
+    a row for themselves) plus in `subscribed_super_admins`, which
+    filters on role at read time — a stale row for a demoted user is
+    inert.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sa_company_subscriptions",
+    )
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.CASCADE,
+        related_name="sa_subscriptions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "company"],
+                name="uniq_sa_company_subscription",
+            )
+        ]
+
+    def __str__(self):
+        return f"SA #{self.user_id} subscribed to company #{self.company_id}"

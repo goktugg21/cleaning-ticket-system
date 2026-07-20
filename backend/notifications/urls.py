@@ -5,6 +5,8 @@ from .views import (
     NotificationMarkAllReadView,
     NotificationMarkReadView,
     NotificationUnreadCountView,
+    SuperAdminCompanySubscriptionDetailView,
+    SuperAdminCompanySubscriptionListView,
 )
 
 # Mounted at /api/notifications/ (see config/urls.py). The literal
@@ -27,5 +29,16 @@ urlpatterns = [
         "<int:pk>/read/",
         NotificationMarkReadView.as_view(),
         name="notification-mark-read",
+    ),
+    # #109 Part D — SA-only per-company subscription state.
+    path(
+        "company-subscriptions/",
+        SuperAdminCompanySubscriptionListView.as_view(),
+        name="notification-company-subscriptions",
+    ),
+    path(
+        "company-subscriptions/<int:company_id>/",
+        SuperAdminCompanySubscriptionDetailView.as_view(),
+        name="notification-company-subscription-detail",
     ),
 ]
