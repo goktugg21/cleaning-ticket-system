@@ -218,7 +218,7 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 **Phases:**
 - [x] **Phase 1 — data model** (THIS): `invoicing` app (`Invoice`, `InvoiceLine`) + `Customer` billing-schedule (`invoice_day_rule`, `invoice_granularity_default`) + `Customer.contract_pdf` + numbering scaffolding (`number` NULL-while-draft, `year`, per-company unique). Migrations `invoicing/0001_initial`, `customers/0012`. NO generation/lifecycle/UI/PDF.
 - [x] **Phase 2a — unbilled rollup + draft generation + claim/release**: `invoicing/selectors.py::unbilled_extra_work` (Option-1 semantics), `invoicing/services.py::generate_draft_invoices` (per-customer / per-building, claim) + `delete_draft_invoice` (release), legacy mark/clear neutralized to no-ops. NO lifecycle/numbering/reversal/PDF/UI.
-- [ ] **Phase 2b — lifecycle + numbering + reversal**: state machine (DRAFT→ISSUED→SENT), numbering assignment at ISSUE (gapless per-company per-year), ISSUED/SENT immutability guard, reversal logic.
+- [x] **Phase 2b — lifecycle + numbering + reversal**: `invoicing/state_machine.py` (issue/send/reverse + assert_mutable), `invoicing/numbering.py` (gapless per-company-per-year via `InvoiceNumberSequence`, row-locked), migration `invoicing/0002`. NO PDF/UI.
 - [ ] **Phase 3 — two-page PDF** (page 1 summary; page 2 detail = EW month / work performed / date).
 - [ ] **Phase 4 — provider "Facturen" UI** + the "who's due" list (driven by the billing schedule).
 - [ ] **Phase 5 — customer-portal visibility** (SEND).
@@ -238,6 +238,13 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 - **Release on draft delete:** `delete_draft_invoice(...)` soft-deletes the DRAFT and clears `is_invoiced`/`invoiced_at` on its claimed EW → they reappear in the unbilled pool (DRAFT-only; ISSUED/SENT guard is Phase 2b).
 - **Legacy mark/clear neutralized:** `/extra-work/mark-invoiced/` + `/clear-invoiced/` are DEPRECATED NO-OPS — keep the route + provider gate + response shape (`{"invoiced_count":0,"ew_ids":[]}` / `{"cleared_count":0,"ew_ids":[]}`), mutate nothing. Endpoints + the old Facturen page are removed together in Phase 4.
 - **Assumption:** every `ExtraWorkRequest.building` is NON-nullable/PROTECT → no buildingless / company-wide EW, so per-building generation is clean (revisit only if EW ever becomes buildingless).
+
+**Phase 2b delivered (2026-07-20):**
+- **Lifecycle (forward-only) DRAFT→ISSUED→SENT** in `invoicing/state_machine.py`, mirroring the tickets `@transaction.atomic` + `select_for_update` + locked-status-precondition pattern: `issue_invoice(actor, invoice)` (DRAFT→ISSUED, assigns number+year, stamps issued_at), `send_invoice(actor, invoice)` (ISSUED→SENT, stamps sent_at; portal visibility is Phase 5, email deferred). Provider-operator-gated; forward-only (issue from ISSUED/SENT and send from DRAFT/SENT rejected via the locked-row precondition, which doubles as the stale/concurrency guard).
+- **Gapless numbering** via a DEDICATED `InvoiceNumberSequence` (per-(company, year), unique) locked with `select_for_update` in `numbering.py::allocate_invoice_number(company_id, year) -> (number_str, seq_int)`, format `"YYYY-NNNN"`. Always exactly one row to lock → no empty-set race. Proven gapless + serialized under a real threaded/`TransactionTestCase` concurrency test.
+- **ISSUE-YEAR DECISION:** the numbering year is the CURRENT Amsterdam-local calendar year at issue (`timezone.localtime(now).year`), NOT the invoice's billing `period_year` — that is what a gapless per-year sequence means operationally.
+- **SENT immutability:** `assert_mutable(invoice)` raises on SENT (the future edit path gates on it); `delete_draft_invoice` already rejects any non-DRAFT (ISSUED + SENT). The only SENT mutation is a reversal.
+- **Reversal** (`state_machine.py::reverse_invoice`): only a SENT, non-reversal invoice can be reversed (terminal — cannot reverse a reversal). Auto-generates a NEW already-ISSUED counter-invoice (`is_reversal=True`, `reverses=original`, its own number from the same sequence, negated totals + negated mirror lines with `extra_work=NULL` — the counter-entry does NOT re-claim EW). RELEASES the original's EW (clears `is_invoiced`/`invoiced_at`); the original stays SENT on the books (NOT soft-deleted). To make the release actually surface under Option-1, the unbilled selector now also ignores claims held by a REVERSED original (a reversed invoice no longer holds its claim). Reversal editing is deferred to the Phase-4 UI.
 
 ---
 
