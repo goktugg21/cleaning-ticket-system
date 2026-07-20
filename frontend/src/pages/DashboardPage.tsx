@@ -9,6 +9,7 @@ import { getExtraWorkStats, listExtraWork } from "../api/extraWork";
 import { getInboxUnreadCount } from "../api/inbox";
 import { listNotifications, notificationHref } from "../api/notifications";
 import type {
+  ExtraWorkRequestList,
   ExtraWorkStats,
   Notification,
   PaginatedResponse,
@@ -28,7 +29,7 @@ import {
 } from "../auth/permissions";
 import { SLABadge } from "../components/sla/SLABadge";
 import { useToast } from "../components/ToastProvider";
-import { currentMonth, splitOpenInvoiced } from "../lib/billing";
+import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
 
 type SLAFilterValue =
@@ -488,7 +489,22 @@ export function DashboardPage({
     openTotal: number;
     invoicedTotal: number;
   } | null>(null);
+  // #109 Part G — the full billing-month rows (already fetched for the
+  // split above) power the "Facturatie <maand>" mini per-building panel;
+  // storing them adds ZERO extra requests.
+  const [billingRows, setBillingRows] = useState<
+    ExtraWorkRequestList[] | null
+  >(null);
   const [todaySlotCount, setTodaySlotCount] = useState<number | null>(null);
+  // #109 Part G — most-recent tickets + extra work for the "Laatste
+  // tickets / extra werk" panel (fetched in parallel inside the
+  // existing attention loader — no new waterfall).
+  const [recentTickets, setRecentTickets] = useState<TicketList[] | null>(
+    null,
+  );
+  const [recentExtraWork, setRecentExtraWork] = useState<
+    ExtraWorkRequestList[] | null
+  >(null);
 
   const loadWidgets = useCallback(async () => {
     if (isTicketsPage) return;
@@ -509,6 +525,7 @@ export function DashboardPage({
     if (inbox.status === "fulfilled") setInboxUnread(inbox.value);
     if (billing.status === "fulfilled" && billing.value !== null) {
       setBillingMonthTotals(splitOpenInvoiced(billing.value.results));
+      setBillingRows(billing.value.results);
     }
     if (slots.status === "fulfilled" && slots.value !== null) {
       const today = localDateKey(new Date().toISOString());
@@ -523,7 +540,7 @@ export function DashboardPage({
   const loadAttention = useCallback(async () => {
     if (isTicketsPage) return;
     try {
-      const [rev, una, act] = await Promise.all([
+      const [rev, una, act, recentTk, recentEw] = await Promise.all([
         api.get<PaginatedResponse<TicketList>>("/tickets/", {
           params: { status: "WAITING_MANAGER_REVIEW", page_size: 3 },
         }),
@@ -535,10 +552,19 @@ export function DashboardPage({
           },
         }),
         listNotifications({ page: 1 }),
+        // #109 Part G — most-recent 5 across the caller's scope (the
+        // backend scopes /tickets/ + /extra-work/ already; default
+        // ordering is newest-first). Parallel with the batch above.
+        api.get<PaginatedResponse<TicketList>>("/tickets/", {
+          params: { page_size: 5 },
+        }),
+        listExtraWork({ page_size: 5 }),
       ]);
       setAttnReview({ count: rev.data.count, rows: rev.data.results });
       setAttnUnassigned({ count: una.data.count, rows: una.data.results });
       setAttnActivity(act.results.slice(0, 3));
+      setRecentTickets(recentTk.data.results.slice(0, 5));
+      setRecentExtraWork(recentEw.results.slice(0, 5));
     } catch {
       // Cards keep their "—" placeholders on failure (mirrors loadStats).
     }
@@ -665,6 +691,26 @@ export function DashboardPage({
 
   const fmt = (value: number | null): string =>
     value === null ? "—" : String(value);
+
+  // #109 Part G — per-building billing breakdown for the "Facturatie"
+  // mini panel, from the already-fetched billing rows (top 4 by total).
+  const billingByBuilding = useMemo(() => {
+    if (billingRows === null) return null;
+    const byBuilding = new Map<number, ExtraWorkRequestList[]>();
+    for (const r of billingRows) {
+      const list = byBuilding.get(r.building) ?? [];
+      list.push(r);
+      byBuilding.set(r.building, list);
+    }
+    return [...byBuilding.entries()]
+      .map(([buildingId, rows]) => ({
+        buildingId,
+        buildingName: rows[0].building_name,
+        totals: sumRows(rows),
+      }))
+      .sort((a, b) => b.totals.total - a.totals.total)
+      .slice(0, 4);
+  }, [billingRows]);
 
   // #108 Option A — count badge for the "Aandacht nodig" rows. Rows the
   // provider must act on get the warning tint as soon as the count is
@@ -837,6 +883,27 @@ export function DashboardPage({
                       })
                     : t("hero.month_loading")}
                 </div>
+                {/* #109 Part G — explicit open-vs-invoiced split under
+                    the amount (data already fetched for the widget). */}
+                {billingMonthTotals && (
+                  <div
+                    className="kpi-split"
+                    data-testid="hero-month-split"
+                  >
+                    <span className="kpi-split-open">
+                      {t("hero.split_open", {
+                        amount: formatMoney(billingMonthTotals.openTotal),
+                      })}
+                    </span>
+                    <span className="kpi-split-invoiced">
+                      {t("hero.split_invoiced", {
+                        amount: formatMoney(
+                          billingMonthTotals.invoicedTotal,
+                        ),
+                      })}
+                    </span>
+                  </div>
+                )}
               </Link>
             </div>
 
@@ -1085,6 +1152,105 @@ export function DashboardPage({
                 </div>
               </section>
             )}
+
+            {/* #109 Part G — bottom density band (management view only):
+                a Facturatie mini per-building panel + a compact
+                Laatste-tickets/extra-werk list. Both reuse
+                already-loaded data / the existing parallel loaders. */}
+            <section
+              className="dashboard-bottom-band"
+              data-testid="dashboard-bottom-band"
+            >
+              <div
+                className="card attention-card"
+                data-testid="dashboard-billing-panel"
+              >
+                <div className="attention-card-head">
+                  <span className="attention-card-title">
+                    {t("bottom.billing_title", { month: currentMonth() })}
+                  </span>
+                  <Link
+                    to="/invoices"
+                    className="attention-card-link"
+                    data-testid="dashboard-billing-link"
+                  >
+                    {t("attention.view_all")}
+                  </Link>
+                </div>
+                {billingByBuilding === null ? (
+                  <p className="muted small">{t("loading")}</p>
+                ) : billingByBuilding.length === 0 ? (
+                  <p className="muted small">{t("bottom.billing_empty")}</p>
+                ) : (
+                  <table className="data-table dashboard-mini-table">
+                    <tbody>
+                      {billingByBuilding.map((row) => (
+                        <tr key={row.buildingId}>
+                          <td>{row.buildingName}</td>
+                          <td className="mini-num muted small">
+                            {t("bottom.billing_open_count", {
+                              count: row.totals.open,
+                            })}
+                          </td>
+                          <td className="mini-num">
+                            <strong>{formatMoney(row.totals.total)}</strong>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div
+                className="card attention-card"
+                data-testid="dashboard-recent-panel"
+              >
+                <div className="attention-card-head">
+                  <span className="attention-card-title">
+                    {t("bottom.recent_title")}
+                  </span>
+                </div>
+                <ul className="attention-card-list">
+                  {(recentTickets ?? []).map((tk) => (
+                    <li key={`t-${tk.id}`}>
+                      <Link
+                        to={`/tickets/${tk.id}`}
+                        className="attention-row"
+                      >
+                        <span className="attention-row-title">
+                          {tk.ticket_no} · {tk.title}
+                        </span>
+                        <span className="muted small">
+                          {formatDate(tk.created_at)}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                  {(recentExtraWork ?? []).map((ew) => (
+                    <li key={`e-${ew.id}`}>
+                      <Link
+                        to={`/extra-work/${ew.id}`}
+                        className="attention-row"
+                      >
+                        <span className="attention-row-title">
+                          {t("ops_type_extra_work")} · {ew.title}
+                        </span>
+                        <span className="muted small">
+                          {ew.building_name}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                  {recentTickets !== null &&
+                    recentExtraWork !== null &&
+                    recentTickets.length === 0 &&
+                    recentExtraWork.length === 0 && (
+                      <li className="muted small">{t("attention.empty")}</li>
+                    )}
+                </ul>
+              </div>
+            </section>
           </>
         )}
 
