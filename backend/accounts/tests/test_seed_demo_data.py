@@ -57,7 +57,12 @@ from tickets.models import Ticket
 
 COMPANY_A_NAME = "Osius Demo"
 COMPANY_A_SLUG = "osius-demo"
-COMPANY_A_BUILDINGS = {"B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"}
+COMPANY_A_BUILDINGS = {"B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"} | {
+    # #110 — extra demo buildings so the contact/permissions building
+    # pickers visibly overflow their capped-scroll containers.
+    f"Bijkantoor {n:02d} Amsterdam"
+    for n in range(4, 19)
+}
 COMPANY_A_CUSTOMER = "B Amsterdam"
 
 COMPANY_B_NAME = "Bright Facilities"
