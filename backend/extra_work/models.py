@@ -1283,6 +1283,13 @@ class ProposalLine(models.Model):
             "the linked Service does not rewrite history."
         ),
     )
+    # #108 Part B — operator-supplied unit name for `unit_type == OTHER`
+    # (e.g. "cm", "m3", "pallet"), mirroring the RF-2 field on
+    # CustomerCustomPrice. Only meaningful for OTHER; the serializer
+    # forces it blank for every other unit type. Unlike the catalog rule,
+    # a blank label on an OTHER line stays legal (plain "Other" and
+    # "Custom…" are both offered in the composer — owner decision).
+    custom_unit_label = models.CharField(max_length=50, blank=True, default="")
     unit_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,

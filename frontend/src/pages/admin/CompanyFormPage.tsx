@@ -28,6 +28,7 @@ import { ImageUploadField } from "../../components/ImageUploadField";
 import { deleteCompanyLogo, uploadCompanyLogo } from "../../api/media";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { Toggle } from "../../components/Toggle";
 
 // Short i18n key alias per policy flag (keeps the common.json keys readable
 // vs. the long backend field names).
@@ -411,8 +412,7 @@ export function CompanyFormPage() {
                       style={{ marginBottom: 8 }}
                     >
                       <label className="settings-toggle-row">
-                        <input
-                          type="checkbox"
+                        <Toggle
                           checked={policy[flag]}
                           disabled={!isSuperAdmin || form.submitting}
                           onChange={(event) =>

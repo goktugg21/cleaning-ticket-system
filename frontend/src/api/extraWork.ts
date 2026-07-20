@@ -405,6 +405,10 @@ export interface ProposalLineWritePayload {
   description: string;
   quantity: string;
   unit_type: ExtraWorkUnitType;
+  // #108 Part B — required non-empty by the backend only when the line
+  // is entered via Custom (unit_type OTHER + a supplied name); forced
+  // blank for concrete unit types (RF-2 mirror).
+  custom_unit_label?: string;
   unit_price: string;
   vat_pct: string;
   customer_explanation?: string;

@@ -59,6 +59,8 @@ import { CustomersAdminPage } from "./pages/admin/CustomersAdminPage";
 // (`/admin/customers/:id/edit`).
 import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsPage";
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
+import { CustomerInvoicesPage } from "./pages/admin/customer/CustomerInvoicesPage";
+import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
@@ -502,6 +504,24 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerTicketsPage />
+              </AdminRoute>
+            }
+          />
+          {/* #108 Part E — customer-scoped Invoices (view-only Facturen
+              slice) + Reports (EW revenue, customer preset fixed). */}
+          <Route
+            path="/admin/customers/:id/invoices"
+            element={
+              <AdminRoute>
+                <CustomerInvoicesPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/customers/:id/reports"
+            element={
+              <AdminRoute>
+                <CustomerReportsPage />
               </AdminRoute>
             }
           />

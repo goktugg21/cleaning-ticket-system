@@ -1659,6 +1659,98 @@ table.data-table {
 }
 .toggle-switch input:checked + .toggle-switch-slider { background: var(--green); }
 .toggle-switch input:checked + .toggle-switch-slider::before { transform: translateX(20px); }
+/* #108 Part D — the toggle is now the platform-wide boolean control
+   (components/Toggle.tsx); disabled + focus states for the sweep. */
+.toggle-switch input:disabled + .toggle-switch-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.toggle-switch input:focus-visible + .toggle-switch-slider {
+  outline: 2px solid var(--green-2);
+  outline-offset: 2px;
+}
+
+/* #108 Part D — the platform SELECTION checkbox (multi-select rows).
+   One shared pattern: consistent size, rounded, accent check. Applied
+   via the .checkbox-input class — behavior untouched. */
+.checkbox-input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  cursor: pointer;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  transition: background 0.12s, border-color 0.12s;
+  vertical-align: middle;
+}
+.checkbox-input::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  transform: scale(0);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: #fff;
+  transition: transform 0.1s;
+}
+.checkbox-input:hover:not(:disabled) {
+  border-color: var(--green);
+}
+.checkbox-input:checked {
+  background: var(--green);
+  border-color: var(--green);
+}
+.checkbox-input:checked::before {
+  transform: scale(1);
+}
+.checkbox-input:focus-visible {
+  outline: 2px solid var(--green-2);
+  outline-offset: 2px;
+}
+.checkbox-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* #108 Part D — long multi-select lists: internal scroll + the shared
+   toolbar (Select all / Clear all / count / optional filter). */
+.multi-select-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.multi-select-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.multi-select-filter {
+  margin-left: auto;
+  max-width: 200px;
+  min-width: 120px;
+}
+.multi-select-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.multi-select-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
 
 /* ====================================================================
    Settings notification preference row
@@ -2854,50 +2946,59 @@ table.data-table {
   border: 1px solid var(--green);
 }
 
-/* RF-19 — stable two-row add-line grid (proposal composer). Fixed
-   grid templates: cells compress as the builder column narrows (e.g.
-   preview open vs collapsed); the form never re-wraps, so the note
-   row and actions hold their position while values change. */
-.proposal-addline-top {
+/* #108 Part B (supersedes the RF-19 two-row grid) — single-row
+   add-line grid (proposal composer). ONE fixed grid row: description
+   (modal box) / unit / qty / unit price / VAT % / subtotal / VAT /
+   total / customer note / internal note / actions. Fixed minmax
+   tracks compress as the builder column narrows (preview open vs
+   collapsed) with ZERO re-wrap; under 900px (where the preview split
+   is stacked anyway) it falls back to a 2-col grid. */
+.proposal-addline-row {
   display: grid;
   grid-template-columns:
-    minmax(110px, 2fr)
-    minmax(84px, 1.1fr)
+    minmax(76px, 1.5fr)
+    minmax(66px, 0.9fr)
+    minmax(48px, 0.55fr)
+    minmax(56px, 0.65fr)
+    minmax(44px, 0.5fr)
     minmax(56px, 0.7fr)
-    minmax(68px, 0.8fr)
-    minmax(52px, 0.6fr)
-    minmax(76px, 0.9fr)
-    minmax(76px, 0.9fr)
-    minmax(80px, 0.9fr);
-  gap: 10px;
+    minmax(56px, 0.7fr)
+    minmax(60px, 0.75fr)
+    minmax(56px, 1fr)
+    minmax(56px, 1fr)
+    max-content;
+  gap: 8px;
   align-items: end;
 }
-.proposal-addline-bottom {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: end;
-  margin-top: 10px;
-}
-.proposal-addline-top .field,
-.proposal-addline-bottom .field {
+.proposal-addline-row .field {
   min-width: 0;
 }
-.proposal-addline-top .field-input {
+.proposal-addline-row .field-input,
+.proposal-addline-row .field-select {
   min-width: 0;
   text-overflow: ellipsis;
 }
 .proposal-addline-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
 }
+/* Filled-dot indicator on the modal-trigger boxes: hollow when the
+   field is empty, accent-filled once a value is set. */
+.ew-note-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-faint);
+  flex: none;
+}
+.ew-note-dot-filled {
+  background: var(--green-2);
+  border-color: var(--green-2);
+}
 @media (max-width: 900px) {
-  .proposal-addline-top {
+  .proposal-addline-row {
     grid-template-columns: 1fr 1fr;
-  }
-  .proposal-addline-bottom {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -3008,6 +3109,131 @@ a.attention-row:hover {
 }
 .attention-card-link:hover {
   text-decoration: underline;
+}
+
+/* #108 Option A — provider dashboard: 4-card hero, the "Aandacht
+   nodig" priority list beside the "Vandaag" column, "Mijn werk" chips.
+   Compound selector: the base .operations-kpi-grid media rules are
+   declared LATER in this file and would otherwise win the cascade at
+   equal specificity, forcing 3 narrow columns that clip the money
+   value. */
+.operations-kpi-grid.option-a-hero {
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (max-width: 1280px) {
+  .operations-kpi-grid.option-a-hero {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 720px) {
+  .operations-kpi-grid.option-a-hero {
+    grid-template-columns: 1fr;
+  }
+}
+.option-a-hero a.kpi-card {
+  color: var(--text);
+  text-decoration: none;
+}
+.option-a-hero a.kpi-card:hover {
+  border-color: var(--green);
+}
+.page-sub-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.page-sub-link:hover {
+  color: var(--green-2);
+}
+.attention-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .attention-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.attn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.attn-item + .attn-item {
+  border-top: 1px solid var(--border);
+}
+.attn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 8px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+}
+a.attn-row:hover {
+  background: var(--green-faint);
+}
+.attn-row-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.attn-count {
+  min-width: 28px;
+  text-align: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-family: var(--f-head);
+  font-size: 12px;
+  font-weight: 800;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.attn-count-warn {
+  background: var(--amber-soft);
+  color: var(--amber);
+  border: 1px solid var(--amber-border);
+}
+.attn-sublist {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0 8px 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mywork-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.mywork-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mywork-chip:hover {
+  border-color: var(--green);
+}
+.mywork-chip-count {
+  font-family: var(--f-head);
+  font-weight: 800;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
 .att-thumb-ext {
   font-family: var(--f-head);
@@ -5430,12 +5656,10 @@ a.attention-row:hover {
   text-transform: uppercase;
   color: var(--warn, #C97A23);
 }
+/* #108 Part D — now a shared Toggle wrapper (span), not a raw 18px
+   checkbox; only the alignment remains. */
 .policy-toggle-card-switch {
   align-self: center;
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  margin: 0;
 }
 
 @media (max-width: 720px) {
@@ -7721,41 +7945,5 @@ a.attention-row:hover {
   cursor: pointer;
   user-select: none;
 }
-.inbox-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-}
-.inbox-switch-track {
-  width: 34px;
-  height: 20px;
-  border-radius: var(--r-pill);
-  background: var(--surface-3);
-  border: 1px solid var(--border);
-  position: relative;
-  transition: background 0.15s, border-color 0.15s;
-  flex-shrink: 0;
-}
-.inbox-switch-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface);
-  box-shadow: var(--shadow-xs);
-  transition: transform 0.15s;
-}
-.inbox-switch input:checked + .inbox-switch-track {
-  background: var(--green);
-  border-color: var(--green);
-}
-.inbox-switch input:checked + .inbox-switch-track .inbox-switch-knob {
-  transform: translateX(14px);
-}
-.inbox-switch input:focus-visible + .inbox-switch-track {
-  outline: 2px solid var(--green-2);
-  outline-offset: 2px;
-}
+/* #108 Part D — the bespoke track/knob rules moved to the shared
+   platform Toggle (.toggle-switch); only the label layout remains. */

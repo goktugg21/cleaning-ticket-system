@@ -41,11 +41,25 @@ import { formatDate, formatMoney } from "../lib/intl";
 
 type StatusFilter = "ALL" | "OPEN" | "INVOICED";
 
-export function InvoicesPage() {
+// #108 Part E — the same view powers the customer-detail Invoices tab:
+// `customerId` narrows the fetch server-side (?customer=) and turns the
+// page VIEW-ONLY (the mark/clear endpoints act at company+month
+// granularity — running them from a customer page would mark other
+// customers' work too; a pointer link to /invoices replaces them).
+// `embedded` drops the standalone page header (the customer sub-page
+// header renders instead).
+export function InvoicesPage({
+  customerId,
+  embedded = false,
+}: {
+  customerId?: number;
+  embedded?: boolean;
+} = {}) {
   const { t } = useTranslation("common");
   const { me } = useAuth();
   const { push: pushToast } = useToast();
-  const canRunActions = isProviderAdmin(me?.role);
+  const customerScoped = customerId !== undefined;
+  const canRunActions = !customerScoped && isProviderAdmin(me?.role);
 
   const [month, setMonth] = useState(currentMonth);
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
@@ -70,7 +84,11 @@ export function InvoicesPage() {
     let cancelled = false;
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     setError("");
-    listExtraWork({ billing_period: month, page_size: 500 })
+    listExtraWork({
+      billing_period: month,
+      page_size: 500,
+      ...(customerId !== undefined ? { customer: customerId } : {}),
+    })
       .then((resp) => {
         if (cancelled) return;
         setRows(resp.results);
@@ -84,7 +102,7 @@ export function InvoicesPage() {
     return () => {
       cancelled = true;
     };
-  }, [month, refreshKey]);
+  }, [month, refreshKey, customerId]);
 
   // Filter options derive from the month's rows (no extra API calls).
   const customerOptions = useMemo(() => {
@@ -210,11 +228,13 @@ export function InvoicesPage() {
 
   return (
     <div data-testid="invoices-page">
-      <PageHeader
-        eyebrow={t("billing.eyebrow")}
-        title={t("billing.title")}
-        subtitle={t("billing.subtitle")}
-      />
+      {!embedded && (
+        <PageHeader
+          eyebrow={t("billing.eyebrow")}
+          title={t("billing.title")}
+          subtitle={t("billing.subtitle")}
+        />
+      )}
 
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div className="invoices-toolbar">
@@ -228,6 +248,7 @@ export function InvoicesPage() {
               data-testid="invoices-month"
             />
           </label>
+          {!customerScoped && (
           <label className="field invoices-toolbar-field">
             <span className="field-label">{t("billing.filter_customer")}</span>
             <select
@@ -244,6 +265,7 @@ export function InvoicesPage() {
               ))}
             </select>
           </label>
+          )}
           <label className="field invoices-toolbar-field">
             <span className="field-label">{t("billing.filter_building")}</span>
             <select
@@ -292,6 +314,13 @@ export function InvoicesPage() {
           </span>
         </div>
 
+        {customerScoped && (
+          <div className="invoices-actions" data-testid="invoices-manage-link">
+            <Link to="/invoices" className="link">
+              {t("billing.manage_on_invoices")}
+            </Link>
+          </div>
+        )}
         {canRunActions && (
           <div className="invoices-actions" data-testid="invoices-actions">
             <button

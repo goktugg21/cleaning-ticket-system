@@ -36,6 +36,7 @@ import type {
 } from "../../api/plannedWork.types";
 import type { Building, Customer, PaginatedResponse } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 
 const FREQUENCIES: RecurringJobFrequency[] = ["WEEKLY", "BIWEEKLY", "MONTHLY"];
 const PRICING_MODES: SelectablePricingMode[] = ["CONTRACT_INCLUDED", "FIXED"];
@@ -948,10 +949,8 @@ export function RecurringJobFormPage() {
                     onToggle={(uid) =>
                       setDefaultStaffIds((prev) => toggleId(prev, uid))
                     }
+                    onSetAll={setDefaultStaffIds}
                     emptyLabel={t("form.no_staff_options")}
-                    selectedLabel={t("form.selected_count", {
-                      count: defaultStaffIds.length,
-                    })}
                     testId="rj-staff-picker"
                   />
                   {fieldErrors.default_staff_ids && (
@@ -973,10 +972,8 @@ export function RecurringJobFormPage() {
                     onToggle={(uid) =>
                       setDefaultManagerIds((prev) => toggleId(prev, uid))
                     }
+                    onSetAll={setDefaultManagerIds}
                     emptyLabel={t("form.no_manager_options")}
-                    selectedLabel={t("form.selected_count", {
-                      count: defaultManagerIds.length,
-                    })}
                     testId="rj-manager-picker"
                   />
                   {fieldErrors.default_manager_ids && (
@@ -1016,45 +1013,47 @@ function CrewPicker({
   candidates,
   selected,
   onToggle,
+  onSetAll,
   emptyLabel,
-  selectedLabel,
   testId,
 }: {
   candidates: CrewUser[];
   selected: number[];
   onToggle: (userId: number) => void;
+  // #108 Part D — bulk selection for the shared toolbar (Select all /
+  // Clear all). Receives the FULL new id list.
+  onSetAll: (userIds: number[]) => void;
   emptyLabel: string;
-  selectedLabel: string;
   testId: string;
 }) {
+  // Display-only row filter — hidden-but-selected users stay selected.
+  const [filter, setFilter] = useState("");
   if (candidates.length === 0) {
     return <p className="muted small">{emptyLabel}</p>;
   }
+  const needle = filter.trim().toLowerCase();
+  const visible = candidates.filter(
+    (user) =>
+      !needle ||
+      user.email.toLowerCase().includes(needle) ||
+      (user.full_name ?? "").toLowerCase().includes(needle),
+  );
   return (
     <div className="crew-picker" data-testid={testId}>
-      <div
-        className="crew-picker-list"
-        style={{
-          maxHeight: 180,
-          overflowY: "auto",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: 8,
-        }}
-      >
-        {candidates.map((user) => (
-          <label
-            key={user.id}
-            className="crew-picker-row"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "4px 2px",
-            }}
-          >
+      <MultiSelectToolbar
+        selectedCount={selected.length}
+        onSelectAll={() => onSetAll(candidates.map((u) => u.id))}
+        onClearAll={() => onSetAll([])}
+        filterValue={filter}
+        onFilterChange={setFilter}
+        testIdPrefix={testId}
+      />
+      <div className="crew-picker-list multi-select-list">
+        {visible.map((user) => (
+          <label key={user.id} className="crew-picker-row">
             <input
               type="checkbox"
+              className="checkbox-input"
               checked={selected.includes(user.id)}
               onChange={() => onToggle(user.id)}
             />
@@ -1064,9 +1063,6 @@ function CrewPicker({
             </span>
           </label>
         ))}
-      </div>
-      <div className="muted small" style={{ marginTop: 6 }}>
-        {selectedLabel}
       </div>
     </div>
   );

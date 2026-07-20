@@ -31,6 +31,9 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { previewAdjustedPrice } from "../../utils/bulkAdjust";
+import { Toggle } from "../../components/Toggle";
 
 /**
  * Sprint 28 Batch 5 — Per-customer contract pricing.
@@ -191,14 +194,21 @@ export function CustomerPricingPage() {
   const [deleteTarget, setDeleteTarget] = useState<PricingRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  // M5 C — bulk-raise modal state (catalog-price section only).
+  // M5 C / #108 Part C — bulk-adjust modal state (catalog-price
+  // section only). `bulkDirection` picks raise vs lower.
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
   const [bulkMode, setBulkMode] = useState<"percent" | "fixed">("percent");
+  const [bulkDirection, setBulkDirection] = useState<"raise" | "lower">(
+    "raise",
+  );
   const [bulkAmount, setBulkAmount] = useState("");
   const [bulkValidFrom, setBulkValidFrom] = useState(todayISO);
   const [bulkError, setBulkError] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  // #108 Part D — display-only row filter for the long service list;
+  // hidden-but-selected rows stay selected (never changes submission).
+  const [bulkFilter, setBulkFilter] = useState("");
 
   // Sprint 8B — copy-from-default modal state. Seeds contract prices for
   // this customer from the provider catalog defaults (active services
@@ -210,6 +220,7 @@ export function CustomerPricingPage() {
   >([]);
   const [copyValidFrom, setCopyValidFrom] = useState(todayISO);
   const [copyValidTo, setCopyValidTo] = useState("");
+  const [copyFilter, setCopyFilter] = useState("");
   const [copyError, setCopyError] = useState("");
   const [copyBusy, setCopyBusy] = useState(false);
   const [copyResult, setCopyResult] =
@@ -462,12 +473,15 @@ export function CustomerPricingPage() {
     }
   }
 
-  // ---- M5 C — bulk-raise handlers (catalog-price section) ----------------
+  // ---- M5 C / #108 Part C — bulk-adjust handlers (catalog-price
+  // section) ----------------
   function openBulkRaise() {
     setBulkSelectedIds(activePrices.map((p) => p.id));
     setBulkMode("percent");
+    setBulkDirection("raise");
     setBulkAmount("");
     setBulkValidFrom(todayISO());
+    setBulkFilter("");
     setBulkError("");
     setBulkOpen(true);
   }
@@ -498,6 +512,16 @@ export function CustomerPricingPage() {
       setBulkError(t("customer_pricing.bulk_raise_error_amount"));
       return;
     }
+    // #108 Part C — client mirrors of the backend guards (the server
+    // re-checks both): a percent lower must stay below 100.
+    if (
+      bulkDirection === "lower" &&
+      bulkMode === "percent" &&
+      amountNumber >= 100
+    ) {
+      setBulkError(t("customer_pricing.bulk_raise_error_percent_lower"));
+      return;
+    }
     if (!bulkValidFrom) {
       setBulkError(t("customer_pricing.error_valid_from_required"));
       return;
@@ -509,6 +533,7 @@ export function CustomerPricingPage() {
         prices: bulkSelectedIds,
         mode: bulkMode,
         amount: bulkAmount.trim(),
+        direction: bulkDirection,
         valid_from: bulkValidFrom,
       });
       // Re-fetch the catalog price list so the new validity-window rows
@@ -528,6 +553,7 @@ export function CustomerPricingPage() {
     setCopySelectedServiceIds([]);
     setCopyValidFrom(todayISO());
     setCopyValidTo("");
+    setCopyFilter("");
     setCopyError("");
     setCopyResult(null);
     setCopyOpen(true);
@@ -1243,8 +1269,7 @@ export function CustomerPricingPage() {
               <label
                 style={{ display: "flex", alignItems: "center", gap: 8 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={form.is_active}
                   onChange={(event) =>
                     setForm((prev) => ({
@@ -1344,45 +1369,31 @@ export function CustomerPricingPage() {
               </div>
             ) : (
               <>
-                <div className="field">
-                  <label
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
-                  >
-                    <input
-                      type="checkbox"
-                      data-testid="customer-pricing-bulk-raise-select-all"
-                      checked={bulkSelectedIds.length === activePrices.length}
-                      onChange={(event) => toggleBulkAll(event.target.checked)}
-                      disabled={bulkBusy}
-                    />
-                    <span>
-                      {t("customer_pricing.bulk_raise_select_all")}
-                    </span>
-                  </label>
-                </div>
-
-                <div
-                  style={{
-                    border: "1px solid var(--border, #e5e7eb)",
-                    borderRadius: 8,
-                    padding: "8px 12px",
-                    marginBottom: 16,
-                    maxHeight: 220,
-                    overflowY: "auto",
-                  }}
-                >
-                  {activePrices.map((price) => (
-                    <label
-                      key={price.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "4px 0",
-                      }}
-                    >
+                {/* #108 Part D — shared multi-select treatment: Select
+                    all / Clear all + count + filter, internal scroll. */}
+                <MultiSelectToolbar
+                  selectedCount={bulkSelectedIds.length}
+                  onSelectAll={() => toggleBulkAll(true)}
+                  onClearAll={() => toggleBulkAll(false)}
+                  disabled={bulkBusy}
+                  filterValue={bulkFilter}
+                  onFilterChange={setBulkFilter}
+                  testIdPrefix="customer-pricing-bulk-raise"
+                />
+                <div className="multi-select-list">
+                  {activePrices
+                    .filter(
+                      (price) =>
+                        !bulkFilter.trim() ||
+                        resolveServiceName(price)
+                          .toLowerCase()
+                          .includes(bulkFilter.trim().toLowerCase()),
+                    )
+                    .map((price) => (
+                    <label key={price.id}>
                       <input
                         type="checkbox"
+                        className="checkbox-input"
                         data-testid="customer-pricing-bulk-raise-row"
                         data-price-id={price.id}
                         checked={bulkSelectedIds.includes(price.id)}
@@ -1393,6 +1404,35 @@ export function CustomerPricingPage() {
                       />
                       <span>
                         {resolveServiceName(price)} — {price.unit_price}
+                        {/* #108 Part C — live effect preview. Backend
+                            HALF_UP is authoritative; a result at or
+                            below zero shows red (the server rejects
+                            the whole batch). */}
+                        {bulkSelectedIds.includes(price.id) &&
+                          (() => {
+                            const next = previewAdjustedPrice(
+                              price.unit_price,
+                              bulkMode,
+                              bulkAmount,
+                              bulkDirection,
+                            );
+                            if (next === null) return null;
+                            return (
+                              <span
+                                style={{
+                                  color:
+                                    next <= 0
+                                      ? "var(--red)"
+                                      : "var(--green-2)",
+                                  fontWeight: 600,
+                                }}
+                                data-testid="customer-pricing-bulk-raise-preview"
+                              >
+                                {" "}
+                                → {next.toFixed(2)}
+                              </span>
+                            );
+                          })()}
                       </span>
                     </label>
                   ))}
@@ -1401,6 +1441,33 @@ export function CustomerPricingPage() {
             )}
 
             <div className="form-2col">
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="bulk-raise-direction"
+                >
+                  {t("customer_pricing.bulk_raise_direction_label")}
+                </label>
+                <select
+                  id="bulk-raise-direction"
+                  className="field-select"
+                  value={bulkDirection}
+                  onChange={(event) =>
+                    setBulkDirection(
+                      event.target.value === "lower" ? "lower" : "raise",
+                    )
+                  }
+                  data-testid="customer-pricing-bulk-raise-direction"
+                  disabled={bulkBusy}
+                >
+                  <option value="raise">
+                    {t("customer_pricing.bulk_raise_direction_raise")}
+                  </option>
+                  <option value="lower">
+                    {t("customer_pricing.bulk_raise_direction_lower")}
+                  </option>
+                </select>
+              </div>
               <div className="field">
                 <label className="field-label" htmlFor="bulk-raise-mode">
                   {t("customer_pricing.bulk_raise_mode_label")}
@@ -1565,47 +1632,30 @@ export function CustomerPricingPage() {
               </div>
             ) : (
               <>
-                <div className="field">
-                  <label
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
-                  >
-                    <input
-                      type="checkbox"
-                      data-testid="customer-pricing-copy-default-select-all"
-                      checked={
-                        copySelectedServiceIds.length === activeServices.length
-                      }
-                      onChange={(event) => toggleCopyAll(event.target.checked)}
-                      disabled={copyBusy}
-                    />
-                    <span>
-                      {t("customer_pricing.copy_from_default_select_all")}
-                    </span>
-                  </label>
-                </div>
-
-                <div
-                  style={{
-                    border: "1px solid var(--border, #e5e7eb)",
-                    borderRadius: 8,
-                    padding: "8px 12px",
-                    marginBottom: 16,
-                    maxHeight: 220,
-                    overflowY: "auto",
-                  }}
-                >
-                  {activeServices.map((service) => (
-                    <label
-                      key={service.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "4px 0",
-                      }}
-                    >
+                {/* #108 Part D — shared multi-select treatment. */}
+                <MultiSelectToolbar
+                  selectedCount={copySelectedServiceIds.length}
+                  onSelectAll={() => toggleCopyAll(true)}
+                  onClearAll={() => toggleCopyAll(false)}
+                  disabled={copyBusy}
+                  filterValue={copyFilter}
+                  onFilterChange={setCopyFilter}
+                  testIdPrefix="customer-pricing-copy-default"
+                />
+                <div className="multi-select-list">
+                  {activeServices
+                    .filter(
+                      (service) =>
+                        !copyFilter.trim() ||
+                        service.name
+                          .toLowerCase()
+                          .includes(copyFilter.trim().toLowerCase()),
+                    )
+                    .map((service) => (
+                    <label key={service.id}>
                       <input
                         type="checkbox"
+                        className="checkbox-input"
                         data-testid="customer-pricing-copy-default-row"
                         data-service-id={service.id}
                         checked={copySelectedServiceIds.includes(service.id)}

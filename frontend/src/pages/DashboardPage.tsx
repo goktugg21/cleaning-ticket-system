@@ -666,6 +666,14 @@ export function DashboardPage({
   const fmt = (value: number | null): string =>
     value === null ? "—" : String(value);
 
+  // #108 Option A — count badge for the "Aandacht nodig" rows. Rows the
+  // provider must act on get the warning tint as soon as the count is
+  // positive; rows waiting on someone else stay neutral.
+  const attnBadge = (value: number | null, actionable: boolean): string =>
+    actionable && value !== null && value > 0
+      ? "attn-count attn-count-warn"
+      : "attn-count";
+
   const focusItems = useMemo(
     () =>
       tickets
@@ -703,17 +711,30 @@ export function DashboardPage({
           </h2>
           <p className="page-sub">
             {/* RF-16 — the dashboard loads no list, so the list-count
-                subtitle only makes sense on the Tickets page. */}
-            {!isTicketsPage
-              ? t("subtitle_overview")
-              : loading
-                ? t("loading_data")
-                : t("subtitle_counts", {
-                    count,
-                    visible: tickets.length,
-                    page,
-                    pages: pageCount,
-                  })}
+                subtitle only makes sense on the Tickets page. The
+                dashboard shows the muted full-lists pointer instead
+                (#108 Option A). */}
+            {!isTicketsPage ? (
+              <>
+                {t("pointer.full_lists")}{" "}
+                <Link to="/tickets" className="page-sub-link">
+                  {t("pointer.tickets")}
+                </Link>
+                {" · "}
+                <Link to="/extra-work" className="page-sub-link">
+                  {t("pointer.extra_work")}
+                </Link>
+              </>
+            ) : loading ? (
+              t("loading_data")
+            ) : (
+              t("subtitle_counts", {
+                count,
+                visible: tickets.length,
+                page,
+                pages: pageCount,
+              })
+            )}
           </p>
         </div>
         <div className="page-header-actions">
@@ -760,10 +781,318 @@ export function DashboardPage({
       )}
 
       <div className="operations-dashboard">
-        {/* RF-3 — the Tickets page hides the dashboard-level chrome (KPI
-            hero, "my work", work-strip toggle) and leads straight with the
-            ticket surface below. The dashboard at "/" is unchanged. */}
-        {!isTicketsPage && (
+        {/* #108 Option A — the provider-management dashboard: a 4-KPI
+            hero, an "Aandacht nodig" priority list beside a compact
+            "Vandaag" column, and a "Mijn werk" chip row. All values come
+            from the existing #106/#107 loaders — no new fetches. */}
+        {!isTicketsPage && isProviderManagementRole(userRole) && (
+          <>
+            <div
+              className="operations-kpi-grid option-a-hero"
+              data-testid="dashboard-ops-kpi-row"
+            >
+              <div className="kpi-card" data-testid="hero-open-work">
+                <div className="kpi-label">{t("hero.open_label")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(opsKpis.totalOpen)}</div>
+                </div>
+                <div className="kpi-meta">{t("hero.open_meta")}</div>
+              </div>
+              <div
+                className="kpi-card kpi-urgent"
+                data-testid="hero-urgent"
+              >
+                <div className="kpi-label">{t("hero.urgent_label")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(opsKpis.urgent)}</div>
+                </div>
+                <div className="kpi-meta">{t("hero.urgent_meta")}</div>
+              </div>
+              <div className="kpi-card" data-testid="hero-awaiting">
+                <div className="kpi-label">{t("hero.awaiting_label")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">{fmt(opsKpis.awaiting)}</div>
+                </div>
+                <div className="kpi-meta">{t("hero.awaiting_meta")}</div>
+              </div>
+              <Link
+                to="/invoices"
+                className="kpi-card"
+                data-testid="hero-month"
+              >
+                <div className="kpi-label">{t("hero.month_label")}</div>
+                <div className="kpi-row-2">
+                  <div className="kpi-value">
+                    {billingMonthTotals
+                      ? formatMoney(billingMonthTotals.openTotal)
+                      : "—"}
+                  </div>
+                </div>
+                <div className="kpi-meta">
+                  {billingMonthTotals
+                    ? t("hero.month_meta", {
+                        invoiced: formatMoney(
+                          billingMonthTotals.invoicedTotal,
+                        ),
+                      })
+                    : t("hero.month_loading")}
+                </div>
+              </Link>
+            </div>
+
+            <section
+              className="attention-layout"
+              data-testid="dashboard-attention"
+            >
+              <div
+                className="card attention-card"
+                data-testid="attention-needed"
+              >
+                <div className="attention-card-head">
+                  <span className="attention-card-title">
+                    {t("attention_panel.title")}
+                  </span>
+                </div>
+                <ul className="attn-list">
+                  <li className="attn-item">
+                    <Link
+                      to="/tickets?status=WAITING_MANAGER_REVIEW"
+                      className="attn-row"
+                      data-testid="attention-review"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.review_title")}
+                      </span>
+                      <span
+                        className={attnBadge(
+                          stats?.by_status?.WAITING_MANAGER_REVIEW ?? null,
+                          true,
+                        )}
+                      >
+                        {fmt(stats?.by_status?.WAITING_MANAGER_REVIEW ?? null)}
+                      </span>
+                    </Link>
+                  </li>
+                  <li className="attn-item">
+                    <Link
+                      to="/tickets?status=OPEN&unassigned=1"
+                      className="attn-row"
+                      data-testid="attention-unassigned"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.unassigned_title")}
+                      </span>
+                      <span
+                        className={attnBadge(
+                          attnUnassigned?.count ?? null,
+                          true,
+                        )}
+                      >
+                        {fmt(attnUnassigned?.count ?? null)}
+                      </span>
+                    </Link>
+                    {(attnUnassigned?.rows ?? []).length > 0 && (
+                      <ul className="attn-sublist">
+                        {(attnUnassigned?.rows ?? []).slice(0, 3).map(
+                          (ticket) => (
+                            <li key={ticket.id}>
+                              <Link
+                                to={`/tickets/${ticket.id}`}
+                                className="attention-row"
+                              >
+                                <span className="attention-row-title">
+                                  {ticket.title}
+                                </span>
+                                <span className="muted small">
+                                  {formatDate(ticket.created_at)}
+                                </span>
+                              </Link>
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                    )}
+                  </li>
+                  <li className="attn-item">
+                    <Link
+                      to="/extra-work?status=UNDER_REVIEW"
+                      className="attn-row"
+                      data-testid="attention-awaiting-pricing"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.awaiting_pricing_title")}
+                      </span>
+                      <span
+                        className={attnBadge(
+                          extraWorkStats?.awaiting_pricing ?? null,
+                          true,
+                        )}
+                      >
+                        {fmt(extraWorkStats?.awaiting_pricing ?? null)}
+                      </span>
+                    </Link>
+                  </li>
+                  <li className="attn-item">
+                    <Link
+                      to="/extra-work?status=PRICING_PROPOSED"
+                      className="attn-row"
+                      data-testid="attention-awaiting-customer"
+                    >
+                      <span className="attn-row-label">
+                        {t("attention.awaiting_customer_title")}
+                      </span>
+                      {/* Waiting on the CUSTOMER — not provider-actionable,
+                          so this row never gets the warning tint. */}
+                      <span className="attn-count">
+                        {fmt(
+                          extraWorkStats?.awaiting_customer_approval ?? null,
+                        )}
+                      </span>
+                    </Link>
+                  </li>
+                </ul>
+              </div>
+
+              <div
+                className="card attention-card"
+                data-testid="dashboard-today"
+              >
+                <div className="attention-card-head">
+                  <span className="attention-card-title">
+                    {t("today.title")}
+                  </span>
+                </div>
+                <ul className="attn-list">
+                  <li className="attn-item">
+                    <Link
+                      to="/agenda"
+                      className="attn-row"
+                      data-testid="today-slots"
+                    >
+                      <span className="attn-row-label">{t("today.slots")}</span>
+                      <span className="attn-count">{fmt(todaySlotCount)}</span>
+                    </Link>
+                  </li>
+                  <li className="attn-item">
+                    <Link
+                      to="/inbox"
+                      className="attn-row"
+                      data-testid="today-inbox"
+                    >
+                      <span className="attn-row-label">
+                        {t("widgets.inbox")}
+                      </span>
+                      <span className="attn-count">{fmt(inboxUnread)}</span>
+                    </Link>
+                  </li>
+                </ul>
+                <div className="attention-card-head">
+                  <span className="attention-card-title">
+                    {t("attention.activity_title")}
+                  </span>
+                </div>
+                <ul
+                  className="attention-card-list"
+                  data-testid="attention-activity"
+                >
+                  {(attnActivity ?? []).map((item) => {
+                    const href = notificationHref(item);
+                    const body = (
+                      <>
+                        <span className="attention-row-title">
+                          {item.summary}
+                        </span>
+                        <span className="muted small">
+                          {formatDate(item.created_at)}
+                        </span>
+                      </>
+                    );
+                    return (
+                      <li key={item.id}>
+                        {href ? (
+                          <Link to={href} className="attention-row">
+                            {body}
+                          </Link>
+                        ) : (
+                          <span className="attention-row">{body}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {attnActivity !== null && attnActivity.length === 0 && (
+                    <li className="muted small">{t("attention.empty")}</li>
+                  )}
+                </ul>
+                <Link
+                  to="/notifications"
+                  className="attention-card-link"
+                  data-testid="attention-activity-link"
+                >
+                  {t("attention.view_all")}
+                </Link>
+              </div>
+            </section>
+
+            {me?.id && (
+              <section
+                className="mywork-section"
+                data-testid="dashboard-my-work"
+              >
+                <div className="section-head" style={{ marginBottom: 10 }}>
+                  <div className="section-head-title">{t("my_work.title")}</div>
+                </div>
+                <div className="mywork-chips">
+                  <Link
+                    to="/tickets?mine=1&exclude_type=REPORT"
+                    className="mywork-chip"
+                    data-testid="dashboard-my-tickets"
+                  >
+                    <span>{t("my_work.chip_tickets")}</span>
+                    <span className="mywork-chip-count">
+                      {fmt(myCounts.tickets)}
+                    </span>
+                  </Link>
+                  <Link
+                    to="/tickets?mine=1&type=REPORT"
+                    className="mywork-chip"
+                    data-testid="dashboard-my-meldingen"
+                  >
+                    <span>{t("my_work.chip_meldingen")}</span>
+                    <span className="mywork-chip-count">
+                      {fmt(myCounts.meldingen)}
+                    </span>
+                  </Link>
+                  <Link
+                    to="/extra-work?mine=1"
+                    className="mywork-chip"
+                    data-testid="dashboard-my-extra-work"
+                  >
+                    <span>{t("my_work.chip_extra_work")}</span>
+                    <span className="mywork-chip-count">
+                      {fmt(myCounts.extraWork)}
+                    </span>
+                  </Link>
+                  <Link
+                    to="/extra-work?mine=1&request_intent=REQUEST_QUOTE"
+                    className="mywork-chip"
+                    data-testid="dashboard-my-quote-requests"
+                  >
+                    <span>{t("my_work.chip_quotes")}</span>
+                    <span className="mywork-chip-count">
+                      {fmt(myCounts.quoteRequests)}
+                    </span>
+                  </Link>
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
+        {/* The STAFF + customer dashboard at "/" is preserved as-is —
+            #108 rebuilt only the provider-management view above. (The
+            management-only billing widget and "Mijn werk" cards never
+            rendered for these roles, so they are absent here.) */}
+        {!isTicketsPage && !isProviderManagementRole(userRole) && (
           <>
         {/* Top KPI strip — five cards, single visual block. Derived
             from existing stats endpoints; never aggregated from a
@@ -853,26 +1182,6 @@ export function DashboardPage({
               </span>
             </Link>
           )}
-          {canAccessBilling(userRole) && (
-            <Link
-              to="/invoices"
-              className="info-widget"
-              data-testid="widget-billing"
-            >
-              <span className="info-widget-value">
-                {billingMonthTotals
-                  ? formatMoney(billingMonthTotals.openTotal)
-                  : "—"}
-              </span>
-              <span className="info-widget-label">
-                {billingMonthTotals
-                  ? t("widgets.billing_month", {
-                      invoiced: formatMoney(billingMonthTotals.invoicedTotal),
-                    })
-                  : t("widgets.billing_month_loading")}
-              </span>
-            </Link>
-          )}
           {isStaffRole(userRole) && (
             <Link
               to="/agenda"
@@ -886,63 +1195,6 @@ export function DashboardPage({
             </Link>
           )}
         </section>
-
-        {/* M6.3 — "My work" summary. Provider-management only ("my
-            created items" is a provider-admin concept). Each card links
-            into a created_by=me-filtered list view. */}
-        {isProviderManagementRole(userRole) && me?.id && (
-          <section
-            className="my-work-section"
-            data-testid="dashboard-my-work"
-            style={{ marginTop: 12 }}
-          >
-            <div className="section-head" style={{ marginBottom: 10 }}>
-              <div className="section-head-title">{t("my_work.title")}</div>
-            </div>
-            <div className="operations-kpi-grid">
-              <Link
-                to="/tickets?mine=1&exclude_type=REPORT"
-                className="kpi-card"
-                data-testid="dashboard-my-tickets"
-              >
-                <div className="kpi-label">{t("my_work.tickets")}</div>
-                <div className="kpi-row-2">
-                  <div className="kpi-value">{fmt(myCounts.tickets)}</div>
-                </div>
-              </Link>
-              <Link
-                to="/tickets?mine=1&type=REPORT"
-                className="kpi-card"
-                data-testid="dashboard-my-meldingen"
-              >
-                <div className="kpi-label">{t("my_work.meldingen")}</div>
-                <div className="kpi-row-2">
-                  <div className="kpi-value">{fmt(myCounts.meldingen)}</div>
-                </div>
-              </Link>
-              <Link
-                to="/extra-work?mine=1"
-                className="kpi-card"
-                data-testid="dashboard-my-extra-work"
-              >
-                <div className="kpi-label">{t("my_work.extra_work")}</div>
-                <div className="kpi-row-2">
-                  <div className="kpi-value">{fmt(myCounts.extraWork)}</div>
-                </div>
-              </Link>
-              <Link
-                to="/extra-work?mine=1&request_intent=REQUEST_QUOTE"
-                className="kpi-card"
-                data-testid="dashboard-my-quote-requests"
-              >
-                <div className="kpi-label">{t("my_work.quote_requests")}</div>
-                <div className="kpi-row-2">
-                  <div className="kpi-value">{fmt(myCounts.quoteRequests)}</div>
-                </div>
-              </Link>
-            </div>
-          </section>
-        )}
 
         {/* RF-16 (#106) — attention cards replace the dashboard's big
             lists (which now live exclusively on the Tickets / Extra
@@ -1275,6 +1527,7 @@ export function DashboardPage({
                           <th style={{ width: 36 }}>
                             <input
                               type="checkbox"
+                              className="checkbox-input"
                               aria-label={t("bulk_confirm.select_all")}
                               data-testid="dashboard-bulk-select-all"
                               checked={allVisibleSelected}
@@ -1314,6 +1567,7 @@ export function DashboardPage({
                             >
                               <input
                                 type="checkbox"
+                                className="checkbox-input"
                                 aria-label={t("bulk_confirm.select_row", {
                                   ticket: ticket.ticket_no,
                                 })}

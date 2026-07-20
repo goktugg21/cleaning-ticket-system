@@ -21,6 +21,7 @@ import {
 } from "../api/inbox";
 import type { InboxRow, InboxThreadKind } from "../api/types";
 import { InboxThreadAvatar } from "../components/Avatar";
+import { Toggle } from "../components/Toggle";
 import { formatRelative, useLocaleCode } from "../lib/intl";
 
 type KindFilter = "all" | InboxThreadKind;
@@ -191,18 +192,14 @@ export function InboxPage() {
           />
         </label>
 
-        {/* IA — proper switch. Still a real checkbox for a11y/keyboard;
-            the track/knob are pure CSS over the hidden input. */}
+        {/* #108 Part D — unified on the shared platform Toggle (was a
+            bespoke inbox-switch track/knob). */}
         <label className="inbox-switch">
-          <input
-            type="checkbox"
+          <Toggle
             checked={unreadOnly}
             onChange={(e) => setUnreadOnly(e.target.checked)}
             data-testid="inbox-unread-only"
           />
-          <span className="inbox-switch-track" aria-hidden="true">
-            <span className="inbox-switch-knob" />
-          </span>
           {t("inbox.unread_only")}
         </label>
       </div>

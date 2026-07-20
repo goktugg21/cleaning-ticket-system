@@ -207,8 +207,9 @@ class SeedDemoDataShapeTests(TestCase):
         # in A + the one operational Ticket spawned for the demo Extra
         # Work request (Sprint 6A — one ticket per request; its title
         # now inherits the EW's "[DEMO] ..." marker, so it is counted
-        # here), and 2 in B.
-        self.assertEqual(len(tickets_a), 5)
+        # here) + the #108 Part G enrichment (3 attention/my-work
+        # tickets + 3 spawned billing-history tickets), and 2 in B.
+        self.assertEqual(len(tickets_a), 11)
         self.assertEqual(len(tickets_b), 2)
         # No ticket in Company A points at a Company B building, and
         # vice versa.
@@ -304,9 +305,11 @@ class SeedDemoDataIsolationTests(TestCase):
         # tickets in A and 2 in B, PLUS one ticket spawned by the
         # Sprint 29 Batch 29.8.5 demo Extra Work fixture in Company A
         # (an INSTANT-routed EW that auto-spawns one operational
-        # ticket on B1 Amsterdam). Cross-company isolation is the
-        # actual signal; the absolute counts are a sanity check.
-        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 5)
+        # ticket on B1 Amsterdam) PLUS the #108 Part G enrichment
+        # (3 attention/my-work tickets + 3 spawned billing tickets).
+        # Cross-company isolation is the actual signal; the absolute
+        # counts are a sanity check.
+        self.assertEqual(a_ticket_qs.filter(company=self.company_a).count(), 11)
         self.assertEqual(b_ticket_qs.filter(company=self.company_b).count(), 2)
 
     def test_cross_company_customer_visibility_is_blocked(self):

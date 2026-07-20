@@ -1,7 +1,6 @@
 {
   "back_to_extra_work": "Back to Extra Work",
   "back_to_dashboard": "Back to dashboard",
-
   "list.page_title": "Extra Work",
   "list.page_subtitle": "Requests for additional services outside the standard cleaning contract. Pricing is proposed by the provider and approved by the customer before any work begins.",
   "list.create_button": "New Extra Work",
@@ -30,13 +29,8 @@
   "list.billing_to_invoice": "To invoice",
   "list.empty_billing_month": "No Extra Work bills in this month.",
   "list.invoice_run_label": "Invoice run — {{month}}",
-  "list.invoice_run_mark": "Mark all as invoiced",
-  "list.invoice_run_clear": "Clear invoiced",
-  "list.invoice_run_confirm_mark": "Mark all completed Extra Work for {{month}} as invoiced?",
-  "list.invoice_run_confirm_clear": "Clear the invoiced status for all Extra Work in {{month}}?",
-  "list.invoice_run_marked": "Marked {{count}} as invoiced.",
-  "list.invoice_run_cleared": "Cleared {{count}}.",
-  "list.invoice_run_multi_company": "This month spans multiple companies — narrow the view to one to run invoicing.",
+  "list.invoice_run_pointer_prefix": "Invoicing is done on the",
+  "list.invoice_run_pointer_link": "Invoices page →",
   "list.export_csv": "Export CSV",
   "list.export_col_subtotal": "Subtotal",
   "list.export_col_vat": "VAT",
@@ -49,7 +43,6 @@
   "kpi.approved_meta": "Customer accepted",
   "kpi.value_label": "Total value",
   "kpi.value_meta": "Excludes cancelled",
-
   "quote.page_title": "Request a quote",
   "quote.page_subtitle": "Compose the work you would like priced. The provider prepares a proposal for your approval — nothing is carried out until you approve it.",
   "quote.submit_button": "Submit quote request",
@@ -75,7 +68,6 @@
   "create.field_category_other_text_placeholder": "e.g. Sealant repair",
   "create.field_urgency": "Urgency",
   "create.field_preferred_date": "Preferred date (optional)",
-
   "create.cart_section_title": "Service line items",
   "create.cart_section_helper": "Add one or more services. Each line has its own requested date and optional note.",
   "create.cart_empty": "No services added yet.",
@@ -95,11 +87,9 @@
   "create.prices.empty": "No agreed contract prices for this customer yet. All services are priced by the provider.",
   "create.prices.search_placeholder": "Search a service…",
   "create.prices.no_match": "No matching service.",
-
   "create.submit_button": "Submit request",
   "create.submitting": "Submitting…",
   "create.cancel_button": "Cancel",
-
   "create.error_title_required": "Title is required.",
   "create.error_description_required": "Description is required.",
   "create.error_building_customer_required": "Building and customer must both be selected.",
@@ -114,7 +104,6 @@
   "create.error_line_custom_required": "Describe the custom service or pick one from the list.",
   "create.error_line_quantity_invalid": "Quantity must be greater than 0.",
   "create.error_line_requested_date_required": "Requested date is required for every line.",
-
   "create.preview.section_title": "Pricing preview",
   "create.preview.helper": "A live overview of your cart. Lines with a pre-agreed price show your own contract price; other lines are priced by the provider.",
   "create.preview.loading": "Calculating prices…",
@@ -136,7 +125,6 @@
   "create.preview.totals_display_only": "For display only — sum of the lines with an agreed price. Lines the provider still needs to price are not included.",
   "create.preview.totals_unpriced_one": "1 line will be priced by the provider.",
   "create.preview.totals_unpriced_other": "{{count}} lines will be priced by the provider.",
-
   "create.intent.section_title": "How would you like to proceed?",
   "create.intent.section_helper": "Choose how this request is handled. The available options depend on the pricing above and your permissions.",
   "create.intent.direct.label": "Direct order — start now",
@@ -152,7 +140,6 @@
   "create.intent.error.required": "Please choose how to proceed.",
   "create.intent.error.rejected_generic": "The selected option is no longer valid for this cart. Review the pricing preview and choose an allowed option.",
   "create.intent.error.none_selected": "Choose how to proceed before submitting the request.",
-
   "result.heading": "Request submitted",
   "result.instant_processing": "Your order is being processed — operational tickets will be created shortly.",
   "result.proposal_pending": "Your request has been sent for pricing review — you'll be notified when a proposal is ready.",
@@ -160,7 +147,6 @@
   "result.cart_preview_title": "Submitted cart",
   "result.back_to_list": "Back to Extra Work",
   "result.view_request": "View this request",
-
   "detail.page_title": "Extra Work request",
   "detail.not_found": "Extra Work not found",
   "detail.details_section_title": "Details",
@@ -182,7 +168,6 @@
   "detail.billing_month_input_label": "Override billing month",
   "detail.billing_save": "Save",
   "detail.billing_use_completion": "Use completion month",
-
   "detail.line_items_section_title": "Requested services",
   "detail.line_items_empty": "No line items.",
   "detail.line_column_service": "Service",
@@ -190,11 +175,9 @@
   "detail.line_column_unit": "Unit",
   "detail.line_column_requested_date": "Requested date",
   "detail.line_column_note": "Note",
-
   "detail.routing_decision_label": "Routing",
   "detail.routing_decision_instant": "Instant — tickets being created",
   "detail.routing_decision_proposal": "Proposal — awaiting pricing review",
-
   "detail.proposal_lines_section_title": "Draft proposal lines",
   "detail.proposal_builder_title": "Pricing proposal",
   "detail.live_preview_title": "Live preview",
@@ -252,7 +235,10 @@
   "detail.pricing_internal_note_modal_title": "Internal cost note (provider-only)",
   "detail.note_modal_save": "Save",
   "detail.note_modal_cancel": "Cancel",
-
+  "detail.unit_custom_option": "Custom…",
+  "detail.custom_unit_modal_title": "Custom unit",
+  "detail.custom_unit_modal_desc": "Name the unit for this line (e.g. m³, pallet). The name appears as the unit on the line and in the PDF.",
+  "detail.custom_unit_placeholder": "e.g. m³, pallet, crate",
   "detail.workflow_section_title": "Workflow",
   "detail.workflow_customer_decision_helper": "The provider has proposed pricing. Please review the lines above and approve or reject.",
   "detail.workflow_approve_button": "Approve pricing",
@@ -291,7 +277,6 @@
   "detail.step_hint_under_review": "Prepare the pricing proposal below, then send it to the customer for approval.",
   "detail.step_hint_under_review_auto_start": "Prepare the pricing proposal below. The customer pre-authorized this — sending the proposal starts the work immediately, no separate approval needed.",
   "detail.action_confirm_pricing": "Confirm pricing & continue",
-
   "detail.override_section_title": "Provider override",
   "detail.override_warning_title": "Override the customer decision.",
   "detail.override_warning_body": "Use only when the customer has agreed by phone, email, or another out-of-band channel. Every override is recorded in the status history with your name, the chosen outcome, and the reason you type below.",
@@ -304,10 +289,8 @@
   "detail.override_cancel": "Cancel",
   "detail.override_confirm": "Confirm override → {{label}}",
   "detail.override_submitting": "Submitting…",
-
   "detail.updated_at": "Updated {{date}}",
   "detail.empty_dash": "—",
-
   "detail.actions_aria_label": "Actions",
   "detail.actions_decision_title": "Customer decision",
   "detail.actions_workflow_title": "Workflow",
@@ -316,9 +299,7 @@
   "detail.actions_retry_spawn_title": "Schedule work",
   "detail.pdf_download_button": "Download proposal PDF",
   "detail.pdf_download_busy": "Preparing PDF…",
-
   "detail.customer_decision_approve_success": "Pricing approved. The provider will schedule the work shortly.",
-
   "detail.retry_spawn": "Retry scheduling work",
   "detail.retry_spawn_busy": "Scheduling…",
   "detail.retry_spawn_helper": "No tickets have been scheduled for this approved request yet. Retry to spawn them now.",
@@ -328,18 +309,15 @@
   "detail.retry_spawn_error_already_done": "Tickets are already scheduled for this request.",
   "detail.retry_spawn_error_forbidden": "You don't have permission to schedule work for this request.",
   "detail.retry_spawn_error_generic": "Could not schedule work. Check the request details and contact support.",
-
   "detail.reject_dialog_title": "Reject this extra-work request",
   "detail.reject_dialog_description": "Please tell the provider why you're rejecting this proposal. Your reason will appear on the request timeline.",
   "detail.reject_dialog_placeholder": "Too expensive, scheduling conflict, no longer needed…",
   "detail.reject_dialog_confirm": "Confirm rejection",
   "detail.reject_dialog_cancel": "Cancel",
   "detail.reject_dialog_required": "A reason is required.",
-
   "detail.spawned_tickets_title": "Spawned tickets",
   "detail.spawned_tickets_desc": "Operational work generated from this Extra Work approval.",
   "detail.spawned_tickets_empty": "No tickets have been spawned from this Extra Work yet.",
-
   "detail.cancel_dialog_title": "Cancel this Extra Work?",
   "detail.cancel_dialog_body": "This will move the request to Cancelled and write the status change to the audit log.",
   "detail.cancel_dialog_confirm": "Cancel Extra Work",
@@ -347,7 +325,6 @@
   "detail.cancel_dialog_spawned_warning_title_one": "1 active ticket will remain after cancellation",
   "detail.cancel_dialog_spawned_warning_title_other": "{{count}} active tickets will remain after cancellation",
   "detail.cancel_dialog_spawned_warning_desc": "Cancelling this Extra Work does not cancel its spawned tickets — those continue to be operational work. Close or approve them separately.",
-
   "detail.direct_publish_section_title": "Direct publish proposal",
   "detail.direct_publish_button": "Publish directly · open tickets now",
   "detail.direct_publish_busy": "Publishing…",
@@ -360,7 +337,6 @@
   "detail.direct_publish_confirm": "Publish and open tickets",
   "detail.direct_publish_cancel": "Keep as draft",
   "detail.direct_publish_success": "Proposal published and tickets opened.",
-
   "category.deep_cleaning": "Deep cleaning",
   "category.window_cleaning": "Window cleaning",
   "category.floor_maintenance": "Floor maintenance",
@@ -370,11 +346,9 @@
   "category.event_cleaning": "Event cleaning",
   "category.emergency_cleaning": "Emergency cleaning",
   "category.other": "Other",
-
   "urgency.normal": "Normal",
   "urgency.high": "High",
   "urgency.urgent": "Urgent",
-
   "status.requested": "Requested",
   "status.under_review": "Under review",
   "status.pricing_proposed": "Pricing proposed",
@@ -383,13 +357,11 @@
   "status.completed": "Completed",
   "status.customer_rejected": "Customer rejected",
   "status.cancelled": "Cancelled",
-
   "unit_type.hours": "Hours",
   "unit_type.square_meters": "m²",
   "unit_type.fixed": "Fixed price",
   "unit_type.item": "Per item",
   "unit_type.other": "Other",
-
   "invoice_row.col_service": "Service",
   "invoice_row.col_source": "Source",
   "invoice_row.col_quantity": "Qty",
@@ -432,7 +404,3 @@
   "messages.sending": "Sending…",
   "messages.posted": "Message posted"
 }
-
-
-
-

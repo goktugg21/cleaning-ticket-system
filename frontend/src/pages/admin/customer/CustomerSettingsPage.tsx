@@ -18,6 +18,7 @@ import { useSavedBanner } from "../../../hooks/useSavedBanner";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 import { ZoneHeader } from "./permissions/ZoneHeader";
+import { Toggle } from "../../../components/Toggle";
 
 /**
  * Sprint 28 Batch 13 (rework) — Customer Settings page (admin variant).
@@ -202,8 +203,7 @@ export function CustomerSettingsPage() {
 
             <div className="settings-toggle-group">
               <label className="settings-toggle-row">
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showAssignedStaffName}
                   onChange={(event) =>
                     setShowAssignedStaffName(event.target.checked)
@@ -214,8 +214,7 @@ export function CustomerSettingsPage() {
                 <span>{t("customer_form.show_assigned_staff_name")}</span>
               </label>
               <label className="settings-toggle-row">
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showAssignedStaffEmail}
                   onChange={(event) =>
                     setShowAssignedStaffEmail(event.target.checked)
@@ -226,8 +225,7 @@ export function CustomerSettingsPage() {
                 <span>{t("customer_form.show_assigned_staff_email")}</span>
               </label>
               <label className="settings-toggle-row">
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showAssignedStaffPhone}
                   onChange={(event) =>
                     setShowAssignedStaffPhone(event.target.checked)

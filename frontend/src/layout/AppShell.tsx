@@ -333,6 +333,27 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.customer_submenu.tickets")}
                   </NavLink>
+                  {/* #108 Part E — customer-scoped Invoices + Reports. */}
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/invoices`}
+                    className={navClass}
+                    data-testid="sidebar-customer-invoices"
+                  >
+                    <span className="nav-icon">
+                      <BadgeEuro size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.invoices")}
+                  </NavLink>
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/reports`}
+                    className={navClass}
+                    data-testid="sidebar-customer-reports"
+                  >
+                    <span className="nav-icon">
+                      <BarChart3 size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.reports")}
+                  </NavLink>
                 </>
               )}
               <NavLink

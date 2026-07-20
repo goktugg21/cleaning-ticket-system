@@ -25,11 +25,9 @@
   "list.empty_filtered_title": "Geen terugkerende taken gevonden",
   "list.empty_filtered_desc": "Probeer een ander statusfilter of wis de zoekopdracht.",
   "list.loading": "Terugkerende taken laden…",
-
   "frequency.WEEKLY": "Wekelijks",
   "frequency.BIWEEKLY": "Tweewekelijks",
   "frequency.MONTHLY": "Maandelijks",
-
   "weekday_short.1": "ma",
   "weekday_short.2": "di",
   "weekday_short.3": "wo",
@@ -37,18 +35,15 @@
   "weekday_short.5": "vr",
   "weekday_short.6": "za",
   "weekday_short.7": "zo",
-
   "pricing_mode.CONTRACT_INCLUDED": "Inbegrepen in contract",
   "pricing_mode.FIXED": "Vaste prijs",
   "pricing_mode.HOURLY": "Per uur",
-
   "pricing.included": "Inbegrepen in contract",
   "pricing.ex_vat_suffix": "excl. btw",
   "pricing.subtotal": "Subtotaal (excl. btw)",
   "pricing.vat": "Btw",
   "pricing.total": "Totaal (incl. btw)",
   "pricing.vat_pct_label": "Btw %",
-
   "occ_status.PLANNED": "Gepland",
   "occ_status.TICKET_CREATED": "Ticket aangemaakt",
   "occ_status.COMPLETED": "Voltooid",
@@ -56,7 +51,6 @@
   "occ_status.RESCHEDULED": "Verzet",
   "occ_status.SKIPPED": "Overgeslagen",
   "occ_status.CANCELLED": "Geannuleerd",
-
   "calendar.title": "Uitvoeringskalender",
   "calendar.desc": "De roosterregel vult de vinkjes vooraf in. Vink een datum uit om over te slaan, opnieuw aan om te herstellen, of vink een datum buiten de regel aan om er een toe te voegen. Elke wijziging geldt voor de hele datum.",
   "calendar.loading": "Kalender laden…",
@@ -72,7 +66,6 @@
   "calendar.toast_added": "Datum gepland",
   "calendar.toast_skipped": "Datum overgeslagen",
   "calendar.toast_cleared": "Datum hersteld",
-
   "form.create_title": "Nieuwe terugkerende taak",
   "form.edit_title": "{{title}} bewerken",
   "form.back_to_list": "Terug naar terugkerend werk",
@@ -132,7 +125,6 @@
   "form.crew_load_failed": "Kon het geschikte team voor dit gebouw niet laden.",
   "form.no_staff_options": "Geen geschikte medewerkers",
   "form.no_manager_options": "Geen geschikte beheerders",
-  "form.selected_count": "{{count}} geselecteerd",
   "form.submit_create": "Terugkerende taak aanmaken",
   "form.submit_edit": "Wijzigingen opslaan",
   "form.saving": "Opslaan…",
@@ -147,7 +139,6 @@
   "form.created_toast_desc": "Open de taak om uitvoeringen te genereren.",
   "form.saved_toast_title": "Wijzigingen opgeslagen",
   "form.saved_toast_desc": "De terugkerende taak is bijgewerkt.",
-
   "detail.back_to_list": "Terug naar terugkerend werk",
   "detail.edit": "Bewerken",
   "detail.archive": "Archiveren",
@@ -195,7 +186,6 @@
   "detail.action_skip": "Overslaan",
   "detail.action_cancel": "Annuleren",
   "detail.action_override": "Aanpassen",
-
   "generate.dialog_title": "Uitvoeringen genereren",
   "generate.dialog_body": "Genereer uitvoeringen voor deze taak binnen de horizon en maak de bijbehorende tickets aan. Dit is idempotent — opnieuw uitvoeren maakt nooit dubbele.",
   "generate.field_days_ahead": "Dagen vooruit",
@@ -203,19 +193,16 @@
   "generate.confirm": "Genereren",
   "generate.result_toast_title": "Uitvoeringen gegenereerd",
   "generate.result_toast_desc": "{{occurrences}} uitvoering(en) en {{tickets}} ticket(s) aangemaakt.",
-
   "skip.dialog_title": "Uitvoering overslaan",
   "skip.dialog_desc": "Overslaan markeert deze geplande datum als niet uitgevoerd. Een reden is verplicht en wordt vastgelegd in de uitvoeringsgeschiedenis.",
   "skip.dialog_placeholder": "Waarom wordt deze uitvoering overgeslagen?",
   "skip.dialog_confirm": "Uitvoering overslaan",
   "skip.toast_title": "Uitvoering overgeslagen",
-
   "cancel.dialog_title": "Uitvoering annuleren",
   "cancel.dialog_desc": "Annuleren verwijdert deze geplande datum uit het schema. Een reden is verplicht en wordt vastgelegd in de uitvoeringsgeschiedenis.",
   "cancel.dialog_placeholder": "Waarom wordt deze uitvoering geannuleerd?",
   "cancel.dialog_confirm": "Uitvoering annuleren",
   "cancel.toast_title": "Uitvoering geannuleerd",
-
   "override.dialog_title": "Uitvoering aanpassen",
   "override.dialog_desc": "Dit wijzigt alleen de planningskalender voor deze uitvoering (bijv. een eenmalige prijs of \"deze datum na 09:00\"). Het verzet GEEN ticket dat al is aangemaakt.",
   "override.field_pricing_mode": "Prijsmodus",
@@ -226,13 +213,11 @@
   "override.confirm": "Aanpassing opslaan",
   "override.saving": "Opslaan…",
   "override.toast_title": "Uitvoering bijgewerkt",
-
   "archive.dialog_title": "Terugkerende taak archiveren?",
   "archive.dialog_body": "De taak genereert geen nieuwe uitvoeringen meer. Bestaande uitvoeringen blijven bewaard voor rapportage. U kunt de taak later herstellen.",
   "archive.confirm": "Archiveren",
   "archive.toast_archived": "Terugkerende taak gearchiveerd",
   "archive.toast_unarchived": "Terugkerende taak hersteld",
-
   "errors.load_failed": "Kon terugkerend werk niet laden.",
   "errors.generic": "Er ging iets mis. Probeer het opnieuw."
 }

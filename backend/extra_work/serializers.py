@@ -1624,6 +1624,18 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(
         source="service.name", read_only=True, default=None
     )
+    # #108 Part B — declared explicitly with trim_whitespace=False so
+    # the RF-2 mirror in validate() owns the stripping: a supplied
+    # whitespace-only label must reach the validator intact to be
+    # rejected with the stable `custom_unit_label_required` code
+    # (DRF's default trimming would silently collapse it to a legal
+    # blank first).
+    custom_unit_label = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
     # See module-level "Per-line pricing source" docblock for the
     # contract. Proposal lines have their own persisted `unit_price` +
     # `vat_pct` snapshot; the classifier compares against an active
@@ -1642,6 +1654,7 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             "description",
             "quantity",
             "unit_type",
+            "custom_unit_label",
             "unit_price",
             "vat_pct",
             "customer_explanation",
@@ -1708,6 +1721,43 @@ class ProposalLineAdminSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"description": "Required when service is not set."}
             )
+
+        # #108 Part B — mirror the RF-2 custom-unit rule from
+        # `serializers_catalog.CustomerCustomPriceSerializer` (same
+        # stable code `custom_unit_label_required`) with ONE
+        # owner-decided difference: a plain OTHER line with a BLANK
+        # label stays legal — the composer offers both "Other" and
+        # "Custom…", and only the Custom path demands a name (the
+        # backend sees that path as a supplied, non-empty label). A
+        # concrete unit type forces the label blank so a stale label
+        # can never contradict its unit; for OTHER the label is
+        # stripped, and a supplied whitespace-only label (an attempted
+        # custom name that collapses to nothing) is rejected.
+        unit_type = attrs.get(
+            "unit_type", getattr(instance, "unit_type", None)
+        )
+        if unit_type != ExtraWorkPricingUnitType.OTHER:
+            if "custom_unit_label" in attrs or instance is not None:
+                attrs["custom_unit_label"] = ""
+        else:
+            raw = attrs.get(
+                "custom_unit_label",
+                getattr(instance, "custom_unit_label", ""),
+            )
+            label = (raw or "").strip()
+            if raw and not label:
+                raise serializers.ValidationError(
+                    {
+                        "custom_unit_label": [
+                            serializers.ErrorDetail(
+                                "A unit name is required when the unit "
+                                "is entered as Custom.",
+                                code="custom_unit_label_required",
+                            )
+                        ]
+                    }
+                )
+            attrs["custom_unit_label"] = label
         return attrs
 
     def _classified(self, obj):
@@ -1755,6 +1805,7 @@ class ProposalLineCustomerSerializer(serializers.ModelSerializer):
             "description",
             "quantity",
             "unit_type",
+            "custom_unit_label",
             "unit_price",
             "vat_pct",
             "customer_explanation",
@@ -1944,6 +1995,7 @@ class ProposalCreateSerializer(serializers.ModelSerializer):
                         description=line.get("description", ""),
                         quantity=line["quantity"],
                         unit_type=line["unit_type"],
+                        custom_unit_label=line.get("custom_unit_label", ""),
                         unit_price=line["unit_price"],
                         vat_pct=line.get("vat_pct", Decimal("21.00")),
                         customer_explanation=line.get(

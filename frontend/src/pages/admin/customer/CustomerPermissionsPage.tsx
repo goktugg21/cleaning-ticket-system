@@ -47,6 +47,7 @@ import {
   draftValueFromOverride,
 } from "./permissions/effectiveResolver";
 import { Users as UsersIcon } from "lucide-react";
+import { Toggle } from "../../../components/Toggle";
 
 /**
  * Sprint 28 Batch 15.2 — Customer Permissions page rebuild.
@@ -688,8 +689,7 @@ export function CustomerPermissionsPage() {
                 className="tech-keys-toggle"
                 data-testid="show-technical-keys-toggle"
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={showTechKeys}
                   onChange={(e) => setShowTechKeys(e.target.checked)}
                 />

@@ -61,6 +61,7 @@ import {
 import { AttachmentThumb } from "../components/AttachmentThumb";
 import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { Toggle } from "../components/Toggle";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { ConvertToExtraWorkDialog } from "../components/ConvertToExtraWorkDialog";
 import { useToast } from "../components/ToastProvider";
@@ -1490,8 +1491,7 @@ export function TicketDetailPage() {
                   {canUsePrivate && (
                     <>
                       <label className="composer-private-toggle">
-                        <input
-                          type="checkbox"
+                        <Toggle
                           checked={effectivePrivate}
                           disabled={directedTo.length === 0}
                           onChange={(event) => setIsPrivate(event.target.checked)}
@@ -1727,8 +1727,7 @@ export function TicketDetailPage() {
                 >
                   {ticket?.actions?.can_upload_hidden_attachment && (
                     <label className="login-check" style={{ margin: 0 }}>
-                      <input
-                        type="checkbox"
+                      <Toggle
                         checked={attachmentHidden}
                         onChange={(event) =>
                           setAttachmentHidden(event.target.checked)
@@ -1956,12 +1955,15 @@ export function TicketDetailPage() {
               dispatch). The field-staff heading interpolates the
               ticket's providing company name to remove the prior
               hardcoded "OSIUS" multi-tenant bug. */}
+          {/* #108 Part F — right-column cards default COLLAPSED
+              (Workflow below stays open); the persistKey override wins
+              once the user touches a card. */}
           <CollapsibleCard
             title={t("card_assignment_title")}
             meta={t("side_summary_assignment", {
               count: ticket.assigned_staff?.length ?? 0,
             })}
-            defaultOpen
+            defaultOpen={false}
             persistKey="ticket-side-assignment"
             testId="side-card-assignment"
           >
@@ -2545,7 +2547,7 @@ export function TicketDetailPage() {
               dialog is unchanged. */}
           <CollapsibleCard
             title={t("card_details_title")}
-            defaultOpen
+            defaultOpen={false}
             persistKey="ticket-side-details"
             testId="side-card-details"
           >

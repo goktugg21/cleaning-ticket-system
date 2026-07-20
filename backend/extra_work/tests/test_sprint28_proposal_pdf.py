@@ -507,3 +507,30 @@ class ProposalPdfWidthFitTest(TestCase):
             unit_type=ExtraWorkPricingUnitType.ITEM,
         )
         self.assertEqual(_fmt_qty_unit(line), "1.234,50 stuks")
+
+        # #108 Part B — a custom unit label replaces the enum label as
+        # the unit text ("overig" never appears), and a realistic custom
+        # label at a large grouped quantity still width-fits the Qty
+        # column via _fit_font_size (same realistic-bounds convention as
+        # the m² probes above — _fitted_cell shrinks, it never truncates).
+        line = ProposalLine(
+            quantity=Decimal("2.00"),
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="m³",
+        )
+        self.assertEqual(_fmt_qty_unit(line), "2,00 m³")
+        pallet_line = ProposalLine(
+            quantity=Decimal("1234.50"),
+            unit_type=ExtraWorkPricingUnitType.OTHER,
+            custom_unit_label="pallet",
+        )
+        label = _fmt_qty_unit(pallet_line)
+        self.assertEqual(label, "1.234,50 pallet")
+        self.assertNotIn("overig", label)
+        size = _fit_font_size(pdf, label, QTY_COL_WIDTH, 9.0, 6.0)
+        pdf.set_font_size(size)
+        self.assertLessEqual(
+            pdf.get_string_width(label),
+            QTY_COL_WIDTH - 1.2,
+            f"custom-unit label {label!r} overflows the qty column",
+        )

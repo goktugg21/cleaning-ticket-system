@@ -33,6 +33,7 @@ import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 import { StaffCredentialsSection } from "./StaffCredentialsSection";
 import { UserPropertiesSection } from "./UserPropertiesSection";
+import { Toggle } from "../../components/Toggle";
 
 interface UserUpdatePayload {
   full_name: string;
@@ -779,8 +780,7 @@ function StaffDetailsSection({
                   cursor: canEdit ? "pointer" : "default",
                 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={canRequestAssignment}
                   onChange={(event) =>
                     setCanRequestAssignment(event.target.checked)
@@ -803,8 +803,7 @@ function StaffDetailsSection({
                   cursor: canEdit ? "pointer" : "default",
                 }}
               >
-                <input
-                  type="checkbox"
+                <Toggle
                   checked={isActive}
                   onChange={(event) => setIsActive(event.target.checked)}
                   disabled={!canEdit || profileSaving}
@@ -929,8 +928,7 @@ function StaffDetailsSection({
                               cursor: canEdit ? "pointer" : "default",
                             }}
                           >
-                            <input
-                              type="checkbox"
+                            <Toggle
                               checked={row.can_request_assignment}
                               onChange={(event) =>
                                 handleToggleCanRequest(
@@ -962,8 +960,7 @@ function StaffDetailsSection({
                               marginTop: 6,
                             }}
                           >
-                            <input
-                              type="checkbox"
+                            <Toggle
                               checked={
                                 row.staff_completion_routes_to_customer
                               }
@@ -1079,8 +1076,7 @@ function StaffDetailsSection({
                             cursor: canEdit ? "pointer" : "default",
                           }}
                         >
-                          <input
-                            type="checkbox"
+                          <Toggle
                             checked={row.can_request_assignment}
                             onChange={(event) =>
                               handleToggleCanRequest(
@@ -1114,8 +1110,7 @@ function StaffDetailsSection({
                             cursor: canEdit ? "pointer" : "default",
                           }}
                         >
-                          <input
-                            type="checkbox"
+                          <Toggle
                             checked={row.staff_completion_routes_to_customer}
                             onChange={(event) =>
                               handleToggleRoutesToCustomer(

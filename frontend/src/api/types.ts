@@ -1232,6 +1232,10 @@ export interface ProposalLine {
   description: string;
   quantity: string;
   unit_type: ExtraWorkUnitType;
+  // #108 Part B — operator-supplied unit name for a line entered via
+  // the composer's "Custom…" unit (unit_type is then OTHER). Blank on
+  // every other line. Present on BOTH admin and customer reads.
+  custom_unit_label: string;
   unit_price: string;
   vat_pct: string;
   customer_explanation: string;
@@ -1822,6 +1826,8 @@ export interface ServiceBulkRaisePayload {
   services: number[];
   mode: "percent" | "fixed";
   amount: string;
+  // #108 Part C — omitted means "raise" (pre-#108 wire shape).
+  direction?: "raise" | "lower";
 }
 
 export interface ServiceBulkRaiseResultRow {
@@ -1908,6 +1914,8 @@ export interface CustomerPriceBulkRaisePayload {
   prices: number[];
   mode: "percent" | "fixed";
   amount: string;
+  // #108 Part C — omitted means "raise" (pre-#108 wire shape).
+  direction?: "raise" | "lower";
   valid_from: string;
 }
 

@@ -92,6 +92,9 @@ interface NormalizedLine {
   // Quantity + unit.
   quantity: string;
   unitType: ExtraWorkUnitType | ServiceUnitType;
+  // #108 Part B — operator-supplied unit name (proposal lines entered
+  // via "Custom…"); when set it replaces the enum unit label.
+  customUnitLabel?: string;
   // Money columns. Each may be null when the line shape doesn't carry
   // that amount (e.g. cart lines have no own unit_price/totals).
   unitPrice: string | null;
@@ -140,6 +143,7 @@ function normalize(props: InvoiceLineRowProps): NormalizedLine {
         label,
         quantity: line.quantity,
         unitType: line.unit_type,
+        customUnitLabel: line.custom_unit_label?.trim() || undefined,
         unitPrice: line.unit_price,
         vatPct: line.vat_pct,
         subtotal: line.line_subtotal,
@@ -206,9 +210,9 @@ export function InvoiceLineRow(props: InvoiceLineRowProps) {
   const normalized = normalize(props);
   const editable = props.editable === true;
 
-  const unitTypeLabel = t(
-    UNIT_TYPE_I18N_KEY[normalized.unitType] ?? "unit_type.other",
-  );
+  const unitTypeLabel =
+    normalized.customUnitLabel ??
+    t(UNIT_TYPE_I18N_KEY[normalized.unitType] ?? "unit_type.other");
   const sourceLabel = t(
     sourceLabelKey(normalized.priceSource, normalized.hasOwnUnitPrice),
   );

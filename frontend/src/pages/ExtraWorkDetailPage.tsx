@@ -78,6 +78,7 @@ import type {
 import { CollapsibleCard } from "../components/CollapsibleCard";
 import { ConfirmDialog, type ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
+import { Toggle } from "../components/Toggle";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
 import { INVOICE_LINE_COLUMN_KEYS } from "../components/invoiceLineColumns";
 import { PageHeader } from "../components/PageHeader";
@@ -1974,8 +1975,7 @@ export function ExtraWorkDetailPage() {
                       {ewCanUsePrivate && (
                         <>
                           <label className="composer-private-toggle">
-                            <input
-                              type="checkbox"
+                            <Toggle
                               checked={ewEffectivePrivate}
                               disabled={ewDirectedTo.length === 0}
                               onChange={(e) => setEwIsPrivate(e.target.checked)}
