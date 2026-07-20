@@ -804,6 +804,84 @@ def _on_ticket_staff_assignment_post_save_update(
 
 
 # ===========================================================================
+# #109 Part B (audit P2-1) — ExtraWorkRequest BILLING-field audit.
+#
+# The parent ExtraWorkRequest stays OUT of the generic full-CRUD trio
+# (see the Batch 6 NB in the registration list below): its STATUS
+# lifecycle is the H-11 workflow trail owned by ExtraWorkStatusHistory,
+# and cart CREATEs would spam the feed. This dedicated UPDATE-ONLY
+# handler tracks ONLY the three billing columns (provider-set billing
+# date + the invoice run's mark/clear writes), so:
+#   * a billing-month PATCH lands as exactly one AuditLog UPDATE row
+#     with the invoice_date before/after,
+#   * a mark-/clear-invoiced run lands as one row PER changed EW
+#     (each row's save() fires this handler — bulk coverage for free),
+#   * a plain status transition (or any other field write) emits
+#     NOTHING here, preserving the H-11 separation.
+# ===========================================================================
+_EW_BILLING_TRACKED_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
+
+
+def _ew_billing_snapshot_for_pre_save(instance):
+    if instance.pk is None:
+        return None
+    from extra_work.models import ExtraWorkRequest
+
+    try:
+        previous = ExtraWorkRequest.objects.get(pk=instance.pk)
+    except ExtraWorkRequest.DoesNotExist:
+        return None
+    return {
+        field: serialize_value(getattr(previous, field))
+        for field in _EW_BILLING_TRACKED_FIELDS
+    }
+
+
+def _on_extra_work_request_pre_save(sender, instance, **kwargs):
+    try:
+        snapshot = _ew_billing_snapshot_for_pre_save(instance)
+        _state_map()[
+            ("extra_work.ExtraWorkRequest", instance.pk)
+        ] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: ExtraWorkRequest pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_extra_work_request_post_save_update(
+    sender, instance, created, **kwargs
+):
+    """UPDATE-only handler: emit a CRUD UPDATE row with the diff of the
+    three billing fields. CREATE is deliberately a no-op (cart creates
+    are not billing events); non-billing writes produce no diff and
+    therefore no row."""
+    if created:
+        return
+    try:
+        snapshot = _state_map().pop(
+            ("extra_work.ExtraWorkRequest", instance.pk), None
+        )
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _EW_BILLING_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = serialize_value(getattr(instance, field))
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: ExtraWorkRequest post_save UPDATE failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+# ===========================================================================
 # Sprint 12 — PlannedOccurrence per-occurrence price / schedule-window
 # override. The occurrence is intentionally NOT in the generic CRUD trio:
 # its STATUS lifecycle (PLANNED/TICKET_CREATED/COMPLETED/...) is the H-11
@@ -1434,6 +1512,25 @@ def _connect():
     # handlers registered above (the membership UPDATE-fallback now skips
     # TicketStaffAssignment, see _on_membership_post_save) so each slot
     # edit lands as exactly one AuditLog UPDATE row.
+    # #109 Part B (audit P2-1) — billing-field UPDATE handler for the
+    # parent ExtraWorkRequest. Tracks ONLY invoice_date / is_invoiced /
+    # invoiced_at; status stays with ExtraWorkStatusHistory (H-11) and
+    # CREATE stays silent. One row per changed EW in a bulk invoice run.
+    from extra_work.models import ExtraWorkRequest
+
+    pre_save.connect(
+        _on_extra_work_request_pre_save,
+        sender=ExtraWorkRequest,
+        weak=False,
+        dispatch_uid="audit:ewb:pre:ExtraWorkRequest",
+    )
+    post_save.connect(
+        _on_extra_work_request_post_save_update,
+        sender=ExtraWorkRequest,
+        weak=False,
+        dispatch_uid="audit:ewb:post_update:ExtraWorkRequest",
+    )
+
     pre_save.connect(
         _on_ticket_staff_assignment_pre_save,
         sender=TicketStaffAssignment,
