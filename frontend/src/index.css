@@ -1744,6 +1744,12 @@ table.data-table {
   max-height: 260px;
   overflow-y: auto;
 }
+/* #109 Part F — taller cap for lists whose rows are interactive
+   cards (per-building access editors) rather than one-line checkbox
+   rows. */
+.multi-select-list-tall {
+  max-height: 320px;
+}
 .multi-select-list label {
   display: flex;
   align-items: center;
@@ -2565,16 +2571,16 @@ table.data-table {
    builder the full card width. The split now lives INSIDE the
    collapsible pricing card, so the builder column is a plain flex
    stack instead of its own `.card`. */
+/* #109 Part E (owner point 1) — the preview is no longer a side
+   column: the split stays ONE column at every width, so the pane
+   stacks BELOW the builder at full card width and the composer row
+   never gets squeezed. `.proposal-split-single` (preview hidden) is
+   now visually identical but kept for the testid/state contract. */
 .proposal-split {
   display: grid;
   grid-template-columns: 1fr;
   gap: 20px;
   align-items: start;
-}
-@media (min-width: 1100px) {
-  .proposal-split:not(.proposal-split-single) {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
-  }
 }
 .proposal-builder-main {
   display: flex;
@@ -2592,15 +2598,15 @@ table.data-table {
   gap: 4px;
 }
 .proposal-preview-pane {
-  position: sticky;
-  top: 16px;
+  /* #109 Part E — bottom-of-card placement: no sticky side-pane
+     behavior; a bounded height keeps the PDF scrollable in place. */
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 32px);
+  max-height: 70vh;
 }
 .proposal-preview-head {
   display: flex;
@@ -6752,6 +6758,13 @@ a.attn-row:hover {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* #109 Part F — viewport cap + internal scroll: the convert-to-EW
+     dialog's growing line list used to push its action buttons off
+     screen with no scroll path (the fixed backdrop never scrolls).
+     Mirrors .permission-editor-modal; protects every .reject-modal
+     consumer. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 .reject-modal-title {
   margin: 0;
