@@ -258,3 +258,40 @@ class InvoiceLine(models.Model):
 
     def __str__(self):
         return f"Line {self.ordering} of invoice #{self.invoice_id}"
+
+
+class InvoiceNumberSequence(models.Model):
+    """
+    Phase 2b — the per-(company, year) GAPLESS invoice-number counter.
+
+    This table is the ONLY authority for issue numbers. At issue (and at
+    reversal) `invoicing.numbering.allocate_invoice_number` get_or_creates the
+    (company, year) row, re-fetches it with select_for_update (so concurrent
+    allocations serialize on the row lock — mirroring the tickets
+    state_machine locking pattern), increments `last_number`, and formats
+    "YYYY-NNNN". There is always exactly ONE row to lock per sequence, so
+    there is no empty-set race and numbering stays gapless per company + year.
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.CASCADE,
+        related_name="invoice_number_sequences",
+    )
+    year = models.PositiveIntegerField()
+    last_number = models.PositiveIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["company", "year"],
+                name="uniq_invoice_seq_company_year",
+            ),
+        ]
+        indexes = [models.Index(fields=["company", "year"])]
+
+    def __str__(self):
+        return f"seq {self.company_id}/{self.year} = {self.last_number}"
