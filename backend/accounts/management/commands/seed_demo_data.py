@@ -204,17 +204,33 @@ SUPER_ADMIN_USER = {
 # so /admin/users shows the role and tenant at a glance. The previous
 # v1 emails (super@, admin@, gokhan@, …) are in LEGACY_DEMO_EMAILS so
 # a stack that ran v1 transitions cleanly to v2 on first reseed.
+# #110 — extra Osius demo buildings so the contact-modal + permissions
+# building pickers (the capped-scroll `.multi-select-list` treatment from
+# #109 Part F) VISIBLY overflow in the demo. All are created under the
+# Osius company and linked to the B Amsterdam customer (via the standard
+# customer["buildings"] path), so a ~18-row picker exceeds the ~260-320px
+# cap and scrolls. Managers / staff / tickets stay pinned to B1-B3.
+_OSIUS_EXTRA_BUILDINGS = [
+    f"Bijkantoor {n:02d} Amsterdam" for n in range(4, 19)
+]
+_OSIUS_ALL_BUILDINGS = [
+    "B1 Amsterdam",
+    "B2 Amsterdam",
+    "B3 Amsterdam",
+    *_OSIUS_EXTRA_BUILDINGS,
+]
+
 COMPANIES = [
     {
         "name": "Osius Demo",
         "slug": "osius-demo",
         "address": "Maroastraat 3, 1060LG Amsterdam",
         "default_language": "nl",
-        "buildings": ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"],
+        "buildings": list(_OSIUS_ALL_BUILDINGS),
         "customer": {
             "name": "B Amsterdam",
             "language": "nl",
-            "buildings": ["B1 Amsterdam", "B2 Amsterdam", "B3 Amsterdam"],
+            "buildings": list(_OSIUS_ALL_BUILDINGS),
         },
         "company_admin": {
             "email": "ramazan-admin-osius@b-amsterdam.demo",

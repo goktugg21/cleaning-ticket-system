@@ -132,7 +132,10 @@ export function ResponsibleManagersSection({
     <CollapsibleCard
       title={t("resp_mgr.title")}
       meta={t("resp_mgr.count", { count: rows.length })}
-      defaultOpen
+      // #110 Part A — default COLLAPSED like the other right-column
+      // cards (Workflow stays the only always-open card). No persistKey;
+      // the ticket-keyed detail-side wrapper remounts it per ticket.
+      defaultOpen={false}
       testId="responsible-managers-section"
     >
       <div style={{ padding: "0 18px 14px" }}>
