@@ -53,6 +53,15 @@ class TicketFilter(df.FilterSet):
     # naturally with the scheduled_*/agenda filters.
     my_jobs = df.BooleanFilter(method="filter_my_jobs")
 
+    # Sprint 111 — building-manager "My tickets" filter. OPT-IN; runs on
+    # top of the already-`scope_tickets_for`-narrowed queryset, so (like
+    # `my_jobs`) it can only ever narrow within the caller's own scope —
+    # no cross-tenant surface. Narrows to tickets the caller MANAGES: the
+    # UNION of the legacy single primary-manager FK (`Ticket.assigned_to`)
+    # and the responsible-manager M:N (`TicketManagerAssignment`, reverse
+    # relation `manager_assignments`).
+    my_managed = df.BooleanFilter(method="filter_my_managed")
+
     # M6.1 — customer-detail sub-tabs. The tickets tab is the inverse of
     # the meldingen tab: drop every ticket whose type is in the given CSV
     # (the tickets tab passes exclude_type=REPORT so it stays disjoint
@@ -130,4 +139,24 @@ class TicketFilter(df.FilterSet):
             return queryset
         return queryset.filter(
             staff_assignments__user=self.request.user
+        ).distinct()
+
+    def filter_my_managed(self, queryset, name, value):
+        # Sprint 111 — narrow to tickets the current user MANAGES: the
+        # UNION of the legacy single primary-manager FK (`assigned_to`)
+        # and the responsible-manager M:N (`TicketManagerAssignment`,
+        # reverse relation `manager_assignments`). Mirrors
+        # `filter_my_jobs`: OPT-IN only (a falsy value leaves the queryset
+        # untouched), request-scoped (guard when there is no request), and
+        # `.distinct()` to collapse the M:N-join fan-out. It does NOT alter
+        # `assigned_to`/`my_jobs`; it composes with `scope_tickets_for`
+        # (already applied in the view), so it can only narrow within the
+        # caller's own scope.
+        if not value:
+            return queryset
+        if getattr(self, "request", None) is None:
+            return queryset
+        return queryset.filter(
+            Q(assigned_to=self.request.user)
+            | Q(manager_assignments__user=self.request.user)
         ).distinct()
