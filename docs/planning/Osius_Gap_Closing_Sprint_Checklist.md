@@ -219,7 +219,7 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 - [x] **Phase 1 — data model** (THIS): `invoicing` app (`Invoice`, `InvoiceLine`) + `Customer` billing-schedule (`invoice_day_rule`, `invoice_granularity_default`) + `Customer.contract_pdf` + numbering scaffolding (`number` NULL-while-draft, `year`, per-company unique). Migrations `invoicing/0001_initial`, `customers/0012`. NO generation/lifecycle/UI/PDF.
 - [x] **Phase 2a — unbilled rollup + draft generation + claim/release**: `invoicing/selectors.py::unbilled_extra_work` (Option-1 semantics), `invoicing/services.py::generate_draft_invoices` (per-customer / per-building, claim) + `delete_draft_invoice` (release), legacy mark/clear neutralized to no-ops. NO lifecycle/numbering/reversal/PDF/UI.
 - [x] **Phase 2b — lifecycle + numbering + reversal**: `invoicing/state_machine.py` (issue/send/reverse + assert_mutable), `invoicing/numbering.py` (gapless per-company-per-year via `InvoiceNumberSequence`, row-locked), migration `invoicing/0002`. NO PDF/UI.
-- [ ] **Phase 3 — two-page PDF** (page 1 summary; page 2 detail = EW month / work performed / date).
+- [x] **Phase 3 — two-page PDF** (page 1 summary; page 2 detail = EW month / work performed / date): `invoicing/invoice_pdf.py::render_invoice_pdf` + provider-only fetch endpoint `GET /api/invoices/<id>/pdf/`. NO Facturen UI (Phase 4).
 - [ ] **Phase 4 — provider "Facturen" UI** + the "who's due" list (driven by the billing schedule).
 - [ ] **Phase 5 — customer-portal visibility** (SEND).
 
@@ -245,6 +245,13 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 - **ISSUE-YEAR DECISION:** the numbering year is the CURRENT Amsterdam-local calendar year at issue (`timezone.localtime(now).year`), NOT the invoice's billing `period_year` — that is what a gapless per-year sequence means operationally.
 - **SENT immutability:** `assert_mutable(invoice)` raises on SENT (the future edit path gates on it); `delete_draft_invoice` already rejects any non-DRAFT (ISSUED + SENT). The only SENT mutation is a reversal.
 - **Reversal** (`state_machine.py::reverse_invoice`): only a SENT, non-reversal invoice can be reversed (terminal — cannot reverse a reversal). Auto-generates a NEW already-ISSUED counter-invoice (`is_reversal=True`, `reverses=original`, its own number from the same sequence, negated totals + negated mirror lines with `extra_work=NULL` — the counter-entry does NOT re-claim EW). RELEASES the original's EW (clears `is_invoiced`/`invoiced_at`); the original stays SENT on the books (NOT soft-deleted). To make the release actually surface under Option-1, the unbilled selector now also ignores claims held by a REVERSED original (a reversed invoice no longer holds its claim). Reversal editing is deferred to the Phase-4 UI.
+
+**Phase 3 delivered (2026-07-20):**
+- **Two-page Dutch invoice PDF** — `invoicing/invoice_pdf.py::render_invoice_pdf(invoice) -> bytes`, reusing the shared `config.pdf_branding` (Osius logo, embedded DejaVu font with real €, accent rule) and the canonical proposal-PDF formatters (`_fmt_money`/`_nl_number`/`_safe_pdf_text`/`_fitted_cell`) so the PDF families cannot drift. **Page 1 = summary** (branded header; number or CONCEPT; klant + optional gebouw; uitgegeven/verzonden dates; periode; a one-line samenvatting; the optional free-text fee; subtotaal/BTW/totaal). **Page 2 = itemized detail** — one width-safe row per line with EW-maand / uitgevoerd werk / datum + aantal / eenheidsprijs / BTW% / subtotaal / BTW / totaal, and a totals footer.
+- **DRAFT marker:** while DRAFT, "CONCEPT" shows in the number slot + a prominent page-1 banner + a per-page header band; ISSUED/SENT show the real number and no marker.
+- **Reversal:** titled **"Creditnota"**; amounts already negative in the data render negative.
+- **Fetch endpoint:** `GET /api/invoices/<id>/pdf/` (`invoicing/urls.py` → mounted at `/api/invoices/`), provider-operator only + tenant-scoped via `selectors.scope_invoices_for` (company-granularity so customer-level `building=NULL` invoices are covered): 200 `application/pdf` inline for an in-scope operator, 403 for a customer/staff, 404 cross-tenant. Customer visibility is Phase 5. Mirrors the proposal-PDF auth/serving pattern.
+- **v1 note:** the page-1 summary is auto-composed from the invoice's own figures; the fully hand-editable page-1 summary line + line editing is the Phase-4 UI. No model change (no migration).
 
 ---
 
