@@ -62,3 +62,16 @@ export async function deleteCustomerContractPdf(
 ): Promise<void> {
   await api.delete(`/customers/${customerId}/contract-pdf/`);
 }
+
+// The contract-PDF serve endpoint is auth-gated (Bearer), so a plain <a>/<img>
+// cannot fetch it — pull the blob via axios (which adds the token) for an
+// object-URL preview / new-tab open.
+export async function fetchCustomerContractPdf(
+  customerId: number,
+): Promise<Blob> {
+  const response = await api.get<Blob>(
+    `/customers/${customerId}/contract-pdf/`,
+    { responseType: "blob" },
+  );
+  return response.data;
+}

@@ -29,6 +29,7 @@ import { useAuth } from "../../../auth/AuthContext";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 
+import { CustomerFacturatieSection } from "./CustomerFacturatieSection";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
@@ -439,6 +440,11 @@ export function CustomerOverviewPage() {
               )}
             </div>
           </div>
+
+          <CustomerFacturatieSection
+            customer={customer}
+            onUpdated={setCustomer}
+          />
 
           <div
             className="quicklink-grid"
