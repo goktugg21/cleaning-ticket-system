@@ -43,6 +43,16 @@
   "agenda.mark_done": "Mark done",
   "agenda.cant_complete": "Can't complete",
 
+  "agenda.manager_title": "My tickets",
+  "agenda.manager_subtitle": "Tickets assigned to you.",
+  "agenda.manager_empty_title": "No tickets assigned",
+  "agenda.manager_empty_desc": "When you're assigned to a ticket — as its manager or a responsible manager — it appears here.",
+  "agenda.manager_list_title": "Assigned tickets",
+  "agenda.manager_list_subtitle_one": "{{count}} ticket",
+  "agenda.manager_list_subtitle_other": "{{count}} tickets",
+  "agenda.role_guard_title": "Not available for your role",
+  "agenda.role_guard_desc": "My Work is only available to field staff and building managers.",
+
   "complete.dialog_title": "Mark slot as done",
   "complete.dialog_desc": "Add a completion note and/or photos as proof of work. At least one is required. This does not close the ticket — your manager reviews it.",
   "complete.note_label": "Completion note",

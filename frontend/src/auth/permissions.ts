@@ -189,11 +189,24 @@ export function canAccessBilling(role: Role | null | undefined): boolean {
 // on every route (including reads). Mirrors the backend role set exactly.
 export const canAccessPlannedWork = isProviderManagementRole;
 
-// `/agenda` (My Work) — the staff slot agenda. Provider-side actors:
-// SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER / STAFF. CUSTOMER_USER is
-// excluded; the my-slots endpoint is caller-scoped (empty for them) but the
-// nav entry stays hidden anyway.
-export const canAccessAgenda = isStaffRole;
+// `/agenda` (My Work) — role-adaptive since Sprint 111. Shown to STAFF and
+// BUILDING_MANAGER ONLY; HIDDEN for SUPER_ADMIN + COMPANY_ADMIN (owner
+// decision) and for CUSTOMER_USER. The surface adapts per role:
+//   - STAFF: the caller's dated slot agenda (backend
+//     GET /api/tickets/my-slots/, caller-scoped). Slots only ever exist
+//     for STAFF — the staff-assign endpoint
+//     (backend/tickets/views_staff_assignments.py `_validate_target_staff`)
+//     rejects any assignee whose role != STAFF.
+//   - BUILDING_MANAGER: the caller's assigned tickets via the ticket list
+//     `?my_managed=1` filter (union of Ticket.assigned_to +
+//     TicketManagerAssignment; backend/tickets/filters.py).
+// SA / CA hold neither slots nor a per-manager ticket relation worth a
+// dedicated surface, so both the nav entry and the page are hidden for
+// them. NOTE: `isStaffRole` is intentionally NOT reused here — it still
+// admits SA + CA (it drives PROVIDER_INTERNAL note access etc.).
+export function canAccessAgenda(role: Role | null | undefined): boolean {
+  return role === "STAFF" || role === "BUILDING_MANAGER";
+}
 
 // `/admin/staff-assignment-requests` — backend admits the BM for the
 // queue covering their assigned buildings, on top of the provider-admin
