@@ -5,28 +5,31 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
 import { listExtraWork } from "../../../api/extraWork";
+import type { ReportFilters } from "../../../api/reports";
 import type { CustomerAdmin, ExtraWorkRequestList } from "../../../api/types";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../../../lib/billing";
 import { formatMoney } from "../../../lib/intl";
+import { ExtraWorkRevenueChart } from "../../reports/charts/ExtraWorkRevenueChart";
+import { StatusDistributionChart } from "../../reports/charts/StatusDistributionChart";
+import { TicketsOverTimeChart } from "../../reports/charts/TicketsOverTimeChart";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 type StatusFilter = "ALL" | "OPEN" | "INVOICED";
 
 /**
- * #108 Part E — the customer-detail Reports tab: the Extra Work
- * revenue report with the customer preset FIXED.
+ * Customer-detail Reports tab.
  *
- * Recon finding: /reports/extra-work-revenue/ has no customer filter
- * (scope is company/building only), and Part E is frontend-only. The
- * EW LIST endpoint, however, both accepts ?customer= and applies the
- * SAME server-side earned/billing-month classification the revenue
- * report's billing-month mode uses (extra_work.billing via the
- * billing_period filter). This tab therefore reuses that endpoint plus
- * the shared lib/billing math (the sanctioned client-side mirror the
- * Facturen page and the dashboard widget already use) — same numbers,
- * no duplicated business logic. The full multi-state chart per
- * customer would need a small additive backend param (follow-up).
+ * #108 Part E shipped the billing KPI grid (EW list + lib/billing math)
+ * because the report endpoints had no customer filter. #109 Part H
+ * added an additive `customer` param to the extra-work-revenue,
+ * tickets-over-time and status-distribution endpoints, so this tab now
+ * also renders the REAL charts locked to this customer:
+ *   - ExtraWorkRevenueChart (billing_period = the selected month, to
+ *     match the KPI grid's bucketing) + its CSV/PDF export buttons;
+ *   - TicketsOverTimeChart (the month's date range);
+ *   - StatusDistributionChart (current snapshot).
+ * The month/status controls + KPI grid are unchanged.
  */
 export function CustomerReportsPage() {
   const { id } = useParams();
@@ -61,18 +64,26 @@ export function CustomerReportsPage() {
     };
   }, [numericId]);
 
+  // Part J — `loading` starts true so the first render shows the bar
+  // without a synchronous setLoading(true) in the effect body (the
+  // CustomerTicketsPage idiom that keeps this file clear of
+  // react-hooks/set-state-in-effect). On a month change the KPIs
+  // refresh in place when the fetch resolves — no loading flash.
   useEffect(() => {
     if (numericId === null) return;
     let cancelled = false;
-    setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
-    setError("");
+    // No synchronous setState in the effect body (Part J): error is
+    // cleared on success and set on failure, both inside the settled
+    // promise, matching the CustomerTicketsPage idiom.
     listExtraWork({
       customer: numericId,
       billing_period: month,
       page_size: 500,
     })
       .then((resp) => {
-        if (!cancelled) setRows(resp.results);
+        if (cancelled) return;
+        setRows(resp.results);
+        setError("");
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
@@ -84,6 +95,35 @@ export function CustomerReportsPage() {
       cancelled = true;
     };
   }, [numericId, month]);
+
+  // #109 Part H — filters locking every chart to this customer. The
+  // revenue chart uses billing-month mode (same bucket as the KPIs);
+  // the ticket charts use the selected month's date range / a current
+  // snapshot. Memoized so useReport's filtersKey is stable per month.
+  const monthRange = useMemo(() => {
+    const [y, m] = month.split("-").map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    return {
+      from: `${month}-01`,
+      to: `${month}-${String(lastDay).padStart(2, "0")}`,
+    };
+  }, [month]);
+  const revenueFilters: ReportFilters = useMemo(
+    () => ({ customer: numericId ?? undefined, billing_period: month }),
+    [numericId, month],
+  );
+  const overTimeFilters: ReportFilters = useMemo(
+    () => ({
+      customer: numericId ?? undefined,
+      from: monthRange.from,
+      to: monthRange.to,
+    }),
+    [numericId, monthRange],
+  );
+  const statusFilters: ReportFilters = useMemo(
+    () => ({ customer: numericId ?? undefined }),
+    [numericId],
+  );
 
   const visibleRows = useMemo(
     () =>
@@ -204,6 +244,13 @@ export function CustomerReportsPage() {
           </div>
         </div>
       )}
+
+      {/* #109 Part H — real charts locked to this customer. */}
+      <div style={{ marginTop: 16 }} data-testid="customer-reports-charts">
+        <ExtraWorkRevenueChart filters={revenueFilters} refreshKey={0} />
+        <TicketsOverTimeChart filters={overTimeFilters} refreshKey={0} />
+        <StatusDistributionChart filters={statusFilters} refreshKey={0} />
+      </div>
 
       <p className="muted small" style={{ marginTop: 16 }}>
         <Link to="/reports" className="link">
