@@ -217,7 +217,8 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 
 **Phases:**
 - [x] **Phase 1 — data model** (THIS): `invoicing` app (`Invoice`, `InvoiceLine`) + `Customer` billing-schedule (`invoice_day_rule`, `invoice_granularity_default`) + `Customer.contract_pdf` + numbering scaffolding (`number` NULL-while-draft, `year`, per-company unique). Migrations `invoicing/0001_initial`, `customers/0012`. NO generation/lifecycle/UI/PDF.
-- [ ] **Phase 2 — generation + lifecycle**: state machine (DRAFT→ISSUED→SENT), numbering assignment at ISSUE (gapless per-company per-year), EW claim/release, reversal logic.
+- [x] **Phase 2a — unbilled rollup + draft generation + claim/release**: `invoicing/selectors.py::unbilled_extra_work` (Option-1 semantics), `invoicing/services.py::generate_draft_invoices` (per-customer / per-building, claim) + `delete_draft_invoice` (release), legacy mark/clear neutralized to no-ops. NO lifecycle/numbering/reversal/PDF/UI.
+- [ ] **Phase 2b — lifecycle + numbering + reversal**: state machine (DRAFT→ISSUED→SENT), numbering assignment at ISSUE (gapless per-company per-year), ISSUED/SENT immutability guard, reversal logic.
 - [ ] **Phase 3 — two-page PDF** (page 1 summary; page 2 detail = EW month / work performed / date).
 - [ ] **Phase 4 — provider "Facturen" UI** + the "who's due" list (driven by the billing schedule).
 - [ ] **Phase 5 — customer-portal visibility** (SEND).
@@ -230,6 +231,13 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 - Draft claims its EW rows on creation; releasing/deleting a draft releases them (Phase 2). Invoice total is the source of truth once issued. Billing-schedule due date is informational (drives the "who's due" list, gates nothing).
 - One active contract PDF per customer, replace-on-reupload, no version history.
 - **DEFERRED: invoice email delivery.** SEND = customer-portal visibility only; v1 does NOT email invoices. (Recorded in `invoicing/models.py` docstring too so it is not lost.)
+
+**Phase 2a delivered (2026-07-20):**
+- **Unbilled rollup (Option 1):** `unbilled_extra_work(actor, company, customer, year, month, building_id=None)` = earned + in-month EW that is NOT settled — excluded if EITHER `is_invoiced=True` (fast flag; also the legacy M4 bulk-run rows, treated as ALREADY SETTLED so they NEVER resurface) OR claimed by a LIVE (non-soft-deleted) `InvoiceLine`. Reuses `extra_work.billing` (build_ticket_map / is_earned / billing_month) + `scope_extra_work_for` verbatim.
+- **Draft generation + claim:** `generate_draft_invoices(...)` creates one draft per customer (building=NULL) or one per building; defaults granularity from `Customer.invoice_granularity_default`; one `InvoiceLine` per EW carrying the EW's EARNED amount (final-with-quoted-fallback, mirroring `reports.dimensions._amounts_for_state`); freezes the invoice subtotal/vat/total; claims each EW atomically (`is_invoiced=True` + live line). Idempotent: a second run finds nothing unbilled → returns `[]` (no empty draft, no double-claim). number/year stay NULL (numbering is Phase 2b).
+- **Release on draft delete:** `delete_draft_invoice(...)` soft-deletes the DRAFT and clears `is_invoiced`/`invoiced_at` on its claimed EW → they reappear in the unbilled pool (DRAFT-only; ISSUED/SENT guard is Phase 2b).
+- **Legacy mark/clear neutralized:** `/extra-work/mark-invoiced/` + `/clear-invoiced/` are DEPRECATED NO-OPS — keep the route + provider gate + response shape (`{"invoiced_count":0,"ew_ids":[]}` / `{"cleared_count":0,"ew_ids":[]}`), mutate nothing. Endpoints + the old Facturen page are removed together in Phase 4.
+- **Assumption:** every `ExtraWorkRequest.building` is NON-nullable/PROTECT → no buildingless / company-wide EW, so per-building generation is clean (revisit only if EW ever becomes buildingless).
 
 ---
 
