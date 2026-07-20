@@ -659,6 +659,13 @@ class Service(models.Model):
         max_length=20,
         choices=ExtraWorkPricingUnitType.choices,
     )
+    # RF-2 (mirror of CustomerCustomPrice.custom_unit_label) — the
+    # operator-supplied unit name for `unit_type == OTHER` (e.g. "cm",
+    # "m3", "pallet"). `OTHER` is otherwise an opaque enum member with
+    # nothing to render. Only meaningful for OTHER; the serializer forces
+    # it blank for every concrete unit type and REQUIRES a non-blank label
+    # for OTHER (stable code `custom_unit_label_required`).
+    custom_unit_label = models.CharField(max_length=50, blank=True, default="")
     default_unit_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,

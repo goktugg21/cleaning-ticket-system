@@ -39,3 +39,39 @@ export function uploadCompanyLogo(companyId: number, file: File) {
 export async function deleteCompanyLogo(companyId: number): Promise<void> {
   await api.delete(`/companies/${companyId}/logo/`);
 }
+
+// Invoicing Phase 4b — the customer informational contract PDF (multipart
+// `file`, application/pdf). Upload returns the new contract-PDF URL (with a
+// fresh ?v= marker); mirrors the logo upload but with its own response key.
+export async function uploadCustomerContractPdf(
+  customerId: number,
+  file: File,
+): Promise<string | null> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await api.post<{ contract_pdf_url?: string }>(
+    `/customers/${customerId}/contract-pdf/`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } },
+  );
+  return response.data.contract_pdf_url ?? null;
+}
+
+export async function deleteCustomerContractPdf(
+  customerId: number,
+): Promise<void> {
+  await api.delete(`/customers/${customerId}/contract-pdf/`);
+}
+
+// The contract-PDF serve endpoint is auth-gated (Bearer), so a plain <a>/<img>
+// cannot fetch it — pull the blob via axios (which adds the token) for an
+// object-URL preview / new-tab open.
+export async function fetchCustomerContractPdf(
+  customerId: number,
+): Promise<Blob> {
+  const response = await api.get<Blob>(
+    `/customers/${customerId}/contract-pdf/`,
+    { responseType: "blob" },
+  );
+  return response.data;
+}

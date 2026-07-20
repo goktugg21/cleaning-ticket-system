@@ -705,6 +705,20 @@ export function AppShell({ children }: AppShellProps) {
                   {t("nav.employees")}
                 </NavLink>
               )}
+              {/* Invoicing Phase 5 — the customer "Facturen" surface: a
+                  read-only list of the customer's own SENT invoices. */}
+              {me?.role === "CUSTOMER_USER" && (
+                <NavLink
+                  to="/my/facturen"
+                  className={navClass}
+                  data-testid="sidebar-my-facturen"
+                >
+                  <span className="nav-icon">
+                    <BadgeEuro size={16} strokeWidth={2} />
+                  </span>
+                  {t("customer_facturen.nav")}
+                </NavLink>
+              )}
             </>
           )}
         </nav>

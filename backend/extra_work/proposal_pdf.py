@@ -39,11 +39,11 @@ from django.utils import timezone
 from fpdf import FPDF
 
 from config.pdf_branding import (
-    ACCENT_RGB,
-    ACCENT_TINT_RGB,
     FONT_FAMILY,
     LOGO_WIDTH_MM,
+    accent_rgb_for,
     accent_rule,
+    accent_tint_for,
     draw_logo,
     register_fonts,
 )
@@ -257,9 +257,14 @@ def render_proposal_pdf(
     audiences. The internal_note field is never read for either.
     """
     extra_work = proposal.extra_work_request
-    company_name = getattr(extra_work.company, "name", "") or ""
+    company = extra_work.company
+    company_name = getattr(company, "name", "") or ""
     customer_name = getattr(extra_work.customer, "name", "") or ""
     building_name = getattr(extra_work.building, "name", "") or ""
+    # Company-aware branding — OSIUS pink/logo only for the platform company;
+    # any other company uses its own logo (or a name-only header) + neutral.
+    brand_accent = accent_rgb_for(company)
+    brand_tint = accent_tint_for(company)
 
     pdf = _ProposalPDF(unit="mm", format="A4")
     register_fonts(pdf)
@@ -272,7 +277,7 @@ def render_proposal_pdf(
     # Branded header — logo top-left, provider block beside it,
     # proposal meta right-aligned, accent rule underneath.
     # ------------------------------------------------------------------
-    logo_bottom = draw_logo(pdf, y=10.0)
+    logo_bottom = draw_logo(pdf, company, y=10.0)
 
     provider_x = pdf.l_margin + LOGO_WIDTH_MM + 8.0
     pdf.set_xy(provider_x, 11.0)
@@ -288,7 +293,7 @@ def render_proposal_pdf(
     meta_x = pdf.w - pdf.r_margin - 80.0
     pdf.set_xy(meta_x, 10.0)
     pdf.set_font(FONT_FAMILY, "B", 15)
-    pdf.set_text_color(*ACCENT_RGB)
+    pdf.set_text_color(*brand_accent)
     pdf.cell(80, 8, _safe_pdf_text(f"Voorstel #{proposal.pk}"), align="R")
     pdf.set_text_color(0, 0, 0)
     pdf.set_xy(meta_x, 18.5)
@@ -296,7 +301,7 @@ def render_proposal_pdf(
     pdf.cell(80, 5, _safe_pdf_text(f"Status: {status_nl}"), align="R")
 
     rule_y = max(logo_bottom, 25.0) + 3.0
-    accent_rule(pdf, rule_y)
+    accent_rule(pdf, rule_y, brand_accent)
     pdf.set_y(rule_y + 5.0)
 
     # ------------------------------------------------------------------
@@ -359,8 +364,8 @@ def render_proposal_pdf(
     # columns right-aligned. Light table borders throughout.
     pdf.set_draw_color(*_TABLE_BORDER_RGB)
     pdf.set_font(FONT_FAMILY, "B", 8.5)
-    pdf.set_fill_color(*ACCENT_TINT_RGB)
-    pdf.set_text_color(*ACCENT_RGB)
+    pdf.set_fill_color(*brand_tint)
+    pdf.set_text_color(*brand_accent)
     headers = (
         ("Dienst / Omschrijving", _COL_LABEL, "L"),
         ("Aantal", QTY_COL_WIDTH, "R"),
@@ -400,7 +405,7 @@ def render_proposal_pdf(
     _total_row("Subtotaal", proposal.subtotal_amount, bold_label=True, size=10)
     _total_row("BTW", proposal.vat_amount, bold_label=True, size=10)
     # Grand total — slightly larger, with a thin accent rule above it.
-    pdf.set_draw_color(*ACCENT_RGB)
+    pdf.set_draw_color(*brand_accent)
     ty = pdf.get_y() + 0.5
     pdf.line(pdf.w - pdf.r_margin - 70, ty, pdf.w - pdf.r_margin, ty)
     pdf.set_draw_color(0, 0, 0)

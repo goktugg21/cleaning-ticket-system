@@ -95,6 +95,16 @@ class ServiceSerializer(serializers.ModelSerializer):
         allow_null=True,
         default=None,
     )
+    # RF-2 (mirror) — declared explicitly with trim_whitespace=False so the
+    # validate() rule owns the stripping: a supplied whitespace-only label
+    # must reach the validator intact (DRF's default trimming would collapse
+    # it to a legal blank first). Same shape as the ProposalLine field.
+    custom_unit_label = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
 
     class Meta:
         model = Service
@@ -107,6 +117,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "unit_type",
+            "custom_unit_label",
             "default_unit_price",
             "default_vat_pct",
             "is_active",
@@ -142,6 +153,40 @@ class ServiceSerializer(serializers.ModelSerializer):
                 "default_vat_pct must be non-negative."
             )
         return value
+
+    def validate(self, attrs):
+        # RF-2 (mirror of CustomerCustomPriceSerializer) — the unit label
+        # only carries meaning for OTHER. Resolve the effective unit_type +
+        # label (a PATCH may change either field independently). For a
+        # concrete unit type the label is forced blank so a row can never
+        # persist a label that contradicts its unit. For OTHER the (stripped)
+        # label is REQUIRED — an "Other" unit with no name renders as nothing.
+        unit_type = attrs.get(
+            "unit_type", getattr(self.instance, "unit_type", None)
+        )
+        if unit_type != ExtraWorkPricingUnitType.OTHER:
+            if "custom_unit_label" in attrs or self.instance is not None:
+                attrs["custom_unit_label"] = ""
+        else:
+            label = attrs.get(
+                "custom_unit_label",
+                getattr(self.instance, "custom_unit_label", ""),
+            )
+            label = (label or "").strip()
+            if not label:
+                raise serializers.ValidationError(
+                    {
+                        "custom_unit_label": [
+                            serializers.ErrorDetail(
+                                "A unit name is required when the unit "
+                                "type is Other.",
+                                code="custom_unit_label_required",
+                            )
+                        ]
+                    }
+                )
+            attrs["custom_unit_label"] = label
+        return attrs
 
     # Sprint 3B — role-aware default-price stripping. Provider
     # operators in scope see `default_unit_price` + `default_vat_pct`;

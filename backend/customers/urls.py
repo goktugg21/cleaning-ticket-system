@@ -11,7 +11,7 @@ from extra_work.views_pricing import (
 )
 
 from .views import CustomerViewSet
-from .views_media import CustomerLogoView
+from .views_media import CustomerContractPdfView, CustomerLogoView
 from .views_contacts import (
     CustomerContactDetailView,
     CustomerContactListCreateView,
@@ -49,6 +49,13 @@ urlpatterns = [
         "<int:customer_id>/logo/",
         CustomerLogoView.as_view(),
         name="customer-logo",
+    ),
+    # Invoicing Phase 4a — informational contract PDF (GET serve provider /
+    # POST upload / DELETE remove — OSIUS admin write).
+    path(
+        "<int:customer_id>/contract-pdf/",
+        CustomerContractPdfView.as_view(),
+        name="customer-contract-pdf",
     ),
     path(
         "<int:customer_id>/users/",

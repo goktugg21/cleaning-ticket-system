@@ -85,6 +85,7 @@ interface ServiceFormState {
   name: string;
   description: string;
   unit_type: ServiceUnitType;
+  custom_unit_label: string;
   default_unit_price: string;
   default_vat_pct: string;
   is_active: boolean;
@@ -95,6 +96,7 @@ const EMPTY_SERVICE_FORM: ServiceFormState = {
   name: "",
   description: "",
   unit_type: "HOURS",
+  custom_unit_label: "",
   default_unit_price: "0.00",
   default_vat_pct: "21.00",
   is_active: true,
@@ -308,6 +310,7 @@ export function ServicesAdminPage() {
       name: service.name,
       description: service.description,
       unit_type: service.unit_type,
+      custom_unit_label: service.custom_unit_label,
       default_unit_price: service.default_unit_price,
       default_vat_pct: service.default_vat_pct,
       is_active: service.is_active,
@@ -341,6 +344,19 @@ export function ServicesAdminPage() {
       setServiceFormError(t("services.error_vat_invalid"));
       return;
     }
+    // RF-2 (mirror of CustomerPricingPage) — a bare "Other" unit renders as
+    // nothing, so the custom label is required exactly when OTHER is chosen.
+    // The backend blanks it for every concrete unit type, so it is not sent
+    // then. Reuses the customer-pricing custom-unit i18n keys.
+    if (
+      serviceForm.unit_type === "OTHER" &&
+      !serviceForm.custom_unit_label.trim()
+    ) {
+      setServiceFormError(
+        t("customer_custom_pricing.error_unit_label_required"),
+      );
+      return;
+    }
     setServiceFormBusy(true);
     setServiceFormError("");
     const payload: ServiceCreatePayload = {
@@ -348,6 +364,10 @@ export function ServicesAdminPage() {
       name: serviceForm.name.trim(),
       description: serviceForm.description,
       unit_type: serviceForm.unit_type,
+      custom_unit_label:
+        serviceForm.unit_type === "OTHER"
+          ? serviceForm.custom_unit_label.trim()
+          : "",
       default_unit_price: serviceForm.default_unit_price.trim(),
       default_vat_pct: serviceForm.default_vat_pct.trim(),
       is_active: serviceForm.is_active,
@@ -1228,6 +1248,39 @@ export function ServicesAdminPage() {
                 ))}
               </select>
             </div>
+
+            {/* RF-2 (mirror of CustomerPricingPage) — "Other" is an opaque
+                unit with nothing to render, so it takes an operator-supplied
+                name ("m3", "pallet"). Reuses the customer-pricing labels. */}
+            {serviceForm.unit_type === "OTHER" && (
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="service-custom-unit-label"
+                >
+                  {t("customer_custom_pricing.field_unit_label")} *
+                </label>
+                <input
+                  id="service-custom-unit-label"
+                  className="field-input"
+                  type="text"
+                  maxLength={50}
+                  value={serviceForm.custom_unit_label}
+                  onChange={(event) =>
+                    setServiceForm((prev) => ({
+                      ...prev,
+                      custom_unit_label: event.target.value,
+                    }))
+                  }
+                  placeholder={t(
+                    "customer_custom_pricing.field_unit_label_placeholder",
+                  )}
+                  data-testid="services-service-input-custom-unit-label"
+                  required
+                  disabled={serviceFormBusy}
+                />
+              </div>
+            )}
 
             <div className="form-2col">
               <div className="field">

@@ -63,6 +63,7 @@ urlpatterns = [
     # by the viewset permission classes.
     path("api/planned-work/", include("planned_work.urls")),
     path("api/reports/", include("reports.urls")),
+    path("api/invoices/", include("invoicing.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),
     # Sprint 24A — admin endpoints for StaffProfile +
