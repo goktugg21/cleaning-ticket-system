@@ -164,6 +164,9 @@ class CustomerSerializer(serializers.ModelSerializer):
     # this customer's threads. Absolute so the frontend fetches the
     # authed blob directly.
     logo_url = serializers.SerializerMethodField()
+    # Invoicing Phase 4a — informational contract-PDF URL (null when unset).
+    # Read-only mirror of logo_url; the byte-serve endpoint is provider-only.
+    contract_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Customer
@@ -191,6 +194,13 @@ class CustomerSerializer(serializers.ModelSerializer):
             "show_assigned_staff_name",
             "show_assigned_staff_email",
             "show_assigned_staff_phone",
+            # Invoicing Phase 4a — billing schedule (writable by OSIUS admins;
+            # the CustomerViewSet write gate is IsSuperAdminOrCompanyAdminFor-
+            # Company) + read-only contract-PDF URL. The schedule is
+            # informational (drives the "who's due" list, gates nothing).
+            "invoice_day_rule",
+            "invoice_granularity_default",
+            "contract_pdf_url",
             "created_at",
             "updated_at",
             "actions",
@@ -199,6 +209,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             "id",
             "linked_building_ids",
             "logo_url",
+            "contract_pdf_url",
             "is_active",
             "actions",
             "created_at",
@@ -230,6 +241,11 @@ class CustomerSerializer(serializers.ModelSerializer):
         from .media_urls import customer_logo_url
 
         return customer_logo_url(obj, self.context.get("request"))
+
+    def get_contract_pdf_url(self, obj: Customer):
+        from .media_urls import customer_contract_pdf_url
+
+        return customer_contract_pdf_url(obj, self.context.get("request"))
 
     def get_actions(self, obj: Customer) -> dict:
         request = self.context.get("request")
