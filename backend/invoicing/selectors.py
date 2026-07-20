@@ -10,10 +10,17 @@ truth for "invoiced"):
     * `is_invoiced=True` (the fast-exclusion flag; also covers the legacy
       M4 bulk-run rows, which are treated as ALREADY SETTLED and must NEVER
       resurface into the pool), OR
-    * it is claimed by a LIVE (non-soft-deleted) InvoiceLine.
+    * it is claimed by a LIVE InvoiceLine — where "live" means the claiming
+      invoice is neither soft-deleted NOR itself REVERSED. (Phase 2b: a
+      SENT original stays on the books after a reversal — we do NOT soft-
+      delete it — so its line still points at the EW; but the reversal is
+      the counter-entry and the work is released, so a reversed original's
+      claim no longer counts.)
 
-Releasing a draft (Phase 2c) soft-deletes the invoice AND clears
-`is_invoiced`, so the EW reappears here (both exclusion legs flip off).
+Release paths, both of which flip BOTH exclusion legs off:
+  * delete draft (Phase 2a): soft-delete the invoice + clear `is_invoiced`.
+  * reverse a SENT invoice (Phase 2b): the original is reversed (its claim
+    stops counting) + `reverse_invoice` clears `is_invoiced`.
 
 We REUSE the earned / billing-month logic verbatim from
 `extra_work.billing` (build_ticket_map / is_earned / billing_month) and the
@@ -45,6 +52,9 @@ def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id
     live_claim = InvoiceLine.objects.filter(
         extra_work_id=OuterRef("pk"),
         invoice__deleted_at__isnull=True,
+        # Phase 2b: a REVERSED original no longer holds its claim — its work
+        # is released back to the pool by the reversal counter-entry.
+        invoice__reversed_by__isnull=True,
     )
     qs = (
         scope_extra_work_for(actor)
