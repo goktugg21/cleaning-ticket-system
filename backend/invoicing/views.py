@@ -5,12 +5,16 @@ Invoicing — HTTP surface.
   Phase 4a  the provider Invoice REST surface (`InvoiceViewSet`): list / due /
             retrieve / generate / issue / send / reverse / delete + editable
             draft lines (add / update / remove) + meta PATCH (summary + fee).
+  Phase 5   the CUSTOMER read surface (`CustomerInvoice*View`, mounted under
+            /api/invoices/my/): a CUSTOMER_USER's own SENT invoices (list /
+            detail / PDF), read-only + REDACTED. Kept SEPARATE from the
+            provider surface so the gates don't tangle.
 
-Every invoice mutation is PROVIDER-OPERATOR-gated (403 for a customer user /
-staff) + TENANT-SCOPED via `selectors.scope_invoices_for` (404 for a
-cross-tenant / out-of-scope invoice). Customer read is Phase 5. The auth +
-serving pattern mirrors `extra_work.views` (a ViewSet with `@action`
-transitions + `_is_provider_operator` gating).
+Every provider invoice mutation is PROVIDER-OPERATOR-gated (403 for a customer
+user / staff) + TENANT-SCOPED via `selectors.scope_invoices_for` (404 for a
+cross-tenant / out-of-scope invoice). The customer read is scoped by the
+SEPARATE `selectors.scope_customer_invoices_for` (membership-level, SENT-only).
+The auth + serving pattern mirrors `extra_work.views`.
 """
 from __future__ import annotations
 
@@ -39,8 +43,13 @@ from .line_services import (
     update_invoice_meta,
 )
 from .models import Invoice, InvoiceLine
-from .selectors import scope_invoices_for, unbilled_extra_work
+from .selectors import (
+    scope_customer_invoices_for,
+    scope_invoices_for,
+    unbilled_extra_work,
+)
 from .serializers import (
+    CustomerInvoiceSerializer,
     InvoiceLineSerializer,
     InvoiceLineWriteSerializer,
     InvoiceMetaSerializer,
@@ -404,3 +413,80 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(InvoiceLineSerializer(line).data)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — the CUSTOMER read surface (mounted under /api/invoices/my/).
+#
+# Read-only + REDACTED. Every endpoint scopes through
+# `scope_customer_invoices_for` (membership-level, SENT-only, non-deleted), so
+# a DRAFT / ISSUED / cross-customer / cross-tenant id is a 404 — never a leak.
+# A non-CUSTOMER_USER (provider / staff / anon) gets an empty list / 404 (the
+# scope returns .none()), NOT a 500. The provider endpoints stay 403 for a
+# customer via `_is_provider_operator` (unchanged).
+# ---------------------------------------------------------------------------
+
+
+class CustomerInvoiceListView(views.APIView):
+    """GET /api/invoices/my/ — the caller's own SENT invoices (redacted),
+    most-recent-first. Flat array (not paginated) — a customer's invoice
+    count is bounded by their monthly billing cadence."""
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request):
+        qs = (
+            scope_customer_invoices_for(request.user)
+            .select_related("customer", "building")
+            .prefetch_related("lines")
+            .order_by("-sent_at", "-id")
+        )
+        serializer = CustomerInvoiceSerializer(
+            qs, many=True, context={"request": request}
+        )
+        return Response(serializer.data)
+
+
+class CustomerInvoiceDetailView(views.APIView):
+    """GET /api/invoices/my/<id>/ — one of the caller's own SENT invoices
+    (redacted). 404 for anything outside `scope_customer_invoices_for`
+    (DRAFT / ISSUED / other customer / other tenant / soft-deleted)."""
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, invoice_id: int):
+        invoice = get_object_or_404(
+            scope_customer_invoices_for(request.user)
+            .select_related("customer", "building")
+            .prefetch_related("lines"),
+            pk=invoice_id,
+        )
+        return Response(
+            CustomerInvoiceSerializer(invoice, context={"request": request}).data
+        )
+
+
+class CustomerInvoicePdfView(views.APIView):
+    """GET /api/invoices/my/<id>/pdf/ — the two-page Dutch PDF (REUSES
+    `render_invoice_pdf`, already customer-safe), but ONLY for an invoice in
+    `scope_customer_invoices_for` — so a customer cannot fetch a DRAFT /
+    ISSUED / other-tenant PDF by id (404). Mirrors `InvoicePdfView`."""
+
+    permission_classes = [IsAuthenticatedAndActive]
+
+    def get(self, request, invoice_id: int):
+        invoice = get_object_or_404(
+            scope_customer_invoices_for(request.user).select_related(
+                "company", "customer", "building"
+            ),
+            pk=invoice_id,
+        )
+        pdf_bytes = render_invoice_pdf(invoice)
+        filename = (
+            f"factuur-{invoice.number}.pdf"
+            if invoice.number
+            else f"factuur-{invoice.pk}.pdf"
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        return response
