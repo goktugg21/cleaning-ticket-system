@@ -510,6 +510,13 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
     scope_building_raw = _first_param(query_params, "building", "building_id")
     scope = resolve_scope(actor, scope_company_raw, scope_building_raw)
 
+    # #109 Part H — optional additive `customer` (+ `customer_id` alias),
+    # scope-checked with the SAME in-scope mirror the ticket dimension
+    # reports use: out-of-scope / nonexistent -> 403 (PermissionDenied),
+    # non-integer -> 400 (ValidationError). Honored in BOTH modes below.
+    customer_raw = _first_param(query_params, "customer", "customer_id")
+    customer = _resolve_customer(actor, customer_raw)
+
     billing_period_raw = query_params.get("billing_period")
     invoice_status_raw = query_params.get("invoice_status")
 
@@ -545,6 +552,8 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
             )
 
         base_qs = extra_work_for_scope(actor, scope)
+        if customer is not None:
+            base_qs = base_qs.filter(customer_id=customer.id)
         _ew_list = list(base_qs)
         _ticket_map = build_ticket_map([e.id for e in _ew_list])
 
@@ -569,6 +578,8 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
         ew_qs = extra_work_for_scope(actor, scope).filter(
             requested_at__gte=bound_lo, requested_at__lt=bound_hi
         )
+        if customer is not None:
+            ew_qs = ew_qs.filter(customer_id=customer.id)
 
     # One spawned operational ticket per EW (linked via
     # Ticket.extra_work_request). Map ew_id -> ticket so the classifier
@@ -622,10 +633,18 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
         "total": _money(sum((acc[s]["total"] for s in _REVENUE_STATES), Decimal("0.00"))),
     }
 
+    scope_dict = scope.to_dict()
+    if customer is not None:
+        # Mirror DimensionFilters.scope_summary so exports._scope_summary_
+        # lines renders "Customer: <name>" in the PDF and JSON consumers
+        # can echo the customer the totals were scoped to.
+        scope_dict["customer_id"] = customer.id
+        scope_dict["customer_name"] = customer.name
+
     return {
         "from": from_date.isoformat(),
         "to": to_date.isoformat(),
-        "scope": scope.to_dict(),
+        "scope": scope_dict,
         "states": states,
         "totals": totals,
         "generated_at": timezone.now().isoformat(),
