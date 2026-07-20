@@ -133,7 +133,6 @@ export function ResponsibleManagersSection({
       title={t("resp_mgr.title")}
       meta={t("resp_mgr.count", { count: rows.length })}
       defaultOpen
-      persistKey="ticket-side-resp-mgr"
       testId="responsible-managers-section"
     >
       <div style={{ padding: "0 18px 14px" }}>

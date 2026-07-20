@@ -414,6 +414,16 @@ export function TicketDetailPage() {
   // transitions (CLOSED), the secondary list renders inline-open
   // and the toggle is hidden — see `shouldDefaultOpen` below.
   const [secondaryOpen, setSecondaryOpen] = useState(false);
+  // #109 Part I — the Workflow "correction actions" disclosure is
+  // per-ticket. TicketDetailPage does NOT remount when only the :id
+  // route param changes, so this state would otherwise carry an open
+  // correction list across tickets. Reset it during render when the
+  // ticket id changes — the React-sanctioned "adjust state when a prop
+  // changes" pattern (a guarded setState during render, NOT in an
+  // effect), so no effect / eslint set-state-in-effect involvement.
+  const [correctionForTicketId, setCorrectionForTicketId] = useState<
+    number | null
+  >(null);
   // Sprint 27F-F1 — ticket-override modal state. Mirrors the
   // ExtraWorkDetailPage shape:
   //   overrideDecision  the target status the operator picked
@@ -1363,6 +1373,15 @@ export function TicketDetailPage() {
     );
   }
 
+  // #109 Part I — guarded render-time reset: when the resolved ticket
+  // id differs from the one the correction disclosure was last set for,
+  // collapse it. React re-renders immediately with the updated guard,
+  // so this settles in one extra render and never loops.
+  if (correctionForTicketId !== ticket.id) {
+    setCorrectionForTicketId(ticket.id);
+    if (secondaryOpen) setSecondaryOpen(false);
+  }
+
   return (
     <div>
       <div className="detail-header">
@@ -1943,7 +1962,12 @@ export function TicketDetailPage() {
           </div>
         </div>
 
-        <div className="detail-side">
+        {/* #109 Part I — key the right column by ticket.id so every
+            CollapsibleCard REMOUNTS on navigation. With persistKey
+            removed from all of them, local open/closed state cannot
+            leak between tickets: each ticket lands on its per-mount
+            defaults (Assignment/Details collapsed, Workflow open). */}
+        <div className="detail-side" key={`detail-side-${ticket.id}`}>
           {/* Sprint 30 Batch 30.1.1 — consolidated Assignment card.
               ONE outer card with TWO clearly-labeled subsections:
                 - Building manager (ticket owner / BM dispatch — writes
@@ -1955,16 +1979,15 @@ export function TicketDetailPage() {
               dispatch). The field-staff heading interpolates the
               ticket's providing company name to remove the prior
               hardcoded "OSIUS" multi-tenant bug. */}
-          {/* #108 Part F — right-column cards default COLLAPSED
-              (Workflow below stays open); the persistKey override wins
-              once the user touches a card. */}
+          {/* #109 Part I — right-column cards default COLLAPSED per
+              mount (no persistKey; the ticket-keyed wrapper above
+              remounts them so nothing leaks across tickets). */}
           <CollapsibleCard
             title={t("card_assignment_title")}
             meta={t("side_summary_assignment", {
               count: ticket.assigned_staff?.length ?? 0,
             })}
             defaultOpen={false}
-            persistKey="ticket-side-assignment"
             testId="side-card-assignment"
           >
 
@@ -2548,7 +2571,6 @@ export function TicketDetailPage() {
           <CollapsibleCard
             title={t("card_details_title")}
             defaultOpen={false}
-            persistKey="ticket-side-details"
             testId="side-card-details"
           >
             <div style={{ padding: "14px 18px 16px" }}>
@@ -2812,7 +2834,6 @@ export function TicketDetailPage() {
             }
             meta={t(`common:status.${ticket.status.toLowerCase()}`)}
             defaultOpen
-            persistKey="ticket-side-workflow"
             testId="side-card-workflow"
           >
             <div className="workflow-body">
