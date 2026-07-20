@@ -82,10 +82,10 @@ const ReportsPage = lazy(() =>
   import("./pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
 
-// RF-13 (#106) — invoices overview, split like ReportsPage to keep the
-// initial bundle small.
-const InvoicesPage = lazy(() =>
-  import("./pages/InvoicesPage").then((m) => ({ default: m.InvoicesPage })),
+// Invoicing Phase 4b — the provider "Facturen" page (due panel + invoice
+// list). Split like ReportsPage to keep the initial bundle small.
+const FacturenPage = lazy(() =>
+  import("./pages/FacturenPage").then((m) => ({ default: m.FacturenPage })),
 );
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -676,7 +676,7 @@ export default function App() {
                     </div>
                   }
                 >
-                  <InvoicesPage />
+                  <FacturenPage />
                 </Suspense>
               </BillingRoute>
             }
