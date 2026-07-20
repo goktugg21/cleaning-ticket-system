@@ -2854,50 +2854,59 @@ table.data-table {
   border: 1px solid var(--green);
 }
 
-/* RF-19 — stable two-row add-line grid (proposal composer). Fixed
-   grid templates: cells compress as the builder column narrows (e.g.
-   preview open vs collapsed); the form never re-wraps, so the note
-   row and actions hold their position while values change. */
-.proposal-addline-top {
+/* #108 Part B (supersedes the RF-19 two-row grid) — single-row
+   add-line grid (proposal composer). ONE fixed grid row: description
+   (modal box) / unit / qty / unit price / VAT % / subtotal / VAT /
+   total / customer note / internal note / actions. Fixed minmax
+   tracks compress as the builder column narrows (preview open vs
+   collapsed) with ZERO re-wrap; under 900px (where the preview split
+   is stacked anyway) it falls back to a 2-col grid. */
+.proposal-addline-row {
   display: grid;
   grid-template-columns:
-    minmax(110px, 2fr)
-    minmax(84px, 1.1fr)
+    minmax(76px, 1.5fr)
+    minmax(66px, 0.9fr)
+    minmax(48px, 0.55fr)
+    minmax(56px, 0.65fr)
+    minmax(44px, 0.5fr)
     minmax(56px, 0.7fr)
-    minmax(68px, 0.8fr)
-    minmax(52px, 0.6fr)
-    minmax(76px, 0.9fr)
-    minmax(76px, 0.9fr)
-    minmax(80px, 0.9fr);
-  gap: 10px;
+    minmax(56px, 0.7fr)
+    minmax(60px, 0.75fr)
+    minmax(56px, 1fr)
+    minmax(56px, 1fr)
+    max-content;
+  gap: 8px;
   align-items: end;
 }
-.proposal-addline-bottom {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: end;
-  margin-top: 10px;
-}
-.proposal-addline-top .field,
-.proposal-addline-bottom .field {
+.proposal-addline-row .field {
   min-width: 0;
 }
-.proposal-addline-top .field-input {
+.proposal-addline-row .field-input,
+.proposal-addline-row .field-select {
   min-width: 0;
   text-overflow: ellipsis;
 }
 .proposal-addline-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   white-space: nowrap;
 }
+/* Filled-dot indicator on the modal-trigger boxes: hollow when the
+   field is empty, accent-filled once a value is set. */
+.ew-note-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-faint);
+  flex: none;
+}
+.ew-note-dot-filled {
+  background: var(--green-2);
+  border-color: var(--green-2);
+}
 @media (max-width: 900px) {
-  .proposal-addline-top {
+  .proposal-addline-row {
     grid-template-columns: 1fr 1fr;
-  }
-  .proposal-addline-bottom {
-    grid-template-columns: 1fr;
   }
 }
 

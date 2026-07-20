@@ -144,8 +144,18 @@ def _fmt_money(amount: Decimal | None) -> str:
 
 
 def _fmt_qty_unit(line: ProposalLine) -> str:
-    """Humanized Dutch 'quantity unit' label, e.g. '12,00 m²'."""
-    unit = _UNIT_LABELS_NL.get(line.unit_type, str(line.unit_type))
+    """Humanized Dutch 'quantity unit' label, e.g. '12,00 m²'.
+
+    #108 Part B — a line entered via the composer's "Custom…" unit
+    carries an operator-supplied `custom_unit_label`; when present it IS
+    the unit text (the enum behind it is OTHER, which renders as
+    nothing meaningful). `_fitted_cell` width-fits the result, so a long
+    custom name shrinks instead of bleeding into the next column.
+    """
+    if (line.custom_unit_label or "").strip():
+        unit = line.custom_unit_label.strip()
+    else:
+        unit = _UNIT_LABELS_NL.get(line.unit_type, str(line.unit_type))
     return f"{_nl_number(line.quantity, 2)} {unit}"
 
 

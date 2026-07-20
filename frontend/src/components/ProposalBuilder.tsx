@@ -95,6 +95,10 @@ function liveLineMoney(
 interface LineFormState {
   description: string;
   unit_type: ExtraWorkUnitType;
+  // #108 Part B — non-empty when the unit was entered via "Custom…"
+  // (unit_type is then OTHER on the wire). Cleared whenever a standard
+  // unit — including plain Other — is picked.
+  custom_unit_label: string;
   quantity: string;
   unit_price: string;
   vat_pct: string;
@@ -123,26 +127,29 @@ function MoneyBox({ label, value }: { label: string; value: number }) {
   );
 }
 
-// A note trigger: a button styled as a field box. Shows a check + the
-// note text when filled, a muted dash when empty. Clicking opens the
-// shared NoteEditorDialog (caller wires onOpen).
-function NoteBox({
+// #108 Part B — a modal-trigger box: a button styled as a field box
+// showing a filled-dot indicator + a one-line preview of the current
+// value (the placeholder when empty). Clicking opens the caller's
+// modal editor — there is no inline editing (Description is
+// strict-modal per owner; the two notes follow the same pattern).
+function ModalFieldBox({
   label,
   value,
+  placeholder,
   onOpen,
   disabled,
   testId,
 }: {
   label: string;
   value: string;
+  placeholder: string;
   onOpen: () => void;
   disabled: boolean;
   testId: string;
 }) {
-  const { t } = useTranslation(["extra_work", "common"]);
   const filled = value.trim() !== "";
   return (
-    <div className="field ew-line-field-note">
+    <div className="field">
       <span className="field-label">{label}</span>
       <button
         type="button"
@@ -152,27 +159,98 @@ function NoteBox({
         data-testid={testId}
         data-filled={filled ? "true" : "false"}
       >
-        {filled ? (
-          <>
-            <Check size={13} strokeWidth={2.4} />
-            <span className="ew-pricing-note-box-text">{value}</span>
-          </>
-        ) : (
-          <span className="muted">{t("detail.empty_dash")}</span>
-        )}
+        <span
+          className={
+            filled ? "ew-note-dot ew-note-dot-filled" : "ew-note-dot"
+          }
+          aria-hidden
+        />
+        <span
+          className={
+            filled
+              ? "ew-pricing-note-box-text"
+              : "ew-pricing-note-box-text muted"
+          }
+        >
+          {filled ? value : placeholder}
+        </span>
       </button>
+    </div>
+  );
+}
+
+// #108 Part B — the "Custom…" unit modal: a single-line, REQUIRED unit
+// name (max 50 chars, mirroring the backend column + the RF-2 rule on
+// the pricing page). Save is disabled until a non-blank name is typed.
+function CustomUnitDialog({
+  initialValue,
+  onSave,
+  onCancel,
+}: {
+  initialValue: string;
+  onSave: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const [value, setValue] = useState(initialValue);
+  const trimmed = value.trim();
+  return (
+    <div
+      className="reject-modal-backdrop"
+      data-testid="proposal-custom-unit-dialog"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="reject-modal">
+        <h3 className="reject-modal-title">
+          {t("detail.custom_unit_modal_title")}
+        </h3>
+        <p className="reject-modal-desc">{t("detail.custom_unit_modal_desc")}</p>
+        <input
+          className="field-input"
+          type="text"
+          maxLength={50}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={t("detail.custom_unit_placeholder")}
+          autoFocus
+          data-testid="proposal-custom-unit-input"
+        />
+        <div className="reject-modal-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onCancel}
+            data-testid="proposal-custom-unit-cancel"
+          >
+            {t("detail.note_modal_cancel")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={trimmed === ""}
+            onClick={() => onSave(trimmed)}
+            data-testid="proposal-custom-unit-save"
+          >
+            {t("detail.note_modal_save")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // Shared field cluster for the add-line form.
 //
-// RF-19 (#107) — fixed two-row grid instead of one wrapping flex row:
-// row 1 = description / unit / qty / unit price / VAT % / computed
-// subtotal-VAT-total; row 2 (always present, fixed position) = the two
-// note triggers + the caller's actions (actionsSlot). Cells compress
-// via the grid template as the column narrows — the form never
-// re-wraps, so nothing jumps when values or the preview pane change.
+// #108 Part B — ONE fixed grid row (replaces the RF-19 two-row grid):
+// description (modal box) / unit / qty / unit price / VAT % / computed
+// subtotal-VAT-total / customer note (modal box) / internal note
+// (modal box) / actions. Description and both notes are strict-modal
+// (a compact trigger box with a filled-dot indicator + one-line
+// preview); the Unit dropdown carries a "Custom…" entry below Other
+// that opens a required unit-name modal. Cells compress via the grid
+// template as the builder column narrows (preview open vs collapsed) —
+// the row NEVER re-wraps, so nothing jumps when values change.
 function LineFields({
   form,
   setForm,
@@ -187,42 +265,63 @@ function LineFields({
   actionsSlot?: ReactNode;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
-  // Which note modal (if any) is open for THIS line editor instance.
-  const [noteModal, setNoteModal] = useState<"customer" | "internal" | null>(
-    null,
-  );
+  // Which modal (if any) is open for THIS line editor instance.
+  const [modal, setModal] = useState<
+    "description" | "customer" | "internal" | "custom_unit" | null
+  >(null);
   const set = <K extends keyof LineFormState>(key: K, value: LineFormState[K]) =>
     setForm({ ...form, [key]: value });
   const money = liveLineMoney(form.quantity, form.unit_price, form.vat_pct);
+  // The select surfaces the stored custom unit name as its own option
+  // ("shown as the unit afterwards"); picking any standard unit —
+  // including plain Other — clears the custom name (mirrors the RF-2
+  // concrete-unit-forces-blank rule).
+  const hasCustomUnit = form.custom_unit_label.trim() !== "";
+  const unitValue = hasCustomUnit ? "__custom" : form.unit_type;
   return (
     <>
-    <div className="proposal-addline-top">
-      <div className="field ew-line-field-grow">
-        <span className="field-label">{t("detail.pricing_form_description")}</span>
-        <input
-          className="field-input"
-          type="text"
-          value={form.description}
-          onChange={(e) => set("description", e.target.value)}
-          disabled={disabled}
-        />
-      </div>
-      <div className="field ew-line-field-medium">
+    <div className="proposal-addline-row">
+      <ModalFieldBox
+        label={t("detail.pricing_form_description")}
+        value={form.description}
+        placeholder={t("detail.pricing_form_description_placeholder")}
+        onOpen={() => setModal("description")}
+        disabled={disabled}
+        testId="proposal-line-description-box"
+      />
+      <div className="field">
         <span className="field-label">{t("detail.pricing_form_unit")}</span>
         <select
           className="field-select"
-          value={form.unit_type}
-          onChange={(e) => set("unit_type", e.target.value as ExtraWorkUnitType)}
+          value={unitValue}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "__custom_new") {
+              setModal("custom_unit");
+              return;
+            }
+            if (v === "__custom") return;
+            setForm({
+              ...form,
+              unit_type: v as ExtraWorkUnitType,
+              custom_unit_label: "",
+            });
+          }}
           disabled={disabled}
+          data-testid="proposal-line-unit-select"
         >
           {UNIT_TYPE_VALUES.map((u) => (
             <option key={u} value={u}>
               {t(UNIT_TYPE_KEY[u])}
             </option>
           ))}
+          {hasCustomUnit && (
+            <option value="__custom">{form.custom_unit_label}</option>
+          )}
+          <option value="__custom_new">{t("detail.unit_custom_option")}</option>
         </select>
       </div>
-      <div className="field ew-line-field-compact">
+      <div className="field">
         <span className="field-label">{t("detail.pricing_form_quantity")}</span>
         <input
           className="field-input"
@@ -234,7 +333,7 @@ function LineFields({
           disabled={disabled}
         />
       </div>
-      <div className="field ew-line-field-compact">
+      <div className="field">
         <span className="field-label">{t("detail.pricing_form_unit_price")}</span>
         <input
           className="field-input"
@@ -246,7 +345,7 @@ function LineFields({
           disabled={disabled}
         />
       </div>
-      <div className="field ew-line-field-compact">
+      <div className="field">
         <span className="field-label">{t("detail.pricing_form_vat")}</span>
         <input
           className="field-input"
@@ -261,27 +360,42 @@ function LineFields({
       <MoneyBox label={t("detail.pricing_column_subtotal")} value={money.subtotal} />
       <MoneyBox label={t("detail.pricing_column_vat")} value={money.vat} />
       <MoneyBox label={t("detail.pricing_column_total")} value={money.total} />
-    </div>
-    <div className="proposal-addline-bottom">
-      <NoteBox
+      <ModalFieldBox
         label={t("detail.pricing_customer_note_button")}
         value={form.customer_explanation}
-        onOpen={() => setNoteModal("customer")}
+        placeholder={t("detail.pricing_form_customer_note_placeholder")}
+        onOpen={() => setModal("customer")}
         disabled={disabled}
         testId="proposal-line-customer-note-box"
       />
       {showInternal && (
-        <NoteBox
+        <ModalFieldBox
           label={t("detail.pricing_internal_note_button")}
           value={form.internal_note}
-          onOpen={() => setNoteModal("internal")}
+          placeholder={t("detail.pricing_form_internal_note_placeholder")}
+          onOpen={() => setModal("internal")}
           disabled={disabled}
           testId="proposal-line-internal-note-box"
         />
       )}
       {actionsSlot}
     </div>
-      {noteModal === "customer" && (
+      {modal === "description" && (
+        <NoteEditorDialog
+          title={t("detail.pricing_form_description")}
+          initialValue={form.description}
+          placeholder={t("detail.pricing_form_description_placeholder")}
+          saveLabel={t("detail.note_modal_save")}
+          cancelLabel={t("detail.note_modal_cancel")}
+          onSave={(value) => {
+            set("description", value);
+            setModal(null);
+          }}
+          onCancel={() => setModal(null)}
+          testId="proposal-line-description-dialog"
+        />
+      )}
+      {modal === "customer" && (
         <NoteEditorDialog
           title={t("detail.pricing_customer_note_modal_title")}
           initialValue={form.customer_explanation}
@@ -290,13 +404,13 @@ function LineFields({
           cancelLabel={t("detail.note_modal_cancel")}
           onSave={(value) => {
             set("customer_explanation", value);
-            setNoteModal(null);
+            setModal(null);
           }}
-          onCancel={() => setNoteModal(null)}
+          onCancel={() => setModal(null)}
           testId="proposal-line-customer-note-dialog"
         />
       )}
-      {showInternal && noteModal === "internal" && (
+      {showInternal && modal === "internal" && (
         <NoteEditorDialog
           title={t("detail.pricing_internal_note_modal_title")}
           initialValue={form.internal_note}
@@ -305,10 +419,20 @@ function LineFields({
           cancelLabel={t("detail.note_modal_cancel")}
           onSave={(value) => {
             set("internal_note", value);
-            setNoteModal(null);
+            setModal(null);
           }}
-          onCancel={() => setNoteModal(null)}
+          onCancel={() => setModal(null)}
           testId="proposal-line-internal-note-dialog"
+        />
+      )}
+      {modal === "custom_unit" && (
+        <CustomUnitDialog
+          initialValue={form.custom_unit_label}
+          onSave={(name) => {
+            setForm({ ...form, unit_type: "OTHER", custom_unit_label: name });
+            setModal(null);
+          }}
+          onCancel={() => setModal(null)}
         />
       )}
     </>
@@ -322,6 +446,10 @@ function payloadFromForm(
   return {
     description: form.description.trim(),
     unit_type: form.unit_type,
+    // Only meaningful for OTHER (the backend forces it blank for any
+    // concrete unit type anyway — RF-2 mirror).
+    custom_unit_label:
+      form.unit_type === "OTHER" ? form.custom_unit_label.trim() : "",
     quantity: form.quantity,
     unit_price: form.unit_price,
     vat_pct: form.vat_pct,
@@ -343,6 +471,7 @@ function ProposalAddLine({
   const [form, setForm] = useState<LineFormState>({
     description: "",
     unit_type: "FIXED",
+    custom_unit_label: "",
     quantity: "1.00",
     unit_price: "0.00",
     vat_pct: "21.00",
@@ -361,6 +490,8 @@ function ProposalAddLine({
         disabled={disabled}
         showInternal
         actionsSlot={
+          // #108 Part B — compact icon actions so the single row holds
+          // at the preview-open width. Labels live on title/aria-label.
           <div className="proposal-addline-actions">
             <button
               type="button"
@@ -368,16 +499,20 @@ function ProposalAddLine({
               disabled={disabled || !form.description.trim()}
               onClick={() => onAdd(payloadFromForm(form, true))}
               data-testid="proposal-add-line-submit"
+              title={t("detail.proposal_add_line")}
+              aria-label={t("detail.proposal_add_line")}
             >
-              {t("detail.proposal_add_line")}
+              <Check size={14} strokeWidth={2.4} />
             </button>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               disabled={disabled}
               onClick={onCancel}
+              title={t("common:cancel")}
+              aria-label={t("common:cancel")}
             >
-              {t("common:cancel")}
+              <X size={14} strokeWidth={2.4} />
             </button>
           </div>
         }
