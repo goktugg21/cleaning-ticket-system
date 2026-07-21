@@ -249,11 +249,17 @@ function ActualHoursPanel({
   ewId,
   hourlyLines,
   finalTotalAmount,
+  locked,
   onUpdated,
 }: {
   ewId: number;
   hourlyLines: ActualHoursLine[];
   finalTotalAmount: string | null;
+  // True once a spawned operational ticket is APPROVED/CLOSED — the backend
+  // freezes the final amount then (code `final_amount_locked`). Derived from
+  // the spawned tickets already on the page so the locked state is shown up
+  // front, not only after a rejected Save.
+  locked: boolean;
   onUpdated: (detail: ExtraWorkRequestDetail) => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
@@ -313,6 +319,18 @@ function ActualHoursPanel({
         <p className="muted small" style={{ marginTop: 0 }}>
           {t("detail.actual_hours_helper")}
         </p>
+        <p className="muted small" style={{ marginTop: 0 }}>
+          {t("detail.actual_hours_scope_note")}
+        </p>
+        {locked && (
+          <div
+            className="alert-warning"
+            style={{ marginBottom: 12 }}
+            data-testid="extra-work-actual-hours-locked"
+          >
+            {t("detail.actual_hours_error_locked")}
+          </div>
+        )}
         <table className="data-table">
           <thead>
             <tr>
@@ -337,6 +355,7 @@ function ActualHoursPanel({
                       line: line.label,
                     })}
                     value={draft[line.id] ?? ""}
+                    disabled={locked}
                     onChange={(event) =>
                       setDraft((prev) => ({
                         ...prev,
@@ -370,7 +389,7 @@ function ActualHoursPanel({
             className="btn btn-primary btn-sm"
             data-testid="extra-work-actual-hours-save"
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || locked}
           >
             {saving
               ? t("detail.actual_hours_saving")
@@ -1008,6 +1027,16 @@ export function ExtraWorkDetailPage() {
   // cancel-confirmation dialog warning panel.
   const activeSpawnedTickets = spawnedTickets.filter(
     (ticket) => !TERMINAL_TICKET_STATUSES.has(ticket.status),
+  );
+
+  // Sprint 8B mirror — the actual-hours final amount is locked once any
+  // spawned operational ticket is APPROVED or CLOSED (backend gate code
+  // `final_amount_locked`; a REJECTED ticket does NOT lock). Derived from the
+  // spawned tickets already on the page so the panel can disable its inputs +
+  // Save and show the locked notice up front, instead of only surfacing it as
+  // a post-Save error.
+  const finalAmountLocked = spawnedTickets.some(
+    (ticket) => ticket.status === "APPROVED" || ticket.status === "CLOSED",
   );
 
   // Sprint 30 Batch 30.1 — retry-spawn button is the recovery path
@@ -2165,6 +2194,7 @@ export function ExtraWorkDetailPage() {
               ewId={ew.id}
               hourlyLines={activeHourlyLines}
               finalTotalAmount={ew.final_total_amount}
+              locked={finalAmountLocked}
               onUpdated={(detail) => {
                 setEw(detail);
                 if (approvedProposalId !== null) {

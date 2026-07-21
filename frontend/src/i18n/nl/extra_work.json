@@ -261,6 +261,7 @@
   "detail.action_cancel": "Aanvraag annuleren",
   "detail.actual_hours_section_title": "Werkelijk gewerkte uren",
   "detail.actual_hours_helper": "Voer de werkelijk gewerkte uren per uurregel in om het te factureren bedrag definitief te maken. Bewerkbaar totdat het operationele ticket is goedgekeurd of gesloten.",
+  "detail.actual_hours_scope_note": "Deze stap bestaat alleen voor extra werk met uurregels; opdrachten met een vaste prijs of andere eenheid hebben geen invoer van werkelijke uren.",
   "detail.actual_hours_col_line": "Dienst",
   "detail.actual_hours_col_hours": "Werkelijke uren",
   "detail.actual_hours_input_aria": "Werkelijke uren voor {{line}}",
