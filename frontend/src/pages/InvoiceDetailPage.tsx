@@ -616,6 +616,41 @@ export function InvoiceDetailPage() {
         </div>
       </section>
 
+      {/* Summary (page 1). */}
+      <section className="card" style={{ padding: "16px 20px", marginBottom: 16 }}>
+        <div className="section-head-title">
+          {t("invoice_detail.summary_title")}
+        </div>
+        {isDraft ? (
+          <>
+            <p className="muted small" style={{ marginTop: 4 }}>
+              {t("invoice_detail.summary_hint")}
+            </p>
+            <textarea
+              className="field-input"
+              rows={3}
+              value={summaryDraft}
+              onChange={(e) => setSummaryDraft(e.target.value)}
+              style={{ width: "100%", marginTop: 8 }}
+              data-testid="invoice-summary-input"
+            />
+            <div className="form-actions" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleSaveSummary}
+                disabled={busy}
+                data-testid="invoice-summary-save"
+              >
+                {t("invoice_detail.summary_save")}
+              </button>
+            </div>
+          </>
+        ) : (
+          <p style={{ marginTop: 8 }}>{invoice.summary_text || "—"}</p>
+        )}
+      </section>
+
       {/* Lines. */}
       <section className="card" style={{ marginBottom: 16 }}>
         <div className="section-head">
@@ -682,7 +717,7 @@ export function InvoiceDetailPage() {
                         onChange={(e) =>
                           setEditDraft({ ...editDraft, quantity: e.target.value })
                         }
-                        style={{ textAlign: "right", maxWidth: 80 }}
+                        style={{ textAlign: "right", width: "100%" }}
                       />
                     </td>
                     <td>
@@ -695,7 +730,7 @@ export function InvoiceDetailPage() {
                             unit_price: e.target.value,
                           })
                         }
-                        style={{ textAlign: "right", maxWidth: 90 }}
+                        style={{ textAlign: "right", width: "100%" }}
                       />
                     </td>
                     <td>
@@ -705,7 +740,7 @@ export function InvoiceDetailPage() {
                         onChange={(e) =>
                           setEditDraft({ ...editDraft, vat_pct: e.target.value })
                         }
-                        style={{ textAlign: "right", maxWidth: 70 }}
+                        style={{ textAlign: "right", width: "100%" }}
                       />
                     </td>
                     <td style={{ textAlign: "right" }}>
@@ -801,7 +836,7 @@ export function InvoiceDetailPage() {
                       onChange={(e) =>
                         setAddDraft({ ...addDraft, quantity: e.target.value })
                       }
-                      style={{ textAlign: "right", maxWidth: 80 }}
+                      style={{ textAlign: "right", width: "100%" }}
                       data-testid="invoice-add-line-qty"
                     />
                   </td>
@@ -812,7 +847,7 @@ export function InvoiceDetailPage() {
                       onChange={(e) =>
                         setAddDraft({ ...addDraft, unit_price: e.target.value })
                       }
-                      style={{ textAlign: "right", maxWidth: 90 }}
+                      style={{ textAlign: "right", width: "100%" }}
                       data-testid="invoice-add-line-unit"
                     />
                   </td>
@@ -823,7 +858,7 @@ export function InvoiceDetailPage() {
                       onChange={(e) =>
                         setAddDraft({ ...addDraft, vat_pct: e.target.value })
                       }
-                      style={{ textAlign: "right", maxWidth: 70 }}
+                      style={{ textAlign: "right", width: "100%" }}
                     />
                   </td>
                   <td />
@@ -854,41 +889,6 @@ export function InvoiceDetailPage() {
             </tbody>
           </table>
         </div>
-      </section>
-
-      {/* Summary (page 1). */}
-      <section className="card" style={{ padding: "16px 20px", marginBottom: 16 }}>
-        <div className="section-head-title">
-          {t("invoice_detail.summary_title")}
-        </div>
-        {isDraft ? (
-          <>
-            <p className="muted small" style={{ marginTop: 4 }}>
-              {t("invoice_detail.summary_hint")}
-            </p>
-            <textarea
-              className="field-input"
-              rows={3}
-              value={summaryDraft}
-              onChange={(e) => setSummaryDraft(e.target.value)}
-              style={{ width: "100%", marginTop: 8 }}
-              data-testid="invoice-summary-input"
-            />
-            <div className="form-actions" style={{ marginTop: 8 }}>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleSaveSummary}
-                disabled={busy}
-                data-testid="invoice-summary-save"
-              >
-                {t("invoice_detail.summary_save")}
-              </button>
-            </div>
-          </>
-        ) : (
-          <p style={{ marginTop: 8 }}>{invoice.summary_text || "—"}</p>
-        )}
       </section>
 
       {/* Fee box. */}
