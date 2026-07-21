@@ -118,16 +118,42 @@ class InvoiceLifecycleApiTests(InvoiceApiBase):
         resp = self.client.post(reverse("invoice-issue", args=[inv_id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["status"], "ISSUED")
-        self.assertIsNotNone(resp.data["number"])
+        # Number-at-send: issue does NOT assign a number yet.
+        self.assertIsNone(resp.data["number"])
 
         resp = self.client.post(reverse("invoice-send", args=[inv_id]))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["status"], "SENT")
+        # The gapless number is born at send.
+        self.assertIsNotNone(resp.data["number"])
 
         resp = self.client.post(reverse("invoice-reverse", args=[inv_id]))
         self.assertEqual(resp.status_code, 201)
         self.assertTrue(resp.data["is_reversal"])
         self.assertEqual(resp.data["reverses"], inv_id)
+
+    def test_unissue_returns_issued_invoice_to_draft(self):
+        draft = self._draft()
+        self.client.force_authenticate(self.admin)
+        self.client.post(reverse("invoice-issue", args=[draft.id]))
+        resp = self.client.post(reverse("invoice-unissue", args=[draft.id]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["status"], "DRAFT")
+        self.assertIsNone(resp.data["number"])
+
+    def test_unissue_draft_400(self):
+        draft = self._draft()
+        self.client.force_authenticate(self.admin)
+        resp = self.client.post(reverse("invoice-unissue", args=[draft.id]))
+        self.assertEqual(resp.status_code, 400)
+
+    def test_unissue_customer_user_403(self):
+        draft = self._draft()
+        self.client.force_authenticate(self.admin)
+        self.client.post(reverse("invoice-issue", args=[draft.id]))
+        self.client.force_authenticate(self.customer_user)
+        resp = self.client.post(reverse("invoice-unissue", args=[draft.id]))
+        self.assertEqual(resp.status_code, 403)
 
     def test_generate_cross_tenant_404(self):
         # Company-A admin generating for a company-B customer -> 404 (the

@@ -56,7 +56,12 @@ from .serializers import (
     InvoiceSerializer,
 )
 from .services import _earned_amounts, delete_draft_invoice, generate_draft_invoices
-from .state_machine import issue_invoice, reverse_invoice, send_invoice
+from .state_machine import (
+    issue_invoice,
+    reverse_invoice,
+    send_invoice,
+    unissue_invoice,
+)
 
 
 def _validation_detail(exc) -> str:
@@ -120,7 +125,8 @@ class InvoiceViewSet(viewsets.GenericViewSet):
       PATCH  /<id>/               update_invoice_meta (summary + fee, DRAFT)
       DELETE /<id>/               delete_draft_invoice (soft-delete + release)
       POST   /<id>/issue/         issue_invoice
-      POST   /<id>/send/          send_invoice
+      POST   /<id>/send/          send_invoice (allocates the number)
+      POST   /<id>/unissue/       unissue_invoice (ISSUED -> DRAFT)
       POST   /<id>/reverse/       reverse_invoice (returns the reversal)
       POST   /<id>/lines/         add_invoice_line
       PATCH  /<id>/lines/<lid>/   update_invoice_line
@@ -351,6 +357,13 @@ class InvoiceViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["post"], url_path="send")
     def send(self, request, pk=None):
         return self._transition(request, send_invoice)
+
+    @action(detail=True, methods=["post"], url_path="unissue")
+    def unissue(self, request, pk=None):
+        # ISSUED -> DRAFT ("back to concept"). Numberless under number-at-send,
+        # so this strands no gapless number; state machine rejects a reversal
+        # or any already-numbered row.
+        return self._transition(request, unissue_invoice)
 
     @action(detail=True, methods=["post"], url_path="reverse")
     def reverse(self, request, pk=None):

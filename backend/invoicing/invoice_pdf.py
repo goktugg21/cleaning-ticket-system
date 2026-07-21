@@ -185,12 +185,13 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
     is_draft = invoice.status == Invoice.Status.DRAFT
 
     doc_title = "Creditnota" if invoice.is_reversal else "Factuur"
-    if is_draft:
-        number_text = "CONCEPT"
-    elif invoice.number:
-        number_text = invoice.number
-    else:
-        number_text = f"#{invoice.pk}"
+    # Number-at-send: the number slot shows the real number ONLY once one
+    # exists (SENT, or a numbered reversal). A numberless invoice — DRAFT OR
+    # ISSUED-but-unsent — shows the CONCEPT marker; it must never render
+    # "None"/blank. The per-page CONCEPT banner below stays tied to DRAFT so an
+    # ISSUED invoice is still distinguishable (its status line reads
+    # "Uitgegeven").
+    number_text = invoice.number or "CONCEPT"
     status_text = f"Status: {_STATUS_LABELS_NL.get(invoice.status, invoice.status)}"
 
     pdf = _InvoicePDF(unit="mm", format="A4")
