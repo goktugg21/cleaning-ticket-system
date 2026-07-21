@@ -7,7 +7,9 @@ customer users get 403 on every endpoint; cross-tenant ids are 404.
 """
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -370,6 +372,70 @@ class InvoiceDueApiTests(InvoiceApiBase):
         self.client.force_authenticate(self.customer_user)
         resp = self.client.get(reverse("invoice-due"))
         self.assertEqual(resp.status_code, 403)
+
+    # -- arbitrary billing day (invoice_day_of_month) ---------------------
+
+    def _row_for(self, resp, customer):
+        return next(
+            (r for r in resp.data if r["customer"] == customer.id), None
+        )
+
+    def test_specific_day_makes_customer_scheduled_and_in_payload(self):
+        # A specific day alone (no first/last rule) schedules the customer.
+        self.customer.invoice_day_of_month = 15
+        self.customer.save(update_fields=["invoice_day_of_month"])
+        self.client.force_authenticate(self.admin)
+        resp = self.client.get(reverse("invoice-due"))
+        self.assertEqual(resp.status_code, 200)
+        row = self._row_for(resp, self.customer)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["invoice_day_of_month"], 15)
+
+    def test_specific_day_is_due_once_today_reaches_it(self):
+        # EW earned in May 2026; today mocked to 2026-05-20 (>= day 15).
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        self.customer.invoice_day_of_month = 15
+        self.customer.save(update_fields=["invoice_day_of_month"])
+        self.client.force_authenticate(self.admin)
+        with patch(
+            "invoicing.views.timezone.localdate", return_value=date(2026, 5, 20)
+        ):
+            resp = self.client.get(reverse("invoice-due"))
+        row = self._row_for(resp, self.customer)
+        self.assertEqual(row["unbilled_count"], 1)
+        self.assertTrue(row["is_due"])  # 20 >= 15 -> reached
+
+    def test_specific_day_not_due_before_the_day(self):
+        # Same EW, but the billing day (25) is AFTER today (2026-05-20).
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        self.customer.invoice_day_of_month = 25
+        self.customer.save(update_fields=["invoice_day_of_month"])
+        self.client.force_authenticate(self.admin)
+        with patch(
+            "invoicing.views.timezone.localdate", return_value=date(2026, 5, 20)
+        ):
+            resp = self.client.get(reverse("invoice-due"))
+        row = self._row_for(resp, self.customer)
+        # Still listed (scheduled) with the unbilled count, but not due yet.
+        self.assertEqual(row["unbilled_count"], 1)
+        self.assertFalse(row["is_due"])  # 20 < 25 -> not reached
+
+    def test_specific_day_takes_precedence_over_rule(self):
+        # Day 25 set alongside FIRST_OF_MONTH: the specific day wins, so on the
+        # 20th it is NOT yet due (FIRST alone would have been due all month).
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        self.customer.invoice_day_rule = Customer.InvoiceDayRule.FIRST_OF_MONTH
+        self.customer.invoice_day_of_month = 25
+        self.customer.save(
+            update_fields=["invoice_day_rule", "invoice_day_of_month"]
+        )
+        self.client.force_authenticate(self.admin)
+        with patch(
+            "invoicing.views.timezone.localdate", return_value=date(2026, 5, 20)
+        ):
+            resp = self.client.get(reverse("invoice-due"))
+        row = self._row_for(resp, self.customer)
+        self.assertFalse(row["is_due"])
 
 
 class InvoiceCrossTenantApiTests(InvoiceApiBase):

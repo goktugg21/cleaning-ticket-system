@@ -22,6 +22,7 @@ import calendar
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -228,7 +229,12 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         unbilled Extra Work count + total for the CURRENT Amsterdam-local
         period (this year, this month), reusing `unbilled_extra_work` (so the
         per-customer figures match exactly what a generate run would claim).
-        `is_due` is a soft hint derived from the day rule vs today:
+        `is_due` is a soft hint derived from the customer's billing day vs
+        today. The EFFECTIVE billing day is `invoice_day_of_month` when set
+        (1..28), otherwise the first/last rule:
+          * a specific day D (1..28) -> "reached" from day D onward within the
+            month (True once today.day >= D), mirroring FIRST_OF_MONTH's
+            reached-for-the-rest-of-the-month semantics.
           * FIRST_OF_MONTH -> billing day is the 1st, so it is "reached" for
             the whole current month (True whenever there is unbilled work).
           * LAST_OF_MONTH  -> reached only on the last calendar day of the
@@ -243,10 +249,14 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         year, month = today.year, today.month
         last_day = calendar.monthrange(year, month)[1]
 
+        # A customer is "scheduled" if it has a specific billing day OR a
+        # first/last rule (either establishes a due day).
         customers = (
             scope_customers_for(request.user)
             .filter(is_active=True)
-            .exclude(invoice_day_rule="")
+            .filter(
+                Q(invoice_day_of_month__isnull=False) | ~Q(invoice_day_rule="")
+            )
             .order_by("name")
         )
         payload = []
@@ -259,11 +269,17 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                 (_earned_amounts(e)[2] for e in unbilled), Decimal("0.00")
             )
             rule = customer.invoice_day_rule
-            if rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
+            day = customer.invoice_day_of_month
+            if day is not None:
+                # Specific day (<=28, so it exists in every month): reached
+                # from day D onward. Reached-for-the-rest-of-the-month, like
+                # FIRST_OF_MONTH but starting at D instead of 1.
+                billing_day_reached = today.day >= day
+            elif rule == Customer.InvoiceDayRule.FIRST_OF_MONTH:
                 billing_day_reached = True
             elif rule == Customer.InvoiceDayRule.LAST_OF_MONTH:
                 billing_day_reached = today.day == last_day
-            else:  # defensive — the queryset already excludes blank rules
+            else:  # defensive — the queryset already excludes fully-unset rows
                 billing_day_reached = False
             payload.append(
                 {
@@ -271,6 +287,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
                     "customer_name": customer.name,
                     "company": customer.company_id,
                     "invoice_day_rule": rule,
+                    "invoice_day_of_month": day,
                     "invoice_granularity_default": (
                         customer.invoice_granularity_default
                     ),

@@ -2,6 +2,7 @@ from pathlib import Path as FilePath
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
 
@@ -110,6 +111,21 @@ class Customer(models.Model):
         blank=True,
         default="",
         help_text="Informational billing-day rule; drives the 'who's due' list, gates nothing.",
+    )
+    # Arbitrary billing day: when set (1..28), it is THE billing day-of-month
+    # and takes precedence over invoice_day_rule. Capped at 28 so the day
+    # exists in every month (use LAST_OF_MONTH for a month-end schedule). NULL
+    # = fall back to invoice_day_rule (FIRST/LAST) or, if that is blank too,
+    # schedule unset. Informational only — drives the 'who's due' list, gates
+    # nothing (mirrors invoice_day_rule).
+    invoice_day_of_month = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(28)],
+        help_text=(
+            "Specific billing day-of-month (1..28); takes precedence over "
+            "invoice_day_rule. NULL falls back to the first/last rule."
+        ),
     )
     invoice_granularity_default = models.CharField(
         max_length=16,
