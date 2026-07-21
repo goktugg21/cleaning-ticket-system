@@ -161,13 +161,12 @@ export function CreateTicketPage() {
     customer.building === buildingId ||
     (customer.linked_building_ids?.includes(buildingId) ?? false);
 
-  const filteredCustomers = useMemo(() => {
-    if (!form.building) return customers;
-    const buildingId = Number(form.building);
-    return customers.filter((customer) =>
-      customerMatchesBuilding(customer, buildingId),
-    );
-  }, [customers, form.building]);
+  // Customer is the MASTER dropdown: it ALWAYS lists all customers. Picking a
+  // building filters only the BUILDING options (filteredBuildings below), never
+  // the customer list — so the operator can always switch to a different
+  // customer after choosing a building (removes the old bidirectional-filter
+  // deadlock). Backend still validates per-(customer, building) access on submit.
+  const filteredCustomers = customers;
 
   const filteredBuildings = useMemo(() => {
     if (!form.customer) return buildings;
@@ -184,28 +183,40 @@ export function CreateTicketPage() {
   useEffect(() => {
     if (!form.building) return;
     if (form.customer) return;
-    if (filteredCustomers.length === 1) {
+    // Derive the single match from the customers linked to THIS building
+    // directly (local computation) — filteredCustomers is now the full list,
+    // so the pick-a-building-first auto-fill still works without collapsing the
+    // customer dropdown. Only auto-fill when exactly one customer maps.
+    const buildingId = Number(form.building);
+    const matches = customers.filter(
+      (customer) =>
+        customer.building === buildingId ||
+        (customer.linked_building_ids?.includes(buildingId) ?? false),
+    );
+    if (matches.length === 1) {
       setForm((current) => ({
         ...current,
-        customer: String(filteredCustomers[0].id),
+        customer: String(matches[0].id),
       }));
     }
-  }, [form.building, form.customer, filteredCustomers]);
+  }, [form.building, form.customer, customers]);
 
   useEffect(() => {
     if (!form.customer) return;
-    const stillValid = filteredCustomers.some(
+    // Defensive only: reset the customer if it is no longer in the LOADED list
+    // (e.g. the customer set reloaded). This checks the full customer list, so
+    // it never invalidates the customer based on the selected building — that
+    // bidirectional filter (the deadlock) is gone.
+    const stillValid = customers.some(
       (customer) => String(customer.id) === form.customer,
     );
     if (!stillValid) {
       setForm((current) => ({
         ...current,
-        customer: filteredCustomers[0]
-          ? String(filteredCustomers[0].id)
-          : "",
+        customer: customers[0] ? String(customers[0].id) : "",
       }));
     }
-  }, [filteredCustomers, form.customer]);
+  }, [customers, form.customer]);
 
   useEffect(() => {
     if (!form.building) return;
