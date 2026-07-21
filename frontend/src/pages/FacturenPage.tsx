@@ -16,7 +16,7 @@
 // to the standalone Facturen page) and `embedded` drops the standalone header
 // (the customer sub-page header renders instead). Used by CustomerInvoicesPage.
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { BadgeEuro } from "lucide-react";
 
@@ -72,6 +72,7 @@ export function FacturenPage({
 } = {}) {
   const { t } = useTranslation("common");
   const { push: pushToast } = useToast();
+  const navigate = useNavigate();
   const customerScoped = customerId !== undefined;
 
   const [dueRows, setDueRows] = useState<InvoiceDueRow[]>([]);
@@ -479,7 +480,25 @@ export function FacturenPage({
             </thead>
             <tbody>
               {visibleInvoices.map((inv) => (
-                <tr key={inv.id} data-testid="facturen-list-row">
+                <tr
+                  key={inv.id}
+                  data-testid="facturen-list-row"
+                  style={{ cursor: "pointer" }}
+                  tabIndex={0}
+                  onClick={(e) => {
+                    // The number cell is a real <Link> (keyboard focus,
+                    // open-in-new-tab, middle-click). If the click originated
+                    // on it, let the anchor navigate — don't double-fire.
+                    if ((e.target as HTMLElement).closest("a")) return;
+                    navigate(`/invoices/${inv.id}`);
+                  }}
+                  onKeyDown={(e) => {
+                    // Enter on the focused row (not the inner anchor) navigates.
+                    if (e.key === "Enter" && e.target === e.currentTarget) {
+                      navigate(`/invoices/${inv.id}`);
+                    }
+                  }}
+                >
                   <td>
                     <Link to={`/invoices/${inv.id}`} className="link">
                       {inv.number ?? t("facturen.concept")}
