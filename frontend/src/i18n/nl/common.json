@@ -1395,6 +1395,7 @@
   "facturatie.schedule_save": "Schema opslaan",
   "facturatie.schedule_saved": "Factuurschema opgeslagen",
   "facturatie.contract_title": "Contract-PDF",
+  "facturatie.contract_preview_title": "Voorbeeld contract-PDF",
   "facturatie.contract_hint": "Alleen ter informatie; heeft geen effect op de facturatie. Één actieve PDF.",
   "facturatie.contract_none": "Geen contract-PDF geüpload.",
   "facturatie.contract_view": "Bekijk PDF",

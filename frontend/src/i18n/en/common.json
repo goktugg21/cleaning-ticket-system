@@ -1395,6 +1395,7 @@
   "facturatie.schedule_save": "Save schedule",
   "facturatie.schedule_saved": "Billing schedule saved",
   "facturatie.contract_title": "Contract PDF",
+  "facturatie.contract_preview_title": "Contract PDF preview",
   "facturatie.contract_hint": "Informational only; no effect on billing. One active PDF.",
   "facturatie.contract_none": "No contract PDF uploaded.",
   "facturatie.contract_view": "View PDF",
