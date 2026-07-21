@@ -27,6 +27,7 @@ import {
   removeInvoiceLine,
   reverseInvoice,
   sendInvoice,
+  unissueInvoice,
   updateInvoiceLine,
   updateInvoiceMeta,
 } from "../api/invoices";
@@ -42,7 +43,7 @@ const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
   SENT: "facturen.status_sent",
 };
 
-type LifecycleAction = "issue" | "send" | "reverse" | "delete";
+type LifecycleAction = "issue" | "send" | "unissue" | "reverse" | "delete";
 
 interface LineDraft {
   description: string;
@@ -285,6 +286,14 @@ export function InvoiceDetailPage() {
           variant: "success",
           title: t("invoice_detail.sent_toast"),
         });
+      } else if (pendingLifecycle === "unissue") {
+        const updated = await unissueInvoice(invoice.id);
+        applyInvoice(updated);
+        setPdfRefresh((k) => k + 1);
+        pushToast({
+          variant: "success",
+          title: t("invoice_detail.unissued_toast"),
+        });
       } else if (pendingLifecycle === "reverse") {
         const reversal = await reverseInvoice(invoice.id);
         pushToast({
@@ -344,6 +353,12 @@ export function InvoiceDetailPage() {
           title: t("invoice_detail.confirm_send_title"),
           body: t("invoice_detail.confirm_send_body"),
           confirm: t("invoice_detail.action_send"),
+        };
+      case "unissue":
+        return {
+          title: t("invoice_detail.confirm_unissue_title"),
+          body: t("invoice_detail.confirm_unissue_body"),
+          confirm: t("invoice_detail.action_unissue"),
         };
       case "reverse":
         return {
@@ -436,15 +451,26 @@ export function InvoiceDetailPage() {
             </>
           )}
           {invoice.status === "ISSUED" && (
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => requestLifecycle("send")}
-              disabled={busy}
-              data-testid="invoice-send-button"
-            >
-              {t("invoice_detail.action_send")}
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => requestLifecycle("send")}
+                disabled={busy}
+                data-testid="invoice-send-button"
+              >
+                {t("invoice_detail.action_send")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => requestLifecycle("unissue")}
+                disabled={busy}
+                data-testid="invoice-unissue-button"
+              >
+                {t("invoice_detail.action_unissue")}
+              </button>
+            </>
           )}
           {invoice.status === "SENT" && !invoice.is_reversal && (
             <button
