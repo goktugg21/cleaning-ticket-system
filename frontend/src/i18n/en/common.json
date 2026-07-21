@@ -1387,6 +1387,7 @@
   "facturatie.day_unset": "Not set",
   "facturatie.day_first": "1st of the month",
   "facturatie.day_last": "Last of the month",
+  "facturatie.day_of_month_option": "Day {{day}}",
   "facturatie.day_rule_helper": "The day of the month this customer's invoices are due. This is an informational schedule that surfaces the customer in the 'due' list on the Invoices page; it does not send any invoices automatically.",
   "facturatie.granularity_label": "Default granularity",
   "facturatie.granularity_customer": "One invoice (customer)",

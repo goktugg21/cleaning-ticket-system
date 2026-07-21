@@ -695,6 +695,9 @@ export interface CustomerAdmin {
   // Invoicing Phase 4a — billing schedule (writable by OSIUS admins) +
   // read-only contract-PDF URL. `invoice_day_rule` is "" when unset.
   invoice_day_rule?: InvoiceDayRule | "";
+  // Arbitrary billing day (1..28); when set it takes precedence over the
+  // first/last rule. NULL falls back to invoice_day_rule.
+  invoice_day_of_month?: number | null;
   invoice_granularity_default?: InvoiceGranularity;
   contract_pdf_url?: string | null;
   created_at: string;
@@ -2121,6 +2124,7 @@ export interface InvoiceDueRow {
   customer_name: string;
   company: number;
   invoice_day_rule: InvoiceDayRule | "";
+  invoice_day_of_month: number | null;
   invoice_granularity_default: InvoiceGranularity;
   period_year: number;
   period_month: number;
