@@ -151,6 +151,12 @@ export function CustomerFacturatieSection({
               </option>
               <option value="LAST_OF_MONTH">{t("facturatie.day_last")}</option>
             </select>
+            <span
+              className="muted small"
+              style={{ display: "block", marginTop: 4 }}
+            >
+              {t("facturatie.day_rule_helper")}
+            </span>
           </label>
           <label className="field" style={{ flex: "1 1 220px" }}>
             <span className="field-label">
@@ -172,6 +178,12 @@ export function CustomerFacturatieSection({
                 {t("facturatie.granularity_building")}
               </option>
             </select>
+            <span
+              className="muted small"
+              style={{ display: "block", marginTop: 4 }}
+            >
+              {t("facturatie.granularity_helper")}
+            </span>
           </label>
         </div>
         {canManage && (
