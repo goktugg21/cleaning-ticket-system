@@ -717,7 +717,7 @@ export function InvoiceDetailPage() {
                         onChange={(e) =>
                           setEditDraft({ ...editDraft, quantity: e.target.value })
                         }
-                        style={{ textAlign: "right", maxWidth: 80 }}
+                        style={{ textAlign: "right", width: "100%" }}
                       />
                     </td>
                     <td>
@@ -730,7 +730,7 @@ export function InvoiceDetailPage() {
                             unit_price: e.target.value,
                           })
                         }
-                        style={{ textAlign: "right", maxWidth: 90 }}
+                        style={{ textAlign: "right", width: "100%" }}
                       />
                     </td>
                     <td>
@@ -740,7 +740,7 @@ export function InvoiceDetailPage() {
                         onChange={(e) =>
                           setEditDraft({ ...editDraft, vat_pct: e.target.value })
                         }
-                        style={{ textAlign: "right", maxWidth: 70 }}
+                        style={{ textAlign: "right", width: "100%" }}
                       />
                     </td>
                     <td style={{ textAlign: "right" }}>
@@ -836,7 +836,7 @@ export function InvoiceDetailPage() {
                       onChange={(e) =>
                         setAddDraft({ ...addDraft, quantity: e.target.value })
                       }
-                      style={{ textAlign: "right", maxWidth: 80 }}
+                      style={{ textAlign: "right", width: "100%" }}
                       data-testid="invoice-add-line-qty"
                     />
                   </td>
@@ -847,7 +847,7 @@ export function InvoiceDetailPage() {
                       onChange={(e) =>
                         setAddDraft({ ...addDraft, unit_price: e.target.value })
                       }
-                      style={{ textAlign: "right", maxWidth: 90 }}
+                      style={{ textAlign: "right", width: "100%" }}
                       data-testid="invoice-add-line-unit"
                     />
                   </td>
@@ -858,7 +858,7 @@ export function InvoiceDetailPage() {
                       onChange={(e) =>
                         setAddDraft({ ...addDraft, vat_pct: e.target.value })
                       }
-                      style={{ textAlign: "right", maxWidth: 70 }}
+                      style={{ textAlign: "right", width: "100%" }}
                     />
                   </td>
                   <td />
