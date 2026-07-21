@@ -261,6 +261,7 @@
   "detail.action_cancel": "Cancel request",
   "detail.actual_hours_section_title": "Actual hours worked",
   "detail.actual_hours_helper": "Enter the hours actually worked on each hourly line to finalize the billable amount. Editable until the operational ticket is approved or closed.",
+  "detail.actual_hours_scope_note": "This step exists only for extra work with hourly lines; fixed-price or other-unit requests have no actual-hours entry.",
   "detail.actual_hours_col_line": "Service",
   "detail.actual_hours_col_hours": "Actual hours",
   "detail.actual_hours_input_aria": "Actual hours for {{line}}",

@@ -55,12 +55,16 @@ class RenderInvoicePdfTests(InvoicingFixture):
         text = _pdf_text(render_invoice_pdf(draft))
         self.assertIn("CONCEPT", text)
 
-    def test_issued_shows_real_number_and_no_draft_marker(self):
+    def test_issued_unsent_shows_concept_not_a_number(self):
+        # Number-at-send: an ISSUED-but-unsent invoice is numberless, so the
+        # number slot shows CONCEPT (never "None"). The status line still reads
+        # "Uitgegeven", so it stays distinguishable from a DRAFT.
         issued = issue_invoice(self.admin, self._draft())
-        self.assertIsNotNone(issued.number)
+        self.assertIsNone(issued.number)
         text = _pdf_text(render_invoice_pdf(issued))
-        self.assertIn(issued.number, text)
-        self.assertNotIn("CONCEPT", text)
+        self.assertIn("CONCEPT", text)
+        self.assertNotIn("None", text)
+        self.assertIn("Uitgegeven", text)
 
     def test_sent_shows_real_number(self):
         sent = send_invoice(self.admin, issue_invoice(self.admin, self._draft()))

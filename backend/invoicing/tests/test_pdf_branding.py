@@ -15,6 +15,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from fpdf import FPDF
 from PIL import Image
+from pypdf import PdfReader
 
 from companies.models import Company
 from config.pdf_branding import (
@@ -42,6 +43,28 @@ def _png_bytes() -> bytes:
     # A landscape logo so the aspect differs from the OSIUS logo's.
     Image.new("RGB", (40, 12), (0, 120, 200)).save(bio, "PNG")
     return bio.getvalue()
+
+
+def _page1_header_text(data: bytes, *, top_mm: float = 30.0) -> str:
+    """Concatenated page-1 text within `top_mm` of the page top — the branded
+    header band (logo slot + provider block + doc title + number/status),
+    which sits ABOVE the accent rule. The 'Aanbieder:' body row (which also
+    carries the company name) is below the band and excluded. Used to prove
+    the name-only header emits the company name exactly ONCE (it used to be
+    double-drawn into the logo slot, overprinting the provider block)."""
+    reader = PdfReader(BytesIO(data))
+    page = reader.pages[0]
+    cutoff = float(page.mediabox.height) - top_mm * (72.0 / 25.4)
+    parts: list[str] = []
+
+    def _visit(text, cm, tm, font_dict, font_size):
+        # tm[5] is the text-space y translation (fpdf2 emits an identity page
+        # CTM, so it is the absolute y from the page bottom).
+        if text and text.strip() and tm[5] >= cutoff:
+            parts.append(text)
+
+    page.extract_text(visitor_text=_visit)
+    return " ".join(parts)
 
 
 @override_settings(PLATFORM_BRAND_SLUG=PLATFORM_SLUG)
@@ -77,9 +100,12 @@ class PdfBrandingFunctionTests(TestCase):
         self.assertGreater(y, 10.0)
 
     def test_draw_logo_name_only_returns_y(self):
-        # Non-platform, no logo -> name-only header, no crash.
+        # Non-platform, no logo -> the name-only slot now draws NOTHING (the
+        # provider block is the single name), so y is returned unchanged
+        # (like the cross-company None case) instead of advancing under a
+        # slot-drawn name that overprinted the provider block.
         y = draw_logo(self._fresh_pdf(), self.other, y=10.0)
-        self.assertGreater(y, 10.0)
+        self.assertEqual(y, 10.0)
 
     def test_draw_logo_none_returns_same_y(self):
         # Cross-company report -> nothing drawn.
@@ -146,6 +172,20 @@ class InvoicePdfBrandingTests(TestCase):
         company = Company.objects.create(name="Bright", slug="bright-inv")
         pdf = render_invoice_pdf(self._invoice(company))
         self.assertTrue(pdf.startswith(b"%PDF"))
+
+    def test_name_only_header_emits_company_name_once(self):
+        # Regression: a non-platform company with NO logo used to have its
+        # name drawn twice in the header — 16pt in the logo slot AND 11pt in
+        # the provider block — at nearly the same coordinates, so the two
+        # overprinted ("Bright Facilities" collided with itself). The header
+        # band must now carry the provider name exactly once.
+        company = Company.objects.create(
+            name="Bright Facilities", slug="bright-once-inv"
+        )
+        pdf = render_invoice_pdf(self._invoice(company))
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        header = _page1_header_text(pdf)
+        self.assertEqual(header.count("Bright Facilities"), 1, header)
 
     def test_render_non_osius_company_logo_invoice_is_pdf(self):
         company = Company.objects.create(name="Logo Co", slug="logo-inv")

@@ -118,6 +118,28 @@ class BillingScheduleWriteTests(_Fixture):
             Customer.InvoiceDayRule.FIRST_OF_MONTH,
         )
 
+    def test_super_admin_can_set_specific_billing_day(self):
+        self.client.force_authenticate(self.sa)
+        resp = self.client.patch(
+            self._detail(self.customer),
+            {"invoice_day_of_month": 15},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["invoice_day_of_month"], 15)
+        self.customer.refresh_from_db()
+        self.assertEqual(self.customer.invoice_day_of_month, 15)
+
+    def test_specific_billing_day_out_of_range_rejected(self):
+        # The model validator (1..28) is enforced by the serializer on write.
+        self.client.force_authenticate(self.sa)
+        resp = self.client.patch(
+            self._detail(self.customer),
+            {"invoice_day_of_month": 31},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 400)
+
     def test_customer_user_cannot_set_billing_schedule(self):
         self.client.force_authenticate(self.cust_user)
         resp = self.client.patch(

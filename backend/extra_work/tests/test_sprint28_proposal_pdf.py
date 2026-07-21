@@ -79,6 +79,28 @@ def _pdf_text(data: bytes) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
+def _page1_header_text(data: bytes, *, top_mm: float = 30.0) -> str:
+    """Concatenated page-1 text within `top_mm` of the page top — the branded
+    header band (logo slot + provider block + title + number/status), which
+    sits ABOVE the accent rule. The 'Aanbieder:' body row (which also carries
+    the company name) is below the band and excluded. Used to prove the
+    name-only header emits the company name exactly ONCE (it used to be
+    double-drawn into the logo slot, overprinting the provider block)."""
+    reader = PdfReader(BytesIO(data))
+    page = reader.pages[0]
+    cutoff = float(page.mediabox.height) - top_mm * (72.0 / 25.4)
+    parts: list[str] = []
+
+    def _visit(text, cm, tm, font_dict, font_size):
+        # tm[5] is the text-space y translation (fpdf2 emits an identity page
+        # CTM, so it is the absolute y from the page bottom).
+        if text and text.strip() and tm[5] >= cutoff:
+            parts.append(text)
+
+    page.extract_text(visitor_text=_visit)
+    return " ".join(parts)
+
+
 def _mk(email: str, role: str, **extra) -> User:
     return User.objects.create_user(
         email=email,
@@ -559,6 +581,19 @@ class ProposalPdfBrandingTests(ProposalPdfFixtureMixin, TestCase):
         )
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 1000)
+
+    def test_name_only_header_emits_company_name_once(self):
+        # Regression: a non-platform company with NO logo used to have its
+        # name drawn twice in the header — 16pt in the logo slot AND 11pt in
+        # the provider block — at nearly the same coordinates, so the two
+        # overprinted. The header band must now carry the provider name
+        # exactly once (the fixture company `prov-b14` is name-only).
+        pdf = render_proposal_pdf(
+            self._built_proposal(), viewer_is_customer=False
+        )
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        header = _page1_header_text(pdf)
+        self.assertEqual(header.count(self.company.name), 1, header)
 
     @override_settings(PLATFORM_BRAND_SLUG="prov-b14")
     def test_render_platform_proposal_is_pdf(self):

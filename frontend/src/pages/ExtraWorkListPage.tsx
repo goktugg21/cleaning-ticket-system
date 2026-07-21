@@ -33,6 +33,7 @@ import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
+import { rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
 
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
@@ -80,7 +81,7 @@ interface ExtraWorkKpis {
   open: number; // REQUESTED + UNDER_REVIEW
   awaiting: number; // PRICING_PROPOSED
   approved: number; // CUSTOMER_APPROVED
-  totalValue: string; // decimal-string sum of total_amount (excludes CANCELLED)
+  totalValue: string; // decimal-string sum of earned amounts (excludes CANCELLED)
 }
 
 function KpiCard({
@@ -192,9 +193,11 @@ export function ExtraWorkListPage() {
       if (r.status === "REQUESTED" || r.status === "UNDER_REVIEW") open += 1;
       else if (r.status === "PRICING_PROPOSED") awaiting += 1;
       else if (r.status === "CUSTOMER_APPROVED") approved += 1;
+      // Earned = final actual-hours amount when present, else the quoted
+      // estimate (rowAmounts — the shared billing rule the /invoices widget
+      // uses), so this KPI agrees with the per-row Total column below.
       if (r.status !== "CANCELLED") {
-        const n = Number(r.total_amount);
-        if (Number.isFinite(n)) totalNum += n;
+        totalNum += rowAmounts(r).total;
       }
     }
     return {
@@ -240,15 +243,18 @@ export function ExtraWorkListPage() {
     ];
     const lines = [headers.map(esc).join(",")];
     for (const row of visibleRows) {
+      // Earned (final-with-quoted-fallback) so the export matches the on-screen
+      // Total; the three columns stay coherent (subtotal + vat == total).
+      const amounts = rowAmounts(row);
       lines.push(
         [
           row.title,
           row.customer_name,
           row.building_name,
           t(STATUS_I18N_KEY[row.status] ?? row.status),
-          row.subtotal_amount,
-          row.vat_amount,
-          row.total_amount,
+          amounts.subtotal.toFixed(2),
+          amounts.vat.toFixed(2),
+          amounts.total.toFixed(2),
           row.is_invoiced
             ? t("list.billing_invoiced")
             : t("list.billing_to_invoice"),
@@ -542,7 +548,7 @@ export function ExtraWorkListPage() {
                     <td>{row.building_name}</td>
                     <td>{row.customer_name}</td>
                     <td style={{ textAlign: "right" }}>
-                      {formatMoney(row.total_amount)}
+                      {formatMoney(rowAmounts(row).total)}
                     </td>
                     {isProvider && (
                       <td>
@@ -629,7 +635,7 @@ export function ExtraWorkListPage() {
                     </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_total")}</dt>
-                      <dd>{formatMoney(row.total_amount)}</dd>
+                      <dd>{formatMoney(rowAmounts(row).total)}</dd>
                     </div>
                     {isProvider && (
                       <div className="admin-card-meta-row">

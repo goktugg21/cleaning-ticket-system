@@ -251,8 +251,10 @@ export interface CustomerWritePayload {
   show_assigned_staff_email?: boolean;
   show_assigned_staff_phone?: boolean;
   // Invoicing Phase 4b — billing schedule (PATCH by OSIUS admins only; the
-  // CustomerViewSet write gate enforces it). "" clears the day rule.
+  // CustomerViewSet write gate enforces it). "" clears the day rule; a numeric
+  // invoice_day_of_month (1..28) sets a specific billing day, null clears it.
   invoice_day_rule?: InvoiceDayRule | "";
+  invoice_day_of_month?: number | null;
   invoice_granularity_default?: InvoiceGranularity;
 }
 

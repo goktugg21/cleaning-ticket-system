@@ -122,31 +122,16 @@ export function CreateTicketPage() {
 
         setBuildings(buildingResponse.data.results);
         setCustomers(customerResponse.data.results);
-
-        const firstBuilding = buildingResponse.data.results[0];
-        // Sprint 14 hotfix: a customer is valid for a building if EITHER
-        // legacy customer.building matches OR the building id appears in
-        // customer.linked_building_ids (M:N source of truth for
-        // consolidated customers like B Amsterdam).
-        const customerMatchesBuilding = (
-          customer: Customer,
-          buildingId: number,
-        ) =>
-          customer.building === buildingId ||
-          (customer.linked_building_ids?.includes(buildingId) ?? false);
-        const firstCustomer = firstBuilding
-          ? customerResponse.data.results.find((customer) =>
-              customerMatchesBuilding(customer, firstBuilding.id),
-            )
-          : undefined;
-
-        setForm((current) => ({
-          ...current,
-          building:
-            current.building || (firstBuilding ? String(firstBuilding.id) : ""),
-          customer:
-            current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
-        }));
+        // #112 follow-up — do NOT auto-select the first building on load.
+        // Auto-selecting a building immediately cross-filtered the customer
+        // dropdown (filteredCustomers) down to just that building's
+        // customer(s), so the form looked locked to a single customer even
+        // though the backend returns them all (e.g. City Office Rotterdam
+        // was hidden behind an auto-picked "B Amsterdam"). Leave building +
+        // customer empty (the form starts at EMPTY_FORM); the operator
+        // narrows the customer list by picking a building, and the
+        // single-match auto-select effect below still saves the click once
+        // they do.
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
       } finally {

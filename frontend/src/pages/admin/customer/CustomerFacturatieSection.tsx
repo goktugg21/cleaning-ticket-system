@@ -4,7 +4,7 @@
 // default). Provider-admin-gated in the UI (the backend enforces OSIUS-admin
 // on write; the controls hide for non-admins). Self-contained so the overview
 // page only imports + mounts it.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -23,6 +23,34 @@ import { useAuth } from "../../../auth/AuthContext";
 import { isProviderAdmin } from "../../../auth/permissions";
 import { useToast } from "../../../components/ToastProvider";
 
+// Billing-day picker value: "" (unset), "1".."28" (a specific day of month),
+// or "last" (last of month). FIRST_OF_MONTH stays a valid enum but is shown as
+// day 1 (they are equivalent). Days cap at 28 so the day exists in every month.
+const DAY_OF_MONTH_OPTIONS = Array.from({ length: 28 }, (_, i) => i + 1);
+
+function initialDaySelection(c: CustomerAdmin): string {
+  if (c.invoice_day_of_month != null) return String(c.invoice_day_of_month);
+  if (c.invoice_day_rule === "LAST_OF_MONTH") return "last";
+  if (c.invoice_day_rule === "FIRST_OF_MONTH") return "1"; // first === day 1
+  return "";
+}
+
+// One canonical representation per selection so a reload shows the same choice:
+// a specific day stores invoice_day_of_month and clears the rule; last-of-month
+// stores the rule and clears the day; unset clears both.
+function daySelectionToPayload(sel: string): {
+  invoice_day_rule: InvoiceDayRule | "";
+  invoice_day_of_month: number | null;
+} {
+  if (sel === "last") {
+    return { invoice_day_rule: "LAST_OF_MONTH", invoice_day_of_month: null };
+  }
+  if (sel === "") {
+    return { invoice_day_rule: "", invoice_day_of_month: null };
+  }
+  return { invoice_day_rule: "", invoice_day_of_month: Number(sel) };
+}
+
 export function CustomerFacturatieSection({
   customer,
   onUpdated,
@@ -36,8 +64,8 @@ export function CustomerFacturatieSection({
   const canManage = isProviderAdmin(me?.role);
 
   const fileRef = useRef<HTMLInputElement>(null);
-  const [dayRule, setDayRule] = useState<InvoiceDayRule | "">(
-    customer.invoice_day_rule ?? "",
+  const [daySelection, setDaySelection] = useState<string>(() =>
+    initialDaySelection(customer),
   );
   const [granularity, setGranularity] = useState<InvoiceGranularity>(
     customer.invoice_granularity_default ?? "CUSTOMER",
@@ -45,15 +73,51 @@ export function CustomerFacturatieSection({
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState("");
 
   const hasContract = Boolean(customer.contract_pdf_url);
+
+  // Inline live preview of the contract PDF. The serve endpoint is auth-gated
+  // (Bearer), so we fetch the blob via the API helper and render it through an
+  // object URL — the same idiom as the invoice / proposal preview. Keyed on
+  // contract_pdf_url so upload / replace (a fresh ?v= URL) refetches and remove
+  // (null) clears it; the object URL is revoked on cleanup. All setState runs
+  // inside the async helper, so no synchronous set-state-in-effect is added.
+  useEffect(() => {
+    let cancelled = false;
+    let created: string | null = null;
+    async function loadPreview() {
+      setPreviewError("");
+      if (!customer.contract_pdf_url) {
+        setPreviewUrl(null);
+        return;
+      }
+      try {
+        const blob = await fetchCustomerContractPdf(customer.id);
+        if (cancelled) return;
+        created = URL.createObjectURL(blob);
+        setPreviewUrl(created);
+      } catch (err) {
+        if (!cancelled) {
+          setPreviewUrl(null);
+          setPreviewError(getApiError(err));
+        }
+      }
+    }
+    loadPreview();
+    return () => {
+      cancelled = true;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [customer.id, customer.contract_pdf_url]);
 
   async function handleSaveSchedule() {
     setSavingSchedule(true);
     setError("");
     try {
       const fresh = await updateCustomer(customer.id, {
-        invoice_day_rule: dayRule,
+        ...daySelectionToPayload(daySelection),
         invoice_granularity_default: granularity,
       });
       onUpdated(fresh);
@@ -140,17 +204,25 @@ export function CustomerFacturatieSection({
             </span>
             <select
               className="field-select"
-              value={dayRule}
-              onChange={(e) => setDayRule(e.target.value as InvoiceDayRule | "")}
+              value={daySelection}
+              onChange={(e) => setDaySelection(e.target.value)}
               disabled={!canManage || savingSchedule}
               data-testid="facturatie-day-rule"
             >
               <option value="">{t("facturatie.day_unset")}</option>
-              <option value="FIRST_OF_MONTH">
-                {t("facturatie.day_first")}
-              </option>
-              <option value="LAST_OF_MONTH">{t("facturatie.day_last")}</option>
+              {DAY_OF_MONTH_OPTIONS.map((d) => (
+                <option key={d} value={String(d)}>
+                  {t("facturatie.day_of_month_option", { day: d })}
+                </option>
+              ))}
+              <option value="last">{t("facturatie.day_last")}</option>
             </select>
+            <span
+              className="muted small"
+              style={{ display: "block", marginTop: 4 }}
+            >
+              {t("facturatie.day_rule_helper")}
+            </span>
           </label>
           <label className="field" style={{ flex: "1 1 220px" }}>
             <span className="field-label">
@@ -172,6 +244,12 @@ export function CustomerFacturatieSection({
                 {t("facturatie.granularity_building")}
               </option>
             </select>
+            <span
+              className="muted small"
+              style={{ display: "block", marginTop: 4 }}
+            >
+              {t("facturatie.granularity_helper")}
+            </span>
           </label>
         </div>
         {canManage && (
@@ -247,6 +325,39 @@ export function CustomerFacturatieSection({
             </>
           )}
         </div>
+
+        {/* Embedded live preview — primary affordance; the "View PDF"
+            button above stays as a secondary open-in-new-tab action. Only
+            renders when a contract is present; a fetch error surfaces inline
+            without crashing the section. */}
+        {hasContract && (
+          <div
+            style={{ marginTop: 12 }}
+            data-testid="facturatie-contract-preview"
+          >
+            {previewError ? (
+              <div className="alert-error" role="alert">
+                {previewError}
+              </div>
+            ) : previewUrl ? (
+              <iframe
+                title={t("facturatie.contract_preview_title")}
+                src={previewUrl}
+                data-testid="facturatie-contract-frame"
+                style={{
+                  width: "100%",
+                  height: 520,
+                  border: "1px solid var(--border, #e2e2e2)",
+                  borderRadius: 6,
+                }}
+              />
+            ) : (
+              <div className="loading-bar">
+                <div className="loading-bar-fill" />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

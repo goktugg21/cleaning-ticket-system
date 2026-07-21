@@ -76,6 +76,14 @@ export async function sendInvoice(id: number): Promise<Invoice> {
   return response.data;
 }
 
+// POST /api/invoices/<id>/unissue/ — ISSUED -> DRAFT ("back to concept").
+// Numberless under number-at-send, so this strands no gapless number; the
+// server rejects a reversal or an already-numbered row (400).
+export async function unissueInvoice(id: number): Promise<Invoice> {
+  const response = await api.post<Invoice>(`/invoices/${id}/unissue/`);
+  return response.data;
+}
+
 export async function reverseInvoice(id: number): Promise<Invoice> {
   const response = await api.post<Invoice>(`/invoices/${id}/reverse/`);
   return response.data;

@@ -199,6 +199,7 @@ class CustomerSerializer(serializers.ModelSerializer):
             # Company) + read-only contract-PDF URL. The schedule is
             # informational (drives the "who's due" list, gates nothing).
             "invoice_day_rule",
+            "invoice_day_of_month",
             "invoice_granularity_default",
             "contract_pdf_url",
             "created_at",

@@ -188,6 +188,27 @@ class CustomerBillingScheduleAndContractTests(TestCase):
             c.invoice_granularity_default,
             Customer.InvoiceGranularity.CUSTOMER,
         )
+        # New arbitrary-day field defaults to NULL (fall back to the rule).
+        self.assertIsNone(c.invoice_day_of_month)
+
+    def test_invoice_day_of_month_round_trip(self):
+        c = Customer.objects.create(
+            company=self.company, name="Cust-day", invoice_day_of_month=15
+        )
+        c.refresh_from_db()
+        self.assertEqual(c.invoice_day_of_month, 15)
+
+    def test_invoice_day_of_month_validator_bounds(self):
+        from django.core.exceptions import ValidationError
+
+        c = Customer(company=self.company, name="Cust-bad")
+        # 28 is the max valid day (exists in every month).
+        c.invoice_day_of_month = 28
+        c.full_clean()  # no raise
+        for bad in (0, 29, 31):
+            c.invoice_day_of_month = bad
+            with self.assertRaises(ValidationError):
+                c.full_clean()
 
     def test_contract_pdf_round_trips(self):
         c = Customer.objects.create(company=self.company, name="Cust3")
