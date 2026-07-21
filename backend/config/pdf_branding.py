@@ -93,18 +93,23 @@ def accent_tint_for(company) -> tuple[int, int, int]:
 
 
 def _draw_name_header(pdf: FPDF, company, y: float) -> float:
-    """Name-only fallback header (no image). Draws the company name bold in
-    the logo slot; returns the y under it. `company is None` draws nothing
-    (cross-company reports have no single name)."""
-    if company is None:
-        return y
-    name = (getattr(company, "name", "") or "").strip()
-    if not name:
-        return y
-    pdf.set_xy(pdf.l_margin, y)
-    pdf.set_font(FONT_FAMILY, "B", 16)
-    pdf.cell(110, 8, name)
-    return y + 8.0
+    """No-op name header: draws nothing and returns `y` unchanged.
+
+    The single-company renderers (`extra_work.proposal_pdf`,
+    `invoicing.invoice_pdf`) already print the company name at 11pt bold in
+    the provider block beside the logo slot. Drawing it a SECOND time here
+    (16pt bold, in the slot itself) double-drew the name for a non-platform
+    company with NO logo, and the wide 16pt slot text overlapped the
+    provider block — a "Bright Facilities" document printed the name
+    collided with itself. Leaving the slot empty makes the provider block
+    the single, clean name.
+
+    The platform path (osius_logo.png) and the company-logo path never
+    reach this function; cross-company reports call `draw_logo(pdf, None,
+    ...)`, which also never drew a name. Returning `y` unchanged keeps
+    `draw_logo`'s `max(logo_bottom, 25.0)` rule geometry intact (the empty
+    slot reserves no height the header depends on)."""
+    return y
 
 
 def draw_logo(pdf: FPDF, company, *, y: float = 10.0) -> float:
