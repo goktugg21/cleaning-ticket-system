@@ -154,19 +154,19 @@ _POLICY_FAMILY_FIELD: dict[str, str] = {
 }
 
 
-def _policy_denies(access: CustomerUserBuildingAccess, permission_key: str) -> bool:
+def _policy_denies_for_customer(customer_id: int, permission_key: str) -> bool:
     """Return True iff the customer's CustomerCompanyPolicy explicitly
-    denies the key's family.
+    denies the key's family. Keyed directly by `customer_id`.
 
-    Lookup is keyed by `access.membership.customer_id` so the policy
-    that applies is ALWAYS the one anchored at the access row's own
-    customer — never the caller-supplied customer_id. Defends in
-    depth against any future call site that mismatches anchors.
+    This is the shared core: `_policy_denies` wraps it for the
+    per-access-row path, and the company-wide CCA short-circuit in
+    `user_can` calls it directly (a CCA may have no access rows).
 
-    Missing policy rows (theoretical only — the Sprint 27C migration
-    + auto-create signal guarantee every Customer has one) are
-    treated as "policy True for every family", so resolution falls
-    through to the role default unchanged.
+    A key outside `_POLICY_FAMILY_FIELD` is outside the policy's blast
+    radius → never denied here. Missing policy rows (theoretical only —
+    the Sprint 27C migration + auto-create signal guarantee every
+    Customer has one) are treated as "policy True for every family", so
+    resolution falls through unchanged.
     """
     field = _POLICY_FAMILY_FIELD.get(permission_key)
     if field is None:
@@ -175,15 +175,28 @@ def _policy_denies(access: CustomerUserBuildingAccess, permission_key: str) -> b
     # column lookup. The policy row exists for every Customer thanks
     # to the Sprint 27C backfill + post_save auto-create.
     row = (
-        CustomerCompanyPolicy.objects.filter(
-            customer_id=access.membership.customer_id
-        )
+        CustomerCompanyPolicy.objects.filter(customer_id=customer_id)
         .values(field)
         .first()
     )
     if row is None:
         return False
     return row[field] is False
+
+
+def _policy_denies(access: CustomerUserBuildingAccess, permission_key: str) -> bool:
+    """Return True iff the customer's CustomerCompanyPolicy explicitly
+    denies the key's family.
+
+    Thin wrapper over `_policy_denies_for_customer`, keyed by
+    `access.membership.customer_id` so the policy that applies is ALWAYS
+    the one anchored at the access row's own customer — never the
+    caller-supplied customer_id. Defends in depth against any future call
+    site that mismatches anchors. Behaviour and signature unchanged.
+    """
+    return _policy_denies_for_customer(
+        access.membership.customer_id, permission_key
+    )
 
 
 def access_has_permission(
@@ -241,18 +254,23 @@ def user_can(
     # able to downgrade it. We resolve such a user directly against the
     # CCA role defaults.
     #
-    # DELIBERATE PRODUCT DECISION (flagged for the owner): this
-    # short-circuit intentionally BYPASSES the per-access
-    # is_active / permission_overrides / _policy_denies (CustomerCompany-
-    # Policy) layers, because Addendum A.1 makes a company-wide CCA the
-    # un-downgradable top customer-side role. In particular a
-    # CustomerCompanyPolicy "deny" does NOT narrow a company-admin. If the
-    # owner wants CustomerCompanyPolicy to also bound a company-admin,
-    # that is a follow-up decision.
+    # RESOLVED PRODUCT DECISION (2026-07-26, owner-approved): the
+    # company-level CustomerCompanyPolicy DOES bind a company-wide CCA.
+    # If the provider turns a policy family off for the customer (e.g.
+    # `customer_users_can_approve_extra_work_pricing`), the CCA cannot
+    # exercise the keys in that family either — we consult
+    # `_policy_denies_for_customer` before returning the CCA role default.
+    # The company-level policy is the ONLY layer that can narrow a CCA.
+    # Per Addendum A.1 (docs/product/sot-addendum-a-meeting2.md §A.1) the
+    # CCA remains the un-downgradable top role otherwise: the per-access
+    # `is_active` and `permission_overrides` layers still do NOT apply to
+    # a company-wide CCA, and no per-building row can downgrade one.
     membership = CustomerUserMembership.objects.filter(
         user=user, customer_id=customer_id
     ).first()
     if membership is not None and membership.is_company_admin:
+        if _policy_denies_for_customer(customer_id, permission_key):
+            return False
         return role_default(
             CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN,
             permission_key,
