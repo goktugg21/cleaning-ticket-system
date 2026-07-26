@@ -43,7 +43,7 @@
 ### CP — Customer-permissions page (carried over) — do first, one PR (same page)
 Backend already supports granting a building a customer user isn't in (`POST /api/customers/<id>/users/<user_id>/access/ {building_id}`, gated only by the Sprint-14 customer↔building link). The FE has `addCustomerUserAccess` wired but the matrix view doesn't surface the control.
 - [x] **Add-building control** in the customer-permissions matrix (pick an un-granted building linked to the customer + role → POST). FE-only. **DONE** (branch `feat/cca-company-wide-and-people-consolidation`): surfaced in the People drill-in modal via the reused `ContactPermissionsPanel` (building picker + grantable-role select from `allowed_target_customer_access_roles`, hidden for a company-admin user).
-- [x] **Option A — `CUSTOMER_COMPANY_ADMIN` company-wide.** Make CCA grant admin across **all** the customer's buildings from one setting; collapse the per-building rows into a single company-wide status; demote = remove that status. **DONE**: additive `CustomerUserMembership.is_company_admin` flag (migration `0010`, forward-only collapse of existing per-building CCA rows); `company_admin_customer_ids` unioned into scoping (tickets/EW/buildings) + ticket-scope/transition + EW catalog/pricing; `compute_role_defaults`/`compute_scope`/`user_can` short-circuit so no per-building row can downgrade a CCA; dedicated POST/DELETE `/users/<id>/company-admin/` endpoint (gated by `can_manage_customer_company_admins`, audited via a dedicated membership UPDATE signal). **Follow-up (not in this PR):** retire the legacy per-building CCA grant path + rework the B5 grant gate to bind the flag (split-brain); document the `user_can` CustomerCompanyPolicy-bypass decision in the product SoT (owner sign-off).
+- [x] **Option A — `CUSTOMER_COMPANY_ADMIN` company-wide.** Make CCA grant admin across **all** the customer's buildings from one setting; collapse the per-building rows into a single company-wide status; demote = remove that status. **DONE**: additive `CustomerUserMembership.is_company_admin` flag (migration `0010`, forward-only collapse of existing per-building CCA rows); `company_admin_customer_ids` unioned into scoping (tickets/EW/buildings) + ticket-scope/transition + EW catalog/pricing; `compute_role_defaults`/`compute_scope`/`user_can` short-circuit so no per-building row can downgrade a CCA; dedicated POST/DELETE `/users/<id>/company-admin/` endpoint (gated by `can_manage_customer_company_admins`, audited via a dedicated membership UPDATE signal). **Follow-up (not in this PR) — BOTH NOW RESOLVED:** retiring the legacy per-building CCA grant path (the split-brain this note calls out) is done — `backend/customers/serializers_memberships.py::validate_access_role` unconditionally rejects `access_role=CUSTOMER_COMPANY_ADMIN` for every actor including SUPER_ADMIN (see the "CCA legacy grant-path retirement" line below). The `user_can` CustomerCompanyPolicy-bypass decision is separately resolved (Sprint 116 — see "CCA — product-SoT sign-off" below and [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md) §A.1.1). (Note: these are two distinct things despite both being called out here — the grant-path split-brain is about who may BECOME a CCA; the policy bypass is about what a CCA may DO once granted. Sprint 116 touched only the latter; it did not touch `can_manage_customer_company_admins` (the separate "B5" gate on who may grant CCA).)
 - [x] **People consolidation + drill-in edit** (Ramazan #5): Contacts / Users / (customer) Employees on **one page** with **drill-in / modal edit** ("click in, edit, leave" — NOT accordion expand). **DONE**: new `/admin/customers/:id/people` page + "People" sidebar tab; one roster with distinct TYPE badges (Contact / Employee / User, several at once); row click opens `CustomerUserManageModal` (company-admin single-status + reused `ContactPermissionsPanel` access editor) — replaced the old `CustomerUsersPage` accordion with the same drill-in. Concepts kept distinct; phone validation unchanged.
 
 ### M1 — Notification / message center (Ramazan #1 — his top pain)
@@ -156,11 +156,11 @@ Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father fe
 
 **RF-8 — Simplified module/permission surface + future modules (Ramazan, 2026-06-23).** Think of melding / extra work as **modules** (not every customer gets extra work); future third modules possible (e.g. **DKS** — assumed: their daily quality-control system, Dagelijks Controle Systeem). One user-management surface grants module access — no access ⇒ the module disappears entirely for that user. Keep the visible permission UI to **3-4 coarse toggles per module** (e.g. can open EW / can close / can act / can respond), bundling the fine-grained permissions behind them: "simple at a glance; the depth exists but the user never needs to see it" — incl. hiding the delegated who-can-grant-what depth. Osius already enforces fine-grained permissions and hides inaccessible surfaces — the ask is a simpler **presentation layer** (presets/bundles). Design with Ramazan in the Fixing & Auditing sprint (ties into Department / backlog #6).
 
-**RF-9 — Assignment/slot page density (Ramazan, 2026-06-23; CONFIRMS backlog #7).** Too much info at once on the assignment surface; hard to parse what's what. Ideas: enlarge/clarify the sub-task/detail areas (Göktuğ) or a simple "assign to someone" button flow (Ramazan). Stays deferred to Fixing & Auditing per backlog #7 — now with his confirmation.
+**RF-9 — Assignment/slot page density (Ramazan, 2026-06-23; CONFIRMS backlog #7).** Too much info at once on the assignment surface; hard to parse what's what. Ideas: enlarge/clarify the sub-task/detail areas (Göktuğ) or a simple "assign to someone" button flow (Ramazan). ~~Stays deferred to Fixing & Auditing per backlog #7 — now with his confirmation.~~ **CORRECTION (Sprint 116 reconciliation): this was NOT actually deferred — direction was decided 2026-06-26 (simple-first AND enlarged details combined) and shipped in PR #106** (see the shipped summary). This line was stale; superseded by the decision at "Decisions (with Göktuğ, 2026-06-26 — the #106 combined sprint)" below.
 
 **RF-10 — Proposal PDF: text overlap + professional pass, Dutch-only (Göktuğ + Ramazan, 2026-06-24).** Root cause verified: `proposal_pdf.py` writes `"{qty} x {UNIT_ENUM}"` into a fixed 22mm fpdf2 cell with no width fitting — long enums (SQUARE_METERS) overflow into the Unit-price column (proposal-12 broken; proposal-10 fits only because `1.00 x OTHER` is short). Fix in the PDF & Preview sprint: humanized **Dutch** unit labels + width-aware cells; all labels/status/urgency in Dutch (PDF is Dutch-only, like the emails); Dutch number/money formatting (€, comma decimals) with the font question (€ glyph / charset) decided at recon; a modest professional layout pass (numeric right-alignment, consistent rows, footer). Otherwise the PDF structure is fine per Göktuğ.
 
-**RF-11 — EW detail: Messages card looks out of place (Göktuğ, 2026-06-24).** The Messages section on the Extra Work detail page sits awkwardly (full-width card between Details and Notify-people). DEFERRED to Fixing & Auditing: messaging UX is being rethought there anyway (RF-1 WhatsApp-style inbox) — restyle once, not twice.
+**RF-11 — EW detail: Messages card looks out of place (Göktuğ, 2026-06-24).** The Messages section on the Extra Work detail page sits awkwardly (full-width card between Details and Notify-people). ~~DEFERRED to Fixing & Auditing: messaging UX is being rethought there anyway (RF-1 WhatsApp-style inbox) — restyle once, not twice.~~ **CORRECTION (Sprint 116 reconciliation): this was NOT actually deferred — it rode along with RF-1 and shipped in PR #103** (see the "Design locked 2026-06-24" note above and the shipped summary). This line was stale.
 
 **RF-12 — Attachment thumbnails without a click (Göktuğ, 2026-06-24).** Post-#100, click-to-view + download work well. New ask: the attachment cards should show a real preview with no click — images render the actual image as the card; PDFs render a first-page thumbnail (client-side render feasibility decided at recon; graceful fallback to the type badge). Ships in the PDF & Preview sprint.
 
@@ -284,32 +284,137 @@ Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`;
 
 ---
 
+## Sprint 116 — CustomerCompanyPolicy binds Customer Company Admins (DONE)
+
+Branch `feat/sprint-115`, commits `2412e3a` (Session A) + `392a57e`
+(Session A2). No migration; no frontend file touched.
+
+**Owner decision (2026-07-26):** `backend/customers/permissions.py::user_can`
+previously short-circuited any `is_company_admin` membership straight to the
+CCA role defaults, bypassing the customer's `CustomerCompanyPolicy` entirely
+(flagged in-source as awaiting a decision). The owner decided **against**
+the bypass: **company-level policy toggles now bind a company-wide CCA.**
+See [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md)
+§A.1.1 for the full authoritative writeup.
+
+- **Session A** — `user_can` now consults the customer's policy (via the
+  new shared, customer-keyed `_policy_denies_for_customer`) before returning
+  the CCA role default.
+- **Session A2** — closed two ticket-path bypasses that short-circuited
+  *before* ever reaching `user_can`, re-opening the gap for two of the four
+  toggles: ticket creation (`tickets/serializers.py`) and the
+  `SCOPE_CUSTOMER_LINKED` branch of `tickets/state_machine.py`. Both now
+  defer to `user_can`'s own CCA branch.
+- **All four `CustomerCompanyPolicy` toggles now bind a CCA:**
+  `customer_users_can_create_tickets`,
+  `customer_users_can_approve_ticket_completion`,
+  `customer_users_can_create_extra_work`,
+  `customer_users_can_approve_extra_work_pricing`.
+- CCA **visibility** (`scope_tickets_for`, `scope_extra_work_for`,
+  `company_admin_customer_ids`) is **unchanged** — denial is action-only.
+- No per-building row can downgrade a CCA (unchanged); company policy is the
+  only layer that narrows one.
+
+**Regression pattern (for future audits):** the #109 audit finding P2-2
+("the customer-approval gate checked only access-row existence, not the
+permission layer") was correctly fixed at the `user_can` gate in
+`tickets/state_machine.py`. But a **later** CCA short-circuit was added
+*above* that same gate (`if ticket.customer_id in
+company_admin_customer_ids(user): return True`), so a CCA never reached the
+fixed gate at all — the fix was correct and a different code path routed
+around it. **Lesson: when an audit finding is fixed at a specific gate,
+also check for any caller that returns before reaching that gate** — a
+correct fix at one layer does not survive a bypass added at a layer above
+it. This is a pattern note, not a blame log — the two layers were touched in
+different sprints by design (#109 fixed the row-vs-permission gap; the CCA
+company-wide flag work in a later sprint added its own visibility/action
+short-circuits without re-checking whether one of them duplicated the #109
+gate's job).
+
+---
+
 ## Owner's forward queue (confirmed 2026-07-26 — planned, not started)
 
-The owner's stated order for the immediate work. **This block is not yet
-exhaustive — item (2) is the full remaining-work sweep that will complete it.**
+The owner's stated order for the immediate work, now including the agreed
+Sprint 116–119 plan. **All four sprints land on branch `feat/sprint-115`; the
+owner opens ONE pull request after Sprint 119** — no per-sprint PRs.
 
-Ordered:
-1. **Docs archiving + fix** — *this sprint (Sprint 115): docs restructure into
-   live/archive (session 1) + content rewrite (session 2).*
-2. **Full "what remains" sweep** — an exhaustive pass over the whole system to
-   enumerate everything still outstanding (this is what makes the forward queue
-   complete).
-3. **Investigate the intermittent frozen-screen bug** — the page scrolls but
-   nothing is clickable until a manual refresh; intermittent, cause unknown.
-4. **Optional-visibility staff-credential PDFs in a modal** — open staff
-   credential PDFs (subject to the A.3 visibility model) in a modal, matching
-   the existing ticket-attachment preview pattern.
+### Agreed sprint plan (116–119)
 
-Then, later and **explicitly unordered relative to each other**:
+- **Sprint 116 — CCA policy binding — DONE.** Sessions A + A2 (commits
+  `2412e3a`, `392a57e`) + this docs session (Session B). See the "Sprint 116"
+  section above and [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md)
+  §A.1.1.
+- **Sprint 117 — bounded-list root fix.** Build a shared bounded-list
+  primitive + a CLAUDE.md rule that any list rendered from a server
+  collection MUST be bounded (scroll, pagination, or an explicit cap with
+  "show all"). Apply it to the surfaces named in the 2026-07-26 sweep:
+  `UserDetailPage`, `CustomerFormPage`, `CustomerUsersPage`,
+  `StaffSlotEditor`, `UserFormPage` (all six files confirmed present under
+  `frontend/src/pages/`), and `ExtraWorkListPage` (this one wants
+  **pagination**, not scroll). Context per the sweep: only a handful of
+  named scroll-container classes exist app-wide today (e.g.
+  `.multi-select-list`, `.ew-table-scroll`, `.notif-panel-body`,
+  `.ew-agreed-prices-list`, plus a few modal bodies — confirmed present in
+  `frontend/src/index.css` and reused across several pages), applied
+  piecemeal sprint-by-sprint — hence the recurring problem. Owner's framing:
+  handle it from the roots.
+- **Sprint 118 — intermittent frozen-screen bug.** The page scrolls but
+  nothing is clickable until a manual refresh. Investigation-first; a fix is
+  **not promised** in one pass. Leading hypothesis to check first: a modal
+  backdrop left mounted with pointer-events still capturing, or a body
+  scroll-lock released without its overlay.
+- **Sprint 119 — staff-credential PDF modal** (reusing the ticket-attachment
+  preview pattern, gated by the A.3 visibility model, EU-national-ID block
+  unconditional) **+ the known-code-issues batch:**
+  - the `/due/` current-month anchor (§B.10 of the invoicing addendum);
+  - two stale invoicing docstrings — confirmed still present 2026-07-26:
+    `backend/invoicing/models.py` lines 22 + 88 still say numbering is
+    "assigned AT ISSUE"; `backend/invoicing/numbering.py` line 10 still
+    names `issue_invoice` (rather than `send_invoice`) as the caller. Both
+    predate PR #113's issue→send move and were never updated;
+  - two frontend TODOs — confirmed present 2026-07-26:
+    `frontend/src/pages/LoginPage.tsx:544` (`TODO(backend): wire this toggle
+    to a "remember device" flag`) and
+    `frontend/src/pages/ExtraWorkListPage.tsx:183` (`TODO(15.5): swap to a
+    ...` filter-scope note).
+
+  **Sprint 117 deliberately precedes 119** so the credentials modal — which
+  renders credential lists with nested grants — is built against the
+  bounded-list rule instead of being retrofitted.
+
+### Then, later and explicitly unordered relative to each other
 - **Mobile responsiveness** and a possible **light/advanced mode split**.
 - **General code refactoring** — clean-up only, **no behaviour change**.
-- **Event + department features**.
+- **Event + department features** (no `Department` model exists in the
+  codebase as of 2026-07-26 — confirmed absent).
 
-Two standing owner decisions on this later group:
+Three standing owner decisions gating this later group:
 - **Refactoring happens AFTER event + department ship** (not before).
 - **The light/advanced split is an architectural decision to settle BEFORE**
   those features are built — not a later styling pass.
+- **Ramazan's full side-by-side review is also a gate**: the refactor and the
+  light/advanced-mode work happen after his review lands and its feedback is
+  absorbed, not before.
+
+### Deferred / undecided items not otherwise tracked above
+So the queue is complete: custom-unit depth (per customer / building / room
+— undecided, backlog #1); SA notification EMAIL parity (in-app v1 shipped,
+email deliberately untouched — `notifications/services.py` confirms
+SUPER_ADMIN is "deliberately NOT auto-notified" by design); customer-scoped
+chart follow-ups (#109 Part H, optional); making credit notes / reversals
+customer-visible (today a reversal surfaces to the customer only once SENT
+— see addendum B §B.4); SA notifications v2; Department + Event features
+(above); production hardening (TLS, real SMTP, non-root containers, Postgres
+backups, and setting `PLATFORM_BRAND_SLUG` to the real production OSIUS
+company slug — see addendum B §B.9) → CD → Sentry DSNs.
+
+**This block is still not fully exhaustive** — Step 4 of the Sprint 116
+Session B reconciliation pass verified the checklist's existing unchecked
+items and RF-item framing (see the self-review below for exactly what was
+checked, marked done, or left unverified), but a full "what remains" sweep
+across the entire system (the original item (2) above) has not been run.
+That full sweep remains the item that would make this queue exhaustive.
 
 ---
 
@@ -322,7 +427,7 @@ Two standing owner decisions on this later group:
 ## Deferred
 - [ ] **Department section** — folded into the **Fixing & Auditing Sprint** below (design + build in person with Ramazan + father there).
 - [x] **CCA legacy grant-path retirement — ALREADY DONE in code.** The legacy per-building `CUSTOMER_COMPANY_ADMIN` grant path is CLOSED: both the create and the PATCH path in `backend/customers/views_memberships.py` reject `access_role=CUSTOMER_COMPANY_ADMIN` for **every actor including SUPER_ADMIN**, with the stable `cca_is_company_wide` 400 code, and `backend/customers/serializers_memberships.py` re-rejects it at the serializer layer (defence in depth). The only path to a CCA is the company-wide `is_company_admin` flag.
-- [ ] **CCA — product-SoT sign-off (still open).** Document the `user_can` CustomerCompanyPolicy-bypass decision in the product SoT (owner sign-off). → Fixing & Auditing sprint.
+- [x] **CCA — product-SoT sign-off — RESOLVED 2026-07-26.** The owner did **not** sign off on the `user_can` CustomerCompanyPolicy bypass — he decided **against** it: company policy now **binds** a company-wide CCA (Sprint 116, commits `2412e3a` + `392a57e`). Documented in [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md) §A.1.1.
 - [ ] **SA notification EMAIL parity** (#109 Part D shipped in-app only) — decide whether a subscribed SUPER_ADMIN also receives the provider-management EMAILS (TICKET_CREATED / TICKET_STATUS_CHANGED / TICKET_SLOT_UNABLE). Deferred; the in-app v1 email path is deliberately untouched.
 - [ ] **Customer-scoped chart follow-ups** (#109 Part H) — the customer Reports charts reuse the existing dimension endpoints with the new `customer` param; a richer per-customer revenue breakdown (per-building split in the chart itself, or a customer axis on more dimensions) is a follow-up if the owner wants it.
 - [ ] **Invoicing `/due/` panel anchors to the current calendar month** (known issue, queued for the next code sprint). `invoicing/views.py::InvoiceViewSet.due` hard-anchors to `today.year, today.month`, so unbilled work from a prior month drops off the due panel once the month rolls over, and a `LAST_OF_MONTH` customer is flagged `is_due` on exactly one calendar day. Nothing is unreachable (`generate` accepts an arbitrary year/month; the Facturen page has a free month picker). **Agreed direction:** have the due panel report unbilled work up to AND INCLUDING the current month, keeping `is_due` as the schedule hint. Documented in [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md) §B.10. Do NOT implement in Sprint 115 (docs-only).

@@ -9,11 +9,34 @@ Sub-tasks (PR #84/#85), customer-pricing default-price surfacing (#86), and the 
 
 ---
 
-## A.1 Customer Company Admin is company-wide (revises §2.5)
-A **Customer Company Admin (CCA)** is admin across **all** of the customer's buildings — it is a **company-wide** status, not a per-building role. The current implementation enforces CCA **per-building** (`accounts/effective_actions.compute_role_defaults` reads the building-specific access row; the cross-row "strongest" is only the `building=None` aggregate). This must change to company-wide:
-- Granting CCA applies to every building the customer is linked to (present and future); demotion removes it everywhere.
-- The customer-permissions UI shows CCA as a **single company-wide status** and **drops the per-building rows** for that user (per-building sub-roles only apply to non-CCA users: Customer User / Customer Location Manager).
-- Migration: collapse existing multi-building CCA rows to the company-wide flag, back-compat. RBAC enforcement updated so a CCA passes any per-building admin check for their customer.
+## A.1 Customer Company Admin is company-wide (revises §2.5) — **SHIPPED**
+A **Customer Company Admin (CCA)** is admin across **all** of the customer's buildings — it is a **company-wide** status, not a per-building role. **This is implemented**, via the `CustomerUserMembership.is_company_admin` flag (migration `customers/0010`, which collapsed existing multi-building per-building CCA rows into the flag). The bullets below are the original ask, kept as the historical record of what was requested — do not read them as still-outstanding:
+- Granting CCA applies to every building the customer is linked to (present and future); demotion removes it everywhere. — **done**: the flag is a single company-wide boolean on the membership, not a per-building row.
+- The customer-permissions UI shows CCA as a **single company-wide status** and **drops the per-building rows** for that user (per-building sub-roles only apply to non-CCA users: Customer User / Customer Location Manager). — **done**.
+- Migration: collapse existing multi-building CCA rows to the company-wide flag, back-compat. RBAC enforcement updated so a CCA passes any per-building admin check for their customer. — **done** (migration `customers/0010`; `accounts/effective_actions.compute_role_defaults` and `compute_scope` short-circuit on the flag before reading any per-building row).
+
+### A.1.1 Amendment — company policy binds a CCA (2026-07-26, owner decision)
+
+**The company-level `CustomerCompanyPolicy` DOES bind a company-wide CCA.** If a provider turns a policy family off for a customer, that customer's CCA cannot exercise the keys in that family either — a CCA is no longer an unconditional bypass of the company's own policy settings.
+
+The four `CustomerCompanyPolicy` boolean fields and the six permission keys each governs (read fresh from `_POLICY_FAMILY_FIELD` in `backend/customers/permissions.py`, 2026-07-26 — verify against that dict before relying on this list in future work, it is the single source of truth):
+
+| Policy field | Keys it governs |
+|---|---|
+| `customer_users_can_create_tickets` | `customer.ticket.create` |
+| `customer_users_can_approve_ticket_completion` | `customer.ticket.approve_own`, `customer.ticket.approve_location` |
+| `customer_users_can_create_extra_work` | `customer.extra_work.create` |
+| `customer_users_can_approve_extra_work_pricing` | `customer.extra_work.approve_own`, `customer.extra_work.approve_location` |
+
+**What stays UNCHANGED from the base A.1 guarantee:**
+- A CCA is still admin across **all** of the customer's buildings and still needs **no** per-building access row.
+- Per-building `is_active` and `permission_overrides` still do **NOT** apply to a company-wide CCA.
+- **No per-building row can downgrade a CCA.** Company policy is the **ONLY** layer that can narrow a CCA.
+- **Denial is ACTION-only, never scope**: a CCA still **SEES** every ticket and every Extra Work item of every customer they administer, regardless of the policy. Only the ability to create/approve within a denied family is affected.
+
+**Where it is enforced:** `customers.permissions.user_can` — the CCA short-circuit in `user_can` consults the customer's `CustomerCompanyPolicy` (via the shared `_policy_denies_for_customer` core) before returning the CCA role default.
+
+**Architectural rule for future work — CCA special-casing belongs in `user_can` and nowhere else.** Any caller that short-circuits on `is_company_admin` **before** reaching `user_can` silently bypasses the policy layer, because it never gives `user_can` the chance to deny. Two such bypasses existed — ticket creation (`tickets/serializers.py`) and the `SCOPE_CUSTOMER_LINKED` branch of `tickets/state_machine.py` — and were removed in Sprint 116 (see the sprint checklist). Scoping/visibility helpers (`company_admin_customer_ids`, `scope_tickets_for`, `scope_extra_work_for`, …) are the **deliberate exception**: they decide what a CCA **sees**, never what it may **do**, and are correctly untouched by this rule.
 
 ## A.2 People management — Contacts / Users / Employees (extends §3.1–§3.2)
 Ramazan's strongest UX preference: **drill-in / modal edit** ("click into a row, edit, leave") — **not** accordion expand-in-place — because lists can hold 40+ people.

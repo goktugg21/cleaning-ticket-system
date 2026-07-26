@@ -271,3 +271,11 @@ Before "simplifying" any of them, grep for its importers first.
 - **Do not write a new mega-doc** when the content belongs in an existing live
   doc. Every new doc is added to [docs/README.md](docs/README.md) in the SAME
   commit that creates it (the index's own rule).
+- **Do not add a local `is_company_admin` short-circuit that grants a
+  customer-side ACTION before reaching `customers.permissions.user_can`** — it
+  silently bypasses the `CustomerCompanyPolicy` layer. `user_can` resolves a
+  company-wide CCA on its own (no access rows needed). Scoping/visibility
+  helpers are the deliberate exception (they decide what a CCA sees, not what
+  it may do). See
+  [docs/product/sot-addendum-a-meeting2.md](docs/product/sot-addendum-a-meeting2.md)
+  §A.1.
