@@ -3,7 +3,7 @@
 Authoritative product behaviour from the stakeholder meeting on **2026-05-15**.
 
 This document sits at the same authority level as
-[`docs/architecture/sprint-27-rbac-matrix.md`](../reference/rbac-matrix.md).
+[`docs/reference/rbac-matrix.md`](../reference/rbac-matrix.md).
 The RBAC matrix is the **security floor**; this doc is the **product floor**.
 A backlog item that contradicts either is wrong by default — open a backlog
 row to reconcile, do not implement the conflicting version.
@@ -324,7 +324,7 @@ to verify payment. Schema needs an `external_reference` / `paid_at` /
 `paid_amount` slot, but the matching logic and integration are out of
 scope.
 
-Both are tracked in `docs/backlog/PRODUCT_BACKLOG.md` as FUTURE-*
+Both are tracked in `docs/archive/superseded/backlog/PRODUCT_BACKLOG.md` as FUTURE-*
 placeholders so the backlog doesn't lose them.
 
 ---
@@ -333,10 +333,10 @@ placeholders so the backlog doesn't lose them.
 
 | Authority | Scope |
 |---|---|
-| [`docs/architecture/sprint-27-rbac-matrix.md`](../reference/rbac-matrix.md) | RBAC + role model + invariants. Security floor. |
+| [`docs/reference/rbac-matrix.md`](../reference/rbac-matrix.md) | RBAC + role model + invariants. Security floor. |
 | **This doc** | Product behaviour. Product floor. |
 | [`CLAUDE.md`](../../CLAUDE.md) | How Claude Code works in this repo. Process floor. |
-| [`docs/backlog/PRODUCT_BACKLOG.md`](../archive/superseded/backlog/PRODUCT_BACKLOG.md) | The live work queue. Items must cite a section of this doc or the RBAC matrix as their source. |
+| [`docs/archive/superseded/backlog/PRODUCT_BACKLOG.md`](../archive/superseded/backlog/PRODUCT_BACKLOG.md) | The work queue (now archived — superseded by `planning/sprint-checklist.md`). Items must cite a section of this doc or the RBAC matrix as their source. |
 
 If a sprint design conflicts with this doc, the conflict goes to a
 backlog row labelled "RECONCILE-…" and the sprint pauses until the

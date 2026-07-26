@@ -3,7 +3,7 @@
 > **Owner:** the operator running production.
 > **Goal:** clear procedural steps for daily backups, retention,
 > and the restore drill that gates pilot go-live. Updates / extends
-> [docs/BACKUP_RESTORE.md](../archive/2026-05-pilot/BACKUP_RESTORE.md), which already
+> [docs/archive/2026-05-pilot/BACKUP_RESTORE.md](../archive/2026-05-pilot/BACKUP_RESTORE.md), which already
 > documents the script invocations.
 >
 > Wraps three pre-existing scripts (do NOT replace them):

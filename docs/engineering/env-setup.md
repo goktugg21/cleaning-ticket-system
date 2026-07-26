@@ -67,7 +67,7 @@ After setting SMTP, run:
 
 See also:
 
-    docs/SMTP_AMAZON_SES.md
+    docs/archive/2026-05-pilot/SMTP_AMAZON_SES.md
 
 ### Password reset link target
 

@@ -14,6 +14,7 @@ in the table below, it is archived and unmaintained** — see the
 | [README.md](README.md) | This index — the map of live vs archived docs. | Whenever a doc is added, moved, renamed, or archived. |
 | [product/source-of-truth.md](product/source-of-truth.md) | Canonical product **target state**: what the system must become, what already works, what changes next, and the sprint order. The authoritative statement of *what the system is*. | Whenever the product target state changes. |
 | [product/sot-addendum-a-meeting2.md](product/sot-addendum-a-meeting2.md) | **Addendum A** (Ramazan Meeting 2, 2026-06-05): revises the base SoT — company-wide Customer Company Admin, people management (Contacts/Users/Employees), recurrence/calendar model. **Wins over the base SoT for the items it covers.** | When a later stakeholder meeting refines the SoT. |
+| [product/sot-addendum-b-invoicing.md](product/sot-addendum-b-invoicing.md) | **Addendum B** (2026-07-26): the invoicing subsystem — lifecycle (numbering at SEND), reversal/credit-note, billing schedule, granularity, the earned-amount rule, PDF branding, and the known `/due/` gap. **Wins over the base SoT for the items it covers.** | Whenever the invoicing subsystem changes. |
 | [product/system-business-logic-and-workflows.md](product/system-business-logic-and-workflows.md) | Plain-English business logic: roles, permissions, ticket + Extra Work workflows, note-visibility taxonomy, audit rules, privacy floor. | Whenever business logic or a workflow changes. |
 | [product/requirements-meeting-2026-05-15.md](product/requirements-meeting-2026-05-15.md) | Stakeholder-meeting requirements (Contacts vs Users, modular per-location permissions, view-first UI, Extra Work cart, pricing model, proposal builder, override audit). The **product floor**, at the same authority as the RBAC matrix. | When the underlying stakeholder requirements change. |
 | [product/role-visibility-matrix.md](product/role-visibility-matrix.md) | Role → left-nav visibility matrix, every cell sourced from code (frontend nav gate **and** backend enforcement). | Whenever the frontend nav gate or backend role scoping changes. |
@@ -36,7 +37,8 @@ in the table below, it is archived and unmaintained** — see the
 
 1. **`product/source-of-truth.md` is authoritative for *what the system is*.**
 2. **An Addendum wins over the base Source of Truth for the items it covers**
-   (today: `product/sot-addendum-a-meeting2.md`).
+   (today: `product/sot-addendum-a-meeting2.md` and
+   `product/sot-addendum-b-invoicing.md`; each governs its own scope).
 3. **Where the docs and the code disagree, the code is the truth.** The drift
    must be **reported**, not silently followed — stop, surface the mismatch,
    and propose a fix.

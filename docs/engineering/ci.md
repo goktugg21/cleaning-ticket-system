@@ -5,7 +5,7 @@ Three GitHub Actions workflows live under
 
 > For the matching **local** verification ladder (when to run what,
 > warnings to ignore, smoke vs. full), see
-> [docs/dev-verification.md](../archive/2026-05-pilot/dev-verification.md). Sprint 24E
+> [docs/archive/2026-05-pilot/dev-verification.md](../archive/2026-05-pilot/dev-verification.md). Sprint 24E
 > introduced a four-tier verification flow so small PRs do not need
 > to wait through the full test universe.
 

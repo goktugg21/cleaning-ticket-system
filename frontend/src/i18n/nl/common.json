@@ -105,8 +105,6 @@
   "nav.customer_submenu.tickets": "Tickets",
   "nav.customer_submenu.contacts": "Contacten",
   "nav.customer_submenu.settings": "Instellingen",
-  "customer_subpage_placeholder.title": "Binnenkort beschikbaar",
-  "customer_subpage_placeholder.description": "Deze sectie wordt in een toekomstige sprint geïmplementeerd. De navigatie-structuur wordt eerst opgeleverd.",
   "topbar.online": "Online",
   "topbar.brand_tag": "Schoonmaakoperaties",
   "topbar.user_fallback": "Facility-gebruiker",

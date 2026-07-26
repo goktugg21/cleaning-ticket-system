@@ -6,7 +6,7 @@
 > bootstrap, and the small set of compose-level decisions that make
 > the stack pilot-ready.
 >
-> Pairs with [`docs/pilot-readiness-roadmap.md`](../archive/2026-05-pilot/pilot-readiness-roadmap.md)
+> Pairs with [`docs/archive/2026-05-pilot/pilot-readiness-roadmap.md`](../archive/2026-05-pilot/pilot-readiness-roadmap.md)
 > (which sets the strategy) and `.env.production.example` (the
 > annotated template).
 

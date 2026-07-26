@@ -321,7 +321,7 @@ the G-B7 row in §7.
 
 ### Sprint 27G — end-to-end Playwright + demo runbook
 - Customer-pricing loop spec with one override at each decision point.
-- Refreshed `docs/demo-walkthrough.md`.
+- Refreshed `docs/archive/2026-05-pilot/demo-walkthrough.md`.
 
 ## 9. Test footprint (Sprint 27A delta)
 
@@ -753,7 +753,7 @@ Production change summary:
 Frontend-only feature on `feature/employees-directory`. Two read-only
 directory surfaces over two already-shipped backend endpoints
 (`GET /api/employees/`, `GET /api/customers/<cid>/employees/`). View-first
-per `docs/product/meeting-2026-05-15-system-requirements.md` §3 — the
+per `docs/product/requirements-meeting-2026-05-15.md` §3 — the
 tables load read-only; mutation is via explicit affordances that mirror
 the existing edit patterns.
 

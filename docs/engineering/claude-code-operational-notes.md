@@ -102,8 +102,9 @@ sg docker -c "docker run --rm -v \"$(pwd)/frontend:/app\" -w /app node:22-alpine
 ```
 
 - `tsc --noEmit -p tsconfig.app.json` (Tier 1) must pass clean.
-- `npx eslint .` must report **exactly 49 problems (47 errors, 2
-  warnings)** — the frozen baseline. Capture it before AND after every
+- `npx eslint .` must report **exactly 48 problems (46 errors, 2
+  warnings)** — the frozen baseline (was 49 until Sprint 115 deleted an
+  unused hook carrying one violation). Capture it before AND after every
   commit and diff the per-file violation counts (`grep -oE
   '^/app/src/[^:]+' | sort | uniq -c`); the set must be identical modulo
   line-number shifts. Zero new violations, and (a standing rule since

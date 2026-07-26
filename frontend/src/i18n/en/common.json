@@ -105,8 +105,6 @@
   "nav.customer_submenu.tickets": "Tickets",
   "nav.customer_submenu.contacts": "Contacts",
   "nav.customer_submenu.settings": "Settings",
-  "customer_subpage_placeholder.title": "Coming soon",
-  "customer_subpage_placeholder.description": "This section will be implemented in a future sprint. The navigation foundation ships first.",
   "topbar.online": "Online",
   "topbar.brand_tag": "Cleaning operations",
   "topbar.user_fallback": "Facility user",

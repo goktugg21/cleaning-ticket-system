@@ -1,80 +1,70 @@
-# Cleaning Ticket System
+# Osius — Cleaning Ticket System
 
-A role-based cleaning operations ticket system built with Django REST Framework and React.
+A multi-tenant SaaS platform for the **Dutch B2B cleaning market**. A cleaning
+service provider manages its customers, buildings, staff, tickets (meldingen),
+recurring work, extra-work requests with pricing/proposals, and invoicing;
+customer companies log in to report issues, request extra work, approve work,
+and see invoices scoped to their own organisation and buildings.
 
-## Features
+Role-based access control and strict tenant scoping are enforced throughout —
+a user only ever sees and does what their role, company, assigned buildings,
+and explicit permissions allow.
 
-- JWT login and token refresh
-- Role-based access control
-- Multi-company / building / customer scoping
-- Customer ticket creation
-- Manager ticket workflow
-- Customer approval workflow
-- Company admin ticket closing
-- Internal staff notes hidden from customer users
-- Ticket filtering, search, and pagination
-- React dashboard and ticket detail UI
-- API smoke tests and scope isolation tests
+> **Deployment status:** production is **not deployed yet**. `crmtest.osius.nl`
+> is a dev/test environment. Production deployment is an open milestone.
 
-## Tech Stack
+## Documentation
 
-### Backend
-- Django
-- Django REST Framework
-- PostgreSQL
-- Redis
-- Simple JWT
-- django-filter
-- django-cors-headers
+**[docs/README.md](docs/README.md) is the documentation index** — the map of
+every live doc (product source-of-truth + addenda, RBAC matrix, business logic,
+engineering runbooks, and the living sprint checklist). Start there.
 
-### Frontend
-- React
-- TypeScript
-- Vite
-- Axios
-- React Router
+Contributor working agreement and hard rules live in
+[CLAUDE.md](CLAUDE.md).
 
-## Local Development
+## Tech stack
 
-Copy environment files:
+- **Backend:** Django 5.2 + Django REST Framework, PostgreSQL, Redis, Celery,
+  Simple JWT, django-filter.
+- **Frontend:** React 19 + TypeScript + Vite, Axios, React Router.
+- **Infra:** Docker Compose (a dev stack and a separate prod stack), FPDF2 for
+  PDF generation, optional Sentry (no-op until a DSN is set).
+
+## Local development (dev stack)
 
 ```bash
 cp .env.example .env
 cp frontend/.env.example frontend/.env
+docker compose up -d          # Postgres, Redis, MailHog, backend, frontend
 ```
 
-Start the stack:
+- Frontend dev server and backend API come up under Docker Compose.
+- Outgoing email is captured by **MailHog** — inspect it at
+  <http://localhost:8025> (SMTP points at `mailhog:1025`; use real SMTP in
+  production via `.env.production.example`).
 
-```bash
-docker compose up -d
-```
+Backend tests (from `backend/`): `python manage.py test` — judge by the textual
+`OK` / `FAILED` line. Frontend gate (from `frontend/`):
+`npm run typecheck && npm run lint && npm run build`.
 
-### Email in development
+## crmtest / prod compose (important)
 
-Outgoing email is captured by the `mailhog` service rather than delivered.
-Inspect captured messages at http://localhost:8025. The default `.env.example`
-already points SMTP at `mailhog:1025`; for production replace with real SMTP
-credentials (see `.env.production.example`).
+`crmtest.osius.nl` is served by the **production compose stack**, not the dev
+stack above:
 
-### Sentry (optional)
+- File `docker-compose.prod.yml`, project `cleaning-ticket-prod`, 6 containers
+  (`db`, `redis`, `backend`, `worker`, `beat`, `frontend`).
+- **Every command against it needs `-f docker-compose.prod.yml`** — a bare
+  `docker compose ...` targets the dev stack.
+- The backend auto-runs `migrate && collectstatic && gunicorn` on start, so
+  migrations apply automatically when the backend container is recreated.
 
-Both backend (`sentry-sdk`) and frontend (`@sentry/react`) can ship error
-events to Sentry, gated on a DSN env var. The SDK is a complete no-op when
-the DSN is empty — there is zero overhead and the integration is safe to
-merge before owning a Sentry org.
+Deploy runbook: [docs/engineering/deployment.md](docs/engineering/deployment.md).
 
-- **Enable**: create a Sentry project (Django for backend, React for
-  frontend), set `SENTRY_DSN` in `.env` and `VITE_SENTRY_DSN` in
-  `frontend/.env`. Restart the backend container and rebuild the frontend.
-- **Default sample rate**: `0.0` in dev (no performance traces), `0.1` in
-  prod (see `.env.production.example`).
-- **Privacy posture**: `send_default_pii=False` on both sides; user emails
-  and IP addresses are NOT auto-sent. Do not flip without a privacy review.
-- **What gets captured**: backend uses `DjangoIntegration`, `CeleryIntegration`,
-  and `LoggingIntegration` (event_level=`ERROR`), so any `logger.error` /
-  `logger.exception` call — including unhandled task failures — becomes a
-  Sentry event. Frontend's top-level `ErrorBoundary` forwards the React
-  component stack as context on `componentDidCatch`.
-- **Source maps / release tracking**: not wired in this batch. Set
-  `SENTRY_RELEASE` / `VITE_SENTRY_RELEASE` to a git SHA via CI when
-  Sprint 3 wires the deployment pipeline.
+## Sentry (optional)
+
+Both backend (`sentry-sdk`) and frontend (`@sentry/react`) can ship errors to
+Sentry, gated on a DSN. The SDK is a complete no-op when the DSN is empty
+(`SENTRY_DSN` / `VITE_SENTRY_DSN`), so the integration is safe to merge before a
+Sentry org exists. `send_default_pii=False` on both sides — do not flip without
+a privacy review.
