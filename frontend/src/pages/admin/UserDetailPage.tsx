@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Paperclip } from "lucide-react";
+import { Eye, Paperclip } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -18,6 +18,7 @@ import {
   updateBuildingManager,
 } from "../../api/admin";
 import {
+  credentialDocumentUrl,
   downloadCredentialDocument,
   downloadPropertyDocument,
   listCredentials,
@@ -47,6 +48,8 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { PdfPreviewDialog } from "../../components/PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../../components/PdfPreviewDialog";
 import { useToast } from "../../components/ToastProvider";
 import { PermissionsRollupChip } from "../../components/PermissionsRollupChip";
 import { PermissionsRollupSummary } from "../../components/PermissionsRollupSummary";
@@ -1302,6 +1305,7 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
   const toast = useToast();
   const [rows, setRows] = useState<StaffCredential[] | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const previewRef = useRef<PdfPreviewDialogHandle>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1333,6 +1337,13 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
     } finally {
       setDownloadingId(null);
     }
+  }
+
+  function handlePreview(credential: StaffCredential) {
+    previewRef.current?.open({
+      url: credentialDocumentUrl(userId, credential.id),
+      filename: credential.original_filename || "document.pdf",
+    });
   }
 
   return (
@@ -1392,21 +1403,33 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
                   : tCred("summary.no_expiry")}
               </span>
               {credential.has_document && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  style={{ padding: "1px 6px", fontSize: 11 }}
-                  onClick={() => {
-                    void handleDownload(credential);
-                  }}
-                  disabled={downloadingId === credential.id}
-                  data-testid="user-detail-credential-download"
-                >
-                  <Paperclip size={12} strokeWidth={2} />
-                  {downloadingId === credential.id
-                    ? tCred("field.downloading")
-                    : tCred("field.download")}
-                </button>
+                <span style={{ display: "inline-flex", gap: 4 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: "1px 6px", fontSize: 11 }}
+                    onClick={() => handlePreview(credential)}
+                    data-testid="user-detail-credential-preview"
+                  >
+                    <Eye size={12} strokeWidth={2} />
+                    {tCred("field.preview")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ padding: "1px 6px", fontSize: 11 }}
+                    onClick={() => {
+                      void handleDownload(credential);
+                    }}
+                    disabled={downloadingId === credential.id}
+                    data-testid="user-detail-credential-download"
+                  >
+                    <Paperclip size={12} strokeWidth={2} />
+                    {downloadingId === credential.id
+                      ? tCred("field.downloading")
+                      : tCred("field.download")}
+                  </button>
+                </span>
               )}
               {credential.grants.length > 0 && (
                 <span
@@ -1427,6 +1450,7 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
           ))}
         </ul>
       </BoundedList>
+      <PdfPreviewDialog ref={previewRef} />
     </section>
   );
 }

@@ -12,7 +12,7 @@
 // a locked notice instead, and the save payload omits both fields.
 import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, X } from "lucide-react";
+import { Download, Eye, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
@@ -23,6 +23,7 @@ import {
   CREDENTIAL_VISIBILITY_LEVELS,
   createCredential,
   createCredentialGrant,
+  credentialDocumentUrl,
   downloadCredentialDocument,
   isAcceptablePdf,
   listCredentialGrants,
@@ -40,6 +41,8 @@ import type {
 } from "../../api/staffCredentials";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { PdfPreviewDialog } from "../../components/PdfPreviewDialog";
+import type { PdfPreviewDialogHandle } from "../../components/PdfPreviewDialog";
 import { useToast } from "../../components/ToastProvider";
 import { Toggle } from "../../components/Toggle";
 
@@ -98,6 +101,7 @@ export function StaffCredentialModal({
     useState<CredentialGrant | null>(null);
   const grantRemoveRef = useRef<ConfirmDialogHandle>(null);
   const deleteRef = useRef<ConfirmDialogHandle>(null);
+  const previewRef = useRef<PdfPreviewDialogHandle>(null);
   const [deleting, setDeleting] = useState(false);
 
   const isEuId = credentialType === "EU_NATIONAL_ID";
@@ -214,6 +218,14 @@ export function StaffCredentialModal({
     } finally {
       setDownloading(false);
     }
+  }
+
+  function handlePreview() {
+    if (!credential) return;
+    previewRef.current?.open({
+      url: credentialDocumentUrl(userId, credential.id),
+      filename: credential.original_filename || "document.pdf",
+    });
   }
 
   async function reloadGrants() {
@@ -525,6 +537,15 @@ export function StaffCredentialModal({
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
+                  onClick={handlePreview}
+                  data-testid="credential-preview-button"
+                >
+                  <Eye size={14} strokeWidth={2} />
+                  {t("field.preview")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
                   onClick={handleDownload}
                   disabled={downloading}
                   data-testid="credential-download-button"
@@ -730,9 +751,10 @@ export function StaffCredentialModal({
             )}
           </section>
         )}
-        {/* ConfirmDialogs live INSIDE the stop-propagation card so a
-            click in the dialog can never bubble to the overlay's
-            close-on-click handler. */}
+        {/* ConfirmDialogs (and the PDF preview dialog) live INSIDE the
+            stop-propagation card so a click in the dialog can never
+            bubble to the overlay's close-on-click handler. */}
+        <PdfPreviewDialog ref={previewRef} />
         <ConfirmDialog
           ref={grantRemoveRef}
           title={t("grants.remove_confirm_title", {
