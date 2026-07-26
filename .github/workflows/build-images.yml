@@ -2,10 +2,10 @@ name: build-images
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
-# Two pushes to master in quick succession should both build, so no
+# Two pushes to main in quick succession should both build, so no
 # cancel-in-progress here — the latest commit's images must always
 # end up tagged `latest`.
 concurrency:
