@@ -1287,12 +1287,20 @@ export function TicketDetailPage() {
 
   // RF-5 — revoke a still-open preview URL if the page unmounts mid-preview.
   // Empty deps + cleanup-only body ⇒ no setState in an effect.
+  // Also close the preview <dialog> if it is still open: showModal() puts it in
+  // the top layer and makes the document inert, and tearing the node out on
+  // unmount without close() can leave the page scrollable-but-click-dead on
+  // engines that don't run the <dialog> "removing steps" reliably (same top-
+  // layer safety as ConfirmDialog). The node is copied in the effect body so
+  // the ref read keeps the hooks lint rule satisfied.
   useEffect(() => {
+    const dialog = previewDialogRef.current;
     return () => {
       if (previewUrlRef.current) {
         URL.revokeObjectURL(previewUrlRef.current);
         previewUrlRef.current = null;
       }
+      if (dialog?.open) dialog.close();
     };
   }, []);
 
