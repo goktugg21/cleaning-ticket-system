@@ -245,3 +245,29 @@ All four are **live and imported** — do not assume any one is dead:
 - `effective_actions.py` — per-scope role-default / action computation.
 
 Before "simplifying" any of them, grep for its importers first.
+
+---
+
+## 8. Things to NOT do
+
+- **Never commit secrets.** `.env` and `.env.*` are gitignored; the tracked
+  `.env.example` and `.env.production.example` are the CONTRACTS. When a new
+  env var is introduced, update the template — **never** commit a real value.
+- **Do not add backwards-compatibility shims for the deprecated `Customer`
+  visibility fields** `show_assigned_staff_name` / `show_assigned_staff_email`
+  / `show_assigned_staff_phone`. They are mirrored by `CustomerCompanyPolicy`
+  (the `customer.policy` one-to-one) but are still the runtime read source —
+  both sets live in parallel and the legacy fields stay until the read-switch
+  is deliberately scheduled (deferred from G-B5). The same "don't build on it,
+  don't shim it" applies to the deprecated single-building anchor FKs
+  `Customer.building` and `Contact.building` — superseded by the M:N
+  `CustomerBuildingMembership` / `ContactBuildingLink`, kept nullable for
+  back-compat until a future sprint drops them.
+- **Test runners.** Backend is Django `manage.py test` — do not introduce an
+  alternative. Frontend e2e is Playwright — do not introduce an alternative.
+  Frontend **component/unit** tests have **no runner yet**; adding one is
+  explicitly in scope for the planned Frontend Testing Sprint and requires
+  owner sign-off — do not add one opportunistically in unrelated work.
+- **Do not write a new mega-doc** when the content belongs in an existing live
+  doc. Every new doc is added to [docs/README.md](docs/README.md) in the SAME
+  commit that creates it (the index's own rule).
