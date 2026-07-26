@@ -285,7 +285,7 @@ class CustomerUserBuildingAccess(models.Model):
     # Sprint 23A: free-form { permission_key: bool } overrides on
     # top of the role default. True grants, False revokes, missing
     # falls back to the role default. The full key list lives in
-    # docs/architecture/sprint-23a-domain-permissions-foundation.md
+    # docs/archive/2026-05-sprints/sprint-23a-domain-permissions-foundation.md
     # and the resolver lives in customers/permissions.py.
     permission_overrides = models.JSONField(default=dict, blank=True)
     # Sprint 23A: lets an admin temporarily disable an access grant
@@ -385,7 +385,7 @@ class Contact(models.Model):
     """
     Sprint 28 Batch 4 — customer-side phone-book entry.
 
-    Distinct from Users (spec docs/product/meeting-2026-05-15-system-requirements.md §1):
+    Distinct from Users (spec docs/product/requirements-meeting-2026-05-15.md §1):
 
       * Contact = a person listed only for communication (name, phone,
         email, free-text role label, notes). It is NOT an authenticated

@@ -7,7 +7,7 @@ falls back to the role default; an `is_active=False` row resolves
 every permission to False.
 
 The full key list lives in
-docs/architecture/sprint-23a-domain-permissions-foundation.md.
+docs/archive/2026-05-sprints/sprint-23a-domain-permissions-foundation.md.
 This module is intentionally small: a dict of role defaults + a
 single resolver function. Sprint 23B may grow it into a manager
 class with caching once admin UI starts using it heavily.

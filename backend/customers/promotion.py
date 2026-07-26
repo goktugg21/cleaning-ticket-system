@@ -3,7 +3,7 @@ Sprint 12B — promote-to-user service.
 
 Bridges a customer-side `Contact` (a communication-only person record,
 no login) to an authenticated `User` (spec
-docs/product/meeting-2026-05-15-system-requirements.md §1: Contacts and
+docs/product/requirements-meeting-2026-05-15.md §1: Contacts and
 Users are distinct entities; promotion is explicit, never a side-effect
 of editing a Contact).
 

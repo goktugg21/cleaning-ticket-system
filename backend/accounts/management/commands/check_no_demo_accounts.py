@@ -67,7 +67,7 @@ Exit codes:
     1 — at least one demo account exists. Refuse to launch.
 
 Operator runbook: this command is the last manual gate in
-docs/pilot-launch-checklist.md before pilot go-live.
+docs/archive/2026-05-pilot/pilot-launch-checklist.md before pilot go-live.
 """
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ class Command(BaseCommand):
                 "[FAIL] demo accounts present on this host: " + ", ".join(sorted(present))
             )
             self.stderr.write(
-                "Delete them before pilot launch — see docs/pilot-launch-checklist.md."
+                "Delete them before pilot launch — see docs/archive/2026-05-pilot/pilot-launch-checklist.md."
             )
             raise SystemExit(1)
         self.stdout.write("[OK] no demo accounts found.")

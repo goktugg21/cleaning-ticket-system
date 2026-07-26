@@ -1,7 +1,7 @@
 """
 Sprint 27F-B2 — audit-coverage tests for the new `AuditLog.reason` +
 `AuditLog.actor_scope` columns (closes gap G-B6 from
-`docs/architecture/sprint-27-rbac-matrix.md` §7).
+`docs/reference/rbac-matrix.md` §7).
 
 Five test classes, five tests:
 

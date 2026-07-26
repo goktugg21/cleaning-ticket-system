@@ -1,0 +1,147 @@
+> **ARCHIVED — historical.** Describes the system as of 2026-05-10. Not maintained; do not rely on it. Live docs: `docs/README.md`.
+
+# Production Deployment Guide
+
+This guide explains how to deploy the cleaning ticket system with Docker Compose.
+
+## 1. Prepare environment file
+
+Copy the production example file:
+
+    cp .env.production.example .env
+
+Edit .env and replace all placeholder values:
+
+    nano .env
+
+Minimum required changes:
+
+- DJANGO_SECRET_KEY
+- DJANGO_ALLOWED_HOSTS
+- CORS_ALLOWED_ORIGINS
+- CSRF_TRUSTED_ORIGINS
+- POSTGRES_PASSWORD
+- SMTP settings if email notifications are enabled
+
+Do not commit .env.
+
+## 2. Build and start production containers
+
+For local production smoke testing:
+
+    FRONTEND_PORT=8080 docker compose -f docker-compose.prod.yml up -d --build
+
+For a real server using port 80:
+
+    FRONTEND_PORT=80 docker compose -f docker-compose.prod.yml up -d --build
+
+The frontend container serves the React build with Nginx and proxies:
+
+- /api/ to Django
+- /django-admin/ to Django (Sprint 18 moved Django admin off the
+  /admin/ prefix so the React SPA owns /admin/companies,
+  /admin/buildings, /admin/customers, /admin/users,
+  /admin/invitations, and /admin/audit-logs end-to-end)
+- /static/ to Django static files
+
+## 3. Run checks
+
+    docker compose -f docker-compose.prod.yml exec backend python manage.py check
+    docker compose -f docker-compose.prod.yml exec backend python manage.py makemigrations --check --dry-run
+
+Run the production smoke test locally:
+
+    FRONTEND_PORT=8080 ./scripts/prod_smoke_test.sh
+
+Expected results:
+
+- Frontend / returns 200
+- /api/auth/me/ returns 401 without token
+- /django-admin/login/ returns 200 (Sprint 18 moved Django admin off the SPA-owned /admin/* prefix)
+- Security headers are present
+
+## 4. Backups
+
+Create PostgreSQL backup:
+
+    ./scripts/backup_postgres.sh
+
+Create media backup:
+
+    ./scripts/backup_media.sh
+
+Restore PostgreSQL backup:
+
+    ./scripts/restore_postgres.sh backups/postgres/<backup-file>.dump
+
+Read the detailed backup guide:
+
+    cat docs/BACKUP_RESTORE.md
+
+## 5. HTTPS
+
+Put the app behind HTTPS before real public launch.
+
+When HTTPS is ready, production .env should include:
+
+    DJANGO_SECURE_SSL_REDIRECT=True
+    DJANGO_SESSION_COOKIE_SECURE=True
+    DJANGO_CSRF_COOKIE_SECURE=True
+    DJANGO_USE_X_FORWARDED_PROTO=True
+    DJANGO_SECURE_HSTS_SECONDS=31536000
+
+Only enable HSTS after confirming HTTPS works correctly.
+
+## 6. Stop production containers
+
+    docker compose -f docker-compose.prod.yml down
+
+To remove production volumes too, only when you intentionally want to delete production data:
+
+    docker compose -f docker-compose.prod.yml down -v
+
+Be careful: -v deletes database, Redis, and media volumes.
+
+## 7. Logs
+
+Production containers use Docker log rotation:
+
+- max-size: 10m
+- max-file: 5
+
+View recent production logs:
+
+    docker compose -f docker-compose.prod.yml logs --tail=200
+
+Follow logs live:
+
+    docker compose -f docker-compose.prod.yml logs -f --tail=100
+
+## 8. Error monitoring
+
+Error monitoring is optional and disabled by default.
+
+To enable Sentry in production, set these values in `.env`:
+
+    SENTRY_DSN=https://your-sentry-dsn
+    SENTRY_ENVIRONMENT=production
+    SENTRY_TRACES_SAMPLE_RATE=0.0
+
+If `SENTRY_DSN` is empty, Sentry is not initialized.
+
+## 9. Uploaded media storage
+
+Production uploaded media is stored in the Docker volume:
+
+    backend_media_prod:/app/media
+
+For the first production release, media stays on the local Docker volume.
+
+Back up media together with PostgreSQL:
+
+    ./scripts/backup_media.sh
+    ./scripts/backup_postgres.sh
+
+Read the media storage decision:
+
+    cat docs/MEDIA_STORAGE.md

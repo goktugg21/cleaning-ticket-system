@@ -4,7 +4,7 @@ provider-default action, and soft-archive DELETE semantics on
 CustomerServicePrice.
 
 Locks the contract from
-`docs/product/Osius_Source_of_Truth_FINAL_2026-05-30.md` §5.7 +
+`docs/product/source-of-truth.md` §5.7 +
 §5.9 plus the Sprint 4 checklist:
 
   * Customer users see only their own active / currently-valid

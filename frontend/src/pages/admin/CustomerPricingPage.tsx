@@ -41,7 +41,7 @@ import { Toggle } from "../../components/Toggle";
  * Customer-scoped sidebar entry. The page lists every
  * `CustomerServicePrice` row for the URL's customer, grouped by
  * service for readability. View-first per
- * `docs/product/meeting-2026-05-15-system-requirements.md` §3:
+ * `docs/product/requirements-meeting-2026-05-15.md` §3:
  *   - list rows are read-only
  *   - clicking a row opens a read-only detail panel
  *   - Add / Edit / Delete are explicit modal actions
