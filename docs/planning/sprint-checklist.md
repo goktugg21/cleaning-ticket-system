@@ -333,6 +333,142 @@ gate's job).
 
 ---
 
+## Sprint 119 — staff-credential PDF modal + known-issues batch (DONE)
+
+Branch `feat/sprint-115`, commits `a8d7ee8` (Part A) + `1afce52` (Part B).
+Sprint 119.1 (docs-only, this entry) audited two carry-forward findings a
+reviewer produced under time pressure before recording them — see "Found
+during Sprint 119 verification" below for what changed under audit.
+
+- **Part A** — in-app PDF preview for staff credential documents
+  (`frontend/src/components/PdfPreviewDialog.tsx`, wired into
+  `StaffCredentialModal.tsx` and `UserDetailPage.tsx`'s
+  `CredentialsReadOnlyCard`), mirroring the existing ticket-attachment
+  preview. No backend change — reuses the existing resolver-gated download
+  endpoint; the EU_NATIONAL_ID hard block is enforced entirely server-side
+  and unaffected.
+- **Part B — six known issues closed:**
+  - `/due/` now reports unbilled work THROUGH the current month, not just
+    the current month (§B.10 of the invoicing addendum, now marked FIXED).
+  - Two stale invoicing docstrings (`models.py`, `numbering.py`) corrected
+    to say numbering is assigned at SEND, not "AT ISSUE".
+  - `accounts/scoping.py::company_ids_for`'s BUILDING_MANAGER branch
+    de-duplicated (`.distinct()`) — a BM assigned to N buildings in one
+    company no longer reports that company N times. The audit also found
+    the CUSTOMER_USER branch has the identical latent shape
+    (`CustomerUserMembership` is `unique_together=(customer, user)`, not
+    `(company, user)`) and fixed it too.
+  - `LoginPage.tsx`'s never-wired "remember device" toggle removed (state,
+    import, and the orphaned `remember_me` i18n key).
+  - `ExtraWorkListPage.tsx`'s stale "unpaginated" comment corrected to
+    describe the real, still-open truncation gap (see below).
+  - Three `ConfirmDialog` consumers (`StaffAssignmentRequestsAdminPage`,
+    `ExtraWorkDetailPage`, `RecurringJobDetailPage`) that only closed their
+    dialog on the success branch now also close it on the error branch.
+
+### Found during Sprint 119 verification, not fixed in it
+
+Two items a reviewer flagged were audited in Sprint 119.1 before being
+recorded here — **both claims were technically correct but each needed a
+correction** to how reachable/severe they actually are. Recorded below as
+the VERIFIED version, not the original report.
+
+- **(K-1) `unbilled_extra_work_through` can crash on an unresolvable
+  billing month** — `backend/invoicing/selectors.py`, the
+  `unbilled_extra_work_through` comprehension (Sprint 119's new `/due/`
+  selector). `extra_work.billing.billing_month(ew, ticket)` returns `None`
+  when `ew.invoice_date` is unset AND (`ticket is None` or
+  `ticket.closed_at is None`); `is_earned(ticket)` only checks
+  `ticket.status == CLOSED` and does **not** require `closed_at` to be set,
+  so the two conditions are not mutually exclusive. The comprehension
+  gates on `is_earned(...) and billing_month(...) <= (year, month)`: the
+  old exact-match selector's `== (year, month)` evaluates `None == tuple`
+  safely to `False`, but the new selector's `<=` evaluates `None <= tuple`,
+  which raises `TypeError` in Python 3 — uncaught, this would 500 the
+  `/due/` endpoint.
+  **Reviewer's original framing, corrected:** the reviewer listed "a data
+  import, a raw `QuerySet.update()`, a migration, or seed/test fixtures"
+  as reachability vectors. Audited each and found **none of them exist**:
+  every non-test `.update()` on `Ticket` (`sla/signals.py`, `sla/tasks.py`,
+  `sla/management/commands/sla_backfill.py`,
+  `planned_work/generation.py`) touches only SLA fields, never
+  `status`/`closed_at`; the one migration touching `Ticket` fields
+  (`tickets/migrations/0012_...`) only backfills `extra_work_request_id`;
+  `seed_demo_data.py` walks every ticket to CLOSED exclusively via the real
+  `apply_transition` state machine (which atomically stamps `closed_at` via
+  `TIMESTAMP_ON_ENTER`), never by direct assignment. **Not reachable
+  through the application, and not reachable through any existing
+  migration, management command, or bulk update either** — those are
+  unconfirmed hypotheticals, not live paths.
+  The one thing that IS real: `backend/invoicing/tests/_helpers.py`'s
+  `InvoicingFixture.make_ew` signature defaults to
+  `ticket_status=TicketStatus.CLOSED, closed_at=None` with a docstring
+  claiming "default: earned in May 2026" — misleading, since the actual
+  default silently produces exactly the None/CLOSED combination. A
+  line-by-line scan of all 46 current `self.make_ew(...)` call sites
+  confirms every one explicitly overrides `closed_at=`, so **no test today
+  exercises it** — but a future test author trusting the docstring and
+  calling `self.make_ew()` bare would trip it, and `/due/`'s test coverage
+  would 500 rather than silently pass. Also confirmed: no other caller of
+  `billing_month` uses an ordering operator — `extra_work/filters.py`,
+  `reports/dimensions.py`, and `seed_demo_data.py` all use `==`/`!=`
+  (None-safe), and `invoicing/services.py:132` already None-guards with
+  `bm[0] if bm else year` before indexing. The blast radius is contained
+  to the one new comprehension, not widened elsewhere.
+  **Interim option:** none needed for production (unreachable); the test
+  helper's misleading default is the only live trap.
+  **Proper fix:** add a `billing_month(...) is not None` guard to the
+  `unbilled_extra_work_through` comprehension (mirroring the
+  `services.py:132` pattern), and either fix `make_ew`'s docstring or its
+  default so `ticket_status=CLOSED` cannot silently pair with
+  `closed_at=None`. Not fixed in Sprint 119.1 (docs-only).
+
+- **(K-2) `ExtraWorkListPage.tsx` silently truncates past 100 rows** —
+  `frontend/src/pages/ExtraWorkListPage.tsx`, the `load()` effect (calls
+  `listExtraWork`, `api/extraWork.ts`) feeding both the `kpis` `useMemo`
+  and, via `visibleRows`, the rendered list AND `exportCsv`'s CSV output.
+  `listExtraWork` requests `page_size: 100` and the page never reads
+  `response.count` or follows `response.next` — confirmed by reading the
+  fetch, the KPI computation, and the CSV export: all three consume the
+  same `rows`/`visibleRows` state, and there is no "showing X of Y" text,
+  no count display, and no next-page control anywhere in the file. For any
+  customer/company with more than 100 rows matching the current
+  server-side filters (billing month / invoice status / mine), the
+  operator sees an incomplete list with silently wrong KPI totals and an
+  incomplete CSV, with no indication anything was cut.
+  **Reviewer's finding: confirmed correct**, with one refinement each way:
+  `listAllExtraWork` (same file) does exist and does page exhaustively
+  (up to a 100-page / 10,000-row safety cap, stopping at the first `next:
+  null`), so it is a usable interim fix — but it is not a *free* drop-in:
+  it costs `ceil(matching_rows / 100)` **sequential** HTTP requests instead
+  of one, since each page's fetch depends on the previous page's `next`.
+  **Newly found in this session — the same shape is systemic, not unique
+  to this page:** `frontend/src/pages/FacturenPage.tsx`'s invoice list has
+  the identical pattern (`listInvoices`, `api/invoices.ts`, also
+  `page_size: 100` with no `next`-following, no count/pager UI) and
+  silently truncates the same way. By contrast, two comparable lists
+  already got the correct fix: `api/plannedWork.ts::listRecurringJobs`
+  bakes exhaustive pagination (accumulate until `next` is null, capped at
+  25 pages × 200) **into the API client function itself**, so
+  `RecurringJobDetailPage` never sees a truncated set without needing to
+  know pagination happened — this is the right pattern to copy. The main
+  Tickets list never had this problem: `api/tickets.ts` exposes no plain
+  single-page `listTickets` at all, only the exhaustive `listAllTickets`
+  (a customer-detail drill-in helper) — so it was never exposed to this
+  shape in the first place.
+  **Interim option:** swap `ExtraWorkListPage`'s and `FacturenPage`'s
+  fetch to the `listRecurringJobs`-style baked-in exhaustive accumulation
+  (or point both at their existing `listAllExtraWork`/an equivalent
+  `listAllInvoices`), accepting the extra sequential-request cost for
+  tenants over 100 matching rows.
+  **Proper fix:** a backend aggregation endpoint for the KPI strip (as the
+  original TODO already proposed) plus real server-side pagination UI
+  (count + "load more" / next-page control) for the list and CSV, so nothing
+  needs to fetch or hold the full set client-side. Not fixed in Sprint
+  119.1 (docs-only) — both pages still truncate as described.
+
+---
+
 ## Owner's forward queue (confirmed 2026-07-26 — planned, not started)
 
 The owner's stated order for the immediate work, now including the agreed
@@ -364,20 +500,11 @@ owner opens ONE pull request after Sprint 119** — no per-sprint PRs.
   **not promised** in one pass. Leading hypothesis to check first: a modal
   backdrop left mounted with pointer-events still capturing, or a body
   scroll-lock released without its overlay.
-- **Sprint 119 — staff-credential PDF modal** (reusing the ticket-attachment
-  preview pattern, gated by the A.3 visibility model, EU-national-ID block
-  unconditional) **+ the known-code-issues batch:**
-  - the `/due/` current-month anchor (§B.10 of the invoicing addendum);
-  - two stale invoicing docstrings — confirmed still present 2026-07-26:
-    `backend/invoicing/models.py` lines 22 + 88 still say numbering is
-    "assigned AT ISSUE"; `backend/invoicing/numbering.py` line 10 still
-    names `issue_invoice` (rather than `send_invoice`) as the caller. Both
-    predate PR #113's issue→send move and were never updated;
-  - two frontend TODOs — confirmed present 2026-07-26:
-    `frontend/src/pages/LoginPage.tsx:544` (`TODO(backend): wire this toggle
-    to a "remember device" flag`) and
-    `frontend/src/pages/ExtraWorkListPage.tsx:183` (`TODO(15.5): swap to a
-    ...` filter-scope note).
+- **Sprint 119 — staff-credential PDF modal + known-code-issues batch —
+  DONE.** Commits `a8d7ee8` (Part A) + `1afce52` (Part B). See the "Sprint
+  119" section above for the full write-up, including two carry-forward
+  findings (K-1, K-2) audited and recorded there in Sprint 119.1 rather
+  than fixed.
 
   **Sprint 117 deliberately precedes 119** so the credentials modal — which
   renders credential lists with nested grants — is built against the
