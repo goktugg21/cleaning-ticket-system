@@ -1333,6 +1333,8 @@
   "multi_select.clear_all": "Alles wissen",
   "multi_select.selected_count": "{{count}} geselecteerd",
   "multi_select.filter_placeholder": "Filteren…",
+  "bounded_list.count_one": "{{count}} regel",
+  "bounded_list.count_other": "{{count}} regels",
   "nav.customer_submenu.invoices": "Facturen",
   "nav.customer_submenu.reports": "Rapporten",
   "billing.manage_on_invoices": "Beheren op de Facturen-pagina →",

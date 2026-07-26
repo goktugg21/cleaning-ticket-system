@@ -279,3 +279,10 @@ Before "simplifying" any of them, grep for its importers first.
   it may do). See
   [docs/product/sot-addendum-a-meeting2.md](docs/product/sot-addendum-a-meeting2.md)
   §A.1.
+- **Do not render a list from a SERVER collection without a bound.** Every
+  such list is scrollable
+  ([frontend/src/components/BoundedList.tsx](frontend/src/components/BoundedList.tsx)),
+  paginated, or explicitly capped with a "show all" affordance. Lists over
+  fixed local constants (option arrays, enums) are exempt. Real tenants have
+  hundreds of buildings, users and tickets — an unbounded list looks fine on
+  seed data and breaks on real data.

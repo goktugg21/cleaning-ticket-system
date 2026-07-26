@@ -42,6 +42,7 @@ import type {
   UserAdminDetail,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
@@ -688,13 +689,20 @@ export function UserDetailPage() {
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.companies_title")}
                     </div>
-                    <ul className="user-detail-membership-list">
-                      {companies.map((c) => (
-                        <li key={c.id}>
-                          <Link to={`/admin/companies/${c.id}`}>{c.name}</Link>
-                        </li>
-                      ))}
-                    </ul>
+                    <BoundedList
+                      size="sm"
+                      count={companies.length}
+                      ariaLabel={t("user_detail.memberships.companies_title")}
+                      testIdPrefix="user-detail-companies"
+                    >
+                      <ul className="user-detail-membership-list">
+                        {companies.map((c) => (
+                          <li key={c.id}>
+                            <Link to={`/admin/companies/${c.id}`}>{c.name}</Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </BoundedList>
                   </div>
                 )}
                 {buildings.length > 0 && (
@@ -702,13 +710,20 @@ export function UserDetailPage() {
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.buildings_title")}
                     </div>
-                    <ul className="user-detail-membership-list">
-                      {buildings.map((b) => (
-                        <li key={b.id}>
-                          <Link to={`/admin/buildings/${b.id}`}>{b.name}</Link>
-                        </li>
-                      ))}
-                    </ul>
+                    <BoundedList
+                      size="sm"
+                      count={buildings.length}
+                      ariaLabel={t("user_detail.memberships.buildings_title")}
+                      testIdPrefix="user-detail-membership-buildings"
+                    >
+                      <ul className="user-detail-membership-list">
+                        {buildings.map((b) => (
+                          <li key={b.id}>
+                            <Link to={`/admin/buildings/${b.id}`}>{b.name}</Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </BoundedList>
                   </div>
                 )}
                 {customers.length > 0 && (
@@ -716,13 +731,20 @@ export function UserDetailPage() {
                     <div className="user-detail-membership-group-title">
                       {t("user_detail.memberships.customers_title")}
                     </div>
-                    <ul className="user-detail-membership-list">
-                      {customers.map((c) => (
-                        <li key={c.id}>
-                          <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
-                        </li>
-                      ))}
-                    </ul>
+                    <BoundedList
+                      size="sm"
+                      count={customers.length}
+                      ariaLabel={t("user_detail.memberships.customers_title")}
+                      testIdPrefix="user-detail-membership-customers"
+                    >
+                      <ul className="user-detail-membership-list">
+                        {customers.map((c) => (
+                          <li key={c.id}>
+                            <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </BoundedList>
                   </div>
                 )}
               </>
@@ -756,7 +778,13 @@ export function UserDetailPage() {
                 </div>
               </div>
 
-              <div className="table-wrap">
+              <BoundedList
+                size="lg"
+                count={buildingsWithBmRow.length}
+                ariaLabel={t("user_detail.bm_permissions.title")}
+                testIdPrefix="user-detail-bm-permissions"
+                className="table-wrap"
+              >
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -953,7 +981,7 @@ export function UserDetailPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
+              </BoundedList>
             </section>
           )}
 
@@ -996,56 +1024,63 @@ export function UserDetailPage() {
                 </div>
               </div>
 
-              <ul className="user-detail-customer-access-list">
-                {customers.map((c) => {
-                  const isSummaryOpen = summaryCustomerId === c.id;
-                  const accessList = accessByCustomerId[c.id] ?? [];
-                  return (
-                    <li
-                      key={c.id}
-                      className="user-detail-customer-access-row"
-                      data-testid={`user-detail-customer-row-${c.id}`}
-                    >
-                      <div className="user-detail-customer-access-row-top">
-                        <span className="user-detail-customer-access-name">
-                          <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
-                        </span>
-                        <PermissionsRollupChip
-                          customerId={c.id}
-                          userId={user.id}
-                          accesses={accessList}
-                          testId={`user-detail-permissions-link-${c.id}`}
-                          onToggle={() =>
-                            setSummaryCustomerId((current) =>
-                              current === c.id ? null : c.id,
-                            )
-                          }
-                          expanded={isSummaryOpen}
-                        />
-                      </div>
-                      {isSummaryOpen && (
-                        <PermissionsRollupSummary
-                          userId={user.id}
-                          customerId={c.id}
-                          userLabel={
-                            user.full_name && user.full_name.trim().length > 0
-                              ? user.full_name
-                              : user.email
-                          }
-                          customerLabel={c.name}
-                          accesses={accessList}
-                          onOpenOverrides={(access) => {
-                            navigate(
-                              `/admin/customers/${c.id}/permissions?focus_user=${user.id}&focus_building=${access.building_id}`,
-                            );
-                          }}
-                          onCollapse={() => setSummaryCustomerId(null)}
-                        />
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
+              <BoundedList
+                size="md"
+                count={customers.length}
+                ariaLabel={t("user_detail.customer_access.title")}
+                testIdPrefix="user-detail-customer-access"
+              >
+                <ul className="user-detail-customer-access-list">
+                  {customers.map((c) => {
+                    const isSummaryOpen = summaryCustomerId === c.id;
+                    const accessList = accessByCustomerId[c.id] ?? [];
+                    return (
+                      <li
+                        key={c.id}
+                        className="user-detail-customer-access-row"
+                        data-testid={`user-detail-customer-row-${c.id}`}
+                      >
+                        <div className="user-detail-customer-access-row-top">
+                          <span className="user-detail-customer-access-name">
+                            <Link to={`/admin/customers/${c.id}`}>{c.name}</Link>
+                          </span>
+                          <PermissionsRollupChip
+                            customerId={c.id}
+                            userId={user.id}
+                            accesses={accessList}
+                            testId={`user-detail-permissions-link-${c.id}`}
+                            onToggle={() =>
+                              setSummaryCustomerId((current) =>
+                                current === c.id ? null : c.id,
+                              )
+                            }
+                            expanded={isSummaryOpen}
+                          />
+                        </div>
+                        {isSummaryOpen && (
+                          <PermissionsRollupSummary
+                            userId={user.id}
+                            customerId={c.id}
+                            userLabel={
+                              user.full_name && user.full_name.trim().length > 0
+                                ? user.full_name
+                                : user.email
+                            }
+                            customerLabel={c.name}
+                            accesses={accessList}
+                            onOpenOverrides={(access) => {
+                              navigate(
+                                `/admin/customers/${c.id}/permissions?focus_user=${user.id}&focus_building=${access.building_id}`,
+                              );
+                            }}
+                            onCollapse={() => setSummaryCustomerId(null)}
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </BoundedList>
             </section>
           )}
 
@@ -1214,11 +1249,17 @@ function StaffBuildingsReadOnlyCard({ userId }: { userId: number }) {
           <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
         </div>
       </div>
-      {rows.length === 0 ? (
-        <p className="muted small" style={{ padding: "6px 0" }}>
-          {t("staff_admin.visibility_no_rows")}
-        </p>
-      ) : (
+      <BoundedList
+        size="md"
+        count={rows.length}
+        ariaLabel={t("staff_admin.visibility_title")}
+        testIdPrefix="user-detail-staff-buildings"
+        emptyState={
+          <p className="muted small" style={{ padding: "6px 0" }}>
+            {t("staff_admin.visibility_no_rows")}
+          </p>
+        }
+      >
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {rows.map((row) => (
             <li
@@ -1251,7 +1292,7 @@ function StaffBuildingsReadOnlyCard({ userId }: { userId: number }) {
             </li>
           ))}
         </ul>
-      )}
+      </BoundedList>
     </section>
   );
 }
@@ -1308,13 +1349,19 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
           <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
         </div>
       </div>
-      {rows.length === 0 ? (
-        <EmptyState
-          compact
-          title={tCred("section.empty_credentials_title")}
-          testId="user-detail-credentials-empty"
-        />
-      ) : (
+      <BoundedList
+        size="md"
+        count={rows.length}
+        ariaLabel={tCred("section.credentials_title")}
+        testIdPrefix="user-detail-credentials"
+        emptyState={
+          <EmptyState
+            compact
+            title={tCred("section.empty_credentials_title")}
+            testId="user-detail-credentials-empty"
+          />
+        }
+      >
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {rows.map((credential) => (
             <li
@@ -1379,7 +1426,7 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
             </li>
           ))}
         </ul>
-      )}
+      </BoundedList>
     </section>
   );
 }
@@ -1436,13 +1483,19 @@ function PropertiesReadOnlyCard({ userId }: { userId: number }) {
           <div className="section-head-sub">{tCred("detail.read_only_hint")}</div>
         </div>
       </div>
-      {rows.length === 0 ? (
-        <EmptyState
-          compact
-          title={tCred("section.empty_properties_title")}
-          testId="user-detail-properties-empty"
-        />
-      ) : (
+      <BoundedList
+        size="md"
+        count={rows.length}
+        ariaLabel={tCred("section.properties_title")}
+        testIdPrefix="user-detail-properties"
+        emptyState={
+          <EmptyState
+            compact
+            title={tCred("section.empty_properties_title")}
+            testId="user-detail-properties-empty"
+          />
+        }
+      >
         <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {rows.map((property) => (
             <li
@@ -1510,7 +1563,7 @@ function PropertiesReadOnlyCard({ userId }: { userId: number }) {
             </li>
           ))}
         </ul>
-      )}
+      </BoundedList>
     </section>
   );
 }
