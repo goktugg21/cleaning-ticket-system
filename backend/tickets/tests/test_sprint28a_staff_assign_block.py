@@ -1,7 +1,7 @@
 """
 Sprint 28 Batch 2 — STAFF cannot reassign tickets via the BM-assign endpoint.
 
-Audit gap (docs/audits/current-state-2026-05-16-system-audit.md row 26,
+Audit gap (docs/archive/2026-05-sprints/audits/current-state-2026-05-16-system-audit.md row 26,
 master plan Batch 2): the gate at `tickets/views.py:250` and
 `tickets/serializers.py:626` both use `is_staff_role(user)` which by
 design returns True for STAFF (Sprint 23A widened that helper so STAFF

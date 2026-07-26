@@ -373,6 +373,46 @@ class InvoiceDueApiTests(InvoiceApiBase):
         resp = self.client.get(reverse("invoice-due"))
         self.assertEqual(resp.status_code, 403)
 
+    # -- SoT Addendum B §B.10: unbilled work carries forward across months -
+
+    def test_due_includes_unbilled_work_from_a_prior_month(self):
+        # EW earned in April 2026 (a PRIOR month); "today" is mocked to
+        # 2026-05-20. Pre-Sprint-119 this dropped off the due panel the
+        # instant May began (the view hard-matched year/month == today's);
+        # now it must still be counted as outstanding.
+        self.make_ew(closed_at=dt(2026, 4, 15))
+        self.customer.invoice_day_rule = Customer.InvoiceDayRule.FIRST_OF_MONTH
+        self.customer.save(update_fields=["invoice_day_rule"])
+        self.client.force_authenticate(self.admin)
+        with patch(
+            "invoicing.views.timezone.localdate", return_value=date(2026, 5, 20)
+        ):
+            resp = self.client.get(reverse("invoice-due"))
+        row = self._row_for(resp, self.customer)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["unbilled_count"], 1)
+        self.assertEqual(row["unbilled_total"], "121.00")
+        # The response shape is unchanged: period_year/period_month still
+        # report the CURRENT (cutoff) period, not the EW's own billing month.
+        self.assertEqual(row["period_year"], 2026)
+        self.assertEqual(row["period_month"], 5)
+
+    def test_due_still_excludes_work_billable_after_the_cutoff_month(self):
+        # EW earned in a FUTURE month (June) relative to "today" (May 20)
+        # must NOT be counted yet — only THROUGH the current month.
+        self.make_ew(closed_at=dt(2026, 6, 5))
+        self.customer.invoice_day_rule = Customer.InvoiceDayRule.FIRST_OF_MONTH
+        self.customer.save(update_fields=["invoice_day_rule"])
+        self.client.force_authenticate(self.admin)
+        with patch(
+            "invoicing.views.timezone.localdate", return_value=date(2026, 5, 20)
+        ):
+            resp = self.client.get(reverse("invoice-due"))
+        row = self._row_for(resp, self.customer)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["unbilled_count"], 0)
+        self.assertEqual(row["unbilled_total"], "0.00")
+
     # -- arbitrary billing day (invoice_day_of_month) ---------------------
 
     def _row_for(self, resp, customer):

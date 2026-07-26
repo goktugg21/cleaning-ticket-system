@@ -1171,7 +1171,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
 
         if user.role == UserRole.CUSTOMER_USER:
             from customers.models import CustomerUserMembership
-            from customers.permissions import access_has_permission
+            from customers.permissions import access_has_permission, user_can
 
             membership = CustomerUserMembership.objects.filter(
                 user=user, customer_id=customer.id
@@ -1181,13 +1181,29 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                     {"customer": "You are not linked to this customer."}
                 )
 
-            # SoT Addendum A.1 — a company-wide Customer Company Admin
-            # (the membership `is_company_admin` flag) may create a ticket
-            # at ANY building of the customer, with no per-building access
-            # row required (the CCA role default grants
-            # `customer.ticket.create`).
+            # SoT Addendum A.1 + 2026-07-26 owner decision — a company-wide
+            # Customer Company Admin (the membership `is_company_admin`
+            # flag) may create a ticket at ANY building of the customer
+            # with no per-building access row required, but the
+            # CustomerCompanyPolicy family (customer_users_can_create_
+            # tickets) still binds them. `user_can` resolves the CCA case
+            # itself (including that policy gate — it can now do so even
+            # with zero access rows), so we defer to it here rather than a
+            # local bypass. (The customer/building link + active-status
+            # checks already ran above; only the permission remains.)
             if membership.is_company_admin:
-                return attrs
+                if user_can(
+                    user, customer.id, building.id, "customer.ticket.create"
+                ):
+                    return attrs
+                raise serializers.ValidationError(
+                    {
+                        "building": (
+                            "You do not have permission to create a ticket "
+                            "at this location."
+                        )
+                    }
+                )
 
             # Sprint 14: customer-users must additionally have building
             # access for the (customer, building) pair. A user with

@@ -80,7 +80,7 @@ echo "frontend_nginx_validate: posture checks"
 if ! grep -qE "^[[:space:]]*location[[:space:]]+/health/[[:space:]]*\{" "$NGINX_CONF"; then
   echo "[FAIL] no 'location /health/' block in $NGINX_CONF" >&2
   echo "       (without this, public /health/live falls through to the SPA fallback" >&2
-  echo "        and the smoke test passes on an HTML response — see docs/pre-host-production-hardening.md)" >&2
+  echo "        and the smoke test passes on an HTML response — see docs/archive/2026-05-pilot/pre-host-production-hardening.md)" >&2
   exit 1
 fi
 echo "[OK]   /health/ proxy block present"

@@ -124,10 +124,12 @@ def scope_customer_invoices_for(user):
     )
 
 
-def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id=None):
+def _scoped_unbilled_ew_with_tickets(actor, company_id, customer_id, building_id=None):
     """
-    Return the list of ExtraWorkRequest rows for (company, customer) that
-    are billable in (year, month) and NOT yet claimed (Option 1).
+    Shared base query for `unbilled_extra_work` / `unbilled_extra_work_through`:
+    company/customer-scoped, not yet claimed (Option 1). Returns
+    (ew_list, ticket_map) so callers apply their own is_earned +
+    billing_month test.
 
     Every ExtraWorkRequest is tied to exactly one building (the FK is
     NON-nullable / PROTECT), so there is no buildingless / company-wide EW:
@@ -161,9 +163,47 @@ def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id
     ew_list = list(qs)
     # Earned + correct month — reuse the M4/reports logic exactly.
     ticket_map = build_ticket_map([e.id for e in ew_list])
+    return ew_list, ticket_map
+
+
+def unbilled_extra_work(actor, company_id, customer_id, year, month, building_id=None):
+    """
+    Return the list of ExtraWorkRequest rows for (company, customer) that
+    are billable in EXACTLY (year, month) and NOT yet claimed (Option 1).
+
+    Used by `generate` (services.py), which always targets one specific
+    billing period. For the "how much is outstanding as of now" question
+    (the due panel), see `unbilled_extra_work_through` below.
+    """
+    ew_list, ticket_map = _scoped_unbilled_ew_with_tickets(
+        actor, company_id, customer_id, building_id
+    )
     return [
         e
         for e in ew_list
         if is_earned(ticket_map.get(e.id))
         and billing_month(e, ticket_map.get(e.id)) == (year, month)
+    ]
+
+
+def unbilled_extra_work_through(
+    actor, company_id, customer_id, year, month, building_id=None
+):
+    """
+    SoT Addendum B §B.10 (Sprint 119) — same scope as `unbilled_extra_work`,
+    but matches every earned row billable in (year, month) OR ANY EARLIER
+    period (tuple comparison, so an earlier year always qualifies too), not
+    just an exact match. Powers the `/due/` panel so unbilled work from a
+    PRIOR month does not silently drop off the list once the calendar month
+    rolls over. `generate` keeps using the exact-period `unbilled_extra_work`
+    unchanged — invoice generation still targets one specific period.
+    """
+    ew_list, ticket_map = _scoped_unbilled_ew_with_tickets(
+        actor, company_id, customer_id, building_id
+    )
+    return [
+        e
+        for e in ew_list
+        if is_earned(ticket_map.get(e.id))
+        and billing_month(e, ticket_map.get(e.id)) <= (year, month)
     ]

@@ -3,7 +3,7 @@ Sprint 3B — provider-scoped Service catalog + safe default-price
 visibility tests.
 
 Locks the rules from
-`docs/product/Osius_Source_of_Truth_FINAL_2026-05-30.md` §1.6 +
+`docs/product/source-of-truth.md` §1.6 +
 §2.1 + §5.7 + §5.8 against the backend serializer + view layers.
 
 Coverage:

@@ -9,7 +9,7 @@ review. This module is the resolver; the DRF permission classes
 that consume it live in the individual app views.
 
 Keys live in
-docs/architecture/sprint-23a-domain-permissions-foundation.md.
+docs/archive/2026-05-sprints/sprint-23a-domain-permissions-foundation.md.
 The resolver is intentionally tiny — Sprint 23B may extend if
 admin UI starts editing per-user overrides.
 """

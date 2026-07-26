@@ -26,7 +26,7 @@ import {
 /**
  * Employees directory (provider side).
  *
- * View-first per `docs/product/meeting-2026-05-15-system-requirements.md`
+ * View-first per `docs/product/requirements-meeting-2026-05-15.md`
  * §3: the table loads read-only. The whole row is the click target — it
  * navigates to the person's account page (/admin/users/<id>) for viewers
  * who can open it (SUPER_ADMIN: any; COMPANY_ADMIN: only ACTIVE non-

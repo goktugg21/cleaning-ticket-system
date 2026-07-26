@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { forwardRef, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 export interface ConfirmDialogHandle {
@@ -51,6 +51,26 @@ export const ConfirmDialog = forwardRef<ConfirmDialogHandle, ConfirmDialogProps>
       }),
       [],
     );
+
+    // showModal() promotes the <dialog> to the browser's top layer and makes
+    // the rest of the document INERT (pointer input swallowed while the page
+    // still scrolls). If this component unmounts while the dialog is still
+    // open — a consumer navigating inside its onConfirm handler (e.g. the
+    // invoice-delete flow), a parent list re-rendering the row away, a redirect
+    // after an action — the node is torn out of the DOM without close() ever
+    // running. Removing an open modal is only guaranteed to release the top
+    // layer / inert state on engines that run the <dialog> "removing steps"
+    // reliably; where they don't, the document is left scrollable but
+    // click-dead until a manual refresh. Closing it here while it is still
+    // attached ejects it from the top layer on every engine. Copy the node in
+    // the effect body (not the cleanup) so the ref read satisfies the hooks
+    // lint rule; the dialog node identity is stable for the component's life.
+    useEffect(() => {
+      const node = dialogRef.current;
+      return () => {
+        if (node?.open) node.close();
+      };
+    }, []);
 
     const handleCancel = () => {
       dialogRef.current?.close();

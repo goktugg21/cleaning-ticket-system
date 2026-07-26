@@ -12,7 +12,7 @@ History:
     on master @ 95748b3 the audit signal registration treated
     `BuildingStaffVisibility` as CREATE/DELETE-only and the
     UPDATE was silently dropped (gap G-B4 in
-    docs/architecture/sprint-27-rbac-matrix.md).
+    docs/reference/rbac-matrix.md).
   * Sprint 27B added a dedicated pre_save snapshot + post_save
     UPDATE-only handler for the model in `audit/signals.py`,
     keeping the existing membership CREATE/DELETE shape unchanged.
@@ -20,7 +20,7 @@ History:
     asserts the corrected behaviour directly.
 
 See section H-10 + gap G-B4 (now marked closed by Sprint 27B) in
-docs/architecture/sprint-27-rbac-matrix.md.
+docs/reference/rbac-matrix.md.
 """
 from __future__ import annotations
 

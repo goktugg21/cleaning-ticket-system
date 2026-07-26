@@ -57,6 +57,7 @@ import type {
 } from "../../api/admin";
 import type { TicketStatus } from "../../api/types";
 import { getApiError } from "../../api/client";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { SlotStatusBadge } from "../../components/SlotStatusBadge";
@@ -730,15 +731,21 @@ export function StaffSlotEditor({
           </div>
         )}
 
-        {groupSlots.length === 0 ? (
-          <p className="muted small" style={{ margin: "8px 0 0" }}>
-            {t("subtasks.empty_slots")}
-          </p>
-        ) : (
+        <BoundedList
+          size="md"
+          count={groupSlots.length}
+          ariaLabel={st.title}
+          testIdPrefix={`subtask-group-slots-${st.id}`}
+          emptyState={
+            <p className="muted small" style={{ margin: "8px 0 0" }}>
+              {t("subtasks.empty_slots")}
+            </p>
+          }
+        >
           <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
             {groupSlots.map(renderSlot)}
           </ul>
-        )}
+        </BoundedList>
         </div>
         )}
       </div>
@@ -876,25 +883,38 @@ export function StaffSlotEditor({
       {loading ? (
         <p className="muted small">{t("editor.loading")}</p>
       ) : subTasks.length === 0 ? (
-        slots.length === 0 ? (
-          <p
-            className="muted small"
-            data-testid="staff-slot-empty"
-            style={{ padding: "2px 0" }}
-          >
-            {t("editor.empty")}
-          </p>
-        ) : (
+        <BoundedList
+          size="md"
+          count={slots.length}
+          ariaLabel={t("editor.title")}
+          testIdPrefix="staff-slot-list"
+          emptyState={
+            <p
+              className="muted small"
+              data-testid="staff-slot-empty"
+              style={{ padding: "2px 0" }}
+            >
+              {t("editor.empty")}
+            </p>
+          }
+        >
           <ul
             style={{ listStyle: "none", margin: 0, padding: 0 }}
             data-testid="staff-slot-list"
           >
             {slots.map(renderSlot)}
           </ul>
-        )
+        </BoundedList>
       ) : (
         <div data-testid="subtask-groups">
-          {subTasks.map(renderSubTaskGroup)}
+          <BoundedList
+            size="md"
+            count={subTasks.length}
+            ariaLabel={t("editor.title")}
+            testIdPrefix="subtask-groups"
+          >
+            {subTasks.map(renderSubTaskGroup)}
+          </BoundedList>
           {looseSlots.length > 0 && (
             <div
               data-testid="subtask-general-group"
@@ -911,9 +931,16 @@ export function StaffSlotEditor({
               >
                 {t("subtasks.general_group")}
               </strong>
-              <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
-                {looseSlots.map(renderSlot)}
-              </ul>
+              <BoundedList
+                size="md"
+                count={looseSlots.length}
+                ariaLabel={t("subtasks.general_group")}
+                testIdPrefix="subtask-loose-slots"
+              >
+                <ul style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
+                  {looseSlots.map(renderSlot)}
+                </ul>
+              </BoundedList>
             </div>
           )}
         </div>

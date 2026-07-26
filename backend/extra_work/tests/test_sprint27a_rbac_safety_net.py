@@ -3,7 +3,7 @@ Sprint 27A — RBAC / permission / hierarchy safety net (extra_work app).
 
 T-5  test_staff_cannot_approve_or_override_extra_work_pricing
 
-Asserts hard invariant H-5 from docs/architecture/sprint-27-rbac-matrix.md:
+Asserts hard invariant H-5 from docs/reference/rbac-matrix.md:
 STAFF must never drive an Extra Work request from
 PRICING_PROPOSED into CUSTOMER_APPROVED or CUSTOMER_REJECTED.
 That decision belongs to the customer (or, via the explicit

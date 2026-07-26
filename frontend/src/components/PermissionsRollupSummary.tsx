@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import type { CustomerUserBuildingAccess } from "../api/types";
 import { accessRoleLabelKey } from "../lib/enumLabels";
+import { BoundedList } from "./BoundedList";
 
 /**
  * Sprint 29 Batch 29.8.5 — inline summary that the
@@ -54,6 +55,10 @@ export function PermissionsRollupSummary({
   onCollapse,
 }: PermissionsRollupSummaryProps) {
   const { t } = useTranslation("common");
+  const title = t("permissions_rollup.summary_title", {
+    user: userLabel,
+    customer: customerLabel,
+  });
 
   return (
     <section
@@ -61,57 +66,60 @@ export function PermissionsRollupSummary({
       data-testid={`permissions-rollup-summary-${userId}-${customerId}`}
     >
       <header className="permissions-rollup-summary-header">
-        <div className="permissions-rollup-summary-title">
-          {t("permissions_rollup.summary_title", {
-            user: userLabel,
-            customer: customerLabel,
-          })}
-        </div>
+        <div className="permissions-rollup-summary-title">{title}</div>
       </header>
 
       {loading ? (
         <div className="permissions-rollup-summary-loading">
           {t("permissions_rollup.summary_loading")}
         </div>
-      ) : accesses.length === 0 ? (
-        <div className="permissions-rollup-summary-empty">
-          {t("permissions_rollup.summary_empty")}
-        </div>
       ) : (
-        <ul className="permissions-rollup-summary-list">
-          {accesses.map((access) => {
-            const overrides = Object.keys(
-              access.permission_overrides ?? {},
-            ).length;
-            return (
-              <li
-                key={access.id}
-                className="permissions-rollup-summary-row"
-                data-testid={`permissions-rollup-summary-row-${access.id}`}
-              >
-                <span className="permissions-rollup-summary-row-building">
-                  {access.building_name}
-                </span>
-                <span className="permissions-rollup-summary-row-role">
-                  {t(accessRoleLabelKey(access.access_role))}
-                  {" · "}
-                  {t(overridesCountLabelKey(overrides), { count: overrides })}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm permissions-rollup-summary-row-edit"
-                  onClick={() => onOpenOverrides(access)}
-                  data-testid={`permissions-rollup-summary-edit-${access.id}`}
+        <BoundedList
+          size="md"
+          count={accesses.length}
+          ariaLabel={title}
+          testIdPrefix={`permissions-rollup-summary-${userId}-${customerId}`}
+          emptyState={
+            <div className="permissions-rollup-summary-empty">
+              {t("permissions_rollup.summary_empty")}
+            </div>
+          }
+        >
+          <ul className="permissions-rollup-summary-list">
+            {accesses.map((access) => {
+              const overrides = Object.keys(
+                access.permission_overrides ?? {},
+              ).length;
+              return (
+                <li
+                  key={access.id}
+                  className="permissions-rollup-summary-row"
+                  data-testid={`permissions-rollup-summary-row-${access.id}`}
                 >
-                  <Pencil size={12} strokeWidth={2.2} aria-hidden="true" />
-                  <span style={{ marginLeft: 4 }}>
-                    {t("permissions_rollup.summary_edit_row")}
+                  <span className="permissions-rollup-summary-row-building">
+                    {access.building_name}
                   </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  <span className="permissions-rollup-summary-row-role">
+                    {t(accessRoleLabelKey(access.access_role))}
+                    {" · "}
+                    {t(overridesCountLabelKey(overrides), { count: overrides })}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm permissions-rollup-summary-row-edit"
+                    onClick={() => onOpenOverrides(access)}
+                    data-testid={`permissions-rollup-summary-edit-${access.id}`}
+                  >
+                    <Pencil size={12} strokeWidth={2.2} aria-hidden="true" />
+                    <span style={{ marginLeft: 4 }}>
+                      {t("permissions_rollup.summary_edit_row")}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </BoundedList>
       )}
 
       <footer className="permissions-rollup-summary-footer">

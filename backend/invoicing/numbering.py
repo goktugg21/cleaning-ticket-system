@@ -7,9 +7,11 @@ locked with select_for_update, mirroring the tickets state_machine locking
 pattern. There is always exactly ONE row to lock per sequence, so there is
 no empty-set / phantom-row race.
 
-MUST run inside a transaction — the caller (issue_invoice / reverse_invoice
-in state_machine.py) wraps this in its own @transaction.atomic block so the
-allocated number and the status flip commit together (or roll back together).
+MUST run inside a transaction — the caller (send_invoice / reverse_invoice
+in state_machine.py — numbering moved off issue_invoice to send in PR #113,
+see docs/product/sot-addendum-b-invoicing.md §B.2) wraps this in its own
+@transaction.atomic block so the allocated number and the status flip commit
+together (or roll back together).
 """
 from __future__ import annotations
 

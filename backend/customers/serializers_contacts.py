@@ -3,7 +3,7 @@ Sprint 28 Batch 4 — Contact (customer phone-book entry) serializer.
 
 Contacts are distinct from Users: they have no login, no role enum, no
 scope rows and no permission overrides (spec
-docs/product/meeting-2026-05-15-system-requirements.md §1). The
+docs/product/requirements-meeting-2026-05-15.md §1). The
 serializer therefore deliberately exposes ONLY the communication fields
 on the model and the read-only audit timestamps. The
 `fields = [...]` list is explicit so an accidental future addition of

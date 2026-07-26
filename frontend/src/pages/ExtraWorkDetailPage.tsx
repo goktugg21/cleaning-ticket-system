@@ -1307,6 +1307,7 @@ export function ExtraWorkDetailPage() {
       cancelDialogRef.current?.close();
     } catch (err) {
       setError(getApiError(err));
+      cancelDialogRef.current?.close();
     } finally {
       setCancelBusy(false);
     }

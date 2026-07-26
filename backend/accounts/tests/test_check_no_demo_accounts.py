@@ -2,7 +2,7 @@
 Sprint 10 — tests for the `check_no_demo_accounts` management command.
 
 The command is the last manual gate before pilot launch
-(docs/pilot-launch-checklist.md). It must:
+(docs/archive/2026-05-pilot/pilot-launch-checklist.md). It must:
   - exit 0 with an "OK" stdout line when no demo accounts exist;
   - exit 1 with a "FAIL" stderr line listing the offending emails
     when any demo account exists, including soft-deleted ones.

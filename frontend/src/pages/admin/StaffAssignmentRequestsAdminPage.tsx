@@ -149,6 +149,7 @@ export function StaffAssignmentRequestsAdminPage() {
       await load();
     } catch (err) {
       setError(getApiError(err));
+      reviewDialogRef.current?.close();
     } finally {
       setReviewBusy(false);
     }

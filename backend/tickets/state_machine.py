@@ -203,16 +203,17 @@ def _user_passes_scope(user, ticket, scope):
     if scope == SCOPE_BUILDING_ASSIGNED:
         return BuildingManagerAssignment.objects.filter(user=user, building_id=ticket.building_id).exists()
     if scope == SCOPE_CUSTOMER_LINKED:
-        # SoT Addendum A.1 — a company-wide Customer Company Admin (the
-        # membership `is_company_admin` flag) may drive customer-decision
-        # transitions (approve / reject) on ANY building of every customer
-        # they administer, with no per-building access row. Mirrors the
-        # company_admin_customer_ids union in scope_tickets_for and the
-        # Extra Work state machine's user_can-based customer gate.
-        from accounts.scoping import company_admin_customer_ids
-
-        if ticket.customer_id in company_admin_customer_ids(user):
-            return True
+        # SoT Addendum A.1 + 2026-07-26 owner decision — a company-wide
+        # Customer Company Admin (the membership `is_company_admin` flag)
+        # may drive customer-decision transitions (approve / reject) on
+        # ANY building of every customer they administer, with no
+        # per-building access row — but the CustomerCompanyPolicy family
+        # (customer_users_can_approve_ticket_completion) still binds them.
+        # No local short-circuit is needed: `user_can` below resolves the
+        # CCA case itself (including that policy gate — it can now do so
+        # even with zero access rows), so a CCA falls straight through to
+        # the same approve_own / approve_location gates as everyone else.
+        #
         # #109 Part A (audit P2-2) — mirror the Extra Work machine's
         # `_user_can_drive_transition` customer-decision gate: a bare
         # CustomerUserBuildingAccess row is no longer enough; the

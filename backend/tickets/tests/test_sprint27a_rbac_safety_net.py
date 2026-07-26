@@ -3,7 +3,7 @@ Sprint 27A — RBAC / permission / hierarchy safety net (tickets app).
 
 T-4  test_staff_cannot_approve_or_override_ticket_completion
 
-Asserts hard invariant H-5 from docs/architecture/sprint-27-rbac-matrix.md:
+Asserts hard invariant H-5 from docs/reference/rbac-matrix.md:
 STAFF must never be able to drive a ticket from
 WAITING_CUSTOMER_APPROVAL into APPROVED or REJECTED — that decision
 belongs to the customer (or, via a separately-modelled workflow

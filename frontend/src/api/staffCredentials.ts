@@ -269,12 +269,22 @@ export async function removeCredentialGrant(
   );
 }
 
+/** Sprint 119 — the credential document's authenticated GET path, shared
+ *  by the download trigger and the in-app PDF preview dialog (both fetch
+ *  the same resolver-gated bytes; only what happens with them differs). */
+export function credentialDocumentUrl(
+  userId: number,
+  credentialId: number,
+): string {
+  return `/users/${userId}/credentials/${credentialId}/download/`;
+}
+
 export async function downloadCredentialDocument(
   userId: number,
   credential: StaffCredential,
 ): Promise<void> {
   await downloadToFile(
-    `/users/${userId}/credentials/${credential.id}/download/`,
+    credentialDocumentUrl(userId, credential.id),
     credential.original_filename || "document.pdf",
   );
 }

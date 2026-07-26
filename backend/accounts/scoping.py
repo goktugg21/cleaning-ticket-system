@@ -49,13 +49,25 @@ def company_ids_for(user):
         return Company.objects.values_list("id", flat=True)
 
     if user.role == UserRole.COMPANY_ADMIN:
+        # CompanyUserMembership is unique_together=(company, user), so this
+        # is naturally distinct already — one row per company at most.
         return CompanyUserMembership.objects.filter(user=user).values_list("company_id", flat=True)
 
     if user.role == UserRole.BUILDING_MANAGER:
-        return BuildingManagerAssignment.objects.filter(user=user).values_list("building__company_id", flat=True)
+        # Sprint 119 (found in the Sprint 118 audit) — a BM's company id
+        # comes from a JOIN through their building assignments, so a BM
+        # assigned to N buildings in one company previously produced that
+        # company id N times (18 raw values / 1 distinct, confirmed against
+        # seed data). BuildingManagerAssignment carries no (user, company)
+        # uniqueness — only .distinct() collapses the fan-out.
+        return BuildingManagerAssignment.objects.filter(user=user).values_list("building__company_id", flat=True).distinct()
 
     if user.role == UserRole.CUSTOMER_USER:
-        return CustomerUserMembership.objects.filter(user=user).values_list("customer__company_id", flat=True)
+        # Same fan-out shape as BUILDING_MANAGER above: CustomerUserMembership
+        # is unique_together=(customer, user), NOT (company, user) — a user
+        # with rows on two Customers under the same provider company would
+        # repeat that company id here too. Fixed alongside the BM branch.
+        return CustomerUserMembership.objects.filter(user=user).values_list("customer__company_id", flat=True).distinct()
 
     return Company.objects.none().values_list("id", flat=True)
 

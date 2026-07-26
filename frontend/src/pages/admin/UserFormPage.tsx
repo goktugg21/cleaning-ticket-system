@@ -27,6 +27,7 @@ import type {
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { roleLabelKeyNs } from "../../auth/permissions";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useEntityForm } from "../../hooks/useEntityForm";
@@ -865,7 +866,13 @@ function StaffDetailsSection({
           <>
             {/* Desktop table — Sprint 22 pattern: hidden at <=600px in
                 index.css so the mobile card list below takes over. */}
-            <div className="table-wrap admin-list-wrap">
+            <BoundedList
+              size="md"
+              count={visibility.length}
+              ariaLabel={t("staff_admin.visibility_title")}
+              testIdPrefix="staff-visibility-table"
+              className="table-wrap admin-list-wrap"
+            >
               <table className="data-table">
                 <thead>
                   <tr>
@@ -994,157 +1001,164 @@ function StaffDetailsSection({
                   })}
                 </tbody>
               </table>
-            </div>
+            </BoundedList>
 
             {/* Mobile parallel — phone-class viewports show this list
                 instead of the desktop table. Sprint 22 pattern. */}
-            <ul
-              className="admin-card-list"
-              data-testid="staff-visibility-card-list"
-              aria-label={t("staff_admin.visibility_title")}
+            <BoundedList
+              size="md"
+              count={visibility.length}
+              ariaLabel={t("staff_admin.visibility_title")}
+              testIdPrefix="staff-visibility-card-list"
             >
-              {visibility.map((row) => {
-                const toggleBusy =
-                  visibilityBusyKey === `toggle-${row.building_id}`;
-                const levelBusy =
-                  visibilityBusyKey === `level-${row.building_id}`;
-                const routesBusy =
-                  visibilityBusyKey === `routes-${row.building_id}`;
-                const removeBusy =
-                  visibilityBusyKey === `remove-${row.building_id}`;
-                return (
-                  <li
-                    key={row.id}
-                    className="admin-card"
-                    data-testid="staff-visibility-card"
-                    data-building-id={row.building_id}
-                  >
-                    <div
-                      className="admin-card-link"
-                      style={{ cursor: "default" }}
+                <ul
+                  className="admin-card-list"
+                  data-testid="staff-visibility-card-list"
+                  aria-label={t("staff_admin.visibility_title")}
+                >
+                  {visibility.map((row) => {
+                  const toggleBusy =
+                    visibilityBusyKey === `toggle-${row.building_id}`;
+                  const levelBusy =
+                    visibilityBusyKey === `level-${row.building_id}`;
+                  const routesBusy =
+                    visibilityBusyKey === `routes-${row.building_id}`;
+                  const removeBusy =
+                    visibilityBusyKey === `remove-${row.building_id}`;
+                  return (
+                    <li
+                      key={row.id}
+                      className="admin-card"
+                      data-testid="staff-visibility-card"
+                      data-building-id={row.building_id}
                     >
-                      <div className="admin-card-head">
-                        <span className="admin-card-title">
-                          {row.building_name}
-                        </span>
-                      </div>
                       <div
-                        className="admin-card-meta-row"
-                        style={{ marginTop: 6 }}
+                        className="admin-card-link"
+                        style={{ cursor: "default" }}
                       >
-                        <label
-                          className="field-label"
-                          style={{ display: "block", marginBottom: 4 }}
+                        <div className="admin-card-head">
+                          <span className="admin-card-title">
+                            {row.building_name}
+                          </span>
+                        </div>
+                        <div
+                          className="admin-card-meta-row"
+                          style={{ marginTop: 6 }}
                         >
-                          {t("staff_admin.level_label")}
-                        </label>
-                        <select
-                          className="field-select"
-                          value={row.visibility_level}
-                          onChange={(event) =>
-                            handleChangeVisibilityLevel(
-                              row,
-                              event.target.value as StaffVisibilityLevel,
-                            )
-                          }
-                          disabled={!canEdit || levelBusy}
-                          aria-label={t("staff_admin.level_label")}
-                          data-testid={`staff-visibility-level-select-mobile-${row.building_id}`}
-                        >
-                          <option value="ASSIGNED_ONLY">
-                            {t("staff_admin.level.assigned_only")}
-                          </option>
-                          <option value="BUILDING_READ">
-                            {t("staff_admin.level.building_read")}
-                          </option>
-                          <option value="BUILDING_READ_AND_ASSIGN">
-                            {t(
-                              "staff_admin.level.building_read_and_assign",
-                            )}
-                          </option>
-                        </select>
-                      </div>
-                      <div
-                        className="admin-card-meta-row"
-                        style={{ marginTop: 6 }}
-                      >
-                        <label
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            cursor: canEdit ? "pointer" : "default",
-                          }}
-                        >
-                          <Toggle
-                            checked={row.can_request_assignment}
+                          <label
+                            className="field-label"
+                            style={{ display: "block", marginBottom: 4 }}
+                          >
+                            {t("staff_admin.level_label")}
+                          </label>
+                          <select
+                            className="field-select"
+                            value={row.visibility_level}
                             onChange={(event) =>
-                              handleToggleCanRequest(
+                              handleChangeVisibilityLevel(
                                 row,
-                                event.target.checked,
+                                event.target.value as StaffVisibilityLevel,
                               )
                             }
-                            disabled={!canEdit || toggleBusy}
-                            data-testid="staff-visibility-can-request-mobile"
-                          />
-                          <span className="muted small">
-                            {t("staff_admin.visibility_can_request_label")}
-                          </span>
-                        </label>
-                      </div>
-                      {/* Sprint 28 Batch 11 — mobile mirror of the
-                          completion-routing checkbox. Same testid
-                          stem so a Playwright spec can target the
-                          row regardless of viewport (the regex
-                          `/^staff-completion-routes-to-customer-/`
-                          will match both desktop and mobile). */}
-                      <div
-                        className="admin-card-meta-row"
-                        style={{ marginTop: 6 }}
-                      >
-                        <label
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 6,
-                            cursor: canEdit ? "pointer" : "default",
-                          }}
+                            disabled={!canEdit || levelBusy}
+                            aria-label={t("staff_admin.level_label")}
+                            data-testid={`staff-visibility-level-select-mobile-${row.building_id}`}
+                          >
+                            <option value="ASSIGNED_ONLY">
+                              {t("staff_admin.level.assigned_only")}
+                            </option>
+                            <option value="BUILDING_READ">
+                              {t("staff_admin.level.building_read")}
+                            </option>
+                            <option value="BUILDING_READ_AND_ASSIGN">
+                              {t(
+                                "staff_admin.level.building_read_and_assign",
+                              )}
+                            </option>
+                          </select>
+                        </div>
+                        <div
+                          className="admin-card-meta-row"
+                          style={{ marginTop: 6 }}
                         >
-                          <Toggle
-                            checked={row.staff_completion_routes_to_customer}
-                            onChange={(event) =>
-                              handleToggleRoutesToCustomer(
-                                row,
-                                event.target.checked,
-                              )
-                            }
-                            disabled={!canEdit || routesBusy}
-                            data-testid={`staff-completion-routes-to-customer-mobile-${row.building_id}`}
-                          />
-                          <span className="muted small">
-                            {t("staff_admin.routes_to_customer_label")}
-                          </span>
-                        </label>
-                      </div>
-                      <div
-                        className="admin-card-actions"
-                        style={{ display: "flex", gap: 6, marginTop: 8 }}
-                      >
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => openRemoveDialog(row)}
-                          disabled={!canEdit || removeBusy}
-                          data-testid="staff-visibility-remove-mobile"
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              cursor: canEdit ? "pointer" : "default",
+                            }}
+                          >
+                            <Toggle
+                              checked={row.can_request_assignment}
+                              onChange={(event) =>
+                                handleToggleCanRequest(
+                                  row,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={!canEdit || toggleBusy}
+                              data-testid="staff-visibility-can-request-mobile"
+                            />
+                            <span className="muted small">
+                              {t("staff_admin.visibility_can_request_label")}
+                            </span>
+                          </label>
+                        </div>
+                        {/* Sprint 28 Batch 11 — mobile mirror of the
+                            completion-routing checkbox. Same testid
+                            stem so a Playwright spec can target the
+                            row regardless of viewport (the regex
+                            `/^staff-completion-routes-to-customer-/`
+                            will match both desktop and mobile). */}
+                        <div
+                          className="admin-card-meta-row"
+                          style={{ marginTop: 6 }}
                         >
-                          {t("staff_admin.visibility_remove_button")}
-                        </button>
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              cursor: canEdit ? "pointer" : "default",
+                            }}
+                          >
+                            <Toggle
+                              checked={row.staff_completion_routes_to_customer}
+                              onChange={(event) =>
+                                handleToggleRoutesToCustomer(
+                                  row,
+                                  event.target.checked,
+                                )
+                              }
+                              disabled={!canEdit || routesBusy}
+                              data-testid={`staff-completion-routes-to-customer-mobile-${row.building_id}`}
+                            />
+                            <span className="muted small">
+                              {t("staff_admin.routes_to_customer_label")}
+                            </span>
+                          </label>
+                        </div>
+                        <div
+                          className="admin-card-actions"
+                          style={{ display: "flex", gap: 6, marginTop: 8 }}
+                        >
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openRemoveDialog(row)}
+                            disabled={!canEdit || removeBusy}
+                            data-testid="staff-visibility-remove-mobile"
+                          >
+                            {t("staff_admin.visibility_remove_button")}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                    </li>
+                  );
+                })}
+                </ul>
+            </BoundedList>
           </>
         )}
 

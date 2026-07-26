@@ -1,6 +1,9 @@
 from django.urls import reverse
 from rest_framework.test import APITestCase
 
+from accounts.scoping import company_ids_for
+from buildings.models import Building, BuildingManagerAssignment
+from customers.models import Customer, CustomerUserMembership
 from test_utils import TenantFixtureMixin
 
 
@@ -72,3 +75,33 @@ class AccountScopingTests(TenantFixtureMixin, APITestCase):
         self.assertIn(self.company.id, response.data["company_ids"])
         self.assertIn(self.building.id, response.data["building_ids"])
         self.assertIn(self.customer.id, response.data["customer_ids"])
+
+    # -- Sprint 119 (found in the Sprint 118 audit) — company_ids_for must
+    # not repeat a company id once per fan-out row -----------------------
+
+    def test_company_ids_for_building_manager_deduplicates_multi_building_fanout(self):
+        # self.manager already has one BuildingManagerAssignment on
+        # self.building (company A). Add a SECOND building in the SAME
+        # company: the join through building__company_id must not surface
+        # company A twice.
+        second_building = Building.objects.create(
+            company=self.company, name="Building A2", address="Second Street 1",
+        )
+        BuildingManagerAssignment.objects.create(
+            user=self.manager, building=second_building
+        )
+        ids = list(company_ids_for(self.manager))
+        self.assertEqual(ids, [self.company.id])
+
+    def test_company_ids_for_customer_user_deduplicates_multi_customer_fanout(self):
+        # Same fan-out shape for CUSTOMER_USER: a second Customer under the
+        # SAME company must not duplicate the company id either.
+        second_customer = Customer.objects.create(
+            company=self.company, building=self.building,
+            name="Customer A2", contact_email="customer-a2@example.com",
+        )
+        CustomerUserMembership.objects.create(
+            user=self.customer_user, customer=second_customer
+        )
+        ids = list(company_ids_for(self.customer_user))
+        self.assertEqual(ids, [self.company.id])

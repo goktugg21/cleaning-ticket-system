@@ -1750,6 +1750,47 @@ table.data-table {
 .multi-select-list-tall {
   max-height: 320px;
 }
+
+/* Sprint 117 — BoundedList, the shared bounded-list primitive
+   (components/BoundedList.tsx). Every list rendered from a SERVER
+   collection must be bounded (see CLAUDE.md #8) — this is that bound.
+   THREE named sizes only, reusing the app's existing de-facto scroll
+   scale (do not add a fourth): sm mirrors .multi-select-list (simple
+   one-line rows), md mirrors .multi-select-list-tall (richer per-row
+   content — chips, buttons, expandable panels), lg mirrors
+   .ew-table-scroll (interactive tables). max-height (not height) +
+   overflow-y: auto means the cap only bites once content is taller
+   than it — a short list renders at its natural height, no dead space. */
+.bounded-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-y: auto;
+}
+.bounded-list:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.bounded-list-sm {
+  max-height: 260px;
+}
+.bounded-list-md {
+  max-height: 320px;
+}
+.bounded-list-lg {
+  max-height: 420px;
+}
+/* A <table> placed inside BoundedList gets the same sticky-header
+   treatment as .ew-table-scroll, generalised to any consumer. */
+.bounded-list table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.bounded-list-count {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 .multi-select-list label {
   display: flex;
   align-items: center;

@@ -4,7 +4,7 @@ Sprint 28 Batch 5 — pricing resolver for the Extra Work cart flow.
 Single public function: `resolve_price(service, customer, *, on=None)`.
 
 Semantics (authoritative — master plan §5 rule #9 +
-docs/project/SPRINT_28_MASTER_PLAN.md §9 decision log row for 2026-05-15):
+docs/archive/2026-05-sprints/SPRINT_28_MASTER_PLAN.md §9 decision log row for 2026-05-15):
 
 The resolver returns the customer-specific contract price (a
 `CustomerServicePrice` row) when an active row exists for the
@@ -19,7 +19,7 @@ the line to the proposal flow instead of spawning operational
 tickets immediately.
 
 The product spec at
-`docs/product/meeting-2026-05-15-system-requirements.md` §5 step 2
+`docs/product/requirements-meeting-2026-05-15.md` §5 step 2
 contains stale wording that says the resolver "falls back" to the
 global default; that wording is explicitly overridden by the master
 plan rule #9 + the same-day decision log. The behaviour locked in

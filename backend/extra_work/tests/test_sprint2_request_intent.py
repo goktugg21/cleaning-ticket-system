@@ -3,7 +3,7 @@ Sprint 2A — request intent + ad-hoc cart line + agreed-price
 snapshot coverage.
 
 Locks the rules from
-`docs/product/Osius_Source_of_Truth_FINAL_2026-05-30.md` §5.1–§5.9
+`docs/product/source-of-truth.md` §5.1–§5.9
 and §11.2 against the backend serializer:
 
   * Three explicit intents: DIRECT_AGREED_PRICE_ORDER /

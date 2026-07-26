@@ -21,6 +21,7 @@ import type {
   CustomerUserMembership,
   UserAdmin,
 } from "../../../api/types";
+import { BoundedList } from "../../../components/BoundedList";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 
@@ -437,7 +438,32 @@ export function CustomerUsersPage() {
               </div>
             )}
 
-            <div className="table-wrap">
+            <BoundedList
+              size="lg"
+              count={visibleMembers.length}
+              ariaLabel={t("customer_view.users.title")}
+              testIdPrefix="customer-users"
+              className="table-wrap"
+              emptyState={
+                members.length === 0 ? (
+                  <p
+                    className="muted small"
+                    style={{ padding: "12px 0" }}
+                    data-testid="customer-users-empty"
+                  >
+                    {t("customer_form.no_users_yet")}
+                  </p>
+                ) : (
+                  <p
+                    className="muted small"
+                    style={{ padding: "12px 0" }}
+                    data-testid="customer-users-no-matches"
+                  >
+                    {t("customer_view.users.filter_no_matches")}
+                  </p>
+                )
+              }
+            >
               <table className="data-table">
                 <thead>
                   <tr>
@@ -540,24 +566,7 @@ export function CustomerUsersPage() {
                   })}
                 </tbody>
               </table>
-              {members.length === 0 ? (
-                <p
-                  className="muted small"
-                  style={{ padding: "12px 0" }}
-                  data-testid="customer-users-empty"
-                >
-                  {t("customer_form.no_users_yet")}
-                </p>
-              ) : visibleMembers.length === 0 ? (
-                <p
-                  className="muted small"
-                  style={{ padding: "12px 0" }}
-                  data-testid="customer-users-no-matches"
-                >
-                  {t("customer_view.users.filter_no_matches")}
-                </p>
-              ) : null}
-            </div>
+            </BoundedList>
 
             {canManageMembers && (
             <form

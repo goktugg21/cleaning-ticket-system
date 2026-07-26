@@ -33,7 +33,7 @@ import { ContactPermissionsPanel } from "./ContactPermissionsPanel";
 /**
  * Sprint 28 Batch 4 — Customer Contacts page (per-customer phone book).
  *
- * View-first per `docs/product/meeting-2026-05-15-system-requirements.md`
+ * View-first per `docs/product/requirements-meeting-2026-05-15.md`
  * §3. List rows are read-only. Clicking a row opens a read-only detail
  * panel; editing happens only through an explicit "Edit" action that
  * opens a modal. Creating a contact opens a separate modal.

@@ -502,7 +502,7 @@ def _on_customer_user_access_post_delete(sender, instance, **kwargs):
         )
 
 
-# Sprint 27B (closes gap G-B4 from docs/architecture/sprint-27-rbac-matrix.md):
+# Sprint 27B (closes gap G-B4 from docs/reference/rbac-matrix.md):
 # `BuildingStaffVisibility` is still registered with the membership-only
 # CREATE/DELETE handlers above — that shape is unchanged. But its single
 # editable field, `can_request_assignment`, is a per-building permission

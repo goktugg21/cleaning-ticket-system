@@ -1677,7 +1677,7 @@ export interface CustomerUserMembership {
 //   - no UserRole enum
 //   - no scope memberships or permission overrides
 //   - no last_login / is_active fields
-// See `docs/product/meeting-2026-05-15-system-requirements.md` §1
+// See `docs/product/requirements-meeting-2026-05-15.md` §1
 // (Contacts vs Users are distinct entities). Promoting a Contact into a
 // User is an explicit, separate flow — `promoteCustomerContact`
 // (POST .../promote-to-user/), which the backend resolves to INVITE or

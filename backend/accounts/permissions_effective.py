@@ -36,7 +36,7 @@ Why this exists:
     duplicating the resolver branching logic.
 
 Hard invariants preserved (per
-docs/architecture/sprint-27-rbac-matrix.md):
+docs/reference/rbac-matrix.md):
 
   * Anonymous users get False for every key.
   * Unknown keys (outside both frozensets) get False.
@@ -57,7 +57,7 @@ site** to this service. Doing so creates risk without a present
 consumer; the service is read-only and behaviorally equivalent
 to the resolvers it composes, so swapping a call site is a
 no-op in terms of runtime semantics. The deferred migration is
-documented in `docs/architecture/sprint-27-rbac-matrix.md` under
+documented in `docs/reference/rbac-matrix.md` under
 the Sprint 27B follow-up notes.
 """
 from __future__ import annotations

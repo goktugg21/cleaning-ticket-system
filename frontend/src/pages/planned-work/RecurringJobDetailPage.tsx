@@ -142,6 +142,7 @@ export function RecurringJobDetailPage() {
       push({ variant: "success", title: t("archive.toast_archived") });
     } catch (err) {
       push({ variant: "error", title: getApiError(err) });
+      archiveRef.current?.close();
     } finally {
       setActionBusy(false);
     }
@@ -185,6 +186,7 @@ export function RecurringJobDetailPage() {
       setJob(jobData);
     } catch (err) {
       push({ variant: "error", title: getApiError(err) });
+      generateRef.current?.close();
     } finally {
       setActionBusy(false);
     }
