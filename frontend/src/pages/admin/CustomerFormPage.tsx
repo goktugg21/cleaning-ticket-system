@@ -43,6 +43,7 @@ import type {
 // 15.2 rebuild). Each user row in `section-customer-users` now
 // surfaces a "Manage permissions →" deep-link to that page.
 import { useAuth } from "../../auth/AuthContext";
+import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { ImageUploadField } from "../../components/ImageUploadField";
@@ -980,7 +981,18 @@ export function CustomerFormPage() {
             </div>
           )}
 
-          <div className="table-wrap">
+          <BoundedList
+            size="lg"
+            count={linkedBuildings.length}
+            ariaLabel={t("customer_form.section_buildings_title")}
+            testIdPrefix="customer-form-linked-buildings"
+            className="table-wrap"
+            emptyState={
+              <p className="muted small" style={{ padding: "12px 0" }}>
+                {t("customer_form.no_buildings_linked")}
+              </p>
+            }
+          >
             <table className="data-table">
               <thead>
                 <tr>
@@ -1012,12 +1024,7 @@ export function CustomerFormPage() {
                 ))}
               </tbody>
             </table>
-            {linkedBuildings.length === 0 && (
-              <p className="muted small" style={{ padding: "12px 0" }}>
-                {t("customer_form.no_buildings_linked")}
-              </p>
-            )}
-          </div>
+          </BoundedList>
 
           <form
             onSubmit={handleAddBuildingLink}
@@ -1084,7 +1091,18 @@ export function CustomerFormPage() {
             </div>
           )}
 
-          <div className="table-wrap">
+          <BoundedList
+            size="lg"
+            count={members.length}
+            ariaLabel={t("customer_form.section_users_title")}
+            testIdPrefix="customer-form-members"
+            className="table-wrap"
+            emptyState={
+              <p className="muted small" style={{ padding: "12px 0" }}>
+                {t("customer_form.no_users_yet")}
+              </p>
+            }
+          >
             <table className="data-table">
               <thead>
                 <tr>
@@ -1356,12 +1374,7 @@ export function CustomerFormPage() {
                 })}
               </tbody>
             </table>
-            {members.length === 0 && (
-              <p className="muted small" style={{ padding: "12px 0" }}>
-                {t("customer_form.no_users_yet")}
-              </p>
-            )}
-          </div>
+          </BoundedList>
 
           <form
             onSubmit={handleAddMember}
