@@ -47,7 +47,7 @@ from .models import Invoice, InvoiceLine
 from .selectors import (
     scope_customer_invoices_for,
     scope_invoices_for,
-    unbilled_extra_work,
+    unbilled_extra_work_through,
 )
 from .serializers import (
     CustomerInvoiceSerializer,
@@ -224,11 +224,16 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         """
         The "who's due" list (informational — gates NOTHING).
 
-        DUE COMPUTATION (documented): for every ACTIVE, in-scope customer that
-        has a billing schedule set (`invoice_day_rule` non-blank), report the
-        unbilled Extra Work count + total for the CURRENT Amsterdam-local
-        period (this year, this month), reusing `unbilled_extra_work` (so the
-        per-customer figures match exactly what a generate run would claim).
+        DUE COMPUTATION (documented, SoT Addendum B §B.10): for every ACTIVE,
+        in-scope customer that has a billing schedule set (`invoice_day_rule`
+        non-blank), report the unbilled Extra Work count + total THROUGH the
+        CURRENT Amsterdam-local period (this year, this month) — i.e. every
+        earned-but-unbilled row from this month or any EARLIER one, via
+        `unbilled_extra_work_through`. This keeps prior-month unbilled work
+        visible once the calendar month rolls over, instead of it silently
+        dropping off the panel (the pre-Sprint-119 behaviour, which used the
+        exact-period `unbilled_extra_work` — still correct for `generate`,
+        which always targets one specific period).
         `is_due` is a soft hint derived from the customer's billing day vs
         today. The EFFECTIVE billing day is `invoice_day_of_month` when set
         (1..28), otherwise the first/last rule:
@@ -261,7 +266,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         )
         payload = []
         for customer in customers:
-            unbilled = unbilled_extra_work(
+            unbilled = unbilled_extra_work_through(
                 request.user, customer.company_id, customer.id, year, month
             )
             count = len(unbilled)

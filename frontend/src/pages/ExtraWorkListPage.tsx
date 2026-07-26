@@ -125,8 +125,18 @@ export function ExtraWorkListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Filter state (client-side; the backend list endpoint is unpaginated
-  // for MVP — filtering happens in the page).
+  // Filter state (client-side; the backend list endpoint IS paginated —
+  // listExtraWork below requests page_size=100 and this page never follows
+  // `next` — filtering happens over whatever that one page returned). This
+  // comment used to say "unpaginated"; that stopped being true once the
+  // endpoint gained real pagination. Sprint 119 investigation (B5): for any
+  // tenant with more than 100 rows matching the current server-side filters
+  // (billing month / invoice status / mine), this list, its CSV export, and
+  // the KPI strip below all silently see only the first page — a real gap,
+  // not just a stale comment, left undone here (see the KPI TODO below for
+  // the queued fix). `listAllExtraWork` (api/extraWork.ts) already exists
+  // and exhaustively pages if a fix lands before the backend aggregation
+  // endpoint arrives.
   const [searchInput, setSearchInput] = useState("");
   // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
   // read once at mount (validated), the dropdown owns the state after.
@@ -180,10 +190,16 @@ export function ExtraWorkListPage() {
 
   // KPI strip — computed from the full loaded set (not the filtered
   // view) so the operator always sees the same headline numbers
-  // regardless of which filter is active. TODO(15.5): swap to a
-  // backend aggregation endpoint once pagination becomes real;
-  // until then this is page-scoped and correct because the list
-  // is unpaginated.
+  // regardless of which filter is active.
+  // TODO(15.5), updated Sprint 119: pagination DID become real (page_size=100,
+  // see listExtraWork) and this was never revisited — swap to a backend
+  // aggregation endpoint (the originally-intended fix). Today these KPIs are
+  // computed from `rows`, which is only the first page: for a customer/company
+  // with more than 100 rows matching the current server-side filters, these
+  // totals silently undercount. Not fixed here (Sprint 119 was scoped to
+  // investigate + describe this TODO, not build a new aggregation endpoint);
+  // flagged for a dedicated follow-up, same as the /due/ month-anchor gap
+  // was before Sprint 119 fixed it (SoT Addendum B §B.10).
   const kpis = useMemo<ExtraWorkKpis>(() => {
     let open = 0;
     let awaiting = 0;

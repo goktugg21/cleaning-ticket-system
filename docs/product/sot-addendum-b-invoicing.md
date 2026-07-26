@@ -158,18 +158,22 @@ production it must be set to that environment's real OSIUS company slug — if i
 does not match, OSIUS's own invoices render unbranded.**
 (`backend/assets/branding/osius_logo.png` is the committed platform logo asset.)
 
-## B.10 KNOWN GAP — the `/due/` panel anchors to the current calendar month
-**Not fixed in this sprint. Do not implement here.** The `/due/` endpoint
-(`views.InvoiceViewSet.due`) hard-anchors to the current Amsterdam-local month:
-`year, month = today.year, today.month`. Two consequences:
-- Unbilled work from a **prior** month stops appearing in the due panel once
-  the month rolls over.
-- A `LAST_OF_MONTH` customer is flagged `is_due` on **exactly one calendar
-  day** (the month's last day).
+## B.10 FIXED (Sprint 119) — the `/due/` panel now reports through the current month
+Previously a KNOWN GAP: the `/due/` endpoint (`views.InvoiceViewSet.due`)
+hard-anchored to the current Amsterdam-local month only
+(`year, month = today.year, today.month`), so unbilled work from a **prior**
+month silently dropped off the panel once the month rolled over, and a
+`LAST_OF_MONTH` customer was flagged `is_due` on exactly one calendar day.
 
-Nothing is unreachable — `generate` accepts an **arbitrary** `year`/`month`,
-and the Facturen page has a free month picker — but the due panel is misleading.
-**Agreed direction (queued for the next code sprint):** have the due panel
-report unbilled work up to **and including** the current month, keeping
-`is_due` as the schedule hint. This addendum documents the gap; it is not
-implemented here.
+**Fix landed:** `due` now calls a new selector,
+`selectors.unbilled_extra_work_through(actor, company_id, customer_id, year,
+month)`, which matches every earned-but-unbilled row billable in `(year,
+month)` **or any earlier period** (tuple comparison), instead of the exact
+`== (year, month)` match. `generate` (`services.py`) is untouched — it keeps
+calling the original exact-period `unbilled_extra_work`, since invoice
+generation still always targets one specific period. `is_due` keeps its
+existing schedule-hint semantics (billing day reached AND unbilled_count >
+0); the response shape is unchanged (`period_year`/`period_month` still
+report the current cutoff period). Covered by
+`InvoiceDueApiTests.test_due_includes_unbilled_work_from_a_prior_month` in
+`backend/invoicing/tests/test_api.py`.

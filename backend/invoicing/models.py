@@ -19,8 +19,10 @@ LOCKED DECISIONS this schema is built to (do NOT re-litigate here):
   * An Invoice sums unbilled EXTRA WORK (claimed in Phase 2) plus an
     OPTIONAL free-text fee (amount + label). There is NO recurring
     contract-fee amount anywhere in the system.
-  * Lifecycle DRAFT -> ISSUED -> SENT. Numbering assigned AT ISSUE (not
-    draft), sequential, gapless, per-COMPANY per-YEAR.
+  * Lifecycle DRAFT -> ISSUED -> SENT. Numbering assigned AT SEND (moved
+    off ISSUE in PR #113 — see docs/product/sot-addendum-b-invoicing.md
+    §B.2), sequential, gapless, per-COMPANY per-YEAR. An ISSUED-but-unsent
+    invoice shows CONCEPT.
   * SENT invoices are immutable — the only mutation is a reversal.
   * Reversal = an auto-generated NEGATIVE counter-invoice, editable, that
     releases the claimed EW back to unbilled (Phase 2 logic). A reversal is
@@ -85,12 +87,14 @@ class Invoice(models.Model):
         db_index=True,
     )
 
-    # Numbering — assigned AT ISSUE (Phase 2), NULL while DRAFT. `number`
+    # Numbering — assigned AT SEND (moved off ISSUE in PR #113 — see
+    # docs/product/sot-addendum-b-invoicing.md §B.2), NULL until then
+    # (including the whole ISSUED-but-unsent CONCEPT state). `number`
     # is nullable (deliberately NOT blank="") so Postgres NULL-distinctness
     # lets many NULL-numbered drafts coexist under one company while the
     # (company, number) unique constraint still rejects a duplicate non-null
     # number within a company. `year` is the numbering year, enabling the
-    # per-company-per-year gapless sequence lookup (Phase 2).
+    # per-company-per-year gapless sequence lookup.
     number = models.CharField(max_length=32, null=True, blank=True)
     year = models.PositiveIntegerField(null=True, blank=True)
 
