@@ -23,9 +23,11 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
+import { ManagedUnitsTab } from "./ManagedUnitsTab";
 
 /**
  * Sprint 28 Batch 5 — Provider-wide Service catalog admin page.
@@ -66,7 +68,7 @@ const UNIT_TYPE_I18N_KEY: Record<ServiceUnitType, string> = {
   OTHER: "services.unit_type.other",
 };
 
-type Tab = "services" | "categories";
+type Tab = "services" | "categories" | "units";
 
 interface CategoryFormState {
   name: string;
@@ -86,6 +88,7 @@ interface ServiceFormState {
   description: string;
   unit_type: ServiceUnitType;
   custom_unit_label: string;
+  managed_unit: number | null;
   default_unit_price: string;
   default_vat_pct: string;
   is_active: boolean;
@@ -97,6 +100,7 @@ const EMPTY_SERVICE_FORM: ServiceFormState = {
   description: "",
   unit_type: "HOURS",
   custom_unit_label: "",
+  managed_unit: null,
   default_unit_price: "0.00",
   default_vat_pct: "21.00",
   is_active: true,
@@ -311,6 +315,7 @@ export function ServicesAdminPage() {
       description: service.description,
       unit_type: service.unit_type,
       custom_unit_label: service.custom_unit_label,
+      managed_unit: service.managed_unit,
       default_unit_price: service.default_unit_price,
       default_vat_pct: service.default_vat_pct,
       is_active: service.is_active,
@@ -368,6 +373,8 @@ export function ServicesAdminPage() {
         serviceForm.unit_type === "OTHER"
           ? serviceForm.custom_unit_label.trim()
           : "",
+      managed_unit:
+        serviceForm.unit_type === "OTHER" ? serviceForm.managed_unit : null,
       default_unit_price: serviceForm.default_unit_price.trim(),
       default_vat_pct: serviceForm.default_vat_pct.trim(),
       is_active: serviceForm.is_active,
@@ -576,6 +583,21 @@ export function ServicesAdminPage() {
           }}
         >
           {t("services.tab_categories")}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "units"}
+          className={`composer-toggle-btn ${
+            tab === "units" ? "active" : ""
+          }`}
+          data-testid="services-tab-units"
+          onClick={() => {
+            setTab("units");
+            resetSelections();
+          }}
+        >
+          {t("services.tab_units")}
         </button>
       </div>
 
@@ -800,7 +822,7 @@ export function ServicesAdminPage() {
             </section>
           )}
         </>
-      ) : (
+      ) : tab === "categories" ? (
         // -------- Categories tab --------
         <>
           <div
@@ -955,6 +977,9 @@ export function ServicesAdminPage() {
             </section>
           )}
         </>
+      ) : (
+        // -------- Units tab --------
+        <ManagedUnitsTab />
       )}
 
       {/* Category create/edit modal */}
@@ -1249,37 +1274,26 @@ export function ServicesAdminPage() {
               </select>
             </div>
 
-            {/* RF-2 (mirror of CustomerPricingPage) — "Other" is an opaque
-                unit with nothing to render, so it takes an operator-supplied
-                name ("m3", "pallet"). Reuses the customer-pricing labels. */}
+            {/* Sprint 123 — "Other" is an opaque unit backed by the
+                per-company managed unit catalog; ServicesAdminPage never
+                tracks a `company` of its own (this admin acts on the
+                operator's own company implicitly), so no companyId is
+                passed here — same implicit-default behaviour the rest of
+                this form already relies on for `company` on create. */}
             {serviceForm.unit_type === "OTHER" && (
-              <div className="field">
-                <label
-                  className="field-label"
-                  htmlFor="service-custom-unit-label"
-                >
-                  {t("customer_custom_pricing.field_unit_label")} *
-                </label>
-                <input
-                  id="service-custom-unit-label"
-                  className="field-input"
-                  type="text"
-                  maxLength={50}
-                  value={serviceForm.custom_unit_label}
-                  onChange={(event) =>
-                    setServiceForm((prev) => ({
-                      ...prev,
-                      custom_unit_label: event.target.value,
-                    }))
-                  }
-                  placeholder={t(
-                    "customer_custom_pricing.field_unit_label_placeholder",
-                  )}
-                  data-testid="services-service-input-custom-unit-label"
-                  required
-                  disabled={serviceFormBusy}
-                />
-              </div>
+              <ManagedUnitPicker
+                id="service-managed-unit"
+                managedUnitId={serviceForm.managed_unit}
+                customUnitLabel={serviceForm.custom_unit_label}
+                onChange={(managedUnitId, label) =>
+                  setServiceForm((prev) => ({
+                    ...prev,
+                    managed_unit: managedUnitId,
+                    custom_unit_label: label,
+                  }))
+                }
+                disabled={serviceFormBusy}
+              />
             )}
 
             <div className="form-2col">

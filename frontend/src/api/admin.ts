@@ -30,6 +30,9 @@ import type {
   InvitationAdmin,
   InvoiceDayRule,
   InvoiceGranularity,
+  ManagedUnit,
+  ManagedUnitCreatePayload,
+  ManagedUnitUpdatePayload,
   PaginatedResponse,
   ProviderEmployee,
   PromoteContactPayload,
@@ -1519,6 +1522,61 @@ export async function bulkRaiseServices(
     payload,
   );
   return response.data;
+}
+
+// ---- Sprint 123 — managed unit catalog (provider-company-scoped) -------
+//
+// `/api/services/units/` — list + create. `/api/services/units/<id>/` —
+// detail / update / delete. Provider-operator-only on every method
+// (unlike Service/Category, GET is NOT open to CUSTOMER_USER — a managed
+// unit has no customer-facing consumer). Same permission gate + company-
+// resolution rule as Service (`_resolve_catalog_create_company`, `?company=
+// <id>` lets a SUPER_ADMIN narrow the list). `?is_active=true|false` filters;
+// the picker requests `is_active=true`, the admin management page requests
+// the unfiltered list so archived rows stay visible/reactivatable.
+
+export interface ManagedUnitListParams {
+  company?: number;
+  is_active?: boolean;
+}
+
+export async function listManagedUnits(
+  params: ManagedUnitListParams = {},
+): Promise<ManagedUnit[]> {
+  const query: Record<string, string | number> = {};
+  if (params.company !== undefined) {
+    query.company = params.company;
+  }
+  if (params.is_active !== undefined) {
+    query.is_active = params.is_active ? "true" : "false";
+  }
+  const response = await api.get<PaginatedResponse<ManagedUnit>>(
+    "/services/units/",
+    { params: query },
+  );
+  return response.data.results;
+}
+
+export async function createManagedUnit(
+  payload: ManagedUnitCreatePayload,
+): Promise<ManagedUnit> {
+  const response = await api.post<ManagedUnit>("/services/units/", payload);
+  return response.data;
+}
+
+export async function updateManagedUnit(
+  id: number,
+  payload: ManagedUnitUpdatePayload,
+): Promise<ManagedUnit> {
+  const response = await api.patch<ManagedUnit>(
+    `/services/units/${id}/`,
+    payload,
+  );
+  return response.data;
+}
+
+export async function deleteManagedUnit(id: number): Promise<void> {
+  await api.delete(`/services/units/${id}/`);
 }
 
 // ---- Sprint 28 Batch 5 — Per-customer pricing ---------------------------

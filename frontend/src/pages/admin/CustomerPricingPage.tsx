@@ -31,6 +31,7 @@ import type {
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
@@ -80,6 +81,7 @@ interface PriceFormState {
   custom_name: string;
   unit_type: ServiceUnitType;
   custom_unit_label: string;
+  managed_unit: number | null;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -110,6 +112,7 @@ function buildEmptyForm(): PriceFormState {
     custom_name: "",
     unit_type: "HOURS",
     custom_unit_label: "",
+    managed_unit: null,
     unit_price: "0.00",
     vat_pct: "21.00",
     valid_from: todayISO(),
@@ -303,6 +306,7 @@ export function CustomerPricingPage() {
         custom_name: price.custom_name,
         unit_type: price.unit_type,
         custom_unit_label: price.custom_unit_label,
+        managed_unit: price.managed_unit,
         unit_price: price.unit_price,
         vat_pct: price.vat_pct,
         valid_from: price.valid_from,
@@ -397,6 +401,7 @@ export function CustomerPricingPage() {
           // every concrete unit type, so send it only where meaningful.
           custom_unit_label:
             form.unit_type === "OTHER" ? form.custom_unit_label.trim() : "",
+          managed_unit: form.unit_type === "OTHER" ? form.managed_unit : null,
         };
         if (mode === "create") {
           const created = await createCustomerCustomPrice(numericId, payload);
@@ -1139,36 +1144,29 @@ export function CustomerPricingPage() {
                   </select>
                 </div>
 
-                {/* "Other" is an opaque unit with nothing to render, so
-                    it takes an operator-supplied name ("m3", "pallet"). */}
+                {/* Sprint 123 — "Other" is an opaque unit backed by the
+                    per-company managed unit catalog. Unlike ServicesAdminPage,
+                    this page already tracks the customer's own provider
+                    company (`customer.company`), so the picker can scope
+                    both the active-unit list and any inline "add new" unit
+                    to that company precisely instead of relying on the
+                    backend's implicit CA-default. */}
                 {form.unit_type === "OTHER" && (
-                  <div className="field">
-                    <label
-                      className="field-label"
-                      htmlFor="price-custom-unit-label"
-                    >
-                      {t("customer_custom_pricing.field_unit_label")} *
-                    </label>
-                    <input
-                      id="price-custom-unit-label"
-                      className="field-input"
-                      type="text"
-                      maxLength={50}
-                      value={form.custom_unit_label}
-                      onChange={(event) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          custom_unit_label: event.target.value,
-                        }))
-                      }
-                      placeholder={t(
-                        "customer_custom_pricing.field_unit_label_placeholder",
-                      )}
-                      data-testid="customer-pricing-input-custom-unit-label"
-                      required
-                      disabled={formBusy}
-                    />
-                  </div>
+                  <ManagedUnitPicker
+                    key={customer?.company ?? "no-company"}
+                    id="price-managed-unit"
+                    companyId={customer?.company}
+                    managedUnitId={form.managed_unit}
+                    customUnitLabel={form.custom_unit_label}
+                    onChange={(managedUnitId, label) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        managed_unit: managedUnitId,
+                        custom_unit_label: label,
+                      }))
+                    }
+                    disabled={formBusy}
+                  />
                 )}
               </>
             )}
