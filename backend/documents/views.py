@@ -275,6 +275,17 @@ class DocumentListCreateView(_DocumentsBase):
         documents = Document.objects.filter(customer=customer)
         folder_id = request.query_params.get("folder")
         if folder_id is not None:
+            # Coerce explicitly: a non-numeric `?folder=` would otherwise reach
+            # the ORM and raise ValueError -> 500. A bad value is a clean 400
+            # in the module's usual {detail, code} shape.
+            try:
+                folder_id = int(folder_id)
+            except (TypeError, ValueError):
+                return _err(
+                    "The folder id must be an integer.",
+                    "invalid_folder_id",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             documents = documents.filter(folder_id=folder_id)
         return Response(DocumentReadSerializer(documents, many=True).data)
 

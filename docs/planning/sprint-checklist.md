@@ -222,6 +222,16 @@ item has moved to `## SHIPPED` or been resolved below instead.
     TCP-socket probe instead of HTTP — CLAUDE.md §6 — but the underlying
     `ALLOWED_HOSTS`/internal-host gap is still open and should be fixed
     properly, e.g. admit the internal hostname, before production.)
+18. **The documents file-list endpoint is unpaginated** — found in Sprint
+    126: `GET /api/customers/<id>/documents/files/` returns EVERY matching
+    row with no page cap. `BoundedList` bounds the rendered height on the
+    frontend, not the payload, so a customer folder with thousands of files
+    would ship the lot in one response. Harmless at current volumes and
+    deliberately NOT truncated (silent truncation was the Sprint 120 bug —
+    `## SHIPPED` #117), but it should gain real pagination (or a documented
+    per-folder cap with a "show all" affordance) before a tenant accumulates
+    large folders. Same shape as the admin-picker 200-row item (#12), on the
+    read side. Not urgent.
 
 ---
 

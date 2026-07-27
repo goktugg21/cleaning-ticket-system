@@ -84,6 +84,13 @@ class FileEndpointTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
         r = self.client.get(files_url(self.customer.id))
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_list_files_non_integer_folder_400(self):
+        # A non-numeric ?folder= is a clean 400, never a 500 from the ORM.
+        self.authenticate(self.customer_user)
+        r = self.client.get(f"{files_url(self.customer.id)}?folder=abc")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(r.data["code"], "invalid_folder_id")
+
     def test_customer_can_upload_into_system_folder(self):
         # Sprint 125 correction: a customer MAY upload into a system folder
         # (filing a contract into Contracten is the intended flow). The file
