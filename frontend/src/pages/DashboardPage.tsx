@@ -5,7 +5,11 @@ import { Layers, Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { api, getApiError } from "../api/client";
 import { getMySlots } from "../api/admin";
-import { getExtraWorkStats, listExtraWork } from "../api/extraWork";
+import {
+  getExtraWorkStats,
+  listAllExtraWork,
+  listExtraWork,
+} from "../api/extraWork";
 import { getInboxUnreadCount } from "../api/inbox";
 import { listNotifications, notificationHref } from "../api/notifications";
 import type {
@@ -517,15 +521,19 @@ export function DashboardPage({
     };
     const [inbox, billing, slots] = await Promise.allSettled([
       getInboxUnreadCount(),
+      // Sprint 120 — this used to request page_size=500, but DRF's
+      // max_page_size (config/pagination.py) silently clamps that to 200,
+      // so any month with more than 200 matching EW rows was undercounted
+      // with no error. listAllExtraWork pages exhaustively instead.
       canAccessBilling(userRole)
-        ? listExtraWork({ billing_period: currentMonth(), page_size: 500 })
+        ? listAllExtraWork({ billing_period: currentMonth() })
         : Promise.resolve(null),
       isStaffRole(userRole) ? getMySlots() : Promise.resolve(null),
     ]);
     if (inbox.status === "fulfilled") setInboxUnread(inbox.value);
     if (billing.status === "fulfilled" && billing.value !== null) {
-      setBillingMonthTotals(splitOpenInvoiced(billing.value.results));
-      setBillingRows(billing.value.results);
+      setBillingMonthTotals(splitOpenInvoiced(billing.value));
+      setBillingRows(billing.value);
     }
     if (slots.status === "fulfilled" && slots.value !== null) {
       const today = localDateKey(new Date().toISOString());
