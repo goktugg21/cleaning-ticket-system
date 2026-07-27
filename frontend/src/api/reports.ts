@@ -1,6 +1,7 @@
 import { api } from "./client";
 import type {
   AgeBucketsResponse,
+  ExtraWorkRevenueByBuildingResponse,
   ExtraWorkRevenueResponse,
   ManagerThroughputResponse,
   SLABreachRateOverTimeResponse,
@@ -165,6 +166,19 @@ export async function fetchExtraWorkRevenue(
   return data;
 }
 
+// Sprint 124 — Extra Work revenue grouped by building (one customer's
+// revenue split across that customer's buildings). Provider-management
+// only, same as fetchExtraWorkRevenue.
+export async function fetchExtraWorkRevenueByBuilding(
+  filters: ReportFilters,
+): Promise<ExtraWorkRevenueByBuildingResponse> {
+  const { data } = await api.get<ExtraWorkRevenueByBuildingResponse>(
+    "/reports/extra-work-revenue-by-building/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
 // Export download helpers. Each returns the URL the browser should
 // hit; the chart card's button just sets `window.location.href` so
 // the existing axios auth header is bypassed and the browser receives
@@ -188,6 +202,8 @@ const EXPORT_PATHS = {
   // Sprint 14A (CSV) + 14D (PDF) — Extra Work revenue states export.
   // Same path base; export.csv / export.pdf resolve on the backend.
   extra_work_revenue: "/reports/extra-work-revenue",
+  // Sprint 124 — Extra Work revenue grouped by building.
+  extra_work_revenue_by_building: "/reports/extra-work-revenue-by-building",
 } as const;
 
 // Sprint 14A — the export-dimension union, derived from the path map so

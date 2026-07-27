@@ -76,6 +76,11 @@
   "ew_revenue_total": "Totaal facturabel: {{amount}}",
   "ew_revenue_incl_vat": "incl. btw",
   "ew_revenue_tooltip_amount": "Facturabel",
+  "ew_revenue_by_building_title": "Meerwerk-omzet per gebouw",
+  "ew_revenue_by_building_subtitle": "Facturabele meerwerk-omzet van deze klant, uitgesplitst per gebouw.",
+  "ew_revenue_by_building_empty": "Geen meerwerk-omzet in deze periode.",
+  "ew_revenue_by_building_total": "Totaal facturabel: {{amount}}",
+  "ew_revenue_by_building_tooltip_amount": "Facturabel",
 
   "ew_by_building_title": "Meerwerk per gebouw",
   "ew_by_building_subtitle": "Alleen tickets met oorsprong meerwerk, gegroepeerd per gebouw in de geselecteerde periode.",

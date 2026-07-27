@@ -251,3 +251,33 @@ export interface ExtraWorkRevenueResponse {
   totals: ExtraWorkRevenueBucket;
   generated_at: string;
 }
+
+// Sprint 124 — Extra Work revenue grouped by BUILDING (one customer's
+// revenue split across that customer's buildings), backed by
+// `compute_extra_work_revenue_by_building` (backend/reports/dimensions.py).
+// Shares the exact same in-scope rows + per-row classification as
+// ExtraWorkRevenueResponse — the only difference is the accumulator key
+// (building instead of revenue state) — so
+// sum(bucket.total for bucket in buckets) === totals.total for the same
+// filters. A building with zero in-scope revenue in the period is
+// OMITTED, not padded with a zero bucket (mirrors TicketsByBuildingBucket's
+// own GROUP-BY-implied omission).
+export interface ExtraWorkRevenueByBuildingBucket {
+  building_id: number;
+  building_name: string;
+  company_id: number;
+  company_name: string;
+  count: number;
+  subtotal: string; // 2dp decimal string (excl. VAT)
+  vat: string; // 2dp decimal string
+  total: string; // 2dp decimal string (incl. VAT)
+}
+
+export interface ExtraWorkRevenueByBuildingResponse {
+  from: string;
+  to: string;
+  scope: ReportScope;
+  buckets: ExtraWorkRevenueByBuildingBucket[];
+  totals: ExtraWorkRevenueBucket;
+  generated_at: string;
+}

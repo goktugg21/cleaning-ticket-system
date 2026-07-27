@@ -76,6 +76,11 @@
   "ew_revenue_total": "Total billable: {{amount}}",
   "ew_revenue_incl_vat": "incl. VAT",
   "ew_revenue_tooltip_amount": "Billable",
+  "ew_revenue_by_building_title": "Extra Work revenue by building",
+  "ew_revenue_by_building_subtitle": "This customer's billable Extra Work revenue, split across their buildings.",
+  "ew_revenue_by_building_empty": "No Extra Work revenue in this range.",
+  "ew_revenue_by_building_total": "Total billable: {{amount}}",
+  "ew_revenue_by_building_tooltip_amount": "Billable",
 
   "ew_by_building_title": "Extra Work by building",
   "ew_by_building_subtitle": "Extra Work-origin tickets only, grouped by building in the selected range.",
