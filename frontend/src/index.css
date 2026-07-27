@@ -1766,6 +1766,20 @@ table.data-table {
   border-radius: 8px;
   overflow-y: auto;
 }
+/* Sprint 121 — Sprint 117 added the border/radius above but no inner
+   padding, so list text sat flush against the box edge (owner-reported
+   regression). Match .multi-select-list's 8px 12px scale for the LIST case
+   only. The table case is EXCLUDED via :not(.table-wrap): a <table> child
+   carries its own cell padding, and container padding there would both
+   double-pad and fight the sticky `thead th` rule below. Every table
+   consumer passes className="table-wrap" (it is also what gives the table
+   its overflow-x scroll), so the class is a reliable, self-enforcing
+   signal — chosen over :not(:has(table)) because :has() is used nowhere
+   else in this stylesheet and silently drops the whole rule on browsers
+   that lack it, which would revert this very fix. */
+.bounded-list:not(.table-wrap) {
+  padding: 8px 12px;
+}
 .bounded-list:focus-visible {
   outline: 2px solid var(--green);
   outline-offset: 2px;
@@ -1787,8 +1801,39 @@ table.data-table {
   z-index: 1;
 }
 .bounded-list-count {
-  margin-top: 6px;
+  /* Sprint 121 — 6px sat the "N items" label tight under the box; 8px
+     aligns it to the same 8/12 spacing scale as the list padding above. */
+  margin-top: 8px;
   font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Sprint 121 — small leading thumbnail on a staff-credential row: a PDF
+   first-page preview (via <DocumentThumb>) that opens the preview modal on
+   click. Compact document-shaped box; the canvas/img inside fills it via the
+   shared .att-thumb-canvas / .att-thumb-img rules (object-fit: cover, top). */
+.credential-thumb {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.credential-thumb:hover {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px rgba(11, 107, 66, 0.12);
+}
+.credential-thumb-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
   color: var(--text-muted);
 }
 .multi-select-list label {
