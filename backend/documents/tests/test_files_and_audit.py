@@ -65,6 +65,25 @@ class FileEndpointTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
         self.assertEqual(doc.customer_id, doc.folder.customer_id)
         self.assertEqual(doc.customer_id, self.customer.id)
 
+    def test_list_files_by_folder(self):
+        # The file pane's data source: GET files/?folder=<id> is folder-scoped.
+        self._upload(self.super_admin, self.overig, upload=pdf_upload("a.pdf"))
+        self._upload(self.super_admin, self.my_folder, upload=pdf_upload("b.pdf"))
+        self.authenticate(self.customer_user)
+        r = self.client.get(
+            f"{files_url(self.customer.id)}?folder={self.overig.id}"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {row["original_filename"] for row in r.data}, {"a.pdf"}
+        )
+
+    def test_list_files_cross_tenant_404(self):
+        # A user of another customer 404s on the list endpoint too.
+        self.authenticate(self.other_customer_user)
+        r = self.client.get(files_url(self.customer.id))
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
     def test_customer_can_upload_into_system_folder(self):
         # Sprint 125 correction: a customer MAY upload into a system folder
         # (filing a contract into Contracten is the intended flow). The file
@@ -92,6 +111,9 @@ class FileEndpointTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
             format="multipart",
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        # Sprint 126 — the stable validator code is surfaced in the body so
+        # the frontend can localize it (DRF would otherwise drop it).
+        self.assertEqual(r.data["code"], "invalid_document_extension")
 
     # -- serve: inline vs attachment ----------------------------------------
 

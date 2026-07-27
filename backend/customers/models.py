@@ -362,6 +362,12 @@ class CustomerCompanyPolicy(models.Model):
     customer_users_can_approve_extra_work_pricing = models.BooleanField(
         default=True
     )
+    # Sprint 126 — company-wide toggle for the customer Documents module
+    # (the "Documenten" module card). Default True: existing customers keep
+    # the role-default grant of `customer.documents.manage`. Setting it False
+    # denies that key for every customer user of this customer, the company-
+    # wide CCA included (see permissions._POLICY_FAMILY_FIELD).
+    customer_users_can_manage_documents = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

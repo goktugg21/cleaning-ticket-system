@@ -166,6 +166,8 @@ _POLICY_FAMILY_FIELD: dict[str, str] = {
     "customer.extra_work.approve_location": (
         "customer_users_can_approve_extra_work_pricing"
     ),
+    # Sprint 126 — the Documents module's company-wide toggle.
+    "customer.documents.manage": "customer_users_can_manage_documents",
 }
 
 
