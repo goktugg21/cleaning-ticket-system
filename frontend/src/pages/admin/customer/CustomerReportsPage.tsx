@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
 import { getCustomer } from "../../../api/admin";
-import { listExtraWork } from "../../../api/extraWork";
+import { listAllExtraWork } from "../../../api/extraWork";
 import type { ReportFilters } from "../../../api/reports";
 import type { CustomerAdmin, ExtraWorkRequestList } from "../../../api/types";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../../../lib/billing";
@@ -75,14 +75,18 @@ export function CustomerReportsPage() {
     // No synchronous setState in the effect body (Part J): error is
     // cleared on success and set on failure, both inside the settled
     // promise, matching the CustomerTicketsPage idiom.
-    listExtraWork({
+    // Sprint 120 addendum — this requested page_size=500, but DRF's
+    // max_page_size (config/pagination.py) silently clamps that to 200,
+    // so any customer with more than 200 matching EW rows in the selected
+    // month had this REPORTS TAB (a customer-facing financial report)
+    // undercounting with no error. listAllExtraWork pages exhaustively.
+    listAllExtraWork({
       customer: numericId,
       billing_period: month,
-      page_size: 500,
     })
-      .then((resp) => {
+      .then((allRows) => {
         if (cancelled) return;
-        setRows(resp.results);
+        setRows(allRows);
         setError("");
       })
       .catch((err) => {
