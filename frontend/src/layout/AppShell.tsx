@@ -13,6 +13,7 @@ import {
   ChevronRight,
   ClipboardList,
   Contact,
+  Files,
   LayoutGrid,
   Mail,
   MailPlus,
@@ -353,6 +354,18 @@ export function AppShell({ children }: AppShellProps) {
                       <BarChart3 size={16} strokeWidth={2} />
                     </span>
                     {t("nav.customer_submenu.reports")}
+                  </NavLink>
+                  {/* Sprint 126 — customer Documents (SA/CA only; BM is
+                      already excluded from this block). */}
+                  <NavLink
+                    to={`/admin/customers/${sidebar.customerId}/documents`}
+                    className={navClass}
+                    data-testid="sidebar-customer-documents"
+                  >
+                    <span className="nav-icon">
+                      <Files size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.customer_submenu.documents")}
                   </NavLink>
                 </>
               )}
@@ -717,6 +730,21 @@ export function AppShell({ children }: AppShellProps) {
                     <BadgeEuro size={16} strokeWidth={2} />
                   </span>
                   {t("customer_facturen.nav")}
+                </NavLink>
+              )}
+              {/* Sprint 126 — customer Documents. Gated on the module key
+                  (via me.can_manage_documents — the effective-permissions
+                  endpoint is provider-only, so the flag is surfaced on /me/). */}
+              {me?.role === "CUSTOMER_USER" && me.can_manage_documents && (
+                <NavLink
+                  to="/my/documents"
+                  className={navClass}
+                  data-testid="sidebar-my-documents"
+                >
+                  <span className="nav-icon">
+                    <Files size={16} strokeWidth={2} />
+                  </span>
+                  {t("documents.my_nav")}
                 </NavLink>
               )}
             </>
