@@ -413,6 +413,24 @@ class InvoiceDueApiTests(InvoiceApiBase):
         self.assertEqual(row["unbilled_count"], 0)
         self.assertEqual(row["unbilled_total"], "0.00")
 
+    def test_due_unresolvable_billing_month_excluded_not_500(self):
+        # Sprint 120 — an earned EW (ticket CLOSED — is_earned() checks
+        # only status) with NO closed_at and NO invoice_date has an
+        # unresolvable billing_month() (returns None). Pre-fix,
+        # unbilled_extra_work_through's `billing_month(...) <= (year,
+        # month)` raised TypeError on None, 500ing this endpoint. It must
+        # instead be EXCLUDED — not billable, not crashed on.
+        self.make_ew(closed_at=None)
+        self.customer.invoice_day_rule = Customer.InvoiceDayRule.FIRST_OF_MONTH
+        self.customer.save(update_fields=["invoice_day_rule"])
+        self.client.force_authenticate(self.admin)
+        resp = self.client.get(reverse("invoice-due"))
+        self.assertEqual(resp.status_code, 200)
+        row = self._row_for(resp, self.customer)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["unbilled_count"], 0)
+        self.assertEqual(row["unbilled_total"], "0.00")
+
     # -- arbitrary billing day (invoice_day_of_month) ---------------------
 
     def _row_for(self, resp, customer):

@@ -30,6 +30,13 @@ def dt(year: int, month: int, day: int) -> datetime:
     return datetime(year, month, day, 12, 0, tzinfo=dt_timezone.utc)
 
 
+# Sprint 120 — make_ew's `closed_at` needs to tell "caller omitted it" apart
+# from "caller explicitly passed None" (the latter is a real, deliberately
+# used case: an earned-but-unresolvable-billing-month fixture). None can't
+# do that itself, since it IS the value some callers explicitly want.
+_UNSET = object()
+
+
 class InvoicingFixture(TestCase):
     """Two tenants (A + B). Company A has two buildings under one customer
     so per-building vs per-customer generation can be exercised."""
@@ -88,7 +95,7 @@ class InvoicingFixture(TestCase):
         self,
         *,
         ticket_status=TicketStatus.CLOSED,
-        closed_at=None,
+        closed_at=_UNSET,
         company=None,
         building=None,
         customer=None,
@@ -102,8 +109,25 @@ class InvoicingFixture(TestCase):
         final_total=None,
         invoice_date=None,
     ):
-        """Create an EW + its spawned operational Ticket (default: earned in
-        May 2026 unless closed_at overridden)."""
+        """Create an EW + its spawned operational Ticket.
+
+        When `closed_at` is omitted, it defaults to a real earned timestamp
+        (2026-05-31) IF `ticket_status` is CLOSED — matching is_earned()'s
+        only check (ticket.status), so a bare make_ew() is earned in May
+        2026 as documented — and to None otherwise, since a non-CLOSED
+        ticket has no closed_at in practice.
+
+        Sprint 120 — the OLD default was a bare `closed_at=None` regardless
+        of `ticket_status`, so a bare `make_ew()` silently built a CLOSED
+        ticket with NO closed_at: earned (is_earned only checks status) but
+        with an unresolvable billing_month(), which crashes any ordering
+        comparison against it (`unbilled_extra_work_through`'s `<=`). Pass
+        `closed_at=None` EXPLICITLY (with `ticket_status=TicketStatus.
+        CLOSED`, the default) to still build that exact edge case on
+        purpose — see test_due_unresolvable_billing_month_excluded_not_500.
+        """
+        if closed_at is _UNSET:
+            closed_at = dt(2026, 5, 31) if ticket_status == TicketStatus.CLOSED else None
         company = company or self.company
         building = building or self.building
         customer = customer or self.customer
