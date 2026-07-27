@@ -65,10 +65,13 @@ class FileEndpointTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
         self.assertEqual(doc.customer_id, doc.folder.customer_id)
         self.assertEqual(doc.customer_id, self.customer.id)
 
-    def test_customer_cannot_upload_into_system_folder(self):
+    def test_customer_can_upload_into_system_folder(self):
+        # Sprint 125 correction: a customer MAY upload into a system folder
+        # (filing a contract into Contracten is the intended flow). The file
+        # is stamped origin=CUSTOMER — placement does not transfer ownership.
         r = self._upload(self.customer_user, self.overig)
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(r.data["code"], "system_folder_readonly")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["origin"], DocumentOrigin.CUSTOMER)
 
     def test_provider_can_upload_into_system_folder(self):
         r = self._upload(self.company_admin, self.overig)
@@ -140,15 +143,44 @@ class FileEndpointTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
         r = self.client.delete(file_url(self.customer.id, pub))
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_customer_cannot_move_document_into_system_folder(self):
+    def test_customer_can_move_own_document_into_system_folder(self):
+        # Sprint 125 correction: moving your OWN file into a system folder is
+        # allowed (same placement rule as upload). Not named in the
+        # correction prompt, but it asserted the same superseded behaviour.
         up = self._upload(self.customer_user, self.my_folder)
         pub = up.data["public_id"]
         self.authenticate(self.customer_user)
         r = self.client.patch(
             file_url(self.customer.id, pub), {"folder": self.overig.id}
         )
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(r.data["code"], "system_folder_readonly")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["folder"], self.overig.id)
+
+    def test_customer_file_in_system_folder_stays_customer_owned(self):
+        # Files a contract into the PROVIDER's Contracten system folder, then
+        # proves placement did NOT hand ownership to the provider: the
+        # customer can still rename AND delete their own file.
+        contracten = DocumentFolder.objects.get(
+            customer=self.customer, system_slug="contracten"
+        )
+        up = self._upload(
+            self.customer_user, contracten, upload=pdf_upload("my-contract.pdf")
+        )
+        self.assertEqual(up.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(up.data["origin"], DocumentOrigin.CUSTOMER)
+        pub = up.data["public_id"]
+
+        self.authenticate(self.customer_user)
+        r = self.client.patch(
+            file_url(self.customer.id, pub),
+            {"original_filename": "signed-contract.pdf"},
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["original_filename"], "signed-contract.pdf")
+
+        r = self.client.delete(file_url(self.customer.id, pub))
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Document.objects.filter(public_id=pub).exists())
 
     # -- delete removes row + file ------------------------------------------
 

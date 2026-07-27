@@ -231,14 +231,16 @@ class FolderTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(r.data["code"], "system_folder_undeletable")
 
-    def test_customer_cannot_create_subfolder_in_system_folder(self):
+    def test_customer_can_create_subfolder_in_system_folder(self):
+        # Sprint 125 correction: a customer MAY create a subfolder inside a
+        # system folder; the new folder is stamped origin=CUSTOMER.
         self.authenticate(self.customer_user)
         r = self.client.post(
             folders_url(self.customer.id),
             {"name": "sub", "parent": self.overig.id},
         )
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertEqual(r.data["code"], "system_folder_readonly")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["origin"], DocumentOrigin.CUSTOMER)
 
     def test_provider_can_create_subfolder_in_system_folder(self):
         self.authenticate(self.super_admin)

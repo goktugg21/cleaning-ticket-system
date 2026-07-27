@@ -65,12 +65,13 @@ CUSTOMER_PERMISSION_KEYS: frozenset[str] = frozenset(
         "customer.users.manage_permissions",
         # Sprint 125 — the Customer Documents module. ONE coarse key gates
         # the whole customer-side document surface (read every folder/file
-        # of the customer, create folders, upload files, and manage the
-        # user's OWN origin=CUSTOMER rows). The origin=CUSTOMER-only write
-        # rule and the is_system-folder ban are enforced in the view, not by
-        # a finer permission key. The frontend `CUSTOMER_PERMISSION_KEYS`
-        # mirror + the RF-8 module-card UI land in the follow-up frontend
-        # sprint (this sprint is backend-only).
+        # of the customer, create folders, upload files anywhere they can
+        # see — system folders included — and manage the user's OWN
+        # origin=CUSTOMER rows). The origin=CUSTOMER-only write rule and the
+        # system-folder rename/move/delete protections are enforced in the
+        # view, not by a finer permission key. The frontend
+        # `CUSTOMER_PERMISSION_KEYS` mirror + the RF-8 module-card UI land in
+        # the follow-up frontend sprint (this sprint is backend-only).
         "customer.documents.manage",
     }
 )

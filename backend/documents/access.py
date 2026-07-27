@@ -20,6 +20,14 @@ Two sides, deliberately narrow:
 view layer combines it with a row's `origin` / `is_system` to decide each
 mutation. Anyone whose side is None must 404 on every endpoint (no existence
 leak, cross-tenant included).
+
+Placement (creating a subfolder in, or uploading a file into, a folder) is
+allowed into ANY folder the actor can see, system folders included — that is
+how a customer files a contract into the provider's `Contracten` folder. The
+`is_system` flag protects only the folder ROW (rename provider-only; move /
+delete rejected for everyone); it never restricts a folder's contents, and
+`origin` — stamped from the actor's side at write time — governs who may
+later edit each placed row.
 """
 from __future__ import annotations
 
@@ -102,7 +110,7 @@ def can_modify_row(side: str, *, origin: str, is_system: bool) -> bool:
 
 def can_rename_system_folder(side: str) -> bool:
     """Only the provider may rename a system folder (its display name);
-    the slug never changes and the customer may never touch it."""
+    the slug never changes and a customer may never rename it."""
     return side == AccessSide.PROVIDER
 
 
@@ -111,13 +119,21 @@ def can_place_in_folder(side: str, target_folder) -> bool:
     `target_folder`? (`target_folder` is None for a root-level folder
     create.)
 
-      * PROVIDER may place anywhere, including inside system folders.
-      * CUSTOMER may place anywhere they can see EXCEPT inside a system
-        folder ("never touch is_system folders at all"): root-level creates
-        and non-system folders are fine, regardless of the folder's origin.
+    Placement is unconditionally allowed for anyone who has reached the view
+    (i.e. already resolved a side) — into ANY folder they can see, system
+    folders INCLUDED. This is what lets a customer file a contract into the
+    provider's `Contracten` folder, the main intended flow.
+
+    Placement never transfers ownership: the new folder / file is stamped
+    with the ACTOR'S own `origin` (see `origin_for_side`), so a customer's
+    file dropped into a system folder stays `origin=CUSTOMER` — theirs to
+    rename / move / delete, and the provider may still delete it too. The
+    `is_system` flag protects only the folder ROW itself (rename is
+    provider-only; move / delete are rejected for everyone) — never its
+    contents. Cross-customer placement can't arise here: the view only ever
+    passes a folder already scoped to the URL customer.
+
+    Retained as the single policy hook so a future tightening has one place
+    to live; today it is an unconditional allow.
     """
-    if side == AccessSide.PROVIDER:
-        return True
-    if target_folder is None:
-        return True
-    return not target_folder.is_system
+    return True
