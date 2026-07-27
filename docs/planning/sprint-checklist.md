@@ -60,7 +60,7 @@ docs-only pass — so this file always reflects where we actually are.
 `## SHIPPED` for the full breakdown). The current branch,
 `docs/checklist-119-closeout`, is this docs-only close-out itself — its own
 `## SHIPPED` line is appended by the first commit of whichever branch starts
-next (see the new maintenance rule below).
+next (see the new maintenance rule above).
 **Live migrations from #119:** `extra_work/0018`–`0020` (the `ManagedUnit`
 schema, its `custom_unit_label` backfill, and a trailing help-text-only
 alter) + `notifications/0014` (the SA per-company email opt-in).
@@ -315,7 +315,7 @@ flagged inline at the time.
 
 **Owner review round 4 (2026-07-20):** Responsible managers + Scheduling cards default-collapsed; Extra Work live-preview pane given a real height (measured embed 420px → 747px); building-list cap re-confirmed with 18 seeded demo buildings (measured overflow). **Shipped — `## SHIPPED` #110.**
 
-**Owner review round 5 (2026-07-20):** "My Work" made role-adaptive and hidden for SA + CA. **Shipped — `## SHIPPED` #111.** Two open discussion items from this round are carried in `## NEXT` (#3, #4).
+**Owner review round 5 (2026-07-20):** "My Work" made role-adaptive and hidden for SA + CA. **Shipped — `## SHIPPED` #111.** Two open discussion items from this round are carried in `## NEXT`, "Fixing & Auditing Sprint" and "Mobile responsiveness."
 
 **Meeting notes (2026-06-23):** Department/event are category-like fields; names must stay editable/customer-flexible — refines backlog #6. Ramazan will do a full side-by-side review vs their current system (this is the review `## NEXT`, "Light/advanced mode split," is gated on). He validated the pricing work (bulk raise, customer-specific prices, price history preserved). The credentials/permissions area of their current tool is their worst pain point.
 
