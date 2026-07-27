@@ -9,6 +9,7 @@ import type { ReportFilters } from "../../../api/reports";
 import type { CustomerAdmin, ExtraWorkRequestList } from "../../../api/types";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../../../lib/billing";
 import { formatMoney } from "../../../lib/intl";
+import { ExtraWorkRevenueByBuildingChart } from "../../reports/charts/ExtraWorkRevenueByBuildingChart";
 import { ExtraWorkRevenueChart } from "../../reports/charts/ExtraWorkRevenueChart";
 import { StatusDistributionChart } from "../../reports/charts/StatusDistributionChart";
 import { TicketsOverTimeChart } from "../../reports/charts/TicketsOverTimeChart";
@@ -27,6 +28,9 @@ type StatusFilter = "ALL" | "OPEN" | "INVOICED";
  * also renders the REAL charts locked to this customer:
  *   - ExtraWorkRevenueChart (billing_period = the selected month, to
  *     match the KPI grid's bucketing) + its CSV/PDF export buttons;
+ *   - ExtraWorkRevenueByBuildingChart (Sprint 124 — the SAME revenue,
+ *     split across this customer's buildings; same filters, so its
+ *     buckets sum to the chart above's Total) + its own export buttons;
  *   - TicketsOverTimeChart (the month's date range);
  *   - StatusDistributionChart (current snapshot).
  * The month/status controls + KPI grid are unchanged.
@@ -252,6 +256,12 @@ export function CustomerReportsPage() {
       {/* #109 Part H — real charts locked to this customer. */}
       <div style={{ marginTop: 16 }} data-testid="customer-reports-charts">
         <ExtraWorkRevenueChart filters={revenueFilters} refreshKey={0} />
+        {/* Sprint 124 — same filters (customer + billing_period) as the
+            chart above, so its buckets sum to that chart's own Total. */}
+        <ExtraWorkRevenueByBuildingChart
+          filters={revenueFilters}
+          refreshKey={0}
+        />
         <TicketsOverTimeChart filters={overTimeFilters} refreshKey={0} />
         <StatusDistributionChart filters={statusFilters} refreshKey={0} />
       </div>

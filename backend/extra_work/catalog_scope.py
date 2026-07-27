@@ -125,6 +125,19 @@ def filter_services_for(user, queryset):
     return queryset.filter(company_id__in=scope)
 
 
+def filter_managed_units_for(user, queryset):
+    """Sprint 123 — apply `scope_company_ids_for_catalog` to a
+    `ManagedUnit` queryset. Identical shape to `filter_services_for`
+    (same `company` FK, same scope rule) — a separate function only so
+    the call site reads as "managed units", not as a reuse of the
+    Service-specific name.
+    """
+    scope = scope_company_ids_for_catalog(user)
+    if scope is None:
+        return queryset
+    return queryset.filter(company_id__in=scope)
+
+
 def filter_categories_for(user, queryset):
     """Sprint 3B — ServiceCategory stays GLOBAL (no `company` FK),
     so this helper is the identity. It exists as a hook so a

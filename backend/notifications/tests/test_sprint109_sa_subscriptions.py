@@ -104,6 +104,97 @@ class SubscriptionEndpointTests(_SubscriptionFixture):
         )
 
 
+class EmailOptInEndpointTests(_SubscriptionFixture):
+    """Sprint 122 (Part C) — the SEPARATE per-company EMAIL opt-in
+    (SuperAdminCompanySubscription.email_enabled), surfaced on the SAME
+    endpoints as the in-app subscription above. Owner-decided: subscribing
+    in-app must NOT silently enable email — defaults False and a bare
+    re-subscribe never resets an existing True."""
+
+    def test_bare_put_creates_subscription_with_email_disabled(self):
+        self.authenticate(self.super_admin)
+        resp = self.client.put(_detail_url(self.company.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["subscribed"])
+        self.assertFalse(resp.data["email_enabled"])
+        self.assertFalse(
+            SuperAdminCompanySubscription.objects.get(
+                user=self.super_admin, company=self.company
+            ).email_enabled
+        )
+
+    def test_put_with_email_enabled_true_sets_it(self):
+        self.authenticate(self.super_admin)
+        resp = self.client.put(
+            _detail_url(self.company.id),
+            {"email_enabled": True},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["email_enabled"])
+        self.assertTrue(
+            SuperAdminCompanySubscription.objects.get(
+                user=self.super_admin, company=self.company
+            ).email_enabled
+        )
+
+    def test_bare_put_does_not_reset_existing_email_enabled(self):
+        SuperAdminCompanySubscription.objects.create(
+            user=self.super_admin, company=self.company, email_enabled=True,
+        )
+        self.authenticate(self.super_admin)
+        resp = self.client.put(_detail_url(self.company.id))  # no body
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["subscribed"])
+        self.assertTrue(resp.data["email_enabled"])
+
+    def test_put_can_disable_email_while_staying_subscribed(self):
+        SuperAdminCompanySubscription.objects.create(
+            user=self.super_admin, company=self.company, email_enabled=True,
+        )
+        self.authenticate(self.super_admin)
+        resp = self.client.put(
+            _detail_url(self.company.id),
+            {"email_enabled": False},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["subscribed"])
+        self.assertFalse(resp.data["email_enabled"])
+
+    def test_list_reports_email_enabled_company_ids_subset(self):
+        SuperAdminCompanySubscription.objects.create(
+            user=self.super_admin, company=self.company, email_enabled=True,
+        )
+        SuperAdminCompanySubscription.objects.create(
+            user=self.super_admin, company=self.other_company, email_enabled=False,
+        )
+        self.authenticate(self.super_admin)
+        resp = self.client.get(LIST_URL)
+        self.assertEqual(
+            set(resp.data["subscribed_company_ids"]),
+            {self.company.id, self.other_company.id},
+        )
+        self.assertEqual(
+            resp.data["email_enabled_company_ids"], [self.company.id]
+        )
+
+    def test_delete_clears_email_enabled_with_the_row(self):
+        SuperAdminCompanySubscription.objects.create(
+            user=self.super_admin, company=self.company, email_enabled=True,
+        )
+        self.authenticate(self.super_admin)
+        resp = self.client.delete(_detail_url(self.company.id))
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["subscribed"])
+        self.assertFalse(resp.data["email_enabled"])
+        self.assertFalse(
+            SuperAdminCompanySubscription.objects.filter(
+                user=self.super_admin, company=self.company
+            ).exists()
+        )
+
+
 class SubscriptionFanOutTests(_SubscriptionFixture):
     def test_unsubscribed_sa_default_feed_stays_empty(self):
         emit_extra_work_requested_notifications(

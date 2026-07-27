@@ -134,6 +134,32 @@ class InvoiceLifecycleApiTests(InvoiceApiBase):
         self.assertTrue(resp.data["is_reversal"])
         self.assertEqual(resp.data["reverses"], inv_id)
 
+    def test_credited_by_number_on_original_after_reverse(self):
+        """Sprint 122 (B2) — the provider-side GET on the ORIGINAL shows the
+        reversal's number as soon as it exists, even before the reversal is
+        itself sent (the provider already sees ISSUED rows directly)."""
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        self.client.force_authenticate(self.admin)
+        inv_id = self.client.post(
+            reverse("invoice-generate"),
+            {"customer": self.customer.id, "year": YEAR, "month": MONTH},
+            format="json",
+        ).data[0]["id"]
+        self.client.post(reverse("invoice-issue", args=[inv_id]))
+        self.client.post(reverse("invoice-send", args=[inv_id]))
+
+        resp = self.client.get(reverse("invoice-detail", args=[inv_id]))
+        self.assertIsNone(resp.data["credited_by_number"])
+
+        reversal_resp = self.client.post(reverse("invoice-reverse", args=[inv_id]))
+        reversal_number = reversal_resp.data["number"]
+        self.assertIsNotNone(reversal_number)
+        # A reversal can never itself be credited (cannot reverse a reversal).
+        self.assertIsNone(reversal_resp.data["credited_by_number"])
+
+        resp = self.client.get(reverse("invoice-detail", args=[inv_id]))
+        self.assertEqual(resp.data["credited_by_number"], reversal_number)
+
     def test_unissue_returns_issued_invoice_to_draft(self):
         draft = self._draft()
         self.client.force_authenticate(self.admin)

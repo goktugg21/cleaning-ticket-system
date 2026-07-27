@@ -10,6 +10,8 @@ routing detail; the model and view both live in this app.
 from django.urls import path
 
 from .views_catalog import (
+    ManagedUnitDetailView,
+    ManagedUnitListCreateView,
     ServiceBulkRaiseView,
     ServiceCategoryDetailView,
     ServiceCategoryListCreateView,
@@ -33,6 +35,21 @@ urlpatterns = [
         "bulk-raise/",
         ServiceBulkRaiseView.as_view(),
         name="service-bulk-raise",
+    ),
+    # Sprint 123 — managed unit catalog. Mounted before the bare "" /
+    # "<id>/" Service routes below so "units/" can never be swallowed
+    # by Service's own <int:service_id> pattern (it wouldn't match a
+    # non-numeric segment anyway, but the explicit ordering documents
+    # the same precedent the customer `my/` routes follow elsewhere).
+    path(
+        "units/",
+        ManagedUnitListCreateView.as_view(),
+        name="managed-unit-list",
+    ),
+    path(
+        "units/<int:unit_id>/",
+        ManagedUnitDetailView.as_view(),
+        name="managed-unit-detail",
     ),
     path(
         "",

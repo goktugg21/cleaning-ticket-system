@@ -213,6 +213,45 @@ def build_tickets_by_building_csv(payload: dict) -> bytes:
     return buffer.getvalue().encode("utf-8")
 
 
+# ---- CSV: extra-work-revenue-by-building (Sprint 124) ----------------------
+
+
+REVENUE_BY_BUILDING_CSV_COLUMNS = (
+    "building_id",
+    "building_name",
+    "company_id",
+    "company_name",
+    "count",
+    "subtotal",
+    "vat",
+    "total",
+    "period_from",
+    "period_to",
+)
+
+
+def build_extra_work_revenue_by_building_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(REVENUE_BY_BUILDING_CSV_COLUMNS)
+    period_from = payload["from"]
+    period_to = payload["to"]
+    for bucket in payload["buckets"]:
+        writer.writerow(
+            {
+                "building_id": bucket["building_id"],
+                "building_name": bucket["building_name"],
+                "company_id": bucket["company_id"],
+                "company_name": bucket["company_name"],
+                "count": bucket["count"],
+                "subtotal": bucket["subtotal"],
+                "vat": bucket["vat"],
+                "total": bucket["total"],
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
 # ---- PDF helpers -----------------------------------------------------------
 
 
@@ -456,6 +495,53 @@ def build_extra_work_revenue_pdf(payload: dict) -> bytes:
         pdf,
         headers=["State", "Count", "Subtotal", "VAT", "Total"],
         widths=[52, 24, 34, 34, 34],
+        rows=rows,
+    )
+    return _pdf_bytes(pdf)
+
+
+# ---- PDF: extra-work-revenue-by-building (Sprint 124) ----------------------
+# Unlike the flat revenue PDF, this payload IS the standard flat `buckets` +
+# `totals` shape (one row per building), so `_new_pdf` fits directly —
+# except `_new_pdf` prints `payload["total"]` (a bare int, the ticket-
+# dimension convention) where this payload carries a `totals` money dict,
+# so the header is built inline instead of via `_new_pdf`.
+
+
+def build_extra_work_revenue_by_building_pdf(payload: dict) -> bytes:
+    pdf = _branded_pdf("Extra Work Revenue by Building", payload["generated_at"])
+
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0, 6, f"Period: {payload['from']} -- {payload['to']}",
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    for line in _scope_summary_lines(payload["scope"]):
+        pdf.cell(0, 6, line, new_x="LMARGIN", new_y="NEXT")
+    totals = payload["totals"]
+    pdf.cell(
+        0,
+        6,
+        f"Total: {totals['count']} request(s) / {totals['total']} revenue",
+        new_x="LMARGIN", new_y="NEXT",
+    )
+    pdf.ln(2)
+
+    rows = [
+        [
+            b["building_name"],
+            b["company_name"],
+            b["count"],
+            b["subtotal"],
+            b["vat"],
+            b["total"],
+        ]
+        for b in payload["buckets"]
+    ]
+    _draw_table(
+        pdf,
+        headers=["Building", "Company", "Count", "Subtotal", "VAT", "Total"],
+        widths=[46, 40, 18, 28, 28, 28],
         rows=rows,
     )
     return _pdf_bytes(pdf)

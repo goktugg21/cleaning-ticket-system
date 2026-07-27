@@ -21,12 +21,15 @@ from .dimensions import (
     _first_param,
     _resolve_customer,
     compute_extra_work_revenue,
+    compute_extra_work_revenue_by_building,
     compute_tickets_by_building,
     compute_tickets_by_customer,
     compute_tickets_by_origin,
     compute_tickets_by_type,
 )
 from .exports import (
+    build_extra_work_revenue_by_building_csv,
+    build_extra_work_revenue_by_building_pdf,
     build_extra_work_revenue_csv,
     build_extra_work_revenue_pdf,
     build_tickets_by_building_csv,
@@ -719,4 +722,48 @@ class ExtraWorkRevenuePDFView(APIView):
         return _pdf_response(
             "extra-work-revenue.pdf",
             build_extra_work_revenue_pdf(payload),
+        )
+
+
+# ===========================================================================
+# Sprint 124 — Extra Work revenue grouped by building. Same permission
+# floor as the flat revenue report (commercial amounts): SUPER_ADMIN /
+# COMPANY_ADMIN / BUILDING_MANAGER only, never STAFF or CUSTOMER_USER.
+# ===========================================================================
+
+
+class ExtraWorkRevenueByBuildingView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        return Response(
+            compute_extra_work_revenue_by_building(
+                request.user, request.query_params
+            )
+        )
+
+
+class ExtraWorkRevenueByBuildingCSVView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        payload = compute_extra_work_revenue_by_building(
+            request.user, request.query_params
+        )
+        return _csv_response(
+            f"extra-work-revenue-by-building_{payload['from']}_{payload['to']}.csv",
+            build_extra_work_revenue_by_building_csv(payload),
+        )
+
+
+class ExtraWorkRevenueByBuildingPDFView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        payload = compute_extra_work_revenue_by_building(
+            request.user, request.query_params
+        )
+        return _pdf_response(
+            f"extra-work-revenue-by-building_{payload['from']}_{payload['to']}.pdf",
+            build_extra_work_revenue_by_building_pdf(payload),
         )

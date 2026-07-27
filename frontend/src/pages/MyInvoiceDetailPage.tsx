@@ -138,6 +138,22 @@ export function MyInvoiceDetailPage() {
         </div>
       )}
 
+      {/* Sprint 122 (B2) — the original stays SENT on the books even after
+          being credited, so without this it would still read as owed. Only
+          set once the credit note is itself SENT (the backend gates it). */}
+      {invoice.credited_by_number && (
+        <div
+          className="alert-info"
+          role="status"
+          style={{ marginBottom: 16 }}
+          data-testid="my-invoice-credited-note"
+        >
+          {t("customer_facturen.credited_note", {
+            number: invoice.credited_by_number,
+          })}
+        </div>
+      )}
+
       {/* Meta. */}
       <section className="card" style={{ padding: "18px 20px", marginBottom: 16 }}>
         <div className="detail-field-row">

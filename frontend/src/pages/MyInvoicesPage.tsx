@@ -94,6 +94,15 @@ export function MyInvoicesPage() {
                           ({t("facturen.credit_note")})
                         </span>
                       )}
+                      {inv.credited_by_number && (
+                        <span className="muted small" style={{ marginLeft: 6 }}>
+                          (
+                          {t("facturen.credited_by", {
+                            number: inv.credited_by_number,
+                          })}
+                          )
+                        </span>
+                      )}
                     </Link>
                   </td>
                   <td className="muted small">

@@ -21,6 +21,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   notificationHref,
+  setCompanyEmailSubscription,
   setCompanySubscription,
 } from "../api/notifications";
 import type { CompanyAdmin, Notification } from "../api/types";
@@ -51,6 +52,11 @@ export function NotificationsPage() {
   const [subscribedIds, setSubscribedIds] = useState<Set<number>>(
     () => new Set(),
   );
+  // Sprint 122 (Part C) — the SEPARATE per-company email opt-in; always a
+  // subset of subscribedIds (email_enabled lives on the same row).
+  const [emailEnabledIds, setEmailEnabledIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const viewAsMode = isSuperAdmin && companyFilter !== "";
 
@@ -61,10 +67,11 @@ export function NotificationsPage() {
       listCompanies({ page_size: 200 }),
       getCompanySubscriptions(),
     ])
-      .then(([companyData, subscribed]) => {
+      .then(([companyData, subscriptions]) => {
         if (cancelled) return;
         setCompanies(companyData.results);
-        setSubscribedIds(new Set(subscribed));
+        setSubscribedIds(new Set(subscriptions.subscribedIds));
+        setEmailEnabledIds(new Set(subscriptions.emailEnabledIds));
       })
       .catch(() => {
         // The selector simply stays empty on failure; the own feed
@@ -233,6 +240,16 @@ export function NotificationsPage() {
                         else draft.delete(companyId);
                         return draft;
                       });
+                      // Sprint 122 (Part C) — unsubscribing deletes the row
+                      // email_enabled lives on, so the email opt-in goes
+                      // with it; mirror that locally without a refetch.
+                      if (!next) {
+                        setEmailEnabledIds((prev) => {
+                          const draft = new Set(prev);
+                          draft.delete(companyId);
+                          return draft;
+                        });
+                      }
                     } catch (err) {
                       setError(getApiError(err));
                     } finally {
@@ -242,6 +259,47 @@ export function NotificationsPage() {
                   data-testid="notifications-subscribe-toggle"
                 />
                 <span>{t("notifications.subscribe_toggle")}</span>
+              </label>
+              {/* Sprint 122 (Part C) — SEPARATE email opt-in, clearly
+                  labelled and disabled until subscribed (email_enabled
+                  lives on the same subscription row, so there is nothing
+                  to toggle without it). Subscribing above never enables
+                  this on its own. */}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  paddingBottom: 6,
+                }}
+              >
+                <Toggle
+                  checked={emailEnabledIds.has(companyFilter as number)}
+                  disabled={
+                    subscriptionBusy ||
+                    !subscribedIds.has(companyFilter as number)
+                  }
+                  onChange={async (event) => {
+                    const next = event.target.checked;
+                    const companyId = companyFilter as number;
+                    setSubscriptionBusy(true);
+                    try {
+                      await setCompanyEmailSubscription(companyId, next);
+                      setEmailEnabledIds((prev) => {
+                        const draft = new Set(prev);
+                        if (next) draft.add(companyId);
+                        else draft.delete(companyId);
+                        return draft;
+                      });
+                    } catch (err) {
+                      setError(getApiError(err));
+                    } finally {
+                      setSubscriptionBusy(false);
+                    }
+                  }}
+                  data-testid="notifications-email-toggle"
+                />
+                <span>{t("notifications.email_toggle")}</span>
               </label>
               <span className="muted small" style={{ paddingBottom: 10 }}>
                 {t("notifications.company_view_hint")}

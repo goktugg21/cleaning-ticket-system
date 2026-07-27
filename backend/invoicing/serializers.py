@@ -46,6 +46,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     building_name = serializers.SerializerMethodField()
     lines = InvoiceLineSerializer(many=True, read_only=True)
+    # Sprint 122 (Part B2) — the number of the reversal that credited THIS
+    # invoice, if any (null otherwise). Provider-side, so shown regardless of
+    # whether that reversal has been sent yet (ISSUED-but-unsent still means
+    # "already superseded" from the operator's point of view — see the
+    # unsent-credit-note nudge on the reversal's own detail page). Reads the
+    # `reverses` reverse relation via `.all()` so a `prefetch_related
+    # ("reversed_by")` queryset avoids N+1 on the list endpoint; sorted in
+    # Python (not `.order_by()`) so that prefetch cache is actually used.
+    credited_by_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -69,6 +78,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "summary_text",
             "is_reversal",
             "reverses",
+            "credited_by_number",
             "issued_at",
             "sent_at",
             "created_at",
@@ -79,6 +89,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     def get_building_name(self, obj: Invoice):
         return obj.building.name if obj.building_id else None
+
+    def get_credited_by_number(self, obj: Invoice):
+        reversals = sorted(obj.reversed_by.all(), key=lambda r: r.id, reverse=True)
+        return reversals[0].number if reversals else None
 
 
 class CustomerInvoiceLineSerializer(serializers.ModelSerializer):
@@ -129,11 +143,19 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
         `CustomerInvoiceLineSerializer`.
     `status` is always SENT in this scope (kept; harmless) and `is_reversal`
     is kept so a credit note reads as such.
+
+    Sprint 122 (Part B2) — `credited_by_number` (the reversing credit note's
+    `number`, nothing else) so a credited original stops reading as an open
+    debt. Deliberately gated on the reversal itself being SENT (not merely
+    existing): the customer scope is SENT-only, so this must never reveal an
+    ISSUED-but-unsent reversal before the operator has deliberately sent it —
+    that would leak a document the customer cannot otherwise see or open.
     """
 
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     building_name = serializers.SerializerMethodField()
     lines = CustomerInvoiceLineSerializer(many=True, read_only=True)
+    credited_by_number = serializers.SerializerMethodField()
 
     class Meta:
         model = Invoice
@@ -152,6 +174,7 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
             "optional_fee_amount",
             "summary_text",
             "is_reversal",
+            "credited_by_number",
             "issued_at",
             "sent_at",
             "lines",
@@ -160,6 +183,14 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
 
     def get_building_name(self, obj: Invoice):
         return obj.building.name if obj.building_id else None
+
+    def get_credited_by_number(self, obj: Invoice):
+        sent_reversals = sorted(
+            (r for r in obj.reversed_by.all() if r.status == Invoice.Status.SENT),
+            key=lambda r: r.id,
+            reverse=True,
+        )
+        return sent_reversals[0].number if sent_reversals else None
 
 
 class InvoiceLineWriteSerializer(serializers.Serializer):

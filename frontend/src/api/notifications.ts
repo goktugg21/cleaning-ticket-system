@@ -59,12 +59,24 @@ export async function listNotifications(
   return response.data;
 }
 
-// #109 Part D — SA-only per-company subscription state.
-export async function getCompanySubscriptions(): Promise<number[]> {
-  const response = await api.get<{ subscribed_company_ids: number[] }>(
-    "/notifications/company-subscriptions/",
-  );
-  return response.data.subscribed_company_ids;
+// #109 Part D — SA-only per-company subscription state. Sprint 122 (Part C)
+// adds emailEnabledIds: the SUBSET of subscribedIds where the caller also
+// opted into email (a company can only be in emailEnabledIds if it is also
+// in subscribedIds — email_enabled lives on the same subscription row).
+export interface CompanySubscriptionState {
+  subscribedIds: number[];
+  emailEnabledIds: number[];
+}
+
+export async function getCompanySubscriptions(): Promise<CompanySubscriptionState> {
+  const response = await api.get<{
+    subscribed_company_ids: number[];
+    email_enabled_company_ids: number[];
+  }>("/notifications/company-subscriptions/");
+  return {
+    subscribedIds: response.data.subscribed_company_ids,
+    emailEnabledIds: response.data.email_enabled_company_ids,
+  };
 }
 
 export async function setCompanySubscription(
@@ -76,6 +88,19 @@ export async function setCompanySubscription(
   } else {
     await api.delete(`/notifications/company-subscriptions/${companyId}/`);
   }
+}
+
+// Sprint 122 (Part C) — the SEPARATE email opt-in for the same per-company
+// subscription row (subscribing in-app does not imply this). Requires an
+// existing subscription; toggle it from the SA settings UI alongside the
+// subscribe Toggle, never standalone.
+export async function setCompanyEmailSubscription(
+  companyId: number,
+  emailEnabled: boolean,
+): Promise<void> {
+  await api.put(`/notifications/company-subscriptions/${companyId}/`, {
+    email_enabled: emailEnabled,
+  });
 }
 
 export async function getUnreadCount(): Promise<number> {

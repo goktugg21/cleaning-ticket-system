@@ -510,6 +510,18 @@ export function FacturenPage({
                           ({t("facturen.credit_note")})
                         </span>
                       )}
+                      {/* Sprint 122 (B2) — a reversed original stays SENT on
+                          the books, so flag it here too or it silently reads
+                          as a normal open invoice in the list. */}
+                      {inv.credited_by_number && (
+                        <span className="muted small" style={{ marginLeft: 6 }}>
+                          (
+                          {t("facturen.credited_by", {
+                            number: inv.credited_by_number,
+                          })}
+                          )
+                        </span>
+                      )}
                     </Link>
                   </td>
                   {!customerScoped && <td>{inv.customer_name}</td>}
@@ -520,16 +532,24 @@ export function FacturenPage({
                     {formatPeriod(inv.period_year, inv.period_month)}
                   </td>
                   <td>
+                    {/* Sprint 122 (B1) — an ISSUED-but-unsent credit note
+                        gets its own amber tag instead of blending into the
+                        plain gray "Issued" used for every other non-SENT
+                        invoice, so it can't get lost in a long list. */}
                     <span
                       className={
-                        inv.status === "SENT"
-                          ? "cell-tag cell-tag-open"
-                          : "cell-tag cell-tag-closed"
+                        inv.is_reversal && inv.status === "ISSUED"
+                          ? "cell-tag cell-tag-warn"
+                          : inv.status === "SENT"
+                            ? "cell-tag cell-tag-open"
+                            : "cell-tag cell-tag-closed"
                       }
                       data-testid="facturen-list-status"
                     >
                       <i />
-                      {t(STATUS_LABEL_KEY[inv.status])}
+                      {inv.is_reversal && inv.status === "ISSUED"
+                        ? t("facturen.credit_note_unsent")
+                        : t(STATUS_LABEL_KEY[inv.status])}
                     </span>
                   </td>
                   <td style={{ textAlign: "right" }}>

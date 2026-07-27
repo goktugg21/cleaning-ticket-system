@@ -505,7 +505,21 @@ def _money(value) -> str:
     return str(value.quantize(Decimal("0.01")))
 
 
-def compute_extra_work_revenue(actor, query_params) -> dict:
+def _resolve_extra_work_revenue_rows(actor, query_params):
+    """Sprint 124 — shared scope/customer/date-window resolution + the
+    exact in-scope `ExtraWorkRequest` queryset + spawned-ticket map,
+    factored out of `compute_extra_work_revenue` so it can be reused
+    verbatim by `compute_extra_work_revenue_by_building`. Both callers
+    then run the SAME `_classify_extra_work` / `_amounts_for_state`
+    functions per row — only the accumulation (by state vs. by
+    building) differs. This is deliberate: the money calculation must
+    exist in exactly one place, so a future change to billing_period /
+    invoice_status / scope handling cannot silently diverge between the
+    flat report and the by-building one and break the "buckets sum to
+    the total" invariant.
+
+    Returns (ew_qs, tickets_by_ew, from_date, to_date, scope, customer).
+    """
     scope_company_raw = _first_param(query_params, "company", "company_id")
     scope_building_raw = _first_param(query_params, "building", "building_id")
     scope = resolve_scope(actor, scope_company_raw, scope_building_raw)
@@ -597,6 +611,14 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
             # `.first()` semantics: keep the lowest-id ticket per EW.
             tickets_by_ew.setdefault(t.extra_work_request_id, t)
 
+    return ew_qs, tickets_by_ew, from_date, to_date, scope, customer
+
+
+def compute_extra_work_revenue(actor, query_params) -> dict:
+    ew_qs, tickets_by_ew, from_date, to_date, scope, customer = (
+        _resolve_extra_work_revenue_rows(actor, query_params)
+    )
+
     acc = {
         s: {
             "count": 0,
@@ -646,6 +668,127 @@ def compute_extra_work_revenue(actor, query_params) -> dict:
         "to": to_date.isoformat(),
         "scope": scope_dict,
         "states": states,
+        "totals": totals,
+        "generated_at": timezone.now().isoformat(),
+    }
+
+
+# ===========================================================================
+# Sprint 124 — Extra Work revenue grouped by BUILDING (one customer's
+# revenue split across that customer's buildings).
+#
+# Reuses `_resolve_extra_work_revenue_rows` (the exact same in-scope
+# ExtraWorkRequest queryset, ticket map, scope/customer/date-window
+# resolution as the flat `compute_extra_work_revenue`) and the exact same
+# `_classify_extra_work` / `_amounts_for_state` per-row functions — the
+# ONLY difference from the flat report is the accumulator key (building_id
+# instead of revenue state). This is what guarantees
+# sum(bucket.total for bucket in buckets) == the flat report's totals.total
+# for the same filters: both reports classify + sum the identical set of
+# rows, just partitioned differently.
+#
+# A building with zero in-scope revenue for the period is OMITTED, not
+# emitted as a padded zero row — mirroring `compute_tickets_by_building`'s
+# own GROUP-BY-implied behaviour (a building with zero matching tickets
+# never appears there either). The customer Reports chart already has to
+# stay readable at 18+ buildings (the dev seed's "B Amsterdam" customer),
+# and a zero-revenue bar for every building with no activity in the
+# selected period would make that worse for no informational gain; the
+# grand total is identical either way since an omitted zero bucket
+# contributes nothing to the sum.
+# ===========================================================================
+
+
+def compute_extra_work_revenue_by_building(actor, query_params) -> dict:
+    ew_qs, tickets_by_ew, from_date, to_date, scope, customer = (
+        _resolve_extra_work_revenue_rows(actor, query_params)
+    )
+
+    acc_by_building: dict = {}
+    building_meta: dict = {}
+    # select_related avoids an N+1 for building/company name lookups —
+    # ExtraWorkRequest.building and .company are both direct FKs (not
+    # reached through the ticket), so this is a single extra JOIN.
+    for ew in ew_qs.select_related("building", "company"):
+        ticket = tickets_by_ew.get(ew.id)
+        state = _classify_extra_work(ew, ticket)
+        subtotal, vat, total = _amounts_for_state(ew, state)
+        b_id = ew.building_id
+        if b_id not in acc_by_building:
+            acc_by_building[b_id] = {
+                "count": 0,
+                "subtotal": Decimal("0.00"),
+                "vat": Decimal("0.00"),
+                "total": Decimal("0.00"),
+            }
+            building_meta[b_id] = {
+                "building_name": ew.building.name,
+                "company_id": ew.company_id,
+                "company_name": ew.company.name,
+            }
+        bucket = acc_by_building[b_id]
+        bucket["count"] += 1
+        bucket["subtotal"] += subtotal or Decimal("0.00")
+        bucket["vat"] += vat or Decimal("0.00")
+        bucket["total"] += total or Decimal("0.00")
+
+    # Highest revenue first (the chart's natural reading order — the
+    # building that earned the most money is the headline), tie-broken by
+    # name for a stable order. Sorted on the Decimal accumulator, not the
+    # stringified 2dp value, so ordering is exact.
+    ordered_ids = sorted(
+        acc_by_building.keys(),
+        key=lambda b_id: (
+            -acc_by_building[b_id]["total"],
+            building_meta[b_id]["building_name"],
+        ),
+    )
+    buckets = [
+        {
+            "building_id": b_id,
+            "building_name": building_meta[b_id]["building_name"],
+            "company_id": building_meta[b_id]["company_id"],
+            "company_name": building_meta[b_id]["company_name"],
+            "count": acc_by_building[b_id]["count"],
+            "subtotal": _money(acc_by_building[b_id]["subtotal"]),
+            "vat": _money(acc_by_building[b_id]["vat"]),
+            "total": _money(acc_by_building[b_id]["total"]),
+        }
+        for b_id in ordered_ids
+    ]
+
+    totals = {
+        "count": sum(acc_by_building[b_id]["count"] for b_id in acc_by_building),
+        "subtotal": _money(
+            sum(
+                (acc_by_building[b_id]["subtotal"] for b_id in acc_by_building),
+                Decimal("0.00"),
+            )
+        ),
+        "vat": _money(
+            sum(
+                (acc_by_building[b_id]["vat"] for b_id in acc_by_building),
+                Decimal("0.00"),
+            )
+        ),
+        "total": _money(
+            sum(
+                (acc_by_building[b_id]["total"] for b_id in acc_by_building),
+                Decimal("0.00"),
+            )
+        ),
+    }
+
+    scope_dict = scope.to_dict()
+    if customer is not None:
+        scope_dict["customer_id"] = customer.id
+        scope_dict["customer_name"] = customer.name
+
+    return {
+        "from": from_date.isoformat(),
+        "to": to_date.isoformat(),
+        "scope": scope_dict,
+        "buckets": buckets,
         "totals": totals,
         "generated_at": timezone.now().isoformat(),
     }

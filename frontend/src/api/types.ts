@@ -1799,6 +1799,28 @@ export interface ServiceCategoryCreatePayload {
 
 export type ServiceCategoryUpdatePayload = Partial<ServiceCategoryCreatePayload>;
 
+// Sprint 123 — a provider-company-scoped managed unit for unit_type=OTHER
+// pricing lines, replacing ad-hoc free-text retyping. `company` is
+// optional on the wire on CREATE (a COMPANY_ADMIN's frontend omits it;
+// the backend defaults to their own company), read-only on UPDATE.
+export interface ManagedUnit {
+  id: number;
+  company: number;
+  company_name: string;
+  label: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManagedUnitCreatePayload {
+  company?: number;
+  label: string;
+  is_active?: boolean;
+}
+
+export type ManagedUnitUpdatePayload = Partial<ManagedUnitCreatePayload>;
+
 export interface Service {
   id: number;
   category: number;
@@ -1807,8 +1829,15 @@ export interface Service {
   description: string;
   unit_type: ServiceUnitType;
   // RF-2 (mirror) — operator-supplied unit name; only meaningful for
-  // unit_type === "OTHER" (blank otherwise, enforced server-side).
+  // unit_type === "OTHER" (blank otherwise, enforced server-side). Kept
+  // in sync with managed_unit's current label whenever one is linked
+  // (Sprint 123) — still the single value every renderer (PDF, exports,
+  // lists) reads, whether or not the row has adopted the catalog.
   custom_unit_label: string;
+  // Sprint 123 — optional managed-unit catalog link (only meaningful for
+  // unit_type === "OTHER"). Null for a legacy / not-yet-adopted row.
+  managed_unit: number | null;
+  managed_unit_label: string | null;
   // DRF serializes Decimal as a string to preserve precision; the form
   // converts to/from number locally and re-emits as a string on submit.
   default_unit_price: string;
@@ -1824,8 +1853,13 @@ export interface ServiceCreatePayload {
   description?: string;
   unit_type: ServiceUnitType;
   // RF-2 (mirror) — sent for unit_type === "OTHER"; the backend forces it
-  // blank for concrete unit types and requires it for OTHER.
+  // blank for concrete unit types and requires it for OTHER, UNLESS
+  // managed_unit is also sent, in which case the backend derives it from
+  // the unit's label and this value is ignored.
   custom_unit_label?: string;
+  // Sprint 123 — when set, the backend overwrites custom_unit_label with
+  // this unit's current label (it must belong to the same company).
+  managed_unit?: number | null;
   default_unit_price: string;
   default_vat_pct: string;
   is_active?: boolean;
@@ -1896,8 +1930,14 @@ export interface CustomerCustomPrice {
   unit_type_display: string;
   // RF-2 — the operator-supplied unit name, only meaningful when
   // `unit_type === "OTHER"` (e.g. "m3"). The backend forces it blank
-  // for every concrete unit type, so it is always "" for those.
+  // for every concrete unit type, so it is always "" for those. Kept in
+  // sync with managed_unit's current label whenever one is linked
+  // (Sprint 123).
   custom_unit_label: string;
+  // Sprint 123 — optional managed-unit catalog link (only meaningful for
+  // unit_type === "OTHER"). Must belong to customer.company's provider.
+  managed_unit: number | null;
+  managed_unit_label: string | null;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -1911,6 +1951,9 @@ export interface CustomerCustomPriceCreatePayload {
   custom_name: string;
   unit_type: ServiceUnitType;
   custom_unit_label?: string;
+  // Sprint 123 — when set, the backend overwrites custom_unit_label with
+  // this unit's current label (it must belong to the customer's company).
+  managed_unit?: number | null;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -2074,6 +2117,10 @@ export interface Invoice {
   summary_text: string;
   is_reversal: boolean;
   reverses: number | null;
+  // Sprint 122 (Part B2) — the reversing credit note's number, if this
+  // invoice has been credited (any status: provider sees unsent reversals
+  // too). Null otherwise, and always null on a reversal itself.
+  credited_by_number: string | null;
   issued_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -2112,6 +2159,10 @@ export interface CustomerInvoice {
   optional_fee_amount: string | null;
   summary_text: string;
   is_reversal: boolean;
+  // Sprint 122 (Part B2) — the reversing credit note's number, ONLY once
+  // that credit note is itself SENT (mirrors the customer scope's SENT-only
+  // gate — never reveals an unsent reversal). Null otherwise.
+  credited_by_number: string | null;
   issued_at: string | null;
   sent_at: string | null;
   lines: CustomerInvoiceLine[];

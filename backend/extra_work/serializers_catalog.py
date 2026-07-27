@@ -38,9 +38,47 @@ from .models import (
     CustomerCustomPrice,
     CustomerServicePrice,
     ExtraWorkPricingUnitType,
+    ManagedUnit,
     Service,
     ServiceCategory,
 )
+
+
+def _resolve_effective_unit(attrs, instance):
+    """Sprint 123 — shared OTHER-unit resolution for `ServiceSerializer`
+    and `CustomerCustomPriceSerializer`.
+
+    Rules (applied to `attrs` in place, returns nothing):
+      * A `managed_unit` may only be set when the EFFECTIVE unit_type
+        (attrs, falling back to the instance) is OTHER — for any
+        concrete unit type it is forced back to None, mirroring the
+        pre-existing `custom_unit_label`-forced-blank rule so a row
+        switched off OTHER can never strand a stale link.
+      * When `managed_unit` is set (and unit_type is OTHER),
+        `custom_unit_label` is overwritten with the unit's CURRENT
+        `label` — the linked unit is authoritative; any client-supplied
+        `custom_unit_label` is ignored in that case. `custom_unit_label`
+        stays the single value every other consumer (PDF, exports,
+        lists) renders, whether or not a row has adopted the catalog.
+      * When `managed_unit` is NOT set (None, the pre-Sprint-123 shape),
+        behaviour is completely unchanged: the caller's existing
+        blank-for-concrete / required-for-OTHER label validation runs
+        exactly as before.
+    """
+    unit_type = attrs.get("unit_type", getattr(instance, "unit_type", None))
+    managed_unit_supplied = "managed_unit" in attrs
+    managed_unit = attrs.get(
+        "managed_unit", getattr(instance, "managed_unit", None)
+    )
+    if unit_type != ExtraWorkPricingUnitType.OTHER:
+        if managed_unit_supplied or instance is not None:
+            attrs["managed_unit"] = None
+        return None
+    if managed_unit is not None:
+        attrs["managed_unit"] = managed_unit
+        attrs["custom_unit_label"] = managed_unit.label
+        return managed_unit
+    return None
 
 
 class ServiceCategorySerializer(serializers.ModelSerializer):
@@ -55,6 +93,100 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class ManagedUnitSerializer(serializers.ModelSerializer):
+    """Sprint 123 — read/write serializer for the per-company managed
+    unit catalog (`ManagedUnit`). Mirrors `ServiceSerializer`'s
+    `company` handling exactly: optional on the wire on CREATE (the
+    view defaults it for a COMPANY_ADMIN, same
+    `_resolve_catalog_create_company` helper), read-only on UPDATE
+    (re-pinning an existing unit to a different provider would strand
+    every Service / CustomerCustomPrice row already linked to it).
+
+    `label` is declared with `trim_whitespace=False` so `validate()`
+    owns the stripping (matching the `custom_unit_label` field's own
+    convention elsewhere in this module) — a whitespace-only label must
+    reach the validator intact rather than being silently trimmed to a
+    blank first.
+
+    The case/whitespace-insensitive uniqueness pre-check here is a
+    friendly-400 convenience layer; `ManagedUnit`'s
+    `UniqueConstraint(Lower(Trim("label")), "company", ...)` is the
+    real DB-level backstop for a race condition or a direct-ORM write.
+    """
+
+    company_name = serializers.CharField(
+        source="company.name", read_only=True
+    )
+    company = serializers.PrimaryKeyRelatedField(
+        queryset=Company.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    label = serializers.CharField(max_length=50, trim_whitespace=False)
+
+    class Meta:
+        model = ManagedUnit
+        fields = [
+            "id",
+            "company",
+            "company_name",
+            "label",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "company_name", "created_at", "updated_at"]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if self.instance is not None:
+            fields["company"].read_only = True
+        return fields
+
+    def validate_label(self, value):
+        stripped = (value or "").strip()
+        if not stripped:
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "label must not be blank.",
+                    code="managed_unit_label_required",
+                )
+            )
+        return stripped
+
+    def validate(self, attrs):
+        label = attrs.get("label", getattr(self.instance, "label", None))
+        company = attrs.get("company")
+        if company is None and self.instance is not None:
+            company = self.instance.company
+        # `company` may still be None here on CREATE when a COMPANY_ADMIN
+        # omitted it (the view resolves + defaults it in perform_create,
+        # AFTER this validate() runs) -- skip the pre-check in that case
+        # and rely on the DB constraint as the sole backstop; the view
+        # cannot re-run this same friendly check post-resolution without
+        # duplicating the query, so a race there surfaces as a 500-turned
+        # -400 via the IntegrityError handler in the view instead.
+        if label and company is not None:
+            normalized = label.lower()
+            existing = ManagedUnit.objects.filter(company=company)
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if any(u.label.strip().lower() == normalized for u in existing):
+                raise serializers.ValidationError(
+                    {
+                        "label": [
+                            serializers.ErrorDetail(
+                                f"A unit named {label!r} already exists "
+                                "for this company.",
+                                code="managed_unit_label_not_unique",
+                            )
+                        ]
+                    }
+                )
+        return attrs
 
 
 class ServiceSerializer(serializers.ModelSerializer):
@@ -86,7 +218,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         source="company.name", read_only=True
     )
     # Sprint 3B — `company` is OPTIONAL on the wire (CA frontend
-    # may omit it; the view's `_resolve_service_create_company`
+    # may omit it; the view's `_resolve_catalog_create_company`
     # defaults to the actor's own company). When supplied, the
     # view runs the cross-company guard before saving.
     company = serializers.PrimaryKeyRelatedField(
@@ -105,6 +237,19 @@ class ServiceSerializer(serializers.ModelSerializer):
         allow_blank=True,
         trim_whitespace=False,
     )
+    # Sprint 123 — optional managed-unit catalog link (only meaningful
+    # for unit_type=OTHER; see `_resolve_effective_unit`). Cross-company
+    # ownership (managed_unit.company == the row's company) is checked
+    # in the view AFTER company resolution, not here — see
+    # `views_catalog.py::_enforce_same_company_managed_unit`.
+    managed_unit = serializers.PrimaryKeyRelatedField(
+        queryset=ManagedUnit.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    managed_unit_label = serializers.CharField(
+        source="managed_unit.label", read_only=True, default=None
+    )
 
     class Meta:
         model = Service
@@ -118,6 +263,8 @@ class ServiceSerializer(serializers.ModelSerializer):
             "description",
             "unit_type",
             "custom_unit_label",
+            "managed_unit",
+            "managed_unit_label",
             "default_unit_price",
             "default_vat_pct",
             "is_active",
@@ -128,6 +275,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             "id",
             "company_name",
             "category_name",
+            "managed_unit_label",
             "created_at",
             "updated_at",
         ]
@@ -155,6 +303,11 @@ class ServiceSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        # Sprint 123 — resolve managed_unit FIRST: nulls it out for a
+        # non-OTHER row, or (when set) overwrites custom_unit_label with
+        # the linked unit's current label. Composes with the unchanged
+        # RF-2 logic below by construction — see the helper's docstring.
+        _resolve_effective_unit(attrs, self.instance)
         # RF-2 (mirror of CustomerCustomPriceSerializer) — the unit label
         # only carries meaning for OTHER. Resolve the effective unit_type +
         # label (a PATCH may change either field independently). For a
@@ -348,6 +501,19 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
     unit_type_display = serializers.CharField(
         source="get_unit_type_display", read_only=True
     )
+    # Sprint 123 — optional managed-unit catalog link (see
+    # ServiceSerializer's identical field + `_resolve_effective_unit`).
+    # Cross-company ownership (managed_unit.company == customer.company)
+    # is checked in the view, which is the only place that already knows
+    # the URL-bound customer at validate() time.
+    managed_unit = serializers.PrimaryKeyRelatedField(
+        queryset=ManagedUnit.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    managed_unit_label = serializers.CharField(
+        source="managed_unit.label", read_only=True, default=None
+    )
 
     class Meta:
         model = CustomerCustomPrice
@@ -357,6 +523,8 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
             "unit_type",
             "unit_type_display",
             "custom_unit_label",
+            "managed_unit",
+            "managed_unit_label",
             "customer",
             "unit_price",
             "vat_pct",
@@ -369,6 +537,7 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "unit_type_display",
+            "managed_unit_label",
             "customer",
             "created_at",
             "updated_at",
@@ -391,6 +560,9 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
         valid_to = attrs.get(
             "valid_to", getattr(self.instance, "valid_to", None)
         )
+        # Sprint 123 — resolve managed_unit FIRST; see ServiceSerializer's
+        # identical call for the full rationale.
+        _resolve_effective_unit(attrs, self.instance)
         # RF-2 — the unit label only carries meaning for OTHER. Resolve
         # the effective unit_type + label (a PATCH may change either field
         # independently). For a concrete unit type the label is forced

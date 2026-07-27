@@ -269,6 +269,11 @@ p { line-height: 1.6; }
 .cell-tag-high i { background: var(--amber); }
 .cell-tag-urgent i { background: var(--red); }
 .cell-tag-urgent { color: var(--red); font-weight: 700; }
+/* Sprint 122 (Part B1) — an ISSUED-but-unsent credit note: mirrors
+   .cell-tag-urgent's pattern so it stands out from the plain "closed" gray
+   used for every other ISSUED/DRAFT invoice. */
+.cell-tag-warn i { background: var(--amber); }
+.cell-tag-warn { color: var(--amber); font-weight: 700; }
 .cell-tag-open i, .cell-tag-in_progress i { background: var(--green); }
 .cell-tag-reopened_by_admin i { background: var(--amber); }
 .cell-tag-waiting_customer_approval i { background: var(--teal); }

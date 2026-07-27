@@ -50,7 +50,7 @@ in the table below, it is archived and unmaintained** — see the
 Everything under `docs/archive/` is kept for **history only**. Each archived
 file carries an `ARCHIVED` banner at the top stating the date it last
 described the system. Archived docs are **not maintained** and must not be
-relied on as current truth. There are four buckets:
+relied on as current truth. There are five buckets:
 
 - **`archive/2026-05-pilot/`** — pilot-era launch, demo, and handoff material
   (go-live, demo scripts, the point-in-time security review, SES setup, pilot
@@ -58,6 +58,12 @@ relied on as current truth. There are four buckets:
 - **`archive/2026-05-sprints/`** — sprint design and audit documents from the
   2026-05 sprint series (codebase/business-logic audits, sprint-23/28/29
   plans, the 2026-05 gap analysis).
+- **`archive/2026-06-sprints/`** — sprint build logs from the 2026-06/07
+  gap-closing series, moved out of `planning/sprint-checklist.md` in Sprint
+  122.1: the Ramazan-Meeting-2 block + Sprints 0–9 + the 2026-06-23 roadmap,
+  the invoicing-subsystem Phase 1–5 build log (superseded by
+  `product/sot-addendum-b-invoicing.md`), and the Sprint 116 (CCA policy) +
+  Sprint 119 (credential-PDF modal + known-issues) build logs.
 - **`archive/superseded/`** — documents describing a model that no longer
   exists in the repo (the old `.claude/agents` backlog / PM-dispatch workflow,
   and the earlier P0 fix plan / audit report).

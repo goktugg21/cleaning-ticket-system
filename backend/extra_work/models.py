@@ -31,6 +31,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower, Trim
 
 
 class ExtraWorkCategory(models.TextChoices):
@@ -564,6 +565,101 @@ class ExtraWorkPricingLineItem(models.Model):
         super().save(*args, **kwargs)
 
 
+class ManagedUnit(models.Model):
+    """
+    Sprint 123 — a provider-company-scoped catalog of unit names for
+    `unit_type=OTHER` pricing lines.
+
+    Before this model, the OTHER unit name was pure free text
+    (`custom_unit_label` on `Service` / `CustomerCustomPrice` /
+    `ProposalLine`), retyped per row with no consistency check — "m3"
+    and "M3 " are the same unit typed two ways, and nothing could
+    aggregate across them. The uniqueness rule below (and the backfill
+    migration's dedupe) is case- and whitespace-insensitive ONLY: "m3"
+    and "m³" are NOT treated as the same label, because "³" (U+00B3) is
+    a distinct Unicode code point from "3" (U+0033) — Python's
+    `.lower()` does not fold one into the other. Merging Unicode symbol
+    variants would need an explicit normalization table, which is not
+    part of this sprint's scope.
+
+    Owner decision (2026-07-27): units are scoped **per provider
+    company**, not per customer/building/room. Rationale: a unit is a
+    physical measure (what changes per customer is the PRICE, not the
+    unit itself); a per-customer unit list would just reintroduce the
+    same drift one level up. Company-scoping mirrors `Service.company`
+    (read that model's docstring first) rather than inventing a new
+    scoping shape.
+
+    `is_active` (default True) lets an operator archive a rarely-used
+    unit out of the everyday picker WITHOUT breaking any row that
+    already references it — the owner's own framing: "sometimes for
+    only one customer we have a very weird unit, but usually we go
+    with defaults."
+
+    Only `Service` and `CustomerCustomPrice` link here (both nullable
+    FKs, additive). `ProposalLine.custom_unit_label` is deliberately
+    NOT touched — a Proposal is a document already shown to the
+    customer, and `ProposalLine.unit_type` is explicitly "denormalised
+    at create time so a later catalog edit... does not rewrite
+    history"; repointing it at a mutable catalog row would let a later
+    unit rename silently change what a customer was historically
+    quoted. The free-text fields on `Service` / `CustomerCustomPrice`
+    also stay: `custom_unit_label` remains the single rendered value
+    everywhere (PDF, exports, lists) whether or not a row has adopted
+    the managed catalog, so every existing consumer of that field
+    keeps working unmodified. When a row IS linked to a `ManagedUnit`,
+    the catalog serializers keep `custom_unit_label` in sync with the
+    unit's current `label` at every write (see
+    `serializers_catalog.py`).
+    """
+
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="managed_units",
+        help_text=(
+            "Provider company that owns this unit. PROTECT mirrors "
+            "Service.company: a Company cannot be hard-deleted while "
+            "it still has managed units."
+        ),
+    )
+    label = models.CharField(
+        max_length=50,
+        help_text='Operator-facing display label, e.g. "m³", "strekkende meter".',
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archiving (is_active=False) removes a unit from the "
+            "everyday picker without breaking rows that already "
+            "reference it."
+        ),
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["company__name", "label", "id"]
+        constraints = [
+            # Case- AND whitespace-insensitive uniqueness, enforced at
+            # the DB layer (not just app-level validation) so a race
+            # condition or a direct-ORM write cannot create "m3" and
+            # "M3 " as two rows in the same company. Trim() first so
+            # leading/trailing whitespace can't bypass Lower()-only
+            # dedupe; Lower() handles case. Postgres builds this as a
+            # real expression index.
+            models.UniqueConstraint(
+                Lower(Trim("label")),
+                "company",
+                name="uniq_managed_unit_label_per_company_ci",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.company.name} / {self.label}"
+
+
 class ServiceCategory(models.Model):
     """
     Sprint 28 Batch 5 — provider-side service catalog: top-level
@@ -666,6 +762,23 @@ class Service(models.Model):
     # it blank for every concrete unit type and REQUIRES a non-blank label
     # for OTHER (stable code `custom_unit_label_required`).
     custom_unit_label = models.CharField(max_length=50, blank=True, default="")
+    # Sprint 123 — optional link into the company's managed-unit catalog
+    # (see ManagedUnit). Nullable: a pre-Sprint-123 row, or one whose
+    # label never got linked, stays valid. `custom_unit_label` remains
+    # the rendered text either way — the catalog serializer keeps it in
+    # sync with the linked unit's current label at every write.
+    managed_unit = models.ForeignKey(
+        "ManagedUnit",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="services",
+        help_text=(
+            "Sprint 123 — optional managed-unit catalog link, only "
+            "meaningful when unit_type=OTHER. PROTECT: archiving a "
+            "unit is always safe; deleting one still in use is not."
+        ),
+    )
     default_unit_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -813,6 +926,23 @@ class CustomerCustomPrice(models.Model):
     # serializer forces it blank for every other unit type so the two
     # cannot drift out of sync.
     custom_unit_label = models.CharField(max_length=50, blank=True, default="")
+    # Sprint 123 — optional link into the owning company's managed-unit
+    # catalog (see ManagedUnit; company is reached via customer.company,
+    # this model has no direct company FK). Nullable + additive, same
+    # rationale as Service.managed_unit.
+    managed_unit = models.ForeignKey(
+        "ManagedUnit",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="custom_prices",
+        help_text=(
+            "Sprint 123 — optional managed-unit catalog link, only "
+            "meaningful when unit_type=OTHER. Must belong to the same "
+            "company as customer.company (enforced in the view — see "
+            "views_catalog.py::_enforce_same_company_managed_unit)."
+        ),
+    )
     unit_price = models.DecimalField(
         max_digits=12,
         decimal_places=2,
