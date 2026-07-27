@@ -30,6 +30,15 @@ docs-only pass — so this file always reflects where we actually are.
   §8 now has a standing rule for this: a sprint does not close without
   updating NOW/NEXT/SHIPPED in that same branch. Don't let it drift a
   third time.
+- **A PR cannot cite its own number.** The `## SHIPPED` line for a merged PR
+  is therefore appended by the FIRST commit of the NEXT branch, not by the
+  PR it describes. A one-PR lag is by design; a two-PR lag is drift. (This
+  is what happened to #119 — Sprints 123 and 124 correctly declined to
+  invent a number, and the entry then had nowhere to land until this
+  docs-only close-out.)
+- **Cross-references into `## NEXT` cite the item by NAME, never by
+  number.** `## NEXT` renumbers whenever an item ships, which silently
+  breaks every numeric pointer into it.
 
 ---
 
@@ -46,65 +55,26 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-122` — Sprints 122, 122.1, 123, and 124 all
-landed here. **The branch is COMPLETE** — this was the last sprint
-planned for it; the owner opens **ONE** PR covering all four next.
-**Last shipped PR on `main`:** **#118** — Sprint 121 (a Sprint-117
-padding-regression fix on `BoundedList`, the nginx `.mjs` MIME-type fix
-that had silently broken PDF-thumbnail rendering in prod, and PDF
-first-page thumbnails for staff credentials).
-**In flight on this branch (unmerged, awaiting the owner's PR):**
-- **Sprint 122** (commits `3933cd4`, `ff386a0`, `616cbc5`) — sharper PDF
-  thumbnails (measure the parent tile + devicePixelRatio instead of the
-  always-0 hidden-canvas width), the credit-note flow completed (an
-  unmissable send-nudge on an unsent reversal, `credited_by_number` on
-  both the provider and customer invoice views, and a fix for the Unissue
-  button rendering on a reversal where the backend already rejects it),
-  and a SUPER_ADMIN per-company **email** notification opt-in separate
-  from the existing in-app subscription.
-- **Sprint 122.1** — restructured this file into NOW/NEXT/SHIPPED and
-  closed the anti-drift gap (see above).
-- **Sprint 123** — managed units per provider company. A new
-  `extra_work.ManagedUnit` model (company-scoped, case+whitespace-
-  insensitive unique label, `is_active` archive flag) plus a nullable
-  `managed_unit` FK on `Service` and `CustomerCustomPrice` (additive
-  migrations `extra_work/0018`–`0020`: the schema, a data backfill that
-  collapsed every existing distinct-normalized free-text
-  `custom_unit_label` per company into one managed unit (most-frequent-
-  spelling-wins, tie-broken by earliest `created_at`), and a trailing
-  help-text-only field alter). Admin CRUD at
-  `/api/services/units/`, gated on the same catalog-management
-  permission as the Service catalog, tenant-scoped like every other
-  catalog endpoint. Frontend: a new "Units" tab on the Services admin
-  page, and a shared `ManagedUnitPicker` (active-unit dropdown + inline
-  "add new") replacing the free-text input everywhere `unit_type ==
-  OTHER` is chosen for a `Service` or a `CustomerCustomPrice` — **not**
-  for `ProposalLine`, which stays deliberately frozen free text (a
-  proposal is a document already shown to the customer; repointing it at
-  a catalog that can later be renamed would silently change a historical
-  quote). Deliberately NOT added to `## SHIPPED` yet — this branch is
-  still unmerged and has no PR number.
-- **Sprint 124** — per-building revenue split in Customer Reports. A
-  new `compute_extra_work_revenue_by_building` (backend/reports/
-  dimensions.py) shares the exact scope/customer/date-window resolution
-  and per-row classification the flat `compute_extra_work_revenue`
-  already uses (extracted into `_resolve_extra_work_revenue_rows`), so
-  the two can never diverge — the per-building buckets are proven (by
-  test) to sum to the flat report's total for the same filters. New
-  endpoint `/api/reports/extra-work-revenue-by-building/` (+ CSV/PDF),
-  same `IsRevenueReportConsumer` permission floor as the flat report. A
-  building with zero in-scope revenue in the period is omitted, not
-  padded with a zero row (mirrors `compute_tickets_by_building`'s own
-  behaviour). Frontend: a new `ExtraWorkRevenueByBuildingChart` on the
-  customer Reports tab, wrapped in `BoundedList` (CLAUDE.md §8) so a
-  customer with 18+ buildings (the dev seed's "B Amsterdam") gets a
-  scrollable, capped-height chart instead of an ever-taller page — each
-  bar still renders at its normal height inside the box. No migration
-  (none was needed). Deliberately NOT added to `## SHIPPED` yet — same
-  reason as above.
-**Immediate next step:** the owner opens the single PR for this branch
-(Sprints 122, 122.1, 123, 124) — no further sprint is queued on
-`feat/sprint-122`. See `## NEXT` for what comes after.
+**No feature branch in flight.** `main` is at `01e6eb5`.
+**Last shipped PR on `main`:** **#119** — Sprints 122, 122.1, 123, 124 (see
+`## SHIPPED` for the full breakdown). The current branch,
+`docs/checklist-119-closeout`, is this docs-only close-out itself — its own
+`## SHIPPED` line is appended by the first commit of whichever branch starts
+next (see the new maintenance rule below).
+**Live migrations from #119:** `extra_work/0018`–`0020` (the `ManagedUnit`
+schema, its `custom_unit_label` backfill, and a trailing help-text-only
+alter) + `notifications/0014` (the SA per-company email opt-in).
+**No next sprint is assigned yet.** Two things gate what comes next:
+- The father's voice memo on the Event + Department features — received by
+  the owner, not yet scoped.
+- For Event/Department specifically, the standing owner decision that the
+  light/advanced mode split is an **architectural** decision to settle
+  first, so those features are born mode-aware rather than retrofitted (see
+  `## NEXT`, "Light/advanced mode split").
+
+Production hardening is **postponed at the owner's instruction** — it needs
+his own inputs (SMTP credentials, a Sentry DSN, the real production
+`PLATFORM_BRAND_SLUG`); see `## NEXT`, "Production hardening → CD → Sentry."
 
 ---
 
@@ -230,6 +200,27 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#119** (`01e6eb5`) — Sprints 122 / 122.1 / 123 / 124 · **122** sharper PDF
+  thumbnails (measure the parent tile + devicePixelRatio instead of the
+  always-0 hidden canvas width), the credit-note flow completed (an unsent
+  ISSUED reversal now reads as an amber "credit note — not sent" with a
+  send-nudge banner, `credited_by_number` on both the provider and customer
+  invoice serializers so a credited original stops reading as open debt, and
+  the Unissue button hidden on a reversal the backend already rejects), and a
+  SUPER_ADMIN per-company **email** notification opt-in separate from the
+  existing in-app subscription (`notifications/0014`, default off);
+  **122.1** this file restructured into NOW / NEXT / SHIPPED, the CLAUDE.md §8
+  anti-drift rule added, the June build logs moved to
+  `docs/archive/2026-06-sprints/`; **123** managed units per provider company
+  (`extra_work.ManagedUnit`, migrations `extra_work/0018–0020` including the
+  `custom_unit_label` free-text backfill, `/api/services/units/` CRUD, a Units
+  tab on the Services admin page + the shared `ManagedUnitPicker`;
+  `ProposalLine` deliberately excluded); **124** per-building Extra Work
+  revenue split on the customer Reports tab
+  (`compute_extra_work_revenue_by_building` sharing
+  `_resolve_extra_work_revenue_rows` with the flat report,
+  `/api/reports/extra-work-revenue-by-building/` + CSV/PDF,
+  `ExtraWorkRevenueByBuildingChart` wrapped in `BoundedList`; no migration).
 - **#118** (`daaaae3`) — Sprint 121 · a Sprint-117 padding regression on `.bounded-list` fixed (text no longer flush against the box); the nginx `.mjs` MIME-type root cause of broken PDF-thumbnail rendering in prod fixed (`.mjs` served as `application/javascript`, not `octet-stream`); PDF first-page thumbnails added for staff credentials via a new shared `<DocumentThumb>` (extracted from `AttachmentThumb`).
 - **#117** (`79d814d`) — Sprint 120 · guarded `unbilled_extra_work_through` against an unresolvable billing month (K-1, `TypeError` → 500 risk on `/due/`), and fixed exhaustive-paging truncation (K-2) across `ExtraWorkListPage`, `FacturenPage`, and two further instances found while fixing it (`DashboardPage`'s billing KPI, `CustomerReportsPage`'s customer-facing report tab) — all four now page exhaustively instead of silently capping at 100/200 rows.
 - **#116** (`70af26e`) — chore: renamed the default branch `master` → `main` (CI triggers + docs updated to match; no functional change).
@@ -271,7 +262,7 @@ flagged inline at the time.
 3. **Invoice PDF + send-to-customer.** A PDF invoice system; likely Ramazan feedback on how invoices / customer feedback get sent. **Shipped — the invoicing subsystem (`## SHIPPED` #112); the send-nudge + credited-original marking shipped in Sprint 122.**
 4. **Notifications history / read messages.** Can't reliably see past notifications; need full history incl. already-read items. **Shipped — RF-1 (`## SHIPPED` #103).**
 5. **Attachment in-app preview.** Clicking an attachment downloads it; want in-app viewing, with PDF preview inside the app. **Shipped — RF-5 (`## SHIPPED` #100) + RF-12 thumbnails (#101) + Sprint 121/122 sharpness fixes.**
-6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific. "Event" may be a selectable event type, not a category — undecided. **Still open — see `## NEXT` #8.**
+6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific. "Event" may be a selectable event type, not a category — undecided. **Still open — see `## NEXT`, "Event + Department features."**
 7. **Right-side card layout / density.** Assignment / responsible-manager / building-manager / scheduling / ticket-detail / add-slot / add-subcard / manager sections are good UX. Possible: make the right-side cards larger with more horizontal space. **Shipped — RF-9 + RF-17 (`## SHIPPED` #106, #107).**
 8. **Customer surfaces — keep combined.** Separate pages for a customer's EW / quote-requests / tickets likely won't be liked; want one customer page with tabs/subsections. **Shipped — M6 (customer drill-in sub-tabs), predates this backlog.**
 9. **Baseline:** system in good shape at the time; editing customers/users + general flows fine; no major issues.
@@ -292,7 +283,7 @@ flagged inline at the time.
 
 **RF-6 — Live proposal-PDF preview, split screen (Ramazan, 2026-06-23).** While building a price proposal, the right half shows the proposal rendered as it will look, updating as lines are entered. **Shipped — `## SHIPPED` #101.**
 
-**RF-7 — Extra Work detail: pricing section "big tabs" (Ramazan, 2026-06-23; location confirmed, element TBC).** Big tab/block elements where he prefers click-in navigation. Göktuğ confirms it's the EW pricing section; the exact element is still to be pinpointed. **Still open — see `## NEXT` #5.**
+**RF-7 — Extra Work detail: pricing section "big tabs" (Ramazan, 2026-06-23; location confirmed, element TBC).** Big tab/block elements where he prefers click-in navigation. Göktuğ confirms it's the EW pricing section; the exact element is still to be pinpointed. **Still open — pinned inside `## NEXT`, "Fixing & Auditing Sprint."**
 
 **RF-8 — Simplified module/permission surface + future modules (Ramazan, 2026-06-23).** Think of melding/extra work as modules; one user-management surface grants module access; keep the visible permission UI to 3–4 coarse toggles per module, with fine-grained permissions bundled behind them. **Shipped — `## SHIPPED` #106 (module cards Meldingen + Extra werk, master on/off + 3 coarse toggles, full depth behind "Geavanceerd").**
 
@@ -326,7 +317,7 @@ flagged inline at the time.
 
 **Owner review round 5 (2026-07-20):** "My Work" made role-adaptive and hidden for SA + CA. **Shipped — `## SHIPPED` #111.** Two open discussion items from this round are carried in `## NEXT` (#3, #4).
 
-**Meeting notes (2026-06-23):** Department/event are category-like fields; names must stay editable/customer-flexible — refines backlog #6. Ramazan will do a full side-by-side review vs their current system (this is the review `## NEXT` #5 is gated on). He validated the pricing work (bulk raise, customer-specific prices, price history preserved). The credentials/permissions area of their current tool is their worst pain point.
+**Meeting notes (2026-06-23):** Department/event are category-like fields; names must stay editable/customer-flexible — refines backlog #6. Ramazan will do a full side-by-side review vs their current system (this is the review `## NEXT`, "Light/advanced mode split," is gated on). He validated the pricing work (bulk raise, customer-specific prices, price history preserved). The credentials/permissions area of their current tool is their worst pain point.
 
 ## Documented-intentional behaviors (audit 2026-07-20)
 These surfaced during the #109 audit and are intentional — recorded so a future audit does not re-flag them:
