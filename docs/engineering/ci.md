@@ -9,11 +9,11 @@ Three GitHub Actions workflows live under
 > introduced a four-tier verification flow so small PRs do not need
 > to wait through the full test universe.
 
-## test.yml — PR + master push validation
+## test.yml — PR + main push validation
 
 Triggers:
-- Pull requests targeting `master`
-- Pushes to `master`
+- Pull requests targeting `main`
+- Pushes to `main`
 - Manual via the **Actions** tab (`workflow_dispatch`)
 
 PR runs are de-duplicated: a force-push or new commit cancels the
@@ -86,7 +86,7 @@ Triggers:
   tab. Accepts an optional `spec_filter` input (a Playwright spec
   path or grep filter) so a single spec can be run in CI without
   pulling the runner through the full suite.
-- `schedule` — nightly cron at **03:30 UTC** runs against master.
+- `schedule` — nightly cron at **03:30 UTC** runs against main.
 
 What it does:
 1. Materialises a `.env` from the CI env block so docker compose
@@ -111,14 +111,14 @@ job above remains the merge gate. Trigger Playwright manually when:
   permission gate that the per-PR jobs cannot exercise.
 - A reviewer requests the full sweep before merge.
 
-## build-images.yml — GHCR publishes on master
+## build-images.yml — GHCR publishes on main
 
 Triggers:
-- Pushes to `master`
+- Pushes to `main`
 - Manual via the **Actions** tab (`workflow_dispatch`)
 
 Pull requests do NOT trigger image publishes. CI's job on PRs is
-validation only; only merges to master produce images.
+validation only; only merges to main produce images.
 
 ### Images
 
@@ -182,4 +182,4 @@ docker run --rm --add-host=host.docker.internal:host-gateway \
 Production deploy (pulling these images into the prod compose stack,
 DNS / TLS termination, `ALLOWED_HOSTS` healthcheck wiring, real SMTP,
 backups) is **Sprint 4**. This sprint only ships the CI foundation:
-PR validation + image publishing on master.
+PR validation + image publishing on main.

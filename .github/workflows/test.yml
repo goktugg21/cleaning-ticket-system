@@ -2,13 +2,13 @@ name: test
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main]
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
 # Cancel in-flight runs for the same ref on PRs (a force-push or new
-# commit supersedes any earlier in-flight run). master pushes don't
+# commit supersedes any earlier in-flight run). main pushes don't
 # share a ref with each other so they are unaffected.
 concurrency:
   group: test-${{ github.ref }}
