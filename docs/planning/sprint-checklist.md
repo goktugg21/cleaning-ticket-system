@@ -1,591 +1,305 @@
 # Osius — Gap-Closing Sprint Checklist
 
-**Updated 2026-07-26** — master is at PR #114 (invoice UI polish); the invoicing subsystem (PR #110–#114) is shipped. This branch is **Sprint 115** (docs restructure + content rewrite). Meeting-2 block + Sprints 7–9 + the #100–#114 queue all shipped.
+**Purpose.** The living plan to close every remaining gap between the
+system and the Ramazan transcripts + Source of Truth, ending with a
+premium UI/UX polish. **CC updates `## NOW` / `## NEXT` / `## SHIPPED`
+for a sprint as part of that sprint's own commit(s)** — not in a later
+docs-only pass — so this file always reflects where we actually are.
 
-**Purpose.** The living plan to close every remaining gap between the system and the Ramazan transcripts + Source of Truth, ending with a premium UI/UX polish. **CC ticks the boxes for a sprint as it completes it** (and stages this file with the commit), so we always know where we are.
+---
 
-**How to use.** Work the **Near-term priority** block first (Ramazan Meeting 2 is the Monday-deadline work), then the original Sprints 7–9, then the standing milestones. Each sprint is a separate CC prompt. Don't start a sprint before the prior one is reviewed/merged unless noted as independent.
+## How to maintain this file (read this before editing anything below)
+
+- **`## NOW`** is rewritten every sprint — replace it, don't append to it.
+  It should stay a paragraph or a few bullets: current branch, the last
+  shipped PR on `main`, what's in flight, and the immediate next sprint.
+- **`## NEXT`** is ONE ordered queue, re-ordered whenever priorities
+  change. Add a newly-found item here as soon as it's found — don't let
+  it wait for a dedicated audit sprint. Remove an item once its sprint
+  starts (it moves into `## NOW`) or ships (it moves into `## SHIPPED`).
+- **`## SHIPPED`** is append-only: one line per merged PR, newest first.
+  Never edit a historical line's wording once it's written — if a line
+  turns out to be inaccurate, add a corrected note rather than rewriting
+  it (see the #115 entry below for the pattern).
+- Everything after the second `---` is a **frozen appendix**, or has been
+  moved to `docs/archive/` — not maintained, not current truth. Only edit
+  it to move MORE material out, not to update its content.
+- **This file drifted out of date twice** before Sprint 122.1 restructured
+  it (see `docs/archive/2026-06-sprints/` for what moved out and why) —
+  in both cases because nothing *required* the update to happen. CLAUDE.md
+  §8 now has a standing rule for this: a sprint does not close without
+  updating NOW/NEXT/SHIPPED in that same branch. Don't let it drift a
+  third time.
 
 ---
 
 ## Conventions (apply to every sprint / CC prompt)
 - Backend is the business source of truth; **verify, don't assume**; never invent endpoints.
-- **Never read or stage** `docs/transkript.txt` / `docs/ramazan_transkript*.txt` or their `:Zone.Identifier`. Stage commits by **explicit path**.
+- **Never stage** `docs/transkript*` or their `:Zone.Identifier`. Stage commits by **explicit path**.
 - nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
-- ESLint baseline = **48** (46 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation — baseline dropped 49 → 48.)
-- Backend / migration / RBAC → open a **PR** (CI + Codex). Migrations additive + back-compat. Routine frontend-only → also a PR now (de-facto rhythm).
-- Each prompt starts with a sync + a grep GUARD proving the right base, captures the lint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
-- Co-author trailer on commits: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+- ESLint baseline = **48** (46 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation — baseline dropped 49 → 48; still 48 as of Sprint 122.)
+- **PR cadence (corrected 2026-07-27 — the old "PR per sprint" line was stale):** several sprints now land on ONE shared branch and the owner opens ONE PR after the last of them (Sprints 115–119 → PR #115; Sprints 122–124 are following the same pattern on `feat/sprint-122`). CI (+ Codex review) still gates that one PR when it opens. Migrations stay additive + back-compat regardless of when the PR opens.
+- Each prompt starts with a sync + a grep GUARD proving the right base, captures the ESLint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial self-review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
+- Co-author trailer on commits: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (the old line here named a different model — verify the current one in `CLAUDE.md` before reusing this, it has changed before).
 
 ---
 
-## Where we are (2026-06-05)
+## NOW
 
-**Completed in this gap-closing effort (do NOT rebuild):**
-- **Sprint 0** — PR #79 Codex P2 fixes (paginate responsible-managers; key by ticket id) ✅ merged; customer-pricing reference prefill ✅ (shipped as the #86 line below).
-- **Sprint 1** — Reschedule frontend control on ticket detail (consumes `/tickets/<id>/schedule/`; SA/CA/BM) ✅.
-- **Sprint 2** — Permission editor in-place from the contact (popup/expand; existing page still reachable) ✅.
-- **Sprint 3** — Contact-first enforcement audited + invitations restricted to provider staff ✅.
-- **Sprint 4** — Sub-tasks **backend** (PR #84): `SubTask` model, nullable `TicketStaffAssignment.sub_task` FK, PA/SA `auto_complete_on_subtasks` flag + roll-up, audit ✅ merged.
-- **Sprint 5** — Sub-tasks **frontend** (PR #85): grouped staff slots, sub-task CRUD, PA/SA auto-complete toggle, PII-safe customer view ✅ merged.
-- **Customer pricing — surface the service default price** (PR #86): dialog prefills unit price + VAT from the service default; default-price column (incl. inactive services); dropdown shows defaults ✅ merged.
-- **Sprint 6** — Recurring **calendar-tick** (PR #87): additive `PlannedOccurrence.is_ad_hoc` (migration 0004) + four idempotent per-date `RecurringJobViewSet` actions (skip-date / add-date / clear-date / calendar) + the month-grid calendar UI + customer/building dropdown swap + per-window pricing clarity. Back-compat with #77. **Follow-up fix in-flight:** bound `add-date` to `[start_date, end_date]` + cap the ad-hoc spawn at `end_date` (Codex P2) — push re-triggers CI; resolve the thread; merge on green.
-- **M1 — Notification & message center** (PR #90): in-app notifications feed + recipient-scoped REST + NotificationBell + /notifications page; 5-channel ticket message visibility + RESTRICTED directed messages through the single `filter_messages_visible_to` chokepoint; 3-channel Extra Work thread; EW lifecycle + message notifications ✅ merged.
-
-**Standing infra not yet done:** production deployment; CD (CI exists as PR checks); Sentry DSNs.
-
----
-
-## Near-term priority — Ramazan Meeting 2 (2026-06-05) + carried-over
-
-> The **Monday** deadline no longer applies. A **dev/test live link** (`crmtest.osius.nl`) already exists and Ramazan has access, so the "live link" need is met — real **production deployment** remains its own standing milestone (no longer pulled forward for that reason). The **Department section** and a full **requirements + codebase audit** are folded into the **Fixing & Auditing Sprint** below.
-
-### CP — Customer-permissions page (carried over) — do first, one PR (same page)
-Backend already supports granting a building a customer user isn't in (`POST /api/customers/<id>/users/<user_id>/access/ {building_id}`, gated only by the Sprint-14 customer↔building link). The FE has `addCustomerUserAccess` wired but the matrix view doesn't surface the control.
-- [x] **Add-building control** in the customer-permissions matrix (pick an un-granted building linked to the customer + role → POST). FE-only. **DONE** (branch `feat/cca-company-wide-and-people-consolidation`): surfaced in the People drill-in modal via the reused `ContactPermissionsPanel` (building picker + grantable-role select from `allowed_target_customer_access_roles`, hidden for a company-admin user).
-- [x] **Option A — `CUSTOMER_COMPANY_ADMIN` company-wide.** Make CCA grant admin across **all** the customer's buildings from one setting; collapse the per-building rows into a single company-wide status; demote = remove that status. **DONE**: additive `CustomerUserMembership.is_company_admin` flag (migration `0010`, forward-only collapse of existing per-building CCA rows); `company_admin_customer_ids` unioned into scoping (tickets/EW/buildings) + ticket-scope/transition + EW catalog/pricing; `compute_role_defaults`/`compute_scope`/`user_can` short-circuit so no per-building row can downgrade a CCA; dedicated POST/DELETE `/users/<id>/company-admin/` endpoint (gated by `can_manage_customer_company_admins`, audited via a dedicated membership UPDATE signal). **Follow-up (not in this PR) — BOTH NOW RESOLVED:** retiring the legacy per-building CCA grant path (the split-brain this note calls out) is done — `backend/customers/serializers_memberships.py::validate_access_role` unconditionally rejects `access_role=CUSTOMER_COMPANY_ADMIN` for every actor including SUPER_ADMIN (see the "CCA legacy grant-path retirement" line below). The `user_can` CustomerCompanyPolicy-bypass decision is separately resolved (Sprint 116 — see "CCA — product-SoT sign-off" below and [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md) §A.1.1). (Note: these are two distinct things despite both being called out here — the grant-path split-brain is about who may BECOME a CCA; the policy bypass is about what a CCA may DO once granted. Sprint 116 touched only the latter; it did not touch `can_manage_customer_company_admins` (the separate "B5" gate on who may grant CCA).)
-- [x] **People consolidation + drill-in edit** (Ramazan #5): Contacts / Users / (customer) Employees on **one page** with **drill-in / modal edit** ("click in, edit, leave" — NOT accordion expand). **DONE**: new `/admin/customers/:id/people` page + "People" sidebar tab; one roster with distinct TYPE badges (Contact / Employee / User, several at once); row click opens `CustomerUserManageModal` (company-admin single-status + reused `ContactPermissionsPanel` access editor) — replaced the old `CustomerUsersPage` accordion with the same drill-in. Concepts kept distinct; phone validation unchanged.
-
-### M1 — Notification / message center (Ramazan #1 — his top pain)
-Messages on tickets / extra-work / meldingen get lost; nobody sees replies.
-- [x] Backend: a notifications feed + per-message "directed-to" (personal/tagged) targeting; recon what already exists (notifications app) before building. Events: new message on a ticket / EW request / melding, and a personally-addressed message.
-- [x] FE: a **top-right bell** + a **notifications page**; each item deep-links to the source (ticket/EW/melding). Personal/tagged messages surface to the addressee only.
-
-### M2 — User/staff profile: structured credentials + flexible custom properties + visibility (Ramazan #4, expanded)
-**Hybrid model (confirmed):**
-- [x] **Structured, typed, compliance-aware credential fields** with built-in rules: **residence permit** (showable; when shown, only expiry date + ID number) · **EU national ID** (**HARD-BLOCKED from any customer — PA/SA only, never a customer-visible PDF**; enforced in code, not a toggle) · **certificates/VCA** (PDF, showable). Documents are **PDF**.
-- [x] **Generic custom-property system** on **all** user profiles (staff + customer users): `property name / value / optional PDF attachment`, **add/remove** (e.g. age, salary, contract).
-- [x] **Visibility model:** every property/document has a visibility level, **default most-restrictive (provider-only)**; salary-type defaults to **PA/SA-only**; visibility selectable **per-customer and per-staff** (who sees what). Visibility changes on sensitive fields are **audited**.
-- [x] Customer-side view honours visibility + the customer permission gate; the EU-ID block is unconditional.
-
-### M3 — Navigation / IA (Ramazan #1-nav)
-- [x] Move **Recurring Work** and the **customer price-quote-request** flow to live **under Extra Work** (sub-items), not as separate top-level / not performed directly in Extra Work.
-
-### M4 — Extra Work billing: monthly invoice run + billing-month (Ramazan #2) ✅ DONE
-Billing must key off a **billing month you set**, not the customer's final-approval date (work done May 31, approved Jun 7 → bills in **May**).
-- [x] Backend (commits 1 / 2a–2e): settable **billing month / `invoice_date`** on `ExtraWorkRequest` (decoupled from approval; migration 0013), provider-only redaction; per-month **invoice run** — mark/clear-invoiced by **company + month** (single source of truth `extra_work/billing.py`; earned = spawned ticket CLOSED; billing month = `COALESCE(invoice_date, completion)`); **EW list filters** (billing month + invoice status); **EW-revenue report** anchored on billing month + status filter (CSV/PDF exports track it).
-- [x] FE (commits 3a–3d): billing-month picker + invoice-status filter + invoiced column on the EW list (provider-only); **invoice-run toolbar** (mark/clear by month + in-view company, confirm-gated); itemized client-side **CSV export** of the filtered list; per-EW **billing-month override** on the detail page (via 2b).
-- Shipped on branch `feat/m4-billing-month` (12 commits); deployed + verified on the dev/test box.
-
-### M5 — Customer pricing: custom line + category edit + bulk raise (Ramazan #3) ✅ DONE
-Builds on #86.
-- [x] **Custom/ad-hoc price line**: add a price for a service **not in the catalog** (free-text name + price + VAT), customer-specific. **DONE** (PR #94): additive `CustomerCustomPrice` model (no service FK, resolver/cart/billing-isolated), provider-only CRUD at `/api/customers/<id>/custom-pricing/` + "Custom price lines" section on the customer pricing page; full-CRUD audit.
-- [x] **Category editing** on the service catalog; a **bulk price-raise** helper (raise many catalog/customer prices at once). **DONE** (PR #94): category editing already shipped (Sprint 28); bulk-raise both **customer contract prices** (`/api/customers/<id>/pricing/bulk-raise/` — new validity-window rows, history-preserving, per-service de-dup) and **catalog defaults** (`/api/services/bulk-raise/` — in place, billing-isolated), % or fixed, with UI on the customer-pricing and services pages.
-
-### M6 — Customer detail (provider side) + dashboard "my X" (Ramazan #7) ✅ DONE
-- [x] On a customer's page, surface **that customer's** tickets / extra-work / **price-quote-requests** / meldingen as drill-in sub-tabs (mirror existing surfaces). **DONE** (PR #95).
-- [x] Dashboard: a **"my X"** aggregation (my tickets / meldingen / extra-work / requests). **DONE** (PR #95).
-
-### M7 — Melding (Ramazan #8) ✅ DONE
-- [x] **Melding = a customer-created waiting ticket** (the Dutch-facing name; NOT a separate concept). Verify the customer-create-ticket path exists + is surfaced as "melding" in the customer UI; close any gap. **DONE** (PR #96).
+**Branch:** `feat/sprint-122` — Sprints 122, 122.1 (this restructure), 123,
+and 124 all land here; the owner opens **ONE** PR after Sprint 124.
+**Last shipped PR on `main`:** **#118** — Sprint 121 (a Sprint-117
+padding-regression fix on `BoundedList`, the nginx `.mjs` MIME-type fix
+that had silently broken PDF-thumbnail rendering in prod, and PDF
+first-page thumbnails for staff credentials).
+**In flight on this branch (unmerged):**
+- **Sprint 122** (commits `3933cd4`, `ff386a0`, `616cbc5`) — sharper PDF
+  thumbnails (measure the parent tile + devicePixelRatio instead of the
+  always-0 hidden-canvas width), the credit-note flow completed (an
+  unmissable send-nudge on an unsent reversal, `credited_by_number` on
+  both the provider and customer invoice views, and a fix for the Unissue
+  button rendering on a reversal where the backend already rejects it),
+  and a SUPER_ADMIN per-company **email** notification opt-in separate
+  from the existing in-app subscription.
+- **Sprint 122.1** (this pass) — restructures this file into
+  NOW/NEXT/SHIPPED and closes the anti-drift gap (see above).
+**Immediate next sprint:** **Sprint 123** — managed units per provider
+company (see `## NEXT`).
 
 ---
 
-## Original remaining sprints (after the Meeting-2 block)
+## NEXT
 
-### Sprint 7 — Bulk select-and-approve  ✅ DONE (PR #97)
-The father's "select" button: confirm many completions at once.
-- [x] Backend bulk endpoint DONE (PR #97): `POST /api/tickets/bulk-status/` advances tickets `WAITING_MANAGER_REVIEW → WAITING_CUSTOMER_APPROVAL`, per-item atomic via `apply_transition`, explicit source-status guard (Codex P1 fix: rejects wrong-state tickets even for SUPER_ADMIN), scoped not-found, gated 403 for CUSTOMER_USER/STAFF; tests added.
-- [x] FE multi-select + bulk-confirm on the dashboard manager-review queue ("Te bevestigen" preset); gates green.
+Single ordered queue — replaces the four lists this used to be spread
+across ("Owner's forward queue", "Deferred / undecided items", "Standing
+milestones", "Deferred"). All four are now retired; every genuinely-open
+item from them lives here, and every already-shipped or already-decided
+item has moved to `## SHIPPED` or been resolved below instead.
 
-### Sprint 8 — Coverage verification & surface  ✅ DONE (PR #98)
-- [x] **Unable-to-complete** (§4.4): already surfaced via the slot-completion path (AgendaPage) — requires a reason and fires `send_slot_unable_to_complete_email` to the manager. The legacy ticket-level `/tickets/<id>/unable-to-complete/` endpoint is superseded by the slot model and intentionally left unsurfaced.
-- [x] **Actual-hours** (§5.12): hourly EW finalize surfaced on the Extra Work detail page (provider-only panel → `POST /api/extra-work/<id>/actual-hours/`). Covers BOTH the INSTANT-cart route AND proposal-routed/auto-start hourly EWs — the active set follows `active_priced_lines`, fixing the Codex P1 dead-end where proposal-routed hourly EWs were blocked by the `actual_hours_required` completion gate with no entry UI. Legacy pricing lines stay out (no `actual_hours` column; never gate).
-- [x] **Copy-from-default** (§5.9): "Copy from defaults" action on the customer pricing page → `POST /api/customers/<id>/pricing/copy-from-default/` (active-services multi-select + valid_from/optional valid_to, all-or-nothing).
-- [x] Occurrence **skip/cancel** surfaced (`skipOccurrence`/`cancelOccurrence` on RecurringJobDetailPage); no other unsurfaced in-scope endpoint found.
+1. **Sprint 123 — managed units per provider company** (owner-decided;
+   next up on this branch). Today `custom_unit_label` is scattered
+   free-text on **three** models — verified 2026-07-27:
+   `extra_work.models.Service`, `CustomerCustomPrice`, `ProposalLine` —
+   with no shared catalog behind any of them. Build a new per-company
+   managed-unit model + a backfill + admin CRUD + an active/archived flag
+   + picker integration wired into all three consumers; the existing
+   free-text fields stay as a deprecated fallback. Additive migrations
+   only. This resolves the old open question "custom-unit depth (per
+   customer / building / room — undecided)" — the owner decided the
+   scope is **per provider company**, not per customer/building/room.
+2. **Sprint 124 — per-building revenue split in Customer Reports**
+   (owner-decided: build it). Resolves the former "customer-scoped chart
+   follow-ups (#109 Part H)" item, which had been listed as optional —
+   now decided and queued, right after 123 on the same branch.
+3. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
+   "my work" surface? An SA creates little of their own work; the
+   concept today is admin-scoped. Awaiting the owner's definition before
+   anything is built.
+4. **Dashboard "Mijn werk" section purpose** — clarify whether the chip
+   row means "items I created" (current behaviour) or a broader "what
+   needs me" queue, and whether it should differ per role. Awaiting
+   owner direction.
+5. **Fixing & Auditing Sprint** — gated on Ramazan's full side-by-side
+   review landing (his own commitment, not yet delivered as of
+   2026-07-27). Scope once it lands: incorporate whatever further changes
+   Ramazan + father want; pin down **RF-7** (the Extra Work
+   pricing-area "big tabs" element he wants changed — location confirmed,
+   exact element still to be pinpointed — see the appendix below); design
+   + build the **Department + Event** section in person with Ramazan and
+   father (no `Department` model exists in the codebase, confirmed
+   2026-07-27); a full codebase audit (bugs / dead code / inconsistencies,
+   confirm each shipped feature behaves as intended); reconcile this
+   checklist against the real codebase once the audit lands.
+6. **Mobile responsiveness** — gated on Ramazan's review landing (#5).
+7. **Light/advanced mode split** — gated on Ramazan's review. Owner
+   decision: this is an **architectural** decision to be settled BEFORE
+   the Event/Department features are built, not a later styling pass.
+8. **Event + Department features** — gated on Ramazan's review, designed
+   in person with Ramazan and father (see #5).
+9. **General code refactoring** (clean-up only, **no behaviour change**)
+   — owner decision: happens AFTER Event/Department ship, not before.
+10. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
+    coverage of the critical full-stack flows on the settled
+    post-feedback system — auth/login, create ticket + melding, ticket
+    lifecycle (staff complete → manager review → customer approval),
+    extra-work request → proposal/instant → actual-hours finalize,
+    customer pricing (contract / custom / bulk-raise / copy-default),
+    notification deep-links. Token-inject pattern (the e2e login form is
+    flaky). Green in CI. Ordering rationale (recorded 2026-06-23, still
+    the plan): the Fixing & Auditing sprint reshapes the UI, so tests
+    written first would be invalidated by those changes.
+11. **Frontend Testing Sprint** — after E2E. Component/unit tests for
+    high-value frontend logic that lacks coverage: pricing-amount
+    display, active-priced-line selection, permission/visibility gating,
+    the drill-in people/permissions flows, notification rendering.
+    Establish the test runner + a CI gate; do not regress the ESLint
+    baseline (48). No frontend component/unit test runner exists yet —
+    backend `manage.py test` and Playwright e2e are the only test
+    runners today; do not add an alternative opportunistically outside
+    this planned sprint (CLAUDE.md §8).
+12. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
+    not blocked on engineering: real SMTP credentials, a Sentry account +
+    DSN, and the real production OSIUS company slug for
+    `PLATFORM_BRAND_SLUG` (see `sot-addendum-b-invoicing.md` §B.9 — if it
+    doesn't match, OSIUS's own invoices render unbranded). CD via GitHub
+    Actions is otherwise ready to wire up (CI already runs as required PR
+    checks). Also standing: TLS, non-root containers, Postgres backups.
+    The owner will work through these interactively, not as an
+    engineering-only backlog item.
+13. **`reverse_invoice` never flips the original invoice's status** —
+    found during Sprint 122 verification, re-verified 2026-07-27 directly
+    against `backend/invoicing/state_machine.py`: `reverse_invoice`
+    checks the original is `SENT` and is not itself a reversal, but never
+    changes `original.status`, and `Invoice.reverses` carries no
+    uniqueness constraint — so nothing stops the same SENT invoice being
+    reversed more than once, each time minting another negated
+    counter-invoice (with its own real, gapless number) against the same
+    original. Pre-existing, not introduced by Sprint 122. No decision yet
+    on whether/how to guard it — recorded so it isn't lost.
+14. **Admin-picker lists sit on the DRF 200-row page cap** — found while
+    verifying Sprint 120's pagination fix (commit `79d814d`): confirmed
+    `CompanyViewSet` / `CustomerViewSet` / `BuildingViewSet` have no
+    `pagination_class` override, so the roughly dozen admin-page call
+    sites requesting `page_size: 200` (company/building/customer/user
+    picker and candidate lists) would silently truncate for any tenant
+    exceeding 200 rows — the same shape Sprint 120 fixed for the EW/
+    invoice/dashboard/reports lists. The Sprint 120 commit message
+    explicitly flagged this as future work but it was never added to this
+    file until now. Not urgent at current data volumes.
+15. **Add the Sprint 118 `<dialog>`-unmount gotcha to
+    `docs/engineering/claude-code-operational-notes.md`** — found during
+    Sprint 122.1: Sprint 118 root-caused and fixed the frozen-screen bug
+    (a native `<dialog>` left the document inert if a component unmounted
+    without calling `close()` first — see
+    `docs/archive/2026-06-sprints/sprint-116-119-build-log.md`), but that
+    reusable engineering pattern was never added to the live operational
+    notes doc. Small, standalone, docs-only.
 
-### Sprint 9 — Premium UI/UX polish  ✅ DONE (PR #99, deployed)
-- [x] A cohesive visual polish pass for a premium look (tokens, spacing, density, consistency), with extra attention to the recurring + sub-task + new profile/notification surfaces. **No behavior changes**; gates/e2e green; before/after screenshots. Feature-level layout asks (e.g. enlarging the right-side responsible-manager / assignment cards — see Backlog note #7) are DEFERRED to the Fixing & Auditing sprint, pending Ramazan + father feedback.
+---
 
-## Roadmap — phase order (updated 2026-06-23 after the Ramazan mini-meeting)
-1. ✅ **Sprint 9 — light UI/UX polish** → PR #99, deployed.
-2. **Quick-wins sprint** (from received feedback that further feedback can't invalidate) → **PR #100**, then deploy: **RF-3** Tickets top-level page · **RF-4** tuck the ticket audit timeline away · **RF-5** attachment type + in-app preview (recon the backend serving path).
-3. **PDF & Preview sprint** → **PR #101**, then deploy: **RF-10** proposal-PDF quality (Dutch-only) · **RF-6** split-screen live proposal preview · **RF-12** attachment thumbnails.
-4. **Continue-without-feedback work (agreed 2026-06-24):** ~~**PR #102** — `sub_tasks` CUSTOMER_USER redaction (privacy) + **RF-2** unified Add-price flow with "Other/Custom" (adds an additive free-text `custom_unit_label` to CustomerCustomPrice — also delivers the core of backlog #1).~~ **DONE — PR #102, deployed to crmtest.** ~~Then **PR #103** — **RF-1** WhatsApp-style message inbox (per-recipient read state, aggregation endpoint, logo avatars) with **RF-11** (EW Messages card restyle) riding along.~~ **DONE — PR #103, deployed to crmtest.** ~~Then **PR #104** — **IA & Effectiveness** consolidation: disjoint Notificaties/Berichten (message events out of the feed by default), customer-detail content tabs 4→2 with filter chips, inbox unread-toggle + mark-all-read, clarity pass (subtitles, SA empty-state, terminology sweep).~~ **DONE — PR #104, deployed to crmtest.**
-5. **Post-#104 queue (agreed with Göktuğ, 2026-06-25; queue collapsed 2026-06-26):**
-   - ~~**PR #105** — **RF-14** EW-detail comfort (collapsible Requested-services/Pricing-proposal cards, scrollable long tables, preview-pane toggle + relaxed spacing) + **RF-15** formal branded PDFs (Osius logo header, embedded font with real €, both PDF families).~~ **DONE — PR #105, deployed to crmtest.**
-   - ~~**PR #106** — **combined queue sprint** (the former #106–#109 collapsed into one): **RF-8** permission bundles (module cards, approved design below) + **RF-9** calm assignment area (simple-first AND enlarged details) + **RF-13** invoices v1 (Facturen overview, customer+building filters, existing mark-invoiced granularity) + **RF-16** dashboard = overview/attention cards, full lists exclusive to Tickets / Extra Work pages.~~ **DONE — PR #106, deployed to crmtest.**
-   - ~~**PR #107** — **RF-17** collapsible/wider ticket-detail right column + **RF-18** dashboard info widgets + **RF-19** stable proposal add-line grid (frontend-only).~~ **DONE — PR #107, merged (c3ae017), deployed to crmtest.**
-   - ~~**PR #108** — **owner-review round-2 batch** (all decisions locked 2026-06-28, see the decision block below): Option-A dashboard rebuild · single-row proposal composer + Custom unit (additive `custom_unit_label` on ProposalLine) · Bulk adjust (raise+lower) · UI consistency sweep (toggles vs restyled checkboxes, multi-select scroll + Select all/Clear all) · customer detail Invoices + Reports sub-tabs · EW-list mark-invoiced → Facturen pointer · ticket-detail right cards default-collapsed (Workflow open) · seed enrichment.~~ **DONE — PR #108, squash-merged (aed15f7), deployed to crmtest, seed enrichment applied.**
-   - ~~**PR #109** — **audit fixes + owner review round-3 + SA notifications + docs**: audit P2-1 (EW billing audit trail) · P2-2 (ticket customer-approval user_can gate) · P3-1 (billing-month Europe/Amsterdam localtime) · P3-3 (SA CONVERTED_TO_EXTRA_WORK terminal guard) · round-3 fixes · SA per-company notification subscriptions (in-app v1) · eslint-disable cleanup · docs polish.~~ **DONE — PR #109, squash-merged (5b37e6f), deployed to crmtest.**
-   - ~~**PR #110** — **round-4 polish** (feat/sprint-110): collapse Responsible-managers + Scheduling by default · taller Extra Work live-preview (embed fills the pane, measured 420→747px) · seed 15 extra Osius demo buildings so the building pickers visibly overflow the capped scroll.~~ **DONE — PR #110, squash-merged (cd86e3a), deployed to crmtest.**
-6. **Feedback completion** — Ramazan's full side-by-side gap list; father's invoice-integration answers; RF-7 pinpointed.
-7. **Fixing & Auditing Sprint** — the full batch + Department + RF-7 + codebase audit + reconcile this checklist. (RF-8 and RF-9 pulled forward into the #105–#109 queue above.)
-8. **E2E testing sprint**, then **Frontend testing sprint** — against the settled, post-feedback system.
-9. **Production hardening** (TLS · real SMTP · non-root containers · Postgres backups) → **CD** → **Sentry DSNs**. → Production-ready, barring further feedback. (The `ALLOWED_HOSTS`-under-`DEBUG=False` healthcheck problem is **already solved**: `docker-compose.prod.yml` uses a TCP socket probe for the backend, with the rationale commented inline — see `backend/config/security.py`'s host validator.)
+## SHIPPED
 
-**Ordering decision (testing vs Fixing & Auditing):** testing runs AFTER Fixing & Auditing. The missing coverage is E2E + frontend (the UI layer); the backend already has a CI test suite protecting the audit's backend changes. The Fixing & Auditing sprint mostly reshapes the UI (new dropdowns, invoice page/PDF, attachment previews, layout/density), so E2E/frontend tests written first would be invalidated by those changes — tests deliver durable value when they lock in final behavior. *Caveat — decide at the fork:* if the feedback returns small/cosmetic, the UI is already near-final and testing-first becomes reasonable; revisit when feedback lands.
+Append-only, one line per merged PR, newest first. #100–#114 are the
+original record — wording preserved as shipped; #115 onward extends it
+(Sprint 122.1). The old heading here cited `git log --oneline master` —
+stale, since PR #116 renamed the default branch to `main`.
 
-## Sprint 9 — Feedback & Backlog Notes (captured 2026-06-23; NOT for implementation yet)
-Göktuğ's pre-feedback recollections, to be reconciled with Ramazan + father feedback before anything is built. These feed the **Fixing & Auditing Sprint**. Several intersect shipped work — flagged inline.
+- **#118** (`daaaae3`) — Sprint 121 · a Sprint-117 padding regression on `.bounded-list` fixed (text no longer flush against the box); the nginx `.mjs` MIME-type root cause of broken PDF-thumbnail rendering in prod fixed (`.mjs` served as `application/javascript`, not `octet-stream`); PDF first-page thumbnails added for staff credentials via a new shared `<DocumentThumb>` (extracted from `AttachmentThumb`).
+- **#117** (`79d814d`) — Sprint 120 · guarded `unbilled_extra_work_through` against an unresolvable billing month (K-1, `TypeError` → 500 risk on `/due/`), and fixed exhaustive-paging truncation (K-2) across `ExtraWorkListPage`, `FacturenPage`, and two further instances found while fixing it (`DashboardPage`'s billing KPI, `CustomerReportsPage`'s customer-facing report tab) — all four now page exhaustively instead of silently capping at 100/200 rows.
+- **#116** (`70af26e`) — chore: renamed the default branch `master` → `main` (CI triggers + docs updated to match; no functional change).
+- **#115** (`e355f61`) — Sprints 115–119 batch · docs restructure; **Sprint 116** CCA policy binding (`CustomerCompanyPolicy` now binds a company-wide CCA — see `sot-addendum-a-meeting2.md` §A.1.1); **Sprint 117** the shared `BoundedList` primitive + the CLAUDE.md "every server list must be bounded" rule; **Sprint 118** the intermittent frozen-screen bug root-caused and fixed (a native `<dialog>` left the document inert if unmounted without `close()` — shared unmount-cleanup across all 28 `ConfirmDialog` consumers + the attachment-preview dialog); **Sprint 119** the staff-credential PDF-preview modal + six known-issues fixes (the `/due/` current-month anchor, two stale invoicing docstrings, a `company_ids_for` scoping de-dupe, a dead `LoginPage` toggle, a stale comment, three `ConfirmDialog` close-on-error fixes).
+- **#114** (c5ac3d4) — Invoice UI polish.
+- **#113** (ae1d855) — Post-clickthrough fixes · **numbering moved from ISSUE to SEND** (so an ISSUED-but-unsent invoice shows CONCEPT and un-issue strands no number) + the `ISSUED → DRAFT` un-issue action + the arbitrary billing day `Customer.invoice_day_of_month` (nullable 1–28, takes precedence over `invoice_day_rule`; migration `customers/0013`).
+- **#112** (ef5677e) — **Invoicing subsystem** (Phases 1–5, the whole `invoicing` app) + two small fixes alongside · DRAFT→ISSUED→SENT lifecycle, gapless per-company-per-year numbering, reversal/credit-note, two-page Dutch PDF, provider Facturen UI + customer-portal visibility. Migrations `invoicing/0001–0003`, `customers/0012`. See [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md).
+- **#111** (e73bd4a) — Sprint 111 · "My Work" made role-adaptive: STAFF keeps the slot agenda; BUILDING_MANAGER gets an assigned-tickets view via a new opt-in `?my_managed` ticket filter; hidden for SUPER_ADMIN + COMPANY_ADMIN. Added `docs/product/role-visibility-matrix.md`.
+- **#110** (cd86e3a) — Round-4 polish · Responsible-managers + Scheduling cards default-collapsed, taller Extra Work live-preview (embed fills the pane, measured 420→747px), seed 15 extra Osius demo buildings so the pickers overflow the capped scroll.
+- **#109** — Audit fixes + round-3 + SA notifications · P2-1 EW billing audit, P2-2 ticket customer-approval `user_can` gate, P3-1 billing localtime, P3-3 SA CONVERTED terminal guard; composer preview-to-bottom + labeled buttons, multi-select scroll proof + unbounded-list sweep, dashboard density band, customer-scoped report charts (revenue/over-time/status), per-ticket collapse; SA per-company notification subscriptions (in-app) + view-as feed; docs polish.
+- **#108** — Owner-batch-2 · Option-A dashboard rebuild, single-row proposal composer + `custom_unit_label` on ProposalLine, Bulk adjust (raise+lower), toggle/checkbox + multi-select sweep, customer Invoices+Reports sub-tabs, EW-list mark-invoiced→Facturen pointer, collapsed ticket-detail cards, seed enrichment.
+- **#107** — Detail/dashboard polish · RF-17 collapsible/wider ticket-detail right column, RF-18 dashboard info widgets, RF-19 stable proposal add-line grid.
+- **#106** — Combined queue · RF-8 permission module bundles, RF-9 calm assignment area, RF-13 Facturen invoices v1 (customer+building filters), RF-16 dashboard = attention cards (full lists on Tickets/Extra Work only).
+- **#105** — EW comfort + branded PDFs · RF-14 collapsible/scrollable EW-detail cards + preview toggle, RF-15 Osius-logo header + embedded DejaVu font with real € on both PDF families.
+- **#104** — IA & Effectiveness · disjoint Notificaties/Berichten (message events out of the feed by default), customer-detail content tabs 4→2 with filter chips, inbox unread-toggle + mark-all-read.
+- **#103** — RF-1 message inbox · WhatsApp-style aggregated inbox over ticket + Extra Work threads, per-recipient read cursors, logo/photo avatars, RF-11 EW Messages card restyle.
+- **#102** — Small independents · `sub_tasks` CUSTOMER_USER redaction (privacy) + RF-2 unified Add-price flow with Other/Custom (`custom_unit_label` on CustomerCustomPrice).
+- **#101** — PDF & Preview sprint · proposal-PDF quality (Dutch), split-screen live proposal preview, attachment thumbnails.
+- **#100** — Quick-wins RF-3/4/5 · top-level Tickets page, tucked ticket audit-timeline, attachment type + in-app preview.
 
-1. **Custom units on the Service "Other" unit type.** "Other" should accept free-text units (cm, m³, …). Possibly customer-specific — even per-room. Open: how far down unit definitions go (customer / building / room).
-2. **Dedicated invoices page + workflow.** Extra work lives in the stream today; may want its own invoice page/workflow; possible "invoiced" status on EW. (Partly built — M4 shipped a settable billing month, a per-month invoice run that marks/clears "invoiced," + an invoice-status filter & invoiced column. New asks: a standalone invoices page + item 3.)
-3. **Invoice PDF + send-to-customer.** A PDF invoice system; likely Ramazan feedback on how invoices / customer feedback get sent. Builds on M4's billing-month + run.
-4. **Notifications history / read messages.** Can't reliably see past notifications; need full history incl. already-read items → audit how the feed surfaces read vs unread + retention. (Relates to M1 / PR #90.)
-5. **Attachment in-app preview.** Clicking an attachment downloads it; want in-app viewing, with PDF preview inside the app. (Flagged deliberately — Ramazan may not raise it.)
-6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific (ties into the deferred Department section). "Event" may be a selectable event type, not a category — undecided.
-7. **Right-side card layout / density.** Assignment / responsible-manager / building-manager / scheduling / ticket-detail / add-slot / add-subcard / manager sections are good UX. Possible: make the right-side cards (responsible manager / assignment) larger with more horizontal space so they read as primary, not small technical details; maybe light explanatory copy. Decide post-feedback.
-8. **Customer surfaces — keep combined.** Separate pages for a customer's EW / quote-requests / tickets likely won't be liked; want one customer page with tabs/subsections. (Already built — M6 / PR #95 put these on the customer page as drill-in sub-tabs. Validate/refine vs Ramazan's preference, not rebuild.)
-9. **Baseline:** system is in good shape; editing customers/users + general flows are fine; no major issues right now.
+---
 
-### Received feedback (logged as it arrives — reconcile into the Fixing & Auditing Sprint)
+# Appendix (frozen — historical reference, not day-to-day reading)
 
-**IA decisions (2026-06-25):** Notifications + Messages both stay, disjoint — message-type events default OFF in the feed (user-mutable opt-in); names locked Notificaties / Berichten / Melding-reserved; customer detail content tabs merged 4→2 with filter chips; inbox gets unread toggle + mark-all-read; Request-a-Quote nav stays (Ramazan); SA notification-emptiness confirmed BY DESIGN (deliberate fan-out exclusion, directed messages bypass it) — documented, not changed.
+Everything below is kept in this file (rather than moved to
+`docs/archive/`) because it is still occasionally referenced by ongoing
+work — the RF numbers and backlog numbers get cited by number elsewhere in
+this file and in commit messages. It is otherwise not maintained; treat
+dates and "current" framing inside it as of the date shown, not as
+current truth.
 
-**RF-1 — Notifications "messages" overview, WhatsApp-style (father, received 2026-06-23, voice memo).** He wants the main messages view to work like a WhatsApp chat list (WhatsApp used as the explicit analogy):
-- A conversation-list view where **each row is a ticket** (a ticket ≈ a WhatsApp chat).
-- Each row shows the **ticket name**, an **avatar** — the person who last acted on the ticket, or (preferably) the **customer company logo**; possibly both — and an **unread-count badge** (1, 2, … like WhatsApp).
-- At a glance an admin sees: **which tickets have messages**, **who wrote the latest message**, and **who hasn't read it** (per-recipient read state — who is the one that hasn't read, not just an unread flag).
-- **Searchable / filterable** (a ticket filter on this view).
-- Goal: *"see all the messages in one place"* — a chat-style aggregated inbox over tickets. Messages still live inside their tickets; this is a unified inbox **surface into** them, not a new home for messages.
-- Sharpens backlog **#4** (notifications history / read-state) + the **M1** notification center. Note: per-recipient read tracking ("who hasn't read") is a real capability distinct from a simple unread badge (roster-level read receipts).
-- **Design locked 2026-06-24 (Göktuğ):** per-user-per-thread read cursors (a `MessageReadCursor` with `last_read_at`, advanced when a thread's messages are viewed); read receipts ("who hasn't read") are **provider-management-only** (SA/CA/BM) — customer users never see who-hasn't-read, only their own unread state. The inbox covers **both** thread kinds (ticket + Extra Work) with **kind / date-range / search / unread-only** filters, ordered by latest-visible-message time. Every count, snippet, and receipt is computed **per-viewer through the existing five-mode visibility matrix** — reuse the canonical visibility filter, never reimplement it. Threads with zero visible messages don't appear. Additive `User.profile_photo`, `Customer.logo`, `Company.logo` (jpeg/png/webp, magic-byte validated, ~2 MB cap) with **hardcoded** permission rules: any user sets their own profile photo; a customer's logo only by that customer's `CUSTOMER_COMPANY_ADMIN`; the provider company logo only by that company's `COMPANY_ADMIN`; `SUPER_ADMIN` may change any photo/logo. **RF-11** (restyle the EW detail Messages card in the inbox's design language, presentation-only) rides along.
+## Sprint 9 — Feedback & Backlog Notes (captured 2026-06-23)
+Göktuğ's pre-feedback recollections, reconciled with Ramazan + father
+feedback over the following weeks. Several intersect shipped work —
+flagged inline at the time.
 
-**RF-2 — Fold custom price lines into the regular "Add price" flow (Göktuğ, 2026-06-23).** On the customer pricing page, merge the separate "add custom price" surface into the regular **Add price line** flow: the service dropdown gains an **"Other" / "Custom"** option, and selecting it lets the user type a **free-text custom service name** and a **free-text custom unit name** — one unified add-price flow for both catalog services and ad-hoc custom lines. Ties into backlog **#1** (custom units on the "Other" unit type). Note: M5 (PR #94) shipped these today as a separate "Custom price lines" section (the `CustomerCustomPrice` model); this is a UX consolidation, not net-new pricing capability.
+1. **Custom units on the Service "Other" unit type.** "Other" should accept free-text units (cm, m³, …). Possibly customer-specific — even per-room. Open: how far down unit definitions go (customer / building / room). **Resolved 2026-07-27: Sprint 123 decided the scope is per PROVIDER COMPANY — see `## NEXT`.**
+2. **Dedicated invoices page + workflow.** Extra work lives in the stream today; may want its own invoice page/workflow; possible "invoiced" status on EW. **Shipped — the invoicing subsystem (`## SHIPPED` #112).**
+3. **Invoice PDF + send-to-customer.** A PDF invoice system; likely Ramazan feedback on how invoices / customer feedback get sent. **Shipped — the invoicing subsystem (`## SHIPPED` #112); the send-nudge + credited-original marking shipped in Sprint 122.**
+4. **Notifications history / read messages.** Can't reliably see past notifications; need full history incl. already-read items. **Shipped — RF-1 (`## SHIPPED` #103).**
+5. **Attachment in-app preview.** Clicking an attachment downloads it; want in-app viewing, with PDF preview inside the app. **Shipped — RF-5 (`## SHIPPED` #100) + RF-12 thumbnails (#101) + Sprint 121/122 sharpness fixes.**
+6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific. "Event" may be a selectable event type, not a category — undecided. **Still open — see `## NEXT` #8.**
+7. **Right-side card layout / density.** Assignment / responsible-manager / building-manager / scheduling / ticket-detail / add-slot / add-subcard / manager sections are good UX. Possible: make the right-side cards larger with more horizontal space. **Shipped — RF-9 + RF-17 (`## SHIPPED` #106, #107).**
+8. **Customer surfaces — keep combined.** Separate pages for a customer's EW / quote-requests / tickets likely won't be liked; want one customer page with tabs/subsections. **Shipped — M6 (customer drill-in sub-tabs), predates this backlog.**
+9. **Baseline:** system in good shape at the time; editing customers/users + general flows fine; no major issues.
 
-**RF-3 — Tickets as a top-level page (Ramazan, 2026-06-23, in-person).** The sidebar jumps straight to "New Ticket"; there is no Tickets page (the list lives on the dashboard). Mirror Extra Work: a top-level **Tickets** page (list) with **New Ticket** reached from inside it.
+### Received feedback (logged as it arrived through the #100–#110 queue)
 
-**RF-4 — Ticket detail: the audit timeline dominates the page (Ramazan, 2026-06-23; raised twice).** The "who did what / changed what" timeline is a good, transparent feature but currently occupies the **entire main column** of the ticket detail (the actual ticket details sit in the right sidebar), which overwhelms at first glance. Move it to a discreet spot — a right-corner control, a tab, or a collapsed drawer — visible on demand ("ileride lazım oluyor ama ilk bakışta lazım değil"). His stated general principle: **at a glance, minimal; depth behind a click** — apply it to dense surfaces. Build-time note: the timeline also carries low-signal rows (e.g. "Created · Ticketmanagerassignment — No tracked field changed") worth condensing/pruning while relocating.
+**IA decisions (2026-06-25):** Notifications + Messages both stay, disjoint — message-type events default OFF in the feed (user-mutable opt-in); names locked Notificaties / Berichten / Melding-reserved; customer detail content tabs merged 4→2 with filter chips; inbox gets unread toggle + mark-all-read; Request-a-Quote nav stays (Ramazan); SA notification-emptiness confirmed BY DESIGN (deliberate fan-out exclusion, directed messages bypass it) — documented, not changed (later made opt-in per company, `## SHIPPED` #109, then given a separate email opt-in in Sprint 122).
 
-**RF-5 — Attachment preview (Ramazan, 2026-06-23; CONFIRMS backlog #5).** He hit it live: attaching a file was non-obvious at first, and clicking an attachment downloads it. Promised in-meeting: show the **file type without clicking**, and clicking opens an **in-app view** (PDF inline) instead of downloading. May need a small backend tweak (inline Content-Disposition / preview endpoint) — recon at build time.
+**RF-1 — Notifications "messages" overview, WhatsApp-style (father, received 2026-06-23, voice memo).** He wants the main messages view to work like a WhatsApp chat list: each row a ticket, an avatar (last actor or customer logo), an unread-count badge, searchable/filterable. **Design locked 2026-06-24:** per-user-per-thread read cursors (`MessageReadCursor`); read receipts ("who hasn't read") are provider-management-only (SA/CA/BM); covers both ticket + Extra Work threads with kind/date-range/search/unread-only filters, computed per-viewer through the existing five-mode visibility matrix. Additive `User.profile_photo`, `Customer.logo`, `Company.logo`. **RF-11** (restyle the EW detail Messages card) rode along. **Shipped — `## SHIPPED` #103.**
 
-**RF-6 — Live proposal-PDF preview, split screen (Ramazan, 2026-06-23).** While building a price proposal, the right half of the screen shows the proposal **rendered as it will look** (a visual preview, not an opened PDF file), updating as lines are entered. He was very enthusiastic; agreed in-meeting. The proposal-PDF endpoint already exists — this is a preview pane over it (v1 may refresh on save rather than per keystroke).
+**RF-2 — Fold custom price lines into the regular "Add price" flow (Göktuğ, 2026-06-23).** Merge the separate "add custom price" surface into the regular Add price line flow: an "Other"/"Custom" dropdown option + free-text service name + free-text unit name. **Shipped — `## SHIPPED` #102.**
 
-**RF-7 — Extra Work detail: pricing section "big tabs" (Ramazan, 2026-06-23; location confirmed, element TBC).** In the **Extra Work detail page's pricing area**, big tab/block elements appeared where he prefers click-in navigation ("üstüne basıp gir; burayı çıkartalım"). Göktuğ confirms it's the EW pricing section; the **exact element is still to be pinpointed** (likely the pricing/proposal blocks) — clarify with Ramazan's full review before acting.
+**RF-3 — Tickets as a top-level page (Ramazan, 2026-06-23, in-person).** Mirror Extra Work: a top-level Tickets page with New Ticket reached from inside it. **Shipped — `## SHIPPED` #100.**
 
-**RF-8 — Simplified module/permission surface + future modules (Ramazan, 2026-06-23).** Think of melding / extra work as **modules** (not every customer gets extra work); future third modules possible (e.g. **DKS** — assumed: their daily quality-control system, Dagelijks Controle Systeem). One user-management surface grants module access — no access ⇒ the module disappears entirely for that user. Keep the visible permission UI to **3-4 coarse toggles per module** (e.g. can open EW / can close / can act / can respond), bundling the fine-grained permissions behind them: "simple at a glance; the depth exists but the user never needs to see it" — incl. hiding the delegated who-can-grant-what depth. Osius already enforces fine-grained permissions and hides inaccessible surfaces — the ask is a simpler **presentation layer** (presets/bundles). Design with Ramazan in the Fixing & Auditing sprint (ties into Department / backlog #6).
+**RF-4 — Ticket detail: the audit timeline dominates the page (Ramazan, 2026-06-23; raised twice).** Move it to a discreet spot — a right-corner control, a tab, or a collapsed drawer. His principle: at a glance minimal, depth behind a click. **Shipped — `## SHIPPED` #100.**
 
-**RF-9 — Assignment/slot page density (Ramazan, 2026-06-23; CONFIRMS backlog #7).** Too much info at once on the assignment surface; hard to parse what's what. Ideas: enlarge/clarify the sub-task/detail areas (Göktuğ) or a simple "assign to someone" button flow (Ramazan). ~~Stays deferred to Fixing & Auditing per backlog #7 — now with his confirmation.~~ **CORRECTION (Sprint 116 reconciliation): this was NOT actually deferred — direction was decided 2026-06-26 (simple-first AND enlarged details combined) and shipped in PR #106** (see the shipped summary). This line was stale; superseded by the decision at "Decisions (with Göktuğ, 2026-06-26 — the #106 combined sprint)" below.
+**RF-5 — Attachment preview (Ramazan, 2026-06-23; confirms backlog #5).** Show file type without clicking; clicking opens an in-app view instead of downloading. **Shipped — `## SHIPPED` #100 (base), #101 (thumbnails), Sprint 121/122 (sharpness).**
 
-**RF-10 — Proposal PDF: text overlap + professional pass, Dutch-only (Göktuğ + Ramazan, 2026-06-24).** Root cause verified: `proposal_pdf.py` writes `"{qty} x {UNIT_ENUM}"` into a fixed 22mm fpdf2 cell with no width fitting — long enums (SQUARE_METERS) overflow into the Unit-price column (proposal-12 broken; proposal-10 fits only because `1.00 x OTHER` is short). Fix in the PDF & Preview sprint: humanized **Dutch** unit labels + width-aware cells; all labels/status/urgency in Dutch (PDF is Dutch-only, like the emails); Dutch number/money formatting (€, comma decimals) with the font question (€ glyph / charset) decided at recon; a modest professional layout pass (numeric right-alignment, consistent rows, footer). Otherwise the PDF structure is fine per Göktuğ.
+**RF-6 — Live proposal-PDF preview, split screen (Ramazan, 2026-06-23).** While building a price proposal, the right half shows the proposal rendered as it will look, updating as lines are entered. **Shipped — `## SHIPPED` #101.**
 
-**RF-11 — EW detail: Messages card looks out of place (Göktuğ, 2026-06-24).** The Messages section on the Extra Work detail page sits awkwardly (full-width card between Details and Notify-people). ~~DEFERRED to Fixing & Auditing: messaging UX is being rethought there anyway (RF-1 WhatsApp-style inbox) — restyle once, not twice.~~ **CORRECTION (Sprint 116 reconciliation): this was NOT actually deferred — it rode along with RF-1 and shipped in PR #103** (see the "Design locked 2026-06-24" note above and the shipped summary). This line was stale.
+**RF-7 — Extra Work detail: pricing section "big tabs" (Ramazan, 2026-06-23; location confirmed, element TBC).** Big tab/block elements where he prefers click-in navigation. Göktuğ confirms it's the EW pricing section; the exact element is still to be pinpointed. **Still open — see `## NEXT` #5.**
 
-**RF-12 — Attachment thumbnails without a click (Göktuğ, 2026-06-24).** Post-#100, click-to-view + download work well. New ask: the attachment cards should show a real preview with no click — images render the actual image as the card; PDFs render a first-page thumbnail (client-side render feasibility decided at recon; graceful fallback to the type badge). Ships in the PDF & Preview sprint.
+**RF-8 — Simplified module/permission surface + future modules (Ramazan, 2026-06-23).** Think of melding/extra work as modules; one user-management surface grants module access; keep the visible permission UI to 3–4 coarse toggles per module, with fine-grained permissions bundled behind them. **Shipped — `## SHIPPED` #106 (module cards Meldingen + Extra werk, master on/off + 3 coarse toggles, full depth behind "Geavanceerd").**
 
-**RF-13 — Invoices get their own page (Göktuğ, 2026-06-24).** Confirms backlog #2: a dedicated invoices page/workflow is the direction. Waits on the father's invoice-integration answers; designed in Fixing & Auditing.
+**RF-9 — Assignment/slot page density (Ramazan, 2026-06-23; confirms backlog #7).** Too much info at once; enlarge/clarify the sub-task/detail areas, or a simple "assign to someone" flow. **Direction locked 2026-06-26:** simple-first AND enlarged details, combined. **Shipped — `## SHIPPED` #106.**
 
-**RF-14 — EW detail pricing area: preview squeeze + long-list comfort (Göktuğ, 2026-06-25).** The live proposal preview (RF-6) squeezes the Pricing proposal section; relax it. Make **Requested services** + **Pricing proposal** collapsible/scrollable for long lists. May be what RF-7 meant — **RF-7 itself stays open** for Ramazan to pinpoint.
+**RF-10 — Proposal PDF: text overlap + professional pass, Dutch-only (Göktuğ + Ramazan, 2026-06-24).** Root cause: `proposal_pdf.py` wrote `"{qty} x {UNIT_ENUM}"` into a fixed-width cell with no fitting; long enums overflowed. **Shipped — `## SHIPPED` #101** (humanized Dutch unit labels + width-aware cells + Dutch number/money formatting).
 
-**RF-15 — Formal branded PDFs (Göktuğ, 2026-06-25).** Osius logo header + embedded font with real € across **proposal PDFs and report PDF exports** — a formal, branded document pass on both PDF families.
+**RF-11 — EW detail: Messages card looks out of place (Göktuğ, 2026-06-24).** Rode along with RF-1. **Shipped — `## SHIPPED` #103.**
 
-**RF-16 — Dashboard and Tickets show nearly the same content (Göktuğ, 2026-06-25).** Distinction/polish between the two surfaces — queued after the current run.
+**RF-12 — Attachment thumbnails without a click (Göktuğ, 2026-06-24).** Images render the actual image; PDFs render a first-page thumbnail. **Shipped — `## SHIPPED` #101** (sharpness fixed later in Sprint 121/122).
 
-**Decisions (with Göktuğ, 2026-06-25):** **RF-8** = design+build now (bundle list pending Göktuğ's sign-off); **RF-9** = simple-first AND enlarged details, combined; **RF-13** = v1 invoices overview now, filterable by customer AND building; tickets get **NO** invoiced status (billing stays on EW; convert-to-EW is the bridge).
+**RF-13 — Invoices get their own page (Göktuğ, 2026-06-24).** Confirms backlog #2. **v1 scope locked 2026-06-26:** overview page, customer+building filters, existing mark-invoiced granularity, tickets get NO invoiced status. **Shipped — `## SHIPPED` #106** (v1), then the full invoicing subsystem (#112).
 
-**Decisions (with Göktuğ, 2026-06-26 — the #106 combined sprint):** **RF-8 bundle design approved:** module cards **Meldingen** + **Extra werk**, each a master on/off + 3 coarse toggles, all existing depth behind an **Advanced** ("Geavanceerd") section. **RF-9 direction:** simple-first AND enlarged details combined (collapsed summary + prominent Toewijzen; expand for the enlarged detail layout). **RF-13 v1 scope:** overview page, customer+building filters, the existing mark-invoiced granularity — no new billing model. **RF-16 direction:** dashboard = overview/attention cards ("Te bevestigen", "Niet toegewezen", "Recente activiteit"); the full lists live exclusively on the Tickets / Extra Work pages.
+**RF-14 — EW detail pricing area: preview squeeze + long-list comfort (Göktuğ, 2026-06-25).** The live proposal preview (RF-6) squeezes the Pricing proposal section; make Requested services + Pricing proposal collapsible/scrollable. **Shipped — `## SHIPPED` #105.**
 
-**RF-17 — Ticket-detail right-side sections not collapsible, narrow column (Göktuğ, 2026-06-27).** The right-side sections (Workflow, Scheduling, Ticket Details, Assignment, Responsible managers, …) are not collapsible and waste horizontal space — make them collapsible and widen the column. Fulfills the card half of backlog #7 (owner's call, without waiting for Ramazan).
+**RF-15 — Formal branded PDFs (Göktuğ, 2026-06-25).** Osius logo header + embedded font with real € across proposal PDFs and report PDF exports. **Shipped — `## SHIPPED` #105.**
 
-**RF-18 — Dashboard too empty (Göktuğ, 2026-06-27).** Add compact info widgets from existing endpoints: unread messages, awaiting pricing, proposals awaiting customer, month billing open/invoiced, today's slots.
+**RF-16 — Dashboard and Tickets show nearly the same content (Göktuğ, 2026-06-25).** **Direction locked 2026-06-26:** dashboard = overview/attention cards ("Te bevestigen", "Niet toegewezen", "Recente activiteit"); full lists live exclusively on Tickets / Extra Work. **Shipped — `## SHIPPED` #106.**
 
-**RF-19 — Proposal-builder add-line form reflows (Göktuğ, 2026-06-27).** The add-line form reflows as content grows, pushing the Internal/Customer note down — stabilize the grid.
+**RF-17 — Ticket-detail right-side sections not collapsible, narrow column (Göktuğ, 2026-06-27).** Make them collapsible and widen the column. **Shipped — `## SHIPPED` #107.**
 
-**#106 review (Göktuğ, 2026-06-27):** #106 deployed + owner-reviewed; the invoices page and settings approved as-is. → Sprint #107 = RF-17 + RF-18 + RF-19 (frontend-only). **DONE — PR #107, merged (c3ae017).**
+**RF-18 — Dashboard too empty (Göktuğ, 2026-06-27).** Add compact info widgets: unread messages, awaiting pricing, proposals awaiting customer, month billing open/invoiced, today's slots. **Shipped — `## SHIPPED` #107.**
 
-**Owner review round 2 (2026-06-28), all locked:** dashboard rebuilt to Option A (4-KPI hero · 'Aandacht nodig' priority list · 'Vandaag' column · 'Mijn werk' chips); proposal composer single-row with modal editors (Description strict-modal per owner); proposal lines gain a Custom unit (additive custom_unit_label on ProposalLine); bulk-raise becomes Bulk adjust (raise+lower, guarded); platform rule: toggles for boolean state, checkboxes (restyled) for selection; system-wide multi-select sweep (scroll + Select all/Clear all); customer detail gains Invoices (view-only + Facturen link) and Reports sub-tabs; seed data enriched; EW-list mark-invoiced action moves to Facturen (filters stay, pointer link added); ticket-detail right cards default-collapsed with Workflow open; zero-price proposal send stays permitted; demo data cleanup declined; E2E deferred until after Ramazan+father feedback — web-Claude code audit runs instead. → **Sprint #108** = this batch, one branch (`feat/owner-batch-2`), PR #108 held for owner review. **DONE — PR #108, squash-merged (aed15f7), deployed to crmtest.**
+**RF-19 — Proposal-builder add-line form reflows (Göktuğ, 2026-06-27).** Stabilize the grid so it doesn't push the note field down as content grows. **Shipped — `## SHIPPED` #107.**
 
-**Owner review round 3 (2026-07-20):** five feedback items on the deployed #108, logged verbatim-compact — (1) proposal composer: move the PDF live-preview to the bottom of the Pricing-proposal card so the composer regains full card width, and restore the pre-#108 LABELED Add-line/Cancel buttons (the ✓/✕ icons were too terse); (2) multi-select lists: prove the scroll cap actually bites, and sweep the whole frontend for any OTHER unbounded lists inside modals/popovers; (3) dashboard is too empty at the bottom — fill the band with an open-vs-invoiced hero split, a Facturatie per-building mini-table and a Laatste-tickets/extra-werk list, reusing already-loaded data; (4) customer Reports tab should show real per-customer report GRAPHS (revenue + tickets-over-time + status-distribution locked to the customer); (5) ticket-detail collapse should be per-ticket — an opened card must not stay open when you navigate to a different ticket, and the correction disclosure must reset per mount. → **Sprint #109** = audit fixes (P2-1, P2-2, P3-1, P3-3) + round-3 fixes + SA notifications (in-app v1; email parity deferred) + docs polish. Branch feat/sprint-109, PR #109 held for owner review. **DONE — PR #109, squash-merged (5b37e6f), deployed to crmtest.**
+**Owner review round 2 (2026-06-28), all locked:** dashboard rebuilt to Option A (4-KPI hero · 'Aandacht nodig' priority list · 'Vandaag' column · 'Mijn werk' chips); proposal composer single-row with modal editors; proposal lines gain a Custom unit (`custom_unit_label` on ProposalLine); bulk-raise becomes Bulk adjust (raise+lower, guarded); platform rule: toggles for boolean state, checkboxes (restyled) for selection; system-wide multi-select sweep (scroll + Select all/Clear all); customer detail gains Invoices (view-only + Facturen link) and Reports sub-tabs; seed data enriched; EW-list mark-invoiced action moves to Facturen; ticket-detail right cards default-collapsed with Workflow open; zero-price proposal send stays permitted; demo data cleanup declined; E2E deferred until after Ramazan+father feedback. **Shipped — `## SHIPPED` #108.**
 
-**Owner review round 4 (2026-07-20):** three targeted polish fixes on the deployed #109 — (1) the right-column **Responsible managers** + **Scheduling** cards still defaulted open; both now default COLLAPSED (Workflow stays the only always-open card; per-ticket remount already in place from #109 Part I). (2) The Extra Work **live-preview** looked short: the PDF embed was not filling the pane. The pane now has a real height (80vh, min 560px, max 85vh) and the embed flex-fills it — MEASURED embed height 420px → 747px on a 1000px-tall viewport (→ 1067px at 1400px), showing the Osius logo through the first line-item rows with the rest scrollable. (3) The **building-list cap** (#109 Part F, 260/320px capped scroll) is re-confirmed and the Osius demo now seeds **18 buildings** (3 core + 15 "Bijkantoor NN Amsterdam", additive, no migration) all linked to the B Amsterdam customer, so the contact/permissions pickers **visibly overflow** — MEASURED 18 rows, clientHeight 258 ≤ 260 cap, scrollHeight 484 → scrolls. → **Sprint #110** = these three fixes. Branch feat/sprint-110, ~~PR #110 held for owner review~~ **DONE — PR #110, squash-merged (cd86e3a), deployed to crmtest, demo buildings seeded.**
+**Owner review round 3 (2026-07-20):** five feedback items on the deployed #108 — proposal composer PDF-preview-to-bottom + labeled Add-line/Cancel buttons; prove the multi-select scroll cap bites + sweep for other unbounded lists; dashboard open-vs-invoiced hero split + Facturatie mini-table + Laatste-tickets list; customer Reports tab real per-customer GRAPHS; ticket-detail collapse per-ticket (reset on navigate). **Shipped — `## SHIPPED` #109.**
 
-**Owner review round 5 (2026-07-20):** "My Work" made role-adaptive and hidden for SA + CA (owner decision, locked). → **Sprint #111** = My Work role-adaptive: **STAFF** keeps the slot agenda unchanged; **BUILDING_MANAGER** gets a new assigned-tickets view via the new opt-in ticket-list `?my_managed` filter (union of `Ticket.assigned_to` + `TicketManagerAssignment`); **hidden for SUPER_ADMIN + COMPANY_ADMIN** (nav gate `canAccessAgenda` = STAFF||BM in `permissions.ts`; backend `TicketFilter.filter_my_managed` on top of `scope_tickets_for`). Added `docs/product/role-visibility-matrix.md` (role → left-nav visibility, every cell sourced from the FE gate + the backend permission/scoping fn). Branch feat/sprint-111, **DONE — PR #111, squash-merged (e73bd4a), deployed to crmtest.**
+**Owner review round 4 (2026-07-20):** Responsible managers + Scheduling cards default-collapsed; Extra Work live-preview pane given a real height (measured embed 420px → 747px); building-list cap re-confirmed with 18 seeded demo buildings (measured overflow). **Shipped — `## SHIPPED` #110.**
 
-**Open discussion items (pending owner direction, not built in #110):**
-- **SUPER_ADMIN "My Work" page content** — what an SA should see on a "my work" surface (SA creates little of their own; the provider-management "Mijn werk" concept is admin-scoped). Awaiting the owner's definition before building.
-- **Dashboard "Mijn werk" section purpose** — clarify whether the chip row is "items I created" (current) or a broader "what needs me" queue, and whether it should differ per role. Awaiting owner direction.
+**Owner review round 5 (2026-07-20):** "My Work" made role-adaptive and hidden for SA + CA. **Shipped — `## SHIPPED` #111.** Two open discussion items from this round are carried in `## NEXT` (#3, #4).
 
-### Documented-intentional behaviors (audit 2026-07-20)
+**Meeting notes (2026-06-23):** Department/event are category-like fields; names must stay editable/customer-flexible — refines backlog #6. Ramazan will do a full side-by-side review vs their current system (this is the review `## NEXT` #5 is gated on). He validated the pricing work (bulk raise, customer-specific prices, price history preserved). The credentials/permissions area of their current tool is their worst pain point.
+
+## Documented-intentional behaviors (audit 2026-07-20)
 These surfaced during the #109 audit and are intentional — recorded so a future audit does not re-flag them:
 - **(I-1)** The ticket-level `/tickets/<id>/unable-to-complete/` endpoint is superseded by the slot-completion flow (AgendaPage → `send_slot_unable_to_complete_email`) and is intentionally left unsurfaced.
 - **(I-2)** The legacy `ExtraWorkPricingLineItem` route is alive by design (older EWs keep it) and has no `actual_hours` column by design — it never gates the completion transition.
-- **(I-3)** The SA notification feed is empty by design (the in-app fan-out deliberately excludes unsubscribed SUPER_ADMIN; only directed messages reach them) — now opt-in per company via the #109 SA subscriptions.
+- **(I-3)** The SA notification feed is empty by design (the in-app fan-out deliberately excludes unsubscribed SUPER_ADMIN; only directed messages reach them) — opt-in per company (`## SHIPPED` #109), with a separate email opt-in added in Sprint 122.
 - **(I-4)** `clear-invoiced` clears by the EW's CURRENT billing month (COALESCE(invoice_date, spawned-ticket completion)), not the month it was originally marked in.
 - **(I-5)** The customer logo GET is open to any authenticated user by design; writes are gated (a customer's logo only by that customer's CUSTOMER_COMPANY_ADMIN; SA may change any).
 - **(I-6)** The user profile-photo GET is open by design; writes are self/SA only.
 
-*(Note: proposal-10's `f — 1.00 x OTHER @ 0.00` line was confirmed junk demo data, not a bug.)*
-
-**Meeting notes (2026-06-23, for the audit sprint):** Department/event are **category-like** fields; names must stay editable/customer-flexible ("herkese uymuyor") — refines backlog #6. Ramazan will do a **full side-by-side review** vs their current system and deliver the complete gap list at once (the agreed batch — Göktuğ implements it in one pass). He validated the pricing work (bulk raise, customer-specific prices, **price history preserved — old EWs keep their old prices**). The credentials/permissions area of their *current* tool is their worst pain point; he'll study ours as the reference.
-
 ---
 
-## Invoicing subsystem (in progress — single branch `feat/invoicing`, ONE PR after Phase 5)
+## Moved to `docs/archive/` in Sprint 122.1
 
-Multi-phase invoicing build. All phases land on the ONE branch `feat/invoicing`; the owner opens ONE PR after Phase 5 (no PR per phase).
+Purely historical build logs that no live work still references by
+number — moved out rather than kept here. Each carries the standard
+`ARCHIVED` banner; each is also listed in `docs/README.md`'s Archive
+section.
 
-> **Status (2026-07-26): SHIPPED** as PR #112 (+ #113 follow-up fixes, #114 UI polish). The per-phase records below are the **historical build log** and describe behaviour as of each phase's date — in particular the Phase-2b entries say numbering was assigned "at issue", which is how it shipped then; **PR #113 later moved allocation to SEND**. For the **current, authoritative** description of the subsystem, read [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md) — where it and this build log differ, the addendum (and the code) win.
-
-**Phases:**
-- [x] **Phase 1 — data model** (THIS): `invoicing` app (`Invoice`, `InvoiceLine`) + `Customer` billing-schedule (`invoice_day_rule`, `invoice_granularity_default`) + `Customer.contract_pdf` + numbering scaffolding (`number` NULL-while-draft, `year`, per-company unique). Migrations `invoicing/0001_initial`, `customers/0012`. NO generation/lifecycle/UI/PDF.
-- [x] **Phase 2a — unbilled rollup + draft generation + claim/release**: `invoicing/selectors.py::unbilled_extra_work` (Option-1 semantics), `invoicing/services.py::generate_draft_invoices` (per-customer / per-building, claim) + `delete_draft_invoice` (release), legacy mark/clear neutralized to no-ops. NO lifecycle/numbering/reversal/PDF/UI.
-- [x] **Phase 2b — lifecycle + numbering + reversal**: `invoicing/state_machine.py` (issue/send/reverse + assert_mutable), `invoicing/numbering.py` (gapless per-company-per-year via `InvoiceNumberSequence`, row-locked), migration `invoicing/0002`. NO PDF/UI.
-- [x] **Phase 3 — two-page PDF** (page 1 summary; page 2 detail = EW month / work performed / date): `invoicing/invoice_pdf.py::render_invoice_pdf` + provider-only fetch endpoint `GET /api/invoices/<id>/pdf/`. NO Facturen UI (Phase 4).
-- [x] **Phase 4a — invoice REST surface + editable draft + billing-schedule/contract-PDF write** (backend only): the full provider Invoice API (list/due/generate/issue/send/reverse/delete + line add/edit/remove + meta/fee/summary PATCH), editable draft lines with EW-release-on-remove, `Invoice.summary_text` + PDF wiring, recompute-on-edit, `Customer` billing-schedule serializer + contract-PDF upload/serve. Migration `invoicing/0003`. NO frontend.
-- [x] **Phase 4b — provider "Facturen" UI** (due panel + invoice list) + the dedicated invoice-detail page (PDF preview + lifecycle + full line editing + editable summary + fee, DRAFT-gated) + the "Facturatie" section on Customer Overview (contract PDF + billing schedule). ALSO removed the legacy Facturen page + the deprecated `/extra-work/mark-invoiced/` + `/clear-invoiced/` no-op endpoints.
-- [x] **Phase 5 — customer-portal visibility** (SEND): a CUSTOMER_USER sees their own SENT invoices (read-only) + the PDF, via a SEPARATE membership-level customer scope + redacted serializer + `/api/invoices/my/` read endpoints + a dedicated customer "Facturen" surface. **The invoicing subsystem is now COMPLETE** — ready for the single subsystem PR.
-
-**LOCKED DECISIONS (do NOT re-litigate; build to these):**
-- No contract entity. A contract is just an uploaded PDF on the customer (informational, ZERO behavioral effect). The billing schedule is a simple setting on the customer.
-- Invoices sum unbilled EXTRA WORK (Phase 2) + an optional free-text fee (amount + label). No recurring contract-fee amount exists in the system.
-- Lifecycle DRAFT → ISSUED → SENT. **Numbering is assigned AT SEND** (not at draft and not at issue — corrected here 2026-07-26; PR #113 moved allocation from issue to send, so an ISSUED-but-unsent invoice shows CONCEPT and un-issue strands no number), sequential, gapless, per-COMPANY per-YEAR. SENT invoices are immutable (reversal only). **Authoritative description: [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md).**
-- Reversal = auto-generated NEGATIVE counter-invoice, editable, releases the claimed EW back to unbilled (Phase 2 logic). A reversal is TERMINAL (cannot reverse a reversal).
-- Draft claims its EW rows on creation; releasing/deleting a draft releases them (Phase 2). Invoice total is the source of truth once issued. Billing-schedule due date is informational (drives the "who's due" list, gates nothing).
-- One active contract PDF per customer, replace-on-reupload, no version history.
-- **DEFERRED: invoice email delivery.** SEND = customer-portal visibility only; v1 does NOT email invoices. (Recorded in `invoicing/models.py` docstring too so it is not lost.)
-
-**Phase 2a delivered (2026-07-20):**
-- **Unbilled rollup (Option 1):** `unbilled_extra_work(actor, company, customer, year, month, building_id=None)` = earned + in-month EW that is NOT settled — excluded if EITHER `is_invoiced=True` (fast flag; also the legacy M4 bulk-run rows, treated as ALREADY SETTLED so they NEVER resurface) OR claimed by a LIVE (non-soft-deleted) `InvoiceLine`. Reuses `extra_work.billing` (build_ticket_map / is_earned / billing_month) + `scope_extra_work_for` verbatim.
-- **Draft generation + claim:** `generate_draft_invoices(...)` creates one draft per customer (building=NULL) or one per building; defaults granularity from `Customer.invoice_granularity_default`; one `InvoiceLine` per EW carrying the EW's EARNED amount (final-with-quoted-fallback, mirroring `reports.dimensions._amounts_for_state`); freezes the invoice subtotal/vat/total; claims each EW atomically (`is_invoiced=True` + live line). Idempotent: a second run finds nothing unbilled → returns `[]` (no empty draft, no double-claim). number/year stay NULL (numbering is Phase 2b).
-- **Release on draft delete:** `delete_draft_invoice(...)` soft-deletes the DRAFT and clears `is_invoiced`/`invoiced_at` on its claimed EW → they reappear in the unbilled pool (DRAFT-only; ISSUED/SENT guard is Phase 2b).
-- **Legacy mark/clear neutralized:** `/extra-work/mark-invoiced/` + `/clear-invoiced/` are DEPRECATED NO-OPS — keep the route + provider gate + response shape (`{"invoiced_count":0,"ew_ids":[]}` / `{"cleared_count":0,"ew_ids":[]}`), mutate nothing. Endpoints + the old Facturen page are removed together in Phase 4.
-- **Assumption:** every `ExtraWorkRequest.building` is NON-nullable/PROTECT → no buildingless / company-wide EW, so per-building generation is clean (revisit only if EW ever becomes buildingless).
-
-**Phase 2b delivered (2026-07-20):**
-- **Lifecycle (forward-only) DRAFT→ISSUED→SENT** in `invoicing/state_machine.py`, mirroring the tickets `@transaction.atomic` + `select_for_update` + locked-status-precondition pattern: `issue_invoice(actor, invoice)` (DRAFT→ISSUED, assigns number+year, stamps issued_at), `send_invoice(actor, invoice)` (ISSUED→SENT, stamps sent_at; portal visibility is Phase 5, email deferred). Provider-operator-gated; forward-only (issue from ISSUED/SENT and send from DRAFT/SENT rejected via the locked-row precondition, which doubles as the stale/concurrency guard).
-- **Gapless numbering** via a DEDICATED `InvoiceNumberSequence` (per-(company, year), unique) locked with `select_for_update` in `numbering.py::allocate_invoice_number(company_id, year) -> (number_str, seq_int)`, format `"YYYY-NNNN"`. Always exactly one row to lock → no empty-set race. Proven gapless + serialized under a real threaded/`TransactionTestCase` concurrency test.
-- **ISSUE-YEAR DECISION:** the numbering year is the CURRENT Amsterdam-local calendar year at issue (`timezone.localtime(now).year`), NOT the invoice's billing `period_year` — that is what a gapless per-year sequence means operationally.
-- **SENT immutability:** `assert_mutable(invoice)` raises on SENT (the future edit path gates on it); `delete_draft_invoice` already rejects any non-DRAFT (ISSUED + SENT). The only SENT mutation is a reversal.
-- **Reversal** (`state_machine.py::reverse_invoice`): only a SENT, non-reversal invoice can be reversed (terminal — cannot reverse a reversal). Auto-generates a NEW already-ISSUED counter-invoice (`is_reversal=True`, `reverses=original`, its own number from the same sequence, negated totals + negated mirror lines with `extra_work=NULL` — the counter-entry does NOT re-claim EW). RELEASES the original's EW (clears `is_invoiced`/`invoiced_at`); the original stays SENT on the books (NOT soft-deleted). To make the release actually surface under Option-1, the unbilled selector now also ignores claims held by a REVERSED original (a reversed invoice no longer holds its claim). Reversal editing is deferred to the Phase-4 UI.
-
-**Phase 3 delivered (2026-07-20):**
-- **Two-page Dutch invoice PDF** — `invoicing/invoice_pdf.py::render_invoice_pdf(invoice) -> bytes`, reusing the shared `config.pdf_branding` (Osius logo, embedded DejaVu font with real €, accent rule) and the canonical proposal-PDF formatters (`_fmt_money`/`_nl_number`/`_safe_pdf_text`/`_fitted_cell`) so the PDF families cannot drift. **Page 1 = summary** (branded header; number or CONCEPT; klant + optional gebouw; uitgegeven/verzonden dates; periode; a one-line samenvatting; the optional free-text fee; subtotaal/BTW/totaal). **Page 2 = itemized detail** — one width-safe row per line with EW-maand / uitgevoerd werk / datum + aantal / eenheidsprijs / BTW% / subtotaal / BTW / totaal, and a totals footer.
-- **DRAFT marker:** while DRAFT, "CONCEPT" shows in the number slot + a prominent page-1 banner + a per-page header band; ISSUED/SENT show the real number and no marker.
-- **Reversal:** titled **"Creditnota"**; amounts already negative in the data render negative.
-- **Fetch endpoint:** `GET /api/invoices/<id>/pdf/` (`invoicing/urls.py` → mounted at `/api/invoices/`), provider-operator only + tenant-scoped via `selectors.scope_invoices_for` (company-granularity so customer-level `building=NULL` invoices are covered): 200 `application/pdf` inline for an in-scope operator, 403 for a customer/staff, 404 cross-tenant. Customer visibility is Phase 5. Mirrors the proposal-PDF auth/serving pattern.
-- **v1 note:** the page-1 summary is auto-composed from the invoice's own figures; the fully hand-editable page-1 summary line + line editing is the Phase-4 UI. No model change (no migration).
-
-**Phase 4a delivered (2026-07-20) — backend only (the Facturen UI is Phase 4b):**
-- **Editable draft (source-of-truth recompute):** `Invoice.summary_text` (nullable-blank `TextField`, migration `invoicing/0003`) for Ramazan's hand-written page-1 samenvatting — the two-page PDF now prefers it when non-empty, else the existing auto-composed line. `services.recompute_invoice_totals(invoice)` re-derives the frozen subtotal/vat/total from the LIVE lines + the optional fee after any edit, so an edited draft stays the source of truth. **Fee-VAT decision:** the optional fee is a VAT-exempt (0% BTW) additional post — it adds to subtotal + total, contributes 0 to VAT, keeping `subtotal + vat == total` intact (least-surprising; the page-1 fee box is a free-text amount with no VAT breakdown).
-- **Line + meta services** (`invoicing/line_services.py`, DRAFT-only via `_assert_draft` = `state_machine.assert_mutable` [SENT] + explicit DRAFT check [ISSUED]; provider-operator-gated): `add_invoice_line(actor, invoice, description=, quantity=, unit_price=, vat_pct=, period_year=, period_month=, performed_on=)` → hand-added line (`extra_work=NULL`, claims nothing), money via `compute_line_amounts`, appended at next ordering; `update_invoice_line(actor, line, **fields)` → edit description/quantity/unit_price/vat_pct/period/performed_on for BOTH origins (an EW-linked line's amount is editable IN PLACE, the claim survives); `remove_invoice_line(actor, line)` → if EW-linked, RELEASE its EW back to unbilled (clear `is_invoiced`/`invoiced_at`, Phase-2a semantics) before deleting; `update_invoice_meta(actor, invoice, summary_text=?, optional_fee_label=?, optional_fee_amount=?)` → set only the provided page-1 meta fields. Every mutation recomputes the invoice totals.
-- **Invoice REST surface** (`invoicing/serializers.py` + `invoicing/filters.py` + `invoicing/views.py::InvoiceViewSet`, wired via a `DefaultRouter` in `invoicing/urls.py`; mirrors `extra_work`). All endpoints provider-operator-gated (403 for a customer user / staff) + tenant-scoped via `scope_invoices_for` (404 cross-tenant): `GET /api/invoices/` (list, filter customer/building/status/period_year/period_month), `GET /api/invoices/due/`, `POST /api/invoices/generate/`, `GET /api/invoices/<id>/`, `PATCH /api/invoices/<id>/` (meta: summary + fee, DRAFT-only), `DELETE /api/invoices/<id>/` (soft-delete + release), `POST /api/invoices/<id>/issue|send|reverse/`, `POST /api/invoices/<id>/lines/`, `PATCH|DELETE /api/invoices/<id>/lines/<lid>/`. The Phase-3 `GET /api/invoices/<id>/pdf/` stays (explicit path listed before the router).
-- **"Who's due" (`GET /api/invoices/due/`) — informational, gates NOTHING:** for every ACTIVE, in-scope customer with a billing schedule set (`invoice_day_rule` non-blank), reports the unbilled EW count + total for the CURRENT Amsterdam-local period (reusing `unbilled_extra_work`), plus `is_due` — a soft hint from the day rule vs today (FIRST_OF_MONTH reached for the whole month; LAST_OF_MONTH reached only on the last calendar day) AND `count > 0`.
-- **Customer billing-schedule + contract-PDF write (Part D):** `CustomerSerializer` now exposes `invoice_day_rule` + `invoice_granularity_default` as writable (the `CustomerViewSet` write gate is already `IsSuperAdminOrCompanyAdminForCompany` → OSIUS admins only) + a read-only `contract_pdf_url`. Contract PDF endpoints mirror the customer logo: `GET/POST/DELETE /api/customers/<id>/contract-pdf/` — serve is provider-only (in scope; customer read is Phase 5); upload/remove is OSIUS-admin-only (SA or CA-in-company — narrower than the logo's CCA gate because the contract is a provider-side billing doc). One active PDF, replace-on-reupload (Phase-1 uuid path). `customers/pdf_uploads.py::PdfUploadSerializer` validates size + `.pdf` + the `%PDF-` magic bytes. No customer migration (the fields shipped in `customers/0012`).
-- **Tests:** invoicing suite 115 green (24 line-service + 25 HTTP added); customers Part-D 13 green. Fee treated VAT-free; EW re-appears in `unbilled_extra_work` after a line removal / draft delete; every mutation rejected on ISSUED/SENT; customer user 403 on every invoice endpoint; cross-tenant 404 (invoices) / 403 (contract upload).
-- **Phase 4b (NOT in 4a):** the provider Facturen UI + the "who's due" surface, AND removal of the legacy Facturen page + the deprecated `/extra-work/mark-invoiced/` + `/clear-invoiced/` no-op endpoints.
-
-**Phase 4b delivered (2026-07-20) — frontend + a small backend removal:**
-- **`frontend/src/api/invoices.ts`** — thin axios wrappers 1:1 with the Phase-4a `InvoiceViewSet` (list/get/due/generate/issue/send/reverse/delete + line add/update/remove + meta PATCH + `fetchInvoicePdf` blob). `types.ts` gained `Invoice` / `InvoiceLine` / `InvoiceDueRow` + `InvoiceStatus` / `InvoiceGranularity` / `InvoiceDayRule`, and `CustomerAdmin` gained `invoice_day_rule` / `invoice_granularity_default` / `contract_pdf_url`. `media.ts` gained the contract-PDF upload/serve(blob)/delete helpers.
-- **Facturen page** (`pages/FacturenPage.tsx`, at the existing `/invoices` `BillingRoute`, replacing the deleted `InvoicesPage`): a "Due now / upcoming" panel on top (from `GET /api/invoices/due/`; per-customer unbilled count + total + `is_due` badge + a "Genereer" control that generates draft(s) using the customer's granularity default with a per-generation override toggle one-invoice / per-building), the full invoice list below (customer/building/status/period filters; rows → the detail page). Reusable with `customerId` + `embedded` — the per-customer Invoices tab (`CustomerInvoicesPage`) now embeds it customer-scoped + a pointer to the standalone page.
-- **Invoice-detail page** (`pages/InvoiceDetailPage.tsx`, `/invoices/:id`, `BillingRoute`): the two-page PDF preview (blob → object URL → iframe, revoked on unmount, refetched after every edit), lifecycle buttons gated by status (Issue when DRAFT, Send when ISSUED, Reverse when SENT — each confirm-gated; reverse navigates to the new credit note, delete returns to the list), and — WHILE DRAFT ONLY — full line editing (add a hand line / edit any line in place / remove a line, the remove confirm spelling out the EW returns to unbilled), the editable page-1 `summary_text`, and the fee box. Once ISSUED/SENT the edit controls hide + a read-only banner shows (backend-enforced; a failed edit surfaces the 400).
-- **"Facturatie" section on Customer Overview** (`pages/admin/customer/CustomerFacturatieSection.tsx`): the billing-schedule settings (`invoice_day_rule` unset / 1st / last of month + `invoice_granularity_default`) PATCHed onto the customer, and the informational contract PDF (upload `accept="application/pdf"` / view / replace / remove — "view" pulls the Bearer-gated blob → new tab). Provider-admin-gated in the UI.
-- **Legacy retirement:** removed the `mark_invoiced` / `clear_invoiced` ViewSet actions + `_parse_invoice_run_params` from `extra_work/views.py` (+ their tests; the shared `_InvoiceRunFixture` is retained for the billing-list + billing-audit tests), removed `markExtraWorkInvoiced` / `clearExtraWorkInvoiced` / `InvoiceRunResult` from `api/extraWork.ts`, and deleted the old `InvoicesPage.tsx`. The EW-list mark-invoiced → Facturen pointer was already in place (#108 Part F).
-- **i18n:** `facturen.*` / `facturatie.* `/ `invoice_detail.*` flat keys added to `nl` + `en` `common.json` in lockstep (115 each).
-- **Verification:** FE gate green — `tsc --noEmit` clean, ESLint EXACTLY 49 (no new violations, no new eslint-disable), `npm run build` exit 0. Backend `extra_work` + `audit` suites green (Ran 806 tests, OK). MEASURED smoke (vite-preview + dev-backend + token-inject, geometry not screenshots): Facturen due panel + list render with no horizontal overflow; the draft detail page shows the PDF iframe at 934×760 with a `blob:` src + the edit controls; adding a hand line moved the total €121.00 → €242.00 (lines 1→2) and refreshed the preview; Issue flipped the status Draft → Issued, showed the read-only banner and removed the edit controls; the Facturatie section rendered and the contract-view button appeared after a PDF upload. (Headless Chromium does not paint PDF pixels in an iframe — the preview is verified by iframe geometry + `blob:` src, not pixels.)
-
-**Phase 5 delivered (2026-07-20) — customer-portal visibility (FINAL phase):**
-- **Customer scope (SEPARATE from the provider scope):** `selectors.scope_customer_invoices_for(user)` — for a CUSTOMER_USER, invoices where `customer_id ∈ scope_customers_for(user)` (MEMBERSHIP-level via `CustomerUserMembership`, NOT per-building — an invoice is the customer's financial document, covering the customer-level `building=NULL` invoice AND per-building invoices uniformly) AND `status == SENT` AND `deleted_at IS NULL`. Every non-customer role (incl. anon) gets `.none()`. The provider `scope_invoices_for` is UNCHANGED (not widened).
-- **Three HARD INVARIANTS** baked into the scope + tested: (1) SENT-only — a customer never sees a DRAFT or an ISSUED invoice (a reversal is created ISSUED, so a credit note reaches the customer only if/when it is SENT — documented, acceptable for v1); (2) own-customer(s) only — no cross-tenant, no other customers of the same provider they aren't a member of; (3) never a soft-deleted invoice.
-- **Redacted serializer:** `CustomerInvoiceSerializer` + `CustomerInvoiceLineSerializer` drop the provider-internal fields — invoice `company` / `customer` / `year` / `reverses` / `created_at` / `updated_at`; line `extra_work` (the internal EW id — the key redaction) / `id` / `ordering` / `created_at` / `updated_at`. Keeps `id` (for the detail/PDF link) + the customer-facing document fields.
-- **Customer read endpoints** (separate APIViews, NOT the provider ViewSet; mounted BEFORE the router include so `my/` isn't swallowed by `<pk>/`): `GET /api/invoices/my/` (list), `GET /api/invoices/my/<id>/` (detail), `GET /api/invoices/my/<id>/pdf/` (PDF, REUSES `render_invoice_pdf` — no second renderer). Every one scopes through `scope_customer_invoices_for`, so a DRAFT / ISSUED / other-customer / cross-tenant / soft-deleted id is a 404 (never a leak); a non-customer gets an empty list / 404 (not a 500). The provider endpoints stay 403 for a customer (unchanged).
-- **Customer "Facturen" surface:** `pages/MyInvoicesPage.tsx` (read-only list of their SENT invoices; row → detail) + `pages/MyInvoiceDetailPage.tsx` (read-only: header + PDF preview + download + totals + lines + summary; NO edit / lifecycle controls). `components/CustomerRoute.tsx` admits only CUSTOMER_USER (mirrors BillingRoute); `/my/facturen` + `/my/facturen/:id` routes + a CUSTOMER_USER-gated nav item (mirrors `nav.my_meldingen`). i18n `customer_facturen.*` added to nl + en in lockstep (21 each).
-- **Verification:** invoicing suite green (Ran 131 tests, OK — 16 customer-read tests added: SENT-only / own-customer-only / redaction; DRAFT+ISSUED not listed and 404; cross-tenant + other-customer 404; SENT reversal visible; customer 403 on provider list/issue/generate; operator unaffected). FE gate green — `tsc` clean, ESLint EXACTLY 49, `npm run build` exit 0. No migration (`makemigrations --check` = No changes). MEASURED customer-side smoke (token-inject as a CUSTOMER_USER): the list showed ONLY the SENT invoice (`[2]`), the DRAFT (3) + ISSUED (4) + a nonexistent id all 404'd on detail/pdf, the provider list 403'd, the redacted payload carried none of the dropped keys (no line `extra_work`); the UI list excluded the draft/issued, the detail showed the PDF iframe at 934×760 with a `blob:` src and ZERO edit/lifecycle controls, no horizontal overflow.
-
----
-
-## Sprint 116 — CustomerCompanyPolicy binds Customer Company Admins (DONE)
-
-Branch `feat/sprint-115`, commits `2412e3a` (Session A) + `392a57e`
-(Session A2). No migration; no frontend file touched.
-
-**Owner decision (2026-07-26):** `backend/customers/permissions.py::user_can`
-previously short-circuited any `is_company_admin` membership straight to the
-CCA role defaults, bypassing the customer's `CustomerCompanyPolicy` entirely
-(flagged in-source as awaiting a decision). The owner decided **against**
-the bypass: **company-level policy toggles now bind a company-wide CCA.**
-See [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md)
-§A.1.1 for the full authoritative writeup.
-
-- **Session A** — `user_can` now consults the customer's policy (via the
-  new shared, customer-keyed `_policy_denies_for_customer`) before returning
-  the CCA role default.
-- **Session A2** — closed two ticket-path bypasses that short-circuited
-  *before* ever reaching `user_can`, re-opening the gap for two of the four
-  toggles: ticket creation (`tickets/serializers.py`) and the
-  `SCOPE_CUSTOMER_LINKED` branch of `tickets/state_machine.py`. Both now
-  defer to `user_can`'s own CCA branch.
-- **All four `CustomerCompanyPolicy` toggles now bind a CCA:**
-  `customer_users_can_create_tickets`,
-  `customer_users_can_approve_ticket_completion`,
-  `customer_users_can_create_extra_work`,
-  `customer_users_can_approve_extra_work_pricing`.
-- CCA **visibility** (`scope_tickets_for`, `scope_extra_work_for`,
-  `company_admin_customer_ids`) is **unchanged** — denial is action-only.
-- No per-building row can downgrade a CCA (unchanged); company policy is the
-  only layer that narrows one.
-
-**Regression pattern (for future audits):** the #109 audit finding P2-2
-("the customer-approval gate checked only access-row existence, not the
-permission layer") was correctly fixed at the `user_can` gate in
-`tickets/state_machine.py`. But a **later** CCA short-circuit was added
-*above* that same gate (`if ticket.customer_id in
-company_admin_customer_ids(user): return True`), so a CCA never reached the
-fixed gate at all — the fix was correct and a different code path routed
-around it. **Lesson: when an audit finding is fixed at a specific gate,
-also check for any caller that returns before reaching that gate** — a
-correct fix at one layer does not survive a bypass added at a layer above
-it. This is a pattern note, not a blame log — the two layers were touched in
-different sprints by design (#109 fixed the row-vs-permission gap; the CCA
-company-wide flag work in a later sprint added its own visibility/action
-short-circuits without re-checking whether one of them duplicated the #109
-gate's job).
-
----
-
-## Sprint 119 — staff-credential PDF modal + known-issues batch (DONE)
-
-Branch `feat/sprint-115`, commits `a8d7ee8` (Part A) + `1afce52` (Part B).
-Sprint 119.1 (docs-only, this entry) audited two carry-forward findings a
-reviewer produced under time pressure before recording them — see "Found
-during Sprint 119 verification" below for what changed under audit.
-
-- **Part A** — in-app PDF preview for staff credential documents
-  (`frontend/src/components/PdfPreviewDialog.tsx`, wired into
-  `StaffCredentialModal.tsx` and `UserDetailPage.tsx`'s
-  `CredentialsReadOnlyCard`), mirroring the existing ticket-attachment
-  preview. No backend change — reuses the existing resolver-gated download
-  endpoint; the EU_NATIONAL_ID hard block is enforced entirely server-side
-  and unaffected.
-- **Part B — six known issues closed:**
-  - `/due/` now reports unbilled work THROUGH the current month, not just
-    the current month (§B.10 of the invoicing addendum, now marked FIXED).
-  - Two stale invoicing docstrings (`models.py`, `numbering.py`) corrected
-    to say numbering is assigned at SEND, not "AT ISSUE".
-  - `accounts/scoping.py::company_ids_for`'s BUILDING_MANAGER branch
-    de-duplicated (`.distinct()`) — a BM assigned to N buildings in one
-    company no longer reports that company N times. The audit also found
-    the CUSTOMER_USER branch has the identical latent shape
-    (`CustomerUserMembership` is `unique_together=(customer, user)`, not
-    `(company, user)`) and fixed it too.
-  - `LoginPage.tsx`'s never-wired "remember device" toggle removed (state,
-    import, and the orphaned `remember_me` i18n key).
-  - `ExtraWorkListPage.tsx`'s stale "unpaginated" comment corrected to
-    describe the real, still-open truncation gap (see below).
-  - Three `ConfirmDialog` consumers (`StaffAssignmentRequestsAdminPage`,
-    `ExtraWorkDetailPage`, `RecurringJobDetailPage`) that only closed their
-    dialog on the success branch now also close it on the error branch.
-
-### Found during Sprint 119 verification, not fixed in it
-
-Two items a reviewer flagged were audited in Sprint 119.1 before being
-recorded here — **both claims were technically correct but each needed a
-correction** to how reachable/severe they actually are. Recorded below as
-the VERIFIED version, not the original report.
-
-- **(K-1) `unbilled_extra_work_through` can crash on an unresolvable
-  billing month** — `backend/invoicing/selectors.py`, the
-  `unbilled_extra_work_through` comprehension (Sprint 119's new `/due/`
-  selector). `extra_work.billing.billing_month(ew, ticket)` returns `None`
-  when `ew.invoice_date` is unset AND (`ticket is None` or
-  `ticket.closed_at is None`); `is_earned(ticket)` only checks
-  `ticket.status == CLOSED` and does **not** require `closed_at` to be set,
-  so the two conditions are not mutually exclusive. The comprehension
-  gates on `is_earned(...) and billing_month(...) <= (year, month)`: the
-  old exact-match selector's `== (year, month)` evaluates `None == tuple`
-  safely to `False`, but the new selector's `<=` evaluates `None <= tuple`,
-  which raises `TypeError` in Python 3 — uncaught, this would 500 the
-  `/due/` endpoint.
-  **Reviewer's original framing, corrected:** the reviewer listed "a data
-  import, a raw `QuerySet.update()`, a migration, or seed/test fixtures"
-  as reachability vectors. Audited each and found **none of them exist**:
-  every non-test `.update()` on `Ticket` (`sla/signals.py`, `sla/tasks.py`,
-  `sla/management/commands/sla_backfill.py`,
-  `planned_work/generation.py`) touches only SLA fields, never
-  `status`/`closed_at`; the one migration touching `Ticket` fields
-  (`tickets/migrations/0012_...`) only backfills `extra_work_request_id`;
-  `seed_demo_data.py` walks every ticket to CLOSED exclusively via the real
-  `apply_transition` state machine (which atomically stamps `closed_at` via
-  `TIMESTAMP_ON_ENTER`), never by direct assignment. **Not reachable
-  through the application, and not reachable through any existing
-  migration, management command, or bulk update either** — those are
-  unconfirmed hypotheticals, not live paths.
-  The one thing that IS real: `backend/invoicing/tests/_helpers.py`'s
-  `InvoicingFixture.make_ew` signature defaults to
-  `ticket_status=TicketStatus.CLOSED, closed_at=None` with a docstring
-  claiming "default: earned in May 2026" — misleading, since the actual
-  default silently produces exactly the None/CLOSED combination. A
-  line-by-line scan of all 46 current `self.make_ew(...)` call sites
-  confirms every one explicitly overrides `closed_at=`, so **no test today
-  exercises it** — but a future test author trusting the docstring and
-  calling `self.make_ew()` bare would trip it, and `/due/`'s test coverage
-  would 500 rather than silently pass. Also confirmed: no other caller of
-  `billing_month` uses an ordering operator — `extra_work/filters.py`,
-  `reports/dimensions.py`, and `seed_demo_data.py` all use `==`/`!=`
-  (None-safe), and `invoicing/services.py:132` already None-guards with
-  `bm[0] if bm else year` before indexing. The blast radius is contained
-  to the one new comprehension, not widened elsewhere.
-  **Interim option:** none needed for production (unreachable); the test
-  helper's misleading default is the only live trap.
-  **Proper fix:** add a `billing_month(...) is not None` guard to the
-  `unbilled_extra_work_through` comprehension (mirroring the
-  `services.py:132` pattern), and either fix `make_ew`'s docstring or its
-  default so `ticket_status=CLOSED` cannot silently pair with
-  `closed_at=None`. Not fixed in Sprint 119.1 (docs-only).
-
-- **(K-2) `ExtraWorkListPage.tsx` silently truncates past 100 rows** —
-  `frontend/src/pages/ExtraWorkListPage.tsx`, the `load()` effect (calls
-  `listExtraWork`, `api/extraWork.ts`) feeding both the `kpis` `useMemo`
-  and, via `visibleRows`, the rendered list AND `exportCsv`'s CSV output.
-  `listExtraWork` requests `page_size: 100` and the page never reads
-  `response.count` or follows `response.next` — confirmed by reading the
-  fetch, the KPI computation, and the CSV export: all three consume the
-  same `rows`/`visibleRows` state, and there is no "showing X of Y" text,
-  no count display, and no next-page control anywhere in the file. For any
-  customer/company with more than 100 rows matching the current
-  server-side filters (billing month / invoice status / mine), the
-  operator sees an incomplete list with silently wrong KPI totals and an
-  incomplete CSV, with no indication anything was cut.
-  **Reviewer's finding: confirmed correct**, with one refinement each way:
-  `listAllExtraWork` (same file) does exist and does page exhaustively
-  (up to a 100-page / 10,000-row safety cap, stopping at the first `next:
-  null`), so it is a usable interim fix — but it is not a *free* drop-in:
-  it costs `ceil(matching_rows / 100)` **sequential** HTTP requests instead
-  of one, since each page's fetch depends on the previous page's `next`.
-  **Newly found in this session — the same shape is systemic, not unique
-  to this page:** `frontend/src/pages/FacturenPage.tsx`'s invoice list has
-  the identical pattern (`listInvoices`, `api/invoices.ts`, also
-  `page_size: 100` with no `next`-following, no count/pager UI) and
-  silently truncates the same way. By contrast, two comparable lists
-  already got the correct fix: `api/plannedWork.ts::listRecurringJobs`
-  bakes exhaustive pagination (accumulate until `next` is null, capped at
-  25 pages × 200) **into the API client function itself**, so
-  `RecurringJobDetailPage` never sees a truncated set without needing to
-  know pagination happened — this is the right pattern to copy. The main
-  Tickets list never had this problem: `api/tickets.ts` exposes no plain
-  single-page `listTickets` at all, only the exhaustive `listAllTickets`
-  (a customer-detail drill-in helper) — so it was never exposed to this
-  shape in the first place.
-  **Interim option:** swap `ExtraWorkListPage`'s and `FacturenPage`'s
-  fetch to the `listRecurringJobs`-style baked-in exhaustive accumulation
-  (or point both at their existing `listAllExtraWork`/an equivalent
-  `listAllInvoices`), accepting the extra sequential-request cost for
-  tenants over 100 matching rows.
-  **Proper fix:** a backend aggregation endpoint for the KPI strip (as the
-  original TODO already proposed) plus real server-side pagination UI
-  (count + "load more" / next-page control) for the list and CSV, so nothing
-  needs to fetch or hold the full set client-side. Not fixed in Sprint
-  119.1 (docs-only) — both pages still truncate as described.
-
----
-
-## Owner's forward queue (confirmed 2026-07-26 — planned, not started)
-
-The owner's stated order for the immediate work, now including the agreed
-Sprint 116–119 plan. **All four sprints land on branch `feat/sprint-115`; the
-owner opens ONE pull request after Sprint 119** — no per-sprint PRs.
-
-### Agreed sprint plan (116–119)
-
-- **Sprint 116 — CCA policy binding — DONE.** Sessions A + A2 (commits
-  `2412e3a`, `392a57e`) + this docs session (Session B). See the "Sprint 116"
-  section above and [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md)
-  §A.1.1.
-- **Sprint 117 — bounded-list root fix.** Build a shared bounded-list
-  primitive + a CLAUDE.md rule that any list rendered from a server
-  collection MUST be bounded (scroll, pagination, or an explicit cap with
-  "show all"). Apply it to the surfaces named in the 2026-07-26 sweep:
-  `UserDetailPage`, `CustomerFormPage`, `CustomerUsersPage`,
-  `StaffSlotEditor`, `UserFormPage` (all six files confirmed present under
-  `frontend/src/pages/`), and `ExtraWorkListPage` (this one wants
-  **pagination**, not scroll). Context per the sweep: only a handful of
-  named scroll-container classes exist app-wide today (e.g.
-  `.multi-select-list`, `.ew-table-scroll`, `.notif-panel-body`,
-  `.ew-agreed-prices-list`, plus a few modal bodies — confirmed present in
-  `frontend/src/index.css` and reused across several pages), applied
-  piecemeal sprint-by-sprint — hence the recurring problem. Owner's framing:
-  handle it from the roots.
-- **Sprint 118 — intermittent frozen-screen bug.** The page scrolls but
-  nothing is clickable until a manual refresh. Investigation-first; a fix is
-  **not promised** in one pass. Leading hypothesis to check first: a modal
-  backdrop left mounted with pointer-events still capturing, or a body
-  scroll-lock released without its overlay.
-- **Sprint 119 — staff-credential PDF modal + known-code-issues batch —
-  DONE.** Commits `a8d7ee8` (Part A) + `1afce52` (Part B). See the "Sprint
-  119" section above for the full write-up, including two carry-forward
-  findings (K-1, K-2) audited and recorded there in Sprint 119.1 rather
-  than fixed.
-
-  **Sprint 117 deliberately precedes 119** so the credentials modal — which
-  renders credential lists with nested grants — is built against the
-  bounded-list rule instead of being retrofitted.
-
-### Then, later and explicitly unordered relative to each other
-- **Mobile responsiveness** and a possible **light/advanced mode split**.
-- **General code refactoring** — clean-up only, **no behaviour change**.
-- **Event + department features** (no `Department` model exists in the
-  codebase as of 2026-07-26 — confirmed absent).
-
-Three standing owner decisions gating this later group:
-- **Refactoring happens AFTER event + department ship** (not before).
-- **The light/advanced split is an architectural decision to settle BEFORE**
-  those features are built — not a later styling pass.
-- **Ramazan's full side-by-side review is also a gate**: the refactor and the
-  light/advanced-mode work happen after his review lands and its feedback is
-  absorbed, not before.
-
-### Deferred / undecided items not otherwise tracked above
-So the queue is complete: custom-unit depth (per customer / building / room
-— undecided, backlog #1); SA notification EMAIL parity (in-app v1 shipped,
-email deliberately untouched — `notifications/services.py` confirms
-SUPER_ADMIN is "deliberately NOT auto-notified" by design); customer-scoped
-chart follow-ups (#109 Part H, optional); making credit notes / reversals
-customer-visible (today a reversal surfaces to the customer only once SENT
-— see addendum B §B.4); SA notifications v2; Department + Event features
-(above); production hardening (TLS, real SMTP, non-root containers, Postgres
-backups, and setting `PLATFORM_BRAND_SLUG` to the real production OSIUS
-company slug — see addendum B §B.9) → CD → Sentry DSNs.
-
-**This block is still not fully exhaustive** — Step 4 of the Sprint 116
-Session B reconciliation pass verified the checklist's existing unchecked
-items and RF-item framing (see the self-review below for exactly what was
-checked, marked done, or left unverified), but a full "what remains" sweep
-across the entire system (the original item (2) above) has not been run.
-That full sweep remains the item that would make this queue exhaustive.
-
----
-
-## Standing milestones
-- [ ] **Production deployment** (the dev/test link already covers the "live link" need; this is the real thing): VPS, TLS, real SMTP, non-root containers, Postgres backups. (The `ALLOWED_HOSTS` Docker-internal-healthcheck problem under `DEBUG=False` is already solved — the prod compose backend uses a TCP socket probe.)
-- [ ] **CD** via GitHub Actions (CI already runs as required PR checks: backend Django/Postgres/Redis + frontend lint/tsc/build).
-- [ ] **Sentry** DSNs (integration is merge-safe / empty-DSN no-op; needs Göktuğ to create the account + provide DSNs).
-- [x] **Backend follow-up ✅ DONE (PR #102):** nested `sub_tasks` redacted for all CUSTOMER_* roles in `TicketDetailSerializer` (empty list; staff identity + internal notes no longer leak).
-
-## Deferred
-- [ ] **Department section** — folded into the **Fixing & Auditing Sprint** below (design + build in person with Ramazan + father there).
-- [x] **CCA legacy grant-path retirement — ALREADY DONE in code.** The legacy per-building `CUSTOMER_COMPANY_ADMIN` grant path is CLOSED: both the create and the PATCH path in `backend/customers/views_memberships.py` reject `access_role=CUSTOMER_COMPANY_ADMIN` for **every actor including SUPER_ADMIN**, with the stable `cca_is_company_wide` 400 code, and `backend/customers/serializers_memberships.py` re-rejects it at the serializer layer (defence in depth). The only path to a CCA is the company-wide `is_company_admin` flag.
-- [x] **CCA — product-SoT sign-off — RESOLVED 2026-07-26.** The owner did **not** sign off on the `user_can` CustomerCompanyPolicy bypass — he decided **against** it: company policy now **binds** a company-wide CCA (Sprint 116, commits `2412e3a` + `392a57e`). Documented in [`sot-addendum-a-meeting2.md`](../product/sot-addendum-a-meeting2.md) §A.1.1.
-- [ ] **SA notification EMAIL parity** (#109 Part D shipped in-app only) — decide whether a subscribed SUPER_ADMIN also receives the provider-management EMAILS (TICKET_CREATED / TICKET_STATUS_CHANGED / TICKET_SLOT_UNABLE). Deferred; the in-app v1 email path is deliberately untouched.
-- [ ] **Customer-scoped chart follow-ups** (#109 Part H) — the customer Reports charts reuse the existing dimension endpoints with the new `customer` param; a richer per-customer revenue breakdown (per-building split in the chart itself, or a customer axis on more dimensions) is a follow-up if the owner wants it.
-- [ ] **Invoicing `/due/` panel anchors to the current calendar month** (known issue, queued for the next code sprint). `invoicing/views.py::InvoiceViewSet.due` hard-anchors to `today.year, today.month`, so unbilled work from a prior month drops off the due panel once the month rolls over, and a `LAST_OF_MONTH` customer is flagged `is_due` on exactly one calendar day. Nothing is unreachable (`generate` accepts an arbitrary year/month; the Facturen page has a free month picker). **Agreed direction:** have the due panel report unbilled work up to AND INCLUDING the current month, keeping `is_due` as the schedule hint. Documented in [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md) §B.10. Do NOT implement in Sprint 115 (docs-only).
-
-## Fixing & Auditing Sprint (planned — after the remaining sprints)
-Opened once the remaining sprint work is done. Scope:
-- [ ] Incorporate the further changes/additions Ramazan + father want (specifics TBD — Göktuğ will provide them).
-- [ ] Codebase audit: review how everything works end-to-end; hunt for bugs / dead code / inconsistencies; confirm each shipped feature behaves as intended.
-- [ ] Reconcile this checklist against the real codebase (tick/realign every item to what's actually implemented).
-- [ ] Department section (deferred above) — design + build in person with Ramazan + father.
-
-## E2E Testing Sprint (planned — after Fixing & Auditing)
-- [ ] End-to-end (Playwright) coverage of the critical full-stack flows on the settled post-feedback system: auth/login, create ticket + melding, ticket lifecycle (staff complete → manager review → customer approval), extra-work request → proposal/instant → actual-hours finalize, customer pricing (contract / custom / bulk-raise / copy-default), notification deep-links. Use the token-inject pattern (the e2e login form is flaky). Green in CI.
-
-## Frontend Testing Sprint (planned — after E2E)
-- [ ] Component/unit tests for high-value frontend logic that lacks coverage (pricing-amount display, active-priced-line selection, permission/visibility gating, the drill-in people/permissions flows, notification rendering). Establish the test runner + a CI gate; do not regress the ESLint baseline (48).
-
-## Shipped summary #100–#114 (from `git log --oneline master` merges)
-One line per PR — number · theme · key surfaces.
-- **#100** — Quick-wins RF-3/4/5 · top-level Tickets page, tucked ticket audit-timeline, attachment type + in-app preview.
-- **#101** — PDF & Preview sprint · proposal-PDF quality (Dutch), split-screen live proposal preview, attachment thumbnails.
-- **#102** — Small independents · `sub_tasks` CUSTOMER_USER redaction (privacy) + RF-2 unified Add-price flow with Other/Custom (`custom_unit_label` on CustomerCustomPrice).
-- **#103** — RF-1 message inbox · WhatsApp-style aggregated inbox over ticket + Extra Work threads, per-recipient read cursors, logo/photo avatars, RF-11 EW Messages card restyle.
-- **#104** — IA & Effectiveness · disjoint Notificaties/Berichten (message events out of the feed by default), customer-detail content tabs 4→2 with filter chips, inbox unread-toggle + mark-all-read.
-- **#105** — EW comfort + branded PDFs · RF-14 collapsible/scrollable EW-detail cards + preview toggle, RF-15 Osius-logo header + embedded DejaVu font with real € on both PDF families.
-- **#106** — Combined queue · RF-8 permission module bundles, RF-9 calm assignment area, RF-13 Facturen invoices v1 (customer+building filters), RF-16 dashboard = attention cards (full lists on Tickets/Extra Work only).
-- **#107** — Detail/dashboard polish · RF-17 collapsible/wider ticket-detail right column, RF-18 dashboard info widgets, RF-19 stable proposal add-line grid.
-- **#108** — Owner-batch-2 · Option-A dashboard rebuild, single-row proposal composer + `custom_unit_label` on ProposalLine, Bulk adjust (raise+lower), toggle/checkbox + multi-select sweep, customer Invoices+Reports sub-tabs, EW-list mark-invoiced→Facturen pointer, collapsed ticket-detail cards, seed enrichment.
-- **#109** — Audit fixes + round-3 + SA notifications · P2-1 EW billing audit, P2-2 ticket customer-approval `user_can` gate, P3-1 billing localtime, P3-3 SA CONVERTED terminal guard; composer preview-to-bottom + labeled buttons, multi-select scroll proof + unbounded-list sweep, dashboard density band, customer-scoped report charts (revenue/over-time/status), per-ticket collapse; SA per-company notification subscriptions (in-app) + view-as feed; docs polish.
-- **#110** (cd86e3a) — Round-4 polish · Responsible-managers + Scheduling cards default-collapsed, taller Extra Work live-preview (embed fills the pane, measured 420→747px), seed 15 extra Osius demo buildings so the pickers overflow the capped scroll.
-- **#111** (e73bd4a) — Sprint 111 · "My Work" made role-adaptive: STAFF keeps the slot agenda; BUILDING_MANAGER gets an assigned-tickets view via a new opt-in `?my_managed` ticket filter; hidden for SUPER_ADMIN + COMPANY_ADMIN. Added `docs/product/role-visibility-matrix.md`.
-- **#112** (ef5677e) — **Invoicing subsystem** (Phases 1–5, the whole `invoicing` app) + two small fixes alongside · DRAFT→ISSUED→SENT lifecycle, gapless per-company-per-year numbering, reversal/credit-note, two-page Dutch PDF, provider Facturen UI + customer-portal visibility. Migrations `invoicing/0001–0003`, `customers/0012`. See [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md).
-- **#113** (ae1d855) — Post-clickthrough fixes · **numbering moved from ISSUE to SEND** (so an ISSUED-but-unsent invoice shows CONCEPT and un-issue strands no number) + the `ISSUED → DRAFT` un-issue action + the arbitrary billing day `Customer.invoice_day_of_month` (nullable 1–28, takes precedence over `invoice_day_rule`; migration `customers/0013`).
-- **#114** (c5ac3d4) — Invoice UI polish.
+- [`archive/2026-06-sprints/meeting2-and-early-sprints.md`](../archive/2026-06-sprints/meeting2-and-early-sprints.md) — Sprint 0–9, the Ramazan-Meeting-2 near-term block (CP, M1–M7), and the 2026-06-23 phase-order roadmap.
+- [`archive/2026-06-sprints/invoicing-build-log.md`](../archive/2026-06-sprints/invoicing-build-log.md) — the invoicing subsystem's Phase 1–5 build log (superseded by [`sot-addendum-b-invoicing.md`](../product/sot-addendum-b-invoicing.md)).
+- [`archive/2026-06-sprints/sprint-116-119-build-log.md`](../archive/2026-06-sprints/sprint-116-119-build-log.md) — Sprint 116 (CCA policy binding), Sprint 118 (the frozen-screen bug, root-caused and fixed), and Sprint 119 (credential PDF modal + known-issues, with the K-1/K-2 findings corrected to reflect their actual Sprint-120 fix).

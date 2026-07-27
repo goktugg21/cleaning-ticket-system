@@ -271,6 +271,13 @@ Before "simplifying" any of them, grep for its importers first.
 - **Do not write a new mega-doc** when the content belongs in an existing live
   doc. Every new doc is added to [docs/README.md](docs/README.md) in the SAME
   commit that creates it (the index's own rule).
+- **Do not close a sprint without updating
+  [docs/planning/sprint-checklist.md](docs/planning/sprint-checklist.md)'s
+  NOW / NEXT / SHIPPED sections in that same branch.** This file drifted out
+  of date twice before Sprint 122.1 restructured it — both times because the
+  update was left for a later, separate docs-only pass instead of being part
+  of the sprint that made the old state stale. The update is part of
+  finishing a sprint, not optional follow-up.
 - **Do not add a local `is_company_admin` short-circuit that grants a
   customer-side ACTION before reaching `customers.permissions.user_can`** — it
   silently bypasses the `CustomerCompanyPolicy` layer. `user_can` resolves a
