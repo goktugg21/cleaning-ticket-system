@@ -35,6 +35,28 @@ export async function listInvoices(
   return response.data;
 }
 
+// Sprint 120 — FacturenPage (listInvoices' one caller) never reads `.count`,
+// only `.results`-derived data, so a bare array is sufficient; mirrors
+// api/extraWork.ts::listAllExtraWork's exhaustive-fetch template (accumulate
+// until `next` is null, hard iteration cap so a backend paging bug cannot
+// loop forever). Fetch EVERY matching row so the list, its KPI totals, and
+// its CSV export never silently truncate at one page.
+export async function listAllInvoices(
+  params: ListInvoicesParams = {},
+): Promise<Invoice[]> {
+  const all: Invoice[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<Invoice>>("/invoices/", {
+      params: { page_size: 100, ...params, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
+}
+
 export async function getInvoice(id: number | string): Promise<Invoice> {
   const response = await api.get<Invoice>(`/invoices/${id}/`);
   return response.data;

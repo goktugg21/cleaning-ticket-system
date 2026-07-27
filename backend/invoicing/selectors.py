@@ -197,13 +197,26 @@ def unbilled_extra_work_through(
     PRIOR month does not silently drop off the list once the calendar month
     rolls over. `generate` keeps using the exact-period `unbilled_extra_work`
     unchanged — invoice generation still targets one specific period.
+
+    Sprint 120 (found in the Sprint 119 audit) — `billing_month()` can
+    return None (no invoice_date AND no ticket.closed_at); `is_earned()`
+    only checks ticket.status, not closed_at, so an earned-but-unresolvable
+    row is possible. The sibling `unbilled_extra_work`'s `==` comparison is
+    safely False against None, but an ordering comparison (`<=`) raises
+    TypeError on None in Python 3 — so this loop resolves billing_month
+    ONCE per row and excludes it explicitly (same None-guard style as
+    services.py's `bm[0] if bm else year`) rather than comparing directly.
+    A row with no resolvable billing month is not billable and must not
+    appear in the due panel.
     """
     ew_list, ticket_map = _scoped_unbilled_ew_with_tickets(
         actor, company_id, customer_id, building_id
     )
-    return [
-        e
-        for e in ew_list
-        if is_earned(ticket_map.get(e.id))
-        and billing_month(e, ticket_map.get(e.id)) <= (year, month)
-    ]
+    result = []
+    for e in ew_list:
+        if not is_earned(ticket_map.get(e.id)):
+            continue
+        bm = billing_month(e, ticket_map.get(e.id))
+        if bm is not None and bm <= (year, month):
+            result.append(e)
+    return result

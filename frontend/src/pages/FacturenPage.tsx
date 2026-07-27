@@ -24,7 +24,7 @@ import { getApiError } from "../api/client";
 import {
   generateInvoices,
   getInvoiceDueList,
-  listInvoices,
+  listAllInvoices,
 } from "../api/invoices";
 import type {
   Invoice,
@@ -116,20 +116,23 @@ export function FacturenPage({
     };
   }, [customerScoped, refreshKey]);
 
-  // Invoice list.
+  // Invoice list. Sprint 120 — listAllInvoices pages exhaustively (the
+  // plain listInvoices requests page_size=100 and never follows `next`,
+  // so this list, its status/period filtering, and its totals used to
+  // silently see only the first 100 matching invoices).
   const period = useMemo(() => parseMonth(periodMonth), [periodMonth]);
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setError("");
       try {
-        const resp = await listInvoices({
+        const allInvoices = await listAllInvoices({
           customer: customerId,
           status: statusFilter === "ALL" ? undefined : statusFilter,
           period_year: period?.year,
           period_month: period?.month,
         });
-        if (!cancelled) setInvoices(resp.results);
+        if (!cancelled) setInvoices(allInvoices);
       } catch (err) {
         if (!cancelled) setError(getApiError(err));
       } finally {
