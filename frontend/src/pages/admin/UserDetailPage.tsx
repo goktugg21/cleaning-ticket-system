@@ -46,6 +46,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { DocumentThumb } from "../../components/DocumentThumb";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { PdfPreviewDialog } from "../../components/PdfPreviewDialog";
@@ -1387,6 +1388,32 @@ function CredentialsReadOnlyCard({ userId }: { userId: number }) {
                 padding: "8px 2px",
               }}
             >
+              {credential.has_document && (
+                <button
+                  type="button"
+                  className="credential-thumb"
+                  onClick={() => handlePreview(credential)}
+                  aria-label={tCred("field.preview")}
+                  data-testid="user-detail-credential-thumb"
+                >
+                  {/* Small leading first-page preview; click opens the same
+                      PdfPreviewDialog as the Preview button. Fetches the
+                      SAME resolver-gated download endpoint — no new access
+                      path, so the EU_NATIONAL_ID gate is unchanged. */}
+                  <DocumentThumb
+                    url={credentialDocumentUrl(userId, credential.id)}
+                    mimeType={credential.mime_type}
+                    imgTestId="user-detail-credential-thumb-image"
+                    pdfTestId="user-detail-credential-thumb-canvas"
+                    fallback={
+                      <span className="credential-thumb-badge">
+                        {(credential.original_filename.split(".").pop() ||
+                          "PDF").toUpperCase()}
+                      </span>
+                    }
+                  />
+                </button>
+              )}
               <span style={{ fontWeight: 600, minWidth: 140 }}>
                 {tCred(`type.${credential.credential_type}`)}
               </span>
