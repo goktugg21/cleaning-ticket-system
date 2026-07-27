@@ -55,26 +55,45 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**No feature branch in flight.** `main` is at `01e6eb5`.
-**Last shipped PR on `main`:** **#119** — Sprints 122, 122.1, 123, 124 (see
-`## SHIPPED` for the full breakdown). The current branch,
-`docs/checklist-119-closeout`, is this docs-only close-out itself — its own
-`## SHIPPED` line is appended by the first commit of whichever branch starts
-next (see the new maintenance rule above).
-**Live migrations from #119:** `extra_work/0018`–`0020` (the `ManagedUnit`
-schema, its `custom_unit_label` backfill, and a trailing help-text-only
-alter) + `notifications/0014` (the SA per-company email opt-in).
-**No next sprint is assigned yet.** Two things gate what comes next:
-- The father's voice memo on the Event + Department features — received by
-  the owner, not yet scoped.
-- For Event/Department specifically, the standing owner decision that the
-  light/advanced mode split is an **architectural** decision to settle
-  first, so those features are born mode-aware rather than retrofitted (see
-  `## NEXT`, "Light/advanced mode split").
+**Branch:** `feat/sprint-125-documents` — Sprint 125 (Customer Documents,
+backend) in flight, unmerged.
+**Last shipped PR on `main`: #120** — the Sprint-checklist close-out for #119
+(docs-only; its own SHIPPED line was appended by THIS branch's first commit,
+per the "a PR cannot cite its own number" rule above). The last *feature* PR
+is **#119** (Sprints 122 / 122.1 / 123 / 124).
+**In flight on this branch (unmerged, awaiting the owner's PR):**
+- **Sprint 125 — Customer Documents (backend).** A new `documents` app: a
+  per-customer folder tree (`DocumentFolder`) + files (`Document`, addressed
+  in URLs by an opaque `public_id` UUID, never the row pk) under
+  `/api/customers/<id>/documents/`. Two-sided ownership via an immutable
+  `origin` (PROVIDER | CUSTOMER) stamped from the actor's role at write time.
+  Provider read/write is **SUPER_ADMIN + COMPANY_ADMIN only** (BUILDING_MANAGER
+  / STAFF get 404 on read, 403 on write); customer users are gated by ONE new
+  coarse key `customer.documents.manage`, resolved through
+  `customers.permissions.user_can` — they read everything, create folders and
+  upload anywhere non-system, and rename/move/delete only their own
+  `origin=CUSTOMER` rows, never touching the four `is_system` root folders
+  (Facturen / Contracten / Overeenkomsten / Overig, auto-created per customer
+  by a Customer `post_save` signal + a one-time backfill). Upload validation
+  (`documents/uploads.py`, 25 MB cap): PDF / PNG / JPG / WEBP / TXT / CSV /
+  DOCX / XLSX with magic-byte + real-OOXML-package + UTF-8-text checks, no
+  ZIP. Folder depth capped at 10, cycle-guarded on move, empty-only delete.
+  Both models audited (folders in the generic CRUD trio; `Document`
+  hand-crafted + filenames-only so a DELETE row answers "who deleted the
+  contract"). nginx body cap raised 12M → 30M (docker frontend + host
+  front-door; the upstream NGINX Proxy Manager must match). Migrations
+  `documents/0001`–`0002`. Deliberately NOT added to `## SHIPPED` yet —
+  unmerged, no PR number.
+**Immediate next step:** the owner opens the single PR for this branch. The
+frontend Documents UI — folder tree, upload, the RF-8 module-card toggle, and
+the `CUSTOMER_PERMISSION_KEYS` mirror in `frontend/src/api/types.ts` — is a
+deliberate follow-up frontend sprint (this sprint is backend-only).
 
-Production hardening is **postponed at the owner's instruction** — it needs
-his own inputs (SMTP credentials, a Sentry DSN, the real production
-`PLATFORM_BRAND_SLUG`); see `## NEXT`, "Production hardening → CD → Sentry."
+Production hardening remains **postponed at the owner's instruction** — it
+needs his own inputs (SMTP credentials, a Sentry DSN, the real production
+`PLATFORM_BRAND_SLUG`); see `## NEXT`. Sprint 125 promoted **off-site backups**
+to their own NEXT item ahead of it: customer contracts now live in the
+`backend_media_prod` volume, which — like Postgres — is not backed up today.
 
 ---
 
@@ -132,16 +151,24 @@ item has moved to `## SHIPPED` or been resolved below instead.
     backend `manage.py test` and Playwright e2e are the only test
     runners today; do not add an alternative opportunistically outside
     this planned sprint (CLAUDE.md §8).
-10. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
+10. **Off-site, encrypted backups with a tested restore.** Nightly
+    `pg_dump` of Postgres AND a copy of the `backend_media_prod` volume,
+    shipped off-site, encrypted, with a restore that is actually EXERCISED
+    (not merely configured). Split out of "Production hardening" (below) and
+    placed AHEAD of it because Sprint 125 made it urgent: customer CONTRACTS
+    now live in `backend_media_prod`, and today NEITHER that volume NOR
+    Postgres is backed up, so a disk loss is unrecoverable. Owner inputs
+    needed: the backup destination + its credentials.
+11. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
     not blocked on engineering: real SMTP credentials, a Sentry account +
     DSN, and the real production OSIUS company slug for
     `PLATFORM_BRAND_SLUG` (see `sot-addendum-b-invoicing.md` §B.9 — if it
     doesn't match, OSIUS's own invoices render unbranded). CD via GitHub
     Actions is otherwise ready to wire up (CI already runs as required PR
-    checks). Also standing: TLS, non-root containers, Postgres backups.
-    The owner will work through these interactively, not as an
-    engineering-only backlog item.
-11. **`reverse_invoice` never flips the original invoice's status** —
+    checks). Also standing: TLS, non-root containers (Postgres + media
+    backups are now their own item, above). The owner will work through
+    these interactively, not as an engineering-only backlog item.
+12. **`reverse_invoice` never flips the original invoice's status** —
     found during Sprint 122 verification, re-verified 2026-07-27 directly
     against `backend/invoicing/state_machine.py`: `reverse_invoice`
     checks the original is `SENT` and is not itself a reversal, but never
@@ -151,7 +178,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     counter-invoice (with its own real, gapless number) against the same
     original. Pre-existing, not introduced by Sprint 122. No decision yet
     on whether/how to guard it — recorded so it isn't lost.
-12. **Admin-picker lists sit on the DRF 200-row page cap** — found while
+13. **Admin-picker lists sit on the DRF 200-row page cap** — found while
     verifying Sprint 120's pagination fix (commit `79d814d`): confirmed
     `CompanyViewSet` / `CustomerViewSet` / `BuildingViewSet` have no
     `pagination_class` override, so the roughly dozen admin-page call
@@ -161,7 +188,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     invoice/dashboard/reports lists. The Sprint 120 commit message
     explicitly flagged this as future work but it was never added to this
     file until now. Not urgent at current data volumes.
-13. **Add the Sprint 118 `<dialog>`-unmount gotcha to
+14. **Add the Sprint 118 `<dialog>`-unmount gotcha to
     `docs/engineering/claude-code-operational-notes.md`** — found during
     Sprint 122.1: Sprint 118 root-caused and fixed the frozen-screen bug
     (a native `<dialog>` left the document inert if a component unmounted
@@ -169,7 +196,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     `docs/archive/2026-06-sprints/sprint-116-119-build-log.md`), but that
     reusable engineering pattern was never added to the live operational
     notes doc. Small, standalone, docs-only.
-14. **`ServicesAdminPage` never sends an explicit `company` on create** —
+15. **`ServicesAdminPage` never sends an explicit `company` on create** —
     found during Sprint 123: the Services/Categories/Units tabs all rely
     entirely on the backend defaulting a COMPANY_ADMIN's own membership
     (`_resolve_catalog_create_company`); a SUPER_ADMIN managing a tenant
@@ -182,7 +209,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     multi-company catalog administration doesn't seem to be a current
     workflow — but a company selector on this page would fix all three
     tabs at once whenever it's prioritized.
-15. **`ServiceCategory` is global while the new `ManagedUnit` is
+16. **`ServiceCategory` is global while the new `ManagedUnit` is
     per-company** — found during Sprint 123 (explicitly out of scope to
     "fix" there): `ServiceCategory.name` is unique system-wide with no
     `company` FK, while `Service`, `CustomerCustomPrice`, and now
@@ -200,6 +227,13 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#120** (`ae8fa0e`) — Sprint-checklist close-out for PR #119 (docs-only) ·
+  appended the #119 SHIPPED entry, rewrote NOW for the merged branch, added
+  two maintenance rules (a PR cannot cite its own number → its SHIPPED line
+  is appended by the NEXT branch; `## NEXT` cross-references cite by NAME,
+  never number), and converted the stale `## NEXT`-by-number pointers in the
+  frozen appendix to names. No code; appended here by Sprint 125 per the new
+  rule (a PR cannot cite its own number).
 - **#119** (`01e6eb5`) — Sprints 122 / 122.1 / 123 / 124 · **122** sharper PDF
   thumbnails (measure the parent tile + devicePixelRatio instead of the
   always-0 hidden canvas width), the credit-note flow completed (an unsent

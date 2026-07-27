@@ -10,6 +10,13 @@ from extra_work.views_pricing import (
     CustomerServicePriceListCreateView,
 )
 
+from documents.views import (
+    DocumentDetailView,
+    DocumentFolderDetailView,
+    DocumentFolderListCreateView,
+    DocumentUploadView,
+)
+
 from .views import CustomerViewSet
 from .views_media import CustomerContractPdfView, CustomerLogoView
 from .views_contacts import (
@@ -56,6 +63,32 @@ urlpatterns = [
         "<int:customer_id>/contract-pdf/",
         CustomerContractPdfView.as_view(),
         name="customer-contract-pdf",
+    ),
+    # Sprint 125 — customer Documents. Provider (SA / CA) + customer users
+    # with `customer.documents.manage` share a per-customer folder tree.
+    # View classes live in documents/views.py (the model app owns the
+    # views); the URL anchor is customer-scoped here (mirrors the pricing
+    # routes). Folders use their integer pk in the path; Documents use their
+    # opaque public_id UUID (never the row pk).
+    path(
+        "<int:customer_id>/documents/folders/",
+        DocumentFolderListCreateView.as_view(),
+        name="customer-document-folders",
+    ),
+    path(
+        "<int:customer_id>/documents/folders/<int:folder_id>/",
+        DocumentFolderDetailView.as_view(),
+        name="customer-document-folder-detail",
+    ),
+    path(
+        "<int:customer_id>/documents/files/",
+        DocumentUploadView.as_view(),
+        name="customer-document-upload",
+    ),
+    path(
+        "<int:customer_id>/documents/files/<uuid:public_id>/",
+        DocumentDetailView.as_view(),
+        name="customer-document-detail",
     ),
     path(
         "<int:customer_id>/users/",
