@@ -55,45 +55,40 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-125-documents` — Sprint 125 (Customer Documents,
-backend) in flight, unmerged.
-**Last shipped PR on `main`: #120** — the Sprint-checklist close-out for #119
-(docs-only; its own SHIPPED line was appended by THIS branch's first commit,
-per the "a PR cannot cite its own number" rule above). The last *feature* PR
-is **#119** (Sprints 122 / 122.1 / 123 / 124).
+**Branch:** `feat/sprint-126-documents-ui` — Sprint 126 (Customer Documents,
+**frontend**) in flight, unmerged.
+**Last shipped PR on `main`: #121** — Sprint 125, the customer Documents
+**backend** (see `## SHIPPED`; its line was appended by THIS branch's first
+commit, per the "a PR cannot cite its own number" rule).
 **In flight on this branch (unmerged, awaiting the owner's PR):**
-- **Sprint 125 — Customer Documents (backend).** A new `documents` app: a
-  per-customer folder tree (`DocumentFolder`) + files (`Document`, addressed
-  in URLs by an opaque `public_id` UUID, never the row pk) under
-  `/api/customers/<id>/documents/`. Two-sided ownership via an immutable
-  `origin` (PROVIDER | CUSTOMER) stamped from the actor's role at write time.
-  Provider read/write is **SUPER_ADMIN + COMPANY_ADMIN only** (BUILDING_MANAGER
-  / STAFF get 404 on read, 403 on write); customer users are gated by ONE new
-  coarse key `customer.documents.manage`, resolved through
-  `customers.permissions.user_can` — they read everything, create folders and
-  upload anywhere non-system, and rename/move/delete only their own
-  `origin=CUSTOMER` rows, never touching the four `is_system` root folders
-  (Facturen / Contracten / Overeenkomsten / Overig, auto-created per customer
-  by a Customer `post_save` signal + a one-time backfill). Upload validation
-  (`documents/uploads.py`, 25 MB cap): PDF / PNG / JPG / WEBP / TXT / CSV /
-  DOCX / XLSX with magic-byte + real-OOXML-package + UTF-8-text checks, no
-  ZIP. Folder depth capped at 10, cycle-guarded on move, empty-only delete.
-  Both models audited (folders in the generic CRUD trio; `Document`
-  hand-crafted + filenames-only so a DELETE row answers "who deleted the
-  contract"). nginx body cap raised 12M → 30M (docker frontend + host
-  front-door; the upstream NGINX Proxy Manager must match). Migrations
-  `documents/0001`–`0002`. Deliberately NOT added to `## SHIPPED` yet —
-  unmerged, no PR number.
-**Immediate next step:** the owner opens the single PR for this branch. The
-frontend Documents UI — folder tree, upload, the RF-8 module-card toggle, and
-the `CUSTOMER_PERMISSION_KEYS` mirror in `frontend/src/api/types.ts` — is a
-deliberate follow-up frontend sprint (this sprint is backend-only).
+- **Sprint 126 — Customer Documents (frontend + rider backend).** A shared
+  `DocumentsExplorer` (folder tree + bounded file pane + breadcrumbs + upload
+  with progress + inline PDF/image preview + rename/move/delete + native
+  drag-move), used by BOTH a provider sub-tab
+  (`/admin/customers/:id/documents`, SA/CA only) and a customer page
+  (`/my/documents`, `CustomerRoute` + gated on the module key). The
+  two-sided ownership split lives in one `documentsAccess.ts` (customers act
+  only on their `origin=CUSTOMER` rows; provider rows show read-only);
+  reuses `DocumentThumb`, `BoundedList`, `PdfPreviewDialog`; backend error
+  `code`s are surfaced as localized Dutch messages. **Rider backend changes**
+  (the frontend needed them): removed the now-dead `can_place_in_folder`
+  guards (§2); a `GET /documents/files/?folder=` list endpoint (the pane's
+  data source — Sprint 125 shipped no file-list); the upload validator's
+  stable `code` is now surfaced in the JSON body; a **new policy field**
+  `CustomerCompanyPolicy.customer_users_can_manage_documents` (additive,
+  default True; migration `customers/0014`) so the RF-8 "Documenten" module
+  card can toggle the module company-wide like Meldingen / Extra werk; and
+  `can_manage_documents` on `/auth/me/` to gate the customer sidebar entry
+  (the effective-permissions endpoint is provider-only). `customer.documents.manage`
+  mirrored into the frontend `CUSTOMER_PERMISSION_KEYS`. ESLint baseline
+  held at **48**. Deliberately NOT added to `## SHIPPED` yet — unmerged, no
+  PR number.
+**Immediate next step:** the owner opens the single PR for this branch.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production
-`PLATFORM_BRAND_SLUG`); see `## NEXT`. Sprint 125 promoted **off-site backups**
-to their own NEXT item ahead of it: customer contracts now live in the
-`backend_media_prod` volume, which — like Postgres — is not backed up today.
+`PLATFORM_BRAND_SLUG`); see `## NEXT`. Off-site backups stay their own NEXT
+item ahead of it (customer contracts now live in `backend_media_prod`).
 
 ---
 
@@ -217,6 +212,16 @@ item has moved to `## SHIPPED` or been resolved below instead.
     (predates Sprint 123), recorded so a future sprint touching either
     catalog doesn't have to rediscover it. No decision on whether it's
     worth reconciling.
+17. **`ALLOWED_HOSTS` does not admit the Docker internal healthcheck under
+    `DEBUG=False`** — a lost standing milestone (it was in the pre-122.1
+    checklist; the 122.1 restructure dropped it). Under `DEBUG=False` the
+    backend container's internal healthcheck / any internal-hostname request
+    hits the `ALLOWED_HOSTS` gate and gets a 400 `DisallowedHost`, so the
+    container reports `(unhealthy)`. Re-confirmed live on crmtest
+    2026-07-28. (This is why the prod compose backend healthcheck uses a raw
+    TCP-socket probe instead of HTTP — CLAUDE.md §6 — but the underlying
+    `ALLOWED_HOSTS`/internal-host gap is still open and should be fixed
+    properly, e.g. admit the internal hostname, before production.)
 
 ---
 
@@ -227,6 +232,25 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#121** (`0aa38f6`) — Sprint 125, customer Documents **backend** · a new
+  `documents` app under `/api/customers/<id>/documents/`: `DocumentFolder`
+  (case-insensitive name uniqueness per (customer, parent) via two partial
+  `Lower()` constraints; depth cap 10) + `Document` (opaque `public_id` UUID
+  in URLs, never the row pk; denormalized `customer` mirrors
+  `folder.customer`). Immutable `origin` (PROVIDER|CUSTOMER) stamped from the
+  actor's role decides customer-side write eligibility. Provider gate =
+  SA + CA-in-company only (BM/STAFF → 404 read, 403 write); customer gate =
+  one coarse key `customer.documents.manage` via `user_can`. Four system
+  folders (Facturen/Contracten/Overeenkomsten/Overig) auto-created per
+  customer (Customer `post_save` signal + idempotent backfill). Upload
+  validation (25 MB, `documents/uploads.py`): extension + declared MIME +
+  magic bytes, real-OOXML-package check, UTF-8/no-NUL text check, no ZIP. A
+  customer MAY place into system folders (files a contract into Contracten)
+  but never rename/move/delete them. Audit: `DocumentFolder` in the generic
+  trio; `Document` hand-crafted + filenames-only (a DELETE row answers "who
+  deleted the contract"). nginx `client_max_body_size` 12M → 30M (docker
+  frontend + host front-door). Migrations `documents/0001`–`0002`. **Backend
+  only — the file-explorer UI is Sprint 126 (see `## NOW`).**
 - **#120** (`ae8fa0e`) — Sprint-checklist close-out for PR #119 (docs-only) ·
   appended the #119 SHIPPED entry, rewrote NOW for the merged branch, added
   two maintenance rules (a PR cannot cite its own number → its SHIPPED line
