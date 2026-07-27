@@ -46,13 +46,14 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-122` — Sprints 122, 122.1 (this restructure), 123,
-and 124 all land here; the owner opens **ONE** PR after Sprint 124.
+**Branch:** `feat/sprint-122` — Sprints 122, 122.1, 123, and 124 all
+landed here. **The branch is COMPLETE** — this was the last sprint
+planned for it; the owner opens **ONE** PR covering all four next.
 **Last shipped PR on `main`:** **#118** — Sprint 121 (a Sprint-117
 padding-regression fix on `BoundedList`, the nginx `.mjs` MIME-type fix
 that had silently broken PDF-thumbnail rendering in prod, and PDF
 first-page thumbnails for staff credentials).
-**In flight on this branch (unmerged):**
+**In flight on this branch (unmerged, awaiting the owner's PR):**
 - **Sprint 122** (commits `3933cd4`, `ff386a0`, `616cbc5`) — sharper PDF
   thumbnails (measure the parent tile + devicePixelRatio instead of the
   always-0 hidden-canvas width), the credit-note flow completed (an
@@ -83,8 +84,27 @@ first-page thumbnails for staff credentials).
   a catalog that can later be renamed would silently change a historical
   quote). Deliberately NOT added to `## SHIPPED` yet — this branch is
   still unmerged and has no PR number.
-**Immediate next sprint:** **Sprint 124** — per-building revenue split
-in Customer Reports (see `## NEXT`).
+- **Sprint 124** — per-building revenue split in Customer Reports. A
+  new `compute_extra_work_revenue_by_building` (backend/reports/
+  dimensions.py) shares the exact scope/customer/date-window resolution
+  and per-row classification the flat `compute_extra_work_revenue`
+  already uses (extracted into `_resolve_extra_work_revenue_rows`), so
+  the two can never diverge — the per-building buckets are proven (by
+  test) to sum to the flat report's total for the same filters. New
+  endpoint `/api/reports/extra-work-revenue-by-building/` (+ CSV/PDF),
+  same `IsRevenueReportConsumer` permission floor as the flat report. A
+  building with zero in-scope revenue in the period is omitted, not
+  padded with a zero row (mirrors `compute_tickets_by_building`'s own
+  behaviour). Frontend: a new `ExtraWorkRevenueByBuildingChart` on the
+  customer Reports tab, wrapped in `BoundedList` (CLAUDE.md §8) so a
+  customer with 18+ buildings (the dev seed's "B Amsterdam") gets a
+  scrollable, capped-height chart instead of an ever-taller page — each
+  bar still renders at its normal height inside the box. No migration
+  (none was needed). Deliberately NOT added to `## SHIPPED` yet — same
+  reason as above.
+**Immediate next step:** the owner opens the single PR for this branch
+(Sprints 122, 122.1, 123, 124) — no further sprint is queued on
+`feat/sprint-122`. See `## NEXT` for what comes after.
 
 ---
 
@@ -96,19 +116,15 @@ milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
 
-1. **Sprint 124 — per-building revenue split in Customer Reports**
-   (owner-decided: build it). Resolves the former "customer-scoped chart
-   follow-ups (#109 Part H)" item, which had been listed as optional —
-   now decided and queued, next up on this branch.
-2. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
+1. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
    "my work" surface? An SA creates little of their own work; the
    concept today is admin-scoped. Awaiting the owner's definition before
    anything is built.
-3. **Dashboard "Mijn werk" section purpose** — clarify whether the chip
+2. **Dashboard "Mijn werk" section purpose** — clarify whether the chip
    row means "items I created" (current behaviour) or a broader "what
    needs me" queue, and whether it should differ per role. Awaiting
    owner direction.
-4. **Fixing & Auditing Sprint** — gated on Ramazan's full side-by-side
+3. **Fixing & Auditing Sprint** — gated on Ramazan's full side-by-side
    review landing (his own commitment, not yet delivered as of
    2026-07-27). Scope once it lands: incorporate whatever further changes
    Ramazan + father want; pin down **RF-7** (the Extra Work
@@ -119,15 +135,15 @@ item has moved to `## SHIPPED` or been resolved below instead.
    2026-07-27); a full codebase audit (bugs / dead code / inconsistencies,
    confirm each shipped feature behaves as intended); reconcile this
    checklist against the real codebase once the audit lands.
-5. **Mobile responsiveness** — gated on Ramazan's review landing (#4).
-6. **Light/advanced mode split** — gated on Ramazan's review. Owner
+4. **Mobile responsiveness** — gated on Ramazan's review landing (#3).
+5. **Light/advanced mode split** — gated on Ramazan's review. Owner
    decision: this is an **architectural** decision to be settled BEFORE
    the Event/Department features are built, not a later styling pass.
-7. **Event + Department features** — gated on Ramazan's review, designed
-   in person with Ramazan and father (see #4).
-8. **General code refactoring** (clean-up only, **no behaviour change**)
+6. **Event + Department features** — gated on Ramazan's review, designed
+   in person with Ramazan and father (see #3).
+7. **General code refactoring** (clean-up only, **no behaviour change**)
    — owner decision: happens AFTER Event/Department ship, not before.
-9. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
+8. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
     coverage of the critical full-stack flows on the settled
     post-feedback system — auth/login, create ticket + melding, ticket
     lifecycle (staff complete → manager review → customer approval),
@@ -137,7 +153,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     flaky). Green in CI. Ordering rationale (recorded 2026-06-23, still
     the plan): the Fixing & Auditing sprint reshapes the UI, so tests
     written first would be invalidated by those changes.
-10. **Frontend Testing Sprint** — after E2E. Component/unit tests for
+9. **Frontend Testing Sprint** — after E2E. Component/unit tests for
     high-value frontend logic that lacks coverage: pricing-amount
     display, active-priced-line selection, permission/visibility gating,
     the drill-in people/permissions flows, notification rendering.
@@ -146,7 +162,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     backend `manage.py test` and Playwright e2e are the only test
     runners today; do not add an alternative opportunistically outside
     this planned sprint (CLAUDE.md §8).
-11. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
+10. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
     not blocked on engineering: real SMTP credentials, a Sentry account +
     DSN, and the real production OSIUS company slug for
     `PLATFORM_BRAND_SLUG` (see `sot-addendum-b-invoicing.md` §B.9 — if it
@@ -155,7 +171,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     checks). Also standing: TLS, non-root containers, Postgres backups.
     The owner will work through these interactively, not as an
     engineering-only backlog item.
-12. **`reverse_invoice` never flips the original invoice's status** —
+11. **`reverse_invoice` never flips the original invoice's status** —
     found during Sprint 122 verification, re-verified 2026-07-27 directly
     against `backend/invoicing/state_machine.py`: `reverse_invoice`
     checks the original is `SENT` and is not itself a reversal, but never
@@ -165,7 +181,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     counter-invoice (with its own real, gapless number) against the same
     original. Pre-existing, not introduced by Sprint 122. No decision yet
     on whether/how to guard it — recorded so it isn't lost.
-13. **Admin-picker lists sit on the DRF 200-row page cap** — found while
+12. **Admin-picker lists sit on the DRF 200-row page cap** — found while
     verifying Sprint 120's pagination fix (commit `79d814d`): confirmed
     `CompanyViewSet` / `CustomerViewSet` / `BuildingViewSet` have no
     `pagination_class` override, so the roughly dozen admin-page call
@@ -175,7 +191,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     invoice/dashboard/reports lists. The Sprint 120 commit message
     explicitly flagged this as future work but it was never added to this
     file until now. Not urgent at current data volumes.
-14. **Add the Sprint 118 `<dialog>`-unmount gotcha to
+13. **Add the Sprint 118 `<dialog>`-unmount gotcha to
     `docs/engineering/claude-code-operational-notes.md`** — found during
     Sprint 122.1: Sprint 118 root-caused and fixed the frozen-screen bug
     (a native `<dialog>` left the document inert if a component unmounted
@@ -183,7 +199,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     `docs/archive/2026-06-sprints/sprint-116-119-build-log.md`), but that
     reusable engineering pattern was never added to the live operational
     notes doc. Small, standalone, docs-only.
-15. **`ServicesAdminPage` never sends an explicit `company` on create** —
+14. **`ServicesAdminPage` never sends an explicit `company` on create** —
     found during Sprint 123: the Services/Categories/Units tabs all rely
     entirely on the backend defaulting a COMPANY_ADMIN's own membership
     (`_resolve_catalog_create_company`); a SUPER_ADMIN managing a tenant
@@ -196,7 +212,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     multi-company catalog administration doesn't seem to be a current
     workflow — but a company selector on this page would fix all three
     tabs at once whenever it's prioritized.
-16. **`ServiceCategory` is global while the new `ManagedUnit` is
+15. **`ServiceCategory` is global while the new `ManagedUnit` is
     per-company** — found during Sprint 123 (explicitly out of scope to
     "fix" there): `ServiceCategory.name` is unique system-wide with no
     `company` FK, while `Service`, `CustomerCustomPrice`, and now
