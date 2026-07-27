@@ -61,10 +61,30 @@ first-page thumbnails for staff credentials).
   button rendering on a reversal where the backend already rejects it),
   and a SUPER_ADMIN per-company **email** notification opt-in separate
   from the existing in-app subscription.
-- **Sprint 122.1** (this pass) — restructures this file into
-  NOW/NEXT/SHIPPED and closes the anti-drift gap (see above).
-**Immediate next sprint:** **Sprint 123** — managed units per provider
-company (see `## NEXT`).
+- **Sprint 122.1** — restructured this file into NOW/NEXT/SHIPPED and
+  closed the anti-drift gap (see above).
+- **Sprint 123** — managed units per provider company. A new
+  `extra_work.ManagedUnit` model (company-scoped, case+whitespace-
+  insensitive unique label, `is_active` archive flag) plus a nullable
+  `managed_unit` FK on `Service` and `CustomerCustomPrice` (additive
+  migrations `extra_work/0018`–`0020`: the schema, a data backfill that
+  collapsed every existing distinct-normalized free-text
+  `custom_unit_label` per company into one managed unit (most-frequent-
+  spelling-wins, tie-broken by earliest `created_at`), and a trailing
+  help-text-only field alter). Admin CRUD at
+  `/api/services/units/`, gated on the same catalog-management
+  permission as the Service catalog, tenant-scoped like every other
+  catalog endpoint. Frontend: a new "Units" tab on the Services admin
+  page, and a shared `ManagedUnitPicker` (active-unit dropdown + inline
+  "add new") replacing the free-text input everywhere `unit_type ==
+  OTHER` is chosen for a `Service` or a `CustomerCustomPrice` — **not**
+  for `ProposalLine`, which stays deliberately frozen free text (a
+  proposal is a document already shown to the customer; repointing it at
+  a catalog that can later be renamed would silently change a historical
+  quote). Deliberately NOT added to `## SHIPPED` yet — this branch is
+  still unmerged and has no PR number.
+**Immediate next sprint:** **Sprint 124** — per-building revenue split
+in Customer Reports (see `## NEXT`).
 
 ---
 
@@ -76,30 +96,19 @@ milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
 
-1. **Sprint 123 — managed units per provider company** (owner-decided;
-   next up on this branch). Today `custom_unit_label` is scattered
-   free-text on **three** models — verified 2026-07-27:
-   `extra_work.models.Service`, `CustomerCustomPrice`, `ProposalLine` —
-   with no shared catalog behind any of them. Build a new per-company
-   managed-unit model + a backfill + admin CRUD + an active/archived flag
-   + picker integration wired into all three consumers; the existing
-   free-text fields stay as a deprecated fallback. Additive migrations
-   only. This resolves the old open question "custom-unit depth (per
-   customer / building / room — undecided)" — the owner decided the
-   scope is **per provider company**, not per customer/building/room.
-2. **Sprint 124 — per-building revenue split in Customer Reports**
+1. **Sprint 124 — per-building revenue split in Customer Reports**
    (owner-decided: build it). Resolves the former "customer-scoped chart
    follow-ups (#109 Part H)" item, which had been listed as optional —
-   now decided and queued, right after 123 on the same branch.
-3. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
+   now decided and queued, next up on this branch.
+2. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
    "my work" surface? An SA creates little of their own work; the
    concept today is admin-scoped. Awaiting the owner's definition before
    anything is built.
-4. **Dashboard "Mijn werk" section purpose** — clarify whether the chip
+3. **Dashboard "Mijn werk" section purpose** — clarify whether the chip
    row means "items I created" (current behaviour) or a broader "what
    needs me" queue, and whether it should differ per role. Awaiting
    owner direction.
-5. **Fixing & Auditing Sprint** — gated on Ramazan's full side-by-side
+4. **Fixing & Auditing Sprint** — gated on Ramazan's full side-by-side
    review landing (his own commitment, not yet delivered as of
    2026-07-27). Scope once it lands: incorporate whatever further changes
    Ramazan + father want; pin down **RF-7** (the Extra Work
@@ -110,15 +119,15 @@ item has moved to `## SHIPPED` or been resolved below instead.
    2026-07-27); a full codebase audit (bugs / dead code / inconsistencies,
    confirm each shipped feature behaves as intended); reconcile this
    checklist against the real codebase once the audit lands.
-6. **Mobile responsiveness** — gated on Ramazan's review landing (#5).
-7. **Light/advanced mode split** — gated on Ramazan's review. Owner
+5. **Mobile responsiveness** — gated on Ramazan's review landing (#4).
+6. **Light/advanced mode split** — gated on Ramazan's review. Owner
    decision: this is an **architectural** decision to be settled BEFORE
    the Event/Department features are built, not a later styling pass.
-8. **Event + Department features** — gated on Ramazan's review, designed
-   in person with Ramazan and father (see #5).
-9. **General code refactoring** (clean-up only, **no behaviour change**)
+7. **Event + Department features** — gated on Ramazan's review, designed
+   in person with Ramazan and father (see #4).
+8. **General code refactoring** (clean-up only, **no behaviour change**)
    — owner decision: happens AFTER Event/Department ship, not before.
-10. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
+9. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
     coverage of the critical full-stack flows on the settled
     post-feedback system — auth/login, create ticket + melding, ticket
     lifecycle (staff complete → manager review → customer approval),
@@ -128,7 +137,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     flaky). Green in CI. Ordering rationale (recorded 2026-06-23, still
     the plan): the Fixing & Auditing sprint reshapes the UI, so tests
     written first would be invalidated by those changes.
-11. **Frontend Testing Sprint** — after E2E. Component/unit tests for
+10. **Frontend Testing Sprint** — after E2E. Component/unit tests for
     high-value frontend logic that lacks coverage: pricing-amount
     display, active-priced-line selection, permission/visibility gating,
     the drill-in people/permissions flows, notification rendering.
@@ -137,7 +146,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     backend `manage.py test` and Playwright e2e are the only test
     runners today; do not add an alternative opportunistically outside
     this planned sprint (CLAUDE.md §8).
-12. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
+11. **Production hardening → CD → Sentry.** Needs the owner's OWN input,
     not blocked on engineering: real SMTP credentials, a Sentry account +
     DSN, and the real production OSIUS company slug for
     `PLATFORM_BRAND_SLUG` (see `sot-addendum-b-invoicing.md` §B.9 — if it
@@ -146,7 +155,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     checks). Also standing: TLS, non-root containers, Postgres backups.
     The owner will work through these interactively, not as an
     engineering-only backlog item.
-13. **`reverse_invoice` never flips the original invoice's status** —
+12. **`reverse_invoice` never flips the original invoice's status** —
     found during Sprint 122 verification, re-verified 2026-07-27 directly
     against `backend/invoicing/state_machine.py`: `reverse_invoice`
     checks the original is `SENT` and is not itself a reversal, but never
@@ -156,7 +165,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     counter-invoice (with its own real, gapless number) against the same
     original. Pre-existing, not introduced by Sprint 122. No decision yet
     on whether/how to guard it — recorded so it isn't lost.
-14. **Admin-picker lists sit on the DRF 200-row page cap** — found while
+13. **Admin-picker lists sit on the DRF 200-row page cap** — found while
     verifying Sprint 120's pagination fix (commit `79d814d`): confirmed
     `CompanyViewSet` / `CustomerViewSet` / `BuildingViewSet` have no
     `pagination_class` override, so the roughly dozen admin-page call
@@ -166,7 +175,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     invoice/dashboard/reports lists. The Sprint 120 commit message
     explicitly flagged this as future work but it was never added to this
     file until now. Not urgent at current data volumes.
-15. **Add the Sprint 118 `<dialog>`-unmount gotcha to
+14. **Add the Sprint 118 `<dialog>`-unmount gotcha to
     `docs/engineering/claude-code-operational-notes.md`** — found during
     Sprint 122.1: Sprint 118 root-caused and fixed the frozen-screen bug
     (a native `<dialog>` left the document inert if a component unmounted
@@ -174,6 +183,27 @@ item has moved to `## SHIPPED` or been resolved below instead.
     `docs/archive/2026-06-sprints/sprint-116-119-build-log.md`), but that
     reusable engineering pattern was never added to the live operational
     notes doc. Small, standalone, docs-only.
+15. **`ServicesAdminPage` never sends an explicit `company` on create** —
+    found during Sprint 123: the Services/Categories/Units tabs all rely
+    entirely on the backend defaulting a COMPANY_ADMIN's own membership
+    (`_resolve_catalog_create_company`); a SUPER_ADMIN managing a tenant
+    with 2+ provider companies (the dev seed has 3) cannot create a
+    Service, Category, or the new managed Unit through this page at all —
+    every create 400s asking to disambiguate, with nowhere in the UI to
+    supply one. Pre-existing for Service/Category (Sprint 123's Units tab
+    just inherited it verbatim for consistency, deliberately, rather than
+    solving it once for the new surface only). Not urgent — SA-managed
+    multi-company catalog administration doesn't seem to be a current
+    workflow — but a company selector on this page would fix all three
+    tabs at once whenever it's prioritized.
+16. **`ServiceCategory` is global while the new `ManagedUnit` is
+    per-company** — found during Sprint 123 (explicitly out of scope to
+    "fix" there): `ServiceCategory.name` is unique system-wide with no
+    `company` FK, while `Service`, `CustomerCustomPrice`, and now
+    `ManagedUnit` are all company-scoped. Pre-existing inconsistency
+    (predates Sprint 123), recorded so a future sprint touching either
+    catalog doesn't have to rediscover it. No decision on whether it's
+    worth reconciling.
 
 ---
 
