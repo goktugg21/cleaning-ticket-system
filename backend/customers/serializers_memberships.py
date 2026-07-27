@@ -23,6 +23,7 @@ _POLICY_BOOLEAN_FIELDS = (
     "customer_users_can_approve_ticket_completion",
     "customer_users_can_create_extra_work",
     "customer_users_can_approve_extra_work_pricing",
+    "customer_users_can_manage_documents",
 )
 
 
@@ -327,6 +328,7 @@ class CustomerCompanyPolicySerializer(serializers.ModelSerializer):
     customer_users_can_approve_ticket_completion = _StrictBooleanField()
     customer_users_can_create_extra_work = _StrictBooleanField()
     customer_users_can_approve_extra_work_pricing = _StrictBooleanField()
+    customer_users_can_manage_documents = _StrictBooleanField()
 
     class Meta:
         model = CustomerCompanyPolicy

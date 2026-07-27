@@ -13,7 +13,11 @@
  */
 import type { CustomerPermissionKey } from "../../../../api/types";
 
-export type PermissionGroup = "tickets" | "extra_work" | "users";
+export type PermissionGroup =
+  | "tickets"
+  | "extra_work"
+  | "users"
+  | "documents";
 
 export interface PermissionKeyRow {
   key: CustomerPermissionKey;
@@ -40,12 +44,15 @@ export const PERMISSION_KEY_ROWS: ReadonlyArray<PermissionKeyRow> = [
   { key: "customer.users.manage", group: "users" },
   { key: "customer.users.assign_location_role", group: "users" },
   { key: "customer.users.manage_permissions", group: "users" },
+  // Documents (1)
+  { key: "customer.documents.manage", group: "documents" },
 ];
 
 export const PERMISSION_GROUP_LABEL_KEY: Record<PermissionGroup, string> = {
   tickets: "customer_permissions.permission_groups.tickets",
   extra_work: "customer_permissions.permission_groups.extra_work",
   users: "customer_permissions.permission_groups.users",
+  documents: "customer_permissions.permission_groups.documents",
 };
 
 export function permissionKeyLabelKey(key: CustomerPermissionKey): string {

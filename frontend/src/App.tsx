@@ -34,6 +34,7 @@ import { MyEmployeesPage } from "./pages/MyEmployeesPage";
 import { MyInvoiceDetailPage } from "./pages/MyInvoiceDetailPage";
 import { MyInvoicesPage } from "./pages/MyInvoicesPage";
 import { MyMeldingenPage } from "./pages/MyMeldingenPage";
+import { MyDocumentsPage } from "./pages/MyDocumentsPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { InboxPage } from "./pages/InboxPage";
 import { ResetPasswordConfirmPage } from "./pages/ResetPasswordConfirmPage";
@@ -64,6 +65,7 @@ import { CustomerBuildingsPage } from "./pages/admin/customer/CustomerBuildingsP
 import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkPage";
 import { CustomerInvoicesPage } from "./pages/admin/customer/CustomerInvoicesPage";
 import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage";
+import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
@@ -279,6 +281,16 @@ export default function App() {
             element={
               <CustomerRoute>
                 <MyInvoicesPage />
+              </CustomerRoute>
+            }
+          />
+          {/* Sprint 126 — customer-side Documents (CUSTOMER_USER only; the
+              sidebar entry is additionally gated on can_manage_documents). */}
+          <Route
+            path="/my/documents"
+            element={
+              <CustomerRoute>
+                <MyDocumentsPage />
               </CustomerRoute>
             }
           />
@@ -550,6 +562,16 @@ export default function App() {
             element={
               <AdminRoute>
                 <CustomerReportsPage />
+              </AdminRoute>
+            }
+          />
+          {/* Sprint 126 — customer Documents sub-tab (SA/CA only; the backend
+              404s BM/STAFF and the sidebar entry is hidden for them). */}
+          <Route
+            path="/admin/customers/:id/documents"
+            element={
+              <AdminRoute>
+                <CustomerDocumentsPage />
               </AdminRoute>
             }
           />

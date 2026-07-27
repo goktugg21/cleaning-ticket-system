@@ -14,7 +14,7 @@ from documents.views import (
     DocumentDetailView,
     DocumentFolderDetailView,
     DocumentFolderListCreateView,
-    DocumentUploadView,
+    DocumentListCreateView,
 )
 
 from .views import CustomerViewSet
@@ -82,8 +82,8 @@ urlpatterns = [
     ),
     path(
         "<int:customer_id>/documents/files/",
-        DocumentUploadView.as_view(),
-        name="customer-document-upload",
+        DocumentListCreateView.as_view(),
+        name="customer-document-files",
     ),
     path(
         "<int:customer_id>/documents/files/<uuid:public_id>/",

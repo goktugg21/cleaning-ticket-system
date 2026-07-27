@@ -108,6 +108,12 @@ class MeSerializer(serializers.ModelSerializer):
     building_ids = serializers.SerializerMethodField()
     customer_ids = serializers.SerializerMethodField()
     profile_photo_url = serializers.SerializerMethodField()
+    # Sprint 126 — does this (customer) user have the Documents module, for
+    # ANY of their customers? Drives the customer-side sidebar entry. The
+    # provider-only effective-permissions endpoint 403s a CUSTOMER_USER, so
+    # the frontend gate reads this instead. Always False for provider roles
+    # (their Documents nav is role-gated, not key-gated).
+    can_manage_documents = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -122,6 +128,7 @@ class MeSerializer(serializers.ModelSerializer):
             "building_ids",
             "customer_ids",
             "profile_photo_url",
+            "can_manage_documents",
             "date_joined",
             "last_login",
         ]
@@ -131,6 +138,18 @@ class MeSerializer(serializers.ModelSerializer):
         from .media_urls import profile_photo_url
 
         return profile_photo_url(obj, self.context.get("request"))
+
+    def get_can_manage_documents(self, obj):
+        if obj.role != "CUSTOMER_USER":
+            return False
+        from customers.permissions import user_can
+
+        return any(
+            user_can(obj, customer_id, None, "customer.documents.manage")
+            for customer_id in scope_customers_for(obj).values_list(
+                "id", flat=True
+            )
+        )
 
     # Routed through scope_*_for so /api/auth/me/ returns the same id sets the
     # matching list endpoints expose. After CHANGE-6, those scope helpers

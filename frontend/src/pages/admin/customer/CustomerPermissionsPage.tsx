@@ -133,6 +133,7 @@ export function CustomerPermissionsPage() {
     customer_users_can_approve_ticket_completion: true,
     customer_users_can_create_extra_work: true,
     customer_users_can_approve_extra_work_pricing: true,
+    customer_users_can_manage_documents: true,
   });
 
   const isSelfAccess = (access: CustomerUserBuildingAccess) =>
@@ -242,6 +243,8 @@ export function CustomerPermissionsPage() {
             data.customer_users_can_create_extra_work,
           customer_users_can_approve_extra_work_pricing:
             data.customer_users_can_approve_extra_work_pricing,
+          customer_users_can_manage_documents:
+            data.customer_users_can_manage_documents,
         });
         setPolicyError("");
       })
@@ -266,7 +269,9 @@ export function CustomerPermissionsPage() {
       policyDraft.customer_users_can_create_extra_work !==
         policy.customer_users_can_create_extra_work ||
       policyDraft.customer_users_can_approve_extra_work_pricing !==
-        policy.customer_users_can_approve_extra_work_pricing
+        policy.customer_users_can_approve_extra_work_pricing ||
+      policyDraft.customer_users_can_manage_documents !==
+        policy.customer_users_can_manage_documents
     );
   }, [policy, policyDraft]);
 
@@ -472,6 +477,8 @@ export function CustomerPermissionsPage() {
           updated.customer_users_can_create_extra_work,
         customer_users_can_approve_extra_work_pricing:
           updated.customer_users_can_approve_extra_work_pricing,
+        customer_users_can_manage_documents:
+          updated.customer_users_can_manage_documents,
       });
       pushToast({
         variant: "success",
@@ -657,6 +664,8 @@ export function CustomerPermissionsPage() {
                         policy.customer_users_can_create_extra_work,
                       customer_users_can_approve_extra_work_pricing:
                         policy.customer_users_can_approve_extra_work_pricing,
+                      customer_users_can_manage_documents:
+                        policy.customer_users_can_manage_documents,
                     })
                   }
                   testId="customer-policy-save-bar"

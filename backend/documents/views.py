@@ -16,7 +16,7 @@ from django.db import IntegrityError
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -30,7 +30,6 @@ from customers.models import Customer
 from .access import (
     AccessSide,
     can_modify_row,
-    can_place_in_folder,
     can_rename_system_folder,
     origin_for_side,
     resolve_access,
@@ -48,6 +47,20 @@ from .serializers import (
 
 def _err(message: str, code: str, http_status: int) -> Response:
     return Response({"detail": message, "code": code}, status=http_status)
+
+
+def _first_validation_code(exc: ValidationError) -> tuple[str, str]:
+    """Pull the first (code, message) pair out of a DRF field ValidationError
+    — `exc.detail` is `{field: [ErrorDetail, ...]}` and each ErrorDetail
+    carries a `.code`. Used to re-emit upload-validation failures in the
+    `{detail, code}` shape the rest of the API uses."""
+    detail = exc.detail
+    if isinstance(detail, dict):
+        for errors in detail.values():
+            if isinstance(errors, list) and errors:
+                first = errors[0]
+                return getattr(first, "code", "invalid"), str(first)
+    return "invalid", "Invalid upload."
 
 
 class _DocumentsBase(APIView):
@@ -112,13 +125,6 @@ class DocumentFolderListCreateView(_DocumentsBase):
         parent = None
         if parent_id is not None:
             parent = self._scoped_folder(customer, parent_id)
-
-        if not can_place_in_folder(side, parent):
-            return _err(
-                "You may not create a folder inside a system folder.",
-                "system_folder_readonly",
-                status.HTTP_403_FORBIDDEN,
-            )
 
         base_depth = 1 if parent is None else parent.depth() + 1
         if base_depth > MAX_FOLDER_DEPTH:
@@ -191,18 +197,12 @@ class DocumentFolderDetailView(_DocumentsBase):
                     status.HTTP_403_FORBIDDEN,
                 )
 
-        # --- apply move (validate cycle + depth + placement first) ---
+        # --- apply move (validate cycle + depth first) ---
         if move:
             new_parent_id = data["parent"]
             new_parent = None
             if new_parent_id is not None:
                 new_parent = self._scoped_folder(customer, new_parent_id)
-            if not can_place_in_folder(side, new_parent):
-                return _err(
-                    "You may not move a folder into a system folder.",
-                    "system_folder_readonly",
-                    status.HTTP_403_FORBIDDEN,
-                )
             if new_parent is not None:
                 if new_parent.id == folder.id or new_parent.id in (
                     folder.descendant_ids()
@@ -264,24 +264,47 @@ class DocumentFolderDetailView(_DocumentsBase):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class DocumentUploadView(_DocumentsBase):
+class DocumentListCreateView(_DocumentsBase):
     parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request, customer_id):
+        # Files in one folder (`?folder=<id>`) — the file pane's data source.
+        # Without `folder`, every file of the customer (the client filters by
+        # the selected folder; the pane itself is bounded on the frontend).
+        customer, _side = self.resolve_read(request, customer_id)
+        documents = Document.objects.filter(customer=customer)
+        folder_id = request.query_params.get("folder")
+        if folder_id is not None:
+            # Coerce explicitly: a non-numeric `?folder=` would otherwise reach
+            # the ORM and raise ValueError -> 500. A bad value is a clean 400
+            # in the module's usual {detail, code} shape.
+            try:
+                folder_id = int(folder_id)
+            except (TypeError, ValueError):
+                return _err(
+                    "The folder id must be an integer.",
+                    "invalid_folder_id",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            documents = documents.filter(folder_id=folder_id)
+        return Response(DocumentReadSerializer(documents, many=True).data)
 
     def post(self, request, customer_id):
         customer, side = self.resolve_write(request, customer_id)
         serializer = DocumentUploadSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError as exc:
+            # Surface the upload validator's STABLE `code` in the body so the
+            # frontend can map it to a localized message. DRF drops codes from
+            # the default {"file": ["msg"]} rendering, so we re-emit as the
+            # same {detail, code} shape the folder endpoints already use.
+            code, message = _first_validation_code(exc)
+            return _err(message, code, status.HTTP_400_BAD_REQUEST)
         upload = serializer.validated_data["file"]
         folder = self._scoped_folder(
             customer, serializer.validated_data["folder"]
         )
-
-        if not can_place_in_folder(side, folder):
-            return _err(
-                "You may not upload into a system folder.",
-                "system_folder_readonly",
-                status.HTTP_403_FORBIDDEN,
-            )
 
         document = Document(
             folder=folder,
@@ -350,12 +373,6 @@ class DocumentDetailView(_DocumentsBase):
 
         if move:
             new_folder = self._scoped_folder(customer, data["folder"])
-            if not can_place_in_folder(side, new_folder):
-                return _err(
-                    "You may not move a document into a system folder.",
-                    "system_folder_readonly",
-                    status.HTTP_403_FORBIDDEN,
-                )
             document.folder = new_folder
         if rename:
             document.original_filename = data["original_filename"]

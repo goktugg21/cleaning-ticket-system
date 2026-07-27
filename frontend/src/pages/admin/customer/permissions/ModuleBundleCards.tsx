@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Ticket, Wrench } from "lucide-react";
+import { FolderArchive, Ticket, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ConfirmDialog } from "../../../../components/ConfirmDialog";
@@ -33,10 +33,13 @@ import { Toggle } from "../../../../components/Toggle";
 type PolicyField = keyof PolicyDraft;
 
 interface ModuleSpec {
-  key: "meldingen" | "extra_werk";
+  key: "meldingen" | "extra_werk" | "documenten";
   icon: LucideIcon;
   titleKey: string;
   toggles: ReadonlyArray<{ field: PolicyField; labelKey: string }>;
+  // Sprint 126 — a single-key module (Documenten) is JUST a master toggle:
+  // the master IS the one field, so the redundant sub-toggle row is hidden.
+  masterOnly?: boolean;
 }
 
 const MODULES: ReadonlyArray<ModuleSpec> = [
@@ -68,6 +71,18 @@ const MODULES: ReadonlyArray<ModuleSpec> = [
         field: "customer_users_can_approve_extra_work_pricing",
         labelKey:
           "customer_permissions.modules.extra_werk.toggle_approve_pricing",
+      },
+    ],
+  },
+  {
+    key: "documenten",
+    icon: FolderArchive,
+    titleKey: "customer_permissions.modules.documenten.title",
+    masterOnly: true,
+    toggles: [
+      {
+        field: "customer_users_can_manage_documents",
+        labelKey: "customer_permissions.modules.documenten.title",
       },
     ],
   },
@@ -142,7 +157,8 @@ export function ModuleBundleCards({
               </label>
             </div>
             <div className="module-bundle-toggles">
-              {module.toggles.map((toggle) => (
+              {!module.masterOnly &&
+                module.toggles.map((toggle) => (
                 <label
                   key={toggle.field}
                   className={

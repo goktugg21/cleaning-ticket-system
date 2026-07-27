@@ -112,28 +112,3 @@ def can_rename_system_folder(side: str) -> bool:
     """Only the provider may rename a system folder (its display name);
     the slug never changes and a customer may never rename it."""
     return side == AccessSide.PROVIDER
-
-
-def can_place_in_folder(side: str, target_folder) -> bool:
-    """May an actor of `side` CREATE a subfolder in, or UPLOAD a file into,
-    `target_folder`? (`target_folder` is None for a root-level folder
-    create.)
-
-    Placement is unconditionally allowed for anyone who has reached the view
-    (i.e. already resolved a side) — into ANY folder they can see, system
-    folders INCLUDED. This is what lets a customer file a contract into the
-    provider's `Contracten` folder, the main intended flow.
-
-    Placement never transfers ownership: the new folder / file is stamped
-    with the ACTOR'S own `origin` (see `origin_for_side`), so a customer's
-    file dropped into a system folder stays `origin=CUSTOMER` — theirs to
-    rename / move / delete, and the provider may still delete it too. The
-    `is_system` flag protects only the folder ROW itself (rename is
-    provider-only; move / delete are rejected for everyone) — never its
-    contents. Cross-customer placement can't arise here: the view only ever
-    passes a folder already scoped to the URL customer.
-
-    Retained as the single policy hook so a future tightening has one place
-    to live; today it is an unconditional allow.
-    """
-    return True

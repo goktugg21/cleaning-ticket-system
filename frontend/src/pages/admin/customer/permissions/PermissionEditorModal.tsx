@@ -154,6 +154,7 @@ export function PermissionEditorModal({
       tickets: [],
       extra_work: [],
       users: [],
+      documents: [],
     };
     for (const row of PERMISSION_KEY_ROWS) grouped[row.group].push(row);
     return grouped;

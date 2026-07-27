@@ -85,6 +85,10 @@ export interface Me {
   customer_ids: number[];
   // RF-1 — authed avatar URL (null when unset).
   profile_photo_url: string | null;
+  // Sprint 126 — customer-side Documents access (any of the user's
+  // customers). Drives the customer sidebar entry; always false for
+  // provider roles. See MeSerializer.get_can_manage_documents.
+  can_manage_documents: boolean;
   date_joined: string;
   last_login: string | null;
 }
@@ -765,6 +769,8 @@ export const CUSTOMER_PERMISSION_KEYS = [
   "customer.users.manage",
   "customer.users.assign_location_role",
   "customer.users.manage_permissions",
+  // Sprint 125/126 — the Customer Documents module (one coarse key).
+  "customer.documents.manage",
 ] as const;
 export type CustomerPermissionKey = (typeof CUSTOMER_PERMISSION_KEYS)[number];
 
@@ -781,6 +787,34 @@ export interface CustomerCompanyPolicyAdmin {
   customer_users_can_approve_ticket_completion: boolean;
   customer_users_can_create_extra_work: boolean;
   customer_users_can_approve_extra_work_pricing: boolean;
+  // Sprint 126 — company-wide toggle for the customer Documents module.
+  customer_users_can_manage_documents: boolean;
+}
+
+// Sprint 126 — customer Documents. Mirrors the backend read serializers
+// (documents/serializers.py). `parent` is null for a root folder; a file is
+// addressed in the API only by its opaque `public_id` (never the row pk).
+export type DocumentOrigin = "PROVIDER" | "CUSTOMER";
+
+export interface DocumentFolder {
+  id: number;
+  parent: number | null;
+  name: string;
+  is_system: boolean;
+  system_slug: string;
+  origin: DocumentOrigin;
+  created_at: string;
+}
+
+export interface DocumentFile {
+  public_id: string;
+  folder: number;
+  original_filename: string;
+  mime_type: string;
+  file_size: number;
+  origin: DocumentOrigin;
+  uploaded_by_email: string | null;
+  created_at: string;
 }
 
 // Sprint 28 Batch 15.5 — user-list scope summary surfaced as a single

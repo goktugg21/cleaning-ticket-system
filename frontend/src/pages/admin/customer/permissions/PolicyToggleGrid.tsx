@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { LucideIcon } from "lucide-react";
-import { BadgeCheck, Ticket, Wallet, Wrench } from "lucide-react";
+import { BadgeCheck, FolderArchive, Ticket, Wallet, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { CustomerCompanyPolicyAdmin } from "../../../../api/types";
@@ -29,6 +29,7 @@ export type PolicyDraft = Pick<
   | "customer_users_can_approve_ticket_completion"
   | "customer_users_can_create_extra_work"
   | "customer_users_can_approve_extra_work_pricing"
+  | "customer_users_can_manage_documents"
 >;
 
 type PolicyField = keyof PolicyDraft;
@@ -77,6 +78,13 @@ const CARDS: ReadonlyArray<PolicyCardSpec> = [
       "customer.extra_work.approve_own",
       "customer.extra_work.approve_location",
     ],
+  },
+  {
+    field: "customer_users_can_manage_documents",
+    icon: FolderArchive,
+    titleKey: "customer_form.policy_field_manage_documents",
+    helperKey: "customer_permissions.policy_card.manage_documents.helper",
+    affectedKeys: ["customer.documents.manage"],
   },
 ];
 

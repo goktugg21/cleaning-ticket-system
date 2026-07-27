@@ -39,6 +39,7 @@ const POLICY_DENIES: Record<
     | "customer_users_can_approve_ticket_completion"
     | "customer_users_can_create_extra_work"
     | "customer_users_can_approve_extra_work_pricing"
+    | "customer_users_can_manage_documents"
   >,
   ReadonlyArray<CustomerPermissionKey>
 > = {
@@ -52,6 +53,7 @@ const POLICY_DENIES: Record<
     "customer.extra_work.approve_own",
     "customer.extra_work.approve_location",
   ],
+  customer_users_can_manage_documents: ["customer.documents.manage"],
 };
 
 function policyDeniesKey(
