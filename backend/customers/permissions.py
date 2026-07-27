@@ -63,6 +63,15 @@ CUSTOMER_PERMISSION_KEYS: frozenset[str] = frozenset(
         "customer.users.manage",
         "customer.users.assign_location_role",
         "customer.users.manage_permissions",
+        # Sprint 125 — the Customer Documents module. ONE coarse key gates
+        # the whole customer-side document surface (read every folder/file
+        # of the customer, create folders, upload files, and manage the
+        # user's OWN origin=CUSTOMER rows). The origin=CUSTOMER-only write
+        # rule and the is_system-folder ban are enforced in the view, not by
+        # a finer permission key. The frontend `CUSTOMER_PERMISSION_KEYS`
+        # mirror + the RF-8 module-card UI land in the follow-up frontend
+        # sprint (this sprint is backend-only).
+        "customer.documents.manage",
     }
 )
 
@@ -81,6 +90,9 @@ _TICKET_ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "customer.extra_work.create",
             "customer.extra_work.view_own",
             "customer.extra_work.approve_own",
+            # Sprint 125 — every customer user participates in the shared
+            # document store by default (revocable per-user via an override).
+            "customer.documents.manage",
         }
     ),
     CustomerUserBuildingAccess.AccessRole.CUSTOMER_LOCATION_MANAGER: frozenset(
@@ -96,6 +108,7 @@ _TICKET_ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "customer.extra_work.approve_own",
             "customer.extra_work.approve_location",
             "customer.users.assign_location_role",
+            "customer.documents.manage",
         }
     ),
     CustomerUserBuildingAccess.AccessRole.CUSTOMER_COMPANY_ADMIN: frozenset(
@@ -118,6 +131,7 @@ _TICKET_ROLE_DEFAULTS: dict[str, frozenset[str]] = {
             "customer.users.manage",
             "customer.users.assign_location_role",
             "customer.users.manage_permissions",
+            "customer.documents.manage",
         }
     ),
 }

@@ -50,6 +50,7 @@ from customers.models import (
     CustomerUserBuildingAccess,
     CustomerUserMembership,
 )
+from documents.models import MAX_FOLDER_DEPTH, Document, DocumentFolder
 from extra_work.models import (
     CustomerCustomPrice,
     CustomerServicePrice,
@@ -1261,6 +1262,122 @@ def _on_property_grant_post_delete(sender, instance, **kwargs):
         )
 
 
+# ===========================================================================
+# Sprint 125 — customer `Document` rows. Like StaffCredential, the model
+# carries a `file` FileField, so it is NOT in the generic CRUD trio (the diff
+# engine would serialize the storage PATH). Audit payloads carry FILENAMES
+# ONLY — never the storage path, never bytes. The DELETE row must answer "who
+# deleted the contract": the deleter is the AuditLog.actor (resolved from the
+# request context), and the payload retains original_filename, the folder
+# PATH, the uploader, mime/size and origin so the fact is legible without the
+# now-gone row.
+# ===========================================================================
+_DOCUMENT_UPDATE_TRACKED_FIELDS = ("original_filename", "folder_id")
+
+
+def _document_folder_path(folder) -> str:
+    """"Root / Sub / Leaf" for a folder, walking parents (bounded by the
+    depth cap so a corrupt cycle cannot loop forever)."""
+    if folder is None:
+        return ""
+    names = [folder.name]
+    node = folder.parent
+    guard = 0
+    while node is not None and guard <= MAX_FOLDER_DEPTH + 1:
+        names.append(node.name)
+        node = node.parent
+        guard += 1
+    return " / ".join(reversed(names))
+
+
+def _document_changes(document, *, action: str) -> dict:
+    """CREATE / DELETE payload for a document — filenames only. The `file`
+    FieldFile (a storage path) is deliberately excluded."""
+    customer = getattr(document, "customer", None)
+    folder = getattr(document, "folder", None)
+    uploader = getattr(document, "uploaded_by", None)
+    payload = {
+        "customer_id": customer.id if customer else None,
+        "customer_name": getattr(customer, "name", None),
+        "folder_id": folder.id if folder else None,
+        "folder_path": _document_folder_path(folder),
+        "original_filename": document.original_filename,
+        "mime_type": document.mime_type,
+        "file_size": document.file_size,
+        "origin": document.origin,
+        "uploaded_by_email": getattr(uploader, "email", None),
+    }
+    if action == AuditAction.CREATE:
+        return {k: {"before": None, "after": v} for k, v in payload.items()}
+    return {k: {"before": v, "after": None} for k, v in payload.items()}
+
+
+def _document_update_snapshot(instance):
+    if instance.pk is None:
+        return None
+    try:
+        previous = Document.objects.get(pk=instance.pk)
+    except Document.DoesNotExist:
+        return None
+    return {
+        "original_filename": previous.original_filename,
+        "folder_id": previous.folder_id,
+    }
+
+
+def _on_document_pre_save(sender, instance, **kwargs):
+    try:
+        snapshot = _document_update_snapshot(instance)
+        _state_map()[("documents.Document", instance.pk)] = snapshot
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Document pre_save snapshot failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_document_post_save(sender, instance, created, **kwargs):
+    try:
+        if created:
+            _create_log(
+                instance,
+                AuditAction.CREATE,
+                _document_changes(instance, action=AuditAction.CREATE),
+            )
+            return
+        snapshot = _state_map().pop(("documents.Document", instance.pk), None)
+        if snapshot is None:
+            return
+        diff = {}
+        for field in _DOCUMENT_UPDATE_TRACKED_FIELDS:
+            before = snapshot[field]
+            after = getattr(instance, field)
+            if before != after:
+                diff[field] = {"before": before, "after": after}
+        if not diff:
+            return
+        _create_log(instance, AuditAction.UPDATE, diff)
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Document post_save failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
+def _on_document_post_delete(sender, instance, **kwargs):
+    try:
+        _create_log(
+            instance,
+            AuditAction.DELETE,
+            _document_changes(instance, action=AuditAction.DELETE),
+        )
+    except Exception:  # pragma: no cover — defensive
+        logger.exception(
+            "audit: Document post_delete failed for #%s",
+            getattr(instance, "pk", None),
+        )
+
+
 def _connect():
     User = _user_model()
     # Lazy import: StaffProfile lives in accounts and would create a
@@ -1365,6 +1482,17 @@ def _connect():
         # tickets/views.py and the auto_complete_on_subtasks flip writes its
         # own explicit row; no double-write.)
         SubTask,
+        # Sprint 125 — customer document FOLDERS. Editable fields (name /
+        # parent on move) produce meaningful UPDATE diffs and there is no
+        # FileField, so the generic CRUD trio is the right shape: create /
+        # rename / move / delete each land as one AuditLog row.
+        #
+        # NB: the `Document` model is deliberately NOT in this trio — it
+        # carries a `file` FileField the generic diff engine would serialize
+        # as a storage PATH. Audit payloads must be FILENAMES ONLY, so
+        # Document gets hand-crafted handlers below (the StaffCredential
+        # pattern).
+        DocumentFolder,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -1633,6 +1761,29 @@ def _connect():
         sender=PropertyCustomerVisibility,
         weak=False,
         dispatch_uid="audit:property_grant:del:PropertyCustomerVisibility",
+    )
+
+    # Sprint 125 — customer Document rows. Hand-crafted (filenames only)
+    # CREATE + UPDATE-diff (rename / move) + DELETE handlers. The DocumentFolder
+    # model is in the generic CRUD trio above; only Document needs the
+    # bespoke shape because of its FileField.
+    pre_save.connect(
+        _on_document_pre_save,
+        sender=Document,
+        weak=False,
+        dispatch_uid="audit:document:pre:Document",
+    )
+    post_save.connect(
+        _on_document_post_save,
+        sender=Document,
+        weak=False,
+        dispatch_uid="audit:document:post:Document",
+    )
+    post_delete.connect(
+        _on_document_post_delete,
+        sender=Document,
+        weak=False,
+        dispatch_uid="audit:document:del:Document",
     )
 
 
