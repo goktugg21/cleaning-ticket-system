@@ -262,6 +262,69 @@ class CustomerInvoiceRedactionTests(_CustomerReadFixture):
             self.assertIn(present, line_keys)
 
 
+class CustomerInvoiceCreditedByTests(_CustomerReadFixture):
+    """Sprint 122 (B2) — `credited_by_number` on the customer read: present
+    ONLY once the reversal that credits this invoice is itself SENT,
+    mirroring the customer scope's own SENT-only gate (never reveal an
+    ISSUED-but-unsent reversal via a different, already-visible invoice)."""
+
+    def _detail(self, inv):
+        return f"/api/invoices/my/{inv.id}/"
+
+    def test_null_when_not_reversed(self):
+        resp = self._api(self.cu).get(self._detail(self.inv_a1_sent))
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.data["credited_by_number"])
+
+    def test_null_while_reversal_issued_not_sent(self):
+        Invoice.objects.create(
+            company=self.company,
+            customer=self.customer_a1,
+            status=Invoice.Status.ISSUED,
+            number="2026-9001",
+            year=2026,
+            issued_at=timezone.now(),
+            is_reversal=True,
+            reverses=self.inv_a1_sent,
+            created_by=self.admin,
+        )
+        resp = self._api(self.cu).get(self._detail(self.inv_a1_sent))
+        self.assertIsNone(resp.data["credited_by_number"])
+
+    def test_set_once_reversal_is_sent(self):
+        reversal = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer_a1,
+            status=Invoice.Status.SENT,
+            number="2026-9002",
+            year=2026,
+            issued_at=timezone.now(),
+            sent_at=timezone.now(),
+            is_reversal=True,
+            reverses=self.inv_a1_sent,
+            created_by=self.admin,
+        )
+        resp = self._api(self.cu).get(self._detail(self.inv_a1_sent))
+        self.assertEqual(resp.data["credited_by_number"], reversal.number)
+
+    def test_in_list_endpoint_too(self):
+        reversal = Invoice.objects.create(
+            company=self.company,
+            customer=self.customer_a1,
+            status=Invoice.Status.SENT,
+            number="2026-9003",
+            year=2026,
+            issued_at=timezone.now(),
+            sent_at=timezone.now(),
+            is_reversal=True,
+            reverses=self.inv_a1_sent,
+            created_by=self.admin,
+        )
+        resp = self._api(self.cu).get(LIST_URL)
+        row = next(r for r in resp.data if r["id"] == self.inv_a1_sent.id)
+        self.assertEqual(row["credited_by_number"], reversal.number)
+
+
 class ProviderSurfaceUnaffectedTests(_CustomerReadFixture):
     def test_customer_403_on_provider_list(self):
         resp = self._api(self.cu).get("/api/invoices/")

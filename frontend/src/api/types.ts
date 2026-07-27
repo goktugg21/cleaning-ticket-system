@@ -2074,6 +2074,10 @@ export interface Invoice {
   summary_text: string;
   is_reversal: boolean;
   reverses: number | null;
+  // Sprint 122 (Part B2) — the reversing credit note's number, if this
+  // invoice has been credited (any status: provider sees unsent reversals
+  // too). Null otherwise, and always null on a reversal itself.
+  credited_by_number: string | null;
   issued_at: string | null;
   sent_at: string | null;
   created_at: string;
@@ -2112,6 +2116,10 @@ export interface CustomerInvoice {
   optional_fee_amount: string | null;
   summary_text: string;
   is_reversal: boolean;
+  // Sprint 122 (Part B2) — the reversing credit note's number, ONLY once
+  // that credit note is itself SENT (mirrors the customer scope's SENT-only
+  // gate — never reveals an unsent reversal). Null otherwise.
+  credited_by_number: string | null;
   issued_at: string | null;
   sent_at: string | null;
   lines: CustomerInvoiceLine[];

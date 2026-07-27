@@ -99,6 +99,11 @@ export function InvoiceDetailPage() {
   );
 
   const isDraft = invoice?.status === "DRAFT";
+  // Sprint 122 (Part B1) — a reversal born ISSUED is a live credit note the
+  // customer cannot see until it is sent; the original it credits still
+  // reads as owed until then. Flag it distinctly wherever status shows.
+  const unsentCreditNote =
+    invoice?.is_reversal === true && invoice?.status === "ISSUED";
 
   function applyInvoice(fresh: Invoice) {
     setInvoice(fresh);
@@ -414,14 +419,18 @@ export function InvoiceDetailPage() {
             <span style={{ marginLeft: 12 }}>
               <span
                 className={
-                  invoice.status === "SENT"
-                    ? "cell-tag cell-tag-open"
-                    : "cell-tag cell-tag-closed"
+                  unsentCreditNote
+                    ? "cell-tag cell-tag-warn"
+                    : invoice.status === "SENT"
+                      ? "cell-tag cell-tag-open"
+                      : "cell-tag cell-tag-closed"
                 }
                 data-testid="invoice-detail-status"
               >
                 <i />
-                {t(STATUS_LABEL_KEY[invoice.status])}
+                {unsentCreditNote
+                  ? t("facturen.credit_note_unsent")
+                  : t(STATUS_LABEL_KEY[invoice.status])}
               </span>
             </span>
           </h2>
@@ -461,15 +470,22 @@ export function InvoiceDetailPage() {
               >
                 {t("invoice_detail.action_send")}
               </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => requestLifecycle("unissue")}
-                disabled={busy}
-                data-testid="invoice-unissue-button"
-              >
-                {t("invoice_detail.action_unissue")}
-              </button>
+              {/* RF-Sprint122 (B3) — a reversal is a committed counter-
+                  document; unissue_invoice explicitly rejects it ("a
+                  reversal is terminal"), so this button would only ever
+                  error on a credit note. Normal ISSUED invoices are
+                  unaffected. */}
+              {!invoice.is_reversal && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => requestLifecycle("unissue")}
+                  disabled={busy}
+                  data-testid="invoice-unissue-button"
+                >
+                  {t("invoice_detail.action_unissue")}
+                </button>
+              )}
             </>
           )}
           {invoice.status === "SENT" && !invoice.is_reversal && (
@@ -489,6 +505,37 @@ export function InvoiceDetailPage() {
       {error && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
           {error}
+        </div>
+      )}
+
+      {/* Sprint 122 (B2) — a reversed original stays SENT on the books (it
+          is not soft-deleted), so without this it would read as an open
+          debt. Shown regardless of whether the credit note itself has been
+          sent yet (the provider should know either way). */}
+      {invoice.credited_by_number && (
+        <div
+          className="alert-info"
+          role="status"
+          style={{ marginBottom: 16 }}
+          data-testid="invoice-credited-note"
+        >
+          {t("invoice_detail.credited_note", {
+            number: invoice.credited_by_number,
+          })}
+        </div>
+      )}
+
+      {/* Sprint 122 (B1) — the unmissable nudge: reversing does not by
+          itself change what the customer sees (SEND does), so an ISSUED
+          credit note left unsent leaves the customer looking at the
+          original as still owed. */}
+      {unsentCreditNote && (
+        <div
+          className="alert-warning"
+          role="status"
+          data-testid="invoice-credit-note-unsent-note"
+        >
+          {t("invoice_detail.credit_note_unsent_note")}
         </div>
       )}
 

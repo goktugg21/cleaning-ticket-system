@@ -143,6 +143,22 @@ class LifecycleTests(InvoicingFixture):
         with self.assertRaises(InvoiceTransitionError):
             unissue_invoice(self.admin, sent)
 
+    def test_unissue_rejected_for_reversal(self):
+        # Sprint 122 (B3) — a reversal is a committed counter-document (born
+        # ISSUED with its own number); un-issuing it would strand that
+        # number. Locks the exact backend guard the frontend Unissue-button
+        # fix relies on (InvoiceDetailPage hides the button for a reversal
+        # instead of letting it 400).
+        self.make_ew(closed_at=dt(2026, 5, 31))
+        original = generate_draft_invoices(
+            self.admin, self.company.id, self.customer.id, 2026, 5
+        )[0]
+        original = send_invoice(self.admin, issue_invoice(self.admin, original))
+        reversal = reverse_invoice(self.admin, original)
+        self.assertEqual(reversal.status, Invoice.Status.ISSUED)
+        with self.assertRaises(InvoiceTransitionError):
+            unissue_invoice(self.admin, reversal)
+
     def test_unissue_provider_operator_gated(self):
         inv = issue_invoice(self.admin, self._draft())
         with self.assertRaises(PermissionDenied):

@@ -143,7 +143,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
         return (
             scope_invoices_for(self.request.user)
             .select_related("company", "customer", "building")
-            .prefetch_related("lines")
+            .prefetch_related("lines", "reversed_by")
         )
 
     def _forbid_non_operator(self, request):
@@ -473,7 +473,7 @@ class CustomerInvoiceListView(views.APIView):
         qs = (
             scope_customer_invoices_for(request.user)
             .select_related("customer", "building")
-            .prefetch_related("lines")
+            .prefetch_related("lines", "reversed_by")
             .order_by("-sent_at", "-id")
         )
         serializer = CustomerInvoiceSerializer(
@@ -493,7 +493,7 @@ class CustomerInvoiceDetailView(views.APIView):
         invoice = get_object_or_404(
             scope_customer_invoices_for(request.user)
             .select_related("customer", "building")
-            .prefetch_related("lines"),
+            .prefetch_related("lines", "reversed_by"),
             pk=invoice_id,
         )
         return Response(
