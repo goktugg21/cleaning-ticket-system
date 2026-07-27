@@ -36,6 +36,7 @@
   "notifications.company_filter_label": "View as company",
   "notifications.company_filter_own": "My notifications",
   "notifications.subscribe_toggle": "Notify me for this company",
+  "notifications.email_toggle": "Also email me (separate from the in-app stream above)",
   "notifications.company_view_hint": "Read-only view of this company's notification stream (one row per event).",
   "inbox.filter_kind": "Type",
   "inbox.kind_all": "All",

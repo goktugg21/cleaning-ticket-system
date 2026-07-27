@@ -138,40 +138,72 @@ class NotificationListView(generics.ListAPIView):
 class SuperAdminCompanySubscriptionListView(APIView):
     """#109 Part D — GET /api/notifications/company-subscriptions/
     (SUPER_ADMIN only, 403 otherwise): the caller's subscribed provider
-    company ids. Minimal shape: {"subscribed_company_ids": [..]}."""
+    company ids. Minimal shape: {"subscribed_company_ids": [..]}.
+
+    Sprint 122 (Part C) adds "email_enabled_company_ids" — the SUBSET of
+    the above where the caller has ALSO opted into email (a company id can
+    only appear here if it is also in subscribed_company_ids, since
+    email_enabled lives on the same subscription row)."""
 
     permission_classes = [IsSuperAdmin]
 
     def get(self, request):
-        ids = list(
-            SuperAdminCompanySubscription.objects.filter(
-                user=request.user
-            ).values_list("company_id", flat=True)
+        rows = SuperAdminCompanySubscription.objects.filter(
+            user=request.user
+        ).values("company_id", "email_enabled")
+        return Response(
+            {
+                "subscribed_company_ids": sorted(
+                    row["company_id"] for row in rows
+                ),
+                "email_enabled_company_ids": sorted(
+                    row["company_id"] for row in rows if row["email_enabled"]
+                ),
+            }
         )
-        return Response({"subscribed_company_ids": sorted(ids)})
 
 
 class SuperAdminCompanySubscriptionDetailView(APIView):
     """#109 Part D — PUT/DELETE
     /api/notifications/company-subscriptions/<company_id>/
     (SUPER_ADMIN only, 403 otherwise). PUT subscribes (idempotent),
-    DELETE unsubscribes (idempotent); both return the resulting state."""
+    DELETE unsubscribes (idempotent); both return the resulting state.
+
+    Sprint 122 (Part C) — PUT also accepts an optional boolean body
+    {"email_enabled": ...} to set the SEPARATE email opt-in on the same
+    row (created if needed, exactly like a bare PUT). Omitted ->
+    email_enabled is left as-is (so a bare re-subscribe never resets it);
+    a fresh row still starts at the model default (False)."""
 
     permission_classes = [IsSuperAdmin]
 
     def put(self, request, company_id):
         company = get_object_or_404(Company, pk=company_id, is_active=True)
-        SuperAdminCompanySubscription.objects.get_or_create(
+        sub, _created = SuperAdminCompanySubscription.objects.get_or_create(
             user=request.user, company=company
         )
-        return Response({"company": company.id, "subscribed": True})
+        email_enabled = request.data.get("email_enabled")
+        if email_enabled is not None:
+            sub.email_enabled = bool(email_enabled)
+            sub.save(update_fields=["email_enabled"])
+        return Response(
+            {
+                "company": company.id,
+                "subscribed": True,
+                "email_enabled": sub.email_enabled,
+            }
+        )
 
     def delete(self, request, company_id):
         SuperAdminCompanySubscription.objects.filter(
             user=request.user, company_id=company_id
         ).delete()
         return Response(
-            {"company": int(company_id), "subscribed": False},
+            {
+                "company": int(company_id),
+                "subscribed": False,
+                "email_enabled": False,
+            },
             status=status.HTTP_200_OK,
         )
 

@@ -36,6 +36,7 @@
   "notifications.company_filter_label": "Bekijk als bedrijf",
   "notifications.company_filter_own": "Mijn meldingen",
   "notifications.subscribe_toggle": "Ontvang meldingen voor dit bedrijf",
+  "notifications.email_toggle": "Ook e-mailen (los van de melding hierboven)",
   "notifications.company_view_hint": "Alleen-lezen weergave van de meldingenstroom van dit bedrijf (één regel per gebeurtenis).",
   "inbox.filter_kind": "Type",
   "inbox.kind_all": "Alle",

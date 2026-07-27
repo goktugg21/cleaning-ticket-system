@@ -106,6 +106,32 @@ def subscribed_super_admins(company_id):
     )
 
 
+def subscribed_super_admins_for_email(company_id):
+    """Sprint 122 (Part C) — active SUPER_ADMIN users who opted into EMAIL
+    delivery for `company_id`, via SuperAdminCompanySubscription.
+    email_enabled. A SEPARATE opt-in from the in-app subscription itself
+    (owner-decided: subscribing in-app must not silently start emailing) —
+    defaults to False, so this returns nothing for a plain in-app
+    subscriber. Unioned into the email senders for TICKET_CREATED /
+    TICKET_STATUS_CHANGED / TICKET_SLOT_UNABLE ONLY, mirroring
+    `subscribed_super_admins`' own scope note: the in-app-only provider-
+    management paths (ticket messages, EW requested/decision/messages) and
+    the other email senders are untouched.
+    """
+    from .models import SuperAdminCompanySubscription  # noqa: F401 (model app-local)
+
+    return list(
+        _active_users()
+        .filter(
+            role=UserRole.SUPER_ADMIN,
+            sa_company_subscriptions__company_id=company_id,
+            sa_company_subscriptions__email_enabled=True,
+        )
+        .distinct()
+        .order_by("email")
+    )
+
+
 def _ticket_staff_users(ticket):
     return _active_users().filter(
         Q(
@@ -865,7 +891,10 @@ def send_ticket_created_email(ticket, actor=None):
 
     return _send_to_users(
         ticket=ticket,
-        users=list(_ticket_staff_users(ticket)),
+        # Sprint 122 (Part C) — SAs who opted into email for this company
+        # join the staff recipients (separate opt-in from the in-app stream).
+        users=list(_ticket_staff_users(ticket))
+        + subscribed_super_admins_for_email(ticket.company_id),
         event_type=NotificationEventType.TICKET_CREATED,
         subject=subject,
         body=body,
@@ -936,6 +965,9 @@ def send_ticket_status_changed_email(
 
     users = []
     users.extend(list(_ticket_staff_users(ticket)))
+    # Sprint 122 (Part C) — SAs who opted into email for this company join
+    # the staff recipients (separate opt-in from the in-app stream).
+    users.extend(subscribed_super_admins_for_email(ticket.company_id))
 
     # Provider-internal states never reach the customer side. The manager /
     # assigned-to (provider-side) recipients below stay unchanged.
@@ -1069,7 +1101,10 @@ def send_slot_unable_to_complete_email(ticket, assignment, actor=None):
 
     return _send_to_users(
         ticket=ticket,
-        users=list(_ticket_staff_users(ticket)),
+        # Sprint 122 (Part C) — SAs who opted into email for this company
+        # join the staff recipients (separate opt-in from the in-app stream).
+        users=list(_ticket_staff_users(ticket))
+        + subscribed_super_admins_for_email(ticket.company_id),
         event_type=NotificationEventType.TICKET_SLOT_UNABLE,
         subject=subject,
         body=body,

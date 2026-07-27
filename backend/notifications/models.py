@@ -375,6 +375,15 @@ class SuperAdminCompanySubscription(models.Model):
         related_name="sa_subscriptions",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # Sprint 122 (Part C) — a SEPARATE opt-in for EMAIL delivery of the
+    # provider-management emails (TICKET_CREATED / TICKET_STATUS_CHANGED /
+    # TICKET_SLOT_UNABLE), owner-decided: subscribing to the in-app stream
+    # above must NOT silently start emailing this SA. Defaults to False, so
+    # an existing row (and a freshly created one) never emails until the SA
+    # explicitly flips this on. Lives on this row deliberately — unsubscribing
+    # (deleting the row) also forgets the email preference, since there is no
+    # longer any subscription for it to modify.
+    email_enabled = models.BooleanField(default=False)
 
     class Meta:
         constraints = [
