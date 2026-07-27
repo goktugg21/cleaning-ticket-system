@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from rest_framework import generics, serializers, status
 from rest_framework.exceptions import PermissionDenied
@@ -62,10 +62,15 @@ from config.pagination import UnboundedPagination
 from .catalog_scope import (
     can_manage_catalog,
     filter_categories_for,
+    filter_managed_units_for,
     filter_services_for,
 )
-from .models import Service, ServiceCategory
-from .serializers_catalog import ServiceCategorySerializer, ServiceSerializer
+from .models import ManagedUnit, Service, ServiceCategory
+from .serializers_catalog import (
+    ManagedUnitSerializer,
+    ServiceCategorySerializer,
+    ServiceSerializer,
+)
 
 
 # Stable error codes raised from this module.
@@ -78,6 +83,9 @@ ERR_SERVICE_BULK_RAISE_INVALID = "service_bulk_raise_invalid"
 # #108 Part C — a lower that would push any selected default price to
 # zero or below rejects the WHOLE batch (all-or-nothing, zero writes).
 ERR_SERVICE_BULK_RAISE_RESULT_INVALID = "service_bulk_raise_result_invalid"
+# Sprint 123 — managed-unit catalog.
+ERR_MANAGED_UNIT_LABEL_NOT_UNIQUE = "managed_unit_label_not_unique"
+ERR_MANAGED_UNIT_COMPANY_MISMATCH = "managed_unit_company_mismatch"
 
 
 def _parse_bool_param(value):
@@ -136,6 +144,34 @@ def _enforce_catalog_management(user, company):
                     "enable it."
                 ),
                 "code": ERR_CATALOG_POLICY_DISABLED,
+            }
+        )
+
+
+def _enforce_same_company_managed_unit(managed_unit, company):
+    """Sprint 123 — a `Service` / `CustomerCustomPrice` row's
+    `managed_unit` (when set) must belong to the SAME provider company
+    as the row itself. Checked here (in the view, after `company` is
+    resolved) rather than in the serializer's `validate()`, because a
+    COMPANY_ADMIN's Service create may omit `company` entirely and have
+    it defaulted by `_resolve_catalog_create_company` AFTER validate()
+    already ran — the serializer cannot know the target company yet at
+    that point. Raises HTTP 400 (not 403 — this is a data-integrity
+    rule, not a permission boundary) with a stable code so a UI can
+    show something more specific than a generic error.
+    """
+    if managed_unit is None or company is None:
+        return
+    if managed_unit.company_id != company.id:
+        raise serializers.ValidationError(
+            {
+                "managed_unit": [
+                    serializers.ErrorDetail(
+                        "This managed unit belongs to a different "
+                        "provider company.",
+                        code=ERR_MANAGED_UNIT_COMPANY_MISMATCH,
+                    )
+                ]
             }
         )
 
@@ -253,8 +289,11 @@ class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-def _resolve_service_create_company(user, supplied_company):
-    """Sprint 3B — pick the `company` for a new Service.
+def _resolve_catalog_create_company(user, supplied_company):
+    """Sprint 3B — pick the `company` for a new catalog row (a Service;
+    Sprint 123 reuses this verbatim for a new ManagedUnit — the
+    resolution rule is generic to "a provider-company-scoped catalog
+    row", not specific to Service).
 
     Rules:
       * COMPANY_ADMIN omitted `company` → default to the actor's
@@ -423,11 +462,17 @@ class ServiceListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         # Resolve company (defaults for CA, multi-Company guard
         # for SA), then run the catalog-management policy gate.
-        target_company = _resolve_service_create_company(
+        target_company = _resolve_catalog_create_company(
             self.request.user,
             serializer.validated_data.get("company"),
         )
         _enforce_catalog_management(self.request.user, target_company)
+        # Sprint 123 — a managed_unit (if any) must belong to this same
+        # company; checked here because `target_company` is only known
+        # AFTER resolution, which the serializer's validate() cannot see.
+        _enforce_same_company_managed_unit(
+            serializer.validated_data.get("managed_unit"), target_company
+        )
         # Persist with the resolved company so an omitted field on
         # the wire still lands non-null on the DB row.
         serializer.save(company=target_company)
@@ -462,6 +507,13 @@ class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
         _enforce_catalog_management(
             self.request.user, serializer.instance.company
         )
+        # Sprint 123 — managed_unit (if changing) must stay within the
+        # row's own (immutable-on-update) company.
+        if "managed_unit" in serializer.validated_data:
+            _enforce_same_company_managed_unit(
+                serializer.validated_data["managed_unit"],
+                serializer.instance.company,
+            )
         serializer.save()
 
     def delete(self, request, *args, **kwargs):
@@ -608,3 +660,134 @@ class ServiceBulkRaiseView(APIView):
             {"updated_count": len(results), "results": results},
             status=status.HTTP_200_OK,
         )
+
+
+class ManagedUnitListCreateView(generics.ListCreateAPIView):
+    """Sprint 123 — GET (list) + POST (create) at
+    /api/services/units/.
+
+    Unlike Service / ServiceCategory, this endpoint is
+    PROVIDER-OPERATOR-ONLY on GET too — a managed unit has no
+    customer-facing consumer (it backs the OTHER-unit picker on the
+    Service and CustomerCustomPrice admin forms only; ProposalLine
+    stays plain free text). `IsSuperAdminOrCompanyAdmin` gates both
+    methods; `filter_managed_units_for` + `_enforce_catalog_management`
+    reuse the exact Service scoping/policy rules (same permission key,
+    per the sprint brief — no new one invented).
+
+    `?is_active=true|false` filters the list (the frontend picker
+    requests `is_active=true`; the admin management surface requests
+    the unfiltered list so archived rows stay visible/reactivatable).
+    `?company=<id>` lets a SUPER_ADMIN narrow to one company's units
+    (mirrors Service's `?category=` filter shape).
+    """
+
+    serializer_class = ManagedUnitSerializer
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    pagination_class = UnboundedPagination
+
+    def get_queryset(self):
+        qs = ManagedUnit.objects.select_related("company").all()
+        company_param = self.request.query_params.get("company")
+        if company_param:
+            try:
+                qs = qs.filter(company_id=int(company_param))
+            except (TypeError, ValueError):
+                qs = qs.none()
+        flag = _parse_bool_param(self.request.query_params.get("is_active"))
+        if flag is not None:
+            qs = qs.filter(is_active=flag)
+        qs = filter_managed_units_for(self.request.user, qs)
+        return qs.order_by("company__name", "label", "id")
+
+    def perform_create(self, serializer):
+        target_company = _resolve_catalog_create_company(
+            self.request.user,
+            serializer.validated_data.get("company"),
+        )
+        _enforce_catalog_management(self.request.user, target_company)
+        try:
+            # The inner atomic() is required, not decorative: without a
+            # savepoint boundary here, an IntegrityError leaves the
+            # surrounding transaction (the test's, or a real request's)
+            # unusable at the DB level even though Python catches the
+            # exception -- Postgres refuses any further command in a
+            # transaction after an error until a ROLLBACK happens.
+            with transaction.atomic():
+                serializer.save(company=target_company)
+        except IntegrityError:
+            # Backstop for a race between the serializer's own
+            # (non-atomic) pre-check and the DB's UniqueConstraint.
+            raise serializers.ValidationError(
+                {
+                    "label": [
+                        serializers.ErrorDetail(
+                            "A unit with this name already exists for "
+                            "this company.",
+                            code=ERR_MANAGED_UNIT_LABEL_NOT_UNIQUE,
+                        )
+                    ]
+                }
+            )
+
+
+class ManagedUnitDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Sprint 123 — GET / PATCH / DELETE at
+    /api/services/units/<int:unit_id>/. Provider-operator-only on
+    every method (see `ManagedUnitListCreateView`).
+
+    DELETE is a real hard delete, same shape as `ServiceDetailView`'s:
+    a unit still referenced by any Service / CustomerCustomPrice row is
+    PROTECTed at the DB layer, which raises `ProtectedError`, caught
+    below and turned into a clean 400 telling the operator to archive
+    (`is_active=false`) instead — archiving never fails, since it does
+    not touch the FK.
+    """
+
+    serializer_class = ManagedUnitSerializer
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    lookup_url_kwarg = "unit_id"
+
+    def get_queryset(self):
+        qs = ManagedUnit.objects.select_related("company").all()
+        return filter_managed_units_for(self.request.user, qs)
+
+    def perform_update(self, serializer):
+        _enforce_catalog_management(
+            self.request.user, serializer.instance.company
+        )
+        try:
+            # See ManagedUnitListCreateView.perform_create for why this
+            # inner atomic() is load-bearing, not decorative.
+            with transaction.atomic():
+                serializer.save()
+        except IntegrityError:
+            raise serializers.ValidationError(
+                {
+                    "label": [
+                        serializers.ErrorDetail(
+                            "A unit with this name already exists for "
+                            "this company.",
+                            code=ERR_MANAGED_UNIT_LABEL_NOT_UNIQUE,
+                        )
+                    ]
+                }
+            )
+
+    def delete(self, request, *args, **kwargs):
+        instance = self.get_object()
+        _enforce_catalog_management(request.user, instance.company)
+        try:
+            instance.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete a unit that is still in use. "
+                        "Archive it (is_active=false) instead."
+                    ),
+                    "code": "managed_unit_protected",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)

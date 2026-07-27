@@ -78,6 +78,10 @@ from .serializers_catalog import (
     CustomerCustomPriceSerializer,
     CustomerServicePriceSerializer,
 )
+# Sprint 123 — reuse the Service-side cross-company guard verbatim
+# rather than re-implementing it (same rule: a managed_unit must
+# belong to the row's own company).
+from .views_catalog import _enforce_same_company_managed_unit
 
 
 # Sprint 3B / Sprint 4B — stable error codes surfaced from this module.
@@ -953,6 +957,12 @@ class CustomerCustomPriceListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         customer = self._get_customer()
         _enforce_customer_price_policy(self.request.user, customer)
+        # Sprint 123 — a managed_unit (if any) must belong to the SAME
+        # provider company as this customer (there is no direct
+        # company FK on CustomerCustomPrice; company is customer.company).
+        _enforce_same_company_managed_unit(
+            serializer.validated_data.get("managed_unit"), customer.company
+        )
         serializer.save(customer=customer)
 
 
@@ -983,6 +993,11 @@ class CustomerCustomPriceDetailView(generics.RetrieveUpdateDestroyAPIView):
         _enforce_customer_price_policy(
             self.request.user, serializer.instance.customer
         )
+        if "managed_unit" in serializer.validated_data:
+            _enforce_same_company_managed_unit(
+                serializer.validated_data["managed_unit"],
+                serializer.instance.customer.company,
+            )
         serializer.save()
 
     def delete(self, request, *args, **kwargs):
