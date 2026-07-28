@@ -481,6 +481,23 @@ item has moved to `## SHIPPED` or been resolved below instead.
     per-folder cap with a "show all" affordance) before a tenant accumulates
     large folders. Same shape as the admin-picker 200-row item (#12), on the
     read side. Not urgent.
+19. **`_resync_invoice_group_labels` never resyncs an untagged
+    PER_BUILDING_DEPARTMENT_WORK_TYPE invoice** — found during Sprint 133
+    verification. It returns early when `department_id is None and
+    work_type_id is None`, which correctly stops a CUSTOMER/PER_BUILDING
+    invoice from inventing a label at issue — but an invoice generated at
+    PER_BUILDING_DEPARTMENT_WORK_TYPE for the UNTAGGED group also has both
+    FKs null at generation, so it's indistinguishable from a coarser-
+    granularity invoice by that check alone. Relabel its Extra Work during
+    the draft window (giving it a real department) and the invoice stays
+    unlabelled at issue — the by-department report groups that EW under its
+    new department, the invoice still shows untagged, and the two disagree.
+    Root cause: `Invoice` does not record which granularity produced it, so
+    "never claimed a label" and "claimed the untagged bucket" look the
+    same. Fix shape: an additive `granularity` field on `Invoice`, resync
+    keyed on that instead of on the FKs being set. Not urgent — it fails
+    conservatively (the invoice under-claims rather than asserting
+    something false), but written down so nobody has to re-derive it.
 
 ---
 
@@ -491,6 +508,25 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#125** (`4c5798a`) — Sprints 130, 131 (+ its cross-tenant leak fix) and
+  132 on one branch, one PR · **Sprint 130**: replaced the customer
+  Permissions page's 17 per-key ✓/✗ columns with one summary chip per
+  permission group (`PermissionGroupChip.tsx`), removed the sticky
+  frozen-pane CSS the 17-column grid needed, measured zero horizontal
+  scroll at 1280px in both locales. **Sprint 131**: `compute_extra_work_
+  by_department` (Building → Department → Work Type), reusing the
+  by-building report's row resolution verbatim; a Dutch-only branded PDF
+  + CSV + customer Reports-tab tree; an untagged bucket instead of
+  dropping pre-Sprint-127 rows, proven by a sum-to-flat-total invariant
+  test. A cross-tenant name leak in the `?department=`/`?work_type=`
+  scope echo was found in review and fixed same branch (`_scoped_label_
+  name`, H-1/H-2). **Sprint 132**: `Customer.InvoiceGranularity.
+  PER_BUILDING_DEPARTMENT_WORK_TYPE`, one level finer than PER_BUILDING —
+  invoices grouped by Building + Department + Work Type, nullable PROTECT
+  `department`/`work_type` FKs on `Invoice`; closed a staleness gap where
+  relabelling an Extra Work during the DRAFT window could leave the
+  invoice's own grouping stale once issued (`_resync_invoice_group_
+  labels`, called before the status flips to ISSUED).
 - **#124** (`765e94f`) — Sprint 129, session-expiry P1 + an owner-reported UI
   defect cluster · **P1**: a mid-session token-refresh failure used to wipe
   tokens and dispatch a dead `auth:logout` `window` event nothing listened

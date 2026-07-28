@@ -718,6 +718,20 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
     for line in _dept_scope_summary_lines_nl(payload["scope"]):
         pdf.cell(0, 6, _safe_pdf_text(line), new_x="LMARGIN", new_y="NEXT")
 
+    # Sprint 133 — the whole document is ex-VAT (it exists to be compared
+    # against the reference tool's own ex-VAT figures), so a reader must
+    # never have to infer that from the "Excl. BTW" column header alone.
+    pdf.set_font(FONT_FAMILY, "", 9)
+    pdf.set_text_color(130, 125, 129)
+    pdf.cell(
+        0,
+        5,
+        "Alle bedragen in dit rapport zijn exclusief BTW.",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.set_text_color(0, 0, 0)
+
     totals = payload["totals"]
     pdf.ln(1)
     pdf.set_font(FONT_FAMILY, "B", 12)
@@ -725,7 +739,9 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
         0,
         8,
         f"Totaal: {totals['count']} werkzaamheden | "
-        f"{_fmt_money(Decimal(totals['total']))}",
+        f"Excl. BTW: {_fmt_money(Decimal(totals['subtotal']))} | "
+        f"BTW: {_fmt_money(Decimal(totals['vat']))} | "
+        f"Incl. BTW: {_fmt_money(Decimal(totals['total']))}",
         new_x="LMARGIN",
         new_y="NEXT",
     )
@@ -747,7 +763,7 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
             _safe_pdf_text(
                 f"{building['building_name']} — gebouwtotaal: "
                 f"{building['count']} werkzaamheden | "
-                f"{_fmt_money(Decimal(building['total']))}"
+                f"{_fmt_money(Decimal(building['subtotal']))}"
             ),
             new_x="LMARGIN",
             new_y="NEXT",
@@ -764,7 +780,7 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
                 pdf.cell(
                     _DEPT_SUMMARY_TOTAL_W,
                     6,
-                    _fmt_money(Decimal(wt["total"])),
+                    _fmt_money(Decimal(wt["subtotal"])),
                     align="R",
                     new_x="LMARGIN",
                     new_y="NEXT",
@@ -773,13 +789,13 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
                 pdf,
                 f"  Subtotaal {dept_label}",
                 dept["count"],
-                _fmt_money(Decimal(dept["total"])),
+                _fmt_money(Decimal(dept["subtotal"])),
             )
         _dept_total_line(
             pdf,
             "Totaal gebouw",
             building["count"],
-            _fmt_money(Decimal(building["total"])),
+            _fmt_money(Decimal(building["subtotal"])),
         )
         pdf.ln(3)
 
@@ -850,19 +866,19 @@ def build_extra_work_by_department_pdf(payload: dict) -> bytes:
                     pdf,
                     f"  Subtotaal {wt_label}",
                     wt["count"],
-                    _fmt_money(Decimal(wt["total"])),
+                    _fmt_money(Decimal(wt["subtotal"])),
                 )
             _dept_total_line(
                 pdf,
                 f"Subtotaal {dept_label}",
                 dept["count"],
-                _fmt_money(Decimal(dept["total"])),
+                _fmt_money(Decimal(dept["subtotal"])),
             )
         _dept_total_line(
             pdf,
             "Totaal gebouw",
             building["count"],
-            _fmt_money(Decimal(building["total"])),
+            _fmt_money(Decimal(building["subtotal"])),
         )
 
     return _pdf_bytes(pdf)
