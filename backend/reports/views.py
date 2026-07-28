@@ -20,6 +20,7 @@ from .dimensions import (
     OriginInvalid,
     _first_param,
     _resolve_customer,
+    compute_extra_work_by_department,
     compute_extra_work_revenue,
     compute_extra_work_revenue_by_building,
     compute_tickets_by_building,
@@ -28,6 +29,8 @@ from .dimensions import (
     compute_tickets_by_type,
 )
 from .exports import (
+    build_extra_work_by_department_csv,
+    build_extra_work_by_department_pdf,
     build_extra_work_revenue_by_building_csv,
     build_extra_work_revenue_by_building_pdf,
     build_extra_work_revenue_csv,
@@ -766,4 +769,46 @@ class ExtraWorkRevenueByBuildingPDFView(APIView):
         return _pdf_response(
             f"extra-work-revenue-by-building_{payload['from']}_{payload['to']}.pdf",
             build_extra_work_revenue_by_building_pdf(payload),
+        )
+
+
+# ===========================================================================
+# Sprint 131 — Extra Work revenue grouped Building -> Department -> Work
+# Type. Same permission floor as the other revenue reports (commercial
+# amounts): SUPER_ADMIN / COMPANY_ADMIN / BUILDING_MANAGER only.
+# ===========================================================================
+
+
+class ExtraWorkByDepartmentView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        return Response(
+            compute_extra_work_by_department(request.user, request.query_params)
+        )
+
+
+class ExtraWorkByDepartmentCSVView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        payload = compute_extra_work_by_department(
+            request.user, request.query_params
+        )
+        return _csv_response(
+            f"extra-work-by-department_{payload['from']}_{payload['to']}.csv",
+            build_extra_work_by_department_csv(payload),
+        )
+
+
+class ExtraWorkByDepartmentPDFView(APIView):
+    permission_classes = [IsAuthenticated, IsRevenueReportConsumer]
+
+    def get(self, request):
+        payload = compute_extra_work_by_department(
+            request.user, request.query_params
+        )
+        return _pdf_response(
+            f"extra-work-by-department_{payload['from']}_{payload['to']}.pdf",
+            build_extra_work_by_department_pdf(payload),
         )

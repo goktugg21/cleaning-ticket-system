@@ -1,6 +1,7 @@
 import { api } from "./client";
 import type {
   AgeBucketsResponse,
+  ExtraWorkByDepartmentResponse,
   ExtraWorkRevenueByBuildingResponse,
   ExtraWorkRevenueResponse,
   ManagerThroughputResponse,
@@ -35,6 +36,11 @@ export interface ReportFilters {
   // (COALESCE(invoice_date, spawned-ticket completion) bucketing), so a
   // customer Reports page can share the same billing month as its KPIs.
   billing_period?: string;
+  // Sprint 131 — optional additive narrowing for the by-department report.
+  // Honored only by extra-work-by-department (and its CSV/PDF exports);
+  // other fetchers/exports simply never send them.
+  department?: number;
+  work_type?: number;
 }
 
 function paramsFor(filters: ReportFilters): Record<string, string> {
@@ -46,6 +52,8 @@ function paramsFor(filters: ReportFilters): Record<string, string> {
   if (filters.origin) out.origin = filters.origin;
   if (filters.customer !== undefined) out.customer = String(filters.customer);
   if (filters.billing_period) out.billing_period = filters.billing_period;
+  if (filters.department !== undefined) out.department = String(filters.department);
+  if (filters.work_type !== undefined) out.work_type = String(filters.work_type);
   return out;
 }
 
@@ -179,6 +187,18 @@ export async function fetchExtraWorkRevenueByBuilding(
   return data;
 }
 
+// Sprint 131 — Extra Work revenue grouped Building -> Department -> Work
+// Type. Provider-management only, same as fetchExtraWorkRevenue.
+export async function fetchExtraWorkByDepartment(
+  filters: ReportFilters,
+): Promise<ExtraWorkByDepartmentResponse> {
+  const { data } = await api.get<ExtraWorkByDepartmentResponse>(
+    "/reports/extra-work-by-department/",
+    { params: paramsFor(filters) },
+  );
+  return data;
+}
+
 // Export download helpers. Each returns the URL the browser should
 // hit; the chart card's button just sets `window.location.href` so
 // the existing axios auth header is bypassed and the browser receives
@@ -204,6 +224,8 @@ const EXPORT_PATHS = {
   extra_work_revenue: "/reports/extra-work-revenue",
   // Sprint 124 — Extra Work revenue grouped by building.
   extra_work_revenue_by_building: "/reports/extra-work-revenue-by-building",
+  // Sprint 131 — Extra Work revenue grouped Building -> Department -> Work Type.
+  extra_work_by_department: "/reports/extra-work-by-department",
 } as const;
 
 // Sprint 14A — the export-dimension union, derived from the path map so

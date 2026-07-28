@@ -7983,3 +7983,90 @@ a.attn-row:hover {
 }
 /* #108 Part D — the bespoke track/knob rules moved to the shared
    platform Toggle (.toggle-switch); only the label layout remains. */
+
+/* ====================================================================
+   Sprint 131 — Extra Work by Department tree
+   ==================================================================== */
+
+/* Native <details>/<summary> at every level — no custom open-state
+   tracking, keyboard- and screen-reader-accessible by default. Building
+   is the outermost row; Department nests one level in; Work Type is a
+   plain (non-expandable) leaf row — the individual Extra Work rows live
+   in the PDF/CSV export, never in this tree (CLAUDE.md #8). */
+.ew-department-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ew-department-tree-building {
+  border-bottom: 1px solid var(--border-soft);
+}
+.ew-department-tree-building:last-child {
+  border-bottom: none;
+}
+.ew-department-tree-building > details > summary {
+  font-weight: 700;
+}
+.ew-department-tree-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  list-style: none;
+}
+.ew-department-tree-summary::-webkit-details-marker {
+  display: none;
+}
+.ew-department-tree-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+}
+details[open] > .ew-department-tree-summary::before {
+  transform: rotate(90deg);
+}
+.ew-department-tree-summary-dept {
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.ew-department-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ew-department-tree-meta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ew-department-tree-departments {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 0 0 8px;
+}
+.ew-department-tree-worktypes {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.ew-department-tree-worktype-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 4px 5px 36px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ew-department-tree-worktype-row:hover {
+  background: var(--surface-2);
+}

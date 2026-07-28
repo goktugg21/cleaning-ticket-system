@@ -34,7 +34,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from accounts.models import UserRole
 from buildings.models import Building, BuildingManagerAssignment
 from companies.models import Company, CompanyUserMembership
-from customers.models import Customer, CustomerUserMembership
+from customers.models import Customer, CustomerUserMembership, Department, WorkType
 from extra_work.billing import billing_month, build_ticket_map, is_earned
 from extra_work.models import ExtraWorkStatus
 from tickets.models import Ticket, TicketStatus, TicketType
@@ -789,6 +789,261 @@ def compute_extra_work_revenue_by_building(actor, query_params) -> dict:
         "to": to_date.isoformat(),
         "scope": scope_dict,
         "buckets": buckets,
+        "totals": totals,
+        "generated_at": timezone.now().isoformat(),
+    }
+
+
+# ===========================================================================
+# Sprint 131 — Extra Work revenue grouped Building -> Department -> Work
+# Type, one level deeper than Sprint 124's by-building report. Reproduces
+# the owner's father's reference "Extra Works by Department" report.
+#
+# Reuses `_resolve_extra_work_revenue_rows` + the per-row `_classify_
+# extra_work` / `_amounts_for_state` functions VERBATIM — same guarantee as
+# `compute_extra_work_revenue_by_building`: summing every leaf bucket's
+# `total` reproduces `compute_extra_work_revenue`'s flat total for the same
+# filters, because both reports classify + sum the identical row set, only
+# partitioned differently (three keys deep here instead of one).
+#
+# An EW with no department, or no work type, is NOT dropped: it lands in an
+# explicit untagged bucket (department_id=None / work_type_id=None,
+# department_name=None / work_type_name=None — the frontend/PDF render the
+# localized "No department" / "No work type" label for a None id). Every
+# existing EW predates the Sprint 127 labels, so today EVERY row lands in
+# the untagged bucket for both levels — that is the expected starting
+# state, not a bug, and it is exactly why the untagged bucket must exist:
+# silently dropping unlabeled rows would make this report disagree with
+# the flat revenue total for every customer that has not finished tagging
+# their history yet.
+#
+# `department` / `work_type` (optional, additive) narrow the SAME already-
+# scoped `ew_qs`: because both are columns on `ExtraWorkRequest` itself
+# (not a scope-widening parameter like `customer`), filtering by an
+# out-of-scope id simply matches zero rows — no separate scope check is
+# needed the way `_resolve_customer` validates `customer`.
+#
+# Detail rows carry "Completed At" / "Week No": the spawned operational
+# ticket's `closed_at`, localized to the project timezone — the SAME field
+# `extra_work.billing.billing_month` anchors on, and the field the EARNED
+# revenue state is defined by (`_classify_extra_work`). Populated ONLY for
+# EARNED rows (ticket CLOSED); "Week No" is the ISO-8601 week number of
+# that local date (verified against the reference report's own WK27/WK27
+# for 30-06 and 01-07). Non-earned rows (in_progress / quoted_pipeline /
+# lost) have no completion date — both fields are None — but the row STILL
+# contributes to every count/subtotal/vat/total figure at every level,
+# exactly like `compute_extra_work_revenue_by_building`; the sum invariant
+# holds across all four revenue states, not an earned-only subset.
+# ===========================================================================
+
+
+def _empty_money_acc() -> dict:
+    return {
+        "count": 0,
+        "subtotal": Decimal("0.00"),
+        "vat": Decimal("0.00"),
+        "total": Decimal("0.00"),
+    }
+
+
+def _accumulate(acc: dict, subtotal: Decimal, vat: Decimal, total: Decimal) -> None:
+    acc["count"] += 1
+    acc["subtotal"] += subtotal
+    acc["vat"] += vat
+    acc["total"] += total
+
+
+def _money_dict(acc: dict) -> dict:
+    return {
+        "count": acc["count"],
+        "subtotal": _money(acc["subtotal"]),
+        "vat": _money(acc["vat"]),
+        "total": _money(acc["total"]),
+    }
+
+
+def compute_extra_work_by_department(actor, query_params) -> dict:
+    ew_qs, tickets_by_ew, from_date, to_date, scope, customer = (
+        _resolve_extra_work_revenue_rows(actor, query_params)
+    )
+
+    department_id = _parse_int(query_params.get("department"), "department")
+    work_type_id = _parse_int(query_params.get("work_type"), "work_type")
+    if department_id is not None:
+        ew_qs = ew_qs.filter(department_id=department_id)
+    if work_type_id is not None:
+        ew_qs = ew_qs.filter(work_type_id=work_type_id)
+
+    building_acc: dict = {}
+    building_meta: dict = {}
+    dept_acc: dict = {}
+    dept_meta: dict = {}
+    wt_acc: dict = {}
+    wt_meta: dict = {}
+    detail_rows: dict = {}
+
+    for ew in ew_qs.select_related(
+        "building", "company", "department", "work_type"
+    ):
+        ticket = tickets_by_ew.get(ew.id)
+        state = _classify_extra_work(ew, ticket)
+        subtotal, vat, total = _amounts_for_state(ew, state)
+        subtotal = subtotal or Decimal("0.00")
+        vat = vat or Decimal("0.00")
+        total = total or Decimal("0.00")
+
+        b_id = ew.building_id
+        d_id = ew.department_id
+        w_id = ew.work_type_id
+        d_key = (b_id, d_id)
+        w_key = (b_id, d_id, w_id)
+
+        if b_id not in building_acc:
+            building_acc[b_id] = _empty_money_acc()
+            building_meta[b_id] = {
+                "building_name": ew.building.name,
+                "company_id": ew.company_id,
+                "company_name": ew.company.name,
+            }
+        _accumulate(building_acc[b_id], subtotal, vat, total)
+
+        if d_key not in dept_acc:
+            dept_acc[d_key] = _empty_money_acc()
+            dept_meta[d_key] = {
+                "department_id": d_id,
+                "department_name": ew.department.name if d_id is not None else None,
+            }
+        _accumulate(dept_acc[d_key], subtotal, vat, total)
+
+        if w_key not in wt_acc:
+            wt_acc[w_key] = _empty_money_acc()
+            wt_meta[w_key] = {
+                "work_type_id": w_id,
+                "work_type_name": ew.work_type.name if w_id is not None else None,
+            }
+        _accumulate(wt_acc[w_key], subtotal, vat, total)
+
+        completed_at = None
+        week_no = None
+        if state == "earned" and ticket is not None and ticket.closed_at is not None:
+            completed_date = timezone.localtime(ticket.closed_at).date()
+            completed_at = completed_date.isoformat()
+            week_no = completed_date.isocalendar()[1]
+
+        detail_rows.setdefault(w_key, []).append(
+            {
+                "extra_work_id": ew.id,
+                "title": ew.title,
+                "week_no": week_no,
+                "completed_at": completed_at,
+                "subtotal": _money(subtotal),
+                "vat": _money(vat),
+                "total": _money(total),
+                "state": state,
+            }
+        )
+
+    # Alphabetical at every level (name, then id for a stable tie-break) —
+    # unlike Sprint 124's by-building revenue ranking, this is a drill-down
+    # statement the customer re-reads period over period, so a fixed,
+    # predictable order matters more than a money-first headline. The
+    # untagged bucket (name=None) has no real name to sort by; it sorts
+    # LAST at its level so labelled data is scanned before the catch-all.
+    def _name_sort_key(name):
+        return (1, "") if name is None else (0, name)
+
+    ordered_building_ids = sorted(
+        building_acc.keys(),
+        key=lambda b_id: (building_meta[b_id]["building_name"], b_id),
+    )
+
+    buildings_out = []
+    for b_id in ordered_building_ids:
+        dept_keys_for_building = sorted(
+            (k for k in dept_acc if k[0] == b_id),
+            key=lambda k: (*_name_sort_key(dept_meta[k]["department_name"]), k[1] or 0),
+        )
+        departments_out = []
+        for d_key in dept_keys_for_building:
+            wt_keys_for_dept = sorted(
+                (k for k in wt_acc if k[0] == d_key[0] and k[1] == d_key[1]),
+                key=lambda k: (*_name_sort_key(wt_meta[k]["work_type_name"]), k[2] or 0),
+            )
+            work_types_out = []
+            for w_key in wt_keys_for_dept:
+                rows = sorted(
+                    detail_rows[w_key],
+                    key=lambda r: (r["completed_at"] or "", r["extra_work_id"]),
+                )
+                work_types_out.append(
+                    {
+                        **wt_meta[w_key],
+                        **_money_dict(wt_acc[w_key]),
+                        "rows": rows,
+                    }
+                )
+            departments_out.append(
+                {
+                    **dept_meta[d_key],
+                    **_money_dict(dept_acc[d_key]),
+                    "work_types": work_types_out,
+                }
+            )
+        buildings_out.append(
+            {
+                "building_id": b_id,
+                **building_meta[b_id],
+                **_money_dict(building_acc[b_id]),
+                "departments": departments_out,
+            }
+        )
+
+    # Sum the building-level accumulators directly (NOT via `_accumulate`,
+    # which adds exactly one row's contribution — these are already
+    # multi-row bucket totals being merged, a different operation).
+    totals = _money_dict(
+        {
+            "count": sum(acc["count"] for acc in building_acc.values()),
+            "subtotal": sum(
+                (acc["subtotal"] for acc in building_acc.values()), Decimal("0.00")
+            ),
+            "vat": sum(
+                (acc["vat"] for acc in building_acc.values()), Decimal("0.00")
+            ),
+            "total": sum(
+                (acc["total"] for acc in building_acc.values()), Decimal("0.00")
+            ),
+        }
+    )
+
+    scope_dict = scope.to_dict()
+    if customer is not None:
+        scope_dict["customer_id"] = customer.id
+        scope_dict["customer_name"] = customer.name
+    if department_id is not None:
+        # Direct lookup (not a scan of `dept_meta`) so the echoed name is
+        # correct even when the filter matches zero rows in this period —
+        # `dept_meta` only carries names for departments that survived the
+        # date-window filter above.
+        scope_dict["department_id"] = department_id
+        scope_dict["department_name"] = (
+            Department.objects.filter(id=department_id)
+            .values_list("name", flat=True)
+            .first()
+        )
+    if work_type_id is not None:
+        scope_dict["work_type_id"] = work_type_id
+        scope_dict["work_type_name"] = (
+            WorkType.objects.filter(id=work_type_id)
+            .values_list("name", flat=True)
+            .first()
+        )
+
+    return {
+        "from": from_date.isoformat(),
+        "to": to_date.isoformat(),
+        "scope": scope_dict,
+        "buildings": buildings_out,
         "totals": totals,
         "generated_at": timezone.now().isoformat(),
     }

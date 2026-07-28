@@ -82,6 +82,14 @@
   "ew_revenue_by_building_total": "Total billable: {{amount}}",
   "ew_revenue_by_building_tooltip_amount": "Billable",
 
+  "ew_by_department_title": "Extra Work by department",
+  "ew_by_department_subtitle": "This customer's billable Extra Work, grouped by building, department and work type.",
+  "ew_by_department_empty": "No Extra Work in this range.",
+  "ew_by_department_total": "Total: {{amount}}",
+  "ew_by_department_item_count": "{{count}} works",
+  "ew_by_department_untagged_department": "No department",
+  "ew_by_department_untagged_work_type": "No work type",
+
   "ew_by_building_title": "Extra Work by building",
   "ew_by_building_subtitle": "Extra Work-origin tickets only, grouped by building in the selected range.",
   "ew_by_customer_title": "Extra Work by customer",

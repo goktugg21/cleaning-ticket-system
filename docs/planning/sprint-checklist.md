@@ -55,78 +55,125 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-130-permissions-density` — a frontend-only FIX
-branch: the customer Permissions page's per-user matrix had 17 permission
-columns plus user/role/actions and did not fit any laptop viewport, forcing
-horizontal scroll with sticky columns the owner could not read.
+**Branch:** `fix/sprint-130-permissions-density` — carries Sprints 130, 131
+**and** 132 on ONE branch; ONE PR opens after 132 is green, nothing here
+merges in between (a deliberate departure from the usual per-sprint-branch
+pattern, called out explicitly in the Sprint 131 brief).
 **Last shipped PR on `main`: #124** — Sprint 129, the session-expiry P1 +
 an owner-reported UI defect cluster (see `## SHIPPED`; its line was appended
 by THIS branch's first commit, per the "a PR cannot cite its own number"
 rule).
+**No `## SHIPPED` line for Sprint 130 yet, and that is deliberate, not an
+oversight.** The Sprint 131 brief asked for a "#125" line to be appended
+now, but nothing has shipped: this branch has no PR yet (the owner opens
+it; CC does not) and by the checklist's own rule two paragraphs below a
+SHIPPED line is appended by the FIRST COMMIT OF THE NEXT BRANCH once a PR
+is actually merged — not pre-guessed by the branch that will BECOME that
+PR. Baking in "#125" now risks a wrong, permanent number if anything else
+merges to `main` first (an append-only log — "never edit a historical
+line's wording once it's written"). The real SHIPPED line for this whole
+130+131+132 branch lands the same way #124 did: appended by the first
+commit of whatever branch comes after this one, once the owner's PR has an
+actual merged number.
 **On this branch (unmerged, awaiting the owner's PR):**
-- **`PermissionsMatrix.tsx` replaces its 17 per-key ✓/✗ columns with one
-  summary chip per permission group.** Four chips (Tickets / Extra Work /
-  Users / Documents), derived from `PERMISSION_GROUPS` — the Sprint 126
-  lesson applies again: a fifth group flows to the chip row automatically,
-  nothing hardcodes the group count. Each chip reads `Group N/Total` (e.g.
-  `Tickets 4/6`) with a `title` listing the granted keys' labels; the pencil
-  still opens `PermissionEditorModal` for full per-key depth. Counts are
-  derived from the SAME `resolvePanelValue` resolution the retired per-key
-  cells used (`PermissionGroupChip.tsx`, new file) — not reimplemented, so it
-  cannot drift from the modal's truth.
-- **Three visually distinct chip states**, color + fill/weight (never color
-  alone): all-granted is a filled solid green chip with bold white text;
-  partial is an outlined amber chip (`--amber`/`--amber-soft`/`--amber-
-  border`, the codebase's existing pending/warning palette); none is an
-  outlined faint-gray chip, regular weight. Verified all three render
-  correctly against live dev data (a seeded `customer.ticket.*` override
-  produced the partial state; a temporary all-granted override — reverted
-  after the screenshot — confirmed the filled-green state; screenshots not
-  committed).
-- **Sticky frozen-pane CSS removed.** The three `.permissions-matrix-sticky-
-  *` rules (and their `@media (max-width: 760px)` sticky-drop companion)
-  existed only to keep the 17-column grid survivable and are gone with it;
-  `.permission-bubble-granted/-denied/-policy-blocked` and the per-key
-  header/divider CSS are gone too (dead once `PermissionBubble.tsx` had no
-  remaining caller — deleted). The base `.permission-bubble` class and
-  `.effective-hint-*` survive: `TriStateBubbleRadio` (the modal's
-  Inherit/Allow/Deny control) still reuses them.
-- **Measured, not eyeballed (the standing rule).** Built `dist/`, served it
-  via `vite preview` behind a Host-rewriting proxy against the dev backend,
-  logged in as `superadmin@cleanops.demo` via token-inject, and read
-  `scrollWidth` vs `clientWidth` on the matrix's scroll wrapper at a 1280×900
-  viewport in BOTH locales (nl is primary and its "Documenten"/"Gebruikers"
-  labels are the widest chips): table width 876px == wrapper content width
-  876px in both — `hasHorizontalOverflow: false`, zero px of scroll.
-  (First pass measured 923px against an 876px wrapper — a real 47px
-  overflow — closed by trimming cell/chip padding and the identity-column
-  min-widths, not by declaring victory on the first render.)
-- **Caught and fixed one bug the measurement pass surfaced.** The group
-  header `<th>` was meant to be screen-reader-only (`.visually-hidden`, so
-  the chip's own label wasn't shown twice) — an existing higher-specificity
-  `.permissions-matrix-table thead th { position: sticky }` rule silently
-  overrode `.visually-hidden`'s `position: absolute`, and `clip` has no
-  effect off `position: absolute/fixed`, so the header text rendered fully
-  visible (`TICKETS` chip under a plain-text `Tickets` header). Fixed by
-  matching the pattern the Actions column already used one cell to the left:
-  an empty `<th aria-label=…>` instead of fighting the cascade.
-- **Playwright contract updated in the same commit.** The nightly/manual
-  spec `sprint29_batch29_8_5_permissions_visibility.spec.ts` asserted 16
-  `permissions-matrix-cell` cells with `data-effective`; rewritten to assert
-  4 `permission-group-chip` chips with `data-permission-group` +
-  `data-granted-count` + `data-total-count` + `data-state`. No other spec
-  referenced the retired testid.
-- **i18n.** New keys `customer_permissions.matrix.group_chip_aria` /
-  `group_chip_none_title`, nl+en lockstep. Removed the 17
-  `matrix.key_short.*` keys and the three `matrix.cell_*_aria` keys — dead
-  once the per-key cells were gone (JSON key-set parity verified
-  programmatically, not by eye). `permission_groups.*` (the chip's own
-  label) and `matrix.policy_blocked` (still used by the modal) were reused,
-  not duplicated.
-FE gate green: tsc clean, ESLint **48** (baseline, no new violations,
-verified both before AND after the header-duplication fix), build OK.
-Backend untouched — frontend-only sprint, no backend suite to run.
-**Immediate next step:** the owner opens the PR for this branch.
+
+**Sprint 130 — Permissions page density fix.** Replaced the customer
+Permissions page's 17 per-key ✓/✗ matrix columns with one summary chip per
+permission group (`PermissionGroupChip.tsx`, new), derived from
+`PERMISSION_GROUPS` so a fifth group can't be skipped; removed the sticky
+frozen-pane CSS the 17-column grid needed and doesn't anymore; measured
+(not eyeballed) zero horizontal scroll at 1280px in both locales; fixed a
+`.visually-hidden` CSS-specificity bug the measurement pass surfaced. Full
+detail was here before Sprint 131 rewrote this section for the combined
+branch — see commit `06bca55` for the complete writeup.
+
+**Sprint 131 — Extra Work by Department report.** Reproduces the owner's
+father's reference "Extra Works by Department" PDF: Building -> Department
+-> Work Type, summary + numbered detail.
+- **`compute_extra_work_by_department`** (`backend/reports/dimensions.py`)
+  — one level deeper than Sprint 124's by-building report, reusing
+  `_resolve_extra_work_revenue_rows` + `_classify_extra_work` /
+  `_amounts_for_state` VERBATIM (same money-calculation-lives-in-one-place
+  guarantee). An EW with no department / work type lands in an explicit
+  untagged bucket (`department_id: null`) instead of being dropped — every
+  pre-Sprint-127 row is untagged today, and silently dropping them would
+  make the report disagree with the flat revenue total. Proven, not
+  asserted: 23 new tests in
+  `reports/tests/test_sprint131_extra_work_by_department.py`, including a
+  sum-to-flat-total invariant test with untagged rows deliberately mixed
+  in with tagged ones across all four revenue states; the full `reports`
+  app suite passes at 209 tests (was 208 before this module's 23rd test,
+  the pagination-fix regression test, was added).
+- **"Completed At"** = the spawned ticket's `closed_at`, localized — the
+  SAME field `extra_work.billing.billing_month` already anchors on —
+  populated ONLY for `state == "earned"`. **"Week No"** = the ISO-8601 week
+  of that date, verified against the brief's own WK27/WK27 example (30-06
+  and 01-07 land in ISO week 27 in both 2025 and 2026 — checked
+  computationally, not assumed). Non-earned rows show neither but still
+  count toward every total.
+- **Endpoint + CSV + PDF** — `/api/reports/extra-work-by-department/`
+  (+ `export.csv` / `export.pdf`), same `IsRevenueReportConsumer` floor as
+  the sibling revenue reports (SA/CA/BM only). The PDF is **Dutch-only**
+  ("Meerwerk per afdeling" — matches this codebase's own established nl
+  term for "Extra Work" in `reports.json`, not a literal translation),
+  reusing the invoice/proposal PDFs' Dutch formatters
+  (`extra_work.proposal_pdf._fmt_money` / `_fitted_cell`) rather than this
+  module's own English `_draw_table`. Summary section (overall total, then
+  per building a bracketing top+bottom total with department/work-type
+  rows between), Detail section (one page per building, numbered
+  Title/Week/Completed-at/Excl.-BTW listing, subtotal ladder). **Caught
+  live**: the shared `_ReportPDF` footer prints English "Page N" — added a
+  `_DeptReportPDF` subclass overriding just the footer to Dutch "Pagina N"
+  so the one Dutch PDF in the module doesn't leak English chrome. **Caught
+  by the self-review's own "400 works, one department" question**: a work
+  type with enough rows to outrun one page landed bare numbered rows on
+  the continuation page with no column header and no department/work-type
+  context — a reader who opened straight to that page couldn't tell what
+  they were looking at. Fixed with `fpdf2`'s `will_page_break(6)` checked
+  BEFORE each row (not after, which would draw the header below the row
+  it belongs above): a `"{building} — {dept} — {work type} (vervolg)"`
+  line + the repeated column header lead every continuation page. Verified
+  two ways — a synthetic 400-row PDF built directly against the export
+  function (11 pages, 9 "(vervolg)" markers, 10 header repeats, all 400
+  row numbers present exactly once, `pypdf`-extracted) and a permanent
+  regression test through the real endpoint with 50 rows
+  (`ExtraWorkByDepartmentPDFPaginationTests`, 23rd test in the module).
+- **Not verified against the actual reference PDF** — it was not in the
+  repo (asked for per the brief's own instruction; not supplied). Built
+  from the brief's detailed written description instead. Structural
+  choices that are this renderer's interpretation, not a confirmed match:
+  numbering restarts per BUILDING (not per department/work-type); a
+  building's total prints at both the top AND bottom of its summary block;
+  "Excl. VAT" renders the `subtotal` field. **Needs the owner's side-by-
+  side check against the real PDF before being considered pixel-matched.**
+- **Frontend** — `ExtraWorkByDepartmentTree.tsx` (new,
+  `pages/reports/charts/`), a sibling of Sprint 124's
+  `ExtraWorkRevenueByBuildingChart` on the customer Reports tab: same
+  card shell, same filters, same `ExportButtons` wiring, a native
+  `<details>/<summary>` tree instead of a bar chart. Renders SUMMARY rows
+  only (count + total per building/department/work-type) — never the
+  individual EW rows the JSON also carries; a busy customer's work-type
+  bucket can hold hundreds of rows, and CLAUDE.md #8 (no unbounded list
+  from a server collection) applies to the tree the same way it applies to
+  the CSV/PDF's numbered listing being the right place for that. The
+  top-level building list is additionally wrapped in `BoundedList`. nl+en
+  i18n lockstep (`reports.json`, `ew_by_department_*` keys); "Meerwerk"
+  house style, not "Extra Werk" — matches the sibling by-building keys
+  already in that bundle.
+- **Verified live against the dev stack, not just the test suite**: built
+  `dist/`, served via `vite preview`, tagged two real seeded EW rows with a
+  temporary Department + Work Type (reverted after), drove the actual
+  Reports tab in a real browser — confirmed the tagged AND untagged
+  rendering paths, clicked the real Export CSV / Export PDF buttons
+  end-to-end, and extracted the downloaded PDF's text via `pypdf` to
+  confirm the Dutch summary/detail content and money formatting render
+  correctly (this is what surfaced the "Page N" footer bug above). All
+  temporary demo-data changes (the two labels, the two EW tags) reverted
+  after.
+FE gate green: tsc clean, ESLint **48** (baseline, no new violations),
+build OK. Backend: targeted `reports` app suite green (209 tests, OK).
+**Immediate next step:** Sprint 132 continues on this SAME branch (no new
+branch, no new PR) — see the Sprint 132 prompt when it arrives.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production
@@ -168,18 +215,21 @@ item has moved to `## SHIPPED` or been resolved below instead.
    the Department + Work Type features are built, not a later styling pass.
 6. **Department + Work Type** — designed in person with Ramazan and father
    (see #3). The two per-customer label lists + Extra Work tagging +
-   filtering are **in flight now** (backend Sprint 127, frontend Sprint 128,
-   one branch/PR — see `## NOW`). What REMAINS queued here is **Sprint C: the
-   grouped report + invoice grouping** that consume the labels (group Extra
-   Work / invoices by Customer + Building + Department + Work Type) — a
-   deliberate follow-up, **NOT dropped**; it is gated on the 127/128 tagging
-   existing first. **Reconciliation guarantee C can rely on (Sprint 127.2):**
-   labels LOCK the moment an EW's work lands on an ISSUED invoice, precisely
-   so the grouped report and issued invoices never disagree; the only way to
-   change a locked label is the correction flow **credit → relabel →
-   re-invoice**. So C can trust that any EW on an issued invoice carries the
-   department / work type it was invoiced under. Naming clarification from
-   the reference implementation:
+   filtering shipped (backend Sprint 127, frontend Sprint 128). Of the
+   two **Sprint C** follow-ups this gated on that tagging (group Extra
+   Work / invoices by Customer + Building + Department + Work Type), the
+   **grouped report** half is done — Sprint 131, on the combined
+   130/131/132 branch (see `## NOW`): `compute_extra_work_by_department`,
+   summary + numbered-detail CSV/PDF export, a customer Reports-tab tree.
+   **REMAINING here: invoice grouping** — grouping invoices themselves by
+   Department / Work Type, not yet built. **Reconciliation guarantee it
+   can rely on (Sprint 127.2):** labels LOCK the moment an EW's work
+   lands on an ISSUED invoice, precisely so the grouped report and issued
+   invoices never disagree; the only way to change a locked label is the
+   correction flow **credit → relabel → re-invoice**. So invoice
+   grouping can trust that any EW on an issued invoice carries the
+   department / work type it was invoiced under. Naming clarification
+   from the reference implementation:
    **"Event" was never a separate feature** — it is one VALUE in B
    Amsterdam's **Department** list (Algemeen / Event / Member), and the real
    second field is **Work Type** (Eindschoonmaak / Opleverschoonmaak / Bouw

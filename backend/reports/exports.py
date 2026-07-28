@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import io
+from decimal import Decimal
 from typing import Iterable
 
 from fpdf import FPDF
@@ -33,6 +34,13 @@ from config.pdf_branding import (
     draw_logo,
     register_fonts,
 )
+
+# Sprint 131 — the department report is DUTCH-ONLY (the one deliverable the
+# owner compares directly against a real reference document), so it reuses
+# the canonical Dutch formatters + width-safe cell already proven on the
+# invoice/proposal PDFs rather than this module's own English `_new_pdf` /
+# `_draw_table` pair used by every other report in this file.
+from extra_work.proposal_pdf import _fitted_cell, _fmt_money, _safe_pdf_text
 
 
 CSV_BOM = "﻿"  # Excel-friendly UTF-8 marker.
@@ -544,4 +552,317 @@ def build_extra_work_revenue_by_building_pdf(payload: dict) -> bytes:
         widths=[46, 40, 18, 28, 28, 28],
         rows=rows,
     )
+    return _pdf_bytes(pdf)
+
+
+# ---- CSV: extra-work-by-department (Sprint 131) ----------------------------
+# One row per LEAF bucket (building x department x work_type) — the same
+# "aggregate bucket, not raw row" convention as the by-building CSV above.
+# The individual-work listing is the PDF detail section's job, not the CSV's.
+
+DEPARTMENT_CSV_COLUMNS = (
+    "building_id",
+    "building_name",
+    "company_id",
+    "company_name",
+    "department_id",
+    "department_name",
+    "work_type_id",
+    "work_type_name",
+    "count",
+    "subtotal",
+    "vat",
+    "total",
+    "period_from",
+    "period_to",
+)
+
+
+def build_extra_work_by_department_csv(payload: dict) -> bytes:
+    buffer, writer = _csv_writer(DEPARTMENT_CSV_COLUMNS)
+    period_from = payload["from"]
+    period_to = payload["to"]
+    for building in payload["buildings"]:
+        for dept in building["departments"]:
+            for wt in dept["work_types"]:
+                writer.writerow(
+                    {
+                        "building_id": building["building_id"],
+                        "building_name": building["building_name"],
+                        "company_id": building["company_id"],
+                        "company_name": building["company_name"],
+                        "department_id": dept["department_id"],
+                        "department_name": dept["department_name"],
+                        "work_type_id": wt["work_type_id"],
+                        "work_type_name": wt["work_type_name"],
+                        "count": wt["count"],
+                        "subtotal": wt["subtotal"],
+                        "vat": wt["vat"],
+                        "total": wt["total"],
+                        "period_from": period_from,
+                        "period_to": period_to,
+                    }
+                )
+    return buffer.getvalue().encode("utf-8")
+
+
+# ---- PDF: extra-work-by-department (Sprint 131) ----------------------------
+# Reproduces the owner's father's reference "Extra Works by Department"
+# report: a Summary section (overall total, then per building a building
+# total + one row per department/work-type + department/building
+# subtotals), followed by a Detail section (per building, its own page: a
+# numbered Title/Week/Completed-at/Excl.-VAT listing per department / work
+# type, with the same subtotal ladder).
+#
+# NOT built from the reference PDF itself — it was not in the repo (asked
+# for, not supplied). This is a best-effort rendering of the sprint brief's
+# WRITTEN description of that PDF, reusing the Dutch formatters proven on
+# the invoice/proposal PDFs. Wording, exact ordering and the choice to
+# bracket each building with a total at both the top AND bottom of its
+# summary block are this renderer's reading of that brief, not a verified
+# pixel match — flagged for a side-by-side check against the real
+# reference before this is considered "matched".
+#
+# Numbering in the Detail section restarts at 1 for each BUILDING (not per
+# department / work type) — one continuous numbered list per building page,
+# which is the most useful "row N" audit reference across a building's
+# whole detail block.
+_DEPT_SUMMARY_LABEL_W = 110.0
+_DEPT_SUMMARY_COUNT_W = 30.0
+_DEPT_SUMMARY_TOTAL_W = 50.0
+_DEPT_DETAIL_COLS = (12.0, 88.0, 20.0, 32.0, 38.0)  # # | Titel | Week | Afgerond op | Excl. BTW
+
+
+def _dept_scope_summary_lines_nl(scope: dict) -> list:
+    """Dutch analogue of `_scope_summary_lines` — this report is Dutch-only,
+    unlike the English cross-company reports that helper serves."""
+    parts = []
+    if scope.get("company_name"):
+        parts.append(f"Bedrijf: {scope['company_name']}")
+    if scope.get("building_name"):
+        parts.append(f"Gebouw: {scope['building_name']}")
+    if scope.get("customer_name"):
+        parts.append(f"Klant: {scope['customer_name']}")
+    if scope.get("department_name"):
+        parts.append(f"Afdeling: {scope['department_name']}")
+    if scope.get("work_type_name"):
+        parts.append(f"Werktype: {scope['work_type_name']}")
+    return parts or ["Bereik: Alles"]
+
+
+def _dept_total_line(pdf: FPDF, label: str, count: int, total: str) -> None:
+    pdf.set_font(FONT_FAMILY, "B", 10)
+    pdf.cell(_DEPT_SUMMARY_LABEL_W, 7, _safe_pdf_text(label))
+    pdf.cell(_DEPT_SUMMARY_COUNT_W, 7, str(count), align="R")
+    pdf.cell(
+        _DEPT_SUMMARY_TOTAL_W, 7, total, align="R", new_x="LMARGIN", new_y="NEXT"
+    )
+
+
+class _DeptReportPDF(_ReportPDF):
+    """Dutch-footer variant of `_ReportPDF` ("Pagina N", not "Page N") —
+    this is the one report PDF in the module that is Dutch throughout;
+    the shared footer stays English for every other (cross-company,
+    English) report so this override cannot affect them."""
+
+    def footer(self) -> None:  # noqa: D401 — fpdf2 hook
+        self.set_y(-12)
+        self.set_font(FONT_FAMILY, "", 7.5)
+        self.set_text_color(130, 125, 129)
+        half = self.epw / 2.0
+        self.cell(half, 6, f"Pagina {self.page_no()}")
+        self.cell(half, 6, self.generated_on, align="R")
+        self.set_text_color(0, 0, 0)
+
+
+def _draw_dept_detail_header_row(pdf: FPDF) -> None:
+    pdf.set_draw_color(208, 200, 206)
+    pdf.set_fill_color(*NEUTRAL_TINT_RGB)
+    pdf.set_text_color(*NEUTRAL_ACCENT_RGB)
+    pdf.set_font(FONT_FAMILY, "B", 8.5)
+    for header, width in zip(
+        ("#", "Titel", "Week", "Afgerond op", "Excl. BTW"), _DEPT_DETAIL_COLS
+    ):
+        pdf.cell(width, 6, header, border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font(FONT_FAMILY, "", 8.5)
+
+
+def _dept_pdf_header(pdf: FPDF) -> float:
+    logo_bottom = draw_logo(pdf, None, y=10.0)
+    pdf.set_xy(pdf.l_margin + LOGO_WIDTH_MM + 8.0, 12.0)
+    pdf.set_font(FONT_FAMILY, "B", 15)
+    pdf.cell(0, 8, "Meerwerk per afdeling")
+    rule_y = max(logo_bottom, 25.0) + 3.0
+    accent_rule(pdf, rule_y, NEUTRAL_ACCENT_RGB)
+    return rule_y + 5.0
+
+
+def build_extra_work_by_department_pdf(payload: dict) -> bytes:
+    pdf = _DeptReportPDF(orientation="P", unit="mm", format="A4")
+    register_fonts(pdf)
+    pdf.generated_on = str(payload.get("generated_at") or "")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_y(_dept_pdf_header(pdf))
+
+    pdf.set_font(FONT_FAMILY, "", 10)
+    pdf.cell(
+        0,
+        6,
+        f"Periode: {payload['from']} t/m {payload['to']}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    for line in _dept_scope_summary_lines_nl(payload["scope"]):
+        pdf.cell(0, 6, _safe_pdf_text(line), new_x="LMARGIN", new_y="NEXT")
+
+    totals = payload["totals"]
+    pdf.ln(1)
+    pdf.set_font(FONT_FAMILY, "B", 12)
+    pdf.cell(
+        0,
+        8,
+        f"Totaal: {totals['count']} werkzaamheden | "
+        f"{_fmt_money(Decimal(totals['total']))}",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+
+    buildings = payload["buildings"]
+    if not buildings:
+        pdf.set_font(FONT_FAMILY, "", 10)
+        pdf.cell(0, 6, "Geen resultaten voor deze periode.")
+
+    # ---- Summary section: per building, its total, then per department
+    # a row per work type + a department subtotal, closed by a building
+    # total. --------------------------------------------------------------
+    for building in buildings:
+        pdf.set_font(FONT_FAMILY, "B", 11)
+        pdf.cell(
+            0,
+            7,
+            _safe_pdf_text(
+                f"{building['building_name']} — gebouwtotaal: "
+                f"{building['count']} werkzaamheden | "
+                f"{_fmt_money(Decimal(building['total']))}"
+            ),
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        for dept in building["departments"]:
+            dept_label = dept["department_name"] or "Geen afdeling"
+            pdf.set_font(FONT_FAMILY, "B", 10)
+            pdf.cell(0, 6, _safe_pdf_text(dept_label), new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font(FONT_FAMILY, "", 9.5)
+            for wt in dept["work_types"]:
+                wt_label = wt["work_type_name"] or "Geen werktype"
+                pdf.cell(_DEPT_SUMMARY_LABEL_W, 6, _safe_pdf_text(f"    {wt_label}"))
+                pdf.cell(_DEPT_SUMMARY_COUNT_W, 6, str(wt["count"]), align="R")
+                pdf.cell(
+                    _DEPT_SUMMARY_TOTAL_W,
+                    6,
+                    _fmt_money(Decimal(wt["total"])),
+                    align="R",
+                    new_x="LMARGIN",
+                    new_y="NEXT",
+                )
+            _dept_total_line(
+                pdf,
+                f"  Subtotaal {dept_label}",
+                dept["count"],
+                _fmt_money(Decimal(dept["total"])),
+            )
+        _dept_total_line(
+            pdf,
+            "Totaal gebouw",
+            building["count"],
+            _fmt_money(Decimal(building["total"])),
+        )
+        pdf.ln(3)
+
+    # ---- Detail section: one page per building. ---------------------------
+    for building in buildings:
+        pdf.add_page()
+        pdf.set_font(FONT_FAMILY, "B", 13)
+        pdf.cell(
+            0, 8, _safe_pdf_text(building["building_name"]), new_x="LMARGIN", new_y="NEXT"
+        )
+        pdf.ln(1)
+        row_no = 0
+        for dept in building["departments"]:
+            dept_label = dept["department_name"] or "Geen afdeling"
+            pdf.set_font(FONT_FAMILY, "B", 11)
+            pdf.cell(0, 7, _safe_pdf_text(dept_label), new_x="LMARGIN", new_y="NEXT")
+            for wt in dept["work_types"]:
+                wt_label = wt["work_type_name"] or "Geen werktype"
+                pdf.set_font(FONT_FAMILY, "B", 10)
+                pdf.cell(0, 6, _safe_pdf_text(wt_label), new_x="LMARGIN", new_y="NEXT")
+                _draw_dept_detail_header_row(pdf)
+
+                for row in wt["rows"]:
+                    # A work type with enough rows to outrun the page (a
+                    # busy customer can have hundreds under one work type)
+                    # would otherwise land bare numbered rows on the
+                    # continuation page with no column header and no
+                    # department/work-type context above them — check
+                    # BEFORE drawing so the repeated context always leads
+                    # its rows, never trails them.
+                    if pdf.will_page_break(6):
+                        pdf.add_page()
+                        pdf.set_font(FONT_FAMILY, "B", 10)
+                        pdf.cell(
+                            0,
+                            6,
+                            _safe_pdf_text(
+                                f"{building['building_name']} — {dept_label} — "
+                                f"{wt_label} (vervolg)"
+                            ),
+                            new_x="LMARGIN",
+                            new_y="NEXT",
+                        )
+                        _draw_dept_detail_header_row(pdf)
+
+                    row_no += 1
+                    values = (
+                        str(row_no),
+                        row["title"],
+                        str(row["week_no"]) if row["week_no"] is not None else "-",
+                        row["completed_at"] or "-",
+                        _fmt_money(Decimal(row["subtotal"])),
+                    )
+                    aligns = ("R", "L", "R", "R", "R")
+                    for value, width, align in zip(values, _DEPT_DETAIL_COLS, aligns):
+                        _fitted_cell(
+                            pdf,
+                            width,
+                            6,
+                            _safe_pdf_text(value),
+                            align=align,
+                            border=1,
+                            base_size=8.5,
+                        )
+                    pdf.ln()
+
+                _dept_total_line(
+                    pdf,
+                    f"  Subtotaal {wt_label}",
+                    wt["count"],
+                    _fmt_money(Decimal(wt["total"])),
+                )
+            _dept_total_line(
+                pdf,
+                f"Subtotaal {dept_label}",
+                dept["count"],
+                _fmt_money(Decimal(dept["total"])),
+            )
+        _dept_total_line(
+            pdf,
+            "Totaal gebouw",
+            building["count"],
+            _fmt_money(Decimal(building["total"])),
+        )
+
     return _pdf_bytes(pdf)
