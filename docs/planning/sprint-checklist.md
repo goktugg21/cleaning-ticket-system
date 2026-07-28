@@ -55,72 +55,77 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-129-session-expiry` — a FIX branch, not a feature
-sprint: one P1 (session-expiry) plus a cluster of UI defects surfaced in owner
-testing (labels Delete dialog, relabel toast, the "CONCEPT" string, the
-half-rendered permissions matrix, a policy-grid cosmetic), one PR.
-**Last shipped PR on `main`: #123** — Sprints 127 / 127.1 / 127.2 / 128,
-Department + Work Type end to end (see `## SHIPPED`; its line was appended by
-THIS branch's first commit, per the "a PR cannot cite its own number" rule).
+**Branch:** `fix/sprint-130-permissions-density` — a frontend-only FIX
+branch: the customer Permissions page's per-user matrix had 17 permission
+columns plus user/role/actions and did not fit any laptop viewport, forcing
+horizontal scroll with sticky columns the owner could not read.
+**Last shipped PR on `main`: #124** — Sprint 129, the session-expiry P1 +
+an owner-reported UI defect cluster (see `## SHIPPED`; its line was appended
+by THIS branch's first commit, per the "a PR cannot cite its own number"
+rule).
 **On this branch (unmerged, awaiting the owner's PR):**
-- **P1 — session-expiry dead page.** After a mid-session token refresh
-  failed, `clearAuthTokens()` wiped the tokens and dispatched a `window`
-  `auth:logout` event that NOTHING ever listened to (born incomplete in the
-  original token-refresh commit — never orphaned by a refactor), so React
-  kept the authenticated `me`, the whole UI stayed rendered, and every
-  subsequent request silently 401'd: a frozen page recoverable only by a full
-  reload. Fixed at the auth seam, not the call site: removed the dead event;
-  `api/client.ts` now calls a registered `onSessionExpired` handler exactly
-  when a 401 cannot be recovered by a refresh; `AuthContext` registers it
-  (once, cleaned up on unmount), clears `me` + the auth header, and flags
-  `sessionExpired`, so the existing `ProtectedRoute` / role guards send the
-  user to `/login`, where the notice explains why. A SUCCESSFUL refresh still
-  transparently retries and does NOT log out (that path is untouched);
-  already-on-`/login` cannot loop (no guard there navigates away).
-- **Labels Delete dialog never opened (Sprint 128 defect).**
-  `CustomerLabelsPage` rendered `ConfirmDialog` conditionally and never
-  called `.open()` — it is imperative (`showModal()` via a ref), so Delete
-  did nothing. Fixed with the standard `useRef<ConfirmDialogHandle>` +
-  `.open()` pattern. Audited every `ConfirmDialog` / native-`<dialog>` site
-  added in Sprints 125-128: this was the ONLY broken one (DocumentsExplorer
-  uses the ref+open pattern; DocumentsDialogs deliberately avoids native
-  `<dialog>`).
-- **Relabel save gave no feedback (Sprint 128 defect).** The EW-detail
-  relabel card now shows a success toast, the way the actual-hours save does.
-- **"CONCEPT (issued, unsent)" leaked an English dev string into the Dutch UI
-  — and meant the opposite ("concept" is Dutch for DRAFT).** Removed from the
-  wire: `labels_locked_invoice` returns the invoice NUMBER or `null`; the
-  relabel 400 `detail` no longer embeds it; the frontend picks the wording
-  (number -> "Vergrendeld door factuur {{number}}"; null -> an issued-but-not-
-  yet-sent phrase, no "concept"), nl+en lockstep. Sprint 127.2 tests updated
-  (issued-unsent -> null; the 400 detail asserts no "concept").
-- **Permissions matrix half-rendered the `documents` group (Sprint 126
-  defect).** Three renderers iterated a hardcoded
-  `["tickets","extra_work","users"]` literal TypeScript could not check, so
-  the matrix showed a headerless 17th column and — worse, FUNCTIONAL — the
-  per-user override editor dropped `customer.documents.manage` entirely (it
-  could only be reached via the company-wide policy toggle, never per user).
-  Fixed the CLASS: `permissionKeyLabels.ts` now exports one ordered
-  `PERMISSION_GROUPS` constant DERIVED from `PERMISSION_KEY_ROWS`, and all
-  three renderers iterate it — a fifth group can no longer skip a renderer.
-  Grepped for other hardcoded group/key lists: the three group-list sites were
-  the ONLY broken ones (the key lists in `effectiveResolver.ts` /
-  `PolicyToggleGrid.tsx` already include documents). Also added the one i18n
-  key that was missing because its renderer never ran:
-  `customer_permissions.matrix.key_short.customer.documents.manage` (nl+en) —
-  key-header count is now 17 = `PERMISSION_KEY_ROWS.length`, and the group
-  colSpan total is 17 too (both derive from the same rows, so equal by
-  construction — see the self-review; no unit runner to assert it at runtime).
-- **Policy-toggle grid cosmetic.** The 5th toggle ("manage documents") sat
-  orphaned in a half-width column; a CSS `:last-child:nth-child(odd)` rule now
-  spans a lone last card full-width, leaving the even (4-card) and
-  single-column responsive cases untouched.
-FE gate green: tsc clean, ESLint **48** (baseline, no new violations), build
-OK. Backend 127.1 / 127.2 suites green (29 tests). **No automated test was
-added for the P1** — the frontend has no unit-test runner (CLAUDE.md §8;
-adding one needs owner sign-off) and the sanctioned e2e suite is
-nightly/manual; the fix is verified by code review + the gates, and the owed
-regression test is recorded in `## NEXT`.
+- **`PermissionsMatrix.tsx` replaces its 17 per-key ✓/✗ columns with one
+  summary chip per permission group.** Four chips (Tickets / Extra Work /
+  Users / Documents), derived from `PERMISSION_GROUPS` — the Sprint 126
+  lesson applies again: a fifth group flows to the chip row automatically,
+  nothing hardcodes the group count. Each chip reads `Group N/Total` (e.g.
+  `Tickets 4/6`) with a `title` listing the granted keys' labels; the pencil
+  still opens `PermissionEditorModal` for full per-key depth. Counts are
+  derived from the SAME `resolvePanelValue` resolution the retired per-key
+  cells used (`PermissionGroupChip.tsx`, new file) — not reimplemented, so it
+  cannot drift from the modal's truth.
+- **Three visually distinct chip states**, color + fill/weight (never color
+  alone): all-granted is a filled solid green chip with bold white text;
+  partial is an outlined amber chip (`--amber`/`--amber-soft`/`--amber-
+  border`, the codebase's existing pending/warning palette); none is an
+  outlined faint-gray chip, regular weight. Verified all three render
+  correctly against live dev data (a seeded `customer.ticket.*` override
+  produced the partial state; a temporary all-granted override — reverted
+  after the screenshot — confirmed the filled-green state; screenshots not
+  committed).
+- **Sticky frozen-pane CSS removed.** The three `.permissions-matrix-sticky-
+  *` rules (and their `@media (max-width: 760px)` sticky-drop companion)
+  existed only to keep the 17-column grid survivable and are gone with it;
+  `.permission-bubble-granted/-denied/-policy-blocked` and the per-key
+  header/divider CSS are gone too (dead once `PermissionBubble.tsx` had no
+  remaining caller — deleted). The base `.permission-bubble` class and
+  `.effective-hint-*` survive: `TriStateBubbleRadio` (the modal's
+  Inherit/Allow/Deny control) still reuses them.
+- **Measured, not eyeballed (the standing rule).** Built `dist/`, served it
+  via `vite preview` behind a Host-rewriting proxy against the dev backend,
+  logged in as `superadmin@cleanops.demo` via token-inject, and read
+  `scrollWidth` vs `clientWidth` on the matrix's scroll wrapper at a 1280×900
+  viewport in BOTH locales (nl is primary and its "Documenten"/"Gebruikers"
+  labels are the widest chips): table width 876px == wrapper content width
+  876px in both — `hasHorizontalOverflow: false`, zero px of scroll.
+  (First pass measured 923px against an 876px wrapper — a real 47px
+  overflow — closed by trimming cell/chip padding and the identity-column
+  min-widths, not by declaring victory on the first render.)
+- **Caught and fixed one bug the measurement pass surfaced.** The group
+  header `<th>` was meant to be screen-reader-only (`.visually-hidden`, so
+  the chip's own label wasn't shown twice) — an existing higher-specificity
+  `.permissions-matrix-table thead th { position: sticky }` rule silently
+  overrode `.visually-hidden`'s `position: absolute`, and `clip` has no
+  effect off `position: absolute/fixed`, so the header text rendered fully
+  visible (`TICKETS` chip under a plain-text `Tickets` header). Fixed by
+  matching the pattern the Actions column already used one cell to the left:
+  an empty `<th aria-label=…>` instead of fighting the cascade.
+- **Playwright contract updated in the same commit.** The nightly/manual
+  spec `sprint29_batch29_8_5_permissions_visibility.spec.ts` asserted 16
+  `permissions-matrix-cell` cells with `data-effective`; rewritten to assert
+  4 `permission-group-chip` chips with `data-permission-group` +
+  `data-granted-count` + `data-total-count` + `data-state`. No other spec
+  referenced the retired testid.
+- **i18n.** New keys `customer_permissions.matrix.group_chip_aria` /
+  `group_chip_none_title`, nl+en lockstep. Removed the 17
+  `matrix.key_short.*` keys and the three `matrix.cell_*_aria` keys — dead
+  once the per-key cells were gone (JSON key-set parity verified
+  programmatically, not by eye). `permission_groups.*` (the chip's own
+  label) and `matrix.policy_blocked` (still used by the modal) were reused,
+  not duplicated.
+FE gate green: tsc clean, ESLint **48** (baseline, no new violations,
+verified both before AND after the header-duplication fix), build OK.
+Backend untouched — frontend-only sprint, no backend suite to run.
 **Immediate next step:** the owner opens the PR for this branch.
 
 Production hardening remains **postponed at the owner's instruction** — it
@@ -305,6 +310,29 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#124** (`765e94f`) — Sprint 129, session-expiry P1 + an owner-reported UI
+  defect cluster · **P1**: a mid-session token-refresh failure used to wipe
+  tokens and dispatch a dead `auth:logout` `window` event nothing listened
+  for, leaving React still rendering the authenticated `me` while every
+  subsequent request silently 401'd (a frozen page, recoverable only by a
+  full reload). Fixed at the auth seam: the dead event is gone;
+  `api/client.ts` calls a registered `onSessionExpired` handler exactly when
+  a 401 cannot be recovered by a refresh; `AuthContext` clears `me` + the
+  auth header and flags `sessionExpired`, so the existing route/role guards
+  send the user to `/login` with a notice. A successful refresh still
+  transparently retries (no logout); already-on-`/login` cannot loop. Also
+  in this branch: the Customer Labels `ConfirmDialog` never called `.open()`
+  (Delete did nothing) — fixed with the standard `useRef` + `.open()`
+  pattern; the EW-detail relabel card now shows a success toast; the
+  "CONCEPT (issued, unsent)" English-in-Dutch string (meaning the opposite
+  of "concept") is gone from the wire — `labels_locked_invoice` returns the
+  invoice number or `null`, nl+en lockstep; and a policy-toggle-grid
+  cosmetic (the lone 5th "manage documents" toggle now spans full width via
+  `:last-child:nth-child(odd)`). FE gate green (tsc, ESLint **48**, build);
+  backend 127.1/127.2 suites green (29 tests). No automated test for the P1
+  — no frontend unit-test runner exists yet — verified by review + the
+  gates; the owed regression test is tracked in `## NEXT` (Frontend Testing
+  Sprint).
 - **#123** (`36641fd`) — Sprints 127 / 127.1 / 127.2 / 128, Department +
   Work Type end to end · two per-customer Extra Work label lists
   (`customers.Department` + `customers.WorkType` — one abstract base, two
