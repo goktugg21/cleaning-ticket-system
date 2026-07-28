@@ -90,6 +90,9 @@ class LabelLockTests(InvoicingFixture):
         resp = self._relabel(ew, department=self.dept.id)
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["code"], "labels_locked_by_invoice")
+        # Sprint 129 §2b — an ISSUED-but-unsent invoice has no number, and the
+        # 400 detail must NOT leak the old "CONCEPT" developer string.
+        self.assertNotIn("concept", resp.data["detail"].lower())
         ew.refresh_from_db()
         self.assertIsNone(ew.department_id)
 
@@ -189,10 +192,22 @@ class LabelLockTests(InvoicingFixture):
         self.assertFalse(resp.data["labels_locked"])
         self.assertIsNone(resp.data["labels_locked_invoice"])
 
-    def test_detail_reports_locked_and_names_invoice_for_issued_ew(self):
+    def test_detail_reports_locked_and_names_invoice_for_sent_ew(self):
         ew = self._earned_ew()
         inv = send_invoice(self.admin, issue_invoice(self.admin, self._draft()))
         resp = self._detail(ew)
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.data["labels_locked"])
         self.assertEqual(resp.data["labels_locked_invoice"], inv.number)
+
+    def test_detail_locked_but_null_invoice_for_issued_unsent_ew(self):
+        # Sprint 129 §2b — an ISSUED-but-unsent invoice locks the labels but
+        # has no number yet (assigned at SEND), so the wire carries null, NOT
+        # the old "CONCEPT (issued, unsent)" string. The frontend picks the
+        # wording for the null case.
+        ew = self._earned_ew()
+        issue_invoice(self.admin, self._draft())  # ISSUED, not sent
+        resp = self._detail(ew)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["labels_locked"])
+        self.assertIsNone(resp.data["labels_locked_invoice"])

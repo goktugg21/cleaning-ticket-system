@@ -416,7 +416,7 @@
   "detail.labels_none": "None",
   "detail.labels_save": "Save",
   "detail.labels_saving": "Saving…",
-  "detail.labels_locked_by": "Locked by invoice {{invoice}}.",
+  "detail.labels_locked_by": "Locked by invoice {{number}}.",
   "detail.labels_locked_howto": "To change this, credit the invoice, relabel, then re-invoice.",
   "detail.labels_error_locked": "These labels are locked by an issued invoice. Refresh the page.",
   "detail.labels_error_mismatch": "This label does not belong to this extra work's customer.",
@@ -429,5 +429,7 @@
   "list.filter_all_departments": "All departments",
   "list.filter_work_type": "Work type",
   "list.filter_all_work_types": "All work types",
-  "list.filter_pick_customer_hint": "Pick a customer first to filter by building, department and work type."
+  "list.filter_pick_customer_hint": "Pick a customer first to filter by building, department and work type.",
+  "detail.labels_locked_by_unsent": "Locked by an issued invoice that has not been sent yet.",
+  "detail.labels_saved": "Labels saved"
 }

@@ -4,7 +4,7 @@
 // hold the relabel action) — the route is CustomerReadRoute (SA/CA/BM) and
 // the write controls are gated on isProviderAdmin, so the page renders
 // read-only for a BM. Backend: /api/customers/<id>/{departments,work-types}/.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -22,7 +22,10 @@ import type { CustomerAdmin, CustomerLabel } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
 import { isProviderAdmin } from "../../../auth/permissions";
 import { BoundedList } from "../../../components/BoundedList";
-import { ConfirmDialog } from "../../../components/ConfirmDialog";
+import {
+  ConfirmDialog,
+  type ConfirmDialogHandle,
+} from "../../../components/ConfirmDialog";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /** Map a coded label API error to an i18n key, else null (caller falls back
@@ -70,6 +73,10 @@ function LabelSection({
   const [editDescription, setEditDescription] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomerLabel | null>(null);
+  // ConfirmDialog is imperative: mounted-but-invisible until `.open()` calls
+  // showModal(). The Sprint 128 version rendered it conditionally without ever
+  // opening it, so Delete did nothing — hold a handle and open it explicitly.
+  const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   // A refetch counter drives the load effect. Mutations bump it (a plain
   // event-handler setState — NOT a set-state-in-effect) rather than calling a
   // state-setting loader from an effect (CLAUDE.md §3).
@@ -166,13 +173,17 @@ function LabelSection({
 
   async function confirmDelete() {
     if (!deleteTarget) return;
+    // The confirm button does not auto-close the (imperative) dialog; close it
+    // ourselves in both branches.
     try {
       await deleteLabel(customerId, kind, deleteTarget.id);
+      deleteDialogRef.current?.close();
       setDeleteTarget(null);
       refetch();
     } catch (err) {
-      // The in-use case (…_protected) surfaces the archive hint; re-throw
-      // nothing — keep the dialog closed and show the section error.
+      // The in-use case (…_protected) surfaces the archive hint in the section
+      // error; close the dialog and show it.
+      deleteDialogRef.current?.close();
       setDeleteTarget(null);
       showError(err);
     }
@@ -329,7 +340,10 @@ function LabelSection({
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
-                            onClick={() => setDeleteTarget(row)}
+                            onClick={() => {
+                              setDeleteTarget(row);
+                              deleteDialogRef.current?.open();
+                            }}
                           >
                             {t("labels.delete")}
                           </button>
@@ -344,16 +358,22 @@ function LabelSection({
         )}
       </div>
 
-      {deleteTarget && (
-        <ConfirmDialog
-          title={t("labels.delete_confirm_title")}
-          body={t("labels.delete_confirm_body", { name: deleteTarget.name })}
-          confirmLabel={t("labels.delete_confirm_button")}
-          destructive
-          onConfirm={confirmDelete}
-          onCancel={() => setDeleteTarget(null)}
-        />
-      )}
+      {/* Rendered UNCONDITIONALLY (imperative dialog); shown via
+          deleteDialogRef.current.open(). ConfirmDialog owns its own
+          open-on-unmount cleanup. */}
+      <ConfirmDialog
+        ref={deleteDialogRef}
+        title={t("labels.delete_confirm_title")}
+        body={
+          deleteTarget
+            ? t("labels.delete_confirm_body", { name: deleteTarget.name })
+            : ""
+        }
+        confirmLabel={t("labels.delete_confirm_button")}
+        destructive
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

@@ -439,17 +439,26 @@ class ExtraWorkRequestViewSet(
         # window stays open).
         locking_invoice = issued_invoice_locking_labels(extra_work)
         if locking_invoice is not None:
-            invoice_label = locking_invoice.number or "CONCEPT (issued, unsent)"
+            # Sprint 129 §2b — no "CONCEPT" literal. Name the number when the
+            # invoice has one (SENT); otherwise say "an issued invoice"
+            # (ISSUED-but-unsent has no number yet). The frontend maps the
+            # `labels_locked_by_invoice` code to its own localized message;
+            # this `detail` is the fallback and must stay language-neutral of
+            # that string.
+            if locking_invoice.number:
+                detail = (
+                    f"This Extra Work is on issued invoice "
+                    f"{locking_invoice.number}; its department / work type are "
+                    f"locked. Credit that invoice, relabel, then re-invoice."
+                )
+            else:
+                detail = (
+                    "This Extra Work is on an issued invoice; its department / "
+                    "work type are locked. Credit that invoice, relabel, then "
+                    "re-invoice."
+                )
             return Response(
-                {
-                    "detail": (
-                        f"This Extra Work is on issued invoice "
-                        f"{invoice_label}; its department / work type are "
-                        f"locked. Credit that invoice, relabel, then "
-                        f"re-invoice."
-                    ),
-                    "code": "labels_locked_by_invoice",
-                },
+                {"detail": detail, "code": "labels_locked_by_invoice"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

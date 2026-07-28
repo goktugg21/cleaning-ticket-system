@@ -416,7 +416,7 @@
   "detail.labels_none": "Geen",
   "detail.labels_save": "Opslaan",
   "detail.labels_saving": "Opslaan…",
-  "detail.labels_locked_by": "Vergrendeld door factuur {{invoice}}.",
+  "detail.labels_locked_by": "Vergrendeld door factuur {{number}}.",
   "detail.labels_locked_howto": "Crediteer de factuur, pas het label aan en factureer opnieuw om dit te wijzigen.",
   "detail.labels_error_locked": "Deze labels zijn vergrendeld door een uitgegeven factuur. Ververs de pagina.",
   "detail.labels_error_mismatch": "Dit label hoort niet bij de klant van dit extra werk.",
@@ -429,5 +429,7 @@
   "list.filter_all_departments": "Alle afdelingen",
   "list.filter_work_type": "Werktype",
   "list.filter_all_work_types": "Alle werktypes",
-  "list.filter_pick_customer_hint": "Kies eerst een klant om te filteren op pand, afdeling en werktype."
+  "list.filter_pick_customer_hint": "Kies eerst een klant om te filteren op pand, afdeling en werktype.",
+  "detail.labels_locked_by_unsent": "Vergrendeld door een uitgegeven, nog niet verzonden factuur.",
+  "detail.labels_saved": "Labels opgeslagen"
 }
