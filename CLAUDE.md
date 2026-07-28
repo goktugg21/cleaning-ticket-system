@@ -145,6 +145,33 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   strict lockstep — identical key sets** (nl is primary).
 - Layout/render claims require **measured rendered geometry, never
   screenshots** (see the playwright_admin_smoke harness).
+- **Deriving render order from a hardcoded array literal defeats
+  TypeScript's exhaustiveness checking.** An exported ordered constant
+  that every consumer iterates is checked by the compiler when a new
+  entry is added; a second, independently-maintained array used only for
+  render order is not. Sprint 126's `documents` permission group
+  rendered a headerless column and was invisible in the per-user
+  permission editor for three sprints before Sprint 130 unified both
+  consumers onto the single `PERMISSION_GROUPS` constant. Iterate the
+  shared exported constant, never a second local copy.
+- **A list endpoint's `pagination_class` is a contract with EVERY
+  caller, not just the one you're fixing.** Loosening it (e.g. to
+  `UnboundedPagination`) to stop one picker's truncation changes the
+  response shape for every OTHER caller that reads `count`/`next`/
+  `previous` and has real pagination UI. Sprint 134 did this to
+  `CompanyViewSet`/`CustomerViewSet`/`BuildingViewSet` to fix admin
+  pickers and broke the admin LIST pages' own prev/next in the same
+  change; Sprint 135 reverted it and fixed the pickers client-side
+  instead (exhaustive paging, the Sprint 120 pattern). Fix the caller
+  that has no pagination UI, not the endpoint every caller shares.
+- **`ConfirmDialog` / native `<dialog>` is imperative — always render it
+  unconditionally and drive it entirely through the ref.** Wrapping it in
+  `{condition && <ConfirmDialog .../>}` mounts an INVISIBLE dialog (a
+  native `<dialog>` is not visible just because it is in the DOM) and the
+  trigger button looks dead (Sprint 128); unmounting one that is still
+  open without calling `.close()` first can leave the whole page inert
+  (Sprint 118, the frozen-screen bug). Full writeup:
+  [docs/engineering/claude-code-operational-notes.md](docs/engineering/claude-code-operational-notes.md).
 
 ### Naming / style
 - Backend Django/PEP-8: snake_case fields, CamelCase models, dot-namespaced

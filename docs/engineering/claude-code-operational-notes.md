@@ -137,3 +137,48 @@ list via `page.evaluate` and confirm `clientHeight <= cap` with
 same-specificity rule can silently win (the #108 hero-grid used a
 compound `.operations-kpi-grid.option-a-hero` selector to beat the base
 `.operations-kpi-grid` media rules declared later in the file).
+
+## `ConfirmDialog` / native `<dialog>` is imperative — two distinct ways to get it wrong
+
+`ConfirmDialog` (`frontend/src/components/ConfirmDialog.tsx`) wraps a
+native `<dialog>` element behind a `forwardRef` + `useImperativeHandle`
+handle (`{ open, close }` calling `showModal()` / `close()`). A native
+`<dialog>` does NOT become visible just because it is mounted in the
+DOM — unlike a normal conditionally-rendered `<div>` modal, mounting it
+is not showing it, and unmounting it is not the only way to hide it.
+That single fact produces two opposite-looking bugs from the same root
+cause:
+
+**Mount without `.open()` → the trigger button looks dead.** Wrapping
+`<ConfirmDialog ref={dialogRef} .../>` in a conditional render (`{mode
+=== "delete" && <ConfirmDialog .../>}`), the way a normal CSS-shown/
+hidden modal would be, mounts an INVISIBLE `<dialog>` — nothing shows
+until code explicitly calls `dialogRef.current.open()`. A caller that
+sets the triggering state but never calls `.open()` sees no dialog, no
+error, just a button that appears to do nothing. This shipped in Sprint
+128 and was found by the owner in testing, not by CI or review.
+
+**Unmount without `.close()` first → the whole page goes inert.**
+Conversely, if a component holding an OPEN `<dialog>` (i.e. `.open()`
+was called, `showModal()` is active) unmounts without calling `.close()`
+first, the browser can leave the document in the modal's inert state —
+the page LOOKS normal but nothing is clickable anywhere, including
+outside where the dialog was. This is the frozen-screen bug Sprint 118
+root-caused and fixed (see
+`docs/archive/2026-06-sprints/sprint-116-119-build-log.md`) — the fix
+was, and remains, calling `.close()` in the unmounting code path (a
+cleanup effect, or before whatever state change causes the unmount)
+rather than just letting the DOM node disappear.
+
+**Fix, both directions:** always render `<ConfirmDialog>` unconditionally
+(never behind `{condition && ...}`) and drive it ENTIRELY through the ref
+— `.open()` to show it, `.close()` before any unmount or before the
+underlying data it references goes away. The existing `useRef` +
+`.open()` call sites elsewhere in the codebase are the pattern to copy;
+a new dialog usage that looks different from those is worth a second
+look before it ships.
+
+This bit Sprint 128 (dead-looking delete button, invisible dialog) and
+Sprint 118 (frozen screen, inert document) — the same imperative-API
+mistake in both directions, three sprints apart, because the gotcha was
+never written down after the first one.
