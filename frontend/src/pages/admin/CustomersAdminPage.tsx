@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
-import { listBuildings, listCompanies, listCustomers } from "../../api/admin";
+import { listAllBuildings, listAllCompanies, listCustomers } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { BuildingAdmin, CompanyAdmin, CustomerAdmin } from "../../api/types";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
@@ -43,12 +43,12 @@ export function CustomersAdminPage() {
   // Companies for the filter dropdown.
   useEffect(() => {
     let cancelled = false;
-    listCompanies({ is_active: "true", page_size: 200 })
+    listAllCompanies({ is_active: "true" })
       .then((response) => {
         if (cancelled) return;
-        setCompanies(response.results);
-        if (response.results.length === 1) {
-          setCompanyFilter(response.results[0].id);
+        setCompanies(response);
+        if (response.length === 1) {
+          setCompanyFilter(response[0].id);
         }
       })
       .finally(() => {
@@ -66,9 +66,9 @@ export function CustomersAdminPage() {
       return;
     }
     let cancelled = false;
-    listBuildings({ is_active: "true", page_size: 200, company: companyFilter })
+    listAllBuildings({ is_active: "true", company: companyFilter })
       .then((response) => {
-        if (!cancelled) setBuildings(response.results);
+        if (!cancelled) setBuildings(response);
       })
       .catch(() => {
         if (!cancelled) setBuildings([]);

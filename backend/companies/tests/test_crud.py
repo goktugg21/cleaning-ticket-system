@@ -146,22 +146,51 @@ class CompanyCRUDTests(TenantFixtureMixin, APITestCase):
 
 
 class CompanyPaginationTests(TenantFixtureMixin, APITestCase):
-    """Sprint 134 — CompanyViewSet had no `pagination_class` override, so
-    the admin picker call sites' `page_size: 200` was silently clamped to
-    200 (the DRF default `StandardResultsSetPagination.max_page_size`) for
-    any tenant exceeding it. `UnboundedPagination` fixes this the same way
-    Sprint 120 fixed it for other tenant-bounded lists."""
+    """Sprint 134 gave CompanyViewSet `pagination_class = UnboundedPagination`
+    to stop the admin picker call sites' `page_size: 200` silently clamping
+    to 200 for any tenant exceeding it. Sprint 135 REVERTED that — it applies
+    to EVERY caller, not just the pickers, and `CustomersAdminPage`'s
+    sibling `CompaniesAdminPage`-style list UI has real pagination (page
+    state + prev/next), which `page_size_query_param=None` + a fixed 10000
+    page permanently broke (`next` always null). The real fix is client-
+    side exhaustive paging for the PICKERS specifically (Sprint 120's own
+    pattern — see frontend/src/api/admin.ts::listAllCompanies), leaving the
+    default `StandardResultsSetPagination` (200/page max) untouched here.
+    This test asserts the end-state that fix depends on: the default
+    pagination correctly reports the true count and pages a >200-row
+    tenant to completion when the CLIENT follows `next`."""
 
     URL = "/api/companies/"
 
-    def test_more_than_200_companies_returned_in_one_page(self):
+    def test_more_than_200_companies_fully_retrievable_by_a_paging_client(self):
         Company.objects.bulk_create(
             [Company(name=f"Bulk {i}", slug=f"bulk-{i}") for i in range(210)]
         )
         self.authenticate(self.super_admin)
+
         response = self.client.get(self.URL, {"page_size": 200})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         # 210 bulk + the 2 fixture companies (self.company, self.other_company).
         self.assertEqual(response.data["count"], 212)
-        self.assertEqual(len(response.data["results"]), 212)
-        self.assertIsNone(response.data["next"])
+        # The default page cap is genuinely back in effect — one page
+        # cannot hold all 212 rows. (Sprint 134's UnboundedPagination
+        # would have returned all 212 here with next=None; that's exactly
+        # the override this test now proves is gone.)
+        self.assertEqual(len(response.data["results"]), 200)
+        self.assertIsNotNone(response.data["next"])
+
+        seen_ids = {row["id"] for row in response.data["results"]}
+        next_url = response.data["next"]
+        for _ in range(10):  # hard iteration cap, mirrors listAllCompanies's own
+            response = self.client.get(next_url)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            seen_ids.update(row["id"] for row in response.data["results"])
+            next_url = response.data["next"]
+            if not next_url:
+                break
+        else:
+            self.fail("Did not reach the end of pagination within 10 pages.")
+
+        # A client that pages exhaustively (the actual fix — see
+        # frontend/src/api/admin.ts::listAllCompanies) retrieves every row.
+        self.assertEqual(len(seen_ids), 212)

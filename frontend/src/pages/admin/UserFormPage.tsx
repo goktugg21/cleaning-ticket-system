@@ -8,9 +8,9 @@ import {
   addStaffVisibility,
   getStaffProfile,
   getUser,
-  listBuildings,
-  listCompanies,
-  listCustomers,
+  listAllBuildings,
+  listAllCompanies,
+  listAllCustomers,
   listStaffVisibility,
   removeStaffVisibility,
   updateStaffProfile,
@@ -122,16 +122,17 @@ export function UserFormPage() {
   }, [isSuperAdmin]);
 
   // Lazy-load membership names. Only fetch the lists the user actually has
-  // memberships in. Each list call is bounded by page_size=200 so most
-  // installs fit in one request.
+  // memberships in. Sprint 135 — fetched exhaustively (listAll*) so a
+  // tenant with more than one page of companies/buildings/customers still
+  // resolves every membership name, not just the ones on the first page.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     if (user.company_ids.length > 0) {
-      listCompanies({ page_size: 200 })
+      listAllCompanies()
         .then((response) => {
           if (cancelled) return;
-          const names = response.results
+          const names = response
             .filter((c) => user.company_ids.includes(c.id))
             .map((c) => c.name);
           setCompanyNames(names);
@@ -143,10 +144,10 @@ export function UserFormPage() {
       setCompanyNames([]);
     }
     if (user.building_ids.length > 0) {
-      listBuildings({ page_size: 200 })
+      listAllBuildings()
         .then((response) => {
           if (cancelled) return;
-          const names = response.results
+          const names = response
             .filter((b) => user.building_ids.includes(b.id))
             .map((b) => b.name);
           setBuildingNames(names);
@@ -158,10 +159,10 @@ export function UserFormPage() {
       setBuildingNames([]);
     }
     if (user.customer_ids.length > 0) {
-      listCustomers({ page_size: 200 })
+      listAllCustomers()
         .then((response) => {
           if (cancelled) return;
-          const names = response.results
+          const names = response
             .filter((c) => user.customer_ids.includes(c.id))
             .map((c) => c.name);
           setCustomerNames(names);
@@ -556,9 +557,9 @@ function StaffDetailsSection({
   // visibility by tampering with the dropdown.
   useEffect(() => {
     let cancelled = false;
-    listBuildings({ is_active: "true", page_size: 200 })
+    listAllBuildings({ is_active: "true" })
       .then((response) => {
-        if (!cancelled) setAllBuildings(response.results);
+        if (!cancelled) setAllBuildings(response);
       })
       .catch(() => {
         if (!cancelled) setAllBuildings([]);

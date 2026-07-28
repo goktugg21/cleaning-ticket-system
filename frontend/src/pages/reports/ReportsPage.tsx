@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { listBuildings, listCompanies } from "../../api/admin";
+import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import type { ReportFilters } from "../../api/reports";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
@@ -46,9 +46,9 @@ export function ReportsPage() {
   useEffect(() => {
     if (!isSuperAdmin) return;
     let cancelled = false;
-    listCompanies({ page_size: 200 }).then((response) => {
+    listAllCompanies().then((response) => {
       if (cancelled) return;
-      setCompanies(response.results);
+      setCompanies(response);
     });
     return () => {
       cancelled = true;
@@ -75,14 +75,14 @@ export function ReportsPage() {
     }
     let cancelled = false;
     setBuildingsLoaded(false);
-    const params: Parameters<typeof listBuildings>[0] = { page_size: 200 };
+    const params: Parameters<typeof listAllBuildings>[0] = {};
     if (isSuperAdmin && filters.company !== undefined) {
       params.company = filters.company;
     }
-    listBuildings(params)
+    listAllBuildings(params)
       .then((response) => {
         if (cancelled) return;
-        setBuildings(response.results);
+        setBuildings(response);
       })
       .finally(() => {
         if (!cancelled) setBuildingsLoaded(true);

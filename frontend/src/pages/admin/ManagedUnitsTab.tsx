@@ -37,6 +37,17 @@ function formatDate(value: string, locale: string): string {
   }
 }
 
+interface ManagedUnitsTabProps {
+  // Sprint 135 — SUPER_ADMIN company disambiguation on create
+  // (backend/extra_work/views_catalog.py::_resolve_catalog_create_company
+  // 400s `service_company_required` for a SA managing 2+ provider
+  // companies who omits `company`). `ServicesAdminPage` renders the ONE
+  // shared selector (also used by the Services tab) and passes its
+  // resolved state down here — this tab does not render its own control.
+  companyRequired?: boolean;
+  selectedCompany?: number | "";
+}
+
 /**
  * Sprint 123 — "Units" tab of the Service catalog admin page. Manages
  * the per-provider-company `ManagedUnit` catalog that backs the
@@ -44,7 +55,8 @@ function formatDate(value: string, locale: string): string {
  * (`ManagedUnitPicker`). Self-contained (own fetch, own modal, own
  * delete dialog) rather than threaded through `ServicesAdminPage`'s
  * existing Services/Categories state, since it has no cross-tab
- * dependency on either.
+ * dependency on either — Sprint 135 is the one exception: the shared
+ * company-disambiguation selector, threaded in via props.
  *
  * `company_name` is shown as a list/detail column even though a
  * COMPANY_ADMIN only ever sees their own company's units (every row
@@ -53,7 +65,10 @@ function formatDate(value: string, locale: string): string {
  * identically-named units from different companies would be
  * indistinguishable in the table.
  */
-export function ManagedUnitsTab() {
+export function ManagedUnitsTab({
+  companyRequired = false,
+  selectedCompany = "",
+}: ManagedUnitsTabProps) {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
@@ -113,11 +128,18 @@ export function ManagedUnitsTab() {
       setFormError(t("managed_units.error_label_required"));
       return;
     }
+    if (mode === "create" && companyRequired && selectedCompany === "") {
+      setFormError(t("catalog.error_company_required"));
+      return;
+    }
     setFormBusy(true);
     setFormError("");
     const payload: ManagedUnitCreatePayload = {
       label: form.label.trim(),
       is_active: form.is_active,
+      ...(mode === "create" && selectedCompany !== ""
+        ? { company: selectedCompany }
+        : {}),
     };
     try {
       if (mode === "create") {

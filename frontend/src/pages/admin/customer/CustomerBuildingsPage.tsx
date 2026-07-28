@@ -7,7 +7,7 @@ import { getApiError } from "../../../api/client";
 import {
   addCustomerBuilding,
   getCustomer,
-  listBuildings,
+  listAllBuildings,
   listCustomerBuildings,
   removeCustomerBuilding,
 } from "../../../api/admin";
@@ -76,15 +76,14 @@ export function CustomerBuildingsPage() {
         setCustomer(customerData);
         const [linksResponse, companyBuildingsResponse] = await Promise.all([
           listCustomerBuildings(numericId),
-          listBuildings({
+          listAllBuildings({
             is_active: "true",
-            page_size: 200,
             company: customerData.company,
           }),
         ]);
         if (cancelled) return;
         setLinkedBuildings(linksResponse.results);
-        setAllCompanyBuildings(companyBuildingsResponse.results);
+        setAllCompanyBuildings(companyBuildingsResponse);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(getApiError(err));
@@ -102,14 +101,13 @@ export function CustomerBuildingsPage() {
     try {
       const [linksResponse, companyBuildingsResponse] = await Promise.all([
         listCustomerBuildings(numericId),
-        listBuildings({
+        listAllBuildings({
           is_active: "true",
-          page_size: 200,
           company: customer.company,
         }),
       ]);
       setLinkedBuildings(linksResponse.results);
-      setAllCompanyBuildings(companyBuildingsResponse.results);
+      setAllCompanyBuildings(companyBuildingsResponse);
     } catch (err) {
       setBuildingLinkError(getApiError(err));
     }

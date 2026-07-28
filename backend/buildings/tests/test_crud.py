@@ -135,13 +135,17 @@ class BuildingCRUDTests(TenantFixtureMixin, APITestCase):
 
 
 class BuildingPaginationTests(TenantFixtureMixin, APITestCase):
-    """Sprint 134 — see CompanyPaginationTests (companies/tests/test_crud.py)
-    for the full rationale; identical fix (`UnboundedPagination`), same test
-    shape, on BuildingViewSet."""
+    """Sprint 135 — see CompanyPaginationTests (companies/tests/test_crud.py)
+    for the full revert rationale; same shape, on BuildingViewSet: the
+    default pagination correctly reports the true count and pages a
+    >200-row tenant to completion when the CLIENT follows `next`. The
+    picker call sites' truncation fix is now client-side exhaustive
+    paging (frontend/src/api/admin.ts::listAllBuildings), not this
+    ViewSet's own `pagination_class`."""
 
     URL = "/api/buildings/"
 
-    def test_more_than_200_buildings_returned_in_one_page(self):
+    def test_more_than_200_buildings_fully_retrievable_by_a_paging_client(self):
         Building.objects.bulk_create(
             [
                 Building(
@@ -153,9 +157,24 @@ class BuildingPaginationTests(TenantFixtureMixin, APITestCase):
             ]
         )
         self.authenticate(self.super_admin)
+
         response = self.client.get(self.URL, {"page_size": 200})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         # 210 bulk + the 2 fixture buildings (self.building, self.other_building).
         self.assertEqual(response.data["count"], 212)
-        self.assertEqual(len(response.data["results"]), 212)
-        self.assertIsNone(response.data["next"])
+        self.assertEqual(len(response.data["results"]), 200)
+        self.assertIsNotNone(response.data["next"])
+
+        seen_ids = {row["id"] for row in response.data["results"]}
+        next_url = response.data["next"]
+        for _ in range(10):  # hard iteration cap, mirrors listAllBuildings's own
+            response = self.client.get(next_url)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            seen_ids.update(row["id"] for row in response.data["results"])
+            next_url = response.data["next"]
+            if not next_url:
+                break
+        else:
+            self.fail("Did not reach the end of pagination within 10 pages.")
+
+        self.assertEqual(len(seen_ids), 212)

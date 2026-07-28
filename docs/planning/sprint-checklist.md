@@ -498,6 +498,15 @@ item has moved to `## SHIPPED` or been resolved below instead.
     keyed on that instead of on the FKs being set. Not urgent — it fails
     conservatively (the invoice under-claims rather than asserting
     something false), but written down so nobody has to re-derive it.
+20. **`login.spec.ts`'s "demo card click fills the login form" e2e test
+    fails on a clean `main` build** — found while cherry-picking the axios
+    timeout fix (Sprint 134) onto this branch. Predates this branch
+    entirely: reproduces from `main` alone, with neither `LoginPage.tsx`
+    nor `login.spec.ts` touched by anything on it. Clicking
+    `[data-testid="demo-card-customer-b3"]` no longer autofills
+    `amanda-customer-b-amsterdam@b-amsterdam.demo` into the login form.
+    Not investigated or fixed here — recorded so it isn't mistaken for a
+    regression on some future branch's e2e run.
 
 ---
 

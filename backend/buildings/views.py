@@ -11,7 +11,6 @@ from accounts.permissions import (
 )
 from accounts.scoping import scope_buildings_for
 from companies.models import Company, CompanyUserMembership
-from config.pagination import UnboundedPagination
 
 from .filters import BuildingFilter
 from .models import Building
@@ -23,10 +22,6 @@ class BuildingViewSet(viewsets.ModelViewSet):
     filterset_class = BuildingFilter
     search_fields = ["name", "address", "city", "postal_code"]
     ordering_fields = ["name", "created_at"]
-    # Sprint 134 — see the identical comment on CompanyViewSet (companies/
-    # views.py): the admin picker call sites request page_size=200, which
-    # the DRF default silently clamps to 200 for any tenant exceeding it.
-    pagination_class = UnboundedPagination
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

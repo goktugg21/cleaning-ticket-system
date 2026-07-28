@@ -11,8 +11,8 @@ import {
   createCustomer,
   deactivateCustomer,
   getCustomer,
-  listBuildings,
-  listCompanies,
+  listAllBuildings,
+  listAllCompanies,
   listCustomerBuildings,
   listCustomerUserAccess,
   listCustomerUsers,
@@ -287,14 +287,13 @@ export function CustomerFormPage() {
           // link" as the difference. is_active=true keeps inactive
           // buildings out of the dropdown; the operator can still see
           // them in the linked list if they were linked previously.
-          listBuildings({
+          listAllBuildings({
             is_active: "true",
-            page_size: 200,
             company: customer.company,
           }),
         ]);
         setLinkedBuildings(linksResponse.results);
-        setAllCompanyBuildings(companyBuildingsResponse.results);
+        setAllCompanyBuildings(companyBuildingsResponse);
       } catch (err) {
         setBuildingLinkError(getApiError(err));
       }
@@ -521,12 +520,12 @@ export function CustomerFormPage() {
 
   useEffect(() => {
     let cancelled = false;
-    listCompanies({ is_active: "true", page_size: 200 })
+    listAllCompanies({ is_active: "true" })
       .then((response) => {
         if (cancelled) return;
-        setCompanies(response.results);
-        if (isCreate && response.results.length === 1) {
-          setCompany(response.results[0].id);
+        setCompanies(response);
+        if (isCreate && response.length === 1) {
+          setCompany(response[0].id);
         }
       })
       .finally(() => {
@@ -543,9 +542,9 @@ export function CustomerFormPage() {
       return;
     }
     let cancelled = false;
-    listBuildings({ is_active: "true", page_size: 200, company })
+    listAllBuildings({ is_active: "true", company })
       .then((response) => {
-        if (!cancelled) setBuildings(response.results);
+        if (!cancelled) setBuildings(response);
       })
       .catch(() => {
         if (!cancelled) setBuildings([]);

@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 import { BellOff, CheckCheck } from "lucide-react";
 
 import { getApiError } from "../api/client";
-import { listCompanies } from "../api/admin";
+import { listAllCompanies } from "../api/admin";
 import { useAuth } from "../auth/AuthContext";
 import {
   getCompanySubscriptions,
@@ -64,12 +64,12 @@ export function NotificationsPage() {
     if (!isSuperAdmin) return;
     let cancelled = false;
     Promise.all([
-      listCompanies({ page_size: 200 }),
+      listAllCompanies(),
       getCompanySubscriptions(),
     ])
       .then(([companyData, subscriptions]) => {
         if (cancelled) return;
-        setCompanies(companyData.results);
+        setCompanies(companyData);
         setSubscribedIds(new Set(subscriptions.subscribedIds));
         setEmailEnabledIds(new Set(subscriptions.emailEnabledIds));
       })

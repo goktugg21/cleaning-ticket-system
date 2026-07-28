@@ -18,8 +18,8 @@ import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listCustomerPrices, listServices } from "../api/admin";
-import { api, getApiError } from "../api/client";
+import { listAllBuildings, listAllCustomers, listCustomerPrices, listServices } from "../api/admin";
+import { getApiError } from "../api/client";
 import { listLabels } from "../api/customerLabels";
 import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
 import type {
@@ -35,7 +35,6 @@ import type {
   ExtraWorkRequestDetail,
   ExtraWorkRequestIntent,
   ExtraWorkUrgency,
-  PaginatedResponse,
   Service,
   ServiceUnitType,
 } from "../api/types";
@@ -348,12 +347,8 @@ export function CreateExtraWorkPage({
       // stuck behind a backend hiccup.
       const [buildingResult, customerResult, servicesResult] =
         await Promise.allSettled([
-          api.get<PaginatedResponse<Building>>("/buildings/", {
-            params: { page_size: 200 },
-          }),
-          api.get<PaginatedResponse<Customer>>("/customers/", {
-            params: { page_size: 200 },
-          }),
+          listAllBuildings(),
+          listAllCustomers(),
           // Sprint 28 Batch 5 — reuse the catalog helper. Only active
           // services are eligible for the cart.
           listServices({ is_active: true }),
@@ -373,8 +368,8 @@ export function CreateExtraWorkPage({
         return;
       }
 
-      const buildingResults = buildingResult.value.data.results;
-      const customerResults = customerResult.value.data.results;
+      const buildingResults = buildingResult.value;
+      const customerResults = customerResult.value;
       setBuildings(buildingResults);
       setCustomers(customerResults);
 
