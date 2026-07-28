@@ -287,6 +287,34 @@ class ExtraWorkRequest(models.Model):
         ),
     )
 
+    # Sprint 127 — per-customer label lists (Department + Work Type) used
+    # for filtering, reporting and invoice grouping. Both are pure labels
+    # and orthogonal to the fixed-choice `category` enum above (they do NOT
+    # replace it — see customers.models.WorkType).
+    #
+    # Nullable is REQUIRED, not a convenience: every existing EW row
+    # predates both fields (no backfill), and one real customer has twelve
+    # departments and ZERO work types. PROTECT mirrors `building`/`customer`
+    # above — a label still referenced by any EW cannot be hard-deleted;
+    # the CRUD delete endpoint turns that into a coded 400 that points the
+    # operator at the `is_active=False` soft-retire path instead. The
+    # same-customer invariant (a label must belong to THIS EW's customer)
+    # is enforced by ExtraWorkRequestCreateSerializer, the sole write path.
+    department = models.ForeignKey(
+        "customers.Department",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="extra_work_requests",
+    )
+    work_type = models.ForeignKey(
+        "customers.WorkType",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="extra_work_requests",
+    )
+
     urgency = models.CharField(
         max_length=16,
         choices=ExtraWorkUrgency.choices,

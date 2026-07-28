@@ -132,7 +132,10 @@ class ExtraWorkRequestViewSet(
 
     def get_queryset(self):
         return scope_extra_work_for(self.request.user).select_related(
-            "company", "building", "customer", "created_by"
+            # Sprint 127 — department / work_type joined so the list
+            # serializer's `*_name` fields never trigger a per-row lookup.
+            "company", "building", "customer", "created_by",
+            "department", "work_type",
         )
 
     def get_serializer_class(self):

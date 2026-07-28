@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower, Trim
 
 
 def customer_logo_upload_path(instance, filename):
@@ -499,3 +500,98 @@ class ContactBuildingLink(models.Model):
 
     def __str__(self):
         return f"{self.contact} ↔ {self.building}"
+
+
+class _CustomerLabelList(models.Model):
+    """Sprint 127 — abstract base for a customer's Extra Work label lists.
+
+    Two concrete lists inherit this shape unchanged today: `Department`
+    (a sub-client / segment of the customer — B Amsterdam's Algemeen /
+    Event / Member, or another customer's twelve medical practices) and
+    `WorkType` (the kind of job — Eindschoonmaak / Opleverschoonmaak /
+    Bouw schoonmaak / ...). Both are PURE labels: no state machine, no
+    permissions of their own, no derived behaviour. They are picked from a
+    dropdown, saved onto an `ExtraWorkRequest`, then grouped / filtered by.
+
+    Why an abstract base and NOT one shared table with a `kind`
+    discriminator: the two lists are independently optional (one real
+    customer has twelve departments and ZERO work types) and each backs a
+    SEPARATE nullable FK on `ExtraWorkRequest`. Two concrete tables make it
+    structurally impossible to tag the `work_type` slot with a `Department`
+    row (the FK targets differ), which a single `kind`-tagged table could
+    not prevent without a check on every read. The base only shares field
+    DEFINITIONS; it creates no shared rows and no coupling between the two.
+
+    The case-insensitive per-customer uniqueness mirrors the `extra_work`
+    `ManagedUnit` precedent (migration 0018): `Lower(Trim(name))` +
+    `customer`, built by Postgres as a real expression index so a race or a
+    direct-ORM write cannot create "Event" and "event " as two rows. The
+    serializer strips `name` on write, so the Trim only ever matters as a
+    DB-level backstop.
+    """
+
+    customer = models.ForeignKey(
+        Customer,
+        on_delete=models.CASCADE,
+        related_name="%(class)ss",
+        help_text=(
+            "Customer that owns this label. CASCADE: the label list is "
+            "pure per-customer metadata with no independent lifecycle, so "
+            "it is removed with the customer."
+        ),
+    )
+    name = models.CharField(max_length=128)
+    description = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archiving (is_active=False) retires a label from the everyday "
+            "picker WITHOUT breaking Extra Work rows that already reference "
+            "it — the soft-retire path when a hard delete is refused by the "
+            "PROTECT on ExtraWorkRequest."
+        ),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        abstract = True
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "customer",
+                name="uniq_%(app_label)s_%(class)s_name_per_customer_ci",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.customer_id}: {self.name}"
+
+
+class Department(_CustomerLabelList):
+    """Sprint 127 — a customer's Department list. See `_CustomerLabelList`.
+
+    NOT a department in the org-chart sense: it is a sub-client / segment
+    of the customer (Algemeen / Event / Member; or twelve medical
+    practices). Consumed only by `ExtraWorkRequest.department`.
+    """
+
+    class Meta(_CustomerLabelList.Meta):
+        verbose_name = "department"
+        verbose_name_plural = "departments"
+
+
+class WorkType(_CustomerLabelList):
+    """Sprint 127 — a customer's Work Type list. See `_CustomerLabelList`.
+
+    The kind of job (Eindschoonmaak / Opleverschoonmaak / Bouw schoonmaak
+    / Extra werkzaamheden / Overige). Distinct from the fixed-choice
+    `ExtraWorkRequest.category` enum: that classifies one ad-hoc request
+    from a global list; this is a per-customer, operator-curated label
+    used for reporting and invoice grouping. Consumed only by
+    `ExtraWorkRequest.work_type`.
+    """
+
+    class Meta(_CustomerLabelList.Meta):
+        verbose_name = "work type"
+        verbose_name_plural = "work types"

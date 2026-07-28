@@ -20,6 +20,8 @@ from customers.models import (
     CustomerBuildingMembership,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
+    Department,
+    WorkType,
 )
 from customers.permissions import access_has_permission, user_can
 
@@ -517,6 +519,16 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # Sprint 127 — per-customer labels. `allow_null` so an untagged row
+    # (null FK) renders the key as null rather than dropping it (this DRF
+    # version raises on the `department.name` traversal otherwise). Visible
+    # to every viewer, customers included — the label is not sensitive.
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, allow_null=True
+    )
+    work_type_name = serializers.CharField(
+        source="work_type.name", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = ExtraWorkRequest
@@ -528,6 +540,10 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "department",
+            "department_name",
+            "work_type",
+            "work_type_name",
             "title",
             "category",
             "urgency",
@@ -596,6 +612,15 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # Sprint 127 — per-customer labels. `allow_null` so an untagged row
+    # (null FK) renders the key as null rather than dropping it. Visible to
+    # every viewer, customers included — the label is not sensitive.
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, allow_null=True
+    )
+    work_type_name = serializers.CharField(
+        source="work_type.name", read_only=True, allow_null=True
+    )
     pricing_line_items = serializers.SerializerMethodField()
     line_items = ExtraWorkRequestItemSerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -619,6 +644,10 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "department",
+            "department_name",
+            "work_type",
+            "work_type_name",
             "title",
             "description",
             "category",
@@ -678,6 +707,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            # Sprint 127 — labels are display-only on the detail serializer
+            # (the EW ViewSet has no update action; assignment is create-time
+            # via ExtraWorkRequestCreateSerializer).
+            "department",
+            "work_type",
             "status",
             "routing_decision",
             "request_intent",
@@ -969,6 +1003,23 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
         queryset=Customer.objects.filter(is_active=True)
     )
+    # Sprint 127 — optional per-customer labels. Nullable + optional so
+    # every existing client keeps working; `validate()` enforces the one
+    # rule (the label must belong to THIS request's customer). Queryset is
+    # unscoped here because the customer is not known until validate(); the
+    # same-customer check there is the real gate.
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    work_type = serializers.PrimaryKeyRelatedField(
+        queryset=WorkType.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
     line_items = ExtraWorkRequestItemSerializer(many=True)
     # Sprint 2A — explicit customer-facing intent. OPTIONAL on the
     # wire so existing Batch 6/7/8 clients keep working unchanged;
@@ -993,6 +1044,10 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "description",
             "category",
             "category_other_text",
+            # Sprint 127 — optional per-customer labels (same-customer
+            # enforced in validate()).
+            "department",
+            "work_type",
             "urgency",
             "preferred_date",
             "request_intent",
@@ -1050,6 +1105,40 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
         ).exists():
             raise serializers.ValidationError(
                 "Customer is not linked to the selected building."
+            )
+
+        # Sprint 127 — THE one rule of the label feature: a Department /
+        # Work Type assigned to this Extra Work MUST belong to this
+        # request's own customer. Without it one customer's work could be
+        # tagged with another customer's label, silently corrupting the
+        # grouped report and invoice grouping that consume these fields.
+        # This serializer is the sole write path (the EW ViewSet has no
+        # update mixin), so this is the single enforcement point.
+        department = attrs.get("department")
+        if department is not None and department.customer_id != customer.id:
+            raise serializers.ValidationError(
+                {
+                    "department": [
+                        serializers.ErrorDetail(
+                            "Department must belong to the same customer as "
+                            "the extra work.",
+                            code="department_customer_mismatch",
+                        )
+                    ]
+                }
+            )
+        work_type = attrs.get("work_type")
+        if work_type is not None and work_type.customer_id != customer.id:
+            raise serializers.ValidationError(
+                {
+                    "work_type": [
+                        serializers.ErrorDetail(
+                            "Work type must belong to the same customer as "
+                            "the extra work.",
+                            code="work_type_customer_mismatch",
+                        )
+                    ]
+                }
             )
 
         # Sprint 3B — every catalog-linked line's service must be

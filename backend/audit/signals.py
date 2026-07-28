@@ -49,6 +49,8 @@ from customers.models import (
     CustomerCompanyPolicy,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
+    Department,
+    WorkType,
 )
 from documents.models import MAX_FOLDER_DEPTH, Document, DocumentFolder
 from extra_work.models import (
@@ -1405,6 +1407,13 @@ def _connect():
         # notes / building) produce meaningful UPDATE diffs, so the
         # full CRUD trio is the right shape.
         Contact,
+        # Sprint 127 — per-customer Extra Work label lists. `name` renames
+        # are the point of auditing them: a relabelled Department / Work
+        # Type later makes an invoice group look wrong, so the rename must
+        # be attributable. Editable fields (name / description / is_active)
+        # produce meaningful UPDATE diffs → the full CRUD trio is the shape.
+        Department,
+        WorkType,
         # Sprint 28 Batch 5 — provider service catalog
         # (ServiceCategory + Service) and per-customer contract
         # prices (CustomerServicePrice). All three carry editable

@@ -39,6 +39,12 @@ class ExtraWorkRequestFilter(df.FilterSet):
         fields = {
             "customer": ["exact"],
             "building": ["exact"],
+            # Sprint 127 — per-customer label filters, by id. Both are plain
+            # FK `exact` filters so they compose with the existing customer +
+            # building filters (the reference implementation filters all four
+            # together: Customer + Building + Department + Work Type).
+            "department": ["exact"],
+            "work_type": ["exact"],
             "status": ["exact", "in"],
             "routing_decision": ["exact"],
             "request_intent": ["exact", "in"],
