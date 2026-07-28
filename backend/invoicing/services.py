@@ -112,6 +112,7 @@ def _create_draft(
     *,
     department_id=None,
     work_type_id=None,
+    granularity=None,
 ):
     """Create ONE draft Invoice for the given EW list and CLAIM them.
 
@@ -125,6 +126,18 @@ def _create_draft(
     PER_BUILDING_DEPARTMENT_WORK_TYPE granularity — every other caller
     passes neither, leaving the invoice's own grouping FKs NULL (it never
     claimed a department/work-type grouping to begin with).
+
+    `granularity` (Sprint 134) records which granularity actually produced
+    this invoice — every caller in `generate_draft_invoices` passes the
+    EFFECTIVE granularity for its branch (not the raw, possibly-unrecognised
+    caller input), so this always holds one of the three real
+    `Customer.InvoiceGranularity` values, never an invalid string. It exists
+    so `state_machine._resync_invoice_group_labels` can tell an untagged
+    PER_BUILDING_DEPARTMENT_WORK_TYPE invoice (department_id/work_type_id
+    both NULL at generation, but MUST still resync if its EW gets tagged
+    during the draft window) apart from a CUSTOMER/PER_BUILDING invoice
+    (also both NULL, but never claimed a grouping at all) — the two were
+    indistinguishable by the FKs alone.
     """
     invoice = Invoice.objects.create(
         company_id=company_id,
@@ -132,6 +145,7 @@ def _create_draft(
         building_id=building_id,
         department_id=department_id,
         work_type_id=work_type_id,
+        granularity=granularity,
         status=Invoice.Status.DRAFT,
         number=None,  # numbering is Phase 2b — NOT assigned here
         year=None,
@@ -257,6 +271,7 @@ def generate_draft_invoices(
                         month,
                         building_id,
                         by_building[building_id],
+                        granularity=Customer.InvoiceGranularity.PER_BUILDING,
                     )
                 )
         elif (
@@ -296,9 +311,14 @@ def generate_draft_invoices(
                         by_group[key],
                         department_id=department_id,
                         work_type_id=work_type_id,
+                        granularity=(
+                            Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
+                        ),
                     )
                 )
-        else:  # CUSTOMER (default)
+        else:  # CUSTOMER (default) — also the fallback for an unrecognised
+            # granularity string; either way this branch is what actually
+            # ran, so `granularity` records CUSTOMER, not the raw input.
             created.append(
                 _create_draft(
                     actor,
@@ -308,6 +328,7 @@ def generate_draft_invoices(
                     month,
                     None,
                     unbilled,
+                    granularity=Customer.InvoiceGranularity.CUSTOMER,
                 )
             )
     return created

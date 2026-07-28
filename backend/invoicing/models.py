@@ -40,6 +40,8 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 
+from customers.models import Customer
+
 
 class Invoice(models.Model):
     """
@@ -99,6 +101,23 @@ class Invoice(models.Model):
         "customers.WorkType",
         on_delete=models.PROTECT,
         related_name="invoices",
+        null=True,
+        blank=True,
+    )
+    # Sprint 134 — which `Customer.InvoiceGranularity` actually produced
+    # this invoice, populated at draft creation. NULL for every invoice
+    # created before this field existed — treated as "not label-
+    # granularity" everywhere it's read, so their behaviour is unchanged.
+    # Exists so `state_machine._resync_invoice_group_labels` can tell an
+    # UNTAGGED PER_BUILDING_DEPARTMENT_WORK_TYPE invoice (department_id
+    # and work_type_id both NULL at generation, but still eligible to
+    # pick up a label if its EW gets tagged during the draft window) apart
+    # from a CUSTOMER/PER_BUILDING invoice (also both NULL, but never
+    # claimed a grouping at all) — the two were indistinguishable by the
+    # FKs alone, which meant the former silently never resynced.
+    granularity = models.CharField(
+        max_length=40,
+        choices=Customer.InvoiceGranularity.choices,
         null=True,
         blank=True,
     )
@@ -196,6 +215,21 @@ class Invoice(models.Model):
             models.UniqueConstraint(
                 fields=["company", "number"],
                 name="uniq_invoice_company_number",
+            ),
+            # Sprint 134 — at most one LIVE reversal per original. Partial
+            # (Postgres) so it constrains only actual reversal rows: `reverses`
+            # is NULL for every non-reversal invoice, and Postgres treats NULL
+            # as distinct in a unique index the same way `uniq_invoice_company_
+            # number` above already relies on for NULL `number`s, so those
+            # rows never collide with each other under this constraint either.
+            # `deleted_at__isnull=True` mirrors the service-layer guard in
+            # `reverse_invoice` (state_machine.py) so a soft-deleted reversal
+            # — not producible today, but not impossible via a future admin
+            # correction — does not permanently block a legitimate re-reversal.
+            models.UniqueConstraint(
+                fields=["reverses"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="uniq_live_reversal_per_original",
             ),
         ]
         indexes = [

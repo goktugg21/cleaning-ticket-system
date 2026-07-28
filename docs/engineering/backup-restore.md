@@ -6,6 +6,12 @@
 > [docs/archive/2026-05-pilot/BACKUP_RESTORE.md](../archive/2026-05-pilot/BACKUP_RESTORE.md), which already
 > documents the script invocations.
 >
+> **This runbook is LOCAL, unencrypted dumps under `backups/`** — good for
+> a quick pre-migration snapshot, not sufficient on its own ("the pilot's
+> first incident must NOT be 'the host died and so did the only copy of
+> the backups'" — §2 below). For the actual OFF-SITE, ENCRYPTED copy, see
+> [docs/operations/backups.md](../operations/backups.md) (Sprint 134).
+>
 > Wraps three pre-existing scripts (do NOT replace them):
 >
 > - [scripts/backup_postgres.sh](../../scripts/archive/backup_postgres.sh)

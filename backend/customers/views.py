@@ -11,6 +11,7 @@ from accounts.permissions import (
 )
 from accounts.scoping import scope_customers_for
 from companies.models import Company, CompanyUserMembership
+from config.pagination import UnboundedPagination
 
 from .filters import CustomerFilter
 from .models import Customer
@@ -22,6 +23,10 @@ class CustomerViewSet(viewsets.ModelViewSet):
     filterset_class = CustomerFilter
     search_fields = ["name", "contact_email", "phone"]
     ordering_fields = ["name", "created_at"]
+    # Sprint 134 — see the identical comment on CompanyViewSet (companies/
+    # views.py): the admin picker call sites request page_size=200, which
+    # the DRF default silently clamps to 200 for any tenant exceeding it.
+    pagination_class = UnboundedPagination
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

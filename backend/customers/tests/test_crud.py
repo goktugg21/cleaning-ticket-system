@@ -136,3 +136,31 @@ class CustomerCRUDTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.company_admin)
         response = self.client.get(self.detail_url(self.customer.id))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class CustomerPaginationTests(TenantFixtureMixin, APITestCase):
+    """Sprint 134 — see CompanyPaginationTests (companies/tests/test_crud.py)
+    for the full rationale; identical fix (`UnboundedPagination`), same test
+    shape, on CustomerViewSet."""
+
+    URL = "/api/customers/"
+
+    def test_more_than_200_customers_returned_in_one_page(self):
+        Customer.objects.bulk_create(
+            [
+                Customer(
+                    company=self.company,
+                    building=self.building,
+                    name=f"Bulk Customer {i}",
+                    contact_email=f"bulk-customer-{i}@example.com",
+                )
+                for i in range(210)
+            ]
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"page_size": 200})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # 210 bulk + the 2 fixture customers (self.customer, self.other_customer).
+        self.assertEqual(response.data["count"], 212)
+        self.assertEqual(len(response.data["results"]), 212)
+        self.assertIsNone(response.data["next"])

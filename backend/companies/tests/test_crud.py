@@ -143,3 +143,25 @@ class CompanyCRUDTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.company_admin)
         response = self.client.get(self.detail_url(self.company.id))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class CompanyPaginationTests(TenantFixtureMixin, APITestCase):
+    """Sprint 134 — CompanyViewSet had no `pagination_class` override, so
+    the admin picker call sites' `page_size: 200` was silently clamped to
+    200 (the DRF default `StandardResultsSetPagination.max_page_size`) for
+    any tenant exceeding it. `UnboundedPagination` fixes this the same way
+    Sprint 120 fixed it for other tenant-bounded lists."""
+
+    URL = "/api/companies/"
+
+    def test_more_than_200_companies_returned_in_one_page(self):
+        Company.objects.bulk_create(
+            [Company(name=f"Bulk {i}", slug=f"bulk-{i}") for i in range(210)]
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"page_size": 200})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # 210 bulk + the 2 fixture companies (self.company, self.other_company).
+        self.assertEqual(response.data["count"], 212)
+        self.assertEqual(len(response.data["results"]), 212)
+        self.assertIsNone(response.data["next"])

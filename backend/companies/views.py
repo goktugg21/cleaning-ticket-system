@@ -9,6 +9,7 @@ from accounts.permissions import (
     IsSuperAdminOrCompanyAdminForCompany,
 )
 from accounts.scoping import scope_companies_for
+from config.pagination import UnboundedPagination
 
 from .filters import CompanyFilter
 from .models import Company
@@ -30,6 +31,14 @@ class CompanyViewSet(viewsets.ModelViewSet):
     filterset_class = CompanyFilter
     search_fields = ["name", "slug"]
     ordering_fields = ["name", "created_at"]
+    # Sprint 134 — the admin company/customer/building pickers pass
+    # `page_size: 200`, silently clamped to 200 by the DRF default
+    # (`config.pagination.StandardResultsSetPagination`), for any tenant
+    # exceeding it. Same fix shape Sprint 120 used for narrow, tenant-
+    # bounded lists (customer contacts, company/customer memberships,
+    # staff roster) — this list is bounded by domain reality (how many
+    # companies/customers/buildings actually exist) the same way those are.
+    pagination_class = UnboundedPagination
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):

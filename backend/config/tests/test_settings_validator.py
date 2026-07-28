@@ -50,6 +50,18 @@ class ProductionSettingsValidatorTests(SimpleTestCase):
     def test_wildcard_allowed_hosts_in_prod_raises(self):
         self.assert_has_error(production_settings(ALLOWED_HOSTS=["*"]), "DJANGO_ALLOWED_HOSTS")
 
+    def test_internal_service_name_alongside_public_domain_in_prod_passes(self):
+        # Sprint 134 — settings.py now always appends "backend" (the
+        # Compose internal DNS name) to ALLOWED_HOSTS. Confirms the
+        # validator's blocklist ({"*", ".localhost", "localhost",
+        # "127.0.0.1"}) does not also reject it — it isn't one of those.
+        self.assertEqual(
+            get_production_settings_errors(
+                production_settings(ALLOWED_HOSTS=["example.com", "backend"])
+            ),
+            [],
+        )
+
     def test_missing_cors_origins_in_prod_raises(self):
         self.assert_has_error(production_settings(CORS_ALLOWED_ORIGINS=[]), "CORS_ALLOWED_ORIGINS")
 

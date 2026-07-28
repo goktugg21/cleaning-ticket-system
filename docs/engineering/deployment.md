@@ -203,6 +203,40 @@ hostname, which is in `DJANGO_ALLOWED_HOSTS`, so it passes the
 gate. Configure NPM's "Health Checks" tab (if available) to
 target `https://<your-domain>/health/ready`.
 
+### Sprint 134 — the underlying gate is fixed; the compose healthcheck is unchanged
+
+`backend/config/settings.py` now **always** appends `"backend"` (the
+Docker Compose internal DNS name for this service, in both
+`docker-compose.yml` and `docker-compose.prod.yml` — the service name
+IS the Compose network alias other services already use to reach it,
+e.g. `frontend/nginx.conf` proxying to `http://backend:8000`) to
+`ALLOWED_HOSTS`, unconditionally and regardless of `DJANGO_DEBUG`. This
+is a deployment-topology constant, not a per-environment secret, so it
+does not live in `.env` — no operator action needed, and adding
+`backend` to `DJANGO_ALLOWED_HOSTS` yourself is redundant, not wrong.
+The security validator's blocklist (`{"*", ".localhost", "localhost",
+"127.0.0.1"}`, quoted above) does not include `"backend"`, so this does
+not loosen it.
+
+**What this changes:** an internal HTTP request that sends `Host:
+backend` (e.g. `curl -H "Host: backend" http://localhost:8000/health/live`
+run from inside the container, or a request from another container on
+the same Compose network addressed as `http://backend:8000/...`) now
+passes the `ALLOWED_HOSTS` gate. It did not before this fix.
+
+**What this does NOT change:** the `docker-compose.prod.yml` backend
+healthcheck itself is **still the TCP socket probe** above — that was a
+deliberate choice, left unchanged this sprint. The compose healthcheck
+**could** now be switched back to an HTTP probe (e.g.
+`curl -f -H "Host: backend" http://localhost:8000/health/live`, since
+`curl`'s Host header can be overridden without touching the OS-level
+DNS resolution the way a bare `urllib.request.urlopen` cannot as
+tersely), which would upgrade liveness from "gunicorn accepts TCP
+connections" to "gunicorn accepts TCP connections AND Django itself
+responds 200" — a strictly more meaningful liveness signal. That
+switch is a separate decision for a future sprint, not implied by this
+fix landing.
+
 ---
 
 ## 5. SMTP / Amazon SES bootstrap

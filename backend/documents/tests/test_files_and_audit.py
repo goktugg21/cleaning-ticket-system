@@ -75,8 +75,46 @@ class FileEndpointTests(DocumentsActorsMixin, TenantFixtureMixin, APITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.assertEqual(
-            {row["original_filename"] for row in r.data}, {"a.pdf"}
+            {row["original_filename"] for row in r.data["results"]}, {"a.pdf"}
         )
+
+    def test_list_files_paginates_past_one_page(self):
+        # Sprint 134 — this endpoint used to return every matching row
+        # unpaginated. 30 rows forces two pages at the standard page_size
+        # (25); bulk-created directly (no real upload I/O — this test is
+        # about pagination, not the upload path).
+        Document.objects.bulk_create(
+            [
+                Document(
+                    folder=self.overig,
+                    customer=self.customer,
+                    file=f"fake/bulk-{i}.pdf",
+                    original_filename=f"bulk-{i}.pdf",
+                    mime_type="application/pdf",
+                    file_size=1,
+                    origin=DocumentOrigin.PROVIDER,
+                )
+                for i in range(30)
+            ]
+        )
+        self.authenticate(self.customer_user)
+        r = self.client.get(
+            f"{files_url(self.customer.id)}?folder={self.overig.id}"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["count"], 30)
+        self.assertEqual(len(r.data["results"]), 25)
+        self.assertIsNotNone(r.data["next"])
+
+        r2 = self.client.get(r.data["next"])
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(r2.data["results"]), 5)
+        self.assertIsNone(r2.data["next"])
+
+        seen = {row["original_filename"] for row in r.data["results"]} | {
+            row["original_filename"] for row in r2.data["results"]
+        }
+        self.assertEqual(seen, {f"bulk-{i}.pdf" for i in range(30)})
 
     def test_list_files_cross_tenant_404(self):
         # A user of another customer 404s on the list endpoint too.

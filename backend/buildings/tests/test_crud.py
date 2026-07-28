@@ -132,3 +132,30 @@ class BuildingCRUDTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.company_admin)
         response = self.client.get(self.detail_url(self.building.id))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class BuildingPaginationTests(TenantFixtureMixin, APITestCase):
+    """Sprint 134 — see CompanyPaginationTests (companies/tests/test_crud.py)
+    for the full rationale; identical fix (`UnboundedPagination`), same test
+    shape, on BuildingViewSet."""
+
+    URL = "/api/buildings/"
+
+    def test_more_than_200_buildings_returned_in_one_page(self):
+        Building.objects.bulk_create(
+            [
+                Building(
+                    company=self.company,
+                    name=f"Bulk Building {i}",
+                    address=f"Bulk Street {i}",
+                )
+                for i in range(210)
+            ]
+        )
+        self.authenticate(self.super_admin)
+        response = self.client.get(self.URL, {"page_size": 200})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # 210 bulk + the 2 fixture buildings (self.building, self.other_building).
+        self.assertEqual(response.data["count"], 212)
+        self.assertEqual(len(response.data["results"]), 212)
+        self.assertIsNone(response.data["next"])

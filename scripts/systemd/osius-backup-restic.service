@@ -1,0 +1,33 @@
+# Sprint 134 — nightly off-site encrypted backup (Postgres + media, via
+# restic). See docs/operations/backups.md for installation.
+#
+# Install:
+#   cp scripts/systemd/osius-backup-restic.service /etc/systemd/system/
+#   cp scripts/systemd/osius-backup-restic.timer /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now osius-backup-restic.timer
+#
+# Adjust User= and WorkingDirectory= below to match where this repo is
+# checked out on the production host and which user owns the docker
+# socket there — the values here match the convention docs/engineering/
+# backup-restore.md already uses for the pg-backup timer example.
+
+[Unit]
+Description=Osius cleaning-ticket-system — nightly restic backup (Postgres + media)
+After=docker.service
+
+[Service]
+Type=oneshot
+User=cleaning-ops
+WorkingDirectory=/opt/cleaning-ticket-system
+ExecStart=/opt/cleaning-ticket-system/scripts/backup_restic.sh
+StandardOutput=append:/var/log/osius-backup-restic.log
+StandardError=append:/var/log/osius-backup-restic.log
+# No ExecStart override needed for failure to surface: backup_restic.sh
+# already exits non-zero on any failure (set -euo pipefail), and systemd
+# marks a oneshot unit `failed` on any non-zero exit by default — that
+# state is what `systemctl --failed` and `journalctl -u
+# osius-backup-restic.service -p err` surface. See docs/operations/
+# backups.md's weekly checklist for wiring this into actual monitoring
+# (e.g. an OnFailure= unit that pages someone) — not built here, since
+# the owner hasn't chosen an alerting channel yet.

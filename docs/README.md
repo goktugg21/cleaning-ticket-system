@@ -26,6 +26,7 @@ in the table below, it is archived and unmaintained** — see the
 | [engineering/env-setup.md](engineering/env-setup.md) | How to prepare the production `.env` (copy the template, generate the secret key, set domain/hosts). | Whenever the env contract or `.env.production.example` changes. |
 | [engineering/backup-restore.md](engineering/backup-restore.md) | Backup & restore runbook: daily backups, retention, and the restore drill that gates go-live. Wraps the pg/media backup scripts. | Whenever the backup/restore scripts or procedure change. |
 | [engineering/media-storage.md](engineering/media-storage.md) | Media storage strategy: the local Docker-volume rationale and the conditions under which it must change. | Whenever the media storage strategy changes. |
+| [operations/backups.md](operations/backups.md) | Off-site, encrypted (restic) backup of Postgres + the full media volume: Hetzner Storage Box provisioning, `scripts/backup_restic.sh` + its systemd timer, retention, and the restore drill. Complements, does not replace, `engineering/backup-restore.md`'s local-dump runbook. | Whenever the off-site backup script, timer, or restore procedure changes. |
 
 > `docs/transkript.txt` is a raw stakeholder transcript. It is intentionally
 > **not** a maintained doc, must never be staged or quoted, and is therefore

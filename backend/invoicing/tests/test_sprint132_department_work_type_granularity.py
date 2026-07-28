@@ -403,6 +403,39 @@ class IssueResyncsGroupLabelsTests(InvoicingFixture):
         self.assertIsNone(issued.department_id)
         self.assertIsNone(issued.work_type_id)
 
+    def test_untagged_label_granularity_invoice_resyncs_a_new_label(self):
+        # Sprint 134 — the gap the early-return used to miss: an UNTAGGED
+        # PER_BUILDING_DEPARTMENT_WORK_TYPE invoice has department_id and
+        # work_type_id both NULL at generation, exactly like a CUSTOMER/
+        # PER_BUILDING invoice's own "never claimed a label" NULLs — before
+        # this fix, the FK-only check treated them the same and this
+        # invoice never resynced. `granularity` disambiguates them: this
+        # one DID claim a grouping (the untagged bucket), so it must still
+        # pick up a label if its EW gets tagged during the draft window.
+        ew = self.make_ew(closed_at=dt(2026, 5, 31))  # no department/work_type
+        inv = generate_draft_invoices(
+            self.admin, self.company.id, self.customer.id, YEAR, MONTH,
+            granularity=GRANULARITY,
+        )[0]
+        self.assertIsNone(inv.department_id)
+        self.assertIsNone(inv.work_type_id)
+        self.assertEqual(inv.granularity, GRANULARITY)
+
+        # Still DRAFT -> still allowed. Tag the previously-untagged EW.
+        validate_labels_for_customer(
+            ew.customer, department=self.dept_a, work_type=self.wt_a
+        )
+        ew.department = self.dept_a
+        ew.work_type = self.wt_a
+        ew.save(update_fields=["department", "work_type", "updated_at"])
+
+        # BEFORE this fix, the invoice would still show NULL/NULL here —
+        # silently disagreeing with the by-department report, which groups
+        # this EW under dept_a/wt_a now that it's tagged.
+        issued = issue_invoice(self.admin, inv)
+        self.assertEqual(issued.department_id, self.dept_a.id)
+        self.assertEqual(issued.work_type_id, self.wt_a.id)
+
     def test_locked_after_issue_relabel_rejected(self):
         # Confirms the OTHER half of the sequence in the brief: once
         # ISSUED, the EW's labels are locked (pre-existing Sprint 127.2

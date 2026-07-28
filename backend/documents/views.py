@@ -25,6 +25,7 @@ from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
 from accounts.scoping import scope_customers_for
 from audit import context as audit_context
+from config.pagination import StandardResultsSetPagination
 from customers.models import Customer
 
 from .access import (
@@ -287,7 +288,17 @@ class DocumentListCreateView(_DocumentsBase):
                     status.HTTP_400_BAD_REQUEST,
                 )
             documents = documents.filter(folder_id=folder_id)
-        return Response(DocumentReadSerializer(documents, many=True).data)
+        # Sprint 134 — this is a plain APIView (not a generic ListAPIView),
+        # so DEFAULT_PAGINATION_CLASS is never applied automatically; the
+        # paginator has to be driven by hand. Same class + same {count,
+        # next, previous, results} envelope the EW/invoice lists already
+        # use (config.pagination.StandardResultsSetPagination) — no second
+        # pagination convention. `Document.Meta.ordering` (-created_at, id)
+        # gives a stable, deterministic page order.
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(documents, request, view=self)
+        serializer = DocumentReadSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, customer_id):
         customer, side = self.resolve_write(request, customer_id)

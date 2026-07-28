@@ -31,6 +31,18 @@ ALLOWED_HOSTS = env_list(
     "DJANGO_ALLOWED_HOSTS",
     "localhost,127.0.0.1",
 )
+# Sprint 134 — "backend" is the Docker Compose internal DNS name for this
+# service in BOTH docker-compose.yml and docker-compose.prod.yml (the
+# service name IS the Compose network alias; other services already reach
+# it this way, e.g. frontend/nginx.conf proxies to http://backend:8000).
+# That is a deployment-TOPOLOGY constant, not a per-environment secret, so
+# it is admitted here rather than left for every operator's .env to
+# remember to add. Closes the DisallowedHost gap for an internal HTTP
+# request addressed by that name (health.py's docstring option (c)) without
+# loosening config/security.py's production validator, which still rejects
+# "*"/".localhost"/"localhost"/"127.0.0.1" — "backend" is none of those.
+if "backend" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("backend")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
