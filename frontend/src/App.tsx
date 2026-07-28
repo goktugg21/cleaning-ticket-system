@@ -66,6 +66,7 @@ import { CustomerExtraWorkPage } from "./pages/admin/customer/CustomerExtraWorkP
 import { CustomerInvoicesPage } from "./pages/admin/customer/CustomerInvoicesPage";
 import { CustomerReportsPage } from "./pages/admin/customer/CustomerReportsPage";
 import { CustomerDocumentsPage } from "./pages/admin/customer/CustomerDocumentsPage";
+import { CustomerLabelsPage } from "./pages/admin/customer/CustomerLabelsPage";
 import { CustomerTicketsPage } from "./pages/admin/customer/CustomerTicketsPage";
 import { CustomerOverviewPage } from "./pages/admin/customer/CustomerOverviewPage";
 import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissionsPage";
@@ -573,6 +574,18 @@ export default function App() {
               <AdminRoute>
                 <CustomerDocumentsPage />
               </AdminRoute>
+            }
+          />
+          {/* Sprint 128 — per-customer Extra Work label management. SA/CA
+              write, BUILDING_MANAGER read (they hold the relabel action) —
+              CustomerReadRoute admits the trio; the page gates its write
+              controls on isProviderAdmin so a BM sees it read-only. */}
+          <Route
+            path="/admin/customers/:id/labels"
+            element={
+              <CustomerReadRoute>
+                <CustomerLabelsPage />
+              </CustomerReadRoute>
             }
           />
           {/* IA 2026-06-25 — the Meldingen and Quote-requests tabs merged

@@ -20,6 +20,8 @@ from customers.models import (
     CustomerBuildingMembership,
     CustomerUserBuildingAccess,
     CustomerUserMembership,
+    Department,
+    WorkType,
 )
 from customers.permissions import access_has_permission, user_can
 
@@ -51,6 +53,10 @@ from .models import (
     ProposalTimelineEvent,
     ProposalTimelineEventType,
     Service,
+)
+from .label_validation import (
+    issued_invoice_locking_labels,
+    validate_labels_for_customer,
 )
 from .pricing import resolve_price
 from .proposal_state_machine import allowed_next_proposal_statuses
@@ -517,6 +523,16 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # Sprint 127 — per-customer labels. `allow_null` so an untagged row
+    # (null FK) renders the key as null rather than dropping it (this DRF
+    # version raises on the `department.name` traversal otherwise). Visible
+    # to every viewer, customers included — the label is not sensitive.
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, allow_null=True
+    )
+    work_type_name = serializers.CharField(
+        source="work_type.name", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = ExtraWorkRequest
@@ -528,6 +544,10 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "department",
+            "department_name",
+            "work_type",
+            "work_type_name",
             "title",
             "category",
             "urgency",
@@ -596,6 +616,15 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # Sprint 127 — per-customer labels. `allow_null` so an untagged row
+    # (null FK) renders the key as null rather than dropping it. Visible to
+    # every viewer, customers included — the label is not sensitive.
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, allow_null=True
+    )
+    work_type_name = serializers.CharField(
+        source="work_type.name", read_only=True, allow_null=True
+    )
     pricing_line_items = serializers.SerializerMethodField()
     line_items = ExtraWorkRequestItemSerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -608,6 +637,13 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # STAFF role; the resolver-side helpers return False for STAFF
     # anyway, but we document the precondition explicitly.
     actions = serializers.SerializerMethodField()
+    # Sprint 128 §0 — whether department / work_type are locked by an issued
+    # invoice, so the relabel UI renders read-only-with-reason instead of an
+    # editable control that would 400 on save. DETAIL ONLY (single-object
+    # fetch = one query); the list serializer deliberately omits it to avoid
+    # an N+1 across every row (Sprint 120's whole reason for existing).
+    labels_locked = serializers.SerializerMethodField()
+    labels_locked_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -619,6 +655,10 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "department",
+            "department_name",
+            "work_type",
+            "work_type_name",
             "title",
             "description",
             "category",
@@ -669,6 +709,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "pricing_line_items",
             "allowed_next_statuses",
             "actions",
+            "labels_locked",
+            "labels_locked_invoice",
         ]
         read_only_fields = [
             "id",
@@ -678,6 +720,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            # Sprint 127 — labels are display-only on the detail serializer
+            # (the EW ViewSet has no update action; assignment is create-time
+            # via ExtraWorkRequestCreateSerializer).
+            "department",
+            "work_type",
             "status",
             "routing_decision",
             "request_intent",
@@ -741,6 +788,27 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
 
     def get_allowed_next_statuses(self, obj):
         return self._resolve_allowed_next_statuses(obj)
+
+    def _locking_invoice(self, obj):
+        # Sprint 128 §0 — resolve once per (serializer instance, EW) so the
+        # two label-lock fields share ONE query. `issued_invoice_locking_
+        # labels` is the SAME predicate the relabel endpoint enforces (reused,
+        # never re-derived).
+        cache = self.__dict__.setdefault("_locking_invoice_cache", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = issued_invoice_locking_labels(obj)
+        return cache[obj.pk]
+
+    def get_labels_locked(self, obj):
+        return self._locking_invoice(obj) is not None
+
+    def get_labels_locked_invoice(self, obj):
+        invoice = self._locking_invoice(obj)
+        if invoice is None:
+            return None
+        # An ISSUED-but-unsent invoice has no number yet (assigned at SEND);
+        # mirror the string the relabel 400 uses so the UI can show the same.
+        return invoice.number or "CONCEPT (issued, unsent)"
 
     def get_actions(self, obj):
         """Per-current-user, per-EW capability block.
@@ -969,6 +1037,23 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
         queryset=Customer.objects.filter(is_active=True)
     )
+    # Sprint 127 — optional per-customer labels. Nullable + optional so
+    # every existing client keeps working; `validate()` enforces the one
+    # rule (the label must belong to THIS request's customer). Queryset is
+    # unscoped here because the customer is not known until validate(); the
+    # same-customer check there is the real gate.
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    work_type = serializers.PrimaryKeyRelatedField(
+        queryset=WorkType.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
     line_items = ExtraWorkRequestItemSerializer(many=True)
     # Sprint 2A — explicit customer-facing intent. OPTIONAL on the
     # wire so existing Batch 6/7/8 clients keep working unchanged;
@@ -993,6 +1078,10 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "description",
             "category",
             "category_other_text",
+            # Sprint 127 — optional per-customer labels (same-customer
+            # enforced in validate()).
+            "department",
+            "work_type",
             "urgency",
             "preferred_date",
             "request_intent",
@@ -1051,6 +1140,17 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Customer is not linked to the selected building."
             )
+
+        # Sprint 127 — THE one rule of the label feature: a Department /
+        # Work Type assigned to this Extra Work MUST belong to this
+        # request's own customer. Sprint 127.1 extracted the check into
+        # `validate_labels_for_customer` so this create path and the relabel
+        # endpoint share ONE copy of the invariant (they must not drift).
+        validate_labels_for_customer(
+            customer,
+            department=attrs.get("department"),
+            work_type=attrs.get("work_type"),
+        )
 
         # Sprint 3B — every catalog-linked line's service must be
         # owned by the same provider company as the customer.
@@ -1525,6 +1625,30 @@ class ExtraWorkTransitionSerializer(serializers.Serializer):
     # without a new persistence column.
     customer_reject_reason = serializers.CharField(
         required=False, allow_blank=True, default=""
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 127.1 — relabel payload (provider classification after create)
+# ---------------------------------------------------------------------------
+class ExtraWorkLabelsSerializer(serializers.Serializer):
+    """The NARROW relabel surface for `PATCH /api/extra-work/<id>/labels/`:
+    `department` + `work_type` ONLY. Deliberately a standalone Serializer,
+    not a general EW update serializer — the EW ViewSet has no update mixin
+    by design, and a full serializer would expose every model field.
+
+    Both fields are optional so a client may set either, both, or send an
+    explicit `null` to clear one. The view distinguishes "absent" (leave as
+    is) from "sent as null" (clear) via key presence in `validated_data`;
+    the same-customer invariant is applied in the view against the resolved
+    EW's customer (see `label_validation.validate_labels_for_customer`).
+    """
+
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=False, allow_null=True
+    )
+    work_type = serializers.PrimaryKeyRelatedField(
+        queryset=WorkType.objects.all(), required=False, allow_null=True
     )
 
 

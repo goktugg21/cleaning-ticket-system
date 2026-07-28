@@ -41,6 +41,7 @@ import axios from "axios";
 
 import { listCustomerContacts } from "../api/admin";
 import { getApiError } from "../api/client";
+import { labelErrorCode, listLabels } from "../api/customerLabels";
 import { markThreadRead, notifyInboxUnreadChanged } from "../api/inbox";
 import {
   createEwMessage,
@@ -53,6 +54,7 @@ import {
   listEwMessages,
   listProposalsForEw,
   listSpawnedTickets,
+  relabelExtraWork,
   retrySpawnTicketsForExtraWork,
   submitActualHours,
   transitionExtraWork,
@@ -62,6 +64,7 @@ import { useAuth } from "../auth/AuthContext";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
   Contact,
+  CustomerLabel,
   EwMessage,
   EwMessageRecipient,
   EwMessageType,
@@ -428,6 +431,204 @@ const EW_TIER_TONE_CLASS: Record<EwMessageType, string> = {
   INTERNAL_NOTE: "internal",
   CUSTOMER_INTERNAL: "internal",
 };
+
+// Sprint 128 — coded relabel errors → localized keys (fallback getApiError).
+const LABELS_ERROR_I18N_KEY: Record<string, string> = {
+  labels_locked_by_invoice: "detail.labels_error_locked",
+  department_customer_mismatch: "detail.labels_error_mismatch",
+  work_type_customer_mismatch: "detail.labels_error_mismatch",
+  relabel_forbidden: "detail.labels_error_forbidden",
+};
+
+// Provider relabel card. When the EW is on an ISSUED invoice
+// (`ew.labels_locked`) the labels are read-only text + a reason naming the
+// invoice; otherwise two dropdowns + Save calling PATCH .../labels/. Options
+// always include the CURRENT value so an archived label still shows.
+function LabelsCard({
+  ew,
+  onUpdated,
+  onRefresh,
+}: {
+  ew: ExtraWorkRequestDetail;
+  onUpdated: (detail: ExtraWorkRequestDetail) => void;
+  onRefresh: () => void;
+}) {
+  const { t } = useTranslation(["extra_work", "common"]);
+  const [departments, setDepartments] = useState<CustomerLabel[]>([]);
+  const [workTypes, setWorkTypes] = useState<CustomerLabel[]>([]);
+  const [deptId, setDeptId] = useState(
+    ew.department ? String(ew.department) : "",
+  );
+  const [wtId, setWtId] = useState(ew.work_type ? String(ew.work_type) : "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    // No picker data needed while locked (read-only view).
+    if (ew.labels_locked) return;
+    let cancelled = false;
+    Promise.all([
+      listLabels(ew.customer, "department", { is_active: true }),
+      listLabels(ew.customer, "work_type", { is_active: true }),
+    ])
+      .then(([deps, wts]) => {
+        if (!cancelled) {
+          setDepartments(deps);
+          setWorkTypes(wts);
+        }
+      })
+      .catch(() => {
+        // A read failure just leaves the dropdowns with the current value.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ew.customer, ew.labels_locked]);
+
+  // Ensure the CURRENT selection is offered even if it has since been
+  // archived (archived rows are absent from the is_active=true fetch).
+  function withCurrent(
+    rows: CustomerLabel[],
+    currentId: number | null,
+    currentName: string | null,
+  ): CustomerLabel[] {
+    if (currentId == null || rows.some((r) => r.id === currentId)) return rows;
+    return [
+      {
+        id: currentId,
+        name: currentName ?? String(currentId),
+        description: "",
+        is_active: false,
+        created_at: "",
+      },
+      ...rows,
+    ];
+  }
+  const deptOptions = withCurrent(departments, ew.department, ew.department_name);
+  const wtOptions = withCurrent(workTypes, ew.work_type, ew.work_type_name);
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await relabelExtraWork(ew.id, {
+        department: deptId ? Number(deptId) : null,
+        work_type: wtId ? Number(wtId) : null,
+      });
+      onUpdated(updated);
+    } catch (err) {
+      const code = labelErrorCode(err);
+      setError(
+        code && code in LABELS_ERROR_I18N_KEY
+          ? t(LABELS_ERROR_I18N_KEY[code])
+          : getApiError(err),
+      );
+      // Raced with an issuance in another tab — reload so the card flips to
+      // the read-only locked view (§4).
+      if (code === "labels_locked_by_invoice") onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="card"
+      style={{ marginBottom: 16 }}
+      data-testid="extra-work-labels"
+    >
+      <div className="form-section">
+        <div className="form-section-title">{t("detail.labels_section_title")}</div>
+        {ew.labels_locked ? (
+          <div
+            className="alert-warning"
+            data-testid="extra-work-labels-locked"
+            style={{ marginTop: 4 }}
+          >
+            <div>
+              {t("detail.labels_field_department")}:{" "}
+              <strong>{ew.department_name ?? t("detail.empty_dash")}</strong>
+              {"  ·  "}
+              {t("detail.labels_field_work_type")}:{" "}
+              <strong>{ew.work_type_name ?? t("detail.empty_dash")}</strong>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              {t("detail.labels_locked_by", {
+                invoice: ew.labels_locked_invoice ?? "",
+              })}
+            </div>
+            <div className="muted small" style={{ marginTop: 4 }}>
+              {t("detail.labels_locked_howto")}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "flex-end",
+                gap: 8,
+                marginTop: 4,
+              }}
+            >
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="muted small">
+                  {t("detail.labels_field_department")}
+                </span>
+                <select
+                  className="field-select"
+                  value={deptId}
+                  onChange={(e) => setDeptId(e.target.value)}
+                  data-testid="extra-work-labels-department"
+                >
+                  <option value="">{t("detail.labels_none")}</option>
+                  {deptOptions.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span className="muted small">
+                  {t("detail.labels_field_work_type")}
+                </span>
+                <select
+                  className="field-select"
+                  value={wtId}
+                  onChange={(e) => setWtId(e.target.value)}
+                  data-testid="extra-work-labels-work-type"
+                >
+                  <option value="">{t("detail.labels_none")}</option>
+                  {wtOptions.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={saving}
+                onClick={() => void save()}
+                data-testid="extra-work-labels-save"
+              >
+                {saving ? t("detail.labels_saving") : t("detail.labels_save")}
+              </button>
+            </div>
+            {error && (
+              <div className="alert-error" style={{ marginTop: 8 }}>
+                {error}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 
 export function ExtraWorkDetailPage() {
@@ -2202,6 +2403,21 @@ export function ExtraWorkDetailPage() {
                   void reloadApprovedProposalDetail();
                 }
               }}
+            />
+          )}
+
+          {/* Sprint 128 — provider relabel (Afdeling / Werktype). Keyed on
+              the label + lock state so the card re-seeds its prop-derived
+              selection after any external EW refresh, per CLAUDE.md §3
+              (no set-state-in-effect resync). */}
+          {isProvider && (
+            <LabelsCard
+              key={`labels-${ew.id}-${ew.department ?? ""}-${
+                ew.work_type ?? ""
+              }-${String(ew.labels_locked)}`}
+              ew={ew}
+              onUpdated={(detail) => setEw(detail)}
+              onRefresh={() => void refresh()}
             />
           )}
 

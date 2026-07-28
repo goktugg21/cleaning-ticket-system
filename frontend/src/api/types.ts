@@ -1144,6 +1144,12 @@ export interface ExtraWorkRequestList {
   building_name: string;
   customer: number;
   customer_name: string;
+  // Sprint 127 — per-customer Extra Work labels. `*_name` is null for an
+  // untagged row. Visible to every viewer (a label is not sensitive).
+  department: number | null;
+  department_name: string | null;
+  work_type: number | null;
+  work_type_name: string | null;
   title: string;
   category: ExtraWorkCategory;
   urgency: ExtraWorkUrgency;
@@ -1348,6 +1354,12 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   // `ExtraWorkRequestDetailSerializer.get_actions`. Optional so older
   // list responses don't break typing; treat absent as all-false.
   actions?: ExtraWorkActions;
+  // Sprint 128 §0 — whether the labels are frozen by a live ISSUED invoice
+  // (so the relabel UI renders read-only-with-reason). `labels_locked_invoice`
+  // is the invoice number, or "CONCEPT (issued, unsent)", or null. Detail
+  // only — the list serializer omits it to avoid an N+1.
+  labels_locked?: boolean;
+  labels_locked_invoice?: string | null;
 }
 
 // Mirrors backend `extra_work/serializers.py::ExtraWorkRequestDetailSerializer.get_actions`.
@@ -1418,6 +1430,10 @@ export interface ExtraWorkRequestCartCreatePayload {
   customer: number;
   category: string;
   category_other_text?: string;
+  // Sprint 128 — optional per-customer labels the customer may set at
+  // create (both optional; the backend enforces they belong to `customer`).
+  department?: number | null;
+  work_type?: number | null;
   urgency: string;
   preferred_date?: string | null;
   // Sprint 5 (frontend) — the create page now sends the customer's
@@ -1441,6 +1457,22 @@ export interface ExtraWorkRequestCartCreatePayload {
     customer_note?: string;
   }>;
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 127/128 — per-customer Extra Work label lists. Department and
+// WorkType are identical in shape (one backend abstract base); mounted at
+// /api/customers/<id>/departments/ and /work-types/. Pure labels — no
+// state machine, no permissions of their own.
+// ---------------------------------------------------------------------------
+export interface CustomerLabel {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+}
+export type Department = CustomerLabel;
+export type WorkType = CustomerLabel;
 
 // ---------------------------------------------------------------------------
 // Sprint 5 (frontend) — Extra Work create INTENT layer + non-mutating

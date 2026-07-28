@@ -18,8 +18,13 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { listCustomerBuildings, listCustomers } from "../api/admin";
+import { listLabels } from "../api/customerLabels";
 import { listAllExtraWork } from "../api/extraWork";
 import type {
+  CustomerAdmin,
+  CustomerBuildingMembership,
+  CustomerLabel,
   ExtraWorkCategory,
   ExtraWorkRequestIntent,
   ExtraWorkRequestList,
@@ -149,6 +154,26 @@ export function ExtraWorkListPage() {
     "ALL" | "completed" | "invoiced"
   >("ALL");
 
+  // Sprint 128 — provider label-cascade filters (Customer -> Building ->
+  // Department -> Work Type), all four server-side (they compose in the
+  // backend ExtraWorkRequestFilter). Building / Department / Work Type are
+  // per-customer, so they are disabled until a customer is chosen and cleared
+  // when it changes. Provider-only: a CUSTOMER_USER is already scoped to one
+  // customer, so a customer picker is meaningless for them.
+  const [customerFilter, setCustomerFilter] = useState("");
+  const [buildingFilter, setBuildingFilter] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [workTypeFilter, setWorkTypeFilter] = useState("");
+  const [customers, setCustomers] = useState<CustomerAdmin[]>([]);
+  // The chosen customer's buildings + label lists, tagged with the customer
+  // id so a stale set from the previously chosen customer is never offered.
+  const [customerScoped, setCustomerScoped] = useState<{
+    customerId: number;
+    buildings: CustomerBuildingMembership[];
+    departments: CustomerLabel[];
+    workTypes: CustomerLabel[];
+  } | null>(null);
+
   // #108 Part F — the mark/clear-invoiced run moved to the Facturen
   // page (owner decision); this list keeps the billing-month +
   // invoice-status FILTERS and a pointer link to /invoices.
@@ -167,6 +192,12 @@ export function ExtraWorkListPage() {
             (searchParams.get("request_intent") as
               | ExtraWorkRequestIntent
               | null) ?? undefined,
+          // Sprint 128 — the label cascade (all server-side). A foreign /
+          // stale child filter simply narrows to zero rows (scope-safe).
+          customer: customerFilter ? Number(customerFilter) : undefined,
+          building: buildingFilter ? Number(buildingFilter) : undefined,
+          department: departmentFilter ? Number(departmentFilter) : undefined,
+          work_type: workTypeFilter ? Number(workTypeFilter) : undefined,
         });
         if (!cancelled) setRows(allRows);
       } catch (err) {
@@ -179,7 +210,73 @@ export function ExtraWorkListPage() {
     return () => {
       cancelled = true;
     };
-  }, [billingMonth, invoiceStatus, searchParams, me?.id]);
+  }, [
+    billingMonth,
+    invoiceStatus,
+    searchParams,
+    me?.id,
+    customerFilter,
+    buildingFilter,
+    departmentFilter,
+    workTypeFilter,
+  ]);
+
+  // Sprint 128 — load the customer list once (provider only; a CUSTOMER_USER
+  // has no customer picker).
+  useEffect(() => {
+    if (!isProvider) return;
+    let cancelled = false;
+    listCustomers({ page_size: 200 })
+      .then((res) => {
+        if (!cancelled) setCustomers(res.results);
+      })
+      .catch(() => {
+        // A load failure just leaves the customer picker empty.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isProvider]);
+
+  // Sprint 128 — LOAD-ONLY effect (no synchronous setState — CLAUDE.md §3):
+  // when the customer filter changes, load the chosen customer's buildings +
+  // active label lists. The three dependent filters are CLEARED in the
+  // customer <select> onChange (an event handler, not here), so a stale child
+  // id never reaches the fetch; `customerScoped` is guarded by customer id
+  // below so a stale option set is never shown either.
+  useEffect(() => {
+    const customerId = customerFilter ? Number(customerFilter) : null;
+    if (!customerId) return;
+    let cancelled = false;
+    Promise.all([
+      listCustomerBuildings(customerId),
+      listLabels(customerId, "department", { is_active: true }),
+      listLabels(customerId, "work_type", { is_active: true }),
+    ])
+      .then(([buildingsRes, departments, workTypes]) => {
+        if (!cancelled) {
+          setCustomerScoped({
+            customerId,
+            buildings: buildingsRes.results,
+            departments,
+            workTypes,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCustomerScoped({
+            customerId,
+            buildings: [],
+            departments: [],
+            workTypes: [],
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerFilter]);
 
   // KPI strip — computed from the full loaded set (not the filtered
   // view) so the operator always sees the same headline numbers
@@ -278,6 +375,23 @@ export function ExtraWorkListPage() {
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  // Sprint 128 — the child options to OFFER right now, guarded inline so a set
+  // fetched for a previously chosen customer is never shown against the
+  // current one (and TS narrows `customerScoped`).
+  const scopedBuildings =
+    customerScoped && String(customerScoped.customerId) === customerFilter
+      ? customerScoped.buildings
+      : [];
+  const scopedDepartments =
+    customerScoped && String(customerScoped.customerId) === customerFilter
+      ? customerScoped.departments
+      : [];
+  const scopedWorkTypes =
+    customerScoped && String(customerScoped.customerId) === customerFilter
+      ? customerScoped.workTypes
+      : [];
+  const customerChosen = customerFilter !== "";
 
   return (
     <div data-testid="extra-work-list-page">
@@ -395,6 +509,95 @@ export function ExtraWorkListPage() {
         </div>
         {isProvider && (
           <>
+            {/* Sprint 128 — the label cascade: Customer -> Building ->
+                Department -> Work Type. The last three are per-customer, so
+                they are disabled (with a hint) until a customer is chosen and
+                clear when it changes. */}
+            <div className="filter-field">
+              <span className="filter-label">{t("list.filter_customer")}</span>
+              <select
+                className="filter-control"
+                value={customerFilter}
+                onChange={(event) => {
+                  // Clear the dependent (per-customer) filters here in the
+                  // event handler — never in the load effect (CLAUDE.md §3).
+                  setCustomerFilter(event.target.value);
+                  setBuildingFilter("");
+                  setDepartmentFilter("");
+                  setWorkTypeFilter("");
+                }}
+                data-testid="extra-work-list-filter-customer"
+              >
+                <option value="">{t("list.filter_all_customers")}</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">{t("list.filter_building")}</span>
+              <select
+                className="filter-control"
+                value={buildingFilter}
+                onChange={(event) => setBuildingFilter(event.target.value)}
+                disabled={!customerChosen}
+                data-testid="extra-work-list-filter-building"
+              >
+                <option value="">{t("list.filter_all_buildings")}</option>
+                {scopedBuildings.map((b) => (
+                  <option key={b.building_id} value={b.building_id}>
+                    {b.building_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("list.filter_department")}
+              </span>
+              <select
+                className="filter-control"
+                value={departmentFilter}
+                onChange={(event) => setDepartmentFilter(event.target.value)}
+                disabled={!customerChosen}
+                data-testid="extra-work-list-filter-department"
+              >
+                <option value="">{t("list.filter_all_departments")}</option>
+                {scopedDepartments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-field">
+              <span className="filter-label">
+                {t("list.filter_work_type")}
+              </span>
+              <select
+                className="filter-control"
+                value={workTypeFilter}
+                onChange={(event) => setWorkTypeFilter(event.target.value)}
+                disabled={!customerChosen}
+                data-testid="extra-work-list-filter-work-type"
+              >
+                <option value="">{t("list.filter_all_work_types")}</option>
+                {scopedWorkTypes.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {!customerChosen && (
+              <div className="filter-field">
+                <span className="muted small">
+                  {t("list.filter_pick_customer_hint")}
+                </span>
+              </div>
+            )}
             <div className="filter-field">
               <span className="filter-label">
                 {t("list.filter_billing_month")}

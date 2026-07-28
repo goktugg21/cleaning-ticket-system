@@ -18,6 +18,12 @@ from documents.views import (
 )
 
 from .views import CustomerViewSet
+from .views_labels import (
+    DepartmentDetailView,
+    DepartmentListCreateView,
+    WorkTypeDetailView,
+    WorkTypeListCreateView,
+)
 from .views_media import CustomerContractPdfView, CustomerLogoView
 from .views_contacts import (
     CustomerContactDetailView,
@@ -89,6 +95,32 @@ urlpatterns = [
         "<int:customer_id>/documents/files/<uuid:public_id>/",
         DocumentDetailView.as_view(),
         name="customer-document-detail",
+    ),
+    # Sprint 127 — per-customer Extra Work label lists (Department + Work
+    # Type). Provider (SA / CA-own-company) manage the rows; customer users
+    # with access read them to populate the Extra Work create dropdowns.
+    # View classes live in views_labels.py (the model app owns the views);
+    # the URL anchor is customer-scoped here, mirroring the documents /
+    # pricing routes.
+    path(
+        "<int:customer_id>/departments/",
+        DepartmentListCreateView.as_view(),
+        name="customer-departments",
+    ),
+    path(
+        "<int:customer_id>/departments/<int:label_id>/",
+        DepartmentDetailView.as_view(),
+        name="customer-department-detail",
+    ),
+    path(
+        "<int:customer_id>/work-types/",
+        WorkTypeListCreateView.as_view(),
+        name="customer-work-types",
+    ),
+    path(
+        "<int:customer_id>/work-types/<int:label_id>/",
+        WorkTypeDetailView.as_view(),
+        name="customer-work-type-detail",
     ),
     path(
         "<int:customer_id>/users/",
