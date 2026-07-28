@@ -17,6 +17,7 @@ import {
 } from "./effectiveResolver";
 import {
   PERMISSION_GROUP_LABEL_KEY,
+  PERMISSION_GROUPS,
   PERMISSION_KEY_ROWS,
   type PermissionGroup,
   type PermissionKeyRow,
@@ -237,7 +238,7 @@ export function PermissionEditorModal({
             data-testid="customer-overrides-table"
           >
             <tbody>
-              {(["tickets", "extra_work", "users"] as const).map((group) => (
+              {PERMISSION_GROUPS.map((group) => (
                 <ModalGroup
                   key={group}
                   groupLabel={t(PERMISSION_GROUP_LABEL_KEY[group])}

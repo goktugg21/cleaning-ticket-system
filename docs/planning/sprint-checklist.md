@@ -56,7 +56,9 @@ docs-only pass — so this file always reflects where we actually are.
 ## NOW
 
 **Branch:** `fix/sprint-129-session-expiry` — a FIX branch, not a feature
-sprint: one P1 plus three UI defects, one PR.
+sprint: one P1 (session-expiry) plus a cluster of UI defects surfaced in owner
+testing (labels Delete dialog, relabel toast, the "CONCEPT" string, the
+half-rendered permissions matrix, a policy-grid cosmetic), one PR.
 **Last shipped PR on `main`: #123** — Sprints 127 / 127.1 / 127.2 / 128,
 Department + Work Type end to end (see `## SHIPPED`; its line was appended by
 THIS branch's first commit, per the "a PR cannot cite its own number" rule).
@@ -92,6 +94,27 @@ THIS branch's first commit, per the "a PR cannot cite its own number" rule).
   (number -> "Vergrendeld door factuur {{number}}"; null -> an issued-but-not-
   yet-sent phrase, no "concept"), nl+en lockstep. Sprint 127.2 tests updated
   (issued-unsent -> null; the 400 detail asserts no "concept").
+- **Permissions matrix half-rendered the `documents` group (Sprint 126
+  defect).** Three renderers iterated a hardcoded
+  `["tickets","extra_work","users"]` literal TypeScript could not check, so
+  the matrix showed a headerless 17th column and — worse, FUNCTIONAL — the
+  per-user override editor dropped `customer.documents.manage` entirely (it
+  could only be reached via the company-wide policy toggle, never per user).
+  Fixed the CLASS: `permissionKeyLabels.ts` now exports one ordered
+  `PERMISSION_GROUPS` constant DERIVED from `PERMISSION_KEY_ROWS`, and all
+  three renderers iterate it — a fifth group can no longer skip a renderer.
+  Grepped for other hardcoded group/key lists: the three group-list sites were
+  the ONLY broken ones (the key lists in `effectiveResolver.ts` /
+  `PolicyToggleGrid.tsx` already include documents). Also added the one i18n
+  key that was missing because its renderer never ran:
+  `customer_permissions.matrix.key_short.customer.documents.manage` (nl+en) —
+  key-header count is now 17 = `PERMISSION_KEY_ROWS.length`, and the group
+  colSpan total is 17 too (both derive from the same rows, so equal by
+  construction — see the self-review; no unit runner to assert it at runtime).
+- **Policy-toggle grid cosmetic.** The 5th toggle ("manage documents") sat
+  orphaned in a half-width column; a CSS `:last-child:nth-child(odd)` rule now
+  spans a lone last card full-width, leaving the even (4-card) and
+  single-column responsive cases untouched.
 FE gate green: tsc clean, ESLint **48** (baseline, no new violations), build
 OK. Backend 127.1 / 127.2 suites green (29 tests). **No automated test was
 added for the P1** — the frontend has no unit-test runner (CLAUDE.md §8;

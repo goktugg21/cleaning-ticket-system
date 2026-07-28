@@ -5734,6 +5734,13 @@ a.attn-row:hover {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
+/* Sprint 129 — a lone last card (odd count, e.g. the 5th "manage documents"
+   toggle) spans the full width instead of sitting orphaned in a half-width
+   column. Only matches when the last card is the odd one out, so the even
+   (4-card) case and the single-column responsive mode are untouched. */
+.policy-toggle-grid > .policy-toggle-card:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
 .policy-toggle-card {
   position: relative;
   display: grid;

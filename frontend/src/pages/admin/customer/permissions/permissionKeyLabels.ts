@@ -55,6 +55,23 @@ export const PERMISSION_GROUP_LABEL_KEY: Record<PermissionGroup, string> = {
   documents: "customer_permissions.permission_groups.documents",
 };
 
+/**
+ * The permission groups, ordered exactly as they first appear in
+ * `PERMISSION_KEY_ROWS`. DERIVED from the rows (not a hand-kept literal) so
+ * every group with keys is included and cannot drift from the body: any
+ * renderer that iterates groups MUST use this, so adding a group to the
+ * rows above flows to every header/body at once and can never silently skip
+ * one (the Sprint 126 `documents` bug — three renderers iterated a hardcoded
+ * `["tickets","extra_work","users"]` literal TypeScript could not check).
+ */
+export const PERMISSION_GROUPS: ReadonlyArray<PermissionGroup> =
+  PERMISSION_KEY_ROWS.reduce<PermissionGroup[]>((groups, row) => {
+    if (!groups.includes(row.group)) {
+      groups.push(row.group);
+    }
+    return groups;
+  }, []);
+
 export function permissionKeyLabelKey(key: CustomerPermissionKey): string {
   return `customer_permissions.permission_keys.${key}.label`;
 }
