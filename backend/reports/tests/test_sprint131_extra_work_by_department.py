@@ -498,6 +498,62 @@ class ExtraWorkByDepartmentCrossTenantTests(_DeptReportBase):
         self.assertEqual(seen_ids, {self.building.id})
         self.assertEqual(response.data["totals"]["total"], "100.00")
 
+    def test_department_filter_from_other_tenant_does_not_leak_name(self):
+        # A department belonging to a customer this company_admin cannot
+        # see at all. The row filter already returns nothing for it (no
+        # EW in this actor's scope can reference a foreign customer's
+        # department — the write-side invariant ties a label to its own
+        # customer); this test is about the SCOPE ECHO, which used to do
+        # an unscoped lookup and leak the label's real name regardless.
+        secret_dept = Department.objects.create(
+            customer=self.other_customer, name="Other Co Secret Department"
+        )
+        self._earned(self.building, self.customer, "10.00")
+        self.client.force_authenticate(user=self.company_admin)
+
+        response = self.client.get(URL_DEPT, {"department": secret_dept.id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["buildings"], [])
+        # The id is just an echo of the caller's own input — harmless.
+        self.assertEqual(response.data["scope"]["department_id"], secret_dept.id)
+        # The NAME must not leak.
+        self.assertIsNone(response.data["scope"]["department_name"])
+
+    def test_work_type_filter_from_other_tenant_does_not_leak_name(self):
+        secret_wt = WorkType.objects.create(
+            customer=self.other_customer, name="Other Co Secret Work Type"
+        )
+        self._earned(self.building, self.customer, "10.00")
+        self.client.force_authenticate(user=self.company_admin)
+
+        response = self.client.get(URL_DEPT, {"work_type": secret_wt.id})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["buildings"], [])
+        self.assertEqual(response.data["scope"]["work_type_id"], secret_wt.id)
+        self.assertIsNone(response.data["scope"]["work_type_name"])
+
+    def test_super_admin_still_sees_cross_company_label_names(self):
+        # Guards against overtightening: SUPER_ADMIN has genuine global
+        # scope, so the same cross-company department/work_type MUST
+        # resolve its real name for them, unlike the company_admin tests
+        # above.
+        dept = Department.objects.create(
+            customer=self.other_customer, name="Cross-Company Department"
+        )
+        wt = WorkType.objects.create(
+            customer=self.other_customer, name="Cross-Company Work Type"
+        )
+        self.client.force_authenticate(user=self.super_admin)
+
+        dept_response = self.client.get(URL_DEPT, {"department": dept.id})
+        self.assertEqual(
+            dept_response.data["scope"]["department_name"], "Cross-Company Department"
+        )
+        wt_response = self.client.get(URL_DEPT, {"work_type": wt.id})
+        self.assertEqual(
+            wt_response.data["scope"]["work_type_name"], "Cross-Company Work Type"
+        )
+
 
 class ExtraWorkByDepartmentExportTests(_DeptReportBase):
     EXPECTED_CSV_HEADERS = [

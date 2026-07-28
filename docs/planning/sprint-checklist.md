@@ -98,12 +98,11 @@ father's reference "Extra Works by Department" PDF: Building -> Department
   untagged bucket (`department_id: null`) instead of being dropped — every
   pre-Sprint-127 row is untagged today, and silently dropping them would
   make the report disagree with the flat revenue total. Proven, not
-  asserted: 23 new tests in
-  `reports/tests/test_sprint131_extra_work_by_department.py`, including a
+  asserted: 26 tests in
+  `reports/tests/test_sprint131_extra_work_by_department.py` (23 landed
+  first, 3 more closing the cross-tenant leak below), including a
   sum-to-flat-total invariant test with untagged rows deliberately mixed
-  in with tagged ones across all four revenue states; the full `reports`
-  app suite passes at 209 tests (was 208 before this module's 23rd test,
-  the pagination-fix regression test, was added).
+  in with tagged ones across all four revenue states.
 - **"Completed At"** = the spawned ticket's `closed_at`, localized — the
   SAME field `extra_work.billing.billing_month` already anchors on —
   populated ONLY for `state == "earned"`. **"Week No"** = the ISO-8601 week
@@ -138,6 +137,29 @@ father's reference "Extra Works by Department" PDF: Building -> Department
   row numbers present exactly once, `pypdf`-extracted) and a permanent
   regression test through the real endpoint with 50 rows
   (`ExtraWorkByDepartmentPDFPaginationTests`, 23rd test in the module).
+- **Cross-tenant name leak, found in review, fixed same branch (H-1/H-2).**
+  The `?department=` / `?work_type=` scope echo did an UNSCOPED lookup by
+  id — the row filter already correctly returned zero rows for a foreign
+  tenant's label, but the echoed `department_name` / `work_type_name`
+  resolved and returned that OTHER customer's real label name regardless
+  of the actor's own scope, verified live against real cross-company demo
+  data before the fix landed. Closed with `_scoped_label_name`, reusing
+  the SAME `_customer_in_scope` check `_resolve_customer` already uses —
+  not a new parallel invariant. **Chose null-name over 403** for an
+  out-of-scope id (not a hard denial): the row-level filter already
+  treats it as "matches nothing," so the echo agrees rather than
+  diverging into a response that would tell the caller the id exists (a
+  403 is an enumeration oracle a silent `null` is not); the `customer`
+  param keeps its existing 403 because it is scope-WIDENING (it selects
+  what the whole report covers), a different kind of parameter than a
+  narrowing filter within an already-resolved scope. Three new tests
+  (24th–26th in the module, bringing it to 26): the leak is closed for
+  both params for an out-of-scope `COMPANY_ADMIN`, and a SUPER_ADMIN
+  sanity test proves the
+  fix didn't overtighten legitimate global access. Re-verified live too
+  (a real cross-company department, probed as both an unrelated
+  `COMPANY_ADMIN` — `department_name: null` — and SUPER_ADMIN — the real
+  name — probe data deleted after).
 - **Not verified against the actual reference PDF** — it was not in the
   repo (asked for per the brief's own instruction; not supplied). Built
   from the brief's detailed written description instead. Structural
@@ -171,7 +193,7 @@ father's reference "Extra Works by Department" PDF: Building -> Department
   temporary demo-data changes (the two labels, the two EW tags) reverted
   after.
 FE gate green: tsc clean, ESLint **48** (baseline, no new violations),
-build OK. Backend: targeted `reports` app suite green (209 tests, OK).
+build OK. Backend: targeted `reports` app suite green (212 tests, OK).
 **Immediate next step:** Sprint 132 continues on this SAME branch (no new
 branch, no new PR) — see the Sprint 132 prompt when it arrives.
 

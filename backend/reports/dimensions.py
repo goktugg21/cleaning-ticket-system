@@ -216,6 +216,31 @@ def _customer_in_scope(actor, customer: Customer) -> bool:
     return False
 
 
+def _scoped_label_name(actor, model, label_id: int) -> Optional[str]:
+    """Resolve a Department/WorkType `name` for a scope echo, but ONLY when
+    the label's own customer is inside the actor's allowed scope — else
+    `None`.
+
+    Sprint 131 follow-up: the original version did an unscoped `.filter(id=
+    ...).first()`, so an out-of-scope id (e.g. a competitor's department)
+    still echoed that customer's real label name in `scope.department_name`
+    even though the row filter (`ew_qs.filter(department_id=...)`) already
+    silently matched zero rows for it. Deliberately `None`, not a 403: a
+    403 would tell the caller the id EXISTS (an enumeration oracle) for a
+    narrowing filter that the row-level query already treats as "matches
+    nothing" rather than "forbidden" — the echo should agree with that, not
+    diverge into a harder failure mode. This mirrors `_customer_in_scope`,
+    the same check `_resolve_customer` uses; `customer` gets a 403 instead
+    because it is scope-WIDENING (it selects what data the whole report
+    covers), not a narrowing filter within an already-resolved scope, so a
+    hard denial is the right response there and not here.
+    """
+    label = model.objects.filter(id=label_id).select_related("customer").first()
+    if label is None or not _customer_in_scope(actor, label.customer):
+        return None
+    return label.name
+
+
 def _resolve_customer(actor, raw: Optional[str]) -> Optional[Customer]:
     customer_id = _parse_int(raw, "customer")
     if customer_id is None:
@@ -821,7 +846,12 @@ def compute_extra_work_revenue_by_building(actor, query_params) -> dict:
 # scoped `ew_qs`: because both are columns on `ExtraWorkRequest` itself
 # (not a scope-widening parameter like `customer`), filtering by an
 # out-of-scope id simply matches zero rows — no separate scope check is
-# needed the way `_resolve_customer` validates `customer`.
+# needed for the ROW filter the way `_resolve_customer` validates
+# `customer`. The scope ECHO is a different story: resolving an id's
+# `name` for the response touches a row the actor may not be allowed to
+# see even though the EW filter above never leaks its data, so THAT half
+# is scope-checked via `_scoped_label_name` (below) — a real gap in an
+# earlier version of this function, closed once found.
 #
 # Detail rows carry "Completed At" / "Week No": the spawned operational
 # ticket's `closed_at`, localized to the project timezone — the SAME field
@@ -1024,19 +1054,19 @@ def compute_extra_work_by_department(actor, query_params) -> dict:
         # Direct lookup (not a scan of `dept_meta`) so the echoed name is
         # correct even when the filter matches zero rows in this period —
         # `dept_meta` only carries names for departments that survived the
-        # date-window filter above.
+        # date-window filter above. SCOPED via `_customer_in_scope` (the
+        # id itself is just an echo of the caller's own input and leaks
+        # nothing; resolving its NAME touches another tenant's row, so
+        # that part must be scope-checked like every other cross-tenant
+        # lookup in this module).
         scope_dict["department_id"] = department_id
-        scope_dict["department_name"] = (
-            Department.objects.filter(id=department_id)
-            .values_list("name", flat=True)
-            .first()
+        scope_dict["department_name"] = _scoped_label_name(
+            actor, Department, department_id
         )
     if work_type_id is not None:
         scope_dict["work_type_id"] = work_type_id
-        scope_dict["work_type_name"] = (
-            WorkType.objects.filter(id=work_type_id)
-            .values_list("name", flat=True)
-            .first()
+        scope_dict["work_type_name"] = _scoped_label_name(
+            actor, WorkType, work_type_id
         )
 
     return {
