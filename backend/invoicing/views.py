@@ -94,7 +94,7 @@ class InvoicePdfView(views.APIView):
             )
         invoice = get_object_or_404(
             scope_invoices_for(request.user).select_related(
-                "company", "customer", "building"
+                "company", "customer", "building", "department", "work_type"
             ),
             pk=invoice_id,
         )
@@ -142,7 +142,7 @@ class InvoiceViewSet(viewsets.GenericViewSet):
     def get_queryset(self):
         return (
             scope_invoices_for(self.request.user)
-            .select_related("company", "customer", "building")
+            .select_related("company", "customer", "building", "department", "work_type")
             .prefetch_related("lines", "reversed_by")
         )
 
@@ -472,7 +472,7 @@ class CustomerInvoiceListView(views.APIView):
     def get(self, request):
         qs = (
             scope_customer_invoices_for(request.user)
-            .select_related("customer", "building")
+            .select_related("customer", "building", "department", "work_type")
             .prefetch_related("lines", "reversed_by")
             .order_by("-sent_at", "-id")
         )
@@ -492,7 +492,7 @@ class CustomerInvoiceDetailView(views.APIView):
     def get(self, request, invoice_id: int):
         invoice = get_object_or_404(
             scope_customer_invoices_for(request.user)
-            .select_related("customer", "building")
+            .select_related("customer", "building", "department", "work_type")
             .prefetch_related("lines", "reversed_by"),
             pk=invoice_id,
         )
@@ -512,7 +512,7 @@ class CustomerInvoicePdfView(views.APIView):
     def get(self, request, invoice_id: int):
         invoice = get_object_or_404(
             scope_customer_invoices_for(request.user).select_related(
-                "company", "customer", "building"
+                "company", "customer", "building", "department", "work_type"
             ),
             pk=invoice_id,
         )

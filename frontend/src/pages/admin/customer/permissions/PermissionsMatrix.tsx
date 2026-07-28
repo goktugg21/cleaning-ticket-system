@@ -6,13 +6,11 @@ import type {
   CustomerAccessRole,
   CustomerBuildingMembership,
   CustomerCompanyPolicyAdmin,
-  CustomerPermissionKey,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
 } from "../../../../api/types";
 import { accessRoleLabelKey } from "../../../../lib/enumLabels";
 
-import { resolvePanelValue } from "./effectiveResolver";
 import {
   PERMISSION_GROUP_LABEL_KEY,
   PERMISSION_GROUPS,
@@ -20,25 +18,27 @@ import {
   type PermissionGroup,
   type PermissionKeyRow,
 } from "./permissionKeyLabels";
-import { PermissionBubble } from "./PermissionBubble";
+import { PermissionGroupChip } from "./PermissionGroupChip";
 import { Toggle } from "../../../../components/Toggle";
 
 /**
- * Sprint 31 Phase 6 — Excel-style permission matrix.
+ * Sprint 31 Phase 6 — introduced as an Excel-style permission matrix;
+ * Sprint 130 replaced the 17 per-key ✓/✗ columns with one summary
+ * chip per permission group (it no longer renders a matrix — the
+ * name is kept so the row/testid history below still lines up).
  *
  * Primary view of the per-user permission surface; REPLACES the
  * `UserAccessCard` + `AccessPermissionsPanel` flow. One <tr> per
  * `CustomerUserBuildingAccess` row (user × building × access_role).
  *
- *   User | Role | Tickets (6) | Extra Work (6) | Users (4) | Actions
+ *   User | Actions | Role | Tickets chip | Extra Work chip | Users chip | Documents chip
  *
- * Each permission cell renders a `PermissionBubble` whose state is
- * driven by `resolvePanelValue` — NEVER by client-side permission
- * truth. The matrix shows the EFFECTIVE outcome, collapsing
- * inherit-allow + override-allow into "granted" and bringing
- * policy-blocked out as a distinct visual variant so the operator
- * can tell "user doesn't have it" apart from "company policy
- * forbids it" without opening the modal.
+ * Each chip is a `PermissionGroupChip`, whose granted/total count is
+ * derived from the SAME `resolvePanelValue` resolution the old cells
+ * used — NEVER by client-side permission truth. The full per-key
+ * inherit/allow/deny detail still lives one click away in
+ * `PermissionEditorModal`; the chip is a summary, not a
+ * re-implementation.
  *
  * Locked testids relocated from `UserAccessCard`:
  *   - `customer-access-role-select` + `data-user-id` + `data-building-id`
@@ -50,7 +50,10 @@ import { Toggle } from "../../../../components/Toggle";
  * New testids introduced:
  *   - `permissions-matrix` on the section root
  *   - `permissions-matrix-row` on each <tr>
- *   - `permission-bubble` (rendered by PermissionBubble)
+ *   - `permission-group-chip` + `data-permission-group` +
+ *     `data-granted-count` + `data-total-count` + `data-state`
+ *     (rendered by PermissionGroupChip; Sprint 130 replaces the
+ *     retired `permissions-matrix-cell` per-key testid)
  *
  * Retired:
  *   - `access-permissions-panel-<id>` / `access-permissions-edit-<id>`
@@ -58,6 +61,8 @@ import { Toggle } from "../../../../components/Toggle";
  *     glance and the modal opens directly from the row)
  *   - `customer-access-badge` (per-building chip — folded into the
  *     row itself)
+ *   - `permissions-matrix-cell` (Sprint 130 — one bubble per key no
+ *     longer exists; see `permission-group-chip` above)
  */
 export interface PermissionsMatrixProps {
   members: CustomerUserMembership[];
@@ -134,103 +139,39 @@ export function PermissionsMatrix(props: PermissionsMatrixProps) {
       <div className="permissions-matrix-scroll">
         <table className="permissions-matrix-table">
           <thead>
-            {/* Group-span header row. Column order:
-                  User | Actions | Role | Tickets(6) | Extra Work(6) | Users(4)
-                The first three are sticky-left so identity + controls
-                stay visible while the 16 vertical permission columns
-                scroll under them on narrow viewports. */}
-            <tr className="permissions-matrix-head-groups">
-              <th
-                className="permissions-matrix-cell-user permissions-matrix-sticky-user"
-                rowSpan={2}
-              >
+            {/* Column order: User | Actions | Role | one chip column
+                per PERMISSION_GROUPS entry. The group's label is
+                already printed on the chip itself (`Tickets 4/6`), so
+                these header cells carry no visible text — an
+                `aria-label` (same pattern as the Actions column)
+                keeps `scope="col"` table semantics without doubling
+                the label up on screen. */}
+            <tr>
+              <th className="permissions-matrix-cell-user">
                 {t("customer_permissions.matrix.col_user")}
               </th>
               <th
-                className="permissions-matrix-cell-actions permissions-matrix-sticky-actions"
-                rowSpan={2}
+                className="permissions-matrix-cell-actions"
                 aria-label={t("customer_permissions.matrix.col_actions")}
               />
-              <th
-                className="permissions-matrix-cell-role permissions-matrix-sticky-role"
-                rowSpan={2}
-              >
+              <th className="permissions-matrix-cell-role">
                 {t("customer_permissions.matrix.col_role")}
               </th>
               {PERMISSION_GROUPS.map((group) => (
                 <th
                   key={group}
-                  colSpan={groupedKeys[group].length}
-                  className={`permissions-matrix-group-header permissions-matrix-group-${group}`}
-                >
-                  {t(PERMISSION_GROUP_LABEL_KEY[group])}
-                </th>
+                  className="permissions-matrix-group-header"
+                  scope="col"
+                  aria-label={t(PERMISSION_GROUP_LABEL_KEY[group])}
+                />
               ))}
-            </tr>
-            {/* Per-key short-label row. Labels are rotated -45° so
-                each permission column narrows to ~34px while staying
-                fully readable. Adjacent labels lean up-and-right out
-                of their own columns on parallel diagonals and don't
-                overlap each other. The grid still scrolls under the
-                frozen User | Actions | Role columns when needed —
-                the angle just shrinks how wide it has to be. */}
-            <tr className="permissions-matrix-head-keys">
-              {PERMISSION_GROUPS.flatMap(
-                (group, groupIdx) =>
-                  groupedKeys[group].map((row, rowIdx) => {
-                    // Subtle vertical divider before the first column of
-                    // each non-Tickets group (Tickets follows the Role
-                    // frozen seam, so doesn't need its own divider).
-                    const isGroupStart = groupIdx > 0 && rowIdx === 0;
-                    // Split the i18n short label on its FIRST space so
-                    // every two-word header renders as two consistent
-                    // stacked lines (word1 top, word2 bottom) regardless
-                    // of whether it would have fit on one line.
-                    // Single-word labels ("create", "invite", "manage",
-                    // NL "aanmaken", "beheren", ...) render as one line.
-                    // Purely presentational — i18n values stay as-is.
-                    const labelShort = t(
-                      `customer_permissions.matrix.key_short.${row.key}`,
-                    );
-                    const spaceIdx = labelShort.indexOf(" ");
-                    const labelFirst =
-                      spaceIdx === -1 ? labelShort : labelShort.slice(0, spaceIdx);
-                    const labelRest =
-                      spaceIdx === -1 ? "" : labelShort.slice(spaceIdx + 1);
-                    return (
-                      <th
-                        key={row.key}
-                        className={
-                          isGroupStart
-                            ? "permissions-matrix-key-header permissions-matrix-group-start"
-                            : "permissions-matrix-key-header"
-                        }
-                        title={t(
-                          `customer_permissions.permission_keys.${row.key}.label`,
-                        )}
-                        scope="col"
-                      >
-                        <span className="permissions-matrix-key-short">
-                          <span className="permissions-matrix-key-line">
-                            {labelFirst}
-                          </span>
-                          {labelRest && (
-                            <span className="permissions-matrix-key-line">
-                              {labelRest}
-                            </span>
-                          )}
-                        </span>
-                      </th>
-                    );
-                  }),
-              )}
             </tr>
           </thead>
           <tbody>
             {flatRows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={3 + PERMISSION_KEY_ROWS.length}
+                  colSpan={3 + PERMISSION_GROUPS.length}
                   className="permissions-matrix-empty"
                   data-testid="permissions-matrix-empty"
                 >
@@ -244,11 +185,9 @@ export function PermissionsMatrix(props: PermissionsMatrixProps) {
                   membership={membership}
                   access={access}
                   policy={props.policy}
+                  groupedKeys={groupedKeys}
                   isSelf={props.meId === membership.user_id}
                   busy={props.isUserBusy(membership.user_id)}
-                  policyBlockedLabel={t(
-                    "customer_permissions.matrix.policy_blocked",
-                  )}
                   onRoleChange={(newRole) =>
                     props.onRoleChange(membership, access, newRole)
                   }
@@ -275,9 +214,9 @@ interface MatrixRowProps {
   membership: CustomerUserMembership;
   access: CustomerUserBuildingAccess;
   policy: CustomerCompanyPolicyAdmin | null;
+  groupedKeys: Record<PermissionGroup, PermissionKeyRow[]>;
   isSelf: boolean;
   busy: boolean;
-  policyBlockedLabel: string;
   onRoleChange: (newRole: CustomerAccessRole) => void;
   onActiveToggle: (next: boolean) => void;
   onEditPermissions: () => void;
@@ -297,10 +236,7 @@ function MatrixRow(props: MatrixRowProps) {
       data-user-id={props.membership.user_id}
       data-building-id={props.access.building_id}
     >
-      <th
-        scope="row"
-        className="permissions-matrix-cell-user permissions-matrix-sticky-user"
-      >
+      <th scope="row" className="permissions-matrix-cell-user">
         <div className="permissions-matrix-user-name">{userName}</div>
         <div className="permissions-matrix-user-building">
           {props.access.building_name}
@@ -316,7 +252,7 @@ function MatrixRow(props: MatrixRowProps) {
           </span>
         )}
       </th>
-      <td className="permissions-matrix-cell-actions permissions-matrix-sticky-actions">
+      <td className="permissions-matrix-cell-actions">
         <div className="permissions-matrix-actions">
           <label
             className="permissions-matrix-active"
@@ -361,7 +297,7 @@ function MatrixRow(props: MatrixRowProps) {
           </button>
         </div>
       </td>
-      <td className="permissions-matrix-cell-role permissions-matrix-sticky-role">
+      <td className="permissions-matrix-cell-role">
         <label className="visually-hidden">
           {t("customer_permissions.role_select_label")}
         </label>
@@ -399,84 +335,18 @@ function MatrixRow(props: MatrixRowProps) {
           )}
         </select>
       </td>
-      {PERMISSION_KEY_ROWS.map((row, idx) => {
-        const prev = idx > 0 ? PERMISSION_KEY_ROWS[idx - 1] : null;
-        const isGroupStart = prev !== null && prev.group !== row.group;
-        return (
-          <PermissionMatrixCell
-            key={row.key}
-            permissionKey={row.key}
-            isGroupStart={isGroupStart}
+      {PERMISSION_GROUPS.map((group) => (
+        <td key={group} className="permissions-matrix-cell-group">
+          <PermissionGroupChip
+            group={group}
+            rows={props.groupedKeys[group]}
             overrides={overrides}
             isActive={isActive}
             policy={props.policy}
             accessRole={props.access.access_role}
-            policyBlockedLabel={props.policyBlockedLabel}
           />
-        );
-      })}
+        </td>
+      ))}
     </tr>
-  );
-}
-
-interface PermissionMatrixCellProps {
-  permissionKey: CustomerPermissionKey;
-  /** True iff this cell is the FIRST column of a non-Tickets group;
-   *  draws the subtle vertical group divider on this column. */
-  isGroupStart: boolean;
-  overrides: Record<string, boolean>;
-  isActive: boolean;
-  policy: CustomerCompanyPolicyAdmin | null;
-  accessRole: CustomerAccessRole;
-  policyBlockedLabel: string;
-}
-
-function PermissionMatrixCell({
-  permissionKey,
-  isGroupStart,
-  overrides,
-  isActive,
-  policy,
-  accessRole,
-  policyBlockedLabel,
-}: PermissionMatrixCellProps) {
-  const { t } = useTranslation("common");
-  const resolution = resolvePanelValue({
-    key: permissionKey,
-    overrides,
-    isActive,
-    policy,
-    accessRole,
-  });
-  const keyLabel = t(
-    `customer_permissions.permission_keys.${permissionKey}.label`,
-  );
-  const ariaLabel = resolution.granted
-    ? t("customer_permissions.matrix.cell_granted_aria", { key: keyLabel })
-    : resolution.reason === "policy_denied"
-      ? t("customer_permissions.matrix.cell_policy_blocked_aria", {
-          key: keyLabel,
-        })
-      : t("customer_permissions.matrix.cell_denied_aria", { key: keyLabel });
-  return (
-    <td
-      className={
-        isGroupStart
-          ? "permissions-matrix-cell-perm permissions-matrix-group-start"
-          : "permissions-matrix-cell-perm"
-      }
-      data-testid="permissions-matrix-cell"
-      data-permission-key={permissionKey}
-      data-effective={resolution.granted ? "granted" : "denied"}
-      data-policy-blocked={
-        resolution.reason === "policy_denied" ? "true" : "false"
-      }
-    >
-      <PermissionBubble
-        resolution={resolution}
-        policyBlockedLabel={policyBlockedLabel}
-        ariaLabel={ariaLabel}
-      />
-    </td>
   );
 }

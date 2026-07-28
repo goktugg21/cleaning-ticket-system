@@ -6079,22 +6079,16 @@ a.attn-row:hover {
 }
 
 /* ----- Sprint 31 Phase 6 — Permissions matrix + modal editor -----
-   Replaces the right-side override drawer. The matrix is the primary
-   view; the modal is the per-row tri-state editor. Permission TRUTH
-   stays in `effectiveResolver`; these styles are visual only. */
+   Sprint 130 replaced the per-key columns with one summary chip per
+   permission group (see `.permission-group-chip` below) — the matrix
+   no longer needs the sticky frozen-pane layout that existed only to
+   keep the 17-column grid survivable. The modal is still the per-row
+   tri-state editor. Permission TRUTH stays in `effectiveResolver`;
+   these styles are visual only. */
 
-/* Glyph bubble for the matrix. The CIRCLE is the chrome; the GLYPH
-   inside (check / cross / lock) is the primary signal. Three
-   variants, each visually distinct so the operator can tell
-   "granted" from "denied" from "blocked by company policy" without
-   opening the modal.
-
-   Modal compatibility note: the tri-state Inherit/Allow/Deny radios
-   in `TriStateBubbleRadio` reuse `.permission-bubble` as the BASE
-   class (size + border + radius) but apply their own
-   `.tri-state-bubble-option-*` + `.tri-state-bubble-selected`
-   modifiers, NEVER `.permission-bubble-granted/-denied/-policy-blocked`.
-   So changing the matrix variants below does not change the modal. */
+/* Base bubble chrome, reused by `TriStateBubbleRadio` (the modal's
+   Inherit/Allow/Deny radios) via its own `.tri-state-bubble-*`
+   modifiers — never the matrix, which no longer renders bubbles. */
 .permission-bubble {
   display: inline-flex;
   align-items: center;
@@ -6108,39 +6102,17 @@ a.attn-row:hover {
   flex-shrink: 0;
   color: var(--text-muted);
 }
-.permission-bubble-granted {
-  background: var(--green-faint);
-  border-color: var(--green);
-  color: var(--green);
-}
-.permission-bubble-denied {
-  background: transparent;
-  border-color: var(--border);
-  color: var(--text-faint);
-}
-.permission-bubble-policy-blocked {
-  background: var(--surface-2);
-  border-color: var(--text-faint);
-  border-style: dashed;
-  color: var(--text-muted);
-  cursor: help;
-}
 
 /* Inline hint colors reused by the modal. */
 .effective-hint-allow { color: var(--green); }
 .effective-hint-deny  { color: var(--danger, #B0413E); }
 
 /* ----- Permissions matrix (primary view of Zone 2) -----
-   Column order:
-     User | Actions | Role | Tickets(6) | Extra Work(6) | Users(4)
-   The grid is intentionally WIDER than the viewport — 16 plain-
-   horizontal permission columns don't fit a sub-page width and we
-   accept that. The wrapper scrolls horizontally; the User | Actions
-   | Role identity columns are `position: sticky` so they stay PINNED
-   while only the permission columns scroll under them (Excel-style
-   frozen pane). A right-edge shadow on the Role column marks the
-   freeze line so the scroll boundary reads as intentional, not
-   broken. */
+   Column order: User | Actions | Role | one chip per permission
+   group. Four narrow chip columns (vs. the old 17 per-key columns)
+   fit comfortably inside a 1280px viewport without horizontal
+   scroll, so the wrapper below is a defensive fallback for narrower
+   viewports, not the primary layout mechanism. */
 .permissions-matrix {
   margin-top: 12px;
   border: 1px solid var(--border);
@@ -6151,32 +6123,17 @@ a.attn-row:hover {
   overflow-x: auto;
   overflow-y: visible;
   border-radius: 10px;
-  /* No right-side padding — column headers are plain horizontal
-     two-line text that wraps inside its own column, so nothing
-     projects past the rightmost column's right edge. The table
-     fills the wrapper's content width exactly. */
 }
 .permissions-matrix-table {
-  /* `width: 100%` + `table-layout: fixed` makes the table fill the
-     wrapper's content area and distribute remaining horizontal
-     space equally among the 16 permission columns (the three frozen
-     identity columns keep their fixed 120 / 100 / 160 widths via
-     the sticky-* rules below). Each permission column = (wrapper
-     content width - 380px frozen) / 16, typically 38-95px depending
-     on viewport. No horizontal scroll because the table is sized
-     to fit the container, not to its content. */
   width: 100%;
-  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 13px;
 }
 .permissions-matrix-table th,
 .permissions-matrix-table td {
-  /* Opaque background is REQUIRED so sticky columns do not let the
-     scrolling permission cells bleed through behind them. */
   background: var(--surface);
-  padding: 8px 10px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--border-soft);
   vertical-align: middle;
 }
@@ -6190,125 +6147,20 @@ a.attn-row:hover {
   top: 0;
   z-index: 1;
 }
-.permissions-matrix-group-header {
-  text-align: center;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-size: 11px;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-}
-.permissions-matrix-group-tickets    { color: var(--green); }
-.permissions-matrix-group-extra_work { color: var(--orange, var(--green-2)); }
-.permissions-matrix-group-users      { color: var(--text-2); }
-
-/* Plain horizontal two-line column-header treatment. Replaces the
-   earlier 45°-angled-label design. The i18n short label is split
-   in TSX on its FIRST space into two `.permissions-matrix-key-
-   line` block spans, so every two-word header renders as exactly
-   two stacked lines (word1 top, word2 bottom) — consistent across
-   "view own", "view location", "approve own", "approve location",
-   "assign role", "manage permissions", and their NL equivalents.
-   Single-word labels ("create", "invite", "manage", NL "aanmaken"
-   / "beheren" / "uitnodigen" / "rechten" / "locatie") render as
-   one line. No rotation, no absolute positioning. The header row
-   grows naturally to fit the tallest (two-line) label, and every
-   label sits centred directly above its column of bubbles. The
-   `vertical-align: bottom` on the cell + the natural baseline of
-   the last line keeps single-line labels and the SECOND line of
-   two-line labels sharing the same bottom baseline — the row
-   reads as a tidy block. `word-break: normal; overflow-wrap:
-   normal` is load-bearing: it guarantees no word ever breaks
-   mid-character (no "permis…ions" splits) — if a single word is
-   genuinely wider than its column on a narrow viewport, it
-   overflows whole rather than fracturing. */
-.permissions-matrix-key-header {
-  text-align: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-muted);
-  line-height: 1.15;
-  vertical-align: bottom;
-  padding: 8px 3px;
-}
-.permissions-matrix-key-short {
-  display: block;
-  word-break: normal;
-  overflow-wrap: normal;
-  letter-spacing: 0.01em;
-}
-.permissions-matrix-key-line {
-  display: block;
-}
-
-/* Subtle vertical group divider. Applied (via the `permissions-
-   matrix-group-start` class added in TSX) to the FIRST column of
-   the Extra Work group (the 7th permission column) and the FIRST
-   column of the Users group (the 13th permission column), on
-   BOTH the header cell AND every body cell of that column so the
-   hairline runs the full matrix height. The first Tickets column
-   doesn't need this because it already sits flush against the
-   Role frozen seam's right-edge shadow. */
-.permissions-matrix-table .permissions-matrix-group-start {
-  border-left: 1px solid var(--border);
-}
-
-/* Frozen identity columns: User | Actions | Role.
-   Each cell carries `position: sticky` with a left offset equal to
-   the running sum of widths to its left, so the three sit flush with
-   no gap, no overlap. The rules apply to BOTH thead and tbody cells
-   in those columns (the `position: sticky` on tbody cells comes from
-   these selectors; the thead row's `top: 0` sticky comes from the
-   `thead th` rule above, so frozen header cells are sticky on BOTH
-   axes — left-frozen during horizontal scroll, top-frozen during
-   page scroll).
-
-   Z-index layering (highest first):
-     z=3  frozen thead cells   (top + left, must sit above body
-                                cells AND non-frozen header cells)
-     z=2  frozen tbody cells   (left only, above scrolling body cells)
-     z=1  non-frozen thead     (top only, set by the `thead th` rule
-                                above)
-     z=0  scrolling tbody      (default) */
-.permissions-matrix-sticky-user {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  min-width: 120px;
-  width: 120px;
+.permissions-matrix-cell-user {
+  min-width: 140px;
   text-align: left;
 }
-.permissions-matrix-sticky-actions {
-  position: sticky;
-  left: 120px;
-  z-index: 2;
-  min-width: 100px;
-  width: 100px;
+.permissions-matrix-cell-actions {
+  min-width: 96px;
 }
-.permissions-matrix-sticky-role {
-  position: sticky;
-  left: 220px;
-  z-index: 2;
-  min-width: 160px;
-  width: 160px;
-  /* The freeze-line seam: a subtle right-edge shadow that stays put
-     on Role's right side as the permission grid scrolls under it.
-     Negative spread keeps the shadow off the top + bottom edges, so
-     it looks like a vertical hairline glow rather than a square
-     drop-shadow. */
-  box-shadow: 6px 0 6px -4px rgba(15, 32, 25, 0.18);
-}
-.permissions-matrix-table thead .permissions-matrix-sticky-user,
-.permissions-matrix-table thead .permissions-matrix-sticky-actions,
-.permissions-matrix-table thead .permissions-matrix-sticky-role {
-  z-index: 3;
-  background: var(--surface-2);
+.permissions-matrix-cell-role {
+  min-width: 132px;
 }
 
 /* Sprint 2b — transient highlight when a ?focus_user deep-link lands on a
    user's matrix rows (e.g. from a contact's "Manage permissions" action).
-   Targets every cell so the sticky User/Actions/Role columns highlight too;
-   the class is added on focus and removed by a ~2.4s timer. */
+   The class is added on focus and removed by a ~2.4s timer. */
 .permissions-matrix-row-focus > th,
 .permissions-matrix-row-focus > td {
   background: var(--amber-soft) !important;
@@ -6357,18 +6209,9 @@ a.attn-row:hover {
   color: var(--text);
 }
 
-.permissions-matrix-cell-perm {
+.permissions-matrix-cell-group {
   text-align: center;
-  padding: 6px 2px;
-  /* Width is set by `table-layout: fixed` on the table: each of the
-     16 permission columns shares (table_width − 380px frozen) / 16
-     equally, matching the angled-row header above. */
-}
-.permissions-matrix-cell-actions {
-  /* Sized via the sticky modifier above (100px) — just enough for
-     the active-toggle checkbox + the pen-icon edit button + the X
-     remove button at flex-start, so the X sits close to the role
-     cell's left edge. */
+  padding: 6px 4px;
 }
 .permissions-matrix-actions {
   display: flex;
@@ -6392,6 +6235,55 @@ a.attn-row:hover {
   text-align: center;
   padding: 24px;
   color: var(--text-muted);
+}
+
+/* ----- Permission group chip (Sprint 130) -----
+   One chip per `PERMISSION_GROUPS` entry, replacing the old per-key
+   ✓/✗ bubble columns. Granted/total is derived from the same
+   `resolvePanelValue` resolution the bubbles used — this is a
+   summary, not a re-decision. Three states, distinguished by BOTH
+   color and fill/weight so the summary reads without relying on hue
+   alone:
+     all-granted -> filled solid green chip, bold white text
+     partial     -> outlined amber chip, bold amber text
+     none        -> outlined faint chip, regular-weight muted text */
+.permission-group-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  font-family: var(--f-head);
+  white-space: nowrap;
+}
+.permission-group-chip-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.permission-group-chip-count {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.permission-group-chip-none {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.permission-group-chip-partial {
+  background: var(--amber-soft);
+  border-color: var(--amber-border);
+  color: var(--amber);
+  font-weight: 700;
+}
+.permission-group-chip-all {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fff;
+  font-weight: 700;
 }
 
 /* ----- Modal editor — replaces the right drawer ----- */
@@ -6599,22 +6491,6 @@ a.attn-row:hover {
 
 @media (max-width: 760px) {
   .permission-editor-modal { max-width: 100%; }
-  /* Drop sticky on the three identity/control columns at narrow
-     widths — keeping them frozen would consume ~380px of the
-     viewport, leaving no room for the permission cells. Mobile
-     scrolls the whole table cleanly instead. The Role column's
-     freeze-line shadow also drops here so the "boundary marker"
-     does not show without a real boundary behind it. */
-  .permissions-matrix-sticky-user,
-  .permissions-matrix-sticky-actions,
-  .permissions-matrix-sticky-role {
-    position: static;
-    min-width: 0;
-    width: auto;
-  }
-  .permissions-matrix-sticky-role {
-    box-shadow: none;
-  }
 }
 
 /* ====================================================================
@@ -8107,3 +7983,90 @@ a.attn-row:hover {
 }
 /* #108 Part D — the bespoke track/knob rules moved to the shared
    platform Toggle (.toggle-switch); only the label layout remains. */
+
+/* ====================================================================
+   Sprint 131 — Extra Work by Department tree
+   ==================================================================== */
+
+/* Native <details>/<summary> at every level — no custom open-state
+   tracking, keyboard- and screen-reader-accessible by default. Building
+   is the outermost row; Department nests one level in; Work Type is a
+   plain (non-expandable) leaf row — the individual Extra Work rows live
+   in the PDF/CSV export, never in this tree (CLAUDE.md #8). */
+.ew-department-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ew-department-tree-building {
+  border-bottom: 1px solid var(--border-soft);
+}
+.ew-department-tree-building:last-child {
+  border-bottom: none;
+}
+.ew-department-tree-building > details > summary {
+  font-weight: 700;
+}
+.ew-department-tree-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  list-style: none;
+}
+.ew-department-tree-summary::-webkit-details-marker {
+  display: none;
+}
+.ew-department-tree-summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-faint);
+  transition: transform 0.15s ease;
+}
+details[open] > .ew-department-tree-summary::before {
+  transform: rotate(90deg);
+}
+.ew-department-tree-summary-dept {
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.ew-department-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ew-department-tree-meta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ew-department-tree-departments {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0 0 0 8px;
+}
+.ew-department-tree-worktypes {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.ew-department-tree-worktype-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 4px 5px 36px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ew-department-tree-worktype-row:hover {
+  background: var(--surface-2);
+}

@@ -2142,7 +2142,14 @@ export interface InboxFilters {
 // Facturen page + the invoice-detail page (Phase 4b).
 // ---------------------------------------------------------------------------
 export type InvoiceStatus = "DRAFT" | "ISSUED" | "SENT";
-export type InvoiceGranularity = "CUSTOMER" | "PER_BUILDING";
+// Sprint 132 — PER_BUILDING_DEPARTMENT_WORK_TYPE groups one level finer
+// than PER_BUILDING: Building + Department + Work Type. Untagged Extra
+// Work (no department and/or no work type) gets its own invoice rather
+// than being dropped or folded into a labelled one.
+export type InvoiceGranularity =
+  | "CUSTOMER"
+  | "PER_BUILDING"
+  | "PER_BUILDING_DEPARTMENT_WORK_TYPE";
 export type InvoiceDayRule = "FIRST_OF_MONTH" | "LAST_OF_MONTH";
 
 export interface InvoiceLine {
@@ -2174,6 +2181,14 @@ export interface Invoice {
   customer_name: string;
   building: number | null;
   building_name: string | null;
+  // Sprint 132 — set only when generated at PER_BUILDING_DEPARTMENT_
+  // WORK_TYPE granularity; null on every other invoice (mirrors building /
+  // building_name's own null-when-unset shape). Compose the display label
+  // with `formatInvoiceGroupLabel` (lib/intl) — never pre-joined here.
+  department: number | null;
+  department_name: string | null;
+  work_type: number | null;
+  work_type_name: string | null;
   period_year: number | null;
   period_month: number | null;
   subtotal_amount: string;
@@ -2217,6 +2232,9 @@ export interface CustomerInvoice {
   status: InvoiceStatus; // always "SENT" in this scope
   customer_name: string;
   building_name: string | null;
+  // Sprint 132 — see Invoice.department_name / work_type_name.
+  department_name: string | null;
+  work_type_name: string | null;
   period_year: number | null;
   period_month: number | null;
   subtotal_amount: string;

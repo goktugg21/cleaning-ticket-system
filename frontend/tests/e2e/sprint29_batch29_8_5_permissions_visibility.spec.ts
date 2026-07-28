@@ -14,10 +14,11 @@ import { loginAs } from "./fixtures/login";
  * 29.8.5 turns both into in-place toggles:
  *
  *   - On the Permissions page the per-access inline panel is replaced
- *     in Sprint 31 Phase 6 by an Excel-style matrix: one row per
- *     access with 16 `permissions-matrix-cell` cells (one per
- *     customer-permission key) showing effective state via
- *     `data-effective` + `data-policy-blocked` discriminators. The
+ *     in Sprint 31 Phase 6 by an Excel-style matrix, then in Sprint
+ *     130 by one summary chip per permission group: one row per
+ *     access with 4 `permission-group-chip` chips (one per
+ *     `PERMISSION_GROUPS` entry) showing granted/total via
+ *     `data-granted-count` + `data-total-count` + `data-state`. The
  *     pill testid `customer-access-overrides-button` is preserved on
  *     the row's "Edit permissions" button; clicking it opens the
  *     PermissionEditorModal directly — no intermediate panel.
@@ -31,7 +32,9 @@ import { loginAs } from "./fixtures/login";
  * Locked testid contract (verified against the in-place
  * implementation):
  *   - `permissions-matrix-row` + data-user-id + data-building-id    (matrix row)
- *   - `permissions-matrix-cell` + data-permission-key + data-effective + data-policy-blocked
+ *   - `permission-group-chip` + data-permission-group + data-granted-count
+ *     + data-total-count + data-state (Sprint 130 — replaces the retired
+ *     `permissions-matrix-cell` per-key testid)
  *   - `permissions-rollup-summary-<userId>-<customerId>`            (summary root)
  *   - `permissions-rollup-summary-collapse-<userId>-<customerId>`   (collapse button)
  *   - `permissions-rollup-summary-open-full-<userId>-<customerId>`  (deep-link)
@@ -250,14 +253,14 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
     }
   });
 
-  test("Permissions matrix renders 16 cells per access row with effective state", async ({
+  test("Permissions matrix renders one group chip per row with granted counts", async ({
     page,
   }) => {
-    // Sprint 31 Phase 6 — replaces the per-access inline panel with a
-    // matrix row. Each matrix row carries 16 `permissions-matrix-cell`
-    // cells (one per customer-permission key); cells expose
-    // `data-effective="granted|denied"` + `data-policy-blocked` so a
-    // spec can assert state structurally without parsing class names.
+    // Sprint 130 — replaces the per-key `permissions-matrix-cell`
+    // columns with one `permission-group-chip` per permission group.
+    // Chips expose `data-permission-group` + `data-granted-count` +
+    // `data-total-count` + `data-state` so a spec can assert state
+    // structurally without parsing class names or counting glyphs.
     test.skip(
       overrideTarget === null,
       "no access row with permission_overrides + seeding fallback failed",
@@ -272,19 +275,19 @@ test.describe("Sprint 29 Batch 29.8.5 — permissions visibility surfaces", () =
     );
     await expect(row).toBeVisible({ timeout: 10_000 });
 
-    // 16 customer-permission keys -> 16 cells per row, same contract
-    // the panel used to provide.
-    const cells = row.locator('[data-testid="permissions-matrix-cell"]');
-    await expect(cells).toHaveCount(16);
+    // 4 permission groups (tickets, extra_work, users, documents) ->
+    // 4 chips per row, one summary per group.
+    const chips = row.locator('[data-testid="permission-group-chip"]');
+    await expect(chips).toHaveCount(4);
 
-    // At least one cell should be granted (the seeded
-    // "customer.ticket.create" override above, or whatever non-empty
-    // overrides the seed shipped). Assert via the structural
-    // `data-effective` discriminator.
-    const grantedCells = row.locator(
-      '[data-testid="permissions-matrix-cell"][data-effective="granted"]',
+    // At least one chip should show a non-zero granted count (the
+    // seeded "customer.ticket.create" override above, or whatever
+    // non-empty overrides the seed shipped). Assert via the
+    // structural `data-state` discriminator rather than text.
+    const nonEmptyChips = row.locator(
+      '[data-testid="permission-group-chip"]:not([data-state="none"])',
     );
-    expect(await grantedCells.count()).toBeGreaterThan(0);
+    expect(await nonEmptyChips.count()).toBeGreaterThan(0);
   });
 
   test("Edit permissions button on the matrix row opens the modal", async ({

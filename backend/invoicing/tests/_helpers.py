@@ -16,7 +16,12 @@ from django.utils import timezone
 from accounts.models import UserRole
 from buildings.models import Building
 from companies.models import Company, CompanyUserMembership
-from customers.models import Customer, CustomerBuildingMembership
+from customers.models import (
+    Customer,
+    CustomerBuildingMembership,
+    Department,
+    WorkType,
+)
 from extra_work.models import ExtraWorkRequest, ExtraWorkStatus
 from invoicing.models import Invoice, InvoiceLine
 from tickets.models import Ticket, TicketStatus
@@ -56,6 +61,12 @@ class InvoicingFixture(TestCase):
         CustomerBuildingMembership.objects.create(
             customer=cls.customer, building=cls.building2
         )
+        # Sprint 132 — Department/WorkType labels for the
+        # PER_BUILDING_DEPARTMENT_WORK_TYPE granularity tests.
+        cls.dept_a = Department.objects.create(customer=cls.customer, name="Dept A")
+        cls.dept_b = Department.objects.create(customer=cls.customer, name="Dept B")
+        cls.wt_a = WorkType.objects.create(customer=cls.customer, name="WT A")
+        cls.wt_b = WorkType.objects.create(customer=cls.customer, name="WT B")
         cls.admin = User.objects.create_user(
             email="admin-inv2a@example.com",
             password=PASSWORD,
@@ -108,6 +119,8 @@ class InvoicingFixture(TestCase):
         final_vat=None,
         final_total=None,
         invoice_date=None,
+        department=None,
+        work_type=None,
     ):
         """Create an EW + its spawned operational Ticket.
 
@@ -148,6 +161,8 @@ class InvoicingFixture(TestCase):
             final_total_amount=final_total,
             invoice_date=invoice_date,
             is_invoiced=is_invoiced,
+            department=department,
+            work_type=work_type,
         )
         Ticket.objects.create(
             company=company,

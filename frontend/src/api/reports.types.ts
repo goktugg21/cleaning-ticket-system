@@ -281,3 +281,83 @@ export interface ExtraWorkRevenueByBuildingResponse {
   totals: ExtraWorkRevenueBucket;
   generated_at: string;
 }
+
+// Sprint 131 — Extra Work revenue grouped Building -> Department -> Work
+// Type (backend/reports/dimensions.py::compute_extra_work_by_department).
+// One level deeper than the by-building report above; shares the exact
+// same in-scope rows + per-row classification, so summing every LEAF
+// (work-type) bucket's `total` reproduces ExtraWorkRevenueResponse's
+// totals.total for the same filters. A department/work-type/building with
+// zero in-scope revenue is OMITTED, never padded with a zero bucket.
+//
+// `department_id` / `work_type_id` are `null` for the untagged bucket —
+// every EW created before Sprint 127 has no label, so it is NOT dropped;
+// it lands here instead. Render the localized "No department" / "No work
+// type" placeholder when the id is null.
+export interface ExtraWorkByDepartmentScope extends ReportScope {
+  customer_id: number | null;
+  customer_name: string | null;
+  department_id: number | null;
+  department_name: string | null;
+  work_type_id: number | null;
+  work_type_name: string | null;
+}
+
+export interface ExtraWorkByDepartmentRow {
+  extra_work_id: number;
+  title: string;
+  // ISO-8601 week number of the completed date, or `null` when the row
+  // has no completion date yet (any state other than "earned").
+  week_no: number | null;
+  // YYYY-MM-DD, or `null` — populated ONLY for state === "earned" (the
+  // spawned ticket's `closed_at`, localized). Non-earned rows still carry
+  // their count/subtotal/vat/total into every bucket total above; they
+  // just have no completion date to show.
+  completed_at: string | null;
+  subtotal: string; // 2dp decimal string (excl. VAT) — the reference
+  // report's "Excl. VAT" detail column.
+  vat: string;
+  total: string;
+  state: ExtraWorkRevenueState;
+}
+
+export interface ExtraWorkByDepartmentWorkTypeBucket {
+  work_type_id: number | null;
+  work_type_name: string | null;
+  count: number;
+  subtotal: string;
+  vat: string;
+  total: string;
+  rows: ExtraWorkByDepartmentRow[];
+}
+
+export interface ExtraWorkByDepartmentDeptBucket {
+  department_id: number | null;
+  department_name: string | null;
+  count: number;
+  subtotal: string;
+  vat: string;
+  total: string;
+  work_types: ExtraWorkByDepartmentWorkTypeBucket[];
+}
+
+export interface ExtraWorkByDepartmentBuildingBucket {
+  building_id: number;
+  building_name: string;
+  company_id: number;
+  company_name: string;
+  count: number;
+  subtotal: string;
+  vat: string;
+  total: string;
+  departments: ExtraWorkByDepartmentDeptBucket[];
+}
+
+export interface ExtraWorkByDepartmentResponse {
+  from: string;
+  to: string;
+  scope: ExtraWorkByDepartmentScope;
+  buildings: ExtraWorkByDepartmentBuildingBucket[];
+  totals: ExtraWorkRevenueBucket;
+  generated_at: string;
+}

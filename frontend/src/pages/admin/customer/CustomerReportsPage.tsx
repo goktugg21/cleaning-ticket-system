@@ -9,6 +9,7 @@ import type { ReportFilters } from "../../../api/reports";
 import type { CustomerAdmin, ExtraWorkRequestList } from "../../../api/types";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../../../lib/billing";
 import { formatMoney } from "../../../lib/intl";
+import { ExtraWorkByDepartmentTree } from "../../reports/charts/ExtraWorkByDepartmentTree";
 import { ExtraWorkRevenueByBuildingChart } from "../../reports/charts/ExtraWorkRevenueByBuildingChart";
 import { ExtraWorkRevenueChart } from "../../reports/charts/ExtraWorkRevenueChart";
 import { StatusDistributionChart } from "../../reports/charts/StatusDistributionChart";
@@ -31,6 +32,9 @@ type StatusFilter = "ALL" | "OPEN" | "INVOICED";
  *   - ExtraWorkRevenueByBuildingChart (Sprint 124 — the SAME revenue,
  *     split across this customer's buildings; same filters, so its
  *     buckets sum to the chart above's Total) + its own export buttons;
+ *   - ExtraWorkByDepartmentTree (Sprint 131 — the SAME revenue again, one
+ *     level deeper: Building -> Department -> Work Type, reproducing the
+ *     owner's father's reference report) + its own export buttons;
  *   - TicketsOverTimeChart (the month's date range);
  *   - StatusDistributionChart (current snapshot).
  * The month/status controls + KPI grid are unchanged.
@@ -262,6 +266,9 @@ export function CustomerReportsPage() {
           filters={revenueFilters}
           refreshKey={0}
         />
+        {/* Sprint 131 — same filters again, one level deeper
+            (Building -> Department -> Work Type). */}
+        <ExtraWorkByDepartmentTree filters={revenueFilters} refreshKey={0} />
         <TicketsOverTimeChart filters={overTimeFilters} refreshKey={0} />
         <StatusDistributionChart filters={statusFilters} refreshKey={0} />
       </div>

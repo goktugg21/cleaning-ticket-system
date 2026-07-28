@@ -82,6 +82,14 @@
   "ew_revenue_by_building_total": "Totaal facturabel: {{amount}}",
   "ew_revenue_by_building_tooltip_amount": "Facturabel",
 
+  "ew_by_department_title": "Meerwerk per afdeling",
+  "ew_by_department_subtitle": "Facturabel meerwerk van deze klant, gegroepeerd per gebouw, afdeling en werktype.",
+  "ew_by_department_empty": "Geen meerwerk in deze periode.",
+  "ew_by_department_total": "Totaal: {{amount}}",
+  "ew_by_department_item_count": "{{count}} werkzaamheden",
+  "ew_by_department_untagged_department": "Geen afdeling",
+  "ew_by_department_untagged_work_type": "Geen werktype",
+
   "ew_by_building_title": "Meerwerk per gebouw",
   "ew_by_building_subtitle": "Alleen tickets met oorsprong meerwerk, gegroepeerd per gebouw in de geselecteerde periode.",
   "ew_by_customer_title": "Meerwerk per klant",

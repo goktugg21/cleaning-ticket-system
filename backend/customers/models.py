@@ -104,6 +104,15 @@ class Customer(models.Model):
     class InvoiceGranularity(models.TextChoices):
         CUSTOMER = "CUSTOMER", "Customer-level"
         PER_BUILDING = "PER_BUILDING", "Per building"
+        # Sprint 132 — one level finer: Building + Department + Work Type
+        # (reproduces the owner's father's reference invoicing tool). Each
+        # invoice covers exactly one (building, department, work_type)
+        # combination; Extra Work with no department and/or no work type
+        # groups into its own untagged invoice rather than being dropped.
+        PER_BUILDING_DEPARTMENT_WORK_TYPE = (
+            "PER_BUILDING_DEPARTMENT_WORK_TYPE",
+            "Per building, department & work type",
+        )
 
     # blank (default "") = schedule unset.
     invoice_day_rule = models.CharField(
@@ -129,10 +138,13 @@ class Customer(models.Model):
         ),
     )
     invoice_granularity_default = models.CharField(
-        max_length=16,
+        # Sprint 132 — widened 16 -> 40 to fit
+        # "PER_BUILDING_DEPARTMENT_WORK_TYPE" (33 chars); additive, no
+        # existing value is affected (CUSTOMER / PER_BUILDING are shorter).
+        max_length=40,
         choices=InvoiceGranularity.choices,
         default=InvoiceGranularity.CUSTOMER,
-        help_text="Default invoice granularity (customer-level vs per-building) for Phase 2 generation.",
+        help_text="Default invoice granularity for Phase 2 generation.",
     )
     # Informational contract PDF: ZERO behavioural effect. One active PDF,
     # replace-on-reupload, NO version history (mirrors the `logo` pattern).

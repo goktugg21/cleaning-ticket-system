@@ -2,6 +2,9 @@ from django.urls import path
 
 from .views import (
     AgeBucketsView,
+    ExtraWorkByDepartmentCSVView,
+    ExtraWorkByDepartmentPDFView,
+    ExtraWorkByDepartmentView,
     ExtraWorkRevenueByBuildingCSVView,
     ExtraWorkRevenueByBuildingPDFView,
     ExtraWorkRevenueByBuildingView,
@@ -152,5 +155,22 @@ urlpatterns = [
         "extra-work-revenue-by-building/export.pdf",
         ExtraWorkRevenueByBuildingPDFView.as_view(),
         name="reports-extra-work-revenue-by-building-pdf",
+    ),
+    # ---- Sprint 131: Extra Work revenue grouped Building -> Department ->
+    # Work Type ----------------------------------------------------------
+    path(
+        "extra-work-by-department/",
+        ExtraWorkByDepartmentView.as_view(),
+        name="reports-extra-work-by-department",
+    ),
+    path(
+        "extra-work-by-department/export.csv",
+        ExtraWorkByDepartmentCSVView.as_view(),
+        name="reports-extra-work-by-department-csv",
+    ),
+    path(
+        "extra-work-by-department/export.pdf",
+        ExtraWorkByDepartmentPDFView.as_view(),
+        name="reports-extra-work-by-department-pdf",
     ),
 ]

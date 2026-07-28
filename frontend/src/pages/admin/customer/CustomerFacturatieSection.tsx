@@ -243,6 +243,9 @@ export function CustomerFacturatieSection({
               <option value="PER_BUILDING">
                 {t("facturatie.granularity_building")}
               </option>
+              <option value="PER_BUILDING_DEPARTMENT_WORK_TYPE">
+                {t("facturatie.granularity_department_work_type")}
+              </option>
             </select>
             <span
               className="muted small"

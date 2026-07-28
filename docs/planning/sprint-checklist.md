@@ -55,73 +55,256 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-129-session-expiry` — a FIX branch, not a feature
-sprint: one P1 (session-expiry) plus a cluster of UI defects surfaced in owner
-testing (labels Delete dialog, relabel toast, the "CONCEPT" string, the
-half-rendered permissions matrix, a policy-grid cosmetic), one PR.
-**Last shipped PR on `main`: #123** — Sprints 127 / 127.1 / 127.2 / 128,
-Department + Work Type end to end (see `## SHIPPED`; its line was appended by
-THIS branch's first commit, per the "a PR cannot cite its own number" rule).
+**Branch:** `fix/sprint-130-permissions-density` — carries Sprints 130, 131
+**and 132, and is now COMPLETE.** All three are green on this ONE branch;
+no further sprint is queued here. The owner opens ONE PR covering 130 + 131
++ 132 (a deliberate departure from the usual per-sprint-branch pattern,
+called out explicitly in the Sprint 131 brief) — CC does not open PRs.
+**Last shipped PR on `main`: #124** — Sprint 129, the session-expiry P1 +
+an owner-reported UI defect cluster (see `## SHIPPED`; its line was appended
+by THIS branch's first commit, per the "a PR cannot cite its own number"
+rule).
+**No `## SHIPPED` line for this branch yet, and that is deliberate, not an
+oversight.** Nothing has merged: this branch has no PR yet (the owner opens
+it; CC does not) and by the checklist's own rule two paragraphs below a
+SHIPPED line is appended by the FIRST COMMIT OF THE NEXT BRANCH once a PR
+is actually merged — not pre-guessed by the branch that became that PR. The
+real SHIPPED line for this whole 130+131+132 branch lands the same way
+#124 did: appended by the first commit of whatever branch comes after this
+one, once the owner's PR has an actual merged number.
 **On this branch (unmerged, awaiting the owner's PR):**
-- **P1 — session-expiry dead page.** After a mid-session token refresh
-  failed, `clearAuthTokens()` wiped the tokens and dispatched a `window`
-  `auth:logout` event that NOTHING ever listened to (born incomplete in the
-  original token-refresh commit — never orphaned by a refactor), so React
-  kept the authenticated `me`, the whole UI stayed rendered, and every
-  subsequent request silently 401'd: a frozen page recoverable only by a full
-  reload. Fixed at the auth seam, not the call site: removed the dead event;
-  `api/client.ts` now calls a registered `onSessionExpired` handler exactly
-  when a 401 cannot be recovered by a refresh; `AuthContext` registers it
-  (once, cleaned up on unmount), clears `me` + the auth header, and flags
-  `sessionExpired`, so the existing `ProtectedRoute` / role guards send the
-  user to `/login`, where the notice explains why. A SUCCESSFUL refresh still
-  transparently retries and does NOT log out (that path is untouched);
-  already-on-`/login` cannot loop (no guard there navigates away).
-- **Labels Delete dialog never opened (Sprint 128 defect).**
-  `CustomerLabelsPage` rendered `ConfirmDialog` conditionally and never
-  called `.open()` — it is imperative (`showModal()` via a ref), so Delete
-  did nothing. Fixed with the standard `useRef<ConfirmDialogHandle>` +
-  `.open()` pattern. Audited every `ConfirmDialog` / native-`<dialog>` site
-  added in Sprints 125-128: this was the ONLY broken one (DocumentsExplorer
-  uses the ref+open pattern; DocumentsDialogs deliberately avoids native
-  `<dialog>`).
-- **Relabel save gave no feedback (Sprint 128 defect).** The EW-detail
-  relabel card now shows a success toast, the way the actual-hours save does.
-- **"CONCEPT (issued, unsent)" leaked an English dev string into the Dutch UI
-  — and meant the opposite ("concept" is Dutch for DRAFT).** Removed from the
-  wire: `labels_locked_invoice` returns the invoice NUMBER or `null`; the
-  relabel 400 `detail` no longer embeds it; the frontend picks the wording
-  (number -> "Vergrendeld door factuur {{number}}"; null -> an issued-but-not-
-  yet-sent phrase, no "concept"), nl+en lockstep. Sprint 127.2 tests updated
-  (issued-unsent -> null; the 400 detail asserts no "concept").
-- **Permissions matrix half-rendered the `documents` group (Sprint 126
-  defect).** Three renderers iterated a hardcoded
-  `["tickets","extra_work","users"]` literal TypeScript could not check, so
-  the matrix showed a headerless 17th column and — worse, FUNCTIONAL — the
-  per-user override editor dropped `customer.documents.manage` entirely (it
-  could only be reached via the company-wide policy toggle, never per user).
-  Fixed the CLASS: `permissionKeyLabels.ts` now exports one ordered
-  `PERMISSION_GROUPS` constant DERIVED from `PERMISSION_KEY_ROWS`, and all
-  three renderers iterate it — a fifth group can no longer skip a renderer.
-  Grepped for other hardcoded group/key lists: the three group-list sites were
-  the ONLY broken ones (the key lists in `effectiveResolver.ts` /
-  `PolicyToggleGrid.tsx` already include documents). Also added the one i18n
-  key that was missing because its renderer never ran:
-  `customer_permissions.matrix.key_short.customer.documents.manage` (nl+en) —
-  key-header count is now 17 = `PERMISSION_KEY_ROWS.length`, and the group
-  colSpan total is 17 too (both derive from the same rows, so equal by
-  construction — see the self-review; no unit runner to assert it at runtime).
-- **Policy-toggle grid cosmetic.** The 5th toggle ("manage documents") sat
-  orphaned in a half-width column; a CSS `:last-child:nth-child(odd)` rule now
-  spans a lone last card full-width, leaving the even (4-card) and
-  single-column responsive cases untouched.
-FE gate green: tsc clean, ESLint **48** (baseline, no new violations), build
-OK. Backend 127.1 / 127.2 suites green (29 tests). **No automated test was
-added for the P1** — the frontend has no unit-test runner (CLAUDE.md §8;
-adding one needs owner sign-off) and the sanctioned e2e suite is
-nightly/manual; the fix is verified by code review + the gates, and the owed
-regression test is recorded in `## NEXT`.
-**Immediate next step:** the owner opens the PR for this branch.
+
+**Sprint 130 — Permissions page density fix.** Replaced the customer
+Permissions page's 17 per-key ✓/✗ matrix columns with one summary chip per
+permission group (`PermissionGroupChip.tsx`, new), derived from
+`PERMISSION_GROUPS` so a fifth group can't be skipped; removed the sticky
+frozen-pane CSS the 17-column grid needed and doesn't anymore; measured
+(not eyeballed) zero horizontal scroll at 1280px in both locales; fixed a
+`.visually-hidden` CSS-specificity bug the measurement pass surfaced. Full
+detail was here before Sprint 131 rewrote this section for the combined
+branch — see commit `06bca55` for the complete writeup.
+
+**Sprint 131 — Extra Work by Department report.** Reproduces the owner's
+father's reference "Extra Works by Department" PDF: Building -> Department
+-> Work Type, summary + numbered detail.
+- **`compute_extra_work_by_department`** (`backend/reports/dimensions.py`)
+  — one level deeper than Sprint 124's by-building report, reusing
+  `_resolve_extra_work_revenue_rows` + `_classify_extra_work` /
+  `_amounts_for_state` VERBATIM (same money-calculation-lives-in-one-place
+  guarantee). An EW with no department / work type lands in an explicit
+  untagged bucket (`department_id: null`) instead of being dropped — every
+  pre-Sprint-127 row is untagged today, and silently dropping them would
+  make the report disagree with the flat revenue total. Proven, not
+  asserted: 26 tests in
+  `reports/tests/test_sprint131_extra_work_by_department.py` (23 landed
+  first, 3 more closing the cross-tenant leak below), including a
+  sum-to-flat-total invariant test with untagged rows deliberately mixed
+  in with tagged ones across all four revenue states.
+- **"Completed At"** = the spawned ticket's `closed_at`, localized — the
+  SAME field `extra_work.billing.billing_month` already anchors on —
+  populated ONLY for `state == "earned"`. **"Week No"** = the ISO-8601 week
+  of that date, verified against the brief's own WK27/WK27 example (30-06
+  and 01-07 land in ISO week 27 in both 2025 and 2026 — checked
+  computationally, not assumed). Non-earned rows show neither but still
+  count toward every total.
+- **Endpoint + CSV + PDF** — `/api/reports/extra-work-by-department/`
+  (+ `export.csv` / `export.pdf`), same `IsRevenueReportConsumer` floor as
+  the sibling revenue reports (SA/CA/BM only). The PDF is **Dutch-only**
+  ("Meerwerk per afdeling" — matches this codebase's own established nl
+  term for "Extra Work" in `reports.json`, not a literal translation),
+  reusing the invoice/proposal PDFs' Dutch formatters
+  (`extra_work.proposal_pdf._fmt_money` / `_fitted_cell`) rather than this
+  module's own English `_draw_table`. Summary section (overall total, then
+  per building a bracketing top+bottom total with department/work-type
+  rows between), Detail section (one page per building, numbered
+  Title/Week/Completed-at/Excl.-BTW listing, subtotal ladder). **Caught
+  live**: the shared `_ReportPDF` footer prints English "Page N" — added a
+  `_DeptReportPDF` subclass overriding just the footer to Dutch "Pagina N"
+  so the one Dutch PDF in the module doesn't leak English chrome. **Caught
+  by the self-review's own "400 works, one department" question**: a work
+  type with enough rows to outrun one page landed bare numbered rows on
+  the continuation page with no column header and no department/work-type
+  context — a reader who opened straight to that page couldn't tell what
+  they were looking at. Fixed with `fpdf2`'s `will_page_break(6)` checked
+  BEFORE each row (not after, which would draw the header below the row
+  it belongs above): a `"{building} — {dept} — {work type} (vervolg)"`
+  line + the repeated column header lead every continuation page. Verified
+  two ways — a synthetic 400-row PDF built directly against the export
+  function (11 pages, 9 "(vervolg)" markers, 10 header repeats, all 400
+  row numbers present exactly once, `pypdf`-extracted) and a permanent
+  regression test through the real endpoint with 50 rows
+  (`ExtraWorkByDepartmentPDFPaginationTests`, 23rd test in the module).
+- **Cross-tenant name leak, found in review, fixed same branch (H-1/H-2).**
+  The `?department=` / `?work_type=` scope echo did an UNSCOPED lookup by
+  id — the row filter already correctly returned zero rows for a foreign
+  tenant's label, but the echoed `department_name` / `work_type_name`
+  resolved and returned that OTHER customer's real label name regardless
+  of the actor's own scope, verified live against real cross-company demo
+  data before the fix landed. Closed with `_scoped_label_name`, reusing
+  the SAME `_customer_in_scope` check `_resolve_customer` already uses —
+  not a new parallel invariant. **Chose null-name over 403** for an
+  out-of-scope id (not a hard denial): the row-level filter already
+  treats it as "matches nothing," so the echo agrees rather than
+  diverging into a response that would tell the caller the id exists (a
+  403 is an enumeration oracle a silent `null` is not); the `customer`
+  param keeps its existing 403 because it is scope-WIDENING (it selects
+  what the whole report covers), a different kind of parameter than a
+  narrowing filter within an already-resolved scope. Three new tests
+  (24th–26th in the module, bringing it to 26): the leak is closed for
+  both params for an out-of-scope `COMPANY_ADMIN`, and a SUPER_ADMIN
+  sanity test proves the
+  fix didn't overtighten legitimate global access. Re-verified live too
+  (a real cross-company department, probed as both an unrelated
+  `COMPANY_ADMIN` — `department_name: null` — and SUPER_ADMIN — the real
+  name — probe data deleted after).
+- **Not verified against the actual reference PDF** — it was not in the
+  repo (asked for per the brief's own instruction; not supplied). Built
+  from the brief's detailed written description instead. Structural
+  choices that are this renderer's interpretation, not a confirmed match:
+  numbering restarts per BUILDING (not per department/work-type); a
+  building's total prints at both the top AND bottom of its summary block;
+  "Excl. VAT" renders the `subtotal` field. **Needs the owner's side-by-
+  side check against the real PDF before being considered pixel-matched.**
+- **Frontend** — `ExtraWorkByDepartmentTree.tsx` (new,
+  `pages/reports/charts/`), a sibling of Sprint 124's
+  `ExtraWorkRevenueByBuildingChart` on the customer Reports tab: same
+  card shell, same filters, same `ExportButtons` wiring, a native
+  `<details>/<summary>` tree instead of a bar chart. Renders SUMMARY rows
+  only (count + total per building/department/work-type) — never the
+  individual EW rows the JSON also carries; a busy customer's work-type
+  bucket can hold hundreds of rows, and CLAUDE.md #8 (no unbounded list
+  from a server collection) applies to the tree the same way it applies to
+  the CSV/PDF's numbered listing being the right place for that. The
+  top-level building list is additionally wrapped in `BoundedList`. nl+en
+  i18n lockstep (`reports.json`, `ew_by_department_*` keys); "Meerwerk"
+  house style, not "Extra Werk" — matches the sibling by-building keys
+  already in that bundle.
+- **Verified live against the dev stack, not just the test suite**: built
+  `dist/`, served via `vite preview`, tagged two real seeded EW rows with a
+  temporary Department + Work Type (reverted after), drove the actual
+  Reports tab in a real browser — confirmed the tagged AND untagged
+  rendering paths, clicked the real Export CSV / Export PDF buttons
+  end-to-end, and extracted the downloaded PDF's text via `pypdf` to
+  confirm the Dutch summary/detail content and money formatting render
+  correctly (this is what surfaced the "Page N" footer bug above). All
+  temporary demo-data changes (the two labels, the two EW tags) reverted
+  after.
+FE gate green: tsc clean, ESLint **48** (baseline, no new violations),
+build OK. Backend: targeted `reports` app suite green (212 tests, OK).
+
+**Sprint 132 — Invoice grouping by department + work type (closes the
+branch).** Reproduces the owner's father's reference tool's finer grouping:
+Customer + Building + Department + Work Type, one level past Sprint 124's
+PER_BUILDING.
+- **New granularity** `Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_
+  WORK_TYPE` (`customers/models.py`) — widened `invoice_granularity_default`
+  16 -> 40 chars to fit the new 33-char value (`fields.E009` caught this at
+  `makemigrations --dry-run`, not at review). **`Invoice` gains nullable,
+  PROTECT `department`/`work_type` FKs** (`invoicing/models.py`), additive
+  migrations (`customers/migrations/0016_...`,
+  `invoicing/migrations/0004_...`), applied to the dev DB.
+- **Grouping** (`invoicing/services.py`) — the existing PER_BUILDING branch
+  is an untouched `dict[int, list]` keyed on `ew.building_id`; the new
+  branch is a sibling `dict[tuple[int, int | None, int | None], list]`
+  keyed on `(building_id, department_id, work_type_id)`, sorted with a
+  `None -> -1` sentinel so an untagged group sorts first within its
+  building rather than raising on a `None`/`int` comparison. **Untagged EW
+  is never dropped or folded** — it lands in its own `(building, None,
+  None)` invoice, the same explicit-untagged-bucket pattern Sprint 131 used
+  for the by-department report.
+- **The Sprint 127.2 lock interaction (checked, not assumed — brief §5's
+  own instruction).** Walked the real sequence live against the dev
+  backend: generate a draft at the new granularity -> relabel one of its
+  claimed EW to a different department/work type (still allowed; the lock
+  only bites once ISSUED) -> the invoice's own `department`/`work_type`
+  went stale relative to its own line, confirmed both live and in
+  `IssueResyncsGroupLabelsTests`. **Fixed with
+  `_resync_invoice_group_labels`** (`invoicing/state_machine.py`), called
+  inside `issue_invoice` immediately before the status flips to ISSUED (same
+  atomic write): re-reads the claimed EWs' current department/work_type,
+  keeps the invoice's stored value only if every line still agrees, nulls
+  the axis on disagreement — mirrors the existing "freeze what's true right
+  now" pattern `recompute_invoice_totals` already uses for money, and does
+  NOT register a second `*StatusHistory` row (H-11 — this isn't a workflow
+  transition, just the invoice's own denormalized fields catching up before
+  they freeze). `reverse_invoice`'s counter-invoice mirrors the original's
+  (already-resynced) `department_id`/`work_type_id`. A CUSTOMER/PER_BUILDING
+  invoice never gains a label retroactively — the resync only touches
+  invoices that already claimed one.
+- **Label** — `"<department> - <work type>"`, composed at RENDER time from
+  the two FK names, never stored pre-joined: `InvoiceSerializer` /
+  `CustomerInvoiceSerializer` (`department_name`/`work_type_name`
+  `SerializerMethodField`s), `invoice_pdf.py::_group_label` (PDF row
+  omitted entirely — not shown blank — when neither is set), frontend
+  `formatInvoiceGroupLabel` (`lib/intl.ts`) shared by `FacturenPage`'s new
+  column and `InvoiceDetailPage`'s new row. All four shapes (both / dept-
+  only / work-type-only / neither) covered in `LabelRenderingTests`,
+  including a `pypdf`-extracted PDF-text assertion.
+- **Tests** — new
+  `invoicing/tests/test_sprint132_department_work_type_granularity.py`, 18
+  tests, everything built through `generate_draft_invoices` /
+  `issue_invoice` / `reverse_invoice` / `delete_draft_invoice`, never by
+  hand-setting `status`. Full `invoicing` suite (192 tests: 174 pre-existing
+  + 18 new) green — zero regressions in CUSTOMER/PER_BUILDING behaviour.
+  `customers` suite (430 tests) also re-run in full as a defensive check on
+  the `invoice_granularity_default` width change — OK, zero regressions.
+- **Verified live against the dev stack** (not just tests): generated a
+  real draft at the new granularity via the actual `/api/invoices/
+  generate/` endpoint, confirmed the Facturen list's new column and the
+  invoice-detail page's new row render correctly, then reproduced the §5
+  staleness sequence end-to-end against real data (relabel a real EW while
+  the invoice was still DRAFT, confirmed the invoice still showed the OLD
+  label, called the real `/issue/` endpoint, confirmed the label updated) —
+  a live, not just unit-tested, proof the resync fix works. All temporary
+  demo data reverted after; PROTECT correctly blocked hard-deleting a
+  still-referenced label until it was soft-retired instead
+  (`is_active: false`), itself a live confirmation the FK and the resync
+  fix both work as designed.
+- **Self-review: invoice-count explosion.** A dense customer (e.g. 3
+  buildings x 5 departments x 5 work types, every combination active in
+  the period) hits 75 invoices/month at this granularity, plus one untagged
+  invoice per building with any unlabelled EW. In practice the count is
+  bounded by how many DISTINCT `(building, department, work_type)` triples
+  actually have unbilled EW that period, not the full cartesian product —
+  a customer with narrow, repeated tagging sees far fewer. **What the
+  reference tool does about this is unverified** — it was not made
+  available to this sprint (the same gap Sprint 131 hit with the reference
+  PDF), so there is no evidence either way on whether it caps, warns, or
+  also produces 75 invoices unmodified. **Recommendation, not built this
+  sprint** (out of scope for the brief's §2-§4): warn the owner in
+  `CustomerFacturatieSection`'s granularity selector before switching a
+  customer to this option, ideally with a live preview count against that
+  customer's actual unbilled EW rather than a generic warning — flagged
+  here rather than silently added, per CLAUDE.md's "don't build beyond
+  what the task requires."
+- **Self-review: are the two FKs on `Invoice` actually needed, or
+  recoverable from lines?** Kept them, deliberately. Once an invoice is
+  ISSUED/SENT, the Sprint 127.2 lock freezes every claimed EW's
+  department/work_type, and the resync above forces the stored FK to agree
+  with the lines at that exact moment — so for the entire immutable
+  majority of an invoice's life, "read the FK" and "derive from lines" are
+  provably the same answer, and the FK is an O(1) `select_related` read
+  instead of an O(lines) join-and-reduce on every list/PDF render. The FK
+  also follows `Invoice.building`'s own precedent exactly (nullable,
+  PROTECT, set from the grouping key at generation) — dropping it would be
+  the inconsistent choice, not the consistent one. Going fully derived
+  would not remove the "lines disagree" problem the resync solves, only
+  move it from "resolved once, at freeze time, and cached" to "re-resolved
+  on every single render, forever, including for old invoices whose answer
+  can never change again."
+- **Self-review: §1-§6 vs the code.** No contradictions found. `services.py`'s
+  pre-Sprint-132 PER_BUILDING branch was exactly the "dict keyed on
+  `ew.building_id`" the brief described; `issued_invoice_locking_labels`
+  exists exactly where and as named; `invoice_granularity_default` is
+  exposed in `CustomerFacturatieSection.tsx` as the brief expected. Recon
+  matched the code on every point checked.
+FE gate green: tsc clean, ESLint **48** (baseline, no new violations),
+build OK.
+
+**Branch complete.** 130 + 131 + 132 are all green on
+`fix/sprint-130-permissions-density`, pushed to origin. No further sprint
+is queued on this branch — the owner opens ONE PR covering all three; CC
+does not open PRs.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production
@@ -163,18 +346,21 @@ item has moved to `## SHIPPED` or been resolved below instead.
    the Department + Work Type features are built, not a later styling pass.
 6. **Department + Work Type** — designed in person with Ramazan and father
    (see #3). The two per-customer label lists + Extra Work tagging +
-   filtering are **in flight now** (backend Sprint 127, frontend Sprint 128,
-   one branch/PR — see `## NOW`). What REMAINS queued here is **Sprint C: the
-   grouped report + invoice grouping** that consume the labels (group Extra
-   Work / invoices by Customer + Building + Department + Work Type) — a
-   deliberate follow-up, **NOT dropped**; it is gated on the 127/128 tagging
-   existing first. **Reconciliation guarantee C can rely on (Sprint 127.2):**
-   labels LOCK the moment an EW's work lands on an ISSUED invoice, precisely
-   so the grouped report and issued invoices never disagree; the only way to
-   change a locked label is the correction flow **credit → relabel →
-   re-invoice**. So C can trust that any EW on an issued invoice carries the
-   department / work type it was invoiced under. Naming clarification from
-   the reference implementation:
+   filtering shipped (backend Sprint 127, frontend Sprint 128). Of the
+   two **Sprint C** follow-ups this gated on that tagging (group Extra
+   Work / invoices by Customer + Building + Department + Work Type), the
+   **grouped report** half is done — Sprint 131, on the combined
+   130/131/132 branch (see `## NOW`): `compute_extra_work_by_department`,
+   summary + numbered-detail CSV/PDF export, a customer Reports-tab tree.
+   **REMAINING here: invoice grouping** — grouping invoices themselves by
+   Department / Work Type, not yet built. **Reconciliation guarantee it
+   can rely on (Sprint 127.2):** labels LOCK the moment an EW's work
+   lands on an ISSUED invoice, precisely so the grouped report and issued
+   invoices never disagree; the only way to change a locked label is the
+   correction flow **credit → relabel → re-invoice**. So invoice
+   grouping can trust that any EW on an issued invoice carries the
+   department / work type it was invoiced under. Naming clarification
+   from the reference implementation:
    **"Event" was never a separate feature** — it is one VALUE in B
    Amsterdam's **Department** list (Algemeen / Event / Member), and the real
    second field is **Work Type** (Eindschoonmaak / Opleverschoonmaak / Bouw
@@ -305,6 +491,29 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#124** (`765e94f`) — Sprint 129, session-expiry P1 + an owner-reported UI
+  defect cluster · **P1**: a mid-session token-refresh failure used to wipe
+  tokens and dispatch a dead `auth:logout` `window` event nothing listened
+  for, leaving React still rendering the authenticated `me` while every
+  subsequent request silently 401'd (a frozen page, recoverable only by a
+  full reload). Fixed at the auth seam: the dead event is gone;
+  `api/client.ts` calls a registered `onSessionExpired` handler exactly when
+  a 401 cannot be recovered by a refresh; `AuthContext` clears `me` + the
+  auth header and flags `sessionExpired`, so the existing route/role guards
+  send the user to `/login` with a notice. A successful refresh still
+  transparently retries (no logout); already-on-`/login` cannot loop. Also
+  in this branch: the Customer Labels `ConfirmDialog` never called `.open()`
+  (Delete did nothing) — fixed with the standard `useRef` + `.open()`
+  pattern; the EW-detail relabel card now shows a success toast; the
+  "CONCEPT (issued, unsent)" English-in-Dutch string (meaning the opposite
+  of "concept") is gone from the wire — `labels_locked_invoice` returns the
+  invoice number or `null`, nl+en lockstep; and a policy-toggle-grid
+  cosmetic (the lone 5th "manage documents" toggle now spans full width via
+  `:last-child:nth-child(odd)`). FE gate green (tsc, ESLint **48**, build);
+  backend 127.1/127.2 suites green (29 tests). No automated test for the P1
+  — no frontend unit-test runner exists yet — verified by review + the
+  gates; the owed regression test is tracked in `## NEXT` (Frontend Testing
+  Sprint).
 - **#123** (`36641fd`) — Sprints 127 / 127.1 / 127.2 / 128, Department +
   Work Type end to end · two per-customer Extra Work label lists
   (`customers.Department` + `customers.WorkType` — one abstract base, two
