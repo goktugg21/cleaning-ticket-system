@@ -52,7 +52,10 @@ from .models import (
     ExtraWorkStatusHistory,
 )
 from .scoping import scope_extra_work_for
-from .label_validation import validate_labels_for_customer
+from .label_validation import (
+    issued_invoice_locking_labels,
+    validate_labels_for_customer,
+)
 from .serializers import (
     ActualHoursEntrySerializer,
     ExtraWorkLabelsSerializer,
@@ -423,6 +426,29 @@ class ExtraWorkRequestViewSet(
                     "detail": "Provide department and/or work_type to set or "
                     "clear.",
                     "code": "no_labels_provided",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Sprint 127.2 — once this EW's work sits on an ISSUED invoice its
+        # labels are immutable (set OR clear), so the Department Report and
+        # issued invoices stay reconcilable. Correcting a mislabel means
+        # credit the invoice, relabel, re-invoice. The message names the
+        # document to credit. NB: keyed on the live issued-invoice link, NOT
+        # `is_invoiced` (that claim flag is set at DRAFT gen — the draft
+        # window stays open).
+        locking_invoice = issued_invoice_locking_labels(extra_work)
+        if locking_invoice is not None:
+            invoice_label = locking_invoice.number or "CONCEPT (issued, unsent)"
+            return Response(
+                {
+                    "detail": (
+                        f"This Extra Work is on issued invoice "
+                        f"{invoice_label}; its department / work type are "
+                        f"locked. Credit that invoice, relabel, then "
+                        f"re-invoice."
+                    ),
+                    "code": "labels_locked_by_invoice",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )

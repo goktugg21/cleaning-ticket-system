@@ -247,7 +247,12 @@ class RelabelBehaviourTests(_RelabelFixture):
         ew.refresh_from_db()
         self.assertIsNone(ew.department_id)
 
-    def test_relabel_after_invoiced_is_allowed(self):
+    def test_claim_flag_alone_does_not_lock_labels(self):
+        # Sprint 127.2 regression for the §1 trap: `is_invoiced` is the DRAFT
+        # claim flag (set at draft generation), NOT "issued". The lock keys
+        # on a live ISSUED/SENT invoice line, so is_invoiced=True with no such
+        # invoice must still relabel. (The invoice-driven lock is covered end
+        # to end in test_sprint127_2_label_lock.py.)
         ew = self._bare_ew()
         ew.is_invoiced = True
         ew.save(update_fields=["is_invoiced"])

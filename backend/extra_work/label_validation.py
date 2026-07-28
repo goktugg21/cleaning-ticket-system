@@ -48,3 +48,46 @@ def validate_labels_for_customer(customer, *, department=None, work_type=None):
         ]
     if errors:
         raise serializers.ValidationError(errors)
+
+
+def issued_invoice_locking_labels(extra_work):
+    """Sprint 127.2 — return the live, ISSUED/SENT invoice whose line locks
+    this Extra Work's labels, or None if the labels are free to change.
+
+    Owner's rule: once an EW's work sits on an ISSUED invoice, `department`
+    and `work_type` are immutable; correcting a mislabel means credit the
+    invoice, relabel, re-invoice. This keeps the Department Report and the
+    issued invoices reconcilable at all times.
+
+    An EW is locked iff some `InvoiceLine` references it whose invoice is:
+      * ISSUED or SENT (a DRAFT does NOT lock — the owner keeps the draft
+        window open for corrections; the draft is regenerable and deleting
+        it releases the claim),
+      * not soft-deleted (`deleted_at IS NULL`), and
+      * not reversed (`reversed_by` empty). Crediting/reversing the invoice
+        is precisely what unlocks the EW — that is the correction flow.
+
+    Deliberately NOT keyed on `ExtraWorkRequest.is_invoiced`: that claim flag
+    is set at DRAFT generation (invoicing/services.py) and released when the
+    draft is deleted, so it would freeze labels during the very window the
+    owner wants open. This mirrors the `live_claim` subquery shape in
+    `invoicing/selectors.py`, narrowed to ISSUED/SENT. A reversal's own
+    counter-lines carry `extra_work=NULL`, so a reversal never self-locks.
+
+    The import is function-local ON PURPOSE: `invoicing` imports `extra_work`
+    at module scope, so a top-level `from invoicing...` here would be an
+    import cycle.
+    """
+    from invoicing.models import Invoice, InvoiceLine
+
+    line = (
+        InvoiceLine.objects.filter(
+            extra_work=extra_work,
+            invoice__status__in=(Invoice.Status.ISSUED, Invoice.Status.SENT),
+            invoice__deleted_at__isnull=True,
+            invoice__reversed_by__isnull=True,
+        )
+        .select_related("invoice")
+        .first()
+    )
+    return line.invoice if line is not None else None

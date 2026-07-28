@@ -95,14 +95,29 @@ commit, per the "a PR cannot cite its own number" rule).
   fields only — the ViewSet still has no update mixin) with the `actual-hours`
   permission shape (`PROVIDER_ROLES`; SUPER_ADMIN global, CA / BM need
   building scope; customer 403, cross-tenant 404 through the EW scope helper).
-  Relabelling an already-invoiced EW is ALLOWED (the invoice is issued and
-  unaffected; the audit row records who changed it). The same-customer
+  (Whether an already-invoiced EW may be relabelled is settled by Sprint
+  127.2 below — it locks once the invoice is ISSUED.) The same-customer
   invariant is now a shared validator called by BOTH the create serializer
   and this endpoint, so the two cannot drift. The EW audit handler's
   tracked-field list gains `department_id` / `work_type_id`, so a relabel
   lands as one attributable UPDATE row. Picker READ widened to
   BUILDING_MANAGER (they hold the relabel action, so their dropdown must
   populate); STAFF still excluded. Targeted tests green.
+- **Sprint 127.2 — lock labels once invoiced (gap-closer inside 127).** Once
+  an EW's work sits on an ISSUED invoice, `department` / `work_type` become
+  immutable, so the Department Report and issued invoices stay reconcilable;
+  correcting a mislabel is credit → relabel → re-invoice. The relabel action
+  rejects with a coded 400 `labels_locked_by_invoice` (message names the
+  document to credit). The lock keys on a live issued-invoice line — an
+  `InvoiceLine` whose `Invoice` is ISSUED/SENT, not soft-deleted, and not
+  reversed — NOT on `ExtraWorkRequest.is_invoiced` (that claim flag is set at
+  DRAFT generation, so a DRAFT stays open for corrections; the trap is
+  regression-tested). A reversal releases the lock (its counter-lines carry
+  `extra_work=NULL`); double reversal and re-invoice-after-reversal both
+  behave. Helper next to the same-customer invariant in
+  `extra_work/label_validation.py` (function-local `invoicing` import — the
+  reverse dependency is a cycle). Targeted tests green (built through the
+  real invoicing services, not hand-set status).
 - **Sprint 128 — Department + Work Type (frontend).** Not started (next
   prompt); rides this same branch and PR.
 Deliberately NOT added to `## SHIPPED` yet — unmerged, no PR number.
@@ -154,7 +169,13 @@ item has moved to `## SHIPPED` or been resolved below instead.
    grouped report + invoice grouping** that consume the labels (group Extra
    Work / invoices by Customer + Building + Department + Work Type) — a
    deliberate follow-up, **NOT dropped**; it is gated on the 127/128 tagging
-   existing first. Naming clarification from the reference implementation:
+   existing first. **Reconciliation guarantee C can rely on (Sprint 127.2):**
+   labels LOCK the moment an EW's work lands on an ISSUED invoice, precisely
+   so the grouped report and issued invoices never disagree; the only way to
+   change a locked label is the correction flow **credit → relabel →
+   re-invoice**. So C can trust that any EW on an issued invoice carries the
+   department / work type it was invoiced under. Naming clarification from
+   the reference implementation:
    **"Event" was never a separate feature** — it is one VALUE in B
    Amsterdam's **Department** list (Algemeen / Event / Member), and the real
    second field is **Work Type** (Eindschoonmaak / Opleverschoonmaak / Bouw
