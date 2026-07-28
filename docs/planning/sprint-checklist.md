@@ -55,13 +55,14 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-127-department-worktype` — carries **TWO** sprints,
-127 (Department + Work Type **backend**) and 128 (the **frontend**), and gets
-**ONE** PR at the end. Sprint 127 is NOT complete-and-mergeable on its own.
+**Branch:** `feat/sprint-127-department-worktype` — **COMPLETE**. It carries
+Department + Work Type end to end: **127** (backend) + **127.1 / 127.2**
+(gap-closers, still inside 127) + **128** (frontend). It gets **ONE** PR for
+all of it; **nothing further is queued on this branch**.
 **Last shipped PR on `main`: #122** — Sprint 126, the customer Documents
 **UI** (see `## SHIPPED`; its line was appended by THIS branch's first
 commit, per the "a PR cannot cite its own number" rule).
-**In flight on this branch (unmerged, awaiting the owner's PR):**
+**On this branch (unmerged, awaiting the owner's single PR):**
 - **Sprint 127 — Department + Work Type (backend).** Two per-customer label
   lists — `customers.Department` and `customers.WorkType` (one abstract base,
   two concrete tables) — that tag Extra Work for filtering / reporting /
@@ -118,11 +119,32 @@ commit, per the "a PR cannot cite its own number" rule).
   `extra_work/label_validation.py` (function-local `invoicing` import — the
   reverse dependency is a cycle). Targeted tests green (built through the
   real invoicing services, not hand-set status).
-- **Sprint 128 — Department + Work Type (frontend).** Not started (next
-  prompt); rides this same branch and PR.
+- **Sprint 128 — Department + Work Type (frontend) + a §0 backend rider.**
+  The UI for everything above. **§0 rider:** the EW **detail** serializer now
+  exposes `labels_locked` + `labels_locked_invoice` (reusing
+  `issued_invoice_locking_labels`; detail-only, one query — the list
+  serializer omits it to avoid an N+1) so the relabel UI can render
+  read-only-with-reason instead of a control that would 400. **Frontend:**
+  (1) a management page `/admin/customers/:id/labels` — ONE page, two CRUD
+  sections (Afdelingen + Werktypes: add / rename / edit description /
+  archive-unarchive / delete-refused-with-archive-hint), provider write,
+  BUILDING_MANAGER read-only (route `CustomerReadRoute`; write gated on
+  `isProviderAdmin`), one BM-visible sidebar entry; (2) two OPTIONAL
+  create-form pickers, per-customer, reloaded on customer change and a stale
+  selection neutralised by derivation (empty list → disabled + "geen …
+  ingesteld" hint); (3) an EW-detail relabel card (two dropdowns + Save, or
+  read-only-with-reason naming the invoice when `labels_locked`, also
+  surfacing `labels_locked_by_invoice` on a between-tabs save race); (4) an
+  EW-list four-filter cascade Customer → Building → Department → Work Type,
+  all server-side, the last three disabled until a customer is chosen and
+  cleared on change. **Drift corrected:** the EW list page had NO customer /
+  building filters (the prompt assumed they existed), so the whole cascade is
+  new, not just the two label filters. nl + en i18n in strict lockstep. FE
+  gate green: tsc clean, ESLint **48** (baseline, no new violations), build
+  OK.
 Deliberately NOT added to `## SHIPPED` yet — unmerged, no PR number.
-**Immediate next step:** Sprint 128 (frontend), then the owner opens the
-single PR for this branch.
+**Immediate next step:** the owner opens the single PR for this branch (all
+of 127 / 127.1 / 127.2 / 128).
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production

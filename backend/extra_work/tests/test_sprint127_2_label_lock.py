@@ -174,3 +174,25 @@ class LabelLockTests(InvoicingFixture):
         self.assertEqual(resp.status_code, 200, resp.data)
         ew.refresh_from_db()
         self.assertEqual(ew.department_id, self.dept.id)
+
+    # -- Sprint 128 §0: the detail serializer exposes the lock ----------
+    def _detail(self, ew):
+        client = APIClient()
+        client.force_authenticate(user=self.admin)
+        return client.get(f"/api/extra-work/{ew.id}/")
+
+    def test_detail_reports_unlocked_for_a_drafted_ew(self):
+        ew = self._earned_ew()
+        self._draft()
+        resp = self._detail(ew)
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.data["labels_locked"])
+        self.assertIsNone(resp.data["labels_locked_invoice"])
+
+    def test_detail_reports_locked_and_names_invoice_for_issued_ew(self):
+        ew = self._earned_ew()
+        inv = send_invoice(self.admin, issue_invoice(self.admin, self._draft()))
+        resp = self._detail(ew)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.data["labels_locked"])
+        self.assertEqual(resp.data["labels_locked_invoice"], inv.number)

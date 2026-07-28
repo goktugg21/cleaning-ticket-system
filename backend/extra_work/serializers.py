@@ -54,7 +54,10 @@ from .models import (
     ProposalTimelineEventType,
     Service,
 )
-from .label_validation import validate_labels_for_customer
+from .label_validation import (
+    issued_invoice_locking_labels,
+    validate_labels_for_customer,
+)
 from .pricing import resolve_price
 from .proposal_state_machine import allowed_next_proposal_statuses
 from .state_machine import allowed_next_statuses
@@ -634,6 +637,13 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     # STAFF role; the resolver-side helpers return False for STAFF
     # anyway, but we document the precondition explicitly.
     actions = serializers.SerializerMethodField()
+    # Sprint 128 §0 — whether department / work_type are locked by an issued
+    # invoice, so the relabel UI renders read-only-with-reason instead of an
+    # editable control that would 400 on save. DETAIL ONLY (single-object
+    # fetch = one query); the list serializer deliberately omits it to avoid
+    # an N+1 across every row (Sprint 120's whole reason for existing).
+    labels_locked = serializers.SerializerMethodField()
+    labels_locked_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = ExtraWorkRequest
@@ -699,6 +709,8 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "pricing_line_items",
             "allowed_next_statuses",
             "actions",
+            "labels_locked",
+            "labels_locked_invoice",
         ]
         read_only_fields = [
             "id",
@@ -776,6 +788,27 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
 
     def get_allowed_next_statuses(self, obj):
         return self._resolve_allowed_next_statuses(obj)
+
+    def _locking_invoice(self, obj):
+        # Sprint 128 §0 — resolve once per (serializer instance, EW) so the
+        # two label-lock fields share ONE query. `issued_invoice_locking_
+        # labels` is the SAME predicate the relabel endpoint enforces (reused,
+        # never re-derived).
+        cache = self.__dict__.setdefault("_locking_invoice_cache", {})
+        if obj.pk not in cache:
+            cache[obj.pk] = issued_invoice_locking_labels(obj)
+        return cache[obj.pk]
+
+    def get_labels_locked(self, obj):
+        return self._locking_invoice(obj) is not None
+
+    def get_labels_locked_invoice(self, obj):
+        invoice = self._locking_invoice(obj)
+        if invoice is None:
+            return None
+        # An ISSUED-but-unsent invoice has no number yet (assigned at SEND);
+        # mirror the string the relabel 400 uses so the UI can show the same.
+        return invoice.number or "CONCEPT (issued, unsent)"
 
     def get_actions(self, obj):
         """Per-current-user, per-EW capability block.

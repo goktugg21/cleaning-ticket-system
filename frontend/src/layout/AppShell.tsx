@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Sparkles,
   Tag,
+  Tags,
   Ticket,
   UserCog,
   Users,
@@ -369,6 +370,19 @@ export function AppShell({ children }: AppShellProps) {
                   </NavLink>
                 </>
               )}
+              {/* Sprint 128 — Extra Work label management (Afdelingen +
+                  Werktypes). OUTSIDE the !isBuildingManager block: BM reads it
+                  read-only (they hold the relabel action), SA/CA manage. */}
+              <NavLink
+                to={`/admin/customers/${sidebar.customerId}/labels`}
+                className={navClass}
+                data-testid="sidebar-customer-labels"
+              >
+                <span className="nav-icon">
+                  <Tags size={16} strokeWidth={2} />
+                </span>
+                {t("nav.customer_submenu.labels")}
+              </NavLink>
               <NavLink
                 to={`/admin/customers/${sidebar.customerId}/contacts`}
                 className={navClass}

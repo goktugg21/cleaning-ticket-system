@@ -20,10 +20,12 @@ import { useTranslation } from "react-i18next";
 
 import { listCustomerPrices, listServices } from "../api/admin";
 import { api, getApiError } from "../api/client";
+import { listLabels } from "../api/customerLabels";
 import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
 import type {
   Building,
   Customer,
+  CustomerLabel,
   CustomerServicePrice,
   ExtraWorkCategory,
   ExtraWorkIntentErrorCode,
@@ -318,6 +320,17 @@ export function CreateExtraWorkPage({
     customerId: number;
     rows: CustomerServicePrice[];
   } | null>(null);
+  // Sprint 128 — the selected customer's active Department / Work Type lists
+  // for the two optional pickers. Tagged with customerId so a stale list from
+  // the previously chosen customer is never shown, and the selection is
+  // cleared on customer change so a stale id can never reach the payload.
+  const [labelLists, setLabelLists] = useState<{
+    customerId: number;
+    departments: CustomerLabel[];
+    workTypes: CustomerLabel[];
+  } | null>(null);
+  const [departmentId, setDepartmentId] = useState("");
+  const [workTypeId, setWorkTypeId] = useState("");
   // Search filter for the agreed-prices dropdown (scales to long
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
@@ -453,6 +466,31 @@ export function CreateExtraWorkPage({
       }));
     }
   }, [filteredBuildings, form.building]);
+
+  // Sprint 128 — the label lists to OFFER right now, guarded inline (so TS
+  // narrows `labelLists` and a list fetched for a previously selected
+  // customer is never shown against the current one).
+  const currentDepartments =
+    labelLists && String(labelLists.customerId) === form.customer
+      ? labelLists.departments
+      : [];
+  const currentWorkTypes =
+    labelLists && String(labelLists.customerId) === form.customer
+      ? labelLists.workTypes
+      : [];
+  // Neutralise a stale selection (from a previously chosen customer) without
+  // a setState-in-effect: an id not in the current customer's active list
+  // collapses to "" for both the dropdown value and the payload.
+  const effectiveDepartmentId = currentDepartments.some(
+    (d) => String(d.id) === departmentId,
+  )
+    ? departmentId
+    : "";
+  const effectiveWorkTypeId = currentWorkTypes.some(
+    (w) => String(w.id) === workTypeId,
+  )
+    ? workTypeId
+    : "";
 
   // The cart is "previewable" once a building + customer are chosen and
   // every line carries a service, a positive quantity, and a date —
@@ -605,6 +643,34 @@ export function CreateExtraWorkPage({
       })
       .catch(() => {
         if (!cancelled) setCustomerPrices({ customerId, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.customer]);
+
+  // Sprint 128 — (re)load the per-customer Department / Work Type picker
+  // lists when the customer changes (only active labels). This effect is
+  // LOAD-ONLY (no synchronous setState — CLAUDE.md §3): a stale selection is
+  // neutralised by the `effectiveDepartmentId` / `effectiveWorkTypeId`
+  // derivations below (they collapse to "" unless the id belongs to the
+  // currently-loaded customer), so a department from a previously selected
+  // customer can never reach the dropdown value OR the payload.
+  useEffect(() => {
+    const customerId = form.customer ? Number(form.customer) : null;
+    if (!customerId) return;
+    let cancelled = false;
+    Promise.all([
+      listLabels(customerId, "department", { is_active: true }),
+      listLabels(customerId, "work_type", { is_active: true }),
+    ])
+      .then(([departments, workTypes]) => {
+        if (!cancelled) setLabelLists({ customerId, departments, workTypes });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLabelLists({ customerId, departments: [], workTypes: [] });
+        }
       });
     return () => {
       cancelled = true;
@@ -914,6 +980,14 @@ export function CreateExtraWorkPage({
           form.category === "OTHER" ? form.category_other_text.trim() : "",
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
+        // Sprint 128 — optional per-customer labels. `effective*` collapses a
+        // stale (foreign-customer) selection to "" so it can never reach here.
+        ...(effectiveDepartmentId
+          ? { department: Number(effectiveDepartmentId) }
+          : {}),
+        ...(effectiveWorkTypeId
+          ? { work_type: Number(effectiveWorkTypeId) }
+          : {}),
         // Send the validated intent (a member of the latest preview's
         // allowed_intents). Omitted when no fresh preview exists: the
         // backend then derives a safe default — identical to the
@@ -1200,6 +1274,62 @@ export function CreateExtraWorkPage({
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+            {/* Sprint 128 — optional per-customer labels. Empty first option
+                (they are optional); disabled with a hint when the chosen
+                customer has no labels of that kind (one real customer has
+                twelve departments and zero work types). */}
+            <div className="form-2col">
+              <div className="field">
+                <label className="field-label" htmlFor="ew-department">
+                  {t("create.field_department")}
+                </label>
+                <select
+                  id="ew-department"
+                  data-testid="extra-work-create-department"
+                  className="field-select"
+                  value={effectiveDepartmentId}
+                  onChange={(event) => setDepartmentId(event.target.value)}
+                  disabled={currentDepartments.length === 0}
+                >
+                  <option value="">{t("create.field_department_none")}</option>
+                  {currentDepartments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+                {form.customer && currentDepartments.length === 0 && (
+                  <span className="muted small">
+                    {t("create.field_department_empty")}
+                  </span>
+                )}
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="ew-work-type">
+                  {t("create.field_work_type")}
+                </label>
+                <select
+                  id="ew-work-type"
+                  data-testid="extra-work-create-work-type"
+                  className="field-select"
+                  value={effectiveWorkTypeId}
+                  onChange={(event) => setWorkTypeId(event.target.value)}
+                  disabled={currentWorkTypes.length === 0}
+                >
+                  <option value="">{t("create.field_work_type_none")}</option>
+                  {currentWorkTypes.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+                {form.customer && currentWorkTypes.length === 0 && (
+                  <span className="muted small">
+                    {t("create.field_work_type_empty")}
+                  </span>
+                )}
               </div>
             </div>
           </div>

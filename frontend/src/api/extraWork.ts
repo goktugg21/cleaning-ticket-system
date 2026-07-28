@@ -42,6 +42,10 @@ import type {
 export interface ListExtraWorkParams {
   customer?: number;
   building?: number;
+  // Sprint 127 — per-customer label filters (by id). Compose with
+  // customer + building (backend `ExtraWorkRequestFilter`).
+  department?: number;
+  work_type?: number;
   status?: ExtraWorkStatus;
   routing_decision?: "INSTANT" | "PROPOSAL";
   request_intent?: ExtraWorkRequestIntent;
@@ -140,6 +144,28 @@ export async function transitionExtraWork(
 ): Promise<ExtraWorkRequestDetail> {
   const response = await api.post<ExtraWorkRequestDetail>(
     `/extra-work/${id}/transition/`,
+    payload,
+  );
+  return response.data;
+}
+
+// Sprint 127.1/128 — provider relabel: set / clear department + work_type on
+// an existing EW. Omit a key to leave it unchanged; send `null` to clear it.
+// Provider roles only (403 `relabel_forbidden` otherwise); 400
+// `labels_locked_by_invoice` once the EW is on an ISSUED invoice;
+// `department_customer_mismatch` / `work_type_customer_mismatch` for a foreign
+// label.
+export interface RelabelPayload {
+  department?: number | null;
+  work_type?: number | null;
+}
+
+export async function relabelExtraWork(
+  id: number | string,
+  payload: RelabelPayload,
+): Promise<ExtraWorkRequestDetail> {
+  const response = await api.patch<ExtraWorkRequestDetail>(
+    `/extra-work/${id}/labels/`,
     payload,
   );
   return response.data;
