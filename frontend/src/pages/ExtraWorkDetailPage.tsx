@@ -454,6 +454,7 @@ function LabelsCard({
   onRefresh: () => void;
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
+  const { push: pushToast } = useToast();
   const [departments, setDepartments] = useState<CustomerLabel[]>([]);
   const [workTypes, setWorkTypes] = useState<CustomerLabel[]>([]);
   const [deptId, setDeptId] = useState(
@@ -516,6 +517,9 @@ function LabelsCard({
         work_type: wtId ? Number(wtId) : null,
       });
       onUpdated(updated);
+      // Sprint 129 §2b — the save was invisible before; confirm it the way
+      // the actual-hours save does.
+      pushToast({ variant: "success", title: t("detail.labels_saved") });
     } catch (err) {
       const code = labelErrorCode(err);
       setError(
@@ -553,9 +557,14 @@ function LabelsCard({
               <strong>{ew.work_type_name ?? t("detail.empty_dash")}</strong>
             </div>
             <div style={{ marginTop: 6 }}>
-              {t("detail.labels_locked_by", {
-                invoice: ew.labels_locked_invoice ?? "",
-              })}
+              {/* Sprint 129 §2b — the backend sends the NUMBER or null; the
+                  frontend owns the wording (no "CONCEPT" leak). Null = an
+                  issued-but-not-yet-sent invoice, which has no number. */}
+              {ew.labels_locked_invoice
+                ? t("detail.labels_locked_by", {
+                    number: ew.labels_locked_invoice,
+                  })
+                : t("detail.labels_locked_by_unsent")}
             </div>
             <div className="muted small" style={{ marginTop: 4 }}>
               {t("detail.labels_locked_howto")}

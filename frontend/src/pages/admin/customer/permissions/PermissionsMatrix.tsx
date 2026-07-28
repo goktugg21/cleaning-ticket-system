@@ -15,6 +15,7 @@ import { accessRoleLabelKey } from "../../../../lib/enumLabels";
 import { resolvePanelValue } from "./effectiveResolver";
 import {
   PERMISSION_GROUP_LABEL_KEY,
+  PERMISSION_GROUPS,
   PERMISSION_KEY_ROWS,
   type PermissionGroup,
   type PermissionKeyRow,
@@ -156,7 +157,7 @@ export function PermissionsMatrix(props: PermissionsMatrixProps) {
               >
                 {t("customer_permissions.matrix.col_role")}
               </th>
-              {(["tickets", "extra_work", "users"] as const).map((group) => (
+              {PERMISSION_GROUPS.map((group) => (
                 <th
                   key={group}
                   colSpan={groupedKeys[group].length}
@@ -174,7 +175,7 @@ export function PermissionsMatrix(props: PermissionsMatrixProps) {
                 frozen User | Actions | Role columns when needed —
                 the angle just shrinks how wide it has to be. */}
             <tr className="permissions-matrix-head-keys">
-              {(["tickets", "extra_work", "users"] as const).flatMap(
+              {PERMISSION_GROUPS.flatMap(
                 (group, groupIdx) =>
                   groupedKeys[group].map((row, rowIdx) => {
                     // Subtle vertical divider before the first column of

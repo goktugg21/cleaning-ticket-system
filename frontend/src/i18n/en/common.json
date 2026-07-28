@@ -1605,5 +1605,6 @@
   "labels.loading": "Loading…",
   "labels.error_name_required": "Name must not be blank.",
   "labels.error_name_conflict": "A label with this name already exists for this customer.",
-  "labels.error_in_use": "This label is still in use by extra work and cannot be deleted. Archive it instead."
+  "labels.error_in_use": "This label is still in use by extra work and cannot be deleted. Archive it instead.",
+  "customer_permissions.matrix.key_short.customer.documents.manage": "manage"
 }

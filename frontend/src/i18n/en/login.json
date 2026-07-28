@@ -48,5 +48,6 @@
   "demo_section_super": "Super admin (sees everything)",
   "demo_section_company_a": "Osius Demo — B Amsterdam (Company A)",
   "demo_section_company_b": "Bright Facilities — Rotterdam (Company B)",
-  "demo_super_scope": "Both companies"
+  "demo_super_scope": "Both companies",
+  "session_expired": "Your session has expired. Please sign in again."
 }

@@ -41,7 +41,26 @@ export function setAuthTokens(access: string, refresh?: string): void {
 export function clearAuthTokens(): void {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
-  window.dispatchEvent(new Event("auth:logout"));
+}
+
+// Sprint 129 — the axios layer (a module, not React) tells the React auth
+// layer when a request 401'd AND a token refresh could not recover it, so
+// `AuthContext` can clear `me` and route the user to /login instead of
+// leaving a dead, silently-401ing page. This replaces the `auth:logout`
+// window event, which shipped in the original token-refresh commit with a
+// dispatch but NO listener ever wired (never orphaned by a refactor — born
+// incomplete), so nothing reacted to a mid-session expiry. One handler,
+// registered by AuthContext on mount; `onSessionExpired` returns the
+// unsubscribe.
+let sessionExpiredHandler: (() => void) | null = null;
+
+export function onSessionExpired(handler: () => void): () => void {
+  sessionExpiredHandler = handler;
+  return () => {
+    if (sessionExpiredHandler === handler) {
+      sessionExpiredHandler = null;
+    }
+  };
 }
 
 export async function logoutRefreshToken(refresh: string): Promise<void> {
@@ -114,6 +133,11 @@ api.interceptors.response.use(
     const newAccess = await refreshAccessToken();
 
     if (!newAccess) {
+      // The session is dead and un-refreshable — notify the auth layer so it
+      // clears `me` and redirects to /login. On a SUCCESSFUL refresh
+      // (newAccess truthy) this is NOT reached, so a transparent retry never
+      // logs the user out.
+      sessionExpiredHandler?.();
       return Promise.reject(error);
     }
 

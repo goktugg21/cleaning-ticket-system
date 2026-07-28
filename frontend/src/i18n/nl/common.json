@@ -1605,5 +1605,6 @@
   "labels.loading": "Laden…",
   "labels.error_name_required": "Naam mag niet leeg zijn.",
   "labels.error_name_conflict": "Er bestaat al een label met deze naam voor deze klant.",
-  "labels.error_in_use": "Dit label is nog in gebruik door extra werk en kan niet worden verwijderd. Archiveer het in plaats daarvan."
+  "labels.error_in_use": "Dit label is nog in gebruik door extra werk en kan niet worden verwijderd. Archiveer het in plaats daarvan.",
+  "customer_permissions.matrix.key_short.customer.documents.manage": "beheren"
 }

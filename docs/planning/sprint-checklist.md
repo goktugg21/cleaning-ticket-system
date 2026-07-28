@@ -55,96 +55,73 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-127-department-worktype` — **COMPLETE**. It carries
-Department + Work Type end to end: **127** (backend) + **127.1 / 127.2**
-(gap-closers, still inside 127) + **128** (frontend). It gets **ONE** PR for
-all of it; **nothing further is queued on this branch**.
-**Last shipped PR on `main`: #122** — Sprint 126, the customer Documents
-**UI** (see `## SHIPPED`; its line was appended by THIS branch's first
-commit, per the "a PR cannot cite its own number" rule).
-**On this branch (unmerged, awaiting the owner's single PR):**
-- **Sprint 127 — Department + Work Type (backend).** Two per-customer label
-  lists — `customers.Department` and `customers.WorkType` (one abstract base,
-  two concrete tables) — that tag Extra Work for filtering / reporting /
-  invoice grouping. Pure labels: no state machine, no permissions of their
-  own, no derived behaviour. Case-insensitive per-customer name uniqueness
-  (`Lower(Trim(name))` + `customer`, the `extra_work/0018` precedent). Two
-  nullable `PROTECT` FKs on `ExtraWorkRequest` (`department`, `work_type`) —
-  nullable is REQUIRED (every existing row predates both; one real customer
-  has twelve departments and ZERO work types; no backfill). Customer-scoped
-  CRUD at `/api/customers/<id>/departments/` + `/work-types/` (view + model
-  live in the customers app, URL anchor mirrors the documents / pricing
-  routes): provider write (`IsSuperAdminOrCompanyAdminForCompany`), customer
-  read (with access, for the create dropdowns); a delete of a still-referenced
-  label is refused with a coded 400 that points at the `is_active=False`
-  soft-retire path (never a 500 on the PROTECT). THE one rule — a label
-  assigned to an EW must belong to that EW's own customer — is enforced by a
-  shared validator (`extra_work/label_validation.py`) + tested, and every
-  picker returns only the URL customer's own rows (cross-tenant tested). Two
-  new EW list filters (`department` / `work_type` by id) compose with the
-  existing customer + building filters. Both models in the generic audit trio
-  (a relabel must be attributable). EW read serializers expose the
-  `department` / `work_type` ids + `department_name` / `work_type_name`.
-  Migrations `customers/0015` + `extra_work/0021` (applied to dev). Targeted
-  backend tests green.
-- **Sprint 127.1 — provider relabel endpoint (gap-closer inside 127, not a
-  new NEXT item).** The create serializer was the ONLY writer of
-  `department` / `work_type`, so ticket-converted EWs (`conversion.py`'s
-  direct ORM create) could never be labelled and a mislabel could never be
-  corrected — the report / invoice grouping would have nothing to group on.
-  Adds `PATCH /api/extra-work/<id>/labels/`: a NARROW action (those two
-  fields only — the ViewSet still has no update mixin) with the `actual-hours`
-  permission shape (`PROVIDER_ROLES`; SUPER_ADMIN global, CA / BM need
-  building scope; customer 403, cross-tenant 404 through the EW scope helper).
-  (Whether an already-invoiced EW may be relabelled is settled by Sprint
-  127.2 below — it locks once the invoice is ISSUED.) The same-customer
-  invariant is now a shared validator called by BOTH the create serializer
-  and this endpoint, so the two cannot drift. The EW audit handler's
-  tracked-field list gains `department_id` / `work_type_id`, so a relabel
-  lands as one attributable UPDATE row. Picker READ widened to
-  BUILDING_MANAGER (they hold the relabel action, so their dropdown must
-  populate); STAFF still excluded. Targeted tests green.
-- **Sprint 127.2 — lock labels once invoiced (gap-closer inside 127).** Once
-  an EW's work sits on an ISSUED invoice, `department` / `work_type` become
-  immutable, so the Department Report and issued invoices stay reconcilable;
-  correcting a mislabel is credit → relabel → re-invoice. The relabel action
-  rejects with a coded 400 `labels_locked_by_invoice` (message names the
-  document to credit). The lock keys on a live issued-invoice line — an
-  `InvoiceLine` whose `Invoice` is ISSUED/SENT, not soft-deleted, and not
-  reversed — NOT on `ExtraWorkRequest.is_invoiced` (that claim flag is set at
-  DRAFT generation, so a DRAFT stays open for corrections; the trap is
-  regression-tested). A reversal releases the lock (its counter-lines carry
-  `extra_work=NULL`); double reversal and re-invoice-after-reversal both
-  behave. Helper next to the same-customer invariant in
-  `extra_work/label_validation.py` (function-local `invoicing` import — the
-  reverse dependency is a cycle). Targeted tests green (built through the
-  real invoicing services, not hand-set status).
-- **Sprint 128 — Department + Work Type (frontend) + a §0 backend rider.**
-  The UI for everything above. **§0 rider:** the EW **detail** serializer now
-  exposes `labels_locked` + `labels_locked_invoice` (reusing
-  `issued_invoice_locking_labels`; detail-only, one query — the list
-  serializer omits it to avoid an N+1) so the relabel UI can render
-  read-only-with-reason instead of a control that would 400. **Frontend:**
-  (1) a management page `/admin/customers/:id/labels` — ONE page, two CRUD
-  sections (Afdelingen + Werktypes: add / rename / edit description /
-  archive-unarchive / delete-refused-with-archive-hint), provider write,
-  BUILDING_MANAGER read-only (route `CustomerReadRoute`; write gated on
-  `isProviderAdmin`), one BM-visible sidebar entry; (2) two OPTIONAL
-  create-form pickers, per-customer, reloaded on customer change and a stale
-  selection neutralised by derivation (empty list → disabled + "geen …
-  ingesteld" hint); (3) an EW-detail relabel card (two dropdowns + Save, or
-  read-only-with-reason naming the invoice when `labels_locked`, also
-  surfacing `labels_locked_by_invoice` on a between-tabs save race); (4) an
-  EW-list four-filter cascade Customer → Building → Department → Work Type,
-  all server-side, the last three disabled until a customer is chosen and
-  cleared on change. **Drift corrected:** the EW list page had NO customer /
-  building filters (the prompt assumed they existed), so the whole cascade is
-  new, not just the two label filters. nl + en i18n in strict lockstep. FE
-  gate green: tsc clean, ESLint **48** (baseline, no new violations), build
-  OK.
-Deliberately NOT added to `## SHIPPED` yet — unmerged, no PR number.
-**Immediate next step:** the owner opens the single PR for this branch (all
-of 127 / 127.1 / 127.2 / 128).
+**Branch:** `fix/sprint-129-session-expiry` — a FIX branch, not a feature
+sprint: one P1 (session-expiry) plus a cluster of UI defects surfaced in owner
+testing (labels Delete dialog, relabel toast, the "CONCEPT" string, the
+half-rendered permissions matrix, a policy-grid cosmetic), one PR.
+**Last shipped PR on `main`: #123** — Sprints 127 / 127.1 / 127.2 / 128,
+Department + Work Type end to end (see `## SHIPPED`; its line was appended by
+THIS branch's first commit, per the "a PR cannot cite its own number" rule).
+**On this branch (unmerged, awaiting the owner's PR):**
+- **P1 — session-expiry dead page.** After a mid-session token refresh
+  failed, `clearAuthTokens()` wiped the tokens and dispatched a `window`
+  `auth:logout` event that NOTHING ever listened to (born incomplete in the
+  original token-refresh commit — never orphaned by a refactor), so React
+  kept the authenticated `me`, the whole UI stayed rendered, and every
+  subsequent request silently 401'd: a frozen page recoverable only by a full
+  reload. Fixed at the auth seam, not the call site: removed the dead event;
+  `api/client.ts` now calls a registered `onSessionExpired` handler exactly
+  when a 401 cannot be recovered by a refresh; `AuthContext` registers it
+  (once, cleaned up on unmount), clears `me` + the auth header, and flags
+  `sessionExpired`, so the existing `ProtectedRoute` / role guards send the
+  user to `/login`, where the notice explains why. A SUCCESSFUL refresh still
+  transparently retries and does NOT log out (that path is untouched);
+  already-on-`/login` cannot loop (no guard there navigates away).
+- **Labels Delete dialog never opened (Sprint 128 defect).**
+  `CustomerLabelsPage` rendered `ConfirmDialog` conditionally and never
+  called `.open()` — it is imperative (`showModal()` via a ref), so Delete
+  did nothing. Fixed with the standard `useRef<ConfirmDialogHandle>` +
+  `.open()` pattern. Audited every `ConfirmDialog` / native-`<dialog>` site
+  added in Sprints 125-128: this was the ONLY broken one (DocumentsExplorer
+  uses the ref+open pattern; DocumentsDialogs deliberately avoids native
+  `<dialog>`).
+- **Relabel save gave no feedback (Sprint 128 defect).** The EW-detail
+  relabel card now shows a success toast, the way the actual-hours save does.
+- **"CONCEPT (issued, unsent)" leaked an English dev string into the Dutch UI
+  — and meant the opposite ("concept" is Dutch for DRAFT).** Removed from the
+  wire: `labels_locked_invoice` returns the invoice NUMBER or `null`; the
+  relabel 400 `detail` no longer embeds it; the frontend picks the wording
+  (number -> "Vergrendeld door factuur {{number}}"; null -> an issued-but-not-
+  yet-sent phrase, no "concept"), nl+en lockstep. Sprint 127.2 tests updated
+  (issued-unsent -> null; the 400 detail asserts no "concept").
+- **Permissions matrix half-rendered the `documents` group (Sprint 126
+  defect).** Three renderers iterated a hardcoded
+  `["tickets","extra_work","users"]` literal TypeScript could not check, so
+  the matrix showed a headerless 17th column and — worse, FUNCTIONAL — the
+  per-user override editor dropped `customer.documents.manage` entirely (it
+  could only be reached via the company-wide policy toggle, never per user).
+  Fixed the CLASS: `permissionKeyLabels.ts` now exports one ordered
+  `PERMISSION_GROUPS` constant DERIVED from `PERMISSION_KEY_ROWS`, and all
+  three renderers iterate it — a fifth group can no longer skip a renderer.
+  Grepped for other hardcoded group/key lists: the three group-list sites were
+  the ONLY broken ones (the key lists in `effectiveResolver.ts` /
+  `PolicyToggleGrid.tsx` already include documents). Also added the one i18n
+  key that was missing because its renderer never ran:
+  `customer_permissions.matrix.key_short.customer.documents.manage` (nl+en) —
+  key-header count is now 17 = `PERMISSION_KEY_ROWS.length`, and the group
+  colSpan total is 17 too (both derive from the same rows, so equal by
+  construction — see the self-review; no unit runner to assert it at runtime).
+- **Policy-toggle grid cosmetic.** The 5th toggle ("manage documents") sat
+  orphaned in a half-width column; a CSS `:last-child:nth-child(odd)` rule now
+  spans a lone last card full-width, leaving the even (4-card) and
+  single-column responsive cases untouched.
+FE gate green: tsc clean, ESLint **48** (baseline, no new violations), build
+OK. Backend 127.1 / 127.2 suites green (29 tests). **No automated test was
+added for the P1** — the frontend has no unit-test runner (CLAUDE.md §8;
+adding one needs owner sign-off) and the sanctioned e2e suite is
+nightly/manual; the fix is verified by code review + the gates, and the owed
+regression test is recorded in `## NEXT`.
+**Immediate next step:** the owner opens the PR for this branch.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production
@@ -219,12 +196,19 @@ item has moved to `## SHIPPED` or been resolved below instead.
 9. **Frontend Testing Sprint** — after E2E. Component/unit tests for
     high-value frontend logic that lacks coverage: pricing-amount
     display, active-priced-line selection, permission/visibility gating,
-    the drill-in people/permissions flows, notification rendering.
-    Establish the test runner + a CI gate; do not regress the ESLint
-    baseline (48). No frontend component/unit test runner exists yet —
-    backend `manage.py test` and Playwright e2e are the only test
-    runners today; do not add an alternative opportunistically outside
-    this planned sprint (CLAUDE.md §8).
+    the drill-in people/permissions flows, notification rendering, and
+    **the Sprint 129 session-expiry auth flow** (a failed mid-session
+    refresh clears `me` + lands on `/login` with the notice; already-on-
+    `/login` does not loop; a SUCCESSFUL refresh transparently retries and
+    does NOT log out — see `AuthContext` + `api/client.ts::onSessionExpired`).
+    That P1 fix shipped in #129 verified by review + the FE gates only,
+    because no unit runner exists to assert the axios-interceptor behaviour;
+    it is the first thing this sprint should lock down (a `page.route`-mocked
+    e2e is the interim option if E2E lands first). Establish the test runner +
+    a CI gate; do not regress the ESLint baseline (48). No frontend
+    component/unit test runner exists yet — backend `manage.py test` and
+    Playwright e2e are the only test runners today; do not add an alternative
+    opportunistically outside this planned sprint (CLAUDE.md §8).
 10. **Off-site, encrypted backups with a tested restore.** Nightly
     `pg_dump` of Postgres AND a copy of the `backend_media_prod` volume,
     shipped off-site, encrypted, with a restore that is actually EXERCISED
@@ -321,6 +305,28 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#123** (`36641fd`) — Sprints 127 / 127.1 / 127.2 / 128, Department +
+  Work Type end to end · two per-customer Extra Work label lists
+  (`customers.Department` + `customers.WorkType` — one abstract base, two
+  tables so a Department id can never fill the work_type slot; case-
+  insensitive `Lower(Trim(name))` + `customer` uniqueness; CASCADE customer
+  FK). Two nullable `PROTECT` FKs on `ExtraWorkRequest`; the one invariant (a
+  label belongs to the EW's own customer) lives in one shared validator
+  (`extra_work/label_validation.py`). Customer-scoped CRUD
+  `/api/customers/<id>/{departments,work-types}/` (provider write; customer +
+  BM read); delete-in-use refused with a coded 400 pointing at
+  `is_active=False`. **127.1** — the provider relabel action
+  `PATCH /api/extra-work/<id>/labels/` (`PROVIDER_ROLES`; ticket-converted EWs
+  finally labellable) + the two FKs added to the EW audit trail. **127.2** —
+  labels LOCK once the work is on an ISSUED invoice (an `InvoiceLine` whose
+  invoice is ISSUED/SENT, not soft-deleted, not reversed — NOT `is_invoiced`);
+  correction is credit → relabel → re-invoice, keeping the Department report
+  and issued invoices reconcilable. **128** — the UI: a per-customer labels
+  management page (two CRUD sections, provider write / BM read), two optional
+  create-form pickers, an EW-detail relabel card (read-only-with-reason when
+  locked), and a Customer → Building → Department → Work Type list-filter
+  cascade; nl+en lockstep; ESLint held at **48**. Migrations `customers/0015`
+  + `extra_work/0021`.
 - **#122** (`9ae51c4`) — Sprint 126, customer Documents **UI** (frontend +
   rider backend) · a shared `DocumentsExplorer` (folder tree + bounded file
   pane + breadcrumbs + upload-with-progress + inline PDF/image preview +

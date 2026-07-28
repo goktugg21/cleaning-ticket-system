@@ -1356,8 +1356,9 @@ export interface ExtraWorkRequestDetail extends ExtraWorkRequestList {
   actions?: ExtraWorkActions;
   // Sprint 128 §0 — whether the labels are frozen by a live ISSUED invoice
   // (so the relabel UI renders read-only-with-reason). `labels_locked_invoice`
-  // is the invoice number, or "CONCEPT (issued, unsent)", or null. Detail
-  // only — the list serializer omits it to avoid an N+1.
+  // is the invoice NUMBER, or null (Sprint 129 §2b: an issued-but-unsent
+  // invoice has no number yet — the frontend picks the wording, no prose on
+  // the wire). Detail only — the list serializer omits it to avoid an N+1.
   labels_locked?: boolean;
   labels_locked_invoice?: string | null;
 }

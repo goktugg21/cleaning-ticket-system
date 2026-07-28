@@ -48,5 +48,6 @@
   "demo_section_super": "Superbeheerder (ziet alles)",
   "demo_section_company_a": "Osius Demo — B Amsterdam (Bedrijf A)",
   "demo_section_company_b": "Bright Facilities — Rotterdam (Bedrijf B)",
-  "demo_super_scope": "Beide bedrijven"
+  "demo_super_scope": "Beide bedrijven",
+  "session_expired": "Je sessie is verlopen. Log opnieuw in."
 }

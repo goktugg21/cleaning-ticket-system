@@ -186,7 +186,7 @@ const SUPER_ADMIN_DEMO_USER: DemoUser = {
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { me, login } = useAuth();
+  const { me, login, sessionExpired } = useAuth();
   const { t } = useTranslation(["login", "common"]);
 
   const [email, setEmail] = useState("");
@@ -547,6 +547,19 @@ export function LoginPage() {
             {info && (
               <div className="alert-info login-error" role="status">
                 {info}
+              </div>
+            )}
+
+            {/* Sprint 129 — a mid-session token refresh failed and the auth
+                layer routed the user back here; explain why so the page does
+                not read as "the app broke". */}
+            {sessionExpired && !info && (
+              <div
+                className="alert-info login-error"
+                role="status"
+                data-testid="login-session-expired"
+              >
+                {t("session_expired")}
               </div>
             )}
 

@@ -806,9 +806,11 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
         invoice = self._locking_invoice(obj)
         if invoice is None:
             return None
-        # An ISSUED-but-unsent invoice has no number yet (assigned at SEND);
-        # mirror the string the relabel 400 uses so the UI can show the same.
-        return invoice.number or "CONCEPT (issued, unsent)"
+        # Sprint 129 §2b — the NUMBER or null, no prose. An ISSUED-but-unsent
+        # invoice has no number yet (assigned at SEND, §2A); the frontend
+        # picks the localized wording for that case, so the wire never carries
+        # a developer/English string.
+        return invoice.number or None
 
     def get_actions(self, obj):
         """Per-current-user, per-EW capability block.
