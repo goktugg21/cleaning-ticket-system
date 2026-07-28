@@ -62,10 +62,18 @@ four — CC does not open PRs.
 
 **Last shipped PR on `main`: #125** — Sprints 130/131/132 (permissions
 page density, the by-department report, invoice grouping by department +
-work type). This branch and the sibling `fix/sprint-133-department-pdf-
-vat` both forked from `main`@`4c5798a` (the #125 merge commit) and can
-land in either order — whichever merges first appends the `## SHIPPED`
-line for its own PR number; the other must not duplicate it.
+work type). **`fix/sprint-133-department-pdf-vat` is NOT a sibling
+branch.** Its tip commit (`9be8e2f`, Sprint 133's own work) is the FIRST
+COMMIT of THIS branch — verified: `git merge-base --is-ancestor
+origin/fix/sprint-133-department-pdf-vat HEAD` returns true. Sprint 133
+is fully contained in this branch's history, not a parallel line of work
+that happens to share an ancestor; the remote
+`fix/sprint-133-department-pdf-vat` pointer is a stray leftover from
+before this branch existed. Opening a separate PR from it would
+duplicate everything this branch's PR already covers. **Once this
+branch's PR merges, delete the stray remote
+`fix/sprint-133-department-pdf-vat` branch** — it has nothing left to
+contribute on its own.
 
 **No `## SHIPPED` line for THIS branch yet, and that is deliberate, not
 an oversight.** Nothing has merged: this branch has no PR yet (the owner
@@ -188,10 +196,12 @@ item has moved to `## SHIPPED` or been resolved below instead.
    pricing-area "big tabs" element he wants changed — location confirmed,
    exact element still to be pinpointed — see the appendix below); design
    + build the **Department + Event** section in person with Ramazan and
-   father (no `Department` model exists in the codebase, confirmed
-   2026-07-27); a full codebase audit (bugs / dead code / inconsistencies,
-   confirm each shipped feature behaves as intended); reconcile this
-   checklist against the real codebase once the audit lands.
+   father (the `Department` MODEL itself already exists and shipped in
+   Sprint 127 — see item 6 — this item is about the broader in-person
+   UI/workflow design, not the label model); a full codebase audit
+   (bugs / dead code / inconsistencies, confirm each shipped feature
+   behaves as intended); reconcile this checklist against the real
+   codebase once the audit lands.
 4. **Mobile responsiveness** — gated on Ramazan's review landing (#3).
 5. **Light/advanced mode split** — gated on Ramazan's review. Owner
    decision: this is an **architectural** decision to be settled BEFORE
