@@ -55,35 +55,42 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-126-documents-ui` — Sprint 126 (Customer Documents,
-**frontend**) in flight, unmerged.
-**Last shipped PR on `main`: #121** — Sprint 125, the customer Documents
-**backend** (see `## SHIPPED`; its line was appended by THIS branch's first
+**Branch:** `feat/sprint-127-department-worktype` — carries **TWO** sprints,
+127 (Department + Work Type **backend**) and 128 (the **frontend**), and gets
+**ONE** PR at the end. Sprint 127 is NOT complete-and-mergeable on its own.
+**Last shipped PR on `main`: #122** — Sprint 126, the customer Documents
+**UI** (see `## SHIPPED`; its line was appended by THIS branch's first
 commit, per the "a PR cannot cite its own number" rule).
 **In flight on this branch (unmerged, awaiting the owner's PR):**
-- **Sprint 126 — Customer Documents (frontend + rider backend).** A shared
-  `DocumentsExplorer` (folder tree + bounded file pane + breadcrumbs + upload
-  with progress + inline PDF/image preview + rename/move/delete + native
-  drag-move), used by BOTH a provider sub-tab
-  (`/admin/customers/:id/documents`, SA/CA only) and a customer page
-  (`/my/documents`, `CustomerRoute` + gated on the module key). The
-  two-sided ownership split lives in one `documentsAccess.ts` (customers act
-  only on their `origin=CUSTOMER` rows; provider rows show read-only);
-  reuses `DocumentThumb`, `BoundedList`, `PdfPreviewDialog`; backend error
-  `code`s are surfaced as localized Dutch messages. **Rider backend changes**
-  (the frontend needed them): removed the now-dead `can_place_in_folder`
-  guards (§2); a `GET /documents/files/?folder=` list endpoint (the pane's
-  data source — Sprint 125 shipped no file-list); the upload validator's
-  stable `code` is now surfaced in the JSON body; a **new policy field**
-  `CustomerCompanyPolicy.customer_users_can_manage_documents` (additive,
-  default True; migration `customers/0014`) so the RF-8 "Documenten" module
-  card can toggle the module company-wide like Meldingen / Extra werk; and
-  `can_manage_documents` on `/auth/me/` to gate the customer sidebar entry
-  (the effective-permissions endpoint is provider-only). `customer.documents.manage`
-  mirrored into the frontend `CUSTOMER_PERMISSION_KEYS`. ESLint baseline
-  held at **48**. Deliberately NOT added to `## SHIPPED` yet — unmerged, no
-  PR number.
-**Immediate next step:** the owner opens the single PR for this branch.
+- **Sprint 127 — Department + Work Type (backend).** Two per-customer label
+  lists — `customers.Department` and `customers.WorkType` (one abstract base,
+  two concrete tables) — that tag Extra Work for filtering / reporting /
+  invoice grouping. Pure labels: no state machine, no permissions of their
+  own, no derived behaviour. Case-insensitive per-customer name uniqueness
+  (`Lower(Trim(name))` + `customer`, the `extra_work/0018` precedent). Two
+  nullable `PROTECT` FKs on `ExtraWorkRequest` (`department`, `work_type`) —
+  nullable is REQUIRED (every existing row predates both; one real customer
+  has twelve departments and ZERO work types; no backfill). Customer-scoped
+  CRUD at `/api/customers/<id>/departments/` + `/work-types/` (view + model
+  live in the customers app, URL anchor mirrors the documents / pricing
+  routes): provider write (`IsSuperAdminOrCompanyAdminForCompany`), customer
+  read (with access, for the create dropdowns); a delete of a still-referenced
+  label is refused with a coded 400 that points at the `is_active=False`
+  soft-retire path (never a 500 on the PROTECT). THE one rule — a label
+  assigned to an EW must belong to that EW's own customer — is enforced in
+  `ExtraWorkRequestCreateSerializer` (the sole EW write path) + tested, and
+  every picker returns only the URL customer's own rows (cross-tenant tested).
+  Two new EW list filters (`department` / `work_type` by id) compose with the
+  existing customer + building filters. Both models in the generic audit trio
+  (a relabel must be attributable). EW read serializers expose the
+  `department` / `work_type` ids + `department_name` / `work_type_name`.
+  Migrations `customers/0015` + `extra_work/0021` (applied to dev). Targeted
+  backend tests green.
+- **Sprint 128 — Department + Work Type (frontend).** Not started (next
+  prompt); rides this same branch and PR.
+Deliberately NOT added to `## SHIPPED` yet — unmerged, no PR number.
+**Immediate next step:** Sprint 128 (frontend), then the owner opens the
+single PR for this branch.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production
@@ -122,11 +129,23 @@ item has moved to `## SHIPPED` or been resolved below instead.
 4. **Mobile responsiveness** — gated on Ramazan's review landing (#3).
 5. **Light/advanced mode split** — gated on Ramazan's review. Owner
    decision: this is an **architectural** decision to be settled BEFORE
-   the Event/Department features are built, not a later styling pass.
-6. **Event + Department features** — gated on Ramazan's review, designed
-   in person with Ramazan and father (see #3).
+   the Department + Work Type features are built, not a later styling pass.
+6. **Department + Work Type** — designed in person with Ramazan and father
+   (see #3). The two per-customer label lists + Extra Work tagging +
+   filtering are **in flight now** (backend Sprint 127, frontend Sprint 128,
+   one branch/PR — see `## NOW`). What REMAINS queued here is **Sprint C: the
+   grouped report + invoice grouping** that consume the labels (group Extra
+   Work / invoices by Customer + Building + Department + Work Type) — a
+   deliberate follow-up, **NOT dropped**; it is gated on the 127/128 tagging
+   existing first. Naming clarification from the reference implementation:
+   **"Event" was never a separate feature** — it is one VALUE in B
+   Amsterdam's **Department** list (Algemeen / Event / Member), and the real
+   second field is **Work Type** (Eindschoonmaak / Opleverschoonmaak / Bouw
+   schoonmaak / Extra werkzaamheden / Overige), not a selectable "event
+   type". Department is NOT an org-chart department — it is a sub-client /
+   segment of the customer (another customer's are twelve medical practices).
 7. **General code refactoring** (clean-up only, **no behaviour change**)
-   — owner decision: happens AFTER Event/Department ship, not before.
+   — owner decision: happens AFTER Department + Work Type ship, not before.
 8. **E2E Testing Sprint** — after Fixing & Auditing. Scope: Playwright
     coverage of the critical full-stack flows on the settled
     post-feedback system — auth/login, create ticket + melding, ticket
@@ -242,6 +261,26 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#122** (`9ae51c4`) — Sprint 126, customer Documents **UI** (frontend +
+  rider backend) · a shared `DocumentsExplorer` (folder tree + bounded file
+  pane + breadcrumbs + upload-with-progress + inline PDF/image preview +
+  rename/move/delete + native drag-move) used by BOTH a provider sub-tab
+  (`/admin/customers/:id/documents`, SA/CA) and a customer page
+  (`/my/documents`, gated on `customer.documents.manage`); the two-sided
+  ownership split (customers act only on their `origin=CUSTOMER` rows,
+  provider rows read-only) lives in one `documentsAccess.ts`; reuses
+  `DocumentThumb` / `BoundedList` / `PdfPreviewDialog`; backend `code`s
+  surfaced as localized Dutch. **Rider backend** (the FE needed it): removed
+  the now-dead `can_place_in_folder` guards (§2); a
+  `GET /documents/files/?folder=<id>` list endpoint (the pane's data source —
+  Sprint 125 shipped none) that 400s (not 500s) on a non-integer `?folder=`;
+  the upload validator's stable `code` now in the JSON body for localization;
+  a new additive policy field
+  `CustomerCompanyPolicy.customer_users_can_manage_documents` (default True;
+  migration `customers/0014`) wiring the module into the company-wide policy
+  layer like Meldingen / Extra werk; `can_manage_documents` on `/auth/me/`
+  for the customer sidebar gate. `customer.documents.manage` mirrored into the
+  frontend `CUSTOMER_PERMISSION_KEYS`. ESLint baseline held at **48**.
 - **#121** (`0aa38f6`) — Sprint 125, customer Documents **backend** · a new
   `documents` app under `/api/customers/<id>/documents/`: `DocumentFolder`
   (case-insensitive name uniqueness per (customer, parent) via two partial
@@ -330,7 +369,7 @@ flagged inline at the time.
 3. **Invoice PDF + send-to-customer.** A PDF invoice system; likely Ramazan feedback on how invoices / customer feedback get sent. **Shipped — the invoicing subsystem (`## SHIPPED` #112); the send-nudge + credited-original marking shipped in Sprint 122.**
 4. **Notifications history / read messages.** Can't reliably see past notifications; need full history incl. already-read items. **Shipped — RF-1 (`## SHIPPED` #103).**
 5. **Attachment in-app preview.** Clicking an attachment downloads it; want in-app viewing, with PDF preview inside the app. **Shipped — RF-5 (`## SHIPPED` #100) + RF-12 thumbnails (#101) + Sprint 121/122 sharpness fixes.**
-6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific. "Event" may be a selectable event type, not a category — undecided. **Still open — see `## NEXT`, "Event + Department features."**
+6. **Customer "event" + "department" fields.** On customer create, possibly two more dropdowns: event + department. Department likely customer-specific. "Event" may be a selectable event type, not a category — undecided. **Resolved 2026-07-27: the two fields are per-customer label lists on Extra Work — "Department" (a sub-client / segment; "Event" is one VALUE in it, never its own field) and "Work Type". Tagging is in flight now (Sprint 127 backend / 128 frontend); the grouped report + invoice grouping are the queued follow-up (Sprint C). See `## NEXT`, "Department + Work Type."**
 7. **Right-side card layout / density.** Assignment / responsible-manager / building-manager / scheduling / ticket-detail / add-slot / add-subcard / manager sections are good UX. Possible: make the right-side cards larger with more horizontal space. **Shipped — RF-9 + RF-17 (`## SHIPPED` #106, #107).**
 8. **Customer surfaces — keep combined.** Separate pages for a customer's EW / quote-requests / tickets likely won't be liked; want one customer page with tabs/subsections. **Shipped — M6 (customer drill-in sub-tabs), predates this backlog.**
 9. **Baseline:** system in good shape at the time; editing customers/users + general flows fine; no major issues.
