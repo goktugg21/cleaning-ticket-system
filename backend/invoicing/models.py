@@ -78,6 +78,31 @@ class Invoice(models.Model):
         blank=True,
     )
 
+    # Sprint 132 — set ONLY when generated at the PER_BUILDING_DEPARTMENT_
+    # WORK_TYPE granularity; NULL on every invoice generated at a coarser
+    # granularity (the normal case today, not a gap). Records what the
+    # invoice was GROUPED BY as a real relation (not stored prose that can
+    # drift from the actual Department/WorkType row) — invoicing.services
+    # sets these from the grouping key at generation; the display label
+    # ("<department> - <work type>") is derived at render time in the
+    # Facturen list / invoice detail page / invoice PDF, never stored.
+    # PROTECT mirrors the label FKs on ExtraWorkRequest — a Department /
+    # WorkType still referenced by an invoice cannot be hard-deleted.
+    department = models.ForeignKey(
+        "customers.Department",
+        on_delete=models.PROTECT,
+        related_name="invoices",
+        null=True,
+        blank=True,
+    )
+    work_type = models.ForeignKey(
+        "customers.WorkType",
+        on_delete=models.PROTECT,
+        related_name="invoices",
+        null=True,
+        blank=True,
+    )
+
     # NOTE: status TRANSITIONS (DRAFT -> ISSUED -> SENT, immutability of
     # SENT, reversal) are enforced by Phase 2's state machine, NOT here.
     status = models.CharField(

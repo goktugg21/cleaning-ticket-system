@@ -45,6 +45,14 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     building_name = serializers.SerializerMethodField()
+    # Sprint 132 — set only for an invoice generated at
+    # PER_BUILDING_DEPARTMENT_WORK_TYPE granularity; null on every other
+    # invoice (mirrors building/building_name's own null-when-unset shape).
+    # The combined "<department> - <work type>" display label is composed
+    # at RENDER time (frontend `formatInvoiceGroupLabel`, or the PDF's own
+    # helper) from these two names — never stored pre-joined.
+    department_name = serializers.SerializerMethodField()
+    work_type_name = serializers.SerializerMethodField()
     lines = InvoiceLineSerializer(many=True, read_only=True)
     # Sprint 122 (Part B2) — the number of the reversal that credited THIS
     # invoice, if any (null otherwise). Provider-side, so shown regardless of
@@ -68,6 +76,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
             "customer_name",
             "building",
             "building_name",
+            "department",
+            "department_name",
+            "work_type",
+            "work_type_name",
             "period_year",
             "period_month",
             "subtotal_amount",
@@ -89,6 +101,12 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
     def get_building_name(self, obj: Invoice):
         return obj.building.name if obj.building_id else None
+
+    def get_department_name(self, obj: Invoice):
+        return obj.department.name if obj.department_id else None
+
+    def get_work_type_name(self, obj: Invoice):
+        return obj.work_type.name if obj.work_type_id else None
 
     def get_credited_by_number(self, obj: Invoice):
         reversals = sorted(obj.reversed_by.all(), key=lambda r: r.id, reverse=True)
@@ -154,6 +172,11 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
 
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     building_name = serializers.SerializerMethodField()
+    # Sprint 132 — same informational shape as building_name; what the
+    # invoice covers is customer-facing content, not provider-internal
+    # (unlike e.g. the line-level `extra_work` id, which stays redacted).
+    department_name = serializers.SerializerMethodField()
+    work_type_name = serializers.SerializerMethodField()
     lines = CustomerInvoiceLineSerializer(many=True, read_only=True)
     credited_by_number = serializers.SerializerMethodField()
 
@@ -165,6 +188,8 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
             "status",
             "customer_name",
             "building_name",
+            "department_name",
+            "work_type_name",
             "period_year",
             "period_month",
             "subtotal_amount",
@@ -183,6 +208,12 @@ class CustomerInvoiceSerializer(serializers.ModelSerializer):
 
     def get_building_name(self, obj: Invoice):
         return obj.building.name if obj.building_id else None
+
+    def get_department_name(self, obj: Invoice):
+        return obj.department.name if obj.department_id else None
+
+    def get_work_type_name(self, obj: Invoice):
+        return obj.work_type.name if obj.work_type_id else None
 
     def get_credited_by_number(self, obj: Invoice):
         sent_reversals = sorted(

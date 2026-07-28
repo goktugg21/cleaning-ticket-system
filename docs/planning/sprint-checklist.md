@@ -56,25 +56,22 @@ docs-only pass — so this file always reflects where we actually are.
 ## NOW
 
 **Branch:** `fix/sprint-130-permissions-density` — carries Sprints 130, 131
-**and** 132 on ONE branch; ONE PR opens after 132 is green, nothing here
-merges in between (a deliberate departure from the usual per-sprint-branch
-pattern, called out explicitly in the Sprint 131 brief).
+**and 132, and is now COMPLETE.** All three are green on this ONE branch;
+no further sprint is queued here. The owner opens ONE PR covering 130 + 131
++ 132 (a deliberate departure from the usual per-sprint-branch pattern,
+called out explicitly in the Sprint 131 brief) — CC does not open PRs.
 **Last shipped PR on `main`: #124** — Sprint 129, the session-expiry P1 +
 an owner-reported UI defect cluster (see `## SHIPPED`; its line was appended
 by THIS branch's first commit, per the "a PR cannot cite its own number"
 rule).
-**No `## SHIPPED` line for Sprint 130 yet, and that is deliberate, not an
-oversight.** The Sprint 131 brief asked for a "#125" line to be appended
-now, but nothing has shipped: this branch has no PR yet (the owner opens
+**No `## SHIPPED` line for this branch yet, and that is deliberate, not an
+oversight.** Nothing has merged: this branch has no PR yet (the owner opens
 it; CC does not) and by the checklist's own rule two paragraphs below a
 SHIPPED line is appended by the FIRST COMMIT OF THE NEXT BRANCH once a PR
-is actually merged — not pre-guessed by the branch that will BECOME that
-PR. Baking in "#125" now risks a wrong, permanent number if anything else
-merges to `main` first (an append-only log — "never edit a historical
-line's wording once it's written"). The real SHIPPED line for this whole
-130+131+132 branch lands the same way #124 did: appended by the first
-commit of whatever branch comes after this one, once the owner's PR has an
-actual merged number.
+is actually merged — not pre-guessed by the branch that became that PR. The
+real SHIPPED line for this whole 130+131+132 branch lands the same way
+#124 did: appended by the first commit of whatever branch comes after this
+one, once the owner's PR has an actual merged number.
 **On this branch (unmerged, awaiting the owner's PR):**
 
 **Sprint 130 — Permissions page density fix.** Replaced the customer
@@ -194,8 +191,120 @@ father's reference "Extra Works by Department" PDF: Building -> Department
   after.
 FE gate green: tsc clean, ESLint **48** (baseline, no new violations),
 build OK. Backend: targeted `reports` app suite green (212 tests, OK).
-**Immediate next step:** Sprint 132 continues on this SAME branch (no new
-branch, no new PR) — see the Sprint 132 prompt when it arrives.
+
+**Sprint 132 — Invoice grouping by department + work type (closes the
+branch).** Reproduces the owner's father's reference tool's finer grouping:
+Customer + Building + Department + Work Type, one level past Sprint 124's
+PER_BUILDING.
+- **New granularity** `Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_
+  WORK_TYPE` (`customers/models.py`) — widened `invoice_granularity_default`
+  16 -> 40 chars to fit the new 33-char value (`fields.E009` caught this at
+  `makemigrations --dry-run`, not at review). **`Invoice` gains nullable,
+  PROTECT `department`/`work_type` FKs** (`invoicing/models.py`), additive
+  migrations (`customers/migrations/0016_...`,
+  `invoicing/migrations/0004_...`), applied to the dev DB.
+- **Grouping** (`invoicing/services.py`) — the existing PER_BUILDING branch
+  is an untouched `dict[int, list]` keyed on `ew.building_id`; the new
+  branch is a sibling `dict[tuple[int, int | None, int | None], list]`
+  keyed on `(building_id, department_id, work_type_id)`, sorted with a
+  `None -> -1` sentinel so an untagged group sorts first within its
+  building rather than raising on a `None`/`int` comparison. **Untagged EW
+  is never dropped or folded** — it lands in its own `(building, None,
+  None)` invoice, the same explicit-untagged-bucket pattern Sprint 131 used
+  for the by-department report.
+- **The Sprint 127.2 lock interaction (checked, not assumed — brief §5's
+  own instruction).** Walked the real sequence live against the dev
+  backend: generate a draft at the new granularity -> relabel one of its
+  claimed EW to a different department/work type (still allowed; the lock
+  only bites once ISSUED) -> the invoice's own `department`/`work_type`
+  went stale relative to its own line, confirmed both live and in
+  `IssueResyncsGroupLabelsTests`. **Fixed with
+  `_resync_invoice_group_labels`** (`invoicing/state_machine.py`), called
+  inside `issue_invoice` immediately before the status flips to ISSUED (same
+  atomic write): re-reads the claimed EWs' current department/work_type,
+  keeps the invoice's stored value only if every line still agrees, nulls
+  the axis on disagreement — mirrors the existing "freeze what's true right
+  now" pattern `recompute_invoice_totals` already uses for money, and does
+  NOT register a second `*StatusHistory` row (H-11 — this isn't a workflow
+  transition, just the invoice's own denormalized fields catching up before
+  they freeze). `reverse_invoice`'s counter-invoice mirrors the original's
+  (already-resynced) `department_id`/`work_type_id`. A CUSTOMER/PER_BUILDING
+  invoice never gains a label retroactively — the resync only touches
+  invoices that already claimed one.
+- **Label** — `"<department> - <work type>"`, composed at RENDER time from
+  the two FK names, never stored pre-joined: `InvoiceSerializer` /
+  `CustomerInvoiceSerializer` (`department_name`/`work_type_name`
+  `SerializerMethodField`s), `invoice_pdf.py::_group_label` (PDF row
+  omitted entirely — not shown blank — when neither is set), frontend
+  `formatInvoiceGroupLabel` (`lib/intl.ts`) shared by `FacturenPage`'s new
+  column and `InvoiceDetailPage`'s new row. All four shapes (both / dept-
+  only / work-type-only / neither) covered in `LabelRenderingTests`,
+  including a `pypdf`-extracted PDF-text assertion.
+- **Tests** — new
+  `invoicing/tests/test_sprint132_department_work_type_granularity.py`, 18
+  tests, everything built through `generate_draft_invoices` /
+  `issue_invoice` / `reverse_invoice` / `delete_draft_invoice`, never by
+  hand-setting `status`. Full `invoicing` suite (192 tests: 174 pre-existing
+  + 18 new) green — zero regressions in CUSTOMER/PER_BUILDING behaviour.
+  `customers` suite (430 tests) also re-run in full as a defensive check on
+  the `invoice_granularity_default` width change — OK, zero regressions.
+- **Verified live against the dev stack** (not just tests): generated a
+  real draft at the new granularity via the actual `/api/invoices/
+  generate/` endpoint, confirmed the Facturen list's new column and the
+  invoice-detail page's new row render correctly, then reproduced the §5
+  staleness sequence end-to-end against real data (relabel a real EW while
+  the invoice was still DRAFT, confirmed the invoice still showed the OLD
+  label, called the real `/issue/` endpoint, confirmed the label updated) —
+  a live, not just unit-tested, proof the resync fix works. All temporary
+  demo data reverted after; PROTECT correctly blocked hard-deleting a
+  still-referenced label until it was soft-retired instead
+  (`is_active: false`), itself a live confirmation the FK and the resync
+  fix both work as designed.
+- **Self-review: invoice-count explosion.** A dense customer (e.g. 3
+  buildings x 5 departments x 5 work types, every combination active in
+  the period) hits 75 invoices/month at this granularity, plus one untagged
+  invoice per building with any unlabelled EW. In practice the count is
+  bounded by how many DISTINCT `(building, department, work_type)` triples
+  actually have unbilled EW that period, not the full cartesian product —
+  a customer with narrow, repeated tagging sees far fewer. **What the
+  reference tool does about this is unverified** — it was not made
+  available to this sprint (the same gap Sprint 131 hit with the reference
+  PDF), so there is no evidence either way on whether it caps, warns, or
+  also produces 75 invoices unmodified. **Recommendation, not built this
+  sprint** (out of scope for the brief's §2-§4): warn the owner in
+  `CustomerFacturatieSection`'s granularity selector before switching a
+  customer to this option, ideally with a live preview count against that
+  customer's actual unbilled EW rather than a generic warning — flagged
+  here rather than silently added, per CLAUDE.md's "don't build beyond
+  what the task requires."
+- **Self-review: are the two FKs on `Invoice` actually needed, or
+  recoverable from lines?** Kept them, deliberately. Once an invoice is
+  ISSUED/SENT, the Sprint 127.2 lock freezes every claimed EW's
+  department/work_type, and the resync above forces the stored FK to agree
+  with the lines at that exact moment — so for the entire immutable
+  majority of an invoice's life, "read the FK" and "derive from lines" are
+  provably the same answer, and the FK is an O(1) `select_related` read
+  instead of an O(lines) join-and-reduce on every list/PDF render. The FK
+  also follows `Invoice.building`'s own precedent exactly (nullable,
+  PROTECT, set from the grouping key at generation) — dropping it would be
+  the inconsistent choice, not the consistent one. Going fully derived
+  would not remove the "lines disagree" problem the resync solves, only
+  move it from "resolved once, at freeze time, and cached" to "re-resolved
+  on every single render, forever, including for old invoices whose answer
+  can never change again."
+- **Self-review: §1-§6 vs the code.** No contradictions found. `services.py`'s
+  pre-Sprint-132 PER_BUILDING branch was exactly the "dict keyed on
+  `ew.building_id`" the brief described; `issued_invoice_locking_labels`
+  exists exactly where and as named; `invoice_granularity_default` is
+  exposed in `CustomerFacturatieSection.tsx` as the brief expected. Recon
+  matched the code on every point checked.
+FE gate green: tsc clean, ESLint **48** (baseline, no new violations),
+build OK.
+
+**Branch complete.** 130 + 131 + 132 are all green on
+`fix/sprint-130-permissions-density`, pushed to origin. No further sprint
+is queued on this branch — the owner opens ONE PR covering all three; CC
+does not open PRs.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production

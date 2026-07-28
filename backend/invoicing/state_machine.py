@@ -62,13 +62,73 @@ def assert_mutable(invoice):
         )
 
 
+def _resync_invoice_group_labels(invoice) -> list[str]:
+    """Sprint 132 — an invoice generated at PER_BUILDING_DEPARTMENT_
+    WORK_TYPE granularity freezes its `department` / `work_type` FKs at
+    GENERATION time, from the grouping key. But an EW's OWN labels stay
+    editable while its claiming invoice is still DRAFT — the Sprint 127.2
+    lock (`extra_work.label_validation.issued_invoice_locking_labels`)
+    bites only once ISSUED — so a relabel during the draft window can make
+    the invoice's frozen FKs stale relative to what its lines now actually
+    carry, or even make a previously-homogeneous invoice's lines disagree
+    with each other.
+
+    Called from `issue_invoice`, immediately before the invoice becomes
+    (mostly) immutable, so this is the last safe moment to catch it — the
+    same "freeze what's true right now" principle `recompute_invoice_
+    totals` already applies to money, applied here to the grouping label
+    instead. Mutates `invoice.department_id` / `invoice.work_type_id` in
+    place; does NOT save (the caller folds the changed field names into
+    its own single save() call). Returns the list of changed field names.
+
+    Each axis is re-derived independently from the LIVE claimed lines: if
+    every line's EW still agrees, the invoice keeps that value (the common
+    case — generated, then issued with no relabel in between). If they
+    disagree, the axis is set to NULL rather than issue an invoice that
+    claims a department/work-type grouping some of its own lines no longer
+    have — the invoice must never assert a grouping it cannot back up.
+
+    Untouched (returns []) for any invoice that was never generated with a
+    department/work_type in the first place (CUSTOMER / PER_BUILDING
+    granularity) — those never claimed a grouping, so there is nothing to
+    verify, even if their lines happen to share one by coincidence.
+    """
+    if invoice.department_id is None and invoice.work_type_id is None:
+        return []
+    ew_ids = invoice.lines.filter(extra_work__isnull=False).values_list(
+        "extra_work_id", flat=True
+    )
+    labels = list(
+        ExtraWorkRequest.objects.filter(id__in=ew_ids).values_list(
+            "department_id", "work_type_id"
+        )
+    )
+    if not labels:
+        return []
+    dept_ids = {d for d, _ in labels}
+    wt_ids = {w for _, w in labels}
+    resolved_dept = next(iter(dept_ids)) if len(dept_ids) == 1 else None
+    resolved_wt = next(iter(wt_ids)) if len(wt_ids) == 1 else None
+    changed = []
+    if invoice.department_id != resolved_dept:
+        invoice.department_id = resolved_dept
+        changed.append("department")
+    if invoice.work_type_id != resolved_wt:
+        invoice.work_type_id = resolved_wt
+        changed.append("work_type")
+    return changed
+
+
 @transaction.atomic
 def issue_invoice(actor, invoice):
     """DRAFT -> ISSUED. Provider-operator only. Stamps issued_at ONLY — the
     gapless number is now assigned at SEND (`send_invoice`), NOT here, so an
     ISSUED-but-unsent invoice carries no number and can be cleanly un-issued
     back to DRAFT (`unissue_invoice`). The frozen money (Phase 2a) is
-    unchanged. Returns the locked/updated row."""
+    unchanged. Also re-syncs the invoice's own department/work_type against
+    its live lines (Sprint 132 — see `_resync_invoice_group_labels`) before
+    the invoice becomes (mostly) immutable. Returns the locked/updated row.
+    """
     if not _is_provider_operator(actor):
         raise PermissionDenied("Only provider operators can issue invoices.")
     locked = Invoice.objects.select_for_update().get(pk=invoice.pk)
@@ -78,9 +138,12 @@ def issue_invoice(actor, invoice):
         raise InvoiceTransitionError(
             f"Only a DRAFT invoice can be issued (current status: {locked.status})."
         )
+    resynced_fields = _resync_invoice_group_labels(locked)
     locked.status = Invoice.Status.ISSUED
     locked.issued_at = timezone.now()
-    locked.save(update_fields=["status", "issued_at", "updated_at"])
+    locked.save(
+        update_fields=[*resynced_fields, "status", "issued_at", "updated_at"]
+    )
     return locked
 
 
@@ -204,6 +267,12 @@ def reverse_invoice(actor, invoice):
         company_id=original.company_id,
         customer_id=original.customer_id,
         building_id=original.building_id,
+        # Sprint 132 — mirror the original's grouping FKs too, the same way
+        # building_id already is. The reversal is the counter-document for
+        # exactly this (building, department, work_type) bucket; it must
+        # carry the same label the original did, not a bare/untagged one.
+        department_id=original.department_id,
+        work_type_id=original.work_type_id,
         status=Invoice.Status.ISSUED,  # a real, already-issued counter-document
         number=number,
         year=year,

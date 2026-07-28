@@ -90,6 +90,18 @@ def _fmt_date(value) -> str:
         return str(value)
 
 
+def _group_label(invoice: Invoice) -> str:
+    """Sprint 132 — "<department> - <work type>" derived at RENDER time
+    from the FKs (never stored pre-joined). Handles all four shapes: both
+    set, either alone, or "" when neither is set (the caller skips the row
+    entirely rather than print a stray "-" or an empty value)."""
+    parts = [
+        invoice.department.name if invoice.department_id else None,
+        invoice.work_type.name if invoice.work_type_id else None,
+    ]
+    return " - ".join(p for p in parts if p)
+
+
 def _fmt_qty(value: Decimal) -> str:
     return _nl_number(value if value is not None else Decimal("0"), 2)
 
@@ -259,6 +271,16 @@ def render_invoice_pdf(invoice: Invoice) -> bytes:
         "Gebouw:", building_name or "Alle gebouwen",
         "Periode:", period_text,
     )
+    # Sprint 132 — only for an invoice generated at PER_BUILDING_
+    # DEPARTMENT_WORK_TYPE granularity; the row is skipped entirely
+    # (not printed empty) for every other invoice, matching `_group_label`'s
+    # "" for the neither-set shape.
+    group_label = _group_label(invoice)
+    if group_label:
+        pdf.set_font(FONT_FAMILY, "B", 10)
+        pdf.cell(28, 6, _safe_pdf_text("Afdeling:"))
+        pdf.set_font(FONT_FAMILY, "", 10)
+        pdf.cell(0, 6, _safe_pdf_text(group_label), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
 
     # Summary line — Ramazan's overview. Phase 4a: prefer the hand-written

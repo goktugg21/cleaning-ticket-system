@@ -35,7 +35,7 @@ import type { Invoice, InvoiceLine, InvoiceStatus } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { useToast } from "../components/ToastProvider";
-import { formatDate, formatMoney } from "../lib/intl";
+import { formatDate, formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
 
 const STATUS_LABEL_KEY: Record<InvoiceStatus, string> = {
   DRAFT: "facturen.status_draft",
@@ -566,6 +566,23 @@ export function InvoiceDetailPage() {
             {invoice.building_name ?? t("invoice_detail.all_buildings")}
           </div>
         </div>
+        {/* Sprint 132 — only for an invoice generated at PER_BUILDING_
+            DEPARTMENT_WORK_TYPE granularity; the row is omitted entirely
+            (not shown with a dash) for every other invoice, the same way
+            the fee box below only renders when a fee is actually set. */}
+        {(invoice.department_name || invoice.work_type_name) && (
+          <div className="detail-field-row" data-testid="invoice-detail-group-label-row">
+            <div className="detail-field-label">
+              {t("invoice_detail.field_department_work_type")}
+            </div>
+            <div className="detail-field-value">
+              {formatInvoiceGroupLabel(
+                invoice.department_name,
+                invoice.work_type_name,
+              )}
+            </div>
+          </div>
+        )}
         <div className="detail-field-row">
           <div className="detail-field-label">
             {t("invoice_detail.field_period")}

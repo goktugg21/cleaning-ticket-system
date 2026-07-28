@@ -209,3 +209,19 @@ export function formatNumber(
   }
 }
 
+/**
+ * Sprint 132 — the invoice grouping label ("<department> - <work type>"),
+ * shared by the Facturen list and the invoice-detail page so the two
+ * surfaces cannot render the four shapes differently. Composed at RENDER
+ * time from the two separate name fields the API returns — never a
+ * pre-joined string on the wire. Returns "" (not a stray "-") when
+ * neither is set; callers fall back to their own empty-value convention
+ * (typically `formatInvoiceGroupLabel(...) || "—"`).
+ */
+export function formatInvoiceGroupLabel(
+  departmentName: string | null | undefined,
+  workTypeName: string | null | undefined,
+): string {
+  return [departmentName, workTypeName].filter(Boolean).join(" - ");
+}
+

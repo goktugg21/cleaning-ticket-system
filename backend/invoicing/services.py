@@ -101,7 +101,18 @@ def _derive_vat_pct(subtotal, vat):
     return Decimal("21.00")
 
 
-def _create_draft(actor, company_id, customer_id, year, month, building_id, ews):
+def _create_draft(
+    actor,
+    company_id,
+    customer_id,
+    year,
+    month,
+    building_id,
+    ews,
+    *,
+    department_id=None,
+    work_type_id=None,
+):
     """Create ONE draft Invoice for the given EW list and CLAIM them.
 
     One InvoiceLine PER EW carrying the EW's earned subtotal/vat/total (the
@@ -109,11 +120,18 @@ def _create_draft(actor, company_id, customer_id, year, month, building_id, ews)
     total is carried on the single summary line; quantity=1, unit_price=the
     earned subtotal, vat_pct=blended). Assumes the caller is inside an
     atomic block.
+
+    `department_id` / `work_type_id` (Sprint 132) are set ONLY by the
+    PER_BUILDING_DEPARTMENT_WORK_TYPE granularity — every other caller
+    passes neither, leaving the invoice's own grouping FKs NULL (it never
+    claimed a department/work-type grouping to begin with).
     """
     invoice = Invoice.objects.create(
         company_id=company_id,
         customer_id=customer_id,
         building_id=building_id,
+        department_id=department_id,
+        work_type_id=work_type_id,
         status=Invoice.Status.DRAFT,
         number=None,  # numbering is Phase 2b — NOT assigned here
         year=None,
@@ -184,7 +202,18 @@ def generate_draft_invoices(
       * "CUSTOMER"     -> ONE draft (building=NULL) with every building's
                           unbilled EW.
       * "PER_BUILDING" -> one draft per building that has unbilled EW.
+      * "PER_BUILDING_DEPARTMENT_WORK_TYPE" -> one draft per distinct
+                          (building, department, work_type) combination
+                          that has unbilled EW (Sprint 132). An EW with no
+                          department and/or no work type groups into its
+                          own untagged draft — NOT skipped, NOT folded into
+                          a labelled one; it is still unbilled work that
+                          must be invoiced, the same rule the Sprint 131
+                          report applies.
       * None           -> the customer's `invoice_granularity_default`.
+      * anything else (including an unrecognised string) -> CUSTOMER, the
+        existing fallback (unchanged — this function has never validated
+        the granularity string; that stays out of scope here).
 
     Provider-operator only (403 otherwise). Every read is tenant-scoped via
     scope_extra_work_for, so an actor cannot generate across tenants — an
@@ -228,6 +257,45 @@ def generate_draft_invoices(
                         month,
                         building_id,
                         by_building[building_id],
+                    )
+                )
+        elif (
+            granularity
+            == Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
+        ):
+            by_group: dict[tuple[int, int | None, int | None], list] = {}
+            for ew in unbilled:
+                key = (ew.building_id, ew.department_id, ew.work_type_id)
+                by_group.setdefault(key, []).append(ew)
+
+            # Deterministic order extending the PER_BUILDING rule above: by
+            # building id first (unchanged), then department id, then work
+            # type id — None sorts FIRST within its building (an untagged
+            # group reads as "the base group" ahead of its labelled
+            # siblings). None can't compare to int directly in Python 3, so
+            # -1 stands in for it (real ids start at 1, so this never
+            # collides with a genuine id).
+            def _group_sort_key(key):
+                b_id, d_id, w_id = key
+                return (
+                    b_id,
+                    d_id if d_id is not None else -1,
+                    w_id if w_id is not None else -1,
+                )
+
+            for key in sorted(by_group, key=_group_sort_key):
+                building_id, department_id, work_type_id = key
+                created.append(
+                    _create_draft(
+                        actor,
+                        company_id,
+                        customer_id,
+                        year,
+                        month,
+                        building_id,
+                        by_group[key],
+                        department_id=department_id,
+                        work_type_id=work_type_id,
                     )
                 )
         else:  # CUSTOMER (default)

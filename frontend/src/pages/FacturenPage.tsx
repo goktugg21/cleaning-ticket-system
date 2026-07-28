@@ -35,7 +35,7 @@ import type {
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
 import { useToast } from "../components/ToastProvider";
-import { formatMoney } from "../lib/intl";
+import { formatInvoiceGroupLabel, formatMoney } from "../lib/intl";
 
 type StatusFilter = InvoiceStatus | "ALL";
 
@@ -367,6 +367,22 @@ export function FacturenPage({
                       />
                       {t("facturatie.granularity_building")}
                     </label>
+                    <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        type="radio"
+                        name="gen-granularity"
+                        checked={
+                          genGranularity === "PER_BUILDING_DEPARTMENT_WORK_TYPE"
+                        }
+                        onChange={() =>
+                          setGenGranularity(
+                            "PER_BUILDING_DEPARTMENT_WORK_TYPE",
+                          )
+                        }
+                        data-testid="facturen-granularity-department-work-type"
+                      />
+                      {t("facturatie.granularity_department_work_type")}
+                    </label>
                   </div>
                 </fieldset>
               </div>
@@ -476,6 +492,7 @@ export function FacturenPage({
                 <th>{t("facturen.col_number")}</th>
                 {!customerScoped && <th>{t("facturen.col_customer")}</th>}
                 <th>{t("facturen.col_building")}</th>
+                <th>{t("facturen.col_department_work_type")}</th>
                 <th>{t("facturen.col_period")}</th>
                 <th>{t("facturen.col_status")}</th>
                 <th style={{ textAlign: "right" }}>{t("facturen.col_total")}</th>
@@ -527,6 +544,12 @@ export function FacturenPage({
                   {!customerScoped && <td>{inv.customer_name}</td>}
                   <td className="muted small">
                     {inv.building_name ?? t("facturen.all_buildings")}
+                  </td>
+                  <td className="muted small">
+                    {formatInvoiceGroupLabel(
+                      inv.department_name,
+                      inv.work_type_name,
+                    ) || "—"}
                   </td>
                   <td className="muted small">
                     {formatPeriod(inv.period_year, inv.period_month)}
