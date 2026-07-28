@@ -807,25 +807,36 @@ def _on_ticket_staff_assignment_post_save_update(
 
 
 # ===========================================================================
-# #109 Part B (audit P2-1) — ExtraWorkRequest BILLING-field audit.
+# #109 Part B (audit P2-1) — ExtraWorkRequest targeted-field audit.
 #
 # The parent ExtraWorkRequest stays OUT of the generic full-CRUD trio
 # (see the Batch 6 NB in the registration list below): its STATUS
 # lifecycle is the H-11 workflow trail owned by ExtraWorkStatusHistory,
 # and cart CREATEs would spam the feed. This dedicated UPDATE-ONLY
-# handler tracks ONLY the three billing columns (provider-set billing
-# date + the invoice run's mark/clear writes), so:
-#   * a billing-month PATCH lands as exactly one AuditLog UPDATE row
-#     with the invoice_date before/after,
+# handler tracks a NARROW field list — the three billing columns
+# (provider-set billing date + the invoice run's mark/clear writes) plus,
+# from Sprint 127.1, the two per-customer label FKs (department_id /
+# work_type_id) so a relabel is attributable (it steers invoice grouping;
+# a silent relabel would defeat the point). So:
+#   * a billing-month PATCH or a /labels/ relabel lands as exactly one
+#     AuditLog UPDATE row with that field's before/after,
 #   * a mark-/clear-invoiced run lands as one row PER changed EW
 #     (each row's save() fires this handler — bulk coverage for free),
 #   * a plain status transition (or any other field write) emits
 #     NOTHING here, preserving the H-11 separation.
+# The FK columns are tracked by their `_id` attribute so the diff is a
+# clean integer (or None), no related-object fetch.
 # ===========================================================================
-_EW_BILLING_TRACKED_FIELDS = ("invoice_date", "is_invoiced", "invoiced_at")
+_EW_TRACKED_FIELDS = (
+    "invoice_date",
+    "is_invoiced",
+    "invoiced_at",
+    "department_id",
+    "work_type_id",
+)
 
 
-def _ew_billing_snapshot_for_pre_save(instance):
+def _ew_snapshot_for_pre_save(instance):
     if instance.pk is None:
         return None
     from extra_work.models import ExtraWorkRequest
@@ -836,13 +847,13 @@ def _ew_billing_snapshot_for_pre_save(instance):
         return None
     return {
         field: serialize_value(getattr(previous, field))
-        for field in _EW_BILLING_TRACKED_FIELDS
+        for field in _EW_TRACKED_FIELDS
     }
 
 
 def _on_extra_work_request_pre_save(sender, instance, **kwargs):
     try:
-        snapshot = _ew_billing_snapshot_for_pre_save(instance)
+        snapshot = _ew_snapshot_for_pre_save(instance)
         _state_map()[
             ("extra_work.ExtraWorkRequest", instance.pk)
         ] = snapshot
@@ -869,7 +880,7 @@ def _on_extra_work_request_post_save_update(
         if snapshot is None:
             return
         diff = {}
-        for field in _EW_BILLING_TRACKED_FIELDS:
+        for field in _EW_TRACKED_FIELDS:
             before = snapshot[field]
             after = serialize_value(getattr(instance, field))
             if before != after:

@@ -52,8 +52,10 @@ from .models import (
     ExtraWorkStatusHistory,
 )
 from .scoping import scope_extra_work_for
+from .label_validation import validate_labels_for_customer
 from .serializers import (
     ActualHoursEntrySerializer,
+    ExtraWorkLabelsSerializer,
     ExtraWorkPreviewSerializer,
     ExtraWorkPricingLineItemCustomerSerializer,
     ExtraWorkPricingLineItemSerializer,
@@ -356,6 +358,98 @@ class ExtraWorkRequestViewSet(
         return Response(
             ExtraWorkRequestDetailSerializer(
                 updated, context={"request": request}
+            ).data
+        )
+
+    @action(detail=True, methods=["patch"], url_path="labels")
+    def labels(self, request, pk=None):
+        """Sprint 127.1 — provider relabel: set / clear `department` +
+        `work_type` on an existing Extra Work AFTER creation.
+
+        The create serializer is the only OTHER writer of these fields, so
+        without this action a ticket-converted EW (built by
+        `conversion.py`'s direct ORM create) could never be labelled, and a
+        mislabel could never be corrected — the report / invoice grouping
+        these fields drive would have nothing to group on.
+
+        Provider-side operational classification, so PROVIDER_ROLES only —
+        the same audience the actual-hours / conversion endpoints use
+        (SUPER_ADMIN global; COMPANY_ADMIN / BUILDING_MANAGER need
+        provider-side building scope on the EW's building). A customer user
+        gets 403; a cross-tenant id 404s through the viewset's own scope
+        helper (no bespoke check). Relabelling an already-invoiced EW is
+        ALLOWED — the invoice is an issued document, unaffected; the audit
+        row records who changed it.
+        """
+        user = request.user
+
+        # Role gate FIRST (before get_object) so customer-side / STAFF get a
+        # stable 403 rather than a scope-driven 404. Mirrors actual_hours.
+        if user.role not in PROVIDER_ROLES:
+            return Response(
+                {
+                    "detail": "This role cannot relabel Extra Work.",
+                    "code": "relabel_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        extra_work = self.get_object()  # 404 if out-of-scope (cross-tenant)
+
+        # Provider scope: SUPER_ADMIN global; COMPANY_ADMIN / BUILDING_MANAGER
+        # must hold provider-side building scope on this EW's building.
+        if user.role != UserRole.SUPER_ADMIN and not user_has_osius_permission(
+            user,
+            "osius.ticket.view_building",
+            building_id=extra_work.building_id,
+        ):
+            return Response(
+                {
+                    "detail": "You do not have provider-side scope for this "
+                    "Extra Work request.",
+                    "code": "relabel_forbidden",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = ExtraWorkLabelsSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        # Key presence distinguishes "sent as null" (clear) from "absent"
+        # (leave unchanged); an empty body changes nothing → 400.
+        if "department" not in data and "work_type" not in data:
+            return Response(
+                {
+                    "detail": "Provide department and/or work_type to set or "
+                    "clear.",
+                    "code": "no_labels_provided",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # THE one invariant — the SAME validator the create serializer runs,
+        # so the two label-write paths cannot drift. Skips null (a clear).
+        validate_labels_for_customer(
+            extra_work.customer,
+            department=data.get("department"),
+            work_type=data.get("work_type"),
+        )
+
+        update_fields = []
+        if "department" in data:
+            extra_work.department = data["department"]
+            update_fields.append("department")
+        if "work_type" in data:
+            extra_work.work_type = data["work_type"]
+            update_fields.append("work_type")
+        # `updated_at` (auto_now) + the changed FK(s); the save fires the
+        # ExtraWorkRequest audit handler, which now tracks the label FKs.
+        update_fields.append("updated_at")
+        extra_work.save(update_fields=update_fields)
+
+        return Response(
+            ExtraWorkRequestDetailSerializer(
+                extra_work, context={"request": request}
             ).data
         )
 

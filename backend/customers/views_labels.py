@@ -12,11 +12,14 @@ Permissions
   `IsSuperAdminOrCompanyAdminForCompany` rule the customer pricing catalog
   uses for provider-side management — SUPER_ADMIN any customer,
   COMPANY_ADMIN their own company's customers.
-* READ (GET list / retrieve): the write audience PLUS customer users with
-  active access to the URL customer, so the customer-side Extra Work create
-  form can populate its Department / Work Type dropdowns. BUILDING_MANAGER /
-  STAFF read the label off the Extra Work payload itself
-  (`department_name` / `work_type_name`) and do not need the picker.
+* READ (GET list / retrieve): the write audience PLUS the read-only
+  consumers of the dropdown — customer users with active access to the URL
+  customer (the customer-side create form), and from Sprint 127.1
+  BUILDING_MANAGERs who can see the customer (they now hold the provider
+  relabel action `PATCH /api/extra-work/<id>/labels/`, so they need the
+  picker to populate its dropdown). STAFF have no label write surface and
+  stay excluded (they read the label off the Extra Work payload's
+  `department_name` / `work_type_name`).
 
 Every queryset is filtered to the URL customer, so the picker only ever
 returns that customer's own rows and a cross-tenant `label_id` is a 404 at
@@ -36,6 +39,7 @@ from rest_framework.response import Response
 
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
+from accounts.scoping import scope_customers_for
 from companies.models import CompanyUserMembership
 from config.pagination import UnboundedPagination
 
@@ -91,10 +95,12 @@ class _CustomerLabelPermission(IsAuthenticatedAndActive):
         user = request.user
         if user.role in (UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN):
             return True
-        # Customer users may READ only (to populate the create dropdowns).
-        if (
-            request.method in permissions.SAFE_METHODS
-            and user.role == UserRole.CUSTOMER_USER
+        # Read-only dropdown consumers: customer users (the create form) and
+        # BUILDING_MANAGERs (the relabel action, Sprint 127.1). The
+        # per-customer scope check runs in the view's `_get_customer`.
+        if request.method in permissions.SAFE_METHODS and user.role in (
+            UserRole.CUSTOMER_USER,
+            UserRole.BUILDING_MANAGER,
         ):
             return True
         return False
@@ -121,10 +127,17 @@ class _CustomerLabelViewMixin:
             ).exists():
                 raise PermissionDenied("Forbidden.")
             return customer
-        # CUSTOMER_USER — reads only (writes already blocked in
-        # has_permission); must hold access to this customer.
+        # Read-only roles (writes already blocked in has_permission):
+        #   CUSTOMER_USER — must hold access to this customer.
+        #   BUILDING_MANAGER — must be able to SEE this customer (manages a
+        #   building the customer is linked to), via the shared scope helper.
         if user.role == UserRole.CUSTOMER_USER and _customer_user_has_access(
             user, customer
+        ):
+            return customer
+        if (
+            user.role == UserRole.BUILDING_MANAGER
+            and scope_customers_for(user).filter(pk=customer.pk).exists()
         ):
             return customer
         raise PermissionDenied("Forbidden.")

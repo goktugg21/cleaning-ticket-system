@@ -77,15 +77,32 @@ commit, per the "a PR cannot cite its own number" rule).
   read (with access, for the create dropdowns); a delete of a still-referenced
   label is refused with a coded 400 that points at the `is_active=False`
   soft-retire path (never a 500 on the PROTECT). THE one rule — a label
-  assigned to an EW must belong to that EW's own customer — is enforced in
-  `ExtraWorkRequestCreateSerializer` (the sole EW write path) + tested, and
-  every picker returns only the URL customer's own rows (cross-tenant tested).
-  Two new EW list filters (`department` / `work_type` by id) compose with the
+  assigned to an EW must belong to that EW's own customer — is enforced by a
+  shared validator (`extra_work/label_validation.py`) + tested, and every
+  picker returns only the URL customer's own rows (cross-tenant tested). Two
+  new EW list filters (`department` / `work_type` by id) compose with the
   existing customer + building filters. Both models in the generic audit trio
   (a relabel must be attributable). EW read serializers expose the
   `department` / `work_type` ids + `department_name` / `work_type_name`.
   Migrations `customers/0015` + `extra_work/0021` (applied to dev). Targeted
   backend tests green.
+- **Sprint 127.1 — provider relabel endpoint (gap-closer inside 127, not a
+  new NEXT item).** The create serializer was the ONLY writer of
+  `department` / `work_type`, so ticket-converted EWs (`conversion.py`'s
+  direct ORM create) could never be labelled and a mislabel could never be
+  corrected — the report / invoice grouping would have nothing to group on.
+  Adds `PATCH /api/extra-work/<id>/labels/`: a NARROW action (those two
+  fields only — the ViewSet still has no update mixin) with the `actual-hours`
+  permission shape (`PROVIDER_ROLES`; SUPER_ADMIN global, CA / BM need
+  building scope; customer 403, cross-tenant 404 through the EW scope helper).
+  Relabelling an already-invoiced EW is ALLOWED (the invoice is issued and
+  unaffected; the audit row records who changed it). The same-customer
+  invariant is now a shared validator called by BOTH the create serializer
+  and this endpoint, so the two cannot drift. The EW audit handler's
+  tracked-field list gains `department_id` / `work_type_id`, so a relabel
+  lands as one attributable UPDATE row. Picker READ widened to
+  BUILDING_MANAGER (they hold the relabel action, so their dropdown must
+  populate); STAFF still excluded. Targeted tests green.
 - **Sprint 128 — Department + Work Type (frontend).** Not started (next
   prompt); rides this same branch and PR.
 Deliberately NOT added to `## SHIPPED` yet — unmerged, no PR number.

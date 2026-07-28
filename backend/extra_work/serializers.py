@@ -54,6 +54,7 @@ from .models import (
     ProposalTimelineEventType,
     Service,
 )
+from .label_validation import validate_labels_for_customer
 from .pricing import resolve_price
 from .proposal_state_machine import allowed_next_proposal_statuses
 from .state_machine import allowed_next_statuses
@@ -1109,37 +1110,14 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
 
         # Sprint 127 — THE one rule of the label feature: a Department /
         # Work Type assigned to this Extra Work MUST belong to this
-        # request's own customer. Without it one customer's work could be
-        # tagged with another customer's label, silently corrupting the
-        # grouped report and invoice grouping that consume these fields.
-        # This serializer is the sole write path (the EW ViewSet has no
-        # update mixin), so this is the single enforcement point.
-        department = attrs.get("department")
-        if department is not None and department.customer_id != customer.id:
-            raise serializers.ValidationError(
-                {
-                    "department": [
-                        serializers.ErrorDetail(
-                            "Department must belong to the same customer as "
-                            "the extra work.",
-                            code="department_customer_mismatch",
-                        )
-                    ]
-                }
-            )
-        work_type = attrs.get("work_type")
-        if work_type is not None and work_type.customer_id != customer.id:
-            raise serializers.ValidationError(
-                {
-                    "work_type": [
-                        serializers.ErrorDetail(
-                            "Work type must belong to the same customer as "
-                            "the extra work.",
-                            code="work_type_customer_mismatch",
-                        )
-                    ]
-                }
-            )
+        # request's own customer. Sprint 127.1 extracted the check into
+        # `validate_labels_for_customer` so this create path and the relabel
+        # endpoint share ONE copy of the invariant (they must not drift).
+        validate_labels_for_customer(
+            customer,
+            department=attrs.get("department"),
+            work_type=attrs.get("work_type"),
+        )
 
         # Sprint 3B — every catalog-linked line's service must be
         # owned by the same provider company as the customer.
@@ -1614,6 +1592,30 @@ class ExtraWorkTransitionSerializer(serializers.Serializer):
     # without a new persistence column.
     customer_reject_reason = serializers.CharField(
         required=False, allow_blank=True, default=""
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 127.1 — relabel payload (provider classification after create)
+# ---------------------------------------------------------------------------
+class ExtraWorkLabelsSerializer(serializers.Serializer):
+    """The NARROW relabel surface for `PATCH /api/extra-work/<id>/labels/`:
+    `department` + `work_type` ONLY. Deliberately a standalone Serializer,
+    not a general EW update serializer — the EW ViewSet has no update mixin
+    by design, and a full serializer would expose every model field.
+
+    Both fields are optional so a client may set either, both, or send an
+    explicit `null` to clear one. The view distinguishes "absent" (leave as
+    is) from "sent as null" (clear) via key presence in `validated_data`;
+    the same-customer invariant is applied in the view against the resolved
+    EW's customer (see `label_validation.validate_labels_for_customer`).
+    """
+
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.all(), required=False, allow_null=True
+    )
+    work_type = serializers.PrimaryKeyRelatedField(
+        queryset=WorkType.objects.all(), required=False, allow_null=True
     )
 
 
