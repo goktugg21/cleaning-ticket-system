@@ -16,3 +16,12 @@ fpdf2>=2.8,<3.0
 # DejaVu font stores text as glyph IDs, so raw byte-search no longer
 # proves sentinel presence).
 pypdf>=5.1,<7.0
+# Sprint 137 — Django's --parallel test runner (CI's actual gate, see
+# .github/workflows/test.yml) needs tblib to pickle a failing test's
+# traceback back to the parent process. Without it, `django/test/
+# runner.py::check_picklable` catches the pickling failure, prints a
+# "you should install tblib" hint, then RE-RAISES — so a real assertion
+# failure in a parallel worker surfaces as `TypeError: cannot pickle
+# 'traceback' object` instead of the actual error. Confirmed directly
+# against the installed Django 5.2.16 runner source, not assumed.
+tblib>=3.2,<4.0
