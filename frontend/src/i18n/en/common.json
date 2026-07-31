@@ -952,6 +952,7 @@
   "customer_pricing.bulk_raise_error_no_selection": "Select at least one price.",
   "customer_pricing.bulk_raise_error_amount": "Enter an amount greater than zero.",
   "customer_pricing.copy_from_default_button": "Copy from defaults",
+  "customer_pricing.show_archived_toggle": "Show archived",
   "customer_pricing.copy_from_default_title": "Copy default prices",
   "customer_pricing.copy_from_default_intro": "Seed this customer's contract prices from the catalog default prices. Services that already have an overlapping active price are skipped.",
   "customer_pricing.copy_from_default_empty": "No active services in the catalog yet.",

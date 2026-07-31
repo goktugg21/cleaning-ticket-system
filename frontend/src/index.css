@@ -2222,6 +2222,58 @@ table.data-table {
   cursor: pointer;
 }
 
+/* Sprint 137 item 1 — staged multi-attachment list on CreateTicketPage.
+   One row per staged file with a per-file remove button; the files are
+   uploaded as N sequential POSTs after the ticket is created. */
+.staged-attachment-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.staged-attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.staged-attachment-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.staged-attachment-size {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.staged-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.staged-attachment-remove:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 /* Back link */
 .link-back {
   display: inline-flex;

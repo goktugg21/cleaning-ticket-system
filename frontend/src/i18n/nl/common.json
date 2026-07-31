@@ -952,6 +952,7 @@
   "customer_pricing.bulk_raise_error_no_selection": "Selecteer minimaal één prijs.",
   "customer_pricing.bulk_raise_error_amount": "Voer een bedrag groter dan nul in.",
   "customer_pricing.copy_from_default_button": "Standaardprijzen kopiëren",
+  "customer_pricing.show_archived_toggle": "Gearchiveerde tonen",
   "customer_pricing.copy_from_default_title": "Standaardprijzen kopiëren",
   "customer_pricing.copy_from_default_intro": "Vul de contractprijzen van deze klant met de standaardprijzen uit de catalogus. Diensten die al een overlappende actieve prijs hebben, worden overgeslagen.",
   "customer_pricing.copy_from_default_empty": "Nog geen actieve diensten in de catalogus.",

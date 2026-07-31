@@ -10,6 +10,7 @@ import {
   Info,
   TriangleAlert,
   UploadCloud,
+  X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { listAllBuildings, listAllCustomers } from "../api/admin";
@@ -91,6 +92,22 @@ const EMPTY_FORM: CreateTicketForm = {
   customer: "",
 };
 
+// Mirrors the backend per-file cap in
+// `tickets/serializers.py::TicketAttachmentSerializer.validate_file`.
+// The endpoint takes ONE file per request, so several attachments are
+// N sequential POSTs (the SlotCompletionDialog pattern) — this is a
+// per-file limit, never a total across the staged set.
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+const ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf";
+
+// Identity for de-duplicating the staged list. The File object itself is
+// a fresh reference on every pick, so picking the same photo twice would
+// otherwise stage (and upload) it twice.
+function fileKey(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
 export function CreateTicketPage() {
   const navigate = useNavigate();
   const { t } = useTranslation(["create_ticket", "common"]);
@@ -103,7 +120,15 @@ export function CreateTicketPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<CreateTicketForm>(EMPTY_FORM);
-  const [stagedAttachment, setStagedAttachment] = useState<File | null>(null);
+  const [stagedAttachments, setStagedAttachments] = useState<File[]>([]);
+  // Set only when the ticket was created but one or more attachments
+  // failed to upload. The ticket is never rolled back, so we hold the id
+  // and the failed filenames and stop the form from being submitted
+  // again (re-submitting would create a SECOND ticket).
+  const [partialUpload, setPartialUpload] = useState<{
+    ticketId: number;
+    failed: string[];
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -282,16 +307,32 @@ export function CreateTicketPage() {
 
       const newId = response.data.id;
 
-      if (stagedAttachment) {
+      // The endpoint accepts ONE file per request, so this is N
+      // sequential POSTs. Sequential (not Promise.all) so a per-file
+      // backend error surfaces against the right file — same rationale
+      // as SlotCompletionDialog. A failure does NOT abort the loop: the
+      // remaining files still upload, and the ticket is NEVER rolled
+      // back, so a partial run keeps everything that did succeed.
+      const failed: string[] = [];
+      for (const file of stagedAttachments) {
         try {
           const formData = new FormData();
-          formData.append("file", stagedAttachment);
+          formData.append("file", file);
           await api.post(`/tickets/${newId}/attachments/`, formData, {
             headers: { "Content-Type": "multipart/form-data" },
           });
         } catch {
-          // Non-fatal: surface but still navigate. The detail page lets users retry.
+          failed.push(file.name);
         }
+      }
+
+      if (failed.length > 0) {
+        // Do not navigate: the operator has to see which files did not
+        // make it. The ticket exists, so the form is locked behind
+        // `partialUpload` to rule out a duplicate submission.
+        setPartialUpload({ ticketId: newId, failed });
+        setError("");
+        return;
       }
 
       navigate(`/tickets/${newId}`);
@@ -509,30 +550,85 @@ export function CreateTicketPage() {
                 strokeWidth={2}
               />
               <span className="upload-title">
-                {stagedAttachment
-                  ? stagedAttachment.name
-                  : t("attachment_drop_hint")}
+                {t("attachment_drop_hint")}
               </span>
               <span className="upload-hint">
-                {stagedAttachment
-                  ? `${(stagedAttachment.size / 1024 / 1024).toFixed(2)} ${t("attachment_replace_hint")}`
-                  : t("attachment_size_hint")}
+                {t("attachment_size_hint")}
               </span>
               <input
                 type="file"
-                accept=".jpg,.jpeg,.png,.webp,.heic,.heif,.pdf"
+                accept={ATTACHMENT_ACCEPT}
+                multiple
                 onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  if (file && file.size > 10 * 1024 * 1024) {
-                    setError(t("attachment_too_large"));
-                    event.target.value = "";
+                  const picked = Array.from(event.target.files ?? []);
+                  // Reset immediately so removing a file and picking the
+                  // SAME one again still fires onChange.
+                  event.target.value = "";
+                  if (picked.length === 0) {
                     return;
                   }
-                  setError("");
-                  setStagedAttachment(file);
+                  // Reject only the oversized files by name and keep the
+                  // rest — rejecting the whole pick would make the
+                  // operator re-select everything.
+                  const tooLarge = picked.filter(
+                    (file) => file.size > MAX_ATTACHMENT_BYTES,
+                  );
+                  const accepted = picked.filter(
+                    (file) => file.size <= MAX_ATTACHMENT_BYTES,
+                  );
+                  setError(
+                    tooLarge.length > 0
+                      ? `${t("attachment_too_large")} ${tooLarge
+                          .map((file) => file.name)
+                          .join(", ")}`
+                      : "",
+                  );
+                  if (accepted.length > 0) {
+                    setStagedAttachments((current) => {
+                      const seen = new Set(current.map(fileKey));
+                      return [
+                        ...current,
+                        ...accepted.filter(
+                          (file) => !seen.has(fileKey(file)),
+                        ),
+                      ];
+                    });
+                  }
                 }}
               />
             </label>
+            {stagedAttachments.length > 0 && (
+              <ul className="staged-attachment-list">
+                {stagedAttachments.map((file) => (
+                  <li
+                    key={fileKey(file)}
+                    className="staged-attachment-row"
+                  >
+                    <span className="staged-attachment-name">
+                      {file.name}
+                    </span>
+                    <span className="staged-attachment-size">
+                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </span>
+                    <button
+                      type="button"
+                      className="staged-attachment-remove"
+                      onClick={() =>
+                        setStagedAttachments((current) =>
+                          current.filter(
+                            (candidate) =>
+                              fileKey(candidate) !== fileKey(file),
+                          ),
+                        )
+                      }
+                      aria-label={`${t("attachment_remove")} ${file.name}`}
+                    >
+                      <X size={15} strokeWidth={2} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {error && (
@@ -545,20 +641,53 @@ export function CreateTicketPage() {
             </div>
           )}
 
+          {partialUpload && (
+            <div
+              className="alert-error"
+              style={{ margin: "0 22px 18px" }}
+              role="alert"
+              data-testid="create-ticket-partial-upload"
+            >
+              <div>
+                {t("attachment_partial_failure", {
+                  count: partialUpload.failed.length,
+                })}
+              </div>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {partialUpload.failed.map((name) => (
+                  <li key={name}>{name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="form-actions">
             <Link to="/" className="btn btn-secondary">
               {t("cancel")}
             </Link>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={submitting || loadingOptions || noOptions}
-            >
-              {submitting
-                ? t("creating")
-                : t(isCustomer ? "melding_submit" : "submit")}
-              <ArrowRight size={14} strokeWidth={2.5} />
-            </button>
+            {partialUpload ? (
+              // The ticket already exists — the only forward action is to
+              // open it. Submitting again would create a second ticket.
+              <Link
+                to={`/tickets/${partialUpload.ticketId}`}
+                className="btn btn-primary"
+                data-testid="create-ticket-goto-ticket"
+              >
+                {t("attachment_partial_goto_ticket")}
+                <ArrowRight size={14} strokeWidth={2.5} />
+              </Link>
+            ) : (
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={submitting || loadingOptions || noOptions}
+              >
+                {submitting
+                  ? t("creating")
+                  : t(isCustomer ? "melding_submit" : "submit")}
+                <ArrowRight size={14} strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -599,7 +728,11 @@ export function CreateTicketPage() {
                 <div className="preview-row">
                   <span className="preview-key">{t("summary_attachment")}</span>
                   <span className="preview-val">
-                    {stagedAttachment ? stagedAttachment.name : t("summary_none")}
+                    {stagedAttachments.length === 0
+                      ? t("summary_none")
+                      : t("summary_attachment_count", {
+                          count: stagedAttachments.length,
+                        })}
                   </span>
                 </div>
               </div>

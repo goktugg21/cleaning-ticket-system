@@ -184,6 +184,9 @@ export function CustomerPricingPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  // Sprint 137 item 2 — off by default: a deleted (soft-archived) price
+  // must not come back unasked. Flipping it refetches both price lists.
+  const [showArchived, setShowArchived] = useState(false);
 
   // RF-2 — one selection / modal / delete-dialog for both price kinds.
   const [selected, setSelected] = useState<PricingRow | null>(null);
@@ -244,14 +247,21 @@ export function CustomerPricingPage() {
         const [customerData, pricesData, servicesData, customPricesData] =
           await Promise.all([
             getCustomer(customerId),
-            listCustomerPrices(customerId),
+            // Sprint 137 item 2 — archived rows are hidden unless the
+            // operator asks for them. DELETE soft-archives, and showing
+            // archived rows by default made a deleted price reappear
+            // greyed-out on the next load (and made one copy-from-default
+            // run look like it had copied everything twice).
+            listCustomerPrices(customerId, { includeArchived: showArchived }),
             // Full catalog (active + inactive). The Default-price column must
             // resolve for pricing rows whose service was later archived, so
             // serviceById is built from every service; the dropdown + create
             // defaults filter down to active-only (see activeServices).
             listServices(),
             // M5 A — custom (non-catalog) price lines for this customer.
-            listCustomerCustomPrices(customerId),
+            listCustomerCustomPrices(customerId, {
+              includeArchived: showArchived,
+            }),
           ]);
         if (cancelled.current) return;
         setCustomer(customerData);
@@ -279,7 +289,7 @@ export function CustomerPricingPage() {
     return () => {
       cancelled.current = true;
     };
-  }, [numericId, t]);
+  }, [numericId, t, showArchived]);
 
   function openCreateModal() {
     setMode("create");
@@ -728,6 +738,18 @@ export function CustomerPricingPage() {
           </h2>
         </div>
         <div className="page-header-actions">
+          <button
+            type="button"
+            className={
+              showArchived ? "btn btn-secondary btn-sm" : "btn btn-ghost btn-sm"
+            }
+            data-testid="customer-pricing-show-archived-toggle"
+            aria-pressed={showArchived}
+            onClick={() => setShowArchived((current) => !current)}
+            disabled={loading || numericId === null}
+          >
+            {t("customer_pricing.show_archived_toggle")}
+          </button>
           <button
             type="button"
             className="btn btn-ghost btn-sm"

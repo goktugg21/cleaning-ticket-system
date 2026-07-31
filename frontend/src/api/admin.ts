@@ -1655,6 +1655,9 @@ export async function deleteManagedUnit(id: number): Promise<void> {
 
 export interface CustomerServicePriceListParams {
   service?: number;
+  // Sprint 137 item 2 — archived (soft-deleted) rows are hidden by the
+  // backend unless this is true. Omit it for the normal view.
+  includeArchived?: boolean;
 }
 
 export async function listCustomerPrices(
@@ -1664,6 +1667,9 @@ export async function listCustomerPrices(
   const query: Record<string, string | number> = {};
   if (params.service !== undefined) {
     query.service = params.service;
+  }
+  if (params.includeArchived) {
+    query.include_archived = "true";
   }
   const response = await api.get<PaginatedResponse<CustomerServicePrice>>(
     `/customers/${customerId}/pricing/`,
@@ -1717,9 +1723,17 @@ export async function deleteCustomerPrice(
 // `/api/customers/<customer_id>/custom-pricing/<custom_price_id>/` — detail.
 export async function listCustomerCustomPrices(
   customerId: number,
+  // Sprint 137 item 2 — same hide-archived-by-default rule as the
+  // contract-price list; both feed one merged table on the pricing page.
+  params: { includeArchived?: boolean } = {},
 ): Promise<CustomerCustomPrice[]> {
+  const query: Record<string, string> = {};
+  if (params.includeArchived) {
+    query.include_archived = "true";
+  }
   const response = await api.get<PaginatedResponse<CustomerCustomPrice>>(
     `/customers/${customerId}/custom-pricing/`,
+    { params: query },
   );
   return response.data.results;
 }
