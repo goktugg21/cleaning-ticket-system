@@ -8,8 +8,8 @@ import {
   addBuildingManager,
   createBuilding,
   getBuilding,
+  listAllCompanies,
   listBuildingManagers,
-  listCompanies,
   listUsers,
   removeBuildingManager,
   updateBuilding,
@@ -153,12 +153,12 @@ export function BuildingFormPage() {
 
   useEffect(() => {
     let cancelled = false;
-    listCompanies({ is_active: "true", page_size: 200 })
+    listAllCompanies({ is_active: "true" })
       .then((response) => {
         if (cancelled) return;
-        setCompanies(response.results);
-        if (isCreate && response.results.length === 1) {
-          setCompany(response.results[0].id);
+        setCompanies(response);
+        if (isCreate && response.length === 1) {
+          setCompany(response[0].id);
         }
       })
       .finally(() => {

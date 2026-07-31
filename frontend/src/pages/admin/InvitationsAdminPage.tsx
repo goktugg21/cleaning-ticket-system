@@ -6,8 +6,8 @@ import { getApiError } from "../../api/client";
 import {
   createInvitation,
   extractAdminFieldErrors,
-  listBuildings,
-  listCompanies,
+  listAllBuildings,
+  listAllCompanies,
   listInvitations,
   revokeInvitation,
 } from "../../api/admin";
@@ -160,13 +160,13 @@ export function InvitationsAdminPage() {
   // dropdown and as a parent filter for buildings/customers).
   useEffect(() => {
     let cancelled = false;
-    listCompanies({ is_active: "true", page_size: 200 })
+    listAllCompanies({ is_active: "true" })
       .then((response) => {
         if (cancelled) return;
-        setCompanies(response.results);
+        setCompanies(response);
         // Auto-select for COMPANY_ADMIN with one company in scope.
-        if (response.results.length === 1) {
-          setFormCompany(response.results[0].id);
+        if (response.length === 1) {
+          setFormCompany(response[0].id);
         }
       })
       .finally(() => {
@@ -184,9 +184,9 @@ export function InvitationsAdminPage() {
       return;
     }
     let cancelled = false;
-    listBuildings({ is_active: "true", page_size: 200, company: formCompany })
+    listAllBuildings({ is_active: "true", company: formCompany })
       .then((response) => {
-        if (!cancelled) setBuildingOptions(response.results);
+        if (!cancelled) setBuildingOptions(response);
       })
       .catch(() => {
         if (!cancelled) setBuildingOptions([]);

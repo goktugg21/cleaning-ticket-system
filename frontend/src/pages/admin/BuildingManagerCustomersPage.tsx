@@ -4,7 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
-import { listCustomers } from "../../api/admin";
+import { listAllCustomers } from "../../api/admin";
 import type { CustomerAdmin } from "../../api/types";
 
 /**
@@ -38,12 +38,14 @@ export function BuildingManagerCustomersPage() {
     setError("");
     // BM scope is enforced server-side; the BM only ever sees
     // customers linked to their assigned buildings. We deliberately
-    // do NOT pass company/building/active filters here — the page is
-    // a simple read-only landing.
-    listCustomers({ page_size: 100, is_active: "true" })
+    // do NOT pass company/building filters here — the page is a simple
+    // read-only landing with no pagination UI, so it must have EVERY
+    // matching row — Sprint 136: this was still capped at page_size:100
+    // with no follow-up, missed by Sprint 135's page_size:200-only grep.
+    listAllCustomers({ is_active: "true" })
       .then((response) => {
         if (cancelled) return;
-        setCustomers(response.results);
+        setCustomers(response);
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));

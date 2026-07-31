@@ -137,3 +137,125 @@ list via `page.evaluate` and confirm `clientHeight <= cap` with
 same-specificity rule can silently win (the #108 hero-grid used a
 compound `.operations-kpi-grid.option-a-hero` selector to beat the base
 `.operations-kpi-grid` media rules declared later in the file).
+
+## Backend full-suite gate — a per-app pass is not a merge gate
+
+CI's actual gate (`.github/workflows/test.yml`, the `Run test suite` step) is:
+
+```
+python manage.py test --noinput --verbosity=1 --parallel
+```
+
+That is the FULL backend suite (every app, ~3300 tests as of Sprint 137),
+fanned across worker processes. A per-app run during development
+(`python manage.py test accounts`, `python manage.py test invoicing`, ...)
+is a fast, useful iteration check, but it is not equivalent to the CI gate
+for two distinct reasons:
+
+- **Cross-app fixture collisions.** A per-app run only ever sees that
+  app's own test data. A new DB-level constraint (e.g. a partial
+  `UniqueConstraint`) can be violated by a fixture pattern living in a
+  completely different app's test module — per-app runs can't catch that
+  because the colliding fixtures never share a process.
+- **`--parallel`-only isolation bugs.** `--parallel` clones the test
+  database per worker and distributes test classes across workers. A bug
+  that depends on execution order, shared module-level state, or DB state
+  leaking between test classes can pass sequentially and fail only under
+  `--parallel` (or vice versa) — a different bug class from a plain
+  assertion failure, needing different treatment (fix the isolation, not
+  the assertion).
+
+This container cannot substitute for CI on either count: it reports
+`nproc=1` with no cgroup CPU limit, so `--parallel` forks no workers, and a
+full sequential run takes roughly 168 minutes — even run to completion, it
+still wouldn't reproduce CI's parallel conditions. Don't try to run the
+full suite locally before pushing; treat CI as the actual full-suite gate
+and use the targeted rule below instead.
+
+**Standing rule:** when you change a shared service function, run every app
+whose TESTS call it — not just the app whose files you edited.
+
+Worked example: `grep -rln "reverse_invoice" backend --include=*.py` returns
+`extra_work/tests/test_sprint127_2_label_lock.py` alongside the invoicing
+files. Sprint 134 edited only `invoicing/`, so `extra_work` was never
+re-run, and that is exactly why CI went red (a stale `extra_work` test had
+documented pre-Sprint-134 double-reversal behaviour that Sprint 134's new
+guard in `invoicing/state_machine.py` deliberately closed).
+
+Also see [Parallel test runner traceback pickling](#parallel-test-runner-traceback-pickling-tblib)
+below — in CI, a real failure inside a `--parallel` worker can be masked by
+a `TypeError: cannot pickle 'traceback' object` from the reporter itself,
+which reads as a totally unrelated crash if you don't know to look past it.
+
+## Parallel test runner traceback pickling (tblib)
+
+Django's `--parallel` test runner ships failing tests' exception info from
+worker subprocesses back to the parent via `multiprocessing`, which means
+pickling the `(exc_type, exc_value, traceback)` tuple. A raw Python
+traceback object is not picklable by default. Confirmed directly against
+the installed Django 5.2 runner source
+(`django/test/runner.py::RemoteTestResult.check_picklable`): on a test
+failure/error, the runner tries `pickle.loads(pickle.dumps(err))`; if that
+itself raises, it prints a diagnostic ("tracebacks cannot be pickled... you
+should install tblib") and **re-raises the pickling exception**, replacing
+the original failure in the output.
+
+Net effect: without `tblib` installed, a genuine assertion failure or
+unhandled exception inside a `--parallel` worker can surface in CI logs as
+
+```
+TypeError: cannot pickle 'traceback' object
+```
+
+with the real failure's message and stack trace gone. `backend/requirements.txt`
+pins `tblib` (Sprint 137) specifically so this class of failure stops being
+unreadable — `tblib.pickling_support.install()` monkey-patches traceback
+objects to make them picklable, which Django's runner uses automatically
+when the package is importable (`if tblib is not None:
+tblib.pickling_support.install()`). No runner-side configuration needed
+beyond having the dependency installed.
+
+## `ConfirmDialog` / native `<dialog>` is imperative — two distinct ways to get it wrong
+
+`ConfirmDialog` (`frontend/src/components/ConfirmDialog.tsx`) wraps a
+native `<dialog>` element behind a `forwardRef` + `useImperativeHandle`
+handle (`{ open, close }` calling `showModal()` / `close()`). A native
+`<dialog>` does NOT become visible just because it is mounted in the
+DOM — unlike a normal conditionally-rendered `<div>` modal, mounting it
+is not showing it, and unmounting it is not the only way to hide it.
+That single fact produces two opposite-looking bugs from the same root
+cause:
+
+**Mount without `.open()` → the trigger button looks dead.** Wrapping
+`<ConfirmDialog ref={dialogRef} .../>` in a conditional render (`{mode
+=== "delete" && <ConfirmDialog .../>}`), the way a normal CSS-shown/
+hidden modal would be, mounts an INVISIBLE `<dialog>` — nothing shows
+until code explicitly calls `dialogRef.current.open()`. A caller that
+sets the triggering state but never calls `.open()` sees no dialog, no
+error, just a button that appears to do nothing. This shipped in Sprint
+128 and was found by the owner in testing, not by CI or review.
+
+**Unmount without `.close()` first → the whole page goes inert.**
+Conversely, if a component holding an OPEN `<dialog>` (i.e. `.open()`
+was called, `showModal()` is active) unmounts without calling `.close()`
+first, the browser can leave the document in the modal's inert state —
+the page LOOKS normal but nothing is clickable anywhere, including
+outside where the dialog was. This is the frozen-screen bug Sprint 118
+root-caused and fixed (see
+`docs/archive/2026-06-sprints/sprint-116-119-build-log.md`) — the fix
+was, and remains, calling `.close()` in the unmounting code path (a
+cleanup effect, or before whatever state change causes the unmount)
+rather than just letting the DOM node disappear.
+
+**Fix, both directions:** always render `<ConfirmDialog>` unconditionally
+(never behind `{condition && ...}`) and drive it ENTIRELY through the ref
+— `.open()` to show it, `.close()` before any unmount or before the
+underlying data it references goes away. The existing `useRef` +
+`.open()` call sites elsewhere in the codebase are the pattern to copy;
+a new dialog usage that looks different from those is worth a second
+look before it ships.
+
+This bit Sprint 128 (dead-looking delete button, invisible dialog) and
+Sprint 118 (frozen screen, inert document) — the same imperative-API
+mistake in both directions, three sprints apart, because the gotcha was
+never written down after the first one.

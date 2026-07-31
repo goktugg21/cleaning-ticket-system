@@ -23,6 +23,16 @@ For prod orchestration, either (a) target the public hostname listed in
 DJANGO_ALLOWED_HOSTS, (b) replace the HTTP healthcheck with a Python
 script that imports Django and calls the view in-process, or (c) add an
 internal hostname (the container/service name) to DJANGO_ALLOWED_HOSTS.
+
+Sprint 134 — (c) is now done unconditionally in settings.py: "backend" (the
+Docker Compose service name for this container in BOTH docker-compose.yml
+and docker-compose.prod.yml) is always appended to ALLOWED_HOSTS, so an
+internal HTTP request addressed by that name (`Host: backend`) now passes
+the gate without loosening the production validator's ban on
+localhost/127.0.0.1/wildcard. The prod compose healthcheck itself still
+uses a TCP socket probe, not HTTP — that is a separate, deliberate choice
+left unchanged this sprint (see docs/engineering/deployment.md §4); this
+fix means switching it back to HTTP is now POSSIBLE, not that it happened.
 """
 from __future__ import annotations
 

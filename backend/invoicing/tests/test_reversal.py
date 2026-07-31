@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
 from invoicing.models import Invoice
@@ -130,3 +131,62 @@ class ReversalTests(InvoicingFixture):
         _ew, original = self._sent_with_ew()
         with self.assertRaises(PermissionDenied):
             reverse_invoice(self.customer_user, original)
+
+
+class DoubleReversalGuardTests(InvoicingFixture):
+    """Sprint 134 — `reverse_invoice` never changes `original.status` (it
+    stays SENT on the books by design), so nothing previously stopped a
+    SECOND reversal of the same original: both existing guards (status ==
+    SENT, not itself a reversal) still passed the second time round, and
+    `Invoice.reverses` carried no uniqueness constraint. Each repeat mints
+    another negated counter-invoice with a real, gapless number."""
+
+    def _sent_with_ew(self):
+        ew = self.make_ew(closed_at=dt(2026, 5, 31))
+        inv = generate_draft_invoices(
+            self.admin, self.company.id, self.customer.id, YEAR, MONTH
+        )[0]
+        inv = send_invoice(self.admin, issue_invoice(self.admin, inv))
+        return ew, inv
+
+    def test_second_reversal_rejected_naming_the_existing_credit_note(self):
+        _ew, original = self._sent_with_ew()
+        first_reversal = reverse_invoice(self.admin, original)
+
+        with self.assertRaises(InvoiceTransitionError) as ctx:
+            reverse_invoice(self.admin, original)
+        message = str(ctx.exception)
+        self.assertIn(original.number, message)
+        self.assertIn(first_reversal.number, message)
+
+        # Refusing the second attempt must not have minted or consumed a
+        # number, nor created a second row in `reversed_by`.
+        self.assertEqual(original.reversed_by.count(), 1)
+
+    def test_first_reversal_still_works(self):
+        _ew, original = self._sent_with_ew()
+        reversal = reverse_invoice(self.admin, original)
+        self.assertTrue(reversal.is_reversal)
+        self.assertEqual(reversal.reverses_id, original.id)
+
+    def test_soft_deleted_reversal_does_not_block_a_legitimate_retry(self):
+        # No application code path can soft-delete a reversal today
+        # (reversals are created ISSUED; delete_draft_invoice is DRAFT-
+        # only) — this constructs the scenario directly, the same way a
+        # future admin-side correction tool could reach it, to prove the
+        # guard's `deleted_at__isnull=True` filter is not dead code.
+        _ew, original = self._sent_with_ew()
+        stale_reversal = reverse_invoice(self.admin, original)
+        Invoice.objects.filter(pk=stale_reversal.pk).update(
+            deleted_at=timezone.now()
+        )
+
+        retry_reversal = reverse_invoice(self.admin, original)
+        self.assertTrue(retry_reversal.is_reversal)
+        self.assertEqual(retry_reversal.reverses_id, original.id)
+        self.assertNotEqual(retry_reversal.id, stale_reversal.id)
+
+        # A third attempt, now that a LIVE reversal exists again, is
+        # refused the same way the very first double-reversal was.
+        with self.assertRaises(InvoiceTransitionError):
+            reverse_invoice(self.admin, original)

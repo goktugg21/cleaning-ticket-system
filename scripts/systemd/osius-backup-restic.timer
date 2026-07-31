@@ -1,0 +1,15 @@
+# Sprint 134 — nightly trigger for osius-backup-restic.service. See
+# docs/operations/backups.md for installation.
+
+[Unit]
+Description=Osius cleaning-ticket-system — nightly restic backup (02:40)
+
+[Timer]
+# 02:40 — after the existing local pg-backup/media-backup cron slots
+# documented in docs/engineering/backup-restore.md (02:30 / 02:35), so
+# this doesn't contend with them for the same docker exec resources.
+OnCalendar=*-*-* 02:40:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -8,7 +8,7 @@
 import axios from "axios";
 
 import { api } from "./client";
-import type { DocumentFile, DocumentFolder } from "./types";
+import type { DocumentFile, DocumentFolder, PaginatedResponse } from "./types";
 
 function base(customerId: number | string): string {
   return `/customers/${customerId}/documents`;
@@ -34,10 +34,23 @@ export async function listFiles(
   customerId: number | string,
   folderId: number,
 ): Promise<DocumentFile[]> {
-  const response = await api.get<DocumentFile[]>(`${base(customerId)}/files/`, {
-    params: { folder: folderId },
-  });
-  return response.data;
+  // Sprint 134 — the backend now paginates this endpoint (it used to
+  // return every row in one response); page exhaustively so a folder
+  // with more than one page of files never silently truncates. Mirrors
+  // api/extraWork.ts::listAllExtraWork's exhaustive-fetch template. The
+  // return type stays a bare array, so DocumentsFilePane needs no change.
+  const all: DocumentFile[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<DocumentFile>>(
+      `${base(customerId)}/files/`,
+      { params: { folder: folderId, page_size: 100, page } },
+    );
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function createFolder(

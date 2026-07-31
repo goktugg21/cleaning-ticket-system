@@ -20,8 +20,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { api, getApiError } from "../../api/client";
-import { extractAdminFieldErrors, getBuildingEligibleCrew } from "../../api/admin";
+import { getApiError } from "../../api/client";
+import {
+  extractAdminFieldErrors,
+  getBuildingEligibleCrew,
+  listAllBuildings,
+  listAllCustomers,
+} from "../../api/admin";
 import type { AdminFieldErrors, CrewUser } from "../../api/admin";
 import {
   createRecurringJob,
@@ -34,7 +39,7 @@ import type {
   RecurringJobWritePayload,
   SelectablePricingMode,
 } from "../../api/plannedWork.types";
-import type { Building, Customer, PaginatedResponse } from "../../api/types";
+import type { Building, Customer } from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 
@@ -130,16 +135,12 @@ export function RecurringJobFormPage() {
     async function load() {
       try {
         const [buildingsResp, customersResp] = await Promise.all([
-          api.get<PaginatedResponse<Building>>("/buildings/", {
-            params: { page_size: 200 },
-          }),
-          api.get<PaginatedResponse<Customer>>("/customers/", {
-            params: { page_size: 200 },
-          }),
+          listAllBuildings(),
+          listAllCustomers(),
         ]);
         if (cancelled) return;
-        setBuildings(buildingsResp.data.results);
-        setCustomers(customersResp.data.results);
+        setBuildings(buildingsResp);
+        setCustomers(customersResp);
 
         // Eligible crew is loaded per-building by the [building] effect
         // below; in edit mode that effect fires once `building` is set

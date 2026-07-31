@@ -138,6 +138,23 @@ export function DocumentsFilePane({
         <span className="doc-pane-hint">{t("documents.drop_hint")}</span>
       </div>
 
+      {files !== null && files.length > 0 && (
+        // Sprint 135 — native HTML5 drag-and-drop (used both here, for a
+        // file->folder move, and above, for an OS file upload) never fires
+        // on touch, and every row's move icon is the only path a tablet
+        // user has. The icon was already always-visible (not hover-gated —
+        // see .doc-file-actions in documents.css), so the gap was framing,
+        // not capability: a reader who tries the intuitive drag gesture and
+        // sees nothing happen has no way to know a working alternative
+        // exists right next to it. State both paths explicitly rather than
+        // building a second, touch-specific drag implementation (a real
+        // pointer-event-based drag would still need a mouse-free rename/
+        // move confirmation step anyway — the icon already provides one).
+        <p className="doc-pane-hint" data-testid="doc-move-hint">
+          {t("documents.move_hint")}
+        </p>
+      )}
+
       {uploadName !== null && (
         <div className="doc-upload-progress" data-testid="doc-upload-progress">
           <span className="doc-upload-name">{uploadName}</span>

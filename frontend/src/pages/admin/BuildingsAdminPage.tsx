@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
-import { listBuildings, listCompanies } from "../../api/admin";
+import { listAllCompanies, listBuildings } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { BuildingAdmin, CompanyAdmin } from "../../api/types";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
@@ -50,17 +50,19 @@ export function BuildingsAdminPage() {
     reactivated: t("buildings.banner_reactivated"),
   });
 
-  // Load companies once for the filter dropdown. The list is paginated server
-  // side; pull a generous page so most installs fit in one request.
+  // Load companies once for the filter dropdown. Sprint 135 — fetched
+  // exhaustively (listAllCompanies) so a tenant with more than one page
+  // of companies still gets a complete dropdown, not a silently truncated
+  // one.
   useEffect(() => {
     let cancelled = false;
-    listCompanies({ is_active: "true", page_size: 200 })
+    listAllCompanies({ is_active: "true" })
       .then((response) => {
         if (cancelled) return;
-        setCompanies(response.results);
+        setCompanies(response);
         // Auto-select for COMPANY_ADMIN with exactly one company in scope.
-        if (response.results.length === 1) {
-          setCompanyFilter(response.results[0].id);
+        if (response.length === 1) {
+          setCompanyFilter(response[0].id);
         }
       })
       .finally(() => {

@@ -35,6 +35,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
+from customers.models import Customer
 from extra_work.models import ExtraWorkRequest
 from extra_work.views import _is_provider_operator  # reuse (do NOT re-implement)
 
@@ -88,12 +89,26 @@ def _resync_invoice_group_labels(invoice) -> list[str]:
     claims a department/work-type grouping some of its own lines no longer
     have — the invoice must never assert a grouping it cannot back up.
 
-    Untouched (returns []) for any invoice that was never generated with a
-    department/work_type in the first place (CUSTOMER / PER_BUILDING
-    granularity) — those never claimed a grouping, so there is nothing to
-    verify, even if their lines happen to share one by coincidence.
+    Untouched (returns []) for any invoice that was never generated at
+    PER_BUILDING_DEPARTMENT_WORK_TYPE granularity (CUSTOMER / PER_BUILDING,
+    or a pre-Sprint-134 invoice with no recorded `granularity` at all) —
+    those never claimed a grouping, so there is nothing to verify, even if
+    their lines happen to share one by coincidence.
+
+    Sprint 134 — this used to key off `department_id is None and
+    work_type_id is None`, which conflated two different states that both
+    look that way at generation time: "never claimed a label" (CUSTOMER /
+    PER_BUILDING) and "claimed the UNTAGGED bucket at label granularity"
+    (an EW with no department/work type, generated at PER_BUILDING_
+    DEPARTMENT_WORK_TYPE). The untagged case silently never resynced even
+    after its EW was relabelled during the draft window, because both FKs
+    were still NULL and the old check couldn't tell it apart from the
+    first case. Keying on `invoice.granularity` instead disambiguates them.
     """
-    if invoice.department_id is None and invoice.work_type_id is None:
+    if (
+        invoice.granularity
+        != Customer.InvoiceGranularity.PER_BUILDING_DEPARTMENT_WORK_TYPE
+    ):
         return []
     ew_ids = invoice.lines.filter(extra_work__isnull=False).values_list(
         "extra_work_id", flat=True
@@ -258,6 +273,24 @@ def reverse_invoice(actor, invoice):
         raise InvoiceTransitionError(
             "A reversal is terminal; it cannot itself be reversed."
         )
+    # Sprint 134 — `reverse_invoice` never changes `original.status` (it
+    # stays SENT on the books by design, see the docstring), so the two
+    # guards above never catch a SECOND reversal of the same original: both
+    # checks still pass. Read inside the same locked/atomic block as the
+    # rest of this function, so this is race-safe the same way the status
+    # check above already is. `deleted_at__isnull=True` excludes a
+    # soft-deleted reversal from blocking a legitimate retry — no app code
+    # path produces one today (reversals are created ISSUED, and
+    # `delete_draft_invoice` is DRAFT-only), but nothing stops a future one
+    # or a direct admin correction, and the guard should not misfire against it.
+    existing_reversal = original.reversed_by.filter(
+        deleted_at__isnull=True
+    ).first()
+    if existing_reversal is not None:
+        raise InvoiceTransitionError(
+            f"Invoice {original.number} has already been reversed by "
+            f"{existing_reversal.number}."
+        )
 
     now = timezone.now()
     year = _issue_year(now)
@@ -273,6 +306,11 @@ def reverse_invoice(actor, invoice):
         # carry the same label the original did, not a bare/untagged one.
         department_id=original.department_id,
         work_type_id=original.work_type_id,
+        # Sprint 134 — mirror which granularity produced the original too,
+        # for the same reason: a reversal of an untagged PER_BUILDING_
+        # DEPARTMENT_WORK_TYPE original should still record that granularity,
+        # not silently look like a CUSTOMER/PER_BUILDING invoice.
+        granularity=original.granularity,
         status=Invoice.Status.ISSUED,  # a real, already-issued counter-document
         number=number,
         year=year,

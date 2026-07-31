@@ -1916,6 +1916,11 @@ export interface Service {
 
 export interface ServiceCreatePayload {
   category: number;
+  // Sprint 135 — write-once on CREATE only (read-only on UPDATE, mirrors
+  // ManagedUnitCreatePayload.company). Omit unless the actor is a
+  // SUPER_ADMIN disambiguating across 2+ provider companies — a
+  // COMPANY_ADMIN's own company is defaulted server-side either way.
+  company?: number;
   name: string;
   description?: string;
   unit_type: ServiceUnitType;

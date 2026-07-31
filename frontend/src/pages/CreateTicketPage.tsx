@@ -12,8 +12,9 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { listAllBuildings, listAllCustomers } from "../api/admin";
 import { api, getApiError } from "../api/client";
-import type { Building, Customer, PaginatedResponse } from "../api/types";
+import type { Building, Customer } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { isCustomerUser } from "../auth/permissions";
 
@@ -110,18 +111,14 @@ export function CreateTicketPage() {
     async function loadOptions() {
       try {
         const [buildingResponse, customerResponse] = await Promise.all([
-          api.get<PaginatedResponse<Building>>("/buildings/", {
-            params: { page_size: 200 },
-          }),
-          api.get<PaginatedResponse<Customer>>("/customers/", {
-            params: { page_size: 200 },
-          }),
+          listAllBuildings(),
+          listAllCustomers(),
         ]);
 
         if (cancelled) return;
 
-        setBuildings(buildingResponse.data.results);
-        setCustomers(customerResponse.data.results);
+        setBuildings(buildingResponse);
+        setCustomers(customerResponse);
         // #112 follow-up — do NOT auto-select the first building on load.
         // Auto-selecting a building immediately cross-filtered the customer
         // dropdown (filteredCustomers) down to just that building's

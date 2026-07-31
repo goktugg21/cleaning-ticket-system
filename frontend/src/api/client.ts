@@ -12,12 +12,40 @@ type RetryRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean;
 };
 
+// Sprint 134 — both clients used to have no `timeout`, so a stalled
+// request waited indefinitely. For the refresh client specifically, that
+// left `refreshPromise` unsettled forever: every 401 queues behind it
+// (see `refreshAccessToken` below), so a hang there froze the whole app
+// with no console error, and the Sprint 129 session-expired handler never
+// fired because it only runs once the refresh call SETTLES.
+//
+// General client: 30s. Generous for normal CRUD/list/detail calls and
+// still comfortably under both infra ceilings behind it in prod — the
+// gunicorn worker timeout (120s, `docker-compose.prod.yml`) and nginx's
+// `/api/` `proxy_read_timeout` (300s, `frontend/nginx.conf`) — so a
+// genuinely slow backend call always fails on the client with a clean,
+// catchable `ECONNABORTED` before infra would have killed the connection
+// out from under it anyway. A specific call that legitimately needs
+// longer (e.g. a large export) can still override it via that request's
+// own `{ timeout }` config, which axios merges over this default.
+const GENERAL_TIMEOUT_MS = 30_000;
+
+// Refresh/logout client: 8s, deliberately tighter. This call is invisible
+// to the user (fired transparently by the response interceptor) and every
+// other in-flight 401 queues behind it, so it must fail fast rather than
+// share the general budget. The endpoints it hits do a single JWT
+// verify/write, not a report/export computation, so 8s already covers
+// normal network jitter or a cold backend with room to spare.
+const REFRESH_TIMEOUT_MS = 8_000;
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: GENERAL_TIMEOUT_MS,
 });
 
 const refreshApi = axios.create({
   baseURL: API_BASE_URL,
+  timeout: REFRESH_TIMEOUT_MS,
 });
 
 let refreshPromise: Promise<string | null> | null = null;

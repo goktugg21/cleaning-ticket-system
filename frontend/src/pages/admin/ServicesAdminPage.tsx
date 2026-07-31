@@ -9,18 +9,21 @@ import {
   createServiceCategory,
   deleteService,
   deleteServiceCategory,
+  listAllCompanies,
   listServiceCategories,
   listServices,
   updateService,
   updateServiceCategory,
 } from "../../api/admin";
 import type {
+  CompanyAdmin,
   Service,
   ServiceCategory,
   ServiceCategoryCreatePayload,
   ServiceCreatePayload,
   ServiceUnitType,
 } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
@@ -134,6 +137,8 @@ function formatDecimal(value: string): string {
 export function ServicesAdminPage() {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
+  const { me } = useAuth();
+  const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
   const [tab, setTab] = useState<Tab>("services");
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
@@ -191,6 +196,28 @@ export function ServicesAdminPage() {
   // #108 Part D — display-only row filter for the long service list;
   // hidden-but-selected rows stay selected (never changes submission).
   const [bulkFilter, setBulkFilter] = useState("");
+
+  // Sprint 135 — a SUPER_ADMIN managing a tenant with 2+ provider
+  // companies must disambiguate `company` on Service / ManagedUnit
+  // create (backend/extra_work/views_catalog.py::
+  // _resolve_catalog_create_company 400s `service_company_required`
+  // otherwise) — Categories are GLOBAL (SUPER_ADMIN-only, no `company`
+  // field at all), so this selector never applies to that tab. One
+  // shared control for both the Services and Units tabs.
+  const [catalogCompanies, setCatalogCompanies] = useState<CompanyAdmin[]>([]);
+  const [catalogCompany, setCatalogCompany] = useState<number | "">("");
+  const showCompanySelector = isSuperAdmin && catalogCompanies.length > 1;
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    let cancelled = false;
+    listAllCompanies({ is_active: "true" }).then((response) => {
+      if (!cancelled) setCatalogCompanies(response);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSuperAdmin]);
 
   // Initial parallel load.
   useEffect(() => {
@@ -339,6 +366,10 @@ export function ServicesAdminPage() {
       setServiceFormError(t("services.error_category_required"));
       return;
     }
+    if (serviceMode === "create" && showCompanySelector && catalogCompany === "") {
+      setServiceFormError(t("catalog.error_company_required"));
+      return;
+    }
     const priceNumber = Number(serviceForm.default_unit_price);
     if (!Number.isFinite(priceNumber) || priceNumber < 0) {
       setServiceFormError(t("services.error_price_invalid"));
@@ -381,7 +412,9 @@ export function ServicesAdminPage() {
     };
     try {
       if (serviceMode === "create") {
-        const created = await createService(payload);
+        const created = await createService(
+          catalogCompany === "" ? payload : { ...payload, company: catalogCompany },
+        );
         setServices((prev) =>
           [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
         );
@@ -600,6 +633,38 @@ export function ServicesAdminPage() {
           {t("services.tab_units")}
         </button>
       </div>
+
+      {showCompanySelector && (
+        <div className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
+          <label className="field-label" htmlFor="catalog-company-selector">
+            {t("catalog.company_selector_label")}
+          </label>
+          <select
+            id="catalog-company-selector"
+            className="field-select"
+            value={catalogCompany === "" ? "" : String(catalogCompany)}
+            onChange={(event) => {
+              const v = event.target.value;
+              setCatalogCompany(v === "" ? "" : Number(v));
+            }}
+            data-testid="catalog-company-selector"
+          >
+            <option value="">
+              {t("catalog.company_selector_placeholder")}
+            </option>
+            {catalogCompanies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
+          {tab === "categories" && (
+            <p className="field-hint muted small">
+              {t("catalog.company_selector_hint_categories")}
+            </p>
+          )}
+        </div>
+      )}
 
       {loadError && (
         <div className="alert-error" role="alert" style={{ marginBottom: 16 }}>
@@ -979,7 +1044,10 @@ export function ServicesAdminPage() {
         </>
       ) : (
         // -------- Units tab --------
-        <ManagedUnitsTab />
+        <ManagedUnitsTab
+          companyRequired={showCompanySelector}
+          selectedCompany={catalogCompany}
+        />
       )}
 
       {/* Category create/edit modal */}

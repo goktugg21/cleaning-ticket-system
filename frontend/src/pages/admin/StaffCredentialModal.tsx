@@ -16,7 +16,7 @@ import { Download, Eye, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
-import { listCustomers } from "../../api/admin";
+import { listAllCustomers } from "../../api/admin";
 import type { CustomerAdmin } from "../../api/types";
 import {
   CREDENTIAL_TYPES,
@@ -120,8 +120,8 @@ export function StaffCredentialModal({
     let cancelled = false;
     (async () => {
       try {
-        const response = await listCustomers({ page_size: 200 });
-        if (!cancelled) setCustomers(response.results);
+        const response = await listAllCustomers();
+        if (!cancelled) setCustomers(response);
       } catch {
         if (!cancelled) setCustomers([]);
       }

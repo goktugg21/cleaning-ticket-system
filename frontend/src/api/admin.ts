@@ -126,6 +126,29 @@ export async function listCompanies(
   return response.data;
 }
 
+// Sprint 135 — the picker call sites across the admin pages (company
+// selects on create/filter forms) used to request `page_size: 200` and
+// assume that was everything; CompanyViewSet has no `pagination_class`
+// override (reverted Sprint 134's UnboundedPagination — it broke
+// CompaniesAdminPage's own prev/next pagination UI for every OTHER
+// caller), so a tenant with more than 200 companies silently truncated.
+// Fetch EVERY matching row instead. Mirrors extraWork.ts::listAllExtraWork.
+export async function listAllCompanies(
+  params: AdminListParams = {},
+): Promise<CompanyAdmin[]> {
+  const all: CompanyAdmin[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<CompanyAdmin>>("/companies/", {
+      params: { ...cleanParams(params), page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
+}
+
 export async function getCompany(id: number): Promise<CompanyAdmin> {
   const response = await api.get<CompanyAdmin>(`/companies/${id}/`);
   return response.data;
@@ -173,6 +196,24 @@ export async function listBuildings(
     params: cleanParams(params),
   });
   return response.data;
+}
+
+// Sprint 135 — see listAllCompanies above for the full rationale; same
+// fix, on BuildingViewSet.
+export async function listAllBuildings(
+  params: AdminListParams = {},
+): Promise<BuildingAdmin[]> {
+  const all: BuildingAdmin[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<BuildingAdmin>>("/buildings/", {
+      params: { ...cleanParams(params), page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function getBuilding(id: number): Promise<BuildingAdmin> {
@@ -268,6 +309,24 @@ export async function listCustomers(
     params: cleanParams(params),
   });
   return response.data;
+}
+
+// Sprint 135 — see listAllCompanies above for the full rationale; same
+// fix, on CustomerViewSet.
+export async function listAllCustomers(
+  params: AdminListParams = {},
+): Promise<CustomerAdmin[]> {
+  const all: CustomerAdmin[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<CustomerAdmin>>("/customers/", {
+      params: { ...cleanParams(params), page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function getCustomer(id: number): Promise<CustomerAdmin> {

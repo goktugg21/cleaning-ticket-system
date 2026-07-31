@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listCustomerBuildings, listCustomers } from "../api/admin";
+import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import { listAllExtraWork } from "../api/extraWork";
 import type {
@@ -226,9 +226,9 @@ export function ExtraWorkListPage() {
   useEffect(() => {
     if (!isProvider) return;
     let cancelled = false;
-    listCustomers({ page_size: 200 })
+    listAllCustomers()
       .then((res) => {
-        if (!cancelled) setCustomers(res.results);
+        if (!cancelled) setCustomers(res);
       })
       .catch(() => {
         // A load failure just leaves the customer picker empty.

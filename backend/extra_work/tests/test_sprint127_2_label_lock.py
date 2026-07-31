@@ -133,6 +133,10 @@ class LabelLockTests(InvoicingFixture):
 
     # -- the owner's correction flow ------------------------------------
     def test_reversal_unlocks_and_new_label_sticks(self):
+        # Single-reversal unlock path. A SECOND reversal of the same original
+        # has been impossible since Sprint 134's guard in
+        # invoicing/state_machine.py (see invoicing/tests/test_reversal.py::
+        # DoubleReversalGuardTests) — do not re-add a double-reversal case here.
         ew = self._earned_ew()
         ew.department = self.dept
         ew.save(update_fields=["department"])
@@ -162,21 +166,6 @@ class LabelLockTests(InvoicingFixture):
         resp = self._relabel(ew, department=self.dept2.id)
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.data["code"], "labels_locked_by_invoice")
-
-    def test_double_reversal_still_unlocks(self):
-        # Known open item: reverse_invoice does not flip the original's status,
-        # so a SENT invoice can be reversed twice. The predicate keys on
-        # `reversed_by` being non-empty, so 1 OR 2 reversals both unlock.
-        ew = self._earned_ew()
-        original = send_invoice(
-            self.admin, issue_invoice(self.admin, self._draft())
-        )
-        reverse_invoice(self.admin, original)
-        reverse_invoice(self.admin, original)  # second reversal
-        resp = self._relabel(ew, department=self.dept.id)
-        self.assertEqual(resp.status_code, 200, resp.data)
-        ew.refresh_from_db()
-        self.assertEqual(ew.department_id, self.dept.id)
 
     # -- Sprint 128 §0: the detail serializer exposes the lock ----------
     def _detail(self, ew):
