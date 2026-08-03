@@ -214,6 +214,9 @@ class ExtraWorkRequestViewSet(
                 customer=customer,
                 requested_date=line["requested_date"],
                 custom_description=(line.get("custom_description") or ""),
+                # Sprint 137 item 6 — orderable per-customer custom
+                # price. Classifies AD_HOC exactly as create does.
+                custom_price=line.get("custom_price"),
             )
             for line in line_items
         ]
@@ -228,12 +231,35 @@ class ExtraWorkRequestViewSet(
                 classification.source
                 == ExtraWorkLinePriceSource.AGREED_CUSTOMER_PRICE
             )
+            line_custom_price = line.get("custom_price")
             lines_payload.append(
                 {
                     "index": index,
                     "service": service.id if service is not None else None,
+                    # Sprint 137 item 6 — a custom-price line stays
+                    # AD_HOC (`price_source` above is untouched), but
+                    # its amount IS known, so it is returned rather than
+                    # rendered as "to be priced by the provider". These
+                    # three keys are null on every other line kind.
+                    "custom_price": (
+                        line_custom_price.id
+                        if line_custom_price is not None
+                        else None
+                    ),
+                    "custom_price_unit_price": (
+                        _decimal_str(classification.snapshot_unit_price)
+                        if line_custom_price is not None
+                        else None
+                    ),
+                    "custom_price_vat_pct": (
+                        _decimal_str(classification.snapshot_vat_pct)
+                        if line_custom_price is not None
+                        else None
+                    ),
                     "custom_description": (
-                        line.get("custom_description") or ""
+                        classification.custom_description
+                        or line.get("custom_description")
+                        or ""
                     ),
                     "requested_date": line["requested_date"],
                     "quantity": _decimal_str(line["quantity"]),

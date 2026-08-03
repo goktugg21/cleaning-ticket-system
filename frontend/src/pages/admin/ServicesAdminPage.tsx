@@ -182,6 +182,24 @@ export function ServicesAdminPage() {
     useState<Service | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
+  // Sprint 137 item 7 — iOS-style list edit mode on the services list.
+  // Unlike the customer pricing lists (where DELETE soft-archives),
+  // DELETE here is a REAL hard delete
+  // (backend/extra_work/views_catalog.py::ServiceDetailView.delete), so
+  // the button says "delete" and means it. A service still referenced
+  // by any customer contract price is PROTECTed and comes back as a
+  // 400 — which is exactly why the per-row failure report below is
+  // load-bearing rather than decorative: a bulk run over a real catalog
+  // will routinely delete some rows and be refused on others.
+  const [serviceEditMode, setServiceEditMode] = useState(false);
+  const [serviceBulkIds, setServiceBulkIds] = useState<number[]>([]);
+  const serviceBulkDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [serviceBulkBusy, setServiceBulkBusy] = useState(false);
+  const [serviceBulkFailures, setServiceBulkFailures] = useState<string[]>(
+    [],
+  );
+  const [serviceBulkDone, setServiceBulkDone] = useState<number | null>(null);
+
   // M5 C — catalog default-price bulk-raise modal (services tab only).
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<number[]>([]);
@@ -490,6 +508,63 @@ export function ServicesAdminPage() {
     }
   }
 
+  // ---- Sprint 137 item 7 — bulk delete (services list edit mode) ----
+  function exitServiceEditMode() {
+    setServiceEditMode(false);
+    setServiceBulkIds([]);
+  }
+
+  function toggleServiceBulkRow(serviceId: number, checked: boolean) {
+    setServiceBulkIds((prev) =>
+      checked ? [...prev, serviceId] : prev.filter((id) => id !== serviceId),
+    );
+  }
+
+  function openServiceBulkDelete() {
+    setServiceBulkFailures([]);
+    setServiceBulkDone(null);
+    serviceBulkDialogRef.current?.open();
+  }
+
+  /**
+   * Delete every selected service. No bulk endpoint exists, so this is
+   * N sequential DELETEs from the client (recorded as a `## NEXT` item
+   * in the sprint checklist for catalogs where N could get large).
+   *
+   * Partial failure is the NORMAL case here, not the exception: any
+   * service a customer still has a contract price for is PROTECTed and
+   * returns 400. Those rows are named individually and stay selected;
+   * the ones that did delete are gone. The run is never reported as a
+   * clean success when anything failed.
+   */
+  async function handleConfirmServiceBulkDelete() {
+    setServiceBulkBusy(true);
+    const targets = services.filter((s) => serviceBulkIds.includes(s.id));
+    const deletedIds: number[] = [];
+    const failed: { id: number; name: string }[] = [];
+
+    for (const service of targets) {
+      try {
+        await deleteService(service.id);
+        deletedIds.push(service.id);
+      } catch {
+        failed.push({ id: service.id, name: service.name });
+      }
+    }
+
+    if (deletedIds.length > 0) {
+      setServices((prev) => prev.filter((s) => !deletedIds.includes(s.id)));
+      if (selectedService && deletedIds.includes(selectedService.id)) {
+        setSelectedService(null);
+      }
+    }
+    setServiceBulkIds(failed.map((f) => f.id));
+    setServiceBulkFailures(failed.map((f) => f.name));
+    setServiceBulkDone(deletedIds.length);
+    setServiceBulkBusy(false);
+    serviceBulkDialogRef.current?.close();
+  }
+
   function handleCancelDelete() {
     setDeleteCategoryTarget(null);
     setDeleteServiceTarget(null);
@@ -685,6 +760,24 @@ export function ServicesAdminPage() {
           >
             <div />
             <div className="page-header-actions">
+              {/* Sprint 137 item 7 — Edit / Done. Outside edit mode the
+                  list renders exactly as before. */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="services-edit-mode-toggle"
+                aria-pressed={serviceEditMode}
+                onClick={() =>
+                  serviceEditMode
+                    ? exitServiceEditMode()
+                    : setServiceEditMode(true)
+                }
+                disabled={services.length === 0}
+              >
+                {serviceEditMode
+                  ? t("services.list_edit_done")
+                  : t("services.list_edit_start")}
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -724,10 +817,78 @@ export function ServicesAdminPage() {
                 </p>
               </div>
             ) : (
-              <div className="table-wrap">
+              <>
+                {/* Edit bar + run report sit OUTSIDE `.table-wrap`:
+                    that container scrolls horizontally, and a toolbar
+                    that scrolls away from its own table is worse than
+                    no toolbar. */}
+                {serviceEditMode && (
+                  <>
+                    <div className="list-edit-bar">
+                      <MultiSelectToolbar
+                        selectedCount={serviceBulkIds.length}
+                        onSelectAll={() =>
+                          setServiceBulkIds(services.map((s) => s.id))
+                        }
+                        onClearAll={() => setServiceBulkIds([])}
+                        disabled={serviceBulkBusy}
+                        actionLabel={t("services.bulk_delete_button")}
+                        onAction={openServiceBulkDelete}
+                        actionDestructive
+                        testIdPrefix="services-bulk-delete"
+                      />
+                    </div>
+                    <div
+                      className="muted small"
+                      style={{ padding: "8px 16px 0" }}
+                      data-testid="services-bulk-delete-explainer"
+                    >
+                      {t("services.bulk_delete_explainer")}
+                    </div>
+                  </>
+                )}
+                {serviceBulkFailures.length > 0 && (
+                  <div
+                    className="alert-error"
+                    role="alert"
+                    style={{ margin: "12px 16px 0" }}
+                    data-testid="services-bulk-delete-failures"
+                  >
+                    {t("services.bulk_delete_partial", {
+                      done: serviceBulkDone ?? 0,
+                      failed: serviceBulkFailures.length,
+                    })}
+                    <ul className="list-edit-failure-list">
+                      {serviceBulkFailures.map((name) => (
+                        <li key={name}>{name}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {serviceBulkFailures.length === 0 &&
+                  (serviceBulkDone ?? 0) > 0 && (
+                    <div
+                      className="alert-info"
+                      role="status"
+                      style={{ margin: "12px 16px 0" }}
+                      data-testid="services-bulk-delete-result"
+                    >
+                      {t("services.bulk_delete_done", {
+                        count: serviceBulkDone ?? 0,
+                      })}
+                    </div>
+                  )}
+                <div className="table-wrap">
                 <table className="data-table">
                   <thead>
                     <tr>
+                      {serviceEditMode && (
+                        <th className="list-edit-checkbox-cell">
+                          <span className="sr-only">
+                            {t("services.list_edit_select_column")}
+                          </span>
+                        </th>
+                      )}
                       <th>{t("services.col_name")}</th>
                       <th>{t("services.col_category")}</th>
                       <th>{t("services.col_unit_type")}</th>
@@ -742,8 +903,37 @@ export function ServicesAdminPage() {
                         key={service.id}
                         data-testid="services-service-row"
                         data-service-id={service.id}
-                        onClick={() => setSelectedService(service)}
+                        onClick={() => {
+                          if (!serviceEditMode) {
+                            setSelectedService(service);
+                            return;
+                          }
+                          toggleServiceBulkRow(
+                            service.id,
+                            !serviceBulkIds.includes(service.id),
+                          );
+                        }}
                       >
+                        {serviceEditMode && (
+                          <td className="list-edit-checkbox-cell">
+                            <input
+                              type="checkbox"
+                              className="checkbox-input"
+                              data-testid="services-bulk-delete-row"
+                              data-service-id={service.id}
+                              checked={serviceBulkIds.includes(service.id)}
+                              onChange={(event) =>
+                                toggleServiceBulkRow(
+                                  service.id,
+                                  event.target.checked,
+                                )
+                              }
+                              onClick={(event) => event.stopPropagation()}
+                              disabled={serviceBulkBusy}
+                              aria-label={service.name}
+                            />
+                          </td>
+                        )}
                         <td>{service.name}</td>
                         <td>{service.category_name}</td>
                         <td>{t(UNIT_TYPE_I18N_KEY[service.unit_type])}</td>
@@ -758,7 +948,8 @@ export function ServicesAdminPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+                </div>
+              </>
             )}
           </div>
 
@@ -1718,6 +1909,24 @@ export function ServicesAdminPage() {
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
         busy={deleteBusy}
+        destructive
+      />
+
+      {/* Sprint 137 item 7 — ONE confirmation for the whole selection.
+          Rendered unconditionally and driven through the ref only
+          (CLAUDE.md §3: a conditionally mounted native <dialog> is
+          invisible and its trigger looks dead). */}
+      <ConfirmDialog
+        ref={serviceBulkDialogRef}
+        title={t("services.bulk_delete_confirm_title", {
+          count: serviceBulkIds.length,
+        })}
+        body={t("services.bulk_delete_confirm_body", {
+          count: serviceBulkIds.length,
+        })}
+        confirmLabel={t("services.bulk_delete_button")}
+        onConfirm={handleConfirmServiceBulkDelete}
+        busy={serviceBulkBusy}
         destructive
       />
     </div>

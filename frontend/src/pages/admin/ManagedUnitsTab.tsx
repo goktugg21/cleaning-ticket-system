@@ -13,6 +13,7 @@ import type { ManagedUnit, ManagedUnitCreatePayload } from "../../api/types";
 import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { Toggle } from "../../components/Toggle";
 
 interface UnitFormState {
@@ -85,6 +86,19 @@ export function ManagedUnitsTab({
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<ManagedUnit | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // Sprint 137 item 7 — list edit mode. DELETE here is a REAL hard
+  // delete (backend/extra_work/views_catalog.py::ManagedUnitDetailView
+  // .delete), same as the Services list and unlike the customer pricing
+  // lists, so the wording says delete. A unit still linked from a
+  // Service or CustomerCustomPrice is PROTECTed and returns 400 — the
+  // per-row failure report below is how the operator learns WHICH ones.
+  const [editMode, setEditMode] = useState(false);
+  const [bulkIds, setBulkIds] = useState<number[]>([]);
+  const bulkDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkFailures, setBulkFailures] = useState<string[]>([]);
+  const [bulkDone, setBulkDone] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,11 +212,76 @@ export function ManagedUnitsTab({
     }
   }
 
+  // ---- Sprint 137 item 7 — bulk delete (units list edit mode) -------
+  function exitEditMode() {
+    setEditMode(false);
+    setBulkIds([]);
+  }
+
+  function toggleBulkRow(unitId: number, checked: boolean) {
+    setBulkIds((prev) =>
+      checked ? [...prev, unitId] : prev.filter((id) => id !== unitId),
+    );
+  }
+
+  function openBulkDelete() {
+    setBulkFailures([]);
+    setBulkDone(null);
+    bulkDialogRef.current?.open();
+  }
+
+  /**
+   * Delete every selected unit. No bulk endpoint exists, so this is N
+   * sequential DELETEs from the client (see the `## NEXT` entry in the
+   * sprint checklist). A PROTECTed unit comes back 400 and is named
+   * individually — a partial run is never reported as a clean one.
+   */
+  async function handleConfirmBulkDelete() {
+    setBulkBusy(true);
+    const targets = units.filter((u) => bulkIds.includes(u.id));
+    const deletedIds: number[] = [];
+    const failed: { id: number; label: string }[] = [];
+
+    for (const unit of targets) {
+      try {
+        await deleteManagedUnit(unit.id);
+        deletedIds.push(unit.id);
+      } catch {
+        failed.push({ id: unit.id, label: unit.label });
+      }
+    }
+
+    if (deletedIds.length > 0) {
+      setUnits((prev) => prev.filter((u) => !deletedIds.includes(u.id)));
+      if (selected && deletedIds.includes(selected.id)) {
+        setSelected(null);
+      }
+    }
+    setBulkIds(failed.map((f) => f.id));
+    setBulkFailures(failed.map((f) => f.label));
+    setBulkDone(deletedIds.length);
+    setBulkBusy(false);
+    bulkDialogRef.current?.close();
+  }
+
   return (
     <>
       <div className="page-header" style={{ marginTop: 0, marginBottom: 12 }}>
         <div />
         <div className="page-header-actions">
+          {/* Sprint 137 item 7 — Edit / Done. */}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            data-testid="services-units-edit-mode-toggle"
+            aria-pressed={editMode}
+            onClick={() => (editMode ? exitEditMode() : setEditMode(true))}
+            disabled={loading || units.length === 0}
+          >
+            {editMode
+              ? t("services.list_edit_done")
+              : t("services.list_edit_start")}
+          </button>
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -226,6 +305,57 @@ export function ManagedUnitsTab({
         </div>
       ) : (
         <div className="card" data-testid="services-units-list">
+          {editMode && units.length > 0 && (
+            <>
+              <div className="list-edit-bar">
+                <MultiSelectToolbar
+                  selectedCount={bulkIds.length}
+                  onSelectAll={() => setBulkIds(units.map((u) => u.id))}
+                  onClearAll={() => setBulkIds([])}
+                  disabled={bulkBusy}
+                  actionLabel={t("managed_units.bulk_delete_button")}
+                  onAction={openBulkDelete}
+                  actionDestructive
+                  testIdPrefix="services-units-bulk-delete"
+                />
+              </div>
+              <div
+                className="muted small"
+                style={{ padding: "8px 16px 0" }}
+                data-testid="services-units-bulk-delete-explainer"
+              >
+                {t("managed_units.bulk_delete_explainer")}
+              </div>
+            </>
+          )}
+          {bulkFailures.length > 0 && (
+            <div
+              className="alert-error"
+              role="alert"
+              style={{ margin: "12px 16px 0" }}
+              data-testid="services-units-bulk-delete-failures"
+            >
+              {t("managed_units.bulk_delete_partial", {
+                done: bulkDone ?? 0,
+                failed: bulkFailures.length,
+              })}
+              <ul className="list-edit-failure-list">
+                {bulkFailures.map((label) => (
+                  <li key={label}>{label}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {bulkFailures.length === 0 && (bulkDone ?? 0) > 0 && (
+            <div
+              className="alert-info"
+              role="status"
+              style={{ margin: "12px 16px 0" }}
+              data-testid="services-units-bulk-delete-result"
+            >
+              {t("managed_units.bulk_delete_done", { count: bulkDone ?? 0 })}
+            </div>
+          )}
           <BoundedList
             size="md"
             count={units.length}
@@ -249,6 +379,13 @@ export function ManagedUnitsTab({
             <table className="data-table">
               <thead>
                 <tr>
+                  {editMode && (
+                    <th className="list-edit-checkbox-cell">
+                      <span className="sr-only">
+                        {t("services.list_edit_select_column")}
+                      </span>
+                    </th>
+                  )}
                   <th>{t("managed_units.col_label")}</th>
                   <th>{t("managed_units.col_company")}</th>
                   <th>{t("services.col_active")}</th>
@@ -260,8 +397,31 @@ export function ManagedUnitsTab({
                     key={unit.id}
                     data-testid="services-unit-row"
                     data-unit-id={unit.id}
-                    onClick={() => setSelected(unit)}
+                    onClick={() => {
+                      if (!editMode) {
+                        setSelected(unit);
+                        return;
+                      }
+                      toggleBulkRow(unit.id, !bulkIds.includes(unit.id));
+                    }}
                   >
+                    {editMode && (
+                      <td className="list-edit-checkbox-cell">
+                        <input
+                          type="checkbox"
+                          className="checkbox-input"
+                          data-testid="services-units-bulk-delete-row"
+                          data-unit-id={unit.id}
+                          checked={bulkIds.includes(unit.id)}
+                          onChange={(event) =>
+                            toggleBulkRow(unit.id, event.target.checked)
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                          disabled={bulkBusy}
+                          aria-label={unit.label}
+                        />
+                      </td>
+                    )}
                     <td>{unit.label}</td>
                     <td className="muted small">{unit.company_name}</td>
                     <td>
@@ -486,6 +646,22 @@ export function ManagedUnitsTab({
         onConfirm={handleConfirmDelete}
         onCancel={handleCancelDelete}
         busy={deleteBusy}
+        destructive
+      />
+
+      {/* Sprint 137 item 7 — ONE confirmation for the whole selection.
+          Unconditionally rendered, ref-driven (CLAUDE.md §3). */}
+      <ConfirmDialog
+        ref={bulkDialogRef}
+        title={t("managed_units.bulk_delete_confirm_title", {
+          count: bulkIds.length,
+        })}
+        body={t("managed_units.bulk_delete_confirm_body", {
+          count: bulkIds.length,
+        })}
+        confirmLabel={t("managed_units.bulk_delete_button")}
+        onConfirm={handleConfirmBulkDelete}
+        busy={bulkBusy}
         destructive
       />
     </>

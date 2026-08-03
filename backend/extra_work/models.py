@@ -1185,6 +1185,33 @@ class ExtraWorkRequestItem(models.Model):
         blank=True,
         default="",
     )
+    # Sprint 137 item 6 — the CustomerCustomPrice row an ORDERED custom
+    # price line came from. Custom prices carry `custom_name` +
+    # `unit_type` + an amount but have NO `service` FK by design, so
+    # before Sprint 137 they could never reach a cart at all: the
+    # operator priced work here and was then baffled it was unorderable.
+    #
+    # A line sourced from one is still an AD_HOC line — `service` stays
+    # NULL and `line_price_source` stays AD_HOC, so routing, the
+    # `all_agreed` predicate and the instant-ticket spawn are all
+    # untouched (see classification.classify_line). What this FK adds is
+    # the durable "which custom price row produced this line?" link, the
+    # exact counterpart of `snapshot_customer_service_price` above — and
+    # SET_NULL for the same reason: archiving the price row must never
+    # delete operational history.
+    snapshot_customer_custom_price = models.ForeignKey(
+        "extra_work.CustomerCustomPrice",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        default=None,
+        related_name="snapshotted_line_items",
+        help_text=(
+            "Sprint 137 item 6 — the CustomerCustomPrice row this "
+            "ad-hoc line was ordered from. SET_NULL: the snapshot_* "
+            "columns are the durable record."
+        ),
+    )
     snapshot_customer_service_price = models.ForeignKey(
         "extra_work.CustomerServicePrice",
         on_delete=models.SET_NULL,

@@ -15,6 +15,7 @@ import {
   getCustomer,
   listCustomerCustomPrices,
   listCustomerPrices,
+  listServiceCategories,
   listServices,
   updateCustomerCustomPrice,
   updateCustomerPrice,
@@ -27,6 +28,7 @@ import type {
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   Service,
+  ServiceCategory,
   ServiceUnitType,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -97,6 +99,24 @@ interface PriceFormState {
 type PricingRow =
   | { kind: "contract"; row: CustomerServicePrice }
   | { kind: "custom"; row: CustomerCustomPrice };
+
+/**
+ * Sprint 137 item 4 — the bucket a pricing row is filed under in the
+ * category view. A number is a real `ServiceCategory.id`; the two
+ * string sentinels are synthetic buckets that exist so NO row can ever
+ * be hidden by the drill-down:
+ *
+ *   "CUSTOM"  — `CustomerCustomPrice` rows. They have no `service` FK
+ *               and therefore no category at all (see the model
+ *               docstring); they still have to live somewhere.
+ *   "UNKNOWN" — a contract row whose `service` is missing from the
+ *               catalog map. Should not happen (the page loads the FULL
+ *               catalog, archived services included), but a row that
+ *               silently vanished from every bucket is exactly the class
+ *               of bug this sprint exists to kill, so it gets a visible
+ *               home rather than a filter that drops it.
+ */
+type CategoryKey = number | "CUSTOM" | "UNKNOWN";
 
 function todayISO(): string {
   const d = new Date();
@@ -182,6 +202,18 @@ export function CustomerPricingPage() {
   const [customer, setCustomer] = useState<CustomerAdmin | null>(null);
   const [prices, setPrices] = useState<CustomerServicePrice[]>([]);
   const [services, setServices] = useState<Service[]>([]);
+  // Sprint 137 item 4 — the provider's real ServiceCategory catalog.
+  // Loaded in FULL (not filtered to active) so a category that still
+  // holds priced rows keeps rendering after it is deactivated, and so
+  // an EMPTY category still shows up: the operator has to be able to
+  // see that a category exists before pricing anything into it.
+  const [categories, setCategories] = useState<ServiceCategory[]>([]);
+  // null = the category-list (index) view; otherwise the drilled-into
+  // bucket. The drill-down is a pure view concern — it never filters
+  // what is fetched, so nothing is lost by navigating.
+  const [activeCategory, setActiveCategory] = useState<CategoryKey | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   // Sprint 137 item 2 — off by default: a deleted (soft-archived) price
@@ -199,6 +231,22 @@ export function CustomerPricingPage() {
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<PricingRow | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // Sprint 137 item 7 — iOS-style list edit mode. Outside edit mode the
+  // list is byte-identical to before: no checkbox column, no toolbar.
+  // The bulk action ARCHIVES (see the delete-dialog copy and §0 of the
+  // sprint brief) — DELETE on both pricing endpoints soft-archives, so
+  // a button saying "Delete" would be the exact lie item 2 set out to
+  // fix.
+  const [editMode, setEditMode] = useState(false);
+  const [bulkSelection, setBulkSelection] = useState<string[]>([]);
+  const bulkArchiveDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [bulkArchiveBusy, setBulkArchiveBusy] = useState(false);
+  // Names of the rows a bulk run could NOT archive. Never cleared by a
+  // later success on other rows — a partial run must not read as a
+  // clean one.
+  const [bulkFailures, setBulkFailures] = useState<string[]>([]);
+  const [bulkDoneCount, setBulkDoneCount] = useState<number | null>(null);
 
   // M5 C / #108 Part C — bulk-adjust modal state (catalog-price
   // section only). `bulkDirection` picks raise vs lower.
@@ -244,8 +292,13 @@ export function CustomerPricingPage() {
     const cancelled = { current: false };
     async function load(customerId: number) {
       try {
-        const [customerData, pricesData, servicesData, customPricesData] =
-          await Promise.all([
+        const [
+          customerData,
+          pricesData,
+          servicesData,
+          customPricesData,
+          categoriesData,
+        ] = await Promise.all([
             getCustomer(customerId),
             // Sprint 137 item 2 — archived rows are hidden unless the
             // operator asks for them. DELETE soft-archives, and showing
@@ -262,12 +315,16 @@ export function CustomerPricingPage() {
             listCustomerCustomPrices(customerId, {
               includeArchived: showArchived,
             }),
+            // Sprint 137 item 4 — every category, including the ones
+            // with no priced rows yet (see the `categories` state).
+            listServiceCategories(),
           ]);
         if (cancelled.current) return;
         setCustomer(customerData);
         setPrices(pricesData);
         setServices(servicesData);
         setCustomPrices(customPricesData);
+        setCategories(categoriesData);
         setLoading(false);
       } catch (err) {
         if (!cancelled.current) {
@@ -488,6 +545,96 @@ export function CustomerPricingPage() {
     }
   }
 
+  // ---- Sprint 137 item 7 — bulk archive (list edit mode) ------------
+  // Rows come from two endpoints, so the selection is keyed by
+  // kind+id — the same composite the table already uses as its React
+  // key. A bare id would collide between a contract row and a custom
+  // row that happen to share one.
+  function rowKey(entry: PricingRow): string {
+    return `${entry.kind}-${entry.row.id}`;
+  }
+
+  function exitEditMode() {
+    setEditMode(false);
+    setBulkSelection([]);
+  }
+
+  function toggleBulkRowSelection(key: string, checked: boolean) {
+    setBulkSelection((prev) =>
+      checked ? [...prev, key] : prev.filter((k) => k !== key),
+    );
+  }
+
+  function openBulkArchive() {
+    setBulkFailures([]);
+    setBulkDoneCount(null);
+    bulkArchiveDialogRef.current?.open();
+  }
+
+  /**
+   * Archive every selected row. There is no bulk endpoint, so this is
+   * N sequential DELETEs from the client — acceptable at the sizes this
+   * page sees (a category's prices), and recorded as a `## NEXT` item
+   * in the sprint checklist because a customer with hundreds of priced
+   * rows would want a real bulk endpoint.
+   *
+   * Sequential rather than parallel on purpose: each DELETE writes an
+   * AuditLog row, and a burst of parallel writes buys nothing here.
+   *
+   * Partial failure is reported per row and never rounded up to
+   * success: the rows that DID archive leave the list, the ones that
+   * did not are named and stay.
+   */
+  async function handleConfirmBulkArchive() {
+    if (numericId === null) return;
+    setBulkArchiveBusy(true);
+    const targets = visibleRows.filter((entry) =>
+      bulkSelection.includes(rowKey(entry)),
+    );
+    const failed: string[] = [];
+    const archivedContractIds: number[] = [];
+    const archivedCustomIds: number[] = [];
+
+    for (const entry of targets) {
+      try {
+        if (entry.kind === "custom") {
+          await deleteCustomerCustomPrice(numericId, entry.row.id);
+          archivedCustomIds.push(entry.row.id);
+        } else {
+          await deleteCustomerPrice(numericId, entry.row.id);
+          archivedContractIds.push(entry.row.id);
+        }
+      } catch {
+        failed.push(resolveRowName(entry));
+      }
+    }
+
+    if (archivedContractIds.length > 0) {
+      setPrices((prev) =>
+        prev.filter((p) => !archivedContractIds.includes(p.id)),
+      );
+    }
+    if (archivedCustomIds.length > 0) {
+      setCustomPrices((prev) =>
+        prev.filter((p) => !archivedCustomIds.includes(p.id)),
+      );
+    }
+    // Keep only the rows that failed selected, so a retry acts on
+    // exactly what is left rather than on rows already archived.
+    setBulkSelection(
+      targets
+        .filter((entry) => failed.includes(resolveRowName(entry)))
+        .map(rowKey),
+    );
+    setSelected(null);
+    setBulkFailures(failed);
+    setBulkDoneCount(
+      archivedContractIds.length + archivedCustomIds.length,
+    );
+    setBulkArchiveBusy(false);
+    bulkArchiveDialogRef.current?.close();
+  }
+
   // ---- M5 C / #108 Part C — bulk-adjust handlers (catalog-price
   // section) ----------------
   function openBulkRaise() {
@@ -700,6 +847,105 @@ export function CustomerPricingPage() {
     ...customPrices.map((row): PricingRow => ({ kind: "custom", row })),
   ];
 
+  /**
+   * Sprint 137 item 4 — which bucket a row is filed under. A custom row
+   * has no category by construction; a contract row takes its service's.
+   * See the `CategoryKey` docstring for why "UNKNOWN" exists.
+   */
+  function categoryKeyOf(entry: PricingRow): CategoryKey {
+    if (entry.kind === "custom") return "CUSTOM";
+    return serviceById.get(entry.row.service)?.category ?? "UNKNOWN";
+  }
+
+  // Bucket EVERY row by category. Derived from `unifiedRows`, so the
+  // index and the drill-down can never disagree about what exists: the
+  // drill-down renders a slice of the same list, never a second fetch.
+  const rowsByCategory = new Map<CategoryKey, PricingRow[]>();
+  for (const entry of unifiedRows) {
+    const key = categoryKeyOf(entry);
+    const bucket = rowsByCategory.get(key);
+    if (bucket) {
+      bucket.push(entry);
+    } else {
+      rowsByCategory.set(key, [entry]);
+    }
+  }
+
+  // The index cards: every real category (INCLUDING the empty ones —
+  // the operator needs to see a category exists before pricing into
+  // it), then the synthetic buckets, which appear only when they
+  // actually hold rows.
+  const categoryCards: {
+    key: CategoryKey;
+    label: string;
+    count: number;
+    isActive: boolean;
+  }[] = [
+    ...categories.map((category) => ({
+      key: category.id as CategoryKey,
+      label: category.name,
+      count: (rowsByCategory.get(category.id) ?? []).length,
+      isActive: category.is_active,
+    })),
+    ...((rowsByCategory.get("CUSTOM") ?? []).length > 0
+      ? [
+          {
+            key: "CUSTOM" as CategoryKey,
+            label: t("customer_pricing.category_custom"),
+            count: (rowsByCategory.get("CUSTOM") ?? []).length,
+            isActive: true,
+          },
+        ]
+      : []),
+    ...((rowsByCategory.get("UNKNOWN") ?? []).length > 0
+      ? [
+          {
+            key: "UNKNOWN" as CategoryKey,
+            label: t("customer_pricing.category_unknown"),
+            count: (rowsByCategory.get("UNKNOWN") ?? []).length,
+            isActive: true,
+          },
+        ]
+      : []),
+  ];
+
+  // Rows shown by the drill-down. An `activeCategory` whose bucket
+  // emptied out (e.g. the archived rows were just hidden again)
+  // degrades to an empty category page with a working breadcrumb
+  // rather than a crash or a silent bounce back to the index.
+  const visibleRows =
+    activeCategory === null ? [] : (rowsByCategory.get(activeCategory) ?? []);
+
+  const activeCategoryLabel =
+    activeCategory === null
+      ? ""
+      : (categoryCards.find((card) => card.key === activeCategory)?.label ??
+        (typeof activeCategory === "number"
+          ? (categories.find((c) => c.id === activeCategory)?.name ?? "")
+          : ""));
+
+  // Navigating between the index and a category clears the row detail
+  // panel — a selected row from another category must not linger under
+  // a list it is not part of.
+  // Sprint 137 item 7 — navigating also leaves edit mode: a selection
+  // made in one category must never be carried into another (or acted
+  // on from the index, where those rows are not even on screen).
+  function openCategory(key: CategoryKey) {
+    setActiveCategory(key);
+    setSelected(null);
+    exitEditMode();
+    setBulkFailures([]);
+    setBulkDoneCount(null);
+  }
+
+  function backToCategories() {
+    setActiveCategory(null);
+    setSelected(null);
+    exitEditMode();
+    setBulkFailures([]);
+    setBulkDoneCount(null);
+  }
+
   const isCustomForm = form.service === CUSTOM_SERVICE_SENTINEL;
 
   // RF-2 — the modal title follows the chosen kind: with "Other /
@@ -795,17 +1041,190 @@ export function CustomerPricingPage() {
         </div>
       ) : (
         <>
+          {/* Sprint 137 item 4 — category index. The flat one-table
+              page became unreadable at real contract sizes; this
+              mirrors the shape of the owner's reference tool: pick a
+              category, drill in, breadcrumb back. */}
+          {activeCategory === null && (
+            <div className="card" data-testid="customer-pricing-categories">
+              {categoryCards.length === 0 ? (
+                <div
+                  style={{ padding: "32px 24px", textAlign: "center" }}
+                  data-testid="customer-pricing-empty"
+                >
+                  <h3 style={{ marginBottom: 8 }}>
+                    {t("customer_pricing.empty_title")}
+                  </h3>
+                  <p className="muted" style={{ margin: 0 }}>
+                    {t("customer_pricing.empty_description")}
+                  </p>
+                </div>
+              ) : (
+                <div style={{ padding: "18px 20px" }}>
+                  <div className="muted small" style={{ marginBottom: 12 }}>
+                    {t("customer_pricing.categories_helper")}
+                  </div>
+                  <div className="pricing-category-grid">
+                    {categoryCards.map((card) => (
+                      <button
+                        type="button"
+                        key={String(card.key)}
+                        className="pricing-category-card"
+                        data-testid="customer-pricing-category-card"
+                        data-category-key={String(card.key)}
+                        data-category-count={card.count}
+                        onClick={() => openCategory(card.key)}
+                      >
+                        <span className="pricing-category-card-name">
+                          {card.label}
+                          {!card.isActive && (
+                            <span
+                              className="badge badge-muted"
+                              style={{ marginLeft: 8 }}
+                            >
+                              {t("admin.status_inactive")}
+                            </span>
+                          )}
+                        </span>
+                        <span className="muted small">
+                          {card.count === 0
+                            ? t("customer_pricing.category_card_empty")
+                            : t("customer_pricing.category_card_count", {
+                                count: card.count,
+                              })}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeCategory !== null && (
           <div className="card" data-testid="customer-pricing-list">
-            {unifiedRows.length === 0 ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "14px 20px",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="customer-pricing-category-back"
+                onClick={backToCategories}
+              >
+                <ChevronLeft size={14} strokeWidth={2.5} />
+                {t("customer_pricing.breadcrumb_all")}
+              </button>
+              <span
+                className="section-title"
+                style={{ margin: 0 }}
+                data-testid="customer-pricing-category-title"
+              >
+                {activeCategoryLabel}
+              </span>
+              {/* Sprint 137 item 7 — Edit / Done. Outside edit mode the
+                  table below looks exactly as it did before. */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ marginLeft: "auto" }}
+                data-testid="customer-pricing-edit-mode-toggle"
+                aria-pressed={editMode}
+                onClick={() =>
+                  editMode ? exitEditMode() : setEditMode(true)
+                }
+                disabled={visibleRows.length === 0}
+              >
+                {editMode
+                  ? t("customer_pricing.list_edit_done")
+                  : t("customer_pricing.list_edit_start")}
+              </button>
+            </div>
+
+            {editMode && (
+              <>
+                <div className="list-edit-bar">
+                  <MultiSelectToolbar
+                    selectedCount={bulkSelection.length}
+                    onSelectAll={() =>
+                      setBulkSelection(visibleRows.map(rowKey))
+                    }
+                    onClearAll={() => setBulkSelection([])}
+                    disabled={bulkArchiveBusy}
+                    actionLabel={t("customer_pricing.bulk_archive_button")}
+                    onAction={openBulkArchive}
+                    actionDestructive
+                    testIdPrefix="customer-pricing-bulk-archive"
+                  />
+                </div>
+                {/* "Delete" here archives. Say so on the screen that
+                    does it, and put the way to SEE the archived rows
+                    one click away rather than leaving the operator to
+                    wonder where they went. */}
+                <div
+                  className="muted small"
+                  style={{ padding: "8px 20px 0" }}
+                  data-testid="customer-pricing-bulk-archive-explainer"
+                >
+                  {t("customer_pricing.bulk_archive_explainer")}{" "}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-testid="customer-pricing-bulk-archive-show-archived"
+                    aria-pressed={showArchived}
+                    onClick={() => setShowArchived((current) => !current)}
+                  >
+                    {t("customer_pricing.show_archived_toggle")}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Partial-run reporting: name every row that failed and
+                never claim a clean run. */}
+            {bulkFailures.length > 0 && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ margin: "12px 20px 0" }}
+                data-testid="customer-pricing-bulk-archive-failures"
+              >
+                {t("customer_pricing.bulk_archive_partial", {
+                  done: bulkDoneCount ?? 0,
+                  failed: bulkFailures.length,
+                })}
+                <ul className="list-edit-failure-list">
+                  {bulkFailures.map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {bulkFailures.length === 0 && (bulkDoneCount ?? 0) > 0 && (
+              <div
+                className="alert-info"
+                role="status"
+                style={{ margin: "12px 20px 0" }}
+                data-testid="customer-pricing-bulk-archive-result"
+              >
+                {t("customer_pricing.bulk_archive_done", {
+                  count: bulkDoneCount ?? 0,
+                })}
+              </div>
+            )}
+            {visibleRows.length === 0 ? (
               <div
                 style={{ padding: "32px 24px", textAlign: "center" }}
-                data-testid="customer-pricing-empty"
+                data-testid="customer-pricing-category-empty"
               >
-                <h3 style={{ marginBottom: 8 }}>
-                  {t("customer_pricing.empty_title")}
-                </h3>
                 <p className="muted" style={{ margin: 0 }}>
-                  {t("customer_pricing.empty_description")}
+                  {t("customer_pricing.category_drill_empty")}
                 </p>
               </div>
             ) : (
@@ -813,6 +1232,13 @@ export function CustomerPricingPage() {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      {editMode && (
+                        <th className="list-edit-checkbox-cell">
+                          <span className="sr-only">
+                            {t("customer_pricing.list_edit_select_column")}
+                          </span>
+                        </th>
+                      )}
                       <th>{t("customer_pricing.col_service")}</th>
                       <th>{t("customer_pricing.col_unit")}</th>
                       <th>{t("customer_pricing.col_unit_price")}</th>
@@ -824,14 +1250,47 @@ export function CustomerPricingPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {unifiedRows.map((entry) => (
+                    {visibleRows.map((entry) => (
                       <tr
                         key={`${entry.kind}-${entry.row.id}`}
                         data-testid="customer-pricing-row"
                         data-price-id={entry.row.id}
                         data-price-kind={entry.kind}
-                        onClick={() => setSelected(entry)}
+                        // In edit mode the row click selects rather
+                        // than opening the read-only detail panel:
+                        // two different meanings for one click would
+                        // be worse than either.
+                        onClick={() => {
+                          if (!editMode) {
+                            setSelected(entry);
+                            return;
+                          }
+                          toggleBulkRowSelection(
+                            rowKey(entry),
+                            !bulkSelection.includes(rowKey(entry)),
+                          );
+                        }}
                       >
+                        {editMode && (
+                          <td className="list-edit-checkbox-cell">
+                            <input
+                              type="checkbox"
+                              className="checkbox-input"
+                              data-testid="customer-pricing-bulk-archive-row"
+                              data-price-id={entry.row.id}
+                              checked={bulkSelection.includes(rowKey(entry))}
+                              onChange={(event) =>
+                                toggleBulkRowSelection(
+                                  rowKey(entry),
+                                  event.target.checked,
+                                )
+                              }
+                              onClick={(event) => event.stopPropagation()}
+                              disabled={bulkArchiveBusy}
+                              aria-label={resolveRowName(entry)}
+                            />
+                          </td>
+                        )}
                         <td>
                           {resolveRowName(entry)}
                           {entry.kind === "custom" && (
@@ -873,6 +1332,7 @@ export function CustomerPricingPage() {
               </div>
             )}
           </div>
+          )}
 
           {selected && (
             <section
@@ -1782,6 +2242,25 @@ export function CustomerPricingPage() {
         onConfirm={handleConfirmDelete}
         onCancel={() => setDeleteTarget(null)}
         busy={deleteBusy}
+        destructive
+      />
+
+      {/* Sprint 137 item 7 — ONE confirmation for the whole selection,
+          naming the count. Rendered unconditionally and driven purely
+          through the ref: a native <dialog> wrapped in `{cond && ...}`
+          mounts invisible and the trigger looks dead (CLAUDE.md §3,
+          Sprint 128). */}
+      <ConfirmDialog
+        ref={bulkArchiveDialogRef}
+        title={t("customer_pricing.bulk_archive_confirm_title", {
+          count: bulkSelection.length,
+        })}
+        body={t("customer_pricing.bulk_archive_confirm_body", {
+          count: bulkSelection.length,
+        })}
+        confirmLabel={t("customer_pricing.bulk_archive_button")}
+        onConfirm={handleConfirmBulkArchive}
+        busy={bulkArchiveBusy}
         destructive
       />
     </div>

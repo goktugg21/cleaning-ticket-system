@@ -55,121 +55,127 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-134-bug-sweep` — carries Sprints 133, 134, 135
-**and 136, and is now COMPLETE.** All four are green on this ONE branch;
-no further sprint is queued here. The owner opens ONE PR covering all
-four — CC does not open PRs.
+**Branch:** `fix/sprint-137-ramazan-round-1` — carries Sprint 137
+items 1-7 (Ramazan's round-1 findings from demoing with real customer
+data). Cut from `main`@`751bb8d`. **ONE PR after item 7**; nothing merges
+in between, and CC does not open PRs — the owner does.
 
-**Last shipped PR on `main`: #125** — Sprints 130/131/132 (permissions
-page density, the by-department report, invoice grouping by department +
-work type). **`fix/sprint-133-department-pdf-vat` is NOT a sibling
-branch.** Its tip commit (`9be8e2f`, Sprint 133's own work) is the FIRST
-COMMIT of THIS branch — verified: `git merge-base --is-ancestor
-origin/fix/sprint-133-department-pdf-vat HEAD` returns true. Sprint 133
-is fully contained in this branch's history, not a parallel line of work
-that happens to share an ancestor; the remote
-`fix/sprint-133-department-pdf-vat` pointer is a stray leftover from
-before this branch existed. Opening a separate PR from it would
-duplicate everything this branch's PR already covers. **Once this
-branch's PR merges, delete the stray remote
-`fix/sprint-133-department-pdf-vat` branch** — it has nothing left to
-contribute on its own.
+**Last shipped PR on `main`: #126** — Sprints 133/134/135/136 (department
+PDF VAT basis, backend bug sweep + axios timeouts + backup machinery,
+the picker sweep that reverted 134's pagination approach, and the docs
+pass). Its SHIPPED line was appended by this branch, per the checklist's
+own rule that the FIRST COMMIT OF THE NEXT BRANCH records the previous
+merge.
 
-**No `## SHIPPED` line for THIS branch yet, and that is deliberate, not
-an oversight.** Nothing has merged: this branch has no PR yet (the owner
-opens it; CC does not), and by the checklist's own rule a SHIPPED line
-is appended by the FIRST COMMIT OF THE NEXT BRANCH once a PR is actually
-merged — not pre-guessed here.
+**No `## SHIPPED` line for THIS branch yet, deliberately** — nothing has
+merged; a SHIPPED line is only appended once a PR actually merges.
 
-**On this branch (unmerged, awaiting the owner's PR):**
+**What landed on this branch (all seven items — unmerged, awaiting the
+owner's PR):**
 
-- **Sprint 133 — department PDF: one VAT basis, not two.**
-  `build_extra_work_by_department_pdf` rendered ex-VAT detail rows
-  (`subtotal`, matching the "Excl. BTW" column header) alongside inc-VAT
-  (`total`) subtotals and totals throughout both the summary and detail
-  sections — a group's own rows never summed to the figure printed
-  beneath them. Now `subtotal` end to end; the top headline keeps ex-VAT
-  as its lead figure and gains explicit `BTW:` / `Incl. BTW:` figures
-  alongside so the inc-VAT total isn't lost from the document. New tests
-  lock the arithmetic that was actually broken (a subtotal line equals
-  the sum of its rows, at the work-type/department/building level) and
-  that the summary and detail sections — two separate rendering loops
-  over the same payload — agree on the same group.
-- **Sprint 134 — backend bug sweep, axios timeouts, and backup
-  machinery.** Six independent items: a double-reversal guard on
-  `reverse_invoice` (service check + a partial DB unique constraint,
-  `uniq_live_reversal_per_original`); an additive `Invoice.granularity`
-  field closing the untagged-invoice resync gap (Sprint 133's own
-  finding); `ALLOWED_HOSTS` now admits `"backend"`, the Docker Compose
-  internal DNS name; the documents file-list endpoint gained real
-  pagination; the admin Company/Customer/Building pickers got
-  `pagination_class = UnboundedPagination` (**this part was WRONG and
-  reverted the same branch — see Sprint 135**); and the whole off-site
-  backup pipeline (`scripts/backup_restic.sh` + a systemd service/timer
-  + `docs/operations/backups.md`) was built. Separately: both axios
-  clients in `frontend/src/api/client.ts` gained an explicit `timeout` —
-  the refresh client had none, so a permanently-hung mid-session refresh
-  left `refreshPromise` unsettled forever, freezing the page with no
-  console error. This was found while investigating a recurring
-  frozen-screen report. **That investigation's real cause was neither
-  this bug nor the Sprint 129 session-expiry bug: the owner confirmed
-  the freeze does not reproduce in an incognito window, meaning a
-  browser extension was intercepting clicks, not this codebase.** Both
-  fixes are real, independently-worth-having bugs — the missing axios
-  timeout in particular was a genuine dead-page failure mode with its
-  own reproduction — but neither one was THE cause of the recurring
-  complaint, and neither should be read as having resolved it.
-- **Sprint 135 — frontend picker sweep + reverted Sprint 134's backend
-  pagination approach.** `UnboundedPagination` on the three admin
-  ViewSets applied to EVERY caller, not just the pickers, and broke
-  `CompaniesAdminPage` / `CustomersAdminPage` / `BuildingsAdminPage`'s
-  own working prev/next pagination (`page_size_query_param=None` + a
-  fixed 10000-row page meant `next` was permanently `null`). Reverted;
-  fixed the ~27 picker call sites instead with client-side exhaustive
-  paging (`listAllCompanies` / `listAllCustomers` / `listAllBuildings` in
-  `frontend/src/api/admin.ts`, mirroring the Sprint 120
-  `listAllExtraWork` pattern) — re-derived the call-site list from
-  scratch rather than trusting the Sprint 134 recon, same count (27).
-  Also: a SUPER_ADMIN company selector on `ServicesAdminPage` (Services
-  + Units tabs only — Categories are global, SUPER_ADMIN-only, no
-  `company` field at all, and were never actually affected by the bug
-  they were originally lumped into); a documents drag-and-drop
-  touch-discoverability hint (the move-icon fallback was already
-  always-visible, not hover-gated — the gap was framing, not capability);
-  a customer picker on `/my/documents` for a user belonging to more than
-  one customer (`customer_ids[0]` used to silently win).
-- **Sprint 136 — docs pass (closes the branch).** One code miss from
-  135's sweep: `BuildingManagerCustomersPage.tsx` was still capped at
-  `page_size: 100` (135's grep only searched for `page_size: 200`),
-  fixed the same way (`listAllCustomers`); re-grepped exhaustively this
-  time by searching for the literal endpoint strings
-  (`"/companies/"`/`"/buildings/"`/`"/customers/"`) rather than any
-  particular `page_size` value — confirmed zero raw calls exist outside
-  `api/admin.ts`, and exactly three remaining callers of the plain
-  (non-exhaustive) `listCompanies`/`listBuildings`/`listCustomers`
-  functions, all three the admin list pages' own verified working
-  pagination. A full `## NEXT` truth-up: every "fixed" claim verified
-  directly against the code (not taken on faith), several stale items
-  reworded or corrected (notably #17 `ALLOWED_HOSTS`, whose old wording
-  claimed a live failure that the current TCP-socket-probe healthcheck
-  cannot actually produce), #16 moved to the documented-intentional
-  section as a recorded owner decision, three new items recorded. The
-  `ConfirmDialog` imperative-`<dialog>` gotcha (both directions — mount
-  without `.open()`, and unmount without `.close()`) finally written
-  down in `docs/engineering/claude-code-operational-notes.md` instead of
-  carried as a NEXT item. This NOW rewrite.
+- **Item 1 — a new ticket accepted only ONE attachment.**
+  `CreateTicketPage` now stages a list (multi-select, per-file remove,
+  de-duped by name+size+lastModified) and POSTs one file per request
+  after the ticket exists. A failed file no longer aborts the loop: the
+  rest still upload, the ticket is never rolled back, and the failed
+  names are shown. On partial failure the form does NOT navigate and the
+  submit button becomes a link to the created ticket, so a second ticket
+  cannot be created by accident. Backend unchanged.
+- **Item 2 — "deleting" a customer price did not stick.** DELETE
+  soft-archives on both pricing endpoints, and both list endpoints
+  returned archived rows unconditionally, so a deleted price reappeared
+  greyed-out on the next load. Archived rows are hidden by default now,
+  with `?include_archived=true` behind a "Show archived" toggle. An
+  explicit `?is_active=` still wins. **Kept as ARCHIVE rather than
+  switched to hard delete — see the `## NEXT` entry for the FK reason.**
+- **Item 3 — "copy from defaults duplicates" was NOT a duplication
+  bug.** The endpoint already skips services with an overlapping active
+  price, one call cannot duplicate, and the client has an in-flight
+  guard plus a post-success selection reset. The operator was seeing the
+  archived OLD row rendered next to the new one; item 2's fix removes
+  the symptom. **This rests on code analysis, not a reproduction** — the
+  owner verifies on crmtest after deploy. If it still doubles there,
+  that is a NEW finding, not a regression.
+- **Item 4 — customer pricing page: group by category.** The single flat
+  table became a category index → drill into a category → that
+  category's priced rows → breadcrumb back, matching the shape of the
+  owner's reference tool. EMPTY categories still render (the operator
+  has to see a category exists before pricing into it), which is why the
+  full `ServiceCategory` list is fetched rather than derived from the
+  priced rows. Two synthetic buckets exist so no row can be hidden by
+  the drill-down: **Custom prices** (a `CustomerCustomPrice` has no
+  category by construction) and **Other prices** (a contract row whose
+  service is missing from the catalog map — should be unreachable, but a
+  silently-vanishing row is exactly the bug class this sprint exists to
+  kill).
+- **Item 5 — Extra Work form: category filters the service list.**
+  Confirmed against the code first: the form's existing "Category"
+  dropdown is `ExtraWorkRequest.category`, the fixed
+  `ExtraWorkCategory` enum (DEEP_CLEANING, WINDOW_CLEANING, …), and it
+  is **completely unrelated** to the `ServiceCategory` catalog the
+  pricing page manages. The two were silently sharing the word
+  "category". The cart now has its own REAL catalog-category filter over
+  the service pickers, plus a catalog-wide search. Per the hard
+  requirement ("never a loop where a service cannot be found"): "All
+  categories" is the DEFAULT so filtering is opt-in; search always spans
+  the WHOLE catalog and ignores the filter; every option label already
+  carries its category name; picking a match from outside the active
+  filter clears that filter; an empty result names what is hiding the
+  rows, gives the count outside the filter, and offers one click back;
+  and a line already in the cart keeps its service in its own picker
+  even when the filter would exclude it. `ExtraWorkRequest.category` was
+  NOT deleted or repurposed — see `## NEXT` for what consumes it.
+- **Item 6 — custom prices are now orderable.** A `CustomerCustomPrice`
+  carries a name, a unit and an amount but deliberately has NO `service`
+  FK, and every cart line was `service` XOR `custom_description`, so
+  these rows could never enter a cart at all — the owner priced his
+  customer's real work types through that path and was baffled they
+  never appeared. Cart lines now accept a third mutually-exclusive
+  `custom_price`; the backend snapshots the row's name/unit/amount onto
+  the line exactly as a catalog line snapshots its contract price, and
+  records the source row in a new nullable SET_NULL FK
+  `ExtraWorkRequestItem.snapshot_customer_custom_price` (one additive
+  migration, `extra_work/0022`). Tenant-scoped (H-1/H-2): another
+  customer's price row is rejected on BOTH create and preview, as are
+  archived and out-of-window rows. **The line still classifies AD_HOC,
+  so routing, `all_agreed` and the instant-ticket path are unchanged —
+  and that is the correct answer, not caution.** `instant_tickets
+  .spawn_instant_ticket` re-resolves EVERY line through
+  `resolve_price(item.service, …)` and aborts the whole submission with
+  `instant_spawn_price_lost` when one fails; `resolve_price` only ever
+  returns a `CustomerServicePrice` and a custom price has no service to
+  resolve, so calling these lines "agreed" would route them INSTANT and
+  then have the spawn guard reject them — turning a working order into a
+  hard failure. The provider still confirms the line in the pricing
+  step, but now with the agreed amount already filled in.
+- **Item 7 — bulk edit on long list pages.** An iOS-style Edit/Done
+  toggle on the customer pricing list, the Services catalog list and the
+  Units catalog list. Outside edit mode each list is unchanged — no
+  checkboxes, no toolbar. In edit mode: a checkbox per row, the existing
+  `MultiSelectToolbar` (reused, not reimplemented — it gained an
+  optional action-button slot), ONE confirmation naming the count, and
+  per-row partial-failure reporting that never rounds a partial run up
+  to success (failed rows are named and stay selected; successful ones
+  leave the list). **The pricing lists say ARCHIVE, not delete**, because
+  that is what the endpoint does — a button saying "Delete" over an
+  archiving backend is the exact lie item 2 set out to fix — and the
+  "Show archived" toggle is reachable from the same screen so the
+  operator can see where the rows went. The Services and Units lists say
+  DELETE, because there it really is a hard delete; a row still
+  referenced by a contract price (or a unit still in use) is PROTECTed
+  and comes back 400, which is precisely why the per-row failure list is
+  load-bearing there rather than decorative. No bulk endpoint exists, so
+  this is **N sequential requests from the client** — recorded in
+  `## NEXT`.
 
-FE gate green on every sprint: tsc clean, ESLint **48** (baseline, no
-new violations), build OK. Backend suites green wherever a sprint
-touched backend code (see each sprint's own commit for exact counts).
-
-**Branch complete**, ready for the owner's PR; CC does not open PRs.
+FE gate: tsc clean, ESLint **48** (46 errors, 2 warnings — baseline
+held, no new violations, no new `eslint-disable`), build OK, nl/en key
+sets verified identical.
 
 Production hardening remains **postponed at the owner's instruction** — it
 needs his own inputs (SMTP credentials, a Sentry DSN, the real production
 `PLATFORM_BRAND_SLUG`); see `## NEXT`. Off-site backups are BUILT but not
-yet running — also its own `## NEXT` item, reworded this sprint to make
-that distinction unmissable.
+yet running — also its own `## NEXT` item.
 
 ---
 
@@ -345,6 +351,61 @@ item has moved to `## SHIPPED` or been resolved below instead.
     server-side type-ahead endpoint instead of fetch-everything-then-
     filter-client-side. Not built — recorded so the shape of the eventual
     fix is on file rather than re-derived under pressure.
+16. **Customer prices ARCHIVE — they do not hard-delete. This is
+    deliberate; do not re-file it as a bug.** DELETE on both
+    `/api/customers/<id>/pricing/` and
+    `/api/customers/<id>/custom-pricing/` sets `is_active=False` and
+    returns 204. It looked like a bug (Sprint 137 item 2: archived rows
+    were still listed, so a "deleted" price reappeared greyed-out on the
+    next load) and was fixed by HIDING archived rows by default rather
+    than by switching to a real delete. The reason is a live FK:
+    `ExtraWorkRequestItem.snapshot_customer_service_price` points at
+    `CustomerServicePrice` on `SET_NULL`, so hard-deleting a contract
+    row would irreversibly null the "which contract row produced this
+    line?" link on already-shipped Extra Work. The money itself is safe
+    either way — the `snapshot_*` columns, `ProposalLine` and
+    `InvoiceLine` all carry their own amounts — but there is no reason
+    to destroy the link when hiding solves the reported complaint.
+    `CustomerCustomPrice` had no inbound FK when that decision was made
+    and could have been hard-deleted by the letter of the rule, but both
+    kinds share ONE table on the pricing page so "delete" has to mean the
+    same thing on both — and Sprint 137 item 6 has since given it an
+    inbound FK of its own (`snapshot_customer_custom_price`), so the
+    original argument now applies to it directly too. Sprint 137 item 7's
+    bulk action is therefore worded **"Archive selected"**, not
+    "Delete selected", and puts the "Show archived" toggle on the same
+    screen. Revisit only as a deliberate decision with the owner, and
+    only alongside a plan for those two FKs.
+17. **The bulk list actions are N sequential client requests — no bulk
+    endpoint exists.** Sprint 137 item 7's Edit/Done mode on the customer
+    pricing list, the Services catalog list and the Units catalog list
+    issues one DELETE per selected row from the browser, sequentially,
+    and reports per-row failures. That is honest and fine at the sizes
+    these lists realistically reach (one category's prices; a provider's
+    catalog), but a selection in the high tens would mean that many
+    round-trips with no server-side transaction — a partial run is a real
+    outcome, which is exactly why the UI names the rows that failed. If a
+    tenant starts routinely selecting ~50+, the fix is a real bulk
+    endpoint per list (`POST .../bulk-archive/` with an id list, one
+    transaction, a per-id result array — the shape
+    `CustomerServicePriceBulkRaiseView` already uses). Not built.
+18. **`ExtraWorkRequest.category` and `ServiceCategory` are two
+    unrelated "category" concepts, and both are still live.**
+    `ExtraWorkRequest.category` is the fixed `ExtraWorkCategory` enum
+    (DEEP_CLEANING, WINDOW_CLEANING, …) classifying ONE request;
+    `ServiceCategory` is the catalog grouping that owns `Service` rows
+    and drives per-customer pricing. Sprint 137 item 5 confirmed against
+    the code that nothing reads the enum except the Extra Work
+    serializers themselves (`create`/`list`/`detail`, plus the
+    `category=OTHER ⇒ category_other_text` validation), `conversion.py`
+    (which pins converted tickets to `OTHER`) and the demo seeder — in
+    particular **`reports/` never reads it**, so the "reports may read
+    it" worry in the original brief does not hold today. Item 5
+    therefore left the field alone and populated, added the catalog
+    filter as a separate axis on the cart, and labelled the request-level
+    dropdown so the two stop being confusable. Migrating the enum away
+    (or onto `ServiceCategory`) is a real decision with a data migration
+    behind it and was bigger than that sprint; it stays open here.
 
 ---
 
@@ -355,6 +416,41 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#126** (`751bb8d`) — Sprints 133, 134, 135 and 136 on one branch, one
+  PR · **Sprint 133**: `build_extra_work_by_department_pdf` mixed two VAT
+  bases in one table — detail rows rendered ex-VAT under an "Excl. BTW"
+  header while every work-type/department/building total rendered
+  inc-VAT, so a group's rows never summed to the figure printed beneath
+  them. The document is now ex-VAT throughout (the headline keeps ex-VAT
+  and gains VAT + inc-VAT alongside); the JSON/CSV payload was untouched.
+  **Sprint 134**: six backend items — a double-reversal guard on
+  `reverse_invoice` (service check + additive partial
+  `uniq_live_reversal_per_original` constraint), `ALLOWED_HOSTS` admits
+  the compose DNS name `backend`, `GET /documents/files/` paginated
+  (manual wiring — it is a plain `APIView`), an additive
+  `Invoice.granularity` field so an UNTAGGED
+  `PER_BUILDING_DEPARTMENT_WORK_TYPE` invoice resyncs its grouping labels,
+  `UnboundedPagination` on the Company/Customer/Building viewsets, and
+  off-site encrypted backup machinery **built but never run**. Plus axios
+  timeouts on both clients (`api` 30s, `refreshApi` 8s), fixing a hung
+  refresh that left `refreshPromise` unsettled forever and a dead page
+  the session-expiry handler never reached. **Sprint 135**: REVERTED
+  134's item 5 — `UnboundedPagination` applied to every caller and killed
+  the admin list pages' own prev/next, a worse failure than the picker
+  truncation it fixed; the pickers were fixed client-side instead
+  (`listAllCompanies`/`listAllCustomers`/`listAllBuildings`, 27 call
+  sites). Also a SUPER_ADMIN company selector on ServicesAdminPage
+  (Services + Units tabs; Categories are global and never affected), and
+  a customer picker on `/my/documents` which had silently used
+  `customer_ids[0]`. **Sprint 136**: one missed picker call site
+  (`BuildingManagerCustomersPage`, capped at 100 not 200), a full `##
+  NEXT` truth-up with every claim re-verified, and three CLAUDE.md
+  lessons (array-literal render order defeats exhaustiveness checking;
+  `pagination_class` is a contract with every caller; the `ConfirmDialog`
+  imperative-dialog gotcha). Tail commits dropped a stale
+  `test_double_reversal_still_unlocks` (Sprint 134's guard made its own
+  setup raise) and pinned `tblib` so Django's `--parallel` runner can
+  pickle tracebacks instead of masking failures.
 - **#125** (`4c5798a`) — Sprints 130, 131 (+ its cross-tenant leak fix) and
   132 on one branch, one PR · **Sprint 130**: replaced the customer
   Permissions page's 17 per-key ✓/✗ columns with one summary chip per

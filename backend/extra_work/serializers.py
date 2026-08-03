@@ -38,6 +38,7 @@ from .classification import (
     validate_intent_for_cart,
 )
 from .models import (
+    CustomerCustomPrice,
     ExtraWorkCategory,
     ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
@@ -303,6 +304,117 @@ class ExtraWorkPricingLineItemCustomerSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 # Sprint 28 Batch 6 — cart line item
 # ---------------------------------------------------------------------------
+def _validate_line_source_exclusivity(
+    *, service, custom_price, custom_description
+):
+    """Sprint 137 item 6 — the cart line's "what is this line?" rule,
+    shared by the create serializer and the preview serializer so the
+    two can never drift.
+
+    Sprint 2A made it `service` XOR `custom_description`. Item 6 adds a
+    THIRD mutually-exclusive way to describe a line: `custom_price`, a
+    `CustomerCustomPrice` the operator already priced for this customer.
+    Exactly one of the three must be present.
+
+    Takes explicit values rather than the `attrs` dict because the two
+    callers key the field differently: the model-bound cart serializer
+    maps it onto `snapshot_customer_custom_price`, the preview
+    serializer is model-free and keeps the wire name.
+
+    The stable error code stays `line_requires_service_or_description`
+    for both the none-supplied and the more-than-one-supplied case —
+    existing clients key on it and it already covered both.
+    """
+    custom_description = (custom_description or "").strip()
+
+    supplied = sum(
+        1
+        for present in (
+            service is not None,
+            custom_price is not None,
+            bool(custom_description),
+        )
+        if present
+    )
+    if supplied == 0:
+        raise serializers.ValidationError(
+            {
+                "non_field_errors": [
+                    serializers.ErrorDetail(
+                        "Line must reference a service, a custom price, "
+                        "or supply a custom_description.",
+                        code="line_requires_service_or_description",
+                    )
+                ]
+            }
+        )
+    if supplied > 1:
+        raise serializers.ValidationError(
+            {
+                "non_field_errors": [
+                    serializers.ErrorDetail(
+                        "Line must carry exactly one of service, "
+                        "custom_price or custom_description.",
+                        code="line_requires_service_or_description",
+                    )
+                ]
+            }
+        )
+
+
+def _validate_custom_price_orderable(custom_price, customer, requested_date):
+    """Sprint 137 item 6 — a `CustomerCustomPrice` may only be ordered
+    by the customer it belongs to, while it is active, and inside its
+    validity window.
+
+    The tenant check is the load-bearing one (RBAC H-1/H-2): the field's
+    queryset spans every customer's custom prices, so without this a
+    caller could name another tenant's price row by id and both leak its
+    amount into the preview and pin it onto their own cart line. Mirrors
+    the existing cross-company `service` guard on the same cart.
+
+    The active + in-window checks mirror `resolve_price`'s semantics for
+    contract rows, so an archived or expired custom price cannot be
+    ordered at its stale amount.
+    """
+    if custom_price.customer_id != customer.id:
+        raise serializers.ValidationError(
+            {
+                "line_items": [
+                    serializers.ErrorDetail(
+                        "Custom price does not belong to this customer.",
+                        code="custom_price_foreign_customer",
+                    )
+                ]
+            }
+        )
+    if not custom_price.is_active:
+        raise serializers.ValidationError(
+            {
+                "line_items": [
+                    serializers.ErrorDetail(
+                        "Cannot order an archived custom price.",
+                        code="custom_price_not_orderable",
+                    )
+                ]
+            }
+        )
+    if custom_price.valid_from > requested_date or (
+        custom_price.valid_to is not None
+        and custom_price.valid_to < requested_date
+    ):
+        raise serializers.ValidationError(
+            {
+                "line_items": [
+                    serializers.ErrorDetail(
+                        "Custom price is not valid on the requested date.",
+                        code="custom_price_not_orderable",
+                    )
+                ]
+            }
+        )
+
+
 class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
     """
     Nested line-item serializer for the Extra Work cart flow.
@@ -348,6 +460,18 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         default="",
         max_length=255,
     )
+    # Sprint 137 item 6 — order a per-customer CustomerCustomPrice. The
+    # queryset is unfiltered here (a nested line serializer has no
+    # handle on the cart's customer); the parent serializer's validate()
+    # enforces the tenant + orderability rules via
+    # `_validate_custom_price_orderable`.
+    custom_price = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerCustomPrice.objects.all(),
+        source="snapshot_customer_custom_price",
+        required=False,
+        allow_null=True,
+        default=None,
+    )
     line_price_source = serializers.CharField(read_only=True)
     # Sprint 8B — actual hours worked (HOURS-unit lines). Read-only on
     # the cart-line read path; written only via the actual-hours
@@ -381,6 +505,10 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
             "service",
             "service_name",
             "custom_description",
+            # Sprint 137 item 6 — writable on create, and surfaced on
+            # read so the detail page can mark the line as ordered from
+            # a custom price rather than typed free-hand.
+            "custom_price",
             "quantity",
             "unit_type",
             "requested_date",
@@ -432,36 +560,14 @@ class ExtraWorkRequestItemSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        # Sprint 2A — XOR: exactly one of `service` or
-        # `custom_description` must be present. Both blank ⇒
-        # `line_requires_service_or_description`; both set ⇒ same
-        # code (ambiguous line).
-        service = attrs.get("service")
-        custom_description = (attrs.get("custom_description") or "").strip()
-        if service is None and not custom_description:
-            raise serializers.ValidationError(
-                {
-                    "non_field_errors": [
-                        serializers.ErrorDetail(
-                            "Line must reference a service or supply a "
-                            "custom_description.",
-                            code="line_requires_service_or_description",
-                        )
-                    ]
-                }
-            )
-        if service is not None and custom_description:
-            raise serializers.ValidationError(
-                {
-                    "non_field_errors": [
-                        serializers.ErrorDetail(
-                            "Line cannot carry both a service and a "
-                            "custom_description.",
-                            code="line_requires_service_or_description",
-                        )
-                    ]
-                }
-            )
+        # Sprint 2A + Sprint 137 item 6 — exactly one of `service`,
+        # `custom_price` or `custom_description`. See
+        # `_validate_line_source_exclusivity`.
+        _validate_line_source_exclusivity(
+            service=attrs.get("service"),
+            custom_price=attrs.get("snapshot_customer_custom_price"),
+            custom_description=attrs.get("custom_description"),
+        )
         return attrs
 
     def _resolved_contract(self, obj):
@@ -1189,6 +1295,18 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                     }
                 )
 
+        # Sprint 137 item 6 — a custom-price line may only name a
+        # CustomerCustomPrice belonging to THIS customer, and only
+        # while it is orderable. Same tenant-scoping intent as the
+        # service guard directly above (RBAC H-1/H-2).
+        for line in attrs.get("line_items", []) or []:
+            line_custom_price = line.get("snapshot_customer_custom_price")
+            if line_custom_price is None:
+                continue
+            _validate_custom_price_orderable(
+                line_custom_price, customer, line["requested_date"]
+            )
+
         if attrs.get("category") == ExtraWorkCategory.OTHER and not attrs.get(
             "category_other_text", ""
         ).strip():
@@ -1266,6 +1384,9 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 customer=customer,
                 requested_date=line["requested_date"],
                 custom_description=(line.get("custom_description") or ""),
+                # Sprint 137 item 6 — a custom-price line. Still
+                # classifies AD_HOC; see classify_line's docstring.
+                custom_price=line.get("snapshot_customer_custom_price"),
             )
             for line in line_items_data
         ]
@@ -1311,14 +1432,33 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 # type defaults to OTHER (legacy placeholder mirroring
                 # migration 0003 backfill). Catalog lines denormalise
                 # from Service.unit_type to pin pricing semantics.
+                #
+                # Sprint 137 item 6 — a custom-price line denormalises
+                # from the CustomerCustomPrice row instead, for the same
+                # reason: a later edit to the price row must not rewrite
+                # the historical line's pricing semantics.
                 if service is None:
-                    unit_type = ExtraWorkPricingUnitType.OTHER
+                    unit_type = (
+                        classification.custom_unit_type
+                        or ExtraWorkPricingUnitType.OTHER
+                    )
                 else:
                     unit_type = service.unit_type
                 ExtraWorkRequestItem.objects.create(
                     extra_work_request=request,
                     service=service,
-                    custom_description=(line.get("custom_description") or ""),
+                    # A custom-price line carries the price row's name
+                    # as its description, so every existing renderer
+                    # (detail page, proposal builder, exports) shows the
+                    # work's real name with no change of its own.
+                    custom_description=(
+                        classification.custom_description
+                        or line.get("custom_description")
+                        or ""
+                    ),
+                    snapshot_customer_custom_price=(
+                        classification.custom_price
+                    ),
                     quantity=line["quantity"],
                     unit_type=unit_type,
                     requested_date=line["requested_date"],
@@ -1406,6 +1546,14 @@ class ExtraWorkPreviewLineSerializer(serializers.Serializer):
         default="",
         max_length=255,
     )
+    # Sprint 137 item 6 — mirror of the cart line's custom-price input.
+    # Model-free serializer, so it keeps the wire name with no `source`.
+    custom_price = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerCustomPrice.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
     quantity = serializers.DecimalField(max_digits=12, decimal_places=2)
     requested_date = serializers.DateField()
     customer_note = serializers.CharField(
@@ -1427,32 +1575,13 @@ class ExtraWorkPreviewLineSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
-        service = attrs.get("service")
-        custom_description = (attrs.get("custom_description") or "").strip()
-        if service is None and not custom_description:
-            raise serializers.ValidationError(
-                {
-                    "non_field_errors": [
-                        serializers.ErrorDetail(
-                            "Line must reference a service or supply a "
-                            "custom_description.",
-                            code="line_requires_service_or_description",
-                        )
-                    ]
-                }
-            )
-        if service is not None and custom_description:
-            raise serializers.ValidationError(
-                {
-                    "non_field_errors": [
-                        serializers.ErrorDetail(
-                            "Line cannot carry both a service and a "
-                            "custom_description.",
-                            code="line_requires_service_or_description",
-                        )
-                    ]
-                }
-            )
+        # Sprint 137 item 6 — identical rule to the cart line; shared
+        # helper so preview and create cannot drift.
+        _validate_line_source_exclusivity(
+            service=attrs.get("service"),
+            custom_price=attrs.get("custom_price"),
+            custom_description=attrs.get("custom_description"),
+        )
         return attrs
 
 
@@ -1536,6 +1665,17 @@ class ExtraWorkPreviewSerializer(serializers.Serializer):
                         ]
                     }
                 )
+
+        # Sprint 137 item 6 — same custom-price tenant + orderability
+        # guard as create (the preview would otherwise leak another
+        # tenant's custom-price amount back to the caller).
+        for line in attrs.get("line_items", []) or []:
+            line_custom_price = line.get("custom_price")
+            if line_custom_price is None:
+                continue
+            _validate_custom_price_orderable(
+                line_custom_price, customer, line["requested_date"]
+            )
 
         # Same scope + permission gate as create.
         if user.role == UserRole.CUSTOMER_USER:

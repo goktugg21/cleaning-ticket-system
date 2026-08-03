@@ -8122,3 +8122,59 @@ details[open] > .ew-department-tree-summary::before {
 .ew-department-tree-worktype-row:hover {
   background: var(--surface-2);
 }
+
+/* Sprint 137 item 4 — customer pricing category index. A responsive
+   grid of category cards replacing the single flat table; each card
+   drills into that category's priced rows. Grid rather than a fixed
+   column count so it collapses cleanly on narrow viewports. */
+.pricing-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+.pricing-category-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.pricing-category-card:hover {
+  border-color: var(--green-2);
+  background: var(--green-faint);
+}
+.pricing-category-card-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+}
+
+/* Sprint 137 item 7 — iOS-style list edit mode. The checkbox column
+   only exists while edit mode is on, so the default read view keeps
+   exactly the geometry it had before. */
+.list-edit-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.list-edit-checkbox-cell {
+  width: 34px;
+  text-align: center;
+}
+.list-edit-failure-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

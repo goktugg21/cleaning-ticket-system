@@ -14,6 +14,9 @@ export function MultiSelectToolbar({
   disabled,
   filterValue,
   onFilterChange,
+  actionLabel,
+  onAction,
+  actionDestructive,
   testIdPrefix,
 }: {
   selectedCount: number;
@@ -23,6 +26,15 @@ export function MultiSelectToolbar({
   // Both filter props present -> the filter input renders.
   filterValue?: string;
   onFilterChange?: (value: string) => void;
+  // Sprint 137 item 7 — optional single action for the current
+  // selection (the iOS-style list edit mode). Both props present ->
+  // the action button renders, disabled while nothing is selected.
+  // The LABEL is the caller's, deliberately: the same interaction
+  // archives on the pricing lists and hard-deletes on the catalog
+  // lists, and the button must say which one it actually does.
+  actionLabel?: string;
+  onAction?: () => void;
+  actionDestructive?: boolean;
   testIdPrefix: string;
 }) {
   const { t } = useTranslation("common");
@@ -65,6 +77,21 @@ export function MultiSelectToolbar({
           disabled={disabled}
           data-testid={`${testIdPrefix}-filter`}
         />
+      )}
+      {actionLabel !== undefined && onAction !== undefined && (
+        <button
+          type="button"
+          className={
+            actionDestructive
+              ? "btn btn-danger btn-sm"
+              : "btn btn-secondary btn-sm"
+          }
+          onClick={onAction}
+          disabled={disabled || selectedCount === 0}
+          data-testid={`${testIdPrefix}-action`}
+        >
+          {actionLabel}
+        </button>
       )}
     </div>
   );

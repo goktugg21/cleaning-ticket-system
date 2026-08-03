@@ -18,13 +18,20 @@ import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listAllBuildings, listAllCustomers, listCustomerPrices, listServices } from "../api/admin";
+import {
+  listAllBuildings,
+  listAllCustomers,
+  listCustomerCustomPrices,
+  listCustomerPrices,
+  listServices,
+} from "../api/admin";
 import { getApiError } from "../api/client";
 import { listLabels } from "../api/customerLabels";
 import { createExtraWork, getExtraWorkPreview } from "../api/extraWork";
 import type {
   Building,
   Customer,
+  CustomerCustomPrice,
   CustomerLabel,
   CustomerServicePrice,
   ExtraWorkCategory,
@@ -72,6 +79,31 @@ interface CartLineState {
 // It is never a real service id (numeric), so it never collides with a
 // catalog service or the agreed-price lookups.
 const CUSTOM_SERVICE_VALUE = "__custom__";
+
+/**
+ * Sprint 137 item 6 — prefix for the "order a per-customer custom
+ * price" options in the same per-line dropdown. `CustomerCustomPrice`
+ * rows carry a name, a unit and an amount but deliberately have NO
+ * `service` FK, so they could never be selected before: the owner
+ * priced his customer's real work types through that path and was then
+ * baffled they never appeared here.
+ *
+ * A prefixed string keeps ONE control (no second picker to keep in
+ * sync) and can never collide with a numeric service id or with
+ * CUSTOM_SERVICE_VALUE.
+ */
+const CUSTOM_PRICE_PREFIX = "custom-price:";
+
+function customPriceValue(id: number): string {
+  return `${CUSTOM_PRICE_PREFIX}${id}`;
+}
+
+/** The CustomerCustomPrice id a cart line orders, or null. */
+function parseCustomPriceId(serviceId: string): number | null {
+  if (!serviceId.startsWith(CUSTOM_PRICE_PREFIX)) return null;
+  const parsed = Number(serviceId.slice(CUSTOM_PRICE_PREFIX.length));
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 const EMPTY_PARENT: ParentFormState = {
   building: "",
@@ -219,6 +251,34 @@ interface AgreedTotals {
 // touches non-agreed lines (those carry no price and are shown as
 // "to be priced by the provider"). If the preview endpoint later
 // returns server-computed totals, switch to those.
+/**
+ * Sprint 137 item 6 — the unit price + VAT a preview line is KNOWN to
+ * carry, from whichever backend-provided channel supplied it:
+ * `agreed_*` on an AGREED_CUSTOMER_PRICE line, `custom_price_*` on a
+ * line ordered from a CustomerCustomPrice. Still zero client-side
+ * inference — both numbers come from the backend, and `price_source`
+ * is never second-guessed here.
+ */
+function knownLinePrice(
+  line: ExtraWorkPreviewLine,
+): { unit: number; vatPct: number } | null {
+  const rawUnit =
+    line.price_source === "AGREED_CUSTOMER_PRICE"
+      ? line.agreed_unit_price
+      : line.custom_price !== null
+        ? line.custom_price_unit_price
+        : null;
+  if (rawUnit === null) return null;
+  const unit = Number(rawUnit);
+  if (!Number.isFinite(unit)) return null;
+  const rawVat =
+    line.price_source === "AGREED_CUSTOMER_PRICE"
+      ? line.agreed_vat_pct
+      : line.custom_price_vat_pct;
+  const vatPct = rawVat !== null ? Number(rawVat) : 0;
+  return { unit, vatPct: Number.isFinite(vatPct) ? vatPct : 0 };
+}
+
 function computeAgreedTotals(lines: ExtraWorkPreviewLine[]): AgreedTotals {
   let subtotal = 0;
   let vat = 0;
@@ -226,19 +286,12 @@ function computeAgreedTotals(lines: ExtraWorkPreviewLine[]): AgreedTotals {
   let unpricedCount = 0;
   for (const line of lines) {
     const qty = Number(line.quantity);
-    const unit =
-      line.agreed_unit_price !== null ? Number(line.agreed_unit_price) : null;
-    if (
-      line.price_source === "AGREED_CUSTOMER_PRICE" &&
-      unit !== null &&
-      Number.isFinite(qty) &&
-      Number.isFinite(unit)
-    ) {
+    const known = knownLinePrice(line);
+    const unit = known ? known.unit : null;
+    if (known !== null && unit !== null && Number.isFinite(qty)) {
       const lineSubtotal = qty * unit;
-      const pct =
-        line.agreed_vat_pct !== null ? Number(line.agreed_vat_pct) : 0;
       subtotal += lineSubtotal;
-      vat += Number.isFinite(pct) ? lineSubtotal * (pct / 100) : 0;
+      vat += lineSubtotal * (known.vatPct / 100);
       agreedCount += 1;
     } else {
       unpricedCount += 1;
@@ -319,6 +372,17 @@ export function CreateExtraWorkPage({
     customerId: number;
     rows: CustomerServicePrice[];
   } | null>(null);
+  // Sprint 137 item 6 — the customer's orderable CUSTOM price lines.
+  // Tagged with customerId like the contract rows above so a stale
+  // list is never offered. The endpoint is provider-only
+  // (backend/extra_work/views_pricing.py::CustomerCustomPriceListCreateView
+  // is gated on IsSuperAdminOrCompanyAdmin), so a customer-side actor
+  // gets a 403 and simply sees no custom-price options — the same
+  // graceful degradation the contract-price fetch already uses.
+  const [customCustomPrices, setCustomCustomPrices] = useState<{
+    customerId: number;
+    rows: CustomerCustomPrice[];
+  } | null>(null);
   // Sprint 128 — the selected customer's active Department / Work Type lists
   // for the two optional pickers. Tagged with customerId so a stale list from
   // the previously chosen customer is never shown, and the selection is
@@ -334,6 +398,22 @@ export function CreateExtraWorkPage({
   // contract lists — the list scrolls and filters rather than dumping
   // every row inline).
   const [priceSearch, setPriceSearch] = useState("");
+
+  // Sprint 137 item 5 — REAL service-catalog category filter over the
+  // cart's service pickers. Note this is a different axis from the
+  // `category` field on the request itself (`ExtraWorkCategory`, the
+  // fixed DEEP_CLEANING/WINDOW_CLEANING/... enum): that classifies the
+  // REQUEST, this narrows the CATALOG. They were always two unrelated
+  // things; the form now says so instead of implying one.
+  //
+  // "" is "All categories" and is the DEFAULT — filtering is opt-in,
+  // per the hard requirement that there is never a loop where a
+  // service cannot be found.
+  const [categoryFilter, setCategoryFilter] = useState("");
+  // Free-text service search. Deliberately searches the WHOLE catalog,
+  // never the filtered subset, so a category filter can never hide a
+  // service the operator is explicitly looking for.
+  const [serviceSearch, setServiceSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -495,8 +575,9 @@ export function CreateExtraWorkPage({
     if (cartLines.length === 0) return false;
     return cartLines.every((line) => {
       // A line is previewable when it is a catalog service (a chosen
-      // numeric serviceId) OR a custom line with non-empty text. An
-      // empty line, or a custom line with blank text, is not.
+      // numeric serviceId), an ordered custom price, OR a custom line
+      // with non-empty text. An empty line, or a custom line with blank
+      // text, is not.
       if (line.serviceId === CUSTOM_SERVICE_VALUE) {
         if (!line.customDescription.trim()) return false;
       } else if (!line.serviceId) {
@@ -520,9 +601,14 @@ export function CreateExtraWorkPage({
       c: Number(form.customer),
       l: cartLines.map((line) => {
         const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+        const customPriceId = parseCustomPriceId(line.serviceId);
         return {
-          s: isCustom ? null : Number(line.serviceId),
+          s: isCustom || customPriceId !== null ? null : Number(line.serviceId),
           c: isCustom ? line.customDescription.trim() : null,
+          // Sprint 137 item 6 — a custom-price line's identity is the
+          // price row id; it belongs in the signature so changing the
+          // ordered price re-fetches the preview.
+          p: customPriceId,
           q: line.quantity,
           d: line.requestedDate,
         };
@@ -537,7 +623,13 @@ export function CreateExtraWorkPage({
     const parsed = JSON.parse(previewKey) as {
       b: number;
       c: number;
-      l: { s: number | null; c: string | null; q: string; d: string }[];
+      l: {
+        s: number | null;
+        c: string | null;
+        p: number | null;
+        q: string;
+        d: string;
+      }[];
     };
     let cancelled = false;
     const timer = setTimeout(() => {
@@ -547,11 +639,19 @@ export function CreateExtraWorkPage({
             building: parsed.b,
             customer: parsed.c,
             request_intent: selectedIntent ?? undefined,
-            // Catalog lines send `service`; custom lines send
-            // `custom_description` (and omit `service`). The preview
-            // serializer accepts service XOR custom_description.
-            line_items: parsed.l.map((line) =>
-              line.c !== null
+            // Catalog lines send `service`; free-text lines send
+            // `custom_description`; Sprint 137 item 6 custom-price
+            // lines send `custom_price`. Exactly one of the three per
+            // line — the preview serializer enforces the same rule.
+            line_items: parsed.l.map((line) => {
+              if (line.p !== null) {
+                return {
+                  custom_price: line.p,
+                  quantity: line.q,
+                  requested_date: line.d,
+                };
+              }
+              return line.c !== null
                 ? {
                     custom_description: line.c,
                     quantity: line.q,
@@ -561,8 +661,8 @@ export function CreateExtraWorkPage({
                     service: line.s ?? undefined,
                     quantity: line.q,
                     requested_date: line.d,
-                  },
-            ),
+                  };
+            }),
           });
           if (cancelled) return;
           setPreview({ key: previewKey, data });
@@ -638,6 +738,26 @@ export function CreateExtraWorkPage({
       })
       .catch(() => {
         if (!cancelled) setCustomerPrices({ customerId, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.customer]);
+
+  // Sprint 137 item 6 — load the customer's orderable custom prices.
+  // Same shape as the contract-price effect above (writes deferred into
+  // the promise resolution, never in the effect body). A 403 for a
+  // customer-side actor degrades to an empty list rather than an error.
+  useEffect(() => {
+    const customerId = form.customer ? Number(form.customer) : null;
+    if (!customerId) return;
+    let cancelled = false;
+    listCustomerCustomPrices(customerId)
+      .then((rows) => {
+        if (!cancelled) setCustomCustomPrices({ customerId, rows });
+      })
+      .catch(() => {
+        if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
       });
     return () => {
       cancelled = true;
@@ -755,6 +875,39 @@ export function CreateExtraWorkPage({
       )
       .sort((a, b) => a.service_name.localeCompare(b.service_name));
   }, [customerPrices, form.customer]);
+  // Sprint 137 item 6 — the custom prices that are orderable RIGHT NOW:
+  // active and inside their validity window, exactly the rule the
+  // backend re-enforces in `_validate_custom_price_orderable`. Offering
+  // an archived or expired row would only produce a 400 on submit.
+  const orderableCustomPrices = useMemo(() => {
+    if (
+      customCustomPrices === null ||
+      !form.customer ||
+      customCustomPrices.customerId !== Number(form.customer)
+    ) {
+      return [] as CustomerCustomPrice[];
+    }
+    const today = todayISO();
+    return customCustomPrices.rows
+      .filter(
+        (p) =>
+          p.is_active &&
+          p.valid_from <= today &&
+          (p.valid_to === null || p.valid_to >= today),
+      )
+      .sort((a, b) => a.custom_name.localeCompare(b.custom_name));
+  }, [customCustomPrices, form.customer]);
+
+  // The unit a custom price is quoted in — its operator-supplied label
+  // for OTHER, the translated unit type otherwise. Mirrors
+  // CustomerPricingPage.resolveUnitLabel.
+  const customPriceUnitLabel = (price: CustomerCustomPrice): string => {
+    if (price.unit_type === "OTHER" && price.custom_unit_label) {
+      return price.custom_unit_label;
+    }
+    return t(UNIT_TYPE_I18N_KEY[price.unit_type]);
+  };
+
   const filteredAgreedPrices = useMemo(() => {
     const q = priceSearch.trim().toLowerCase();
     if (!q) return agreedPrices;
@@ -791,6 +944,106 @@ export function CreateExtraWorkPage({
       : ` — ${money}`;
   };
 
+  // ---- Sprint 137 item 5 — catalog category filter ------------------
+  // The categories OFFERED are derived from the loaded catalog rather
+  // than fetched separately, so a category can never be offered that
+  // would yield an empty picker: every option here has >= 1 service
+  // behind it by construction.
+  const catalogCategories = useMemo(() => {
+    const byId = new Map<number, string>();
+    for (const svc of services) {
+      if (!byId.has(svc.category)) {
+        byId.set(svc.category, svc.category_name || String(svc.category));
+      }
+    }
+    return [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [services]);
+
+  const serviceSearchTerm = serviceSearch.trim().toLowerCase();
+
+  // Search results span the ENTIRE catalog — the category filter is
+  // deliberately ignored while searching. Every option label already
+  // carries its category name, so a match from outside the current
+  // filter is self-describing.
+  const searchMatches = useMemo(() => {
+    if (!serviceSearchTerm) return null;
+    return services.filter((svc) =>
+      `${svc.category_name} ${svc.name}`
+        .toLowerCase()
+        .includes(serviceSearchTerm),
+    );
+  }, [services, serviceSearchTerm]);
+
+  const categoryFilteredServices = useMemo(() => {
+    if (!categoryFilter) return services;
+    return services.filter((svc) => String(svc.category) === categoryFilter);
+  }, [services, categoryFilter]);
+
+  // What the per-line pickers offer right now: search wins over the
+  // category filter when one is typed.
+  const offeredServices = searchMatches ?? categoryFilteredServices;
+  const narrowingActive = Boolean(categoryFilter) || Boolean(serviceSearchTerm);
+  const hiddenServiceCount = services.length - offeredServices.length;
+
+  function clearServiceNarrowing() {
+    setCategoryFilter("");
+    setServiceSearch("");
+  }
+
+  /**
+   * True when a cart line orders a custom price that is NOT on the
+   * currently-selected customer's orderable list — the customer was
+   * switched (or the row archived) after the line was added. The line
+   * is kept, labelled and blocked at submit rather than silently reset:
+   * quietly emptying a line the user added is the failure mode this
+   * sprint keeps finding.
+   */
+  function staleCustomPriceLine(line: CartLineState): boolean {
+    const customPriceId = parseCustomPriceId(line.serviceId);
+    if (customPriceId === null) return false;
+    return !orderableCustomPrices.some((p) => p.id === customPriceId);
+  }
+
+  /**
+   * The option list for ONE cart line. The line's currently-selected
+   * service is ALWAYS included even when the active filter/search
+   * excludes it — otherwise narrowing the catalog would blank out a
+   * `<select>` that already had a value, silently dropping a line the
+   * user had already added to the cart.
+   */
+  function optionsForLine(line: CartLineState): Service[] {
+    if (!line.serviceId || line.serviceId === CUSTOM_SERVICE_VALUE) {
+      return offeredServices;
+    }
+    const selectedId = Number(line.serviceId);
+    if (offeredServices.some((svc) => svc.id === selectedId)) {
+      return offeredServices;
+    }
+    const selected = services.find((svc) => svc.id === selectedId);
+    return selected ? [selected, ...offeredServices] : offeredServices;
+  }
+
+  /**
+   * Picking a service from OUTSIDE the active category filter clears
+   * that filter (per the "selecting a match outside the current
+   * category clears the filter" rule) — leaving it on would show the
+   * operator a cart line whose service is not in the list they are
+   * looking at.
+   */
+  function onLineServiceChange(tempId: string, value: string) {
+    updateCartLine(tempId, "serviceId", value);
+    // A custom price has no catalog category, so it can neither match
+    // nor contradict the active filter — leave the filter alone.
+    if (parseCustomPriceId(value) !== null) return;
+    if (!categoryFilter || value === CUSTOM_SERVICE_VALUE || !value) return;
+    const picked = services.find((svc) => svc.id === Number(value));
+    if (picked && String(picked.category) !== categoryFilter) {
+      setCategoryFilter("");
+    }
+  }
+
   function update<K extends keyof ParentFormState>(
     name: K,
     value: ParentFormState[K],
@@ -818,6 +1071,25 @@ export function CreateExtraWorkPage({
         );
       }
       return [...current, { ...emptyCartLine(), serviceId: String(serviceId) }];
+    });
+  }
+
+  // Sprint 137 item 6 — mirror of addServiceFromContract for a custom
+  // price: fill the first empty line, else append. No-op when the price
+  // is already in the cart (submit rejects duplicates).
+  function addCustomPriceToCart(customPriceId: number) {
+    const value = customPriceValue(customPriceId);
+    setCartLines((current) => {
+      if (current.some((l) => l.serviceId === value)) {
+        return current;
+      }
+      const emptyIdx = current.findIndex((l) => !l.serviceId);
+      if (emptyIdx >= 0) {
+        return current.map((l, i) =>
+          i === emptyIdx ? { ...l, serviceId: value } : l,
+        );
+      }
+      return [...current, { ...emptyCartLine(), serviceId: value }];
     });
   }
 
@@ -863,8 +1135,36 @@ export function CreateExtraWorkPage({
       return;
     }
     const seenServiceIds = new Set<number>();
+    // Sprint 137 item 6 — custom-price lines dedupe on their own id
+    // space; a price row is no more orderable twice than a service is.
+    const seenCustomPriceIds = new Set<number>();
     for (const line of cartLines) {
       const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
+      const customPriceId = parseCustomPriceId(line.serviceId);
+      if (customPriceId !== null) {
+        // A price row stranded by a customer switch would be rejected
+        // by the backend's tenant guard anyway — fail here with a
+        // message that says what to do instead.
+        if (staleCustomPriceLine(line)) {
+          setError(t("create.error_stale_custom_price"));
+          return;
+        }
+        if (seenCustomPriceIds.has(customPriceId)) {
+          setError(t("create.error_duplicate_custom_price"));
+          return;
+        }
+        seenCustomPriceIds.add(customPriceId);
+        const qtyNum = Number(line.quantity);
+        if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+          setError(t("create.error_line_quantity_invalid"));
+          return;
+        }
+        if (!line.requestedDate) {
+          setError(t("create.error_line_requested_date_required"));
+          return;
+        }
+        continue;
+      }
       if (isCustom) {
         // Custom line: require non-empty free-text. Custom lines are
         // never deduped against catalog services and skip the
@@ -988,11 +1288,21 @@ export function CreateExtraWorkPage({
         // backend then derives a safe default — identical to the
         // pre-intent-layer graceful-degradation behaviour.
         ...(intentToSend ? { request_intent: intentToSend } : {}),
-        // Catalog lines send `service`; custom lines send
-        // `custom_description` (and omit `service`) — service XOR
-        // custom_description, validated above.
-        line_items: cartLines.map((line) =>
-          line.serviceId === CUSTOM_SERVICE_VALUE
+        // Catalog lines send `service`; free-text lines send
+        // `custom_description`; Sprint 137 item 6 custom-price lines
+        // send `custom_price`. Exactly one of the three per line,
+        // validated above and re-enforced by the backend.
+        line_items: cartLines.map((line) => {
+          const customPriceId = parseCustomPriceId(line.serviceId);
+          if (customPriceId !== null) {
+            return {
+              custom_price: customPriceId,
+              quantity: line.quantity,
+              requested_date: line.requestedDate,
+              customer_note: line.customerNote.trim() || undefined,
+            };
+          }
+          return line.serviceId === CUSTOM_SERVICE_VALUE
             ? {
                 custom_description: line.customDescription.trim(),
                 quantity: line.quantity,
@@ -1004,8 +1314,8 @@ export function CreateExtraWorkPage({
                 quantity: line.quantity,
                 requested_date: line.requestedDate,
                 customer_note: line.customerNote.trim() || undefined,
-              },
-        ),
+              };
+        }),
       });
       setResult(created);
     } catch (err) {
@@ -1352,6 +1662,16 @@ export function CreateExtraWorkPage({
                     </option>
                   ))}
                 </select>
+                {/* Sprint 137 item 5 — this dropdown is
+                    `ExtraWorkRequest.category`, the fixed enum that
+                    classifies the REQUEST. It is NOT the ServiceCategory
+                    catalog the pricing page manages, and the two were
+                    silently sharing the word "category". Naming the
+                    difference is the cheap half of the fix; the cart's
+                    own catalog-category filter is the other half. */}
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("create.field_category_hint")}
+                </div>
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="ew-urgency">
@@ -1591,12 +1911,184 @@ export function CreateExtraWorkPage({
                       </div>
                     </>
                   )}
+                  {/* Sprint 137 item 6 — the customer's custom price
+                      lines, in the SAME browse panel as the contract
+                      prices. This panel is where the owner looked for
+                      the work types he had priced; before item 6 they
+                      were not here (nor anywhere else in this form)
+                      because a CustomerCustomPrice has no service FK
+                      and so could never be ordered at all. */}
+                  {orderableCustomPrices.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div
+                        className="form-section-title"
+                        style={{ margin: "0 0 6px" }}
+                      >
+                        {t("create.prices.custom_section_title")}
+                      </div>
+                      <div
+                        className="ew-agreed-prices-list"
+                        data-testid="extra-work-create-custom-prices-list"
+                      >
+                        {orderableCustomPrices.map((price) => {
+                          const inCart = cartLines.some(
+                            (l) => parseCustomPriceId(l.serviceId) === price.id,
+                          );
+                          return (
+                            <button
+                              type="button"
+                              key={price.id}
+                              className="ew-agreed-price-item"
+                              data-testid="extra-work-create-custom-price-item"
+                              data-in-cart={inCart ? "true" : "false"}
+                              disabled={inCart}
+                              onClick={() => addCustomPriceToCart(price.id)}
+                            >
+                              <span className="ew-agreed-price-item-label">
+                                {price.custom_name}
+                                <span className="muted small">
+                                  {" · "}
+                                  {customPriceUnitLabel(price)}
+                                </span>
+                              </span>
+                              <span className="ew-agreed-price-item-price">
+                                {formatMoney(price.unit_price)}
+                                <span className="muted small">
+                                  {" · "}
+                                  {formatNumber(price.vat_pct, {
+                                    maximumFractionDigits: 2,
+                                  })}
+                                  %
+                                </span>
+                                {inCart && (
+                                  <Check
+                                    size={14}
+                                    strokeWidth={2.5}
+                                    aria-hidden
+                                    style={{ marginLeft: 6 }}
+                                  />
+                                )}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="muted small" style={{ marginTop: 6 }}>
+                        {t("create.prices.custom_helper")}
+                      </div>
+                    </div>
+                  )}
                   <div className="muted small" style={{ marginTop: 8 }}>
                     {t("create.prices.helper")}
                   </div>
                 </div>
               </details>
             )}
+
+            {/* Sprint 137 item 5 — narrow the service pickers by REAL
+                catalog category, plus a catalog-wide search. Both are
+                opt-in: the default is "All categories" with no search,
+                which is byte-identical to the pre-137 picker. */}
+            {services.length > 0 && (
+              <div
+                className="form-2col"
+                data-testid="extra-work-create-catalog-filter"
+                style={{ marginBottom: 12 }}
+              >
+                <div className="field">
+                  <label className="field-label" htmlFor="ew-catalog-category">
+                    {t("create.catalog_filter.category_label")}
+                  </label>
+                  <select
+                    id="ew-catalog-category"
+                    className="field-select"
+                    data-testid="extra-work-create-catalog-category"
+                    value={categoryFilter}
+                    onChange={(event) => setCategoryFilter(event.target.value)}
+                  >
+                    <option value="">
+                      {t("create.catalog_filter.all_categories")}
+                    </option>
+                    {catalogCategories.map((category) => (
+                      <option key={category.id} value={String(category.id)}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label className="field-label" htmlFor="ew-catalog-search">
+                    {t("create.catalog_filter.search_label")}
+                  </label>
+                  <input
+                    id="ew-catalog-search"
+                    className="field-input"
+                    type="search"
+                    data-testid="extra-work-create-catalog-search"
+                    placeholder={t("create.catalog_filter.search_placeholder")}
+                    value={serviceSearch}
+                    onChange={(event) => setServiceSearch(event.target.value)}
+                  />
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {t("create.catalog_filter.search_hint")}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Never a bare empty list: name what is hiding the
+                results, give the count OUTSIDE the narrowing, and
+                offer one click back to the full catalog. */}
+            {narrowingActive && offeredServices.length === 0 && (
+              <div
+                className="alert-warning"
+                role="status"
+                style={{ marginBottom: 12 }}
+                data-testid="extra-work-create-catalog-filter-empty"
+              >
+                {serviceSearchTerm
+                  ? t("create.catalog_filter.no_search_match", {
+                      search: serviceSearch.trim(),
+                      total: services.length,
+                    })
+                  : t("create.catalog_filter.category_empty", {
+                      total: services.length,
+                    })}{" "}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-testid="extra-work-create-catalog-filter-clear"
+                  onClick={clearServiceNarrowing}
+                >
+                  {t("create.catalog_filter.clear")}
+                </button>
+              </div>
+            )}
+
+            {/* Narrowing is active but still showing something: say how
+                many services are hidden so the picker is never silently
+                partial. */}
+            {narrowingActive &&
+              offeredServices.length > 0 &&
+              hiddenServiceCount > 0 && (
+                <div
+                  className="muted small"
+                  style={{ marginBottom: 12 }}
+                  data-testid="extra-work-create-catalog-filter-note"
+                >
+                  {t("create.catalog_filter.hidden_note", {
+                    shown: offeredServices.length,
+                    total: services.length,
+                  })}{" "}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={clearServiceNarrowing}
+                  >
+                    {t("create.catalog_filter.clear")}
+                  </button>
+                </div>
+              )}
 
             {cartLines.length === 0 && (
               <div
@@ -1629,18 +2121,14 @@ export function CreateExtraWorkPage({
                     className="field-select"
                     value={line.serviceId}
                     onChange={(event) =>
-                      updateCartLine(
-                        line.tempId,
-                        "serviceId",
-                        event.target.value,
-                      )
+                      onLineServiceChange(line.tempId, event.target.value)
                     }
                     required
                   >
                     <option value="" disabled>
                       {t("create.line_field_service_placeholder")}
                     </option>
-                    {services.map((svc) => {
+                    {optionsForLine(line).map((svc) => {
                       const baseLabel = svc.category_name
                         ? `${svc.category_name} — ${svc.name}`
                         : svc.name;
@@ -1650,6 +2138,40 @@ export function CreateExtraWorkPage({
                         </option>
                       );
                     })}
+                    {/* Sprint 137 item 6 — the customer's own custom
+                        price lines, orderable at last. Grouped so they
+                        read as a distinct kind of thing rather than
+                        blending into the catalog, and never filtered by
+                        the catalog-category filter: a custom price has
+                        no category to filter by. */}
+                    {orderableCustomPrices.length > 0 && (
+                      <optgroup
+                        label={t("create.line_custom_price_group")}
+                      >
+                        {orderableCustomPrices.map((price) => (
+                          <option
+                            key={price.id}
+                            value={customPriceValue(price.id)}
+                          >
+                            {`${price.custom_name} — ${formatMoney(
+                              price.unit_price,
+                            )} / ${customPriceUnitLabel(price)}`}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {/* A custom price belongs to ONE customer. Switching
+                        customer mid-compose can therefore strand a line
+                        whose price row is not on the new customer's list
+                        — the backend rejects it (tenant guard), but the
+                        <select> would first go blank and hide WHY. Keep
+                        the value visible and labelled instead of
+                        silently emptying the line. */}
+                    {staleCustomPriceLine(line) && (
+                      <option value={line.serviceId}>
+                        {t("create.line_custom_price_unavailable")}
+                      </option>
+                    )}
                     {/* Custom line: no agreed-price suffix — it has no
                         catalog service to price against. Re-picking a
                         catalog service from this still-visible dropdown
@@ -1658,6 +2180,30 @@ export function CreateExtraWorkPage({
                       {t("create.line_custom_option")}
                     </option>
                   </select>
+                  {/* A custom-price line is priced from an agreed
+                      per-customer row, but it still has no catalog
+                      service, so the provider confirms it in the
+                      pricing step. Say so on the line rather than
+                      letting the source pill be the only clue. */}
+                  {parseCustomPriceId(line.serviceId) !== null &&
+                    (staleCustomPriceLine(line) ? (
+                      <div
+                        className="alert-warning"
+                        role="status"
+                        style={{ marginTop: 6 }}
+                        data-testid={`extra-work-create-line-custom-price-stale-${index}`}
+                      >
+                        {t("create.line_custom_price_stale")}
+                      </div>
+                    ) : (
+                      <div
+                        className="muted small"
+                        style={{ marginTop: 6 }}
+                        data-testid={`extra-work-create-line-custom-price-${index}`}
+                      >
+                        {t("create.line_custom_price_hint")}
+                      </div>
+                    ))}
                   {line.serviceId === CUSTOM_SERVICE_VALUE && (
                     <input
                       data-testid={`extra-work-create-line-custom-${index}`}
@@ -1821,19 +2367,17 @@ export function CreateExtraWorkPage({
                       </thead>
                       <tbody>
                         {previewData.lines.map((line) => {
-                          const unit =
-                            line.agreed_unit_price !== null
-                              ? Number(line.agreed_unit_price)
-                              : null;
-                          const pct =
-                            line.agreed_vat_pct !== null
-                              ? Number(line.agreed_vat_pct)
-                              : null;
+                          // Sprint 137 item 6 — "priced" now covers an
+                          // agreed contract line AND a line ordered
+                          // from a custom price. Both numbers are
+                          // backend-provided; the source pill still
+                          // reflects the backend's `price_source`
+                          // verbatim (a custom price stays AD_HOC).
+                          const known = knownLinePrice(line);
+                          const unit = known ? known.unit : null;
+                          const pct = known ? known.vatPct : null;
                           const qty = Number(line.quantity);
-                          const isAgreed =
-                            line.price_source === "AGREED_CUSTOMER_PRICE" &&
-                            unit !== null &&
-                            Number.isFinite(unit);
+                          const isAgreed = known !== null;
                           const lineTotal =
                             isAgreed && unit !== null && Number.isFinite(qty)
                               ? qty * unit * (1 + (pct ?? 0) / 100)
