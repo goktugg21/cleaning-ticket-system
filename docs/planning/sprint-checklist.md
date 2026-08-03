@@ -55,10 +55,11 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-137-ramazan-round-1` — Sprint 137 items 1-7 PLUS
-the Sprint 138 round-2 items the owner found while testing round 1 on
-crmtest, before merging. Cut from `main`@`751bb8d`. **Still ONE PR**;
-nothing merges in between, and CC does not open PRs — the owner does.
+**Branch:** `fix/sprint-137-ramazan-round-1` — Sprint 137 items 1-7,
+the Sprint 138 round-2 items, and the Sprint 139 round-3 consistency
+fixes, all found by the owner testing the previous round on crmtest
+before merging. Cut from `main`@`751bb8d`. **Still ONE PR**; nothing
+merges in between, and CC does not open PRs — the owner does.
 
 **Last shipped PR on `main`: #126** — Sprints 133/134/135/136. Its
 SHIPPED line was appended by this branch.
@@ -134,6 +135,52 @@ work.**
   mean hiding filters behind a disclosure, which risks concealing an
   ACTIVE filter — the exact class of defect this sprint exists to
   remove — so it was not done. Recorded in `## NEXT`.
+
+**Round 3 (Sprint 139) — four consistency defects found on crmtest.**
+The same underlying idea was implemented differently in different
+places; these make them agree.
+
+- **§1 Deactivating a service now behaves like archiving a price.** The
+  customer pricing list hid archived rows behind a toggle while the
+  Services catalog kept deactivated rows on screen forever marked
+  "Inactive" — two lists, two behaviours, one idea. Inactive services
+  (and inactive Units, which had the same shape) are now HIDDEN by
+  default and revealed by the same show/hide toggle with a
+  state-reflecting label, rendered with the same quiet row treatment
+  (`.list-row-archived`, generalised from the price-only class). Reuses
+  the endpoints' EXISTING `?is_active=` param — no second mechanism.
+  The Deactiveren / Activeren actions are unchanged; an inactive row
+  stays reachable through the toggle, and its detail panel still opens
+  so it can be reactivated.
+- **§2 Result banners auto-dismiss — but only the SUCCESSFUL ones.**
+  "Deleted 1 service(s)." used to sit on the page indefinitely. Success
+  results now go through the app's existing `ToastProvider`
+  (`useToast().push`), whose defaults already encode the right rule:
+  4s for success, and **sticky for errors**. Failure and partial-failure
+  results deliberately stay as in-page alerts, because they name the
+  rows the operator still has to deal with — those must not disappear
+  on a timer. No second toast pattern was introduced.
+- **§3 One category-grouped picker, used three times.** The bulk
+  price-adjust modals (catalog defaults, and customer contract prices)
+  were still flat scrolling lists while copy-from-defaults had been
+  grouped in Sprint 138 §5, so the same catalog looked different
+  depending on which modal you opened. Extracted
+  `CategoryGroupedPicker` + `buildPickerGroups` and moved all THREE onto
+  it, including the "select-all covers rows the filter is hiding" rule
+  and the real-total count in each group header. The grouping helper
+  lives in `lib/pickerGroups.ts` rather than beside the component,
+  because `react-refresh/only-export-components` rejects a component
+  module that also exports plain functions.
+- **§4 The company dropdown filters the lists.** It previously only
+  disambiguated which company a NEW row belonged to (Sprint 135), which
+  is not what an operator expects from a dropdown above a list. It now
+  also narrows the Services and Units lists, via `?company=` — already
+  supported by the Units endpoint, added to the Service endpoint this
+  round. It is applied BEFORE `filter_services_for`, so it can only
+  narrow: a COMPANY_ADMIN naming another company's id gets an empty
+  list, never that company's catalog (asserted). Categories are global
+  and unaffected; the page already said so on the Categories tab, and
+  the Services/Units tabs now say what the selector DOES do there.
 
 FE gate: tsc clean, ESLint **48** (46 errors, 2 warnings — baseline held,
 no new violations, no new `eslint-disable`), build OK. nl/en verified

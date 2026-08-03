@@ -8211,13 +8211,14 @@ details[open] > .ew-department-tree-summary::before {
 
 /* Sprint 138 §3 — an archived PRICE row is a read-only audit record:
    visually quiet, no checkbox, not selectable. Kept deliberately
-   subtle rather than struck through — it is history, not an error. */
-.pricing-row-archived {
-  color: var(--text-muted);
-  background: var(--surface-2);
+   subtle rather than struck through — it is history, not an error.
+   Sprint 139 §1 generalised the colours to `.list-row-archived`; the
+   not-selectable cursor stays price-specific, since an inactive
+   SERVICE row is still clickable (you reactivate it from its detail). */
+.list-row-archived[data-archived="true"] {
   cursor: default;
 }
-.pricing-row-archived:hover {
+.list-row-archived[data-archived="true"]:hover {
   background: var(--surface-2);
 }
 
@@ -8242,4 +8243,12 @@ details[open] > .ew-department-tree-summary::before {
 .copy-default-group-name {
   font-weight: 600;
   font-size: 13px;
+}
+
+/* Sprint 139 §1 — one quiet-row treatment for every catalog list that
+   hides archived/inactive rows behind a toggle (customer prices,
+   services, units). Replaces the price-only `.pricing-row-archived`. */
+.list-row-archived {
+  color: var(--text-muted);
+  background: var(--surface-2);
 }

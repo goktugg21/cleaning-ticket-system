@@ -14,6 +14,7 @@ import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { useToast } from "../../components/ToastProvider";
 import { Toggle } from "../../components/Toggle";
 
 interface UnitFormState {
@@ -71,6 +72,8 @@ export function ManagedUnitsTab({
   selectedCompany = "",
 }: ManagedUnitsTabProps) {
   const { t, i18n } = useTranslation("common");
+  // Sprint 139 §2 — success toasts auto-dismiss; the failure list stays.
+  const { push: pushToast } = useToast();
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
   const [units, setUnits] = useState<ManagedUnit[]>([]);
@@ -99,10 +102,20 @@ export function ManagedUnitsTab({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkFailures, setBulkFailures] = useState<string[]>([]);
   const [bulkDone, setBulkDone] = useState<number | null>(null);
+  // Sprint 139 §1 — off by default (see the load effect).
+  const [showInactive, setShowInactive] = useState(false);
 
+  // Sprint 139 §1 — inactive units are hidden by default, same rule
+  // and same toggle shape as the Services list and the customer pricing
+  // list. Sprint 139 §4 — the shared company selector filters this list
+  // too. Both reuse the endpoint's existing `?is_active=` / `?company=`
+  // params (it already supported them; see ManagedUnitListCreateView).
   useEffect(() => {
     let cancelled = false;
-    listManagedUnits()
+    listManagedUnits({
+      ...(showInactive ? {} : { is_active: true }),
+      ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+    })
       .then((data) => {
         if (cancelled) return;
         setUnits(data);
@@ -116,7 +129,7 @@ export function ManagedUnitsTab({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showInactive, selectedCompany]);
 
   function openCreateModal() {
     setMode("create");
@@ -262,6 +275,14 @@ export function ManagedUnitsTab({
     setBulkDone(deletedIds.length);
     setBulkBusy(false);
     bulkDialogRef.current?.close();
+    if (failed.length === 0 && deletedIds.length > 0) {
+      pushToast({
+        variant: "success",
+        title: t("managed_units.bulk_delete_done", {
+          count: deletedIds.length,
+        }),
+      });
+    }
   }
 
   return (
@@ -270,6 +291,22 @@ export function ManagedUnitsTab({
         <div />
         <div className="page-header-actions">
           {/* Sprint 137 item 7 — Edit / Done. */}
+          <button
+            type="button"
+            className={
+              showInactive
+                ? "btn btn-secondary btn-sm"
+                : "btn btn-ghost btn-sm"
+            }
+            data-testid="services-units-show-inactive-toggle"
+            aria-pressed={showInactive}
+            onClick={() => setShowInactive((current) => !current)}
+            disabled={loading}
+          >
+            {showInactive
+              ? t("services.hide_inactive_toggle")
+              : t("services.show_inactive_toggle")}
+          </button>
           <button
             type="button"
             className="btn btn-ghost btn-sm"
@@ -305,6 +342,19 @@ export function ManagedUnitsTab({
         </div>
       ) : (
         <div className="card" data-testid="services-units-list">
+          {/* Sprint 139 §1 — same note as the Services list. */}
+          {showInactive && (
+            <div
+              className="alert-info"
+              role="status"
+              style={{ margin: "12px 16px 0" }}
+              data-testid="services-units-inactive-included-note"
+            >
+              {t("services.inactive_included_note", {
+                count: units.filter((u) => !u.is_active).length,
+              })}
+            </div>
+          )}
           {editMode && units.length > 0 && (
             <>
               <div className="list-edit-bar">
@@ -351,16 +401,6 @@ export function ManagedUnitsTab({
               </ul>
             </div>
           )}
-          {bulkFailures.length === 0 && (bulkDone ?? 0) > 0 && (
-            <div
-              className="alert-info"
-              role="status"
-              style={{ margin: "12px 16px 0" }}
-              data-testid="services-units-bulk-delete-result"
-            >
-              {t("managed_units.bulk_delete_done", { count: bulkDone ?? 0 })}
-            </div>
-          )}
           <BoundedList
             size="md"
             count={units.length}
@@ -402,6 +442,8 @@ export function ManagedUnitsTab({
                     key={unit.id}
                     data-testid="services-unit-row"
                     data-unit-id={unit.id}
+                    data-inactive={unit.is_active ? "false" : "true"}
+                    className={unit.is_active ? "" : "list-row-archived"}
                     onClick={() => {
                       if (!editMode) {
                         setSelected(unit);

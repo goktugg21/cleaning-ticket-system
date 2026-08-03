@@ -21,15 +21,17 @@ import type {
   CompanyAdmin,
   Service,
   ServiceCategory,
-  ServiceCategoryArchiveResult,
   ServiceCategoryCreatePayload,
   ServiceCreatePayload,
   ServiceUnitType,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
+import { useToast } from "../../components/ToastProvider";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
+import { CategoryGroupedPicker } from "../../components/CategoryGroupedPicker";
+import { buildPickerGroups } from "../../lib/pickerGroups";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
@@ -141,6 +143,9 @@ export function ServicesAdminPage() {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
   const { me } = useAuth();
+  // Sprint 139 §2 — SUCCESS results are toasts (auto-dismiss), FAILURE
+  // results stay as in-page alerts. See `pushBulkResult` below.
+  const { push: pushToast } = useToast();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
 
   const [tab, setTab] = useState<Tab>("services");
@@ -231,8 +236,6 @@ export function ServicesAdminPage() {
   const [categoryArchiveTarget, setCategoryArchiveTarget] =
     useState<ServiceCategory | null>(null);
   const [categoryArchiveBusy, setCategoryArchiveBusy] = useState(false);
-  const [categoryArchiveResult, setCategoryArchiveResult] =
-    useState<ServiceCategoryArchiveResult | null>(null);
 
   // M5 C — catalog default-price bulk-raise modal (services tab only).
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -258,6 +261,9 @@ export function ServicesAdminPage() {
   // shared control for both the Services and Units tabs.
   const [catalogCompanies, setCatalogCompanies] = useState<CompanyAdmin[]>([]);
   const [catalogCompany, setCatalogCompany] = useState<number | "">("");
+  // Sprint 139 §1 — off by default: an inactive service is hidden the
+  // same way an archived price is, and revealed by the same toggle.
+  const [showInactive, setShowInactive] = useState(false);
   const showCompanySelector = isSuperAdmin && catalogCompanies.length > 1;
 
   useEffect(() => {
@@ -272,13 +278,28 @@ export function ServicesAdminPage() {
   }, [isSuperAdmin]);
 
   // Initial parallel load.
+  //
+  // Sprint 139 §1 — INACTIVE services are hidden by default, matching
+  // the customer pricing list's archived-rows rule (Sprint 137 item 2).
+  // Two lists over the same idea behaved differently for no reason: a
+  // deactivated service used to sit in the catalog forever marked
+  // "Inactive". Reuses the endpoint's existing `?is_active=` param
+  // rather than inventing a second mechanism.
+  //
+  // Sprint 139 §4 — the company selector now FILTERS the list too, not
+  // just pick a target for new rows. Sent as `?company=`, which the
+  // backend applies BEFORE `filter_services_for`, so it can only ever
+  // narrow.
   useEffect(() => {
     const cancelled = { current: false };
     async function load() {
       try {
         const [categoriesData, servicesData] = await Promise.all([
           listServiceCategories(),
-          listServices(),
+          listServices({
+            ...(showInactive ? {} : { is_active: true }),
+            ...(catalogCompany === "" ? {} : { company: catalogCompany }),
+          }),
         ]);
         if (cancelled.current) return;
         setCategories(categoriesData);
@@ -295,7 +316,7 @@ export function ServicesAdminPage() {
     return () => {
       cancelled.current = true;
     };
-  }, []);
+  }, [showInactive, catalogCompany]);
 
   function resetSelections() {
     setSelectedCategory(null);
@@ -542,6 +563,37 @@ export function ServicesAdminPage() {
     }
   }
 
+  /**
+   * Sprint 139 §1/§4 — refetch the service list HONOURING the current
+   * archived toggle and company filter. Every post-mutation reload goes
+   * through this; calling `listServices()` bare would silently drop
+   * both filters and repopulate the list with rows the operator had
+   * just filtered away.
+   */
+  function currentServiceListParams() {
+    return {
+      ...(showInactive ? {} : { is_active: true }),
+      ...(catalogCompany === "" ? {} : { company: catalogCompany }),
+    };
+  }
+
+  /**
+   * Drop a row that no longer matches the active filters (e.g. a
+   * service just deactivated while inactive rows are hidden) instead of
+   * leaving it on screen contradicting the toggle.
+   */
+  function applyServiceUpdates(updated: Service[]) {
+    const byId = new Map(updated.map((svc) => [svc.id, svc]));
+    setServices((prev) =>
+      prev
+        .map((svc) => byId.get(svc.id) ?? svc)
+        .filter((svc) => showInactive || svc.is_active)
+        .filter(
+          (svc) => catalogCompany === "" || svc.company === catalogCompany,
+        ),
+    );
+  }
+
   // ---- Sprint 137 item 7 — bulk delete (services list edit mode) ----
   function exitServiceEditMode() {
     setServiceEditMode(false);
@@ -600,6 +652,12 @@ export function ServicesAdminPage() {
     setServiceBulkDone(deletedIds.length);
     setServiceBulkBusy(false);
     serviceBulkDialogRef.current?.close();
+    if (failed.length === 0 && deletedIds.length > 0) {
+      pushToast({
+        variant: "success",
+        title: t("services.bulk_delete_done", { count: deletedIds.length }),
+      });
+    }
   }
 
   /**
@@ -632,7 +690,7 @@ export function ServicesAdminPage() {
 
     if (updated.length > 0) {
       const byId = new Map(updated.map((s) => [s.id, s]));
-      setServices((prev) => prev.map((s) => byId.get(s.id) ?? s));
+      applyServiceUpdates(updated);
       if (selectedService && byId.has(selectedService.id)) {
         setSelectedService(byId.get(selectedService.id) ?? null);
       }
@@ -642,6 +700,17 @@ export function ServicesAdminPage() {
     setServiceBulkDone(updated.length);
     setServiceBulkBusy(false);
     serviceBulkDialogRef.current?.close();
+    if (failed.length === 0 && updated.length > 0) {
+      pushToast({
+        variant: "success",
+        title: t(
+          nextActive
+            ? "services.bulk_activate_done"
+            : "services.bulk_deactivate_done",
+          { count: updated.length },
+        ),
+      });
+    }
   }
 
   // ---- Sprint 138 §2a — cascade archive / unarchive a category ------
@@ -670,11 +739,29 @@ export function ServicesAdminPage() {
       setSelectedCategory(result.category);
       // The cascade changed Service.is_active rows underneath us.
       try {
-        setServices(await listServices());
+        setServices(await listServices(currentServiceListParams()));
       } catch {
         // Non-fatal — the archive itself succeeded.
       }
-      setCategoryArchiveResult(result);
+      pushToast({
+        variant: "success",
+        title: archiving
+          ? t("services.category_archive_result", {
+              count: result.deactivated_service_count,
+            })
+          : t("services.category_unarchive_result", {
+              count: result.still_archived_service_count,
+            }),
+        // A cascade that reached several providers is worth more than
+        // four seconds of the operator's attention.
+        description:
+          result.affected_company_count > 1
+            ? t("services.category_archive_multi_company", {
+                count: result.affected_company_count,
+              })
+            : undefined,
+        durationMs: result.affected_company_count > 1 ? 8_000 : undefined,
+      });
       categoryArchiveDialogRef.current?.close();
       setCategoryArchiveTarget(null);
     } catch (err) {
@@ -695,9 +782,9 @@ export function ServicesAdminPage() {
       const updated = await updateService(service.id, {
         is_active: !service.is_active,
       });
-      setServices((prev) =>
-        prev.map((s) => (s.id === updated.id ? updated : s)),
-      );
+      applyServiceUpdates([updated]);
+      // Keep the detail panel on the row so the operator can flip it
+      // straight back, even when the list itself no longer shows it.
       setSelectedService(updated);
     } catch (err) {
       setLoadError(getApiError(err));
@@ -753,7 +840,7 @@ export function ServicesAdminPage() {
 
     if (updated.length > 0) {
       const byId = new Map(updated.map((s) => [s.id, s]));
-      setServices((prev) => prev.map((s) => byId.get(s.id) ?? s));
+      applyServiceUpdates(updated);
       if (selectedService && byId.has(selectedService.id)) {
         setSelectedService(byId.get(selectedService.id) ?? null);
       }
@@ -772,6 +859,12 @@ export function ServicesAdminPage() {
     setServiceBulkDone(updated.length);
     setMoveBusy(false);
     setMoveOpen(false);
+    if (failed.length === 0 && updated.length > 0) {
+      pushToast({
+        variant: "success",
+        title: t("services.bulk_move_done", { count: updated.length }),
+      });
+    }
   }
 
   function handleCancelDelete() {
@@ -837,7 +930,7 @@ export function ServicesAdminPage() {
         direction: bulkDirection,
       });
       // Re-fetch so the updated catalog defaults surface in the table.
-      const refreshed = await listServices();
+      const refreshed = await listServices(currentServiceListParams());
       setServices(refreshed);
       closeBulkRaise();
     } catch (err) {
@@ -853,6 +946,17 @@ export function ServicesAdminPage() {
   // act on. Plain derived value (the earlier-defined openBulkRaise
   // captures it, so a manual useMemo would trip the hooks rule).
   const activeServices = services.filter((s) => s.is_active);
+
+  // Sprint 139 §3 — the catalog bulk-adjust picker, grouped by category.
+  const bulkFilterTerm = bulkFilter.trim().toLowerCase();
+  const bulkRaiseGroups = buildPickerGroups<Service>({
+    rows: activeServices,
+    categories,
+    categoryOf: (service) => service.category,
+    matchesFilter: (service) =>
+      !bulkFilterTerm || service.name.toLowerCase().includes(bulkFilterTerm),
+    fallbackName: t("customer_pricing.category_unknown"),
+  });
 
   // ---- Sprint 138 §1 — which bulk actions may even be OFFERED -------
   // The sprint's whole theme: an action the backend will always refuse
@@ -1002,9 +1106,21 @@ export function ServicesAdminPage() {
               </option>
             ))}
           </select>
-          {tab === "categories" && (
+          {/* Sprint 139 §4 — the selector now FILTERS the Services and
+              Units lists as well as targeting new rows, so say which
+              one applies on the tab you are looking at. The categories
+              hint already stated that categories are global and
+              unaffected; it stays, and is now the honest counterpart to
+              the filtering hint rather than the only explanation. */}
+          {tab === "categories" ? (
             <p className="field-hint muted small">
               {t("catalog.company_selector_hint_categories")}
+            </p>
+          ) : (
+            <p className="field-hint muted small">
+              {catalogCompany === ""
+                ? t("catalog.company_selector_hint_all")
+                : t("catalog.company_selector_hint_filtering")}
             </p>
           )}
         </div>
@@ -1031,6 +1147,25 @@ export function ServicesAdminPage() {
             <div className="page-header-actions">
               {/* Sprint 137 item 7 — Edit / Done. Outside edit mode the
                   list renders exactly as before. */}
+              {/* Sprint 139 §1 + §4 — same show/hide-archived toggle
+                  shape as the customer pricing page, label reflecting
+                  state (Sprint 138 §4). */}
+              <button
+                type="button"
+                className={
+                  showInactive
+                    ? "btn btn-secondary btn-sm"
+                    : "btn btn-ghost btn-sm"
+                }
+                data-testid="services-show-inactive-toggle"
+                aria-pressed={showInactive}
+                onClick={() => setShowInactive((current) => !current)}
+                disabled={loading}
+              >
+                {showInactive
+                  ? t("services.hide_inactive_toggle")
+                  : t("services.show_inactive_toggle")}
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1087,6 +1222,20 @@ export function ServicesAdminPage() {
               </div>
             ) : (
               <>
+                {/* Sprint 139 §1 — say on the list that inactive rows
+                    are included, mirroring the pricing page. */}
+                {showInactive && (
+                  <div
+                    className="alert-info"
+                    role="status"
+                    style={{ margin: "12px 16px 0" }}
+                    data-testid="services-inactive-included-note"
+                  >
+                    {t("services.inactive_included_note", {
+                      count: services.filter((svc) => !svc.is_active).length,
+                    })}
+                  </div>
+                )}
                 {/* Edit bar + run report sit OUTSIDE `.table-wrap`:
                     that container scrolls horizontally, and a toolbar
                     that scrolls away from its own table is worse than
@@ -1140,19 +1289,6 @@ export function ServicesAdminPage() {
                     </ul>
                   </div>
                 )}
-                {serviceBulkFailures.length === 0 &&
-                  (serviceBulkDone ?? 0) > 0 && (
-                    <div
-                      className="alert-info"
-                      role="status"
-                      style={{ margin: "12px 16px 0" }}
-                      data-testid="services-bulk-delete-result"
-                    >
-                      {t("services.bulk_delete_done", {
-                        count: serviceBulkDone ?? 0,
-                      })}
-                    </div>
-                  )}
                 <div className="table-wrap">
                 <table className="data-table">
                   <thead>
@@ -1178,6 +1314,10 @@ export function ServicesAdminPage() {
                         key={service.id}
                         data-testid="services-service-row"
                         data-service-id={service.id}
+                        data-inactive={service.is_active ? "false" : "true"}
+                        className={
+                          service.is_active ? "" : "list-row-archived"
+                        }
                         onClick={() => {
                           if (!serviceEditMode) {
                             setSelectedService(service);
@@ -1402,34 +1542,6 @@ export function ServicesAdminPage() {
               </button>
             </div>
           </div>
-
-          {/* Sprint 138 §2a — report what the cascade actually did.
-              An unarchive says explicitly that the services stayed
-              archived, so nobody assumes a full restore. */}
-          {categoryArchiveResult && (
-            <div
-              className="alert-info"
-              role="status"
-              style={{ marginBottom: 12 }}
-              data-testid="services-category-archive-result"
-            >
-              {categoryArchiveResult.deactivated_service_count > 0
-                ? t("services.category_archive_result", {
-                    count: categoryArchiveResult.deactivated_service_count,
-                  })
-                : t("services.category_unarchive_result", {
-                    count:
-                      categoryArchiveResult.still_archived_service_count,
-                  })}
-              {categoryArchiveResult.affected_company_count > 1 && (
-                <div className="muted small" style={{ marginTop: 4 }}>
-                  {t("services.category_archive_multi_company", {
-                    count: categoryArchiveResult.affected_company_count,
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="card" data-testid="services-categories-list">
             {categories.length === 0 ? (
@@ -2105,64 +2217,62 @@ export function ServicesAdminPage() {
                   onFilterChange={setBulkFilter}
                   testIdPrefix="services-bulk-raise"
                 />
-                <div className="multi-select-list">
-                  {activeServices
-                    .filter(
-                      (service) =>
-                        !bulkFilter.trim() ||
-                        service.name
-                          .toLowerCase()
-                          .includes(bulkFilter.trim().toLowerCase()),
-                    )
-                    .map((service) => (
-                    <label key={service.id}>
-                      <input
-                        type="checkbox"
-                        className="checkbox-input"
-                        data-testid="services-bulk-raise-row"
-                        data-service-id={service.id}
-                        checked={bulkSelectedIds.includes(service.id)}
-                        onChange={(event) =>
-                          toggleBulkRow(service.id, event.target.checked)
-                        }
-                        disabled={bulkBusy}
-                      />
-                      <span>
-                        {service.name} —{" "}
-                        {formatDecimal(service.default_unit_price)}
-                        {/* #108 Part C — live effect preview. Backend
-                            HALF_UP is authoritative; a result at or
-                            below zero shows red (the server rejects
-                            the whole batch). */}
-                        {bulkSelectedIds.includes(service.id) &&
-                          (() => {
-                            const next = previewAdjustedPrice(
-                              service.default_unit_price,
-                              bulkMode,
-                              bulkAmount,
-                              bulkDirection,
-                            );
-                            if (next === null) return null;
-                            return (
-                              <span
-                                style={{
-                                  color:
-                                    next <= 0
-                                      ? "var(--red)"
-                                      : "var(--green-2)",
-                                  fontWeight: 600,
-                                }}
-                                data-testid="services-bulk-raise-preview"
-                              >
-                                {" "}
-                                → {next.toFixed(2)}
-                              </span>
-                            );
-                          })()}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                {/* Sprint 139 §3 — grouped by category through the
+                    SHARED picker, same shape as copy-from-defaults and
+                    the customer price bulk-adjust. Three modals over
+                    the same catalog used to present it three different
+                    ways. */}
+                <CategoryGroupedPicker
+                  groups={bulkRaiseGroups}
+                  getId={(service) => service.id}
+                  renderItem={(service) => (
+                    <>
+                      {service.name} —{" "}
+                      {formatDecimal(service.default_unit_price)}
+                      {/* #108 Part C — live effect preview. Backend
+                          HALF_UP is authoritative; a result at or below
+                          zero shows red (the server rejects the whole
+                          batch). */}
+                      {bulkSelectedIds.includes(service.id) &&
+                        (() => {
+                          const next = previewAdjustedPrice(
+                            service.default_unit_price,
+                            bulkMode,
+                            bulkAmount,
+                            bulkDirection,
+                          );
+                          if (next === null) return null;
+                          return (
+                            <span
+                              style={{
+                                color:
+                                  next <= 0
+                                    ? "var(--red)"
+                                    : "var(--green-2)",
+                                fontWeight: 600,
+                              }}
+                              data-testid="services-bulk-raise-preview"
+                            >
+                              {" "}
+                              → {next.toFixed(2)}
+                            </span>
+                          );
+                        })()}
+                    </>
+                  )}
+                  selectedIds={bulkSelectedIds}
+                  onToggleItem={toggleBulkRow}
+                  onToggleGroup={(group, checked) =>
+                    setBulkSelectedIds((prev) => {
+                      const ids = group.items.map((svc) => svc.id);
+                      return checked
+                        ? [...new Set([...prev, ...ids])]
+                        : prev.filter((id) => !ids.includes(id));
+                    })
+                  }
+                  disabled={bulkBusy}
+                  testIdPrefix="services-bulk-raise"
+                />
               </>
             )}
 

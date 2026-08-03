@@ -1564,6 +1564,10 @@ export async function unarchiveServiceCategory(
 export interface ServiceListParams {
   category?: number;
   is_active?: boolean;
+  // Sprint 139 §4 — narrow to one provider company. Applied by the
+  // backend BEFORE `filter_services_for`, so it can only ever narrow
+  // what the actor already sees, never widen it.
+  company?: number;
 }
 
 export async function listServices(
@@ -1575,6 +1579,9 @@ export async function listServices(
   }
   if (params.is_active !== undefined) {
     query.is_active = params.is_active ? "true" : "false";
+  }
+  if (params.company !== undefined) {
+    query.company = params.company;
   }
   const response = await api.get<PaginatedResponse<Service>>("/services/", {
     params: query,

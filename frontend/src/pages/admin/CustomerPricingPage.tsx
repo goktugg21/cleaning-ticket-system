@@ -34,7 +34,10 @@ import type {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { ManagedUnitPicker } from "../../components/ManagedUnitPicker";
+import { CategoryGroupedPicker } from "../../components/CategoryGroupedPicker";
+import { buildPickerGroups } from "../../lib/pickerGroups";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { useToast } from "../../components/ToastProvider";
 import { previewAdjustedPrice } from "../../utils/bulkAdjust";
 import { Toggle } from "../../components/Toggle";
 
@@ -191,6 +194,8 @@ function formatDateOnly(value: string, locale: string): string {
 export function CustomerPricingPage() {
   const { id } = useParams();
   const { t, i18n } = useTranslation("common");
+  // Sprint 139 §2 — success toasts auto-dismiss; the failure list stays.
+  const { push: pushToast } = useToast();
   const numericId = useMemo(() => {
     if (!id) return null;
     const n = Number(id);
@@ -651,12 +656,20 @@ export function CustomerPricingPage() {
         .map(rowKey),
     );
     setSelected(null);
+    const archivedCount =
+      archivedContractIds.length + archivedCustomIds.length;
     setBulkFailures(failed);
-    setBulkDoneCount(
-      archivedContractIds.length + archivedCustomIds.length,
-    );
+    setBulkDoneCount(archivedCount);
     setBulkArchiveBusy(false);
     bulkArchiveDialogRef.current?.close();
+    if (failed.length === 0 && archivedCount > 0) {
+      pushToast({
+        variant: "success",
+        title: t("customer_pricing.bulk_archive_done", {
+          count: archivedCount,
+        }),
+      });
+    }
   }
 
   // ---- M5 C / #108 Part C — bulk-adjust handlers (catalog-price
@@ -758,20 +771,17 @@ export function CustomerPricingPage() {
   }
 
   /**
-   * Sprint 138 §5 — select or clear an ENTIRE category in one action.
+   * Sprint 138 §5 / Sprint 139 §3 — select or clear an ENTIRE category
+   * in one action.
    *
-   * Acts on `group.services` (every active service in the category),
-   * NOT on `group.visible` (what the text filter currently shows). The
-   * filter is display-only on every other multi-select list in this
-   * codebase — "hidden-but-selected rows stay selected" — and the
-   * owner's ask was explicitly to copy a whole category at once, which
-   * a filter-narrowed select-all would quietly fail to do.
+   * Acts on the group's FULL item list, not on what the text filter
+   * currently shows. The filter is display-only on every multi-select
+   * list here — "hidden-but-selected rows stay selected" — and the
+   * owner's ask was to select a whole category at once, which a
+   * filter-narrowed select-all would quietly fail to do.
    */
-  function toggleCopyGroup(
-    group: { services: Service[] },
-    checked: boolean,
-  ) {
-    const ids = group.services.map((s) => s.id);
+  function toggleCopySelection(items: Service[], checked: boolean) {
+    const ids = items.map((s) => s.id);
     setCopySelectedServiceIds((prev) =>
       checked
         ? [...new Set([...prev, ...ids])]
@@ -974,41 +984,31 @@ export function CustomerPricingPage() {
   // latter. Categories with no active services at all are dropped —
   // unlike the pricing INDEX (item 4), an empty group here would be a
   // dead end, since there is nothing in it to copy.
+  // Sprint 139 §3 — the price bulk-adjust picker, grouped by the
+  // category of the SERVICE each contract price points at. A price row
+  // whose service is missing from the catalog map still gets a group.
+  const bulkFilterTerm = bulkFilter.trim().toLowerCase();
+  const bulkPriceGroups = buildPickerGroups<CustomerServicePrice>({
+    rows: activePrices,
+    categories,
+    categoryOf: (price) => serviceById.get(price.service)?.category ?? null,
+    matchesFilter: (price) =>
+      !bulkFilterTerm ||
+      resolveServiceName(price).toLowerCase().includes(bulkFilterTerm),
+    fallbackName: t("customer_pricing.category_unknown"),
+  });
+
   const copyFilterTerm = copyFilter.trim().toLowerCase();
-  const copyGroups: {
-    key: string;
-    name: string;
-    services: Service[];
-    visible: Service[];
-  }[] = [
-    ...categories.map((category) => {
-      const groupServices = activeServices.filter(
-        (s) => s.category === category.id,
-      );
-      return {
-        key: String(category.id),
-        name: category.name,
-        services: groupServices,
-        visible: groupServices.filter(
-          (s) => !copyFilterTerm || s.name.toLowerCase().includes(copyFilterTerm),
-        ),
-      };
-    }),
-    // Defensive bucket: an active service whose category is missing
-    // from the category list must still be copyable, never dropped.
-    (() => {
-      const knownIds = new Set(categories.map((c) => c.id));
-      const orphans = activeServices.filter((s) => !knownIds.has(s.category));
-      return {
-        key: "__uncategorised__",
-        name: t("customer_pricing.category_unknown"),
-        services: orphans,
-        visible: orphans.filter(
-          (s) => !copyFilterTerm || s.name.toLowerCase().includes(copyFilterTerm),
-        ),
-      };
-    })(),
-  ].filter((group) => group.services.length > 0);
+  // Sprint 139 §3 — through the shared builder, so an active service
+  // whose category is missing still gets a home instead of vanishing.
+  const copyGroups = buildPickerGroups<Service>({
+    rows: activeServices,
+    categories,
+    categoryOf: (service) => service.category,
+    matchesFilter: (service) =>
+      !copyFilterTerm || service.name.toLowerCase().includes(copyFilterTerm),
+    fallbackName: t("customer_pricing.category_unknown"),
+  });
 
   const activeCategoryLabel =
     activeCategory === null
@@ -1321,18 +1321,6 @@ export function CustomerPricingPage() {
                 </ul>
               </div>
             )}
-            {bulkFailures.length === 0 && (bulkDoneCount ?? 0) > 0 && (
-              <div
-                className="alert-info"
-                role="status"
-                style={{ margin: "12px 20px 0" }}
-                data-testid="customer-pricing-bulk-archive-result"
-              >
-                {t("customer_pricing.bulk_archive_done", {
-                  count: bulkDoneCount ?? 0,
-                })}
-              </div>
-            )}
             {/* Sprint 138 §4 — make it visible ON THE LIST that
                 archived rows are included, so the extra greyed rows are
                 never a mystery. */}
@@ -1393,7 +1381,7 @@ export function CustomerPricingPage() {
                         // be worse than either.
                         data-archived={isArchivedRow(entry) ? "true" : "false"}
                         className={
-                          isArchivedRow(entry) ? "pricing-row-archived" : ""
+                          isArchivedRow(entry) ? "list-row-archived" : ""
                         }
                         onClick={() => {
                           // An archived row is read-only: selecting it
@@ -2037,63 +2025,60 @@ export function CustomerPricingPage() {
                   onFilterChange={setBulkFilter}
                   testIdPrefix="customer-pricing-bulk-raise"
                 />
-                <div className="multi-select-list">
-                  {activePrices
-                    .filter(
-                      (price) =>
-                        !bulkFilter.trim() ||
-                        resolveServiceName(price)
-                          .toLowerCase()
-                          .includes(bulkFilter.trim().toLowerCase()),
-                    )
-                    .map((price) => (
-                    <label key={price.id}>
-                      <input
-                        type="checkbox"
-                        className="checkbox-input"
-                        data-testid="customer-pricing-bulk-raise-row"
-                        data-price-id={price.id}
-                        checked={bulkSelectedIds.includes(price.id)}
-                        onChange={(event) =>
-                          toggleBulkRow(price.id, event.target.checked)
-                        }
-                        disabled={bulkBusy}
-                      />
-                      <span>
-                        {resolveServiceName(price)} — {price.unit_price}
-                        {/* #108 Part C — live effect preview. Backend
-                            HALF_UP is authoritative; a result at or
-                            below zero shows red (the server rejects
-                            the whole batch). */}
-                        {bulkSelectedIds.includes(price.id) &&
-                          (() => {
-                            const next = previewAdjustedPrice(
-                              price.unit_price,
-                              bulkMode,
-                              bulkAmount,
-                              bulkDirection,
-                            );
-                            if (next === null) return null;
-                            return (
-                              <span
-                                style={{
-                                  color:
-                                    next <= 0
-                                      ? "var(--red)"
-                                      : "var(--green-2)",
-                                  fontWeight: 600,
-                                }}
-                                data-testid="customer-pricing-bulk-raise-preview"
-                              >
-                                {" "}
-                                → {next.toFixed(2)}
-                              </span>
-                            );
-                          })()}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                {/* Sprint 139 §3 — grouped by category, same shape
+                    as the copy-from-defaults picker. The price rows
+                    take their category from the catalog service they
+                    price. */}
+                <CategoryGroupedPicker
+                  groups={bulkPriceGroups}
+                  getId={(price) => price.id}
+                  renderItem={(price) => (
+                    <>
+                      {resolveServiceName(price)} — {price.unit_price}
+                      {/* #108 Part C — live effect preview. Backend
+                          HALF_UP is authoritative; a result at or below
+                          zero shows red (the server rejects the whole
+                          batch). */}
+                      {bulkSelectedIds.includes(price.id) &&
+                        (() => {
+                          const next = previewAdjustedPrice(
+                            price.unit_price,
+                            bulkMode,
+                            bulkAmount,
+                            bulkDirection,
+                          );
+                          if (next === null) return null;
+                          return (
+                            <span
+                              style={{
+                                color:
+                                  next <= 0
+                                    ? "var(--red)"
+                                    : "var(--green-2)",
+                                fontWeight: 600,
+                              }}
+                              data-testid="customer-pricing-bulk-raise-preview"
+                            >
+                              {" "}
+                              → {next.toFixed(2)}
+                            </span>
+                          );
+                        })()}
+                    </>
+                  )}
+                  selectedIds={bulkSelectedIds}
+                  onToggleItem={toggleBulkRow}
+                  onToggleGroup={(group, checked) =>
+                    setBulkSelectedIds((prev) => {
+                      const ids = group.items.map((p) => p.id);
+                      return checked
+                        ? [...new Set([...prev, ...ids])]
+                        : prev.filter((id) => !ids.includes(id));
+                    })
+                  }
+                  disabled={bulkBusy}
+                  testIdPrefix="customer-pricing-bulk-raise"
+                />
               </>
             )}
 
@@ -2299,90 +2284,25 @@ export function CustomerPricingPage() {
                   onFilterChange={setCopyFilter}
                   testIdPrefix="customer-pricing-copy-default"
                 />
-                {/* Sprint 138 §5 — grouped by ServiceCategory with a
-                    per-category select-all, because the owner wants to
-                    copy an ENTIRE category in one action. The flat
-                    scrolling list made that a manual hunt. */}
-                <div className="multi-select-list">
-                  {copyGroups.map((group) => (
-                    <div key={group.key} className="copy-default-group">
-                      <div className="copy-default-group-header">
-                        <span className="copy-default-group-name">
-                          {group.name}
-                        </span>
-                        <span className="muted small">
-                          {group.visible.length === group.services.length
-                            ? t("customer_pricing.copy_group_count", {
-                                count: group.services.length,
-                              })
-                            : t("customer_pricing.copy_group_count_filtered", {
-                                shown: group.visible.length,
-                                count: group.services.length,
-                              })}
-                        </span>
-                        {/* Selects EVERY service in the category — the
-                            ones scrolled out of view AND the ones the
-                            text filter is hiding. The filter is
-                            display-only here, exactly as it is on every
-                            other MultiSelectToolbar list; the count
-                            beside the name states the real total so
-                            that is never a surprise. */}
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          data-testid="customer-pricing-copy-group-select-all"
-                          data-category-key={group.key}
-                          onClick={() => toggleCopyGroup(group, true)}
-                          disabled={copyBusy}
-                        >
-                          {t("customer_pricing.copy_group_select_all", {
-                            count: group.services.length,
-                          })}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          data-testid="customer-pricing-copy-group-clear"
-                          onClick={() => toggleCopyGroup(group, false)}
-                          disabled={copyBusy}
-                        >
-                          {t("multi_select.clear_all")}
-                        </button>
-                      </div>
-                      {group.visible.map((service) => (
-                        <label key={service.id}>
-                          <input
-                            type="checkbox"
-                            className="checkbox-input"
-                            data-testid="customer-pricing-copy-default-row"
-                            data-service-id={service.id}
-                            checked={copySelectedServiceIds.includes(
-                              service.id,
-                            )}
-                            onChange={(event) =>
-                              toggleCopyService(
-                                service.id,
-                                event.target.checked,
-                              )
-                            }
-                            disabled={copyBusy}
-                          />
-                          <span>
-                            {service.name} — {service.default_unit_price}
-                          </span>
-                        </label>
-                      ))}
-                      {group.visible.length === 0 && (
-                        <div
-                          className="muted small"
-                          style={{ padding: "4px 0 8px 8px" }}
-                        >
-                          {t("customer_pricing.copy_group_all_filtered")}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {/* Sprint 138 §5 / Sprint 139 §3 — grouped by
+                    ServiceCategory with a per-category select-all,
+                    through the SHARED picker so this modal, the catalog
+                    bulk-adjust and the price bulk-adjust cannot drift
+                    into three different shapes. */}
+                <CategoryGroupedPicker
+                  groups={copyGroups}
+                  getId={(service) => service.id}
+                  renderItem={(service) =>
+                    `${service.name} — ${service.default_unit_price}`
+                  }
+                  selectedIds={copySelectedServiceIds}
+                  onToggleItem={toggleCopyService}
+                  onToggleGroup={(group, checked) =>
+                    toggleCopySelection(group.items, checked)
+                  }
+                  disabled={copyBusy}
+                  testIdPrefix="customer-pricing-copy-default"
+                />
               </>
             )}
 

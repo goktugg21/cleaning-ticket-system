@@ -1939,6 +1939,13 @@ export type ManagedUnitUpdatePayload = Partial<ManagedUnitCreatePayload>;
 
 export interface Service {
   id: number;
+  // Sprint 3B — the owning provider company. Always present on reads
+  // (the model column is NOT NULL); write-once on CREATE, read-only on
+  // UPDATE. Added to this type in Sprint 139 §4, when the company
+  // selector started filtering the list client-side as well as server-
+  // side — the field was always on the wire, just not declared here.
+  company: number;
+  company_name: string;
   category: number;
   category_name: string;
   name: string;

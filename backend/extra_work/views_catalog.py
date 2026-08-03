@@ -597,6 +597,11 @@ class ServiceListCreateView(generics.ListCreateAPIView):
     Provider Admin frontend that doesn't send the field), then
     runs the catalog-management policy gate against the resolved
     company.
+
+    Filters: `?category=<id>`, `?is_active=true|false`, and
+    Sprint 139's `?company=<id>`. All three NARROW only —
+    `filter_services_for` runs last, so no query param can widen
+    what an actor sees beyond their own catalog scope.
     """
 
     serializer_class = ServiceSerializer
@@ -631,6 +636,20 @@ class ServiceListCreateView(generics.ListCreateAPIView):
                 qs = qs.filter(category_id=int(category))
             except (TypeError, ValueError):
                 # Bad input -> empty result rather than 500.
+                qs = qs.none()
+        # Sprint 139 §4 — `?company=<id>` narrows the list to one
+        # provider company, mirroring the shape `ManagedUnitListCreate
+        # View` already uses. It can only ever NARROW: it is applied
+        # BEFORE `filter_services_for`, which then intersects the result
+        # with the actor's own catalog scope. A COMPANY_ADMIN asking for
+        # another company's id therefore gets an empty list, never a
+        # widened one — the scope filter is the floor, this is a
+        # convenience on top of it.
+        company_param = self.request.query_params.get("company")
+        if company_param:
+            try:
+                qs = qs.filter(company_id=int(company_param))
+            except (TypeError, ValueError):
                 qs = qs.none()
         flag = _parse_bool_param(self.request.query_params.get("is_active"))
         if flag is not None:

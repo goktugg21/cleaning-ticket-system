@@ -365,3 +365,80 @@ class EmptiedCategoryIsDeletableTests(
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["code"], "category_protected")
         self.assertIn("move", response.data["detail"].lower())
+
+
+class ServiceCompanyFilterTests(CatalogLifecycleFixtureMixin, APITestCase):
+    """Sprint 139 §4 — `?company=` NARROWS the service list. It is
+    applied BEFORE `filter_services_for`, so it can never widen what an
+    actor sees: a COMPANY_ADMIN naming another company's id gets an
+    empty list, not that company's catalog."""
+
+    def setUp(self):
+        super().setUp()
+        self.foreign_service = Service.objects.create(
+            category=self.category,
+            company=self.other_company,
+            name="Other provider service",
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            default_unit_price=Decimal("77.00"),
+        )
+
+    def test_super_admin_can_narrow_to_one_company(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get(
+            SERVICE_LIST_URL, {"company": self.other_company.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertEqual(ids, {self.foreign_service.id})
+
+    def test_company_admin_cannot_widen_via_company_param(self):
+        """The load-bearing assertion: asking for a foreign company's id
+        returns NOTHING, rather than leaking that company's catalog."""
+        self.authenticate(self.company_admin)
+        response = self.client.get(
+            SERVICE_LIST_URL, {"company": self.other_company.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"], [])
+
+    def test_company_admin_unfiltered_list_is_still_own_company_only(self):
+        self.authenticate(self.company_admin)
+        response = self.client.get(SERVICE_LIST_URL)
+        companies = {row["company"] for row in response.data["results"]}
+        self.assertEqual(companies, {self.company.id})
+
+    def test_garbage_company_param_yields_empty_not_500(self):
+        self.authenticate(self.super_admin)
+        response = self.client.get(SERVICE_LIST_URL, {"company": "abc"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"], [])
+
+
+class ServiceIsActiveFilterTests(CatalogLifecycleFixtureMixin, APITestCase):
+    """Sprint 139 §1 — the Services list hides inactive rows by default
+    using the endpoint's EXISTING `?is_active=` param (no second
+    mechanism was invented). This locks that the param still works both
+    ways, since the frontend default now depends on it."""
+
+    def test_is_active_true_hides_deactivated_services(self):
+        self.unpriced_service.is_active = False
+        self.unpriced_service.save(update_fields=["is_active"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(SERVICE_LIST_URL, {"is_active": "true"})
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertIn(self.priced_service.id, ids)
+        self.assertNotIn(self.unpriced_service.id, ids)
+
+    def test_unfiltered_list_still_includes_them(self):
+        """The toggle's "show inactive" state sends no param at all, so
+        an inactive row must still be reachable — that is how it gets
+        reactivated."""
+        self.unpriced_service.is_active = False
+        self.unpriced_service.save(update_fields=["is_active"])
+
+        self.authenticate(self.super_admin)
+        response = self.client.get(SERVICE_LIST_URL)
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertIn(self.unpriced_service.id, ids)
