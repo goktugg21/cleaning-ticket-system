@@ -313,9 +313,14 @@ export function ManagedUnitsTab({
                   onSelectAll={() => setBulkIds(units.map((u) => u.id))}
                   onClearAll={() => setBulkIds([])}
                   disabled={bulkBusy}
-                  actionLabel={t("managed_units.bulk_delete_button")}
-                  onAction={openBulkDelete}
-                  actionDestructive
+                  actions={[
+                    {
+                      key: "delete",
+                      label: t("managed_units.bulk_delete_button"),
+                      onClick: openBulkDelete,
+                      destructive: true,
+                    },
+                  ]}
                   testIdPrefix="services-units-bulk-delete"
                 />
               </div>

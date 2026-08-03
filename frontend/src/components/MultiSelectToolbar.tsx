@@ -7,6 +7,31 @@
 // Pair with the .multi-select-list scroll container class.
 import { useTranslation } from "react-i18next";
 
+/**
+ * Sprint 137 item 7 / Sprint 138 §1–§2 — one or more actions for the
+ * current selection (the iOS-style list edit mode).
+ *
+ * The LABEL is always the caller's, deliberately: the same interaction
+ * archives on the customer pricing lists, hard-deletes on the Units
+ * list, and deactivates-or-deletes on the Services list depending on
+ * whether the row is referenced. The button has to say which one it
+ * actually does.
+ *
+ * Sprint 138 turned the single action into a list because the Services
+ * list genuinely needs several (deactivate / activate / move to
+ * category / delete) — rather than growing a second selection
+ * primitive alongside this one.
+ */
+export interface MultiSelectAction {
+  key: string;
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+  /** Disabled for a reason the caller can explain in `title`. */
+  disabled?: boolean;
+  title?: string;
+}
+
 export function MultiSelectToolbar({
   selectedCount,
   onSelectAll,
@@ -14,9 +39,8 @@ export function MultiSelectToolbar({
   disabled,
   filterValue,
   onFilterChange,
-  actionLabel,
-  onAction,
-  actionDestructive,
+  actions,
+  countLabel,
   testIdPrefix,
 }: {
   selectedCount: number;
@@ -26,15 +50,11 @@ export function MultiSelectToolbar({
   // Both filter props present -> the filter input renders.
   filterValue?: string;
   onFilterChange?: (value: string) => void;
-  // Sprint 137 item 7 — optional single action for the current
-  // selection (the iOS-style list edit mode). Both props present ->
-  // the action button renders, disabled while nothing is selected.
-  // The LABEL is the caller's, deliberately: the same interaction
-  // archives on the pricing lists and hard-deletes on the catalog
-  // lists, and the button must say which one it actually does.
-  actionLabel?: string;
-  onAction?: () => void;
-  actionDestructive?: boolean;
+  actions?: MultiSelectAction[];
+  // Sprint 138 §3 — overrides the default "N geselecteerd" when the
+  // caller needs to say what the count covers (e.g. "N of M active
+  // rows", because archived price rows are not selectable at all).
+  countLabel?: string;
   testIdPrefix: string;
 }) {
   const { t } = useTranslation("common");
@@ -65,7 +85,7 @@ export function MultiSelectToolbar({
         className="multi-select-count"
         data-testid={`${testIdPrefix}-count`}
       >
-        {t("multi_select.selected_count", { count: selectedCount })}
+        {countLabel ?? t("multi_select.selected_count", { count: selectedCount })}
       </span>
       {onFilterChange !== undefined && (
         <input
@@ -78,21 +98,25 @@ export function MultiSelectToolbar({
           data-testid={`${testIdPrefix}-filter`}
         />
       )}
-      {actionLabel !== undefined && onAction !== undefined && (
+      {(actions ?? []).map((action) => (
         <button
+          key={action.key}
           type="button"
           className={
-            actionDestructive
+            action.destructive
               ? "btn btn-danger btn-sm"
               : "btn btn-secondary btn-sm"
           }
-          onClick={onAction}
-          disabled={disabled || selectedCount === 0}
-          data-testid={`${testIdPrefix}-action`}
+          onClick={action.onClick}
+          disabled={
+            disabled || selectedCount === 0 || Boolean(action.disabled)
+          }
+          title={action.title}
+          data-testid={`${testIdPrefix}-action-${action.key}`}
         >
-          {actionLabel}
+          {action.label}
         </button>
-      )}
+      ))}
     </div>
   );
 }

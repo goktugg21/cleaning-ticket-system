@@ -82,6 +82,28 @@ def _resolve_effective_unit(attrs, instance):
 
 
 class ServiceCategorySerializer(serializers.ModelSerializer):
+    """Sprint 138 §2 — `service_count` / `active_service_count` are the
+    numbers the catalog UI needs to decide which actions to OFFER on a
+    category, rather than offering all of them and letting the operator
+    discover which ones 400.
+
+    `Service.category` is `on_delete=PROTECT` and NOT nullable, so a
+    category holding ANY service is permanently undeletable; a category
+    holding none is deletable whether it is active or archived. That is
+    exactly `service_count == 0`. `active_service_count` is what the
+    cascade-archive confirmation counts ("this will also deactivate N
+    services").
+
+    Both come from an annotation on the view's queryset (one query for
+    the whole page — see `ServiceCategoryListCreateView.get_queryset`).
+    The `getattr` fallback only fires for a single object that never
+    went through that queryset (the CREATE/UPDATE response), so it can
+    never produce an N+1 on a list.
+    """
+
+    service_count = serializers.SerializerMethodField()
+    active_service_count = serializers.SerializerMethodField()
+
     class Meta:
         model = ServiceCategory
         fields = [
@@ -89,10 +111,30 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
             "name",
             "description",
             "is_active",
+            "service_count",
+            "active_service_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "service_count",
+            "active_service_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_service_count(self, obj) -> int:
+        annotated = getattr(obj, "annotated_service_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.services.count()
+
+    def get_active_service_count(self, obj) -> int:
+        annotated = getattr(obj, "annotated_active_service_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.services.filter(is_active=True).count()
 
 
 class ManagedUnitSerializer(serializers.ModelSerializer):
@@ -250,6 +292,22 @@ class ServiceSerializer(serializers.ModelSerializer):
     managed_unit_label = serializers.CharField(
         source="managed_unit.label", read_only=True, default=None
     )
+    # Sprint 138 §1 — does ANY CustomerServicePrice row reference this
+    # service, active or ARCHIVED? `CustomerServicePrice.service` is
+    # `on_delete=PROTECT`, and Sprint 137 item 2 established that
+    # "deleting" a price archives it rather than destroying it — so a
+    # service that has ever been priced for any customer is permanently
+    # undeletable, and the operator's archived prices still block it.
+    # That produced the "Deleted 0 service(s), 1 failed" screen: the UI
+    # offered Delete on a row where it could never succeed, and the 400
+    # named prices the operator believed he had already deleted.
+    #
+    # The UI uses this to offer Deactiveren instead of Delete. Sourced
+    # from an `Exists` annotation on the view queryset (ONE subquery for
+    # the whole page, no per-row query); the `getattr` fallback only
+    # fires for a single un-annotated object (the CREATE/UPDATE
+    # response), so it cannot become an N+1 on a list.
+    has_price_rows = serializers.SerializerMethodField()
 
     class Meta:
         model = Service
@@ -268,6 +326,7 @@ class ServiceSerializer(serializers.ModelSerializer):
             "default_unit_price",
             "default_vat_pct",
             "is_active",
+            "has_price_rows",
             "created_at",
             "updated_at",
         ]
@@ -276,9 +335,16 @@ class ServiceSerializer(serializers.ModelSerializer):
             "company_name",
             "category_name",
             "managed_unit_label",
+            "has_price_rows",
             "created_at",
             "updated_at",
         ]
+
+    def get_has_price_rows(self, obj) -> bool:
+        annotated = getattr(obj, "annotated_has_price_rows", None)
+        if annotated is not None:
+            return bool(annotated)
+        return obj.customer_prices.exists()
 
     def get_fields(self):
         fields = super().get_fields()

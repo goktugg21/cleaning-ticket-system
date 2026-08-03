@@ -42,6 +42,7 @@ import type {
   ServiceBulkRaisePayload,
   ServiceBulkRaiseResult,
   ServiceCategory,
+  ServiceCategoryArchiveResult,
   ServiceCategoryCreatePayload,
   ServiceCategoryUpdatePayload,
   ServiceCreatePayload,
@@ -1525,6 +1526,39 @@ export async function updateServiceCategory(
 
 export async function deleteServiceCategory(id: number): Promise<void> {
   await api.delete(`/services/categories/${id}/`);
+}
+
+/**
+ * Sprint 138 §2a — archive a category TOGETHER WITH its services, in
+ * one backend transaction. `Service.category` is not nullable, so a
+ * service cannot live outside a category; leaving a retired category's
+ * services active would strand them (live in every picker, invisible in
+ * the category UI).
+ *
+ * SUPER_ADMIN only — categories are global.
+ */
+export async function archiveServiceCategory(
+  id: number,
+): Promise<ServiceCategoryArchiveResult> {
+  const response = await api.post<ServiceCategoryArchiveResult>(
+    `/services/categories/${id}/archive/`,
+  );
+  return response.data;
+}
+
+/**
+ * Sprint 138 §2a — restore the CATEGORY only. Its services stay
+ * archived: reactivating one is a separate deliberate act (it becomes
+ * orderable again). `still_archived_service_count` is what the UI
+ * reports so the operator is not left assuming a full restore.
+ */
+export async function unarchiveServiceCategory(
+  id: number,
+): Promise<ServiceCategoryArchiveResult> {
+  const response = await api.post<ServiceCategoryArchiveResult>(
+    `/services/categories/${id}/unarchive/`,
+  );
+  return response.data;
 }
 
 export interface ServiceListParams {

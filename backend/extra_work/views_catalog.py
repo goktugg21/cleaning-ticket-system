@@ -46,9 +46,9 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import IntegrityError, transaction
-from django.db.models import ProtectedError
+from django.db.models import Count, Exists, OuterRef, ProtectedError, Q
 from rest_framework import generics, serializers, status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -64,8 +64,14 @@ from .catalog_scope import (
     filter_categories_for,
     filter_managed_units_for,
     filter_services_for,
+    scope_company_ids_for_catalog,
 )
-from .models import ManagedUnit, Service, ServiceCategory
+from .models import (
+    CustomerServicePrice,
+    ManagedUnit,
+    Service,
+    ServiceCategory,
+)
 from .serializers_catalog import (
     ManagedUnitSerializer,
     ServiceCategorySerializer,
@@ -176,6 +182,43 @@ def _enforce_same_company_managed_unit(managed_unit, company):
         )
 
 
+def _annotate_category_service_counts(queryset, user):
+    """Sprint 138 §2 — annotate each category with how many services it
+    holds, so the UI can decide which actions to OFFER instead of
+    offering all of them and letting the operator find out which ones
+    400 (`Service.category` is PROTECT: a non-empty category can never
+    be deleted).
+
+    ONE aggregate per column for the whole page — no per-row query.
+
+    The counts are SCOPED to the catalog the actor can actually see
+    (`scope_company_ids_for_catalog`): categories are global but
+    services are company-scoped, so an unscoped count would tell a
+    COMPANY_ADMIN a category holds services they cannot see and cannot
+    act on. SUPER_ADMIN — the only role permitted to archive or delete
+    a category at all — has scope `None` and therefore always sees the
+    COMPLETE count, which is the number the PROTECT rule actually
+    depends on.
+    """
+    scope = scope_company_ids_for_catalog(user)
+    service_filter = Q()
+    active_filter = Q(services__is_active=True)
+    if scope is not None:
+        scoped = Q(services__company_id__in=scope)
+        service_filter &= scoped
+        active_filter &= scoped
+    return queryset.annotate(
+        annotated_service_count=Count(
+            "services",
+            filter=service_filter if scope is not None else None,
+            distinct=True,
+        ),
+        annotated_active_service_count=Count(
+            "services", filter=active_filter, distinct=True
+        ),
+    )
+
+
 def _enforce_category_super_admin_only(user):
     """Sprint 3B — categories are global, so non-Super-Admin must
     not mutate them (one Provider Admin changing a category would
@@ -228,7 +271,9 @@ class ServiceCategoryListCreateView(generics.ListCreateAPIView):
         return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
-        qs = ServiceCategory.objects.all()
+        qs = _annotate_category_service_counts(
+            ServiceCategory.objects.all(), self.request.user
+        )
         flag = _parse_bool_param(self.request.query_params.get("is_active"))
         if flag is not None:
             qs = qs.filter(is_active=flag)
@@ -262,7 +307,10 @@ class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return filter_categories_for(
-            self.request.user, ServiceCategory.objects.all()
+            self.request.user,
+            _annotate_category_service_counts(
+                ServiceCategory.objects.all(), self.request.user
+            ),
         )
 
     def perform_update(self, serializer):
@@ -277,16 +325,131 @@ class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
         except ProtectedError:
             return Response(
                 {
+                    # Sprint 138 §2c — BACKSTOP only: the UI offers
+                    # Delete on a category exactly when its
+                    # `service_count` is 0, and offers Archive /
+                    # Move-services-out otherwise.
                     "detail": (
-                        "Cannot delete a category that still has services "
-                        "attached. Deactivate it (is_active=false) or "
-                        "delete the services first."
+                        "Cannot delete a category that still has "
+                        "services attached. Move its services to "
+                        "another category first (they cannot be left "
+                        "without one), or archive the category — which "
+                        "also deactivates the services inside it."
                     ),
                     "code": "category_protected",
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ServiceCategoryArchiveView(APIView):
+    """Sprint 138 §2a — archive a category TOGETHER WITH its services,
+    or unarchive the category alone.
+
+        POST /api/services/categories/<id>/archive/
+        POST /api/services/categories/<id>/unarchive/
+
+    Why the archive cascades: `Service.category` is NOT nullable, so a
+    service cannot exist outside a category. Archiving a category while
+    leaving its services active would strand active, orderable services
+    inside a category the operator has declared retired — visible
+    nowhere in the category UI, still live in every picker. Cascading is
+    the honest reading of "archive this category".
+
+    Why the UNarchive does NOT cascade: reactivating a service is a
+    deliberate act with its own consequences (it becomes orderable
+    again, and it reappears in every cart picker). Restoring a category
+    is not a statement about which of its services should come back, so
+    the services stay archived and are reactivated one at a time via the
+    Service PATCH surface (§1's Activeren). The response returns the
+    count that stayed archived so the UI can say so rather than let the
+    operator assume everything came back.
+
+    SUPER_ADMIN only, same rule as every other category write
+    (`_enforce_category_super_admin_only`): categories are GLOBAL, so
+    one provider admin archiving a category would deactivate services
+    belonging to every other provider company on the platform. That
+    cross-company reach is exactly why this stays SA-only, and why the
+    response reports how many companies were touched.
+
+    Per-row `save()` inside one `transaction.atomic()` rather than a
+    bulk `.update()`: `Service` and `ServiceCategory` are both
+    registered for full-CRUD generic audit, and a queryset `.update()`
+    fires no `post_save`, so it would silently write nothing to
+    `AuditLog` (RBAC H-10). Mirrors `ServiceBulkRaiseView`.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+
+    def _get_category(self, category_id, user):
+        try:
+            return filter_categories_for(
+                user, ServiceCategory.objects.all()
+            ).get(pk=category_id)
+        except ServiceCategory.DoesNotExist:
+            raise NotFound(detail="Service category not found.")
+
+    def post(self, request, category_id, *args, **kwargs):
+        category = self._get_category(category_id, request.user)
+        _enforce_category_super_admin_only(request.user)
+
+        archiving = self.archive
+
+        with transaction.atomic():
+            audit_context.set_current_reason(
+                "service_category_archive_cascade"
+                if archiving
+                else "service_category_unarchive"
+            )
+            touched_services = 0
+            affected_company_ids = set()
+            if archiving:
+                # Only the services that are still ACTIVE need writing;
+                # re-saving an already-archived row would add a no-op
+                # audit entry for a change that did not happen.
+                for service in category.services.filter(
+                    is_active=True
+                ).select_related("company"):
+                    service.is_active = False
+                    service.save(update_fields=["is_active", "updated_at"])
+                    touched_services += 1
+                    affected_company_ids.add(service.company_id)
+            if category.is_active == archiving:
+                category.is_active = not archiving
+                category.save(update_fields=["is_active", "updated_at"])
+
+        payload = ServiceCategorySerializer(
+            _annotate_category_service_counts(
+                ServiceCategory.objects.filter(pk=category.pk), request.user
+            ).first()
+        ).data
+        return Response(
+            {
+                "category": payload,
+                # Named for what actually happened, not for what was
+                # requested: an unarchive deactivates nothing.
+                "deactivated_service_count": touched_services,
+                "affected_company_count": len(affected_company_ids),
+                # On unarchive: how many services stayed archived, so
+                # the UI can say "the category is back, its services are
+                # not" instead of implying a full restore.
+                "still_archived_service_count": (
+                    0
+                    if archiving
+                    else category.services.filter(is_active=False).count()
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class ServiceCategoryArchiveActionView(ServiceCategoryArchiveView):
+    archive = True
+
+
+class ServiceCategoryUnarchiveActionView(ServiceCategoryArchiveView):
+    archive = False
 
 
 def _resolve_catalog_create_company(user, supplied_company):
@@ -445,7 +608,23 @@ class ServiceListCreateView(generics.ListCreateAPIView):
         return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
-        qs = Service.objects.select_related("category", "company").all()
+        qs = (
+            Service.objects.select_related("category", "company")
+            # Sprint 138 §1 — one EXISTS subquery for the whole page,
+            # NOT a per-row query. Deliberately unfiltered on
+            # `is_active`: an ARCHIVED CustomerServicePrice still
+            # PROTECTs its Service, so a service priced only by
+            # archived rows must still report True or the UI would
+            # offer a Delete that always 400s.
+            .annotate(
+                annotated_has_price_rows=Exists(
+                    CustomerServicePrice.objects.filter(
+                        service=OuterRef("pk")
+                    )
+                )
+            )
+            .all()
+        )
         category = self.request.query_params.get("category")
         if category:
             try:
@@ -498,7 +677,20 @@ class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
         return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
-        qs = Service.objects.select_related("category", "company").all()
+        qs = (
+            Service.objects.select_related("category", "company")
+            # Sprint 138 §1 — same annotation as the list view so a
+            # single-service GET/PATCH response carries the same
+            # `has_price_rows` the list does.
+            .annotate(
+                annotated_has_price_rows=Exists(
+                    CustomerServicePrice.objects.filter(
+                        service=OuterRef("pk")
+                    )
+                )
+            )
+            .all()
+        )
         return filter_services_for(self.request.user, qs)
 
     def perform_update(self, serializer):
@@ -524,10 +716,27 @@ class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
         except ProtectedError:
             return Response(
                 {
+                    # Sprint 138 §1 — server-side BACKSTOP only: the UI
+                    # no longer offers Delete on a referenced service
+                    # (`has_price_rows`), so reaching this is a
+                    # direct-API call or a stale page.
+                    #
+                    # The old wording sent the operator to "delete the
+                    # contract prices first", which is a dead end:
+                    # deleting a price ARCHIVES it (Sprint 137 item 2 —
+                    # `ExtraWorkRequestItem.snapshot_customer_service_
+                    # price` is a live FK), and an archived price still
+                    # PROTECTs its service. Following that advice
+                    # produced exactly the loop the operator hit.
                     "detail": (
-                        "Cannot delete a service that still has customer "
-                        "contract prices. Deactivate it (is_active=false) "
-                        "or delete the contract prices first."
+                        "Cannot delete a service that has customer "
+                        "contract prices. ARCHIVED prices also block "
+                        "deletion — deleting a price archives it rather "
+                        "than destroying it, because shipped Extra Work "
+                        "lines still reference it. Deactivate the "
+                        "service instead (is_active=false); it then "
+                        "stops appearing in pickers while its history "
+                        "stays intact."
                     ),
                     "code": "service_protected",
                 },

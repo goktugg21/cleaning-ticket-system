@@ -543,6 +543,11 @@ export function ExtraWorkListPage() {
                 value={buildingFilter}
                 onChange={(event) => setBuildingFilter(event.target.value)}
                 disabled={!customerChosen}
+                title={
+                  customerChosen
+                    ? undefined
+                    : t("list.filter_pick_customer_hint")
+                }
                 data-testid="extra-work-list-filter-building"
               >
                 <option value="">{t("list.filter_all_buildings")}</option>
@@ -562,6 +567,11 @@ export function ExtraWorkListPage() {
                 value={departmentFilter}
                 onChange={(event) => setDepartmentFilter(event.target.value)}
                 disabled={!customerChosen}
+                title={
+                  customerChosen
+                    ? undefined
+                    : t("list.filter_pick_customer_hint")
+                }
                 data-testid="extra-work-list-filter-department"
               >
                 <option value="">{t("list.filter_all_departments")}</option>
@@ -581,6 +591,11 @@ export function ExtraWorkListPage() {
                 value={workTypeFilter}
                 onChange={(event) => setWorkTypeFilter(event.target.value)}
                 disabled={!customerChosen}
+                title={
+                  customerChosen
+                    ? undefined
+                    : t("list.filter_pick_customer_hint")
+                }
                 data-testid="extra-work-list-filter-work-type"
               >
                 <option value="">{t("list.filter_all_work_types")}</option>
@@ -591,13 +606,6 @@ export function ExtraWorkListPage() {
                 ))}
               </select>
             </div>
-            {!customerChosen && (
-              <div className="filter-field">
-                <span className="muted small">
-                  {t("list.filter_pick_customer_hint")}
-                </span>
-              </div>
-            )}
             <div className="filter-field">
               <span className="filter-label">
                 {t("list.filter_billing_month")}
@@ -651,6 +659,19 @@ export function ExtraWorkListPage() {
               </select>
             </div>
           </>
+        )}
+        {/* Sprint 138 §6 — the cascade hint used to be its own
+            `.filter-field`, so it floated between the controls and made
+            the bar look ragged. It now sits on ONE line beneath the
+            controls it describes (and as a `title` on each disabled
+            control), spanning the full row. */}
+        {isProvider && !customerChosen && (
+          <div
+            className="ew-list-filters-hint muted small"
+            data-testid="extra-work-list-filter-hint"
+          >
+            {t("list.filter_pick_customer_hint")}
+          </div>
         )}
       </div>
 

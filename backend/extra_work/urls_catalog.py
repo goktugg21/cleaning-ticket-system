@@ -13,8 +13,10 @@ from .views_catalog import (
     ManagedUnitDetailView,
     ManagedUnitListCreateView,
     ServiceBulkRaiseView,
+    ServiceCategoryArchiveActionView,
     ServiceCategoryDetailView,
     ServiceCategoryListCreateView,
+    ServiceCategoryUnarchiveActionView,
     ServiceDetailView,
     ServiceListCreateView,
 )
@@ -30,6 +32,20 @@ urlpatterns = [
         "categories/<int:category_id>/",
         ServiceCategoryDetailView.as_view(),
         name="service-category-detail",
+    ),
+    # Sprint 138 §2a — archive a category together with its
+    # services (one transaction); unarchive restores the category
+    # alone. Mounted before the bare Service routes for the same
+    # reason "units/" is.
+    path(
+        "categories/<int:category_id>/archive/",
+        ServiceCategoryArchiveActionView.as_view(),
+        name="service-category-archive",
+    ),
+    path(
+        "categories/<int:category_id>/unarchive/",
+        ServiceCategoryUnarchiveActionView.as_view(),
+        name="service-category-unarchive",
     ),
     path(
         "bulk-raise/",

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
 import {
+  archiveServiceCategory,
   bulkRaiseServices,
   createService,
   createServiceCategory,
@@ -12,6 +13,7 @@ import {
   listAllCompanies,
   listServiceCategories,
   listServices,
+  unarchiveServiceCategory,
   updateService,
   updateServiceCategory,
 } from "../../api/admin";
@@ -19,6 +21,7 @@ import type {
   CompanyAdmin,
   Service,
   ServiceCategory,
+  ServiceCategoryArchiveResult,
   ServiceCategoryCreatePayload,
   ServiceCreatePayload,
   ServiceUnitType,
@@ -199,6 +202,37 @@ export function ServicesAdminPage() {
     [],
   );
   const [serviceBulkDone, setServiceBulkDone] = useState<number | null>(null);
+
+  // Sprint 138 §1 — a service with ANY contract price row (active OR
+  // archived) is permanently undeletable: `CustomerServicePrice.service`
+  // is PROTECT and Sprint 137 item 2 established that "deleting" a price
+  // only archives it. Offering Delete there produced the operator's
+  // "Deleted 0 service(s), 1 failed" screen, with a 400 naming prices he
+  // believed he had already deleted. Those rows get Deactiveren instead.
+  const [serviceBulkActionKind, setServiceBulkActionKind] = useState<
+    "delete" | "deactivate" | "activate"
+  >("delete");
+  // Sprint 138 §2b — bulk move to another category. This is the
+  // mechanism that EMPTIES a category (so it becomes deletable), not
+  // just a convenience: `Service.category` is not nullable, so a
+  // service can only leave a category by joining another one.
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTargetCategory, setMoveTargetCategory] = useState<number | "">(
+    "",
+  );
+  // Moving live work INTO an archived category is almost always a
+  // mistake, so archived targets are opt-in.
+  const [moveIncludeArchived, setMoveIncludeArchived] = useState(false);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState("");
+  const [serviceToggleBusy, setServiceToggleBusy] = useState(false);
+  // Sprint 138 §2a — cascade archive / unarchive a category.
+  const categoryArchiveDialogRef = useRef<ConfirmDialogHandle>(null);
+  const [categoryArchiveTarget, setCategoryArchiveTarget] =
+    useState<ServiceCategory | null>(null);
+  const [categoryArchiveBusy, setCategoryArchiveBusy] = useState(false);
+  const [categoryArchiveResult, setCategoryArchiveResult] =
+    useState<ServiceCategoryArchiveResult | null>(null);
 
   // M5 C — catalog default-price bulk-raise modal (services tab only).
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -520,12 +554,6 @@ export function ServicesAdminPage() {
     );
   }
 
-  function openServiceBulkDelete() {
-    setServiceBulkFailures([]);
-    setServiceBulkDone(null);
-    serviceBulkDialogRef.current?.open();
-  }
-
   /**
    * Delete every selected service. No bulk endpoint exists, so this is
    * N sequential DELETEs from the client (recorded as a `## NEXT` item
@@ -538,6 +566,15 @@ export function ServicesAdminPage() {
    * clean success when anything failed.
    */
   async function handleConfirmServiceBulkDelete() {
+    // Sprint 138 §1 — one dialog, three verbs. `serviceBulkActionKind`
+    // is set by whichever toolbar button opened it, so the confirmation
+    // copy and the request below always agree.
+    if (serviceBulkActionKind !== "delete") {
+      await handleConfirmServiceBulkSetActive(
+        serviceBulkActionKind === "activate",
+      );
+      return;
+    }
     setServiceBulkBusy(true);
     const targets = services.filter((s) => serviceBulkIds.includes(s.id));
     const deletedIds: number[] = [];
@@ -563,6 +600,178 @@ export function ServicesAdminPage() {
     setServiceBulkDone(deletedIds.length);
     setServiceBulkBusy(false);
     serviceBulkDialogRef.current?.close();
+  }
+
+  /**
+   * Sprint 138 §1 — bulk (de)activate. This is the action a referenced
+   * service gets INSTEAD of Delete: it stops appearing in pickers while
+   * every contract price and shipped Extra Work line that points at it
+   * stays intact. No bulk endpoint exists, so this is N sequential
+   * PATCHes from the client (recorded as a `## NEXT` item); partial
+   * failure is reported per row exactly as the delete path does.
+   */
+  async function handleConfirmServiceBulkSetActive(nextActive: boolean) {
+    setServiceBulkBusy(true);
+    const targets = services
+      .filter((s) => serviceBulkIds.includes(s.id))
+      // Skip rows already in the target state — re-saving them would
+      // report a change that did not happen (the Sprint 138 §3 lesson).
+      .filter((s) => s.is_active !== nextActive);
+    const updated: Service[] = [];
+    const failed: { id: number; name: string }[] = [];
+
+    for (const service of targets) {
+      try {
+        updated.push(
+          await updateService(service.id, { is_active: nextActive }),
+        );
+      } catch {
+        failed.push({ id: service.id, name: service.name });
+      }
+    }
+
+    if (updated.length > 0) {
+      const byId = new Map(updated.map((s) => [s.id, s]));
+      setServices((prev) => prev.map((s) => byId.get(s.id) ?? s));
+      if (selectedService && byId.has(selectedService.id)) {
+        setSelectedService(byId.get(selectedService.id) ?? null);
+      }
+    }
+    setServiceBulkIds(failed.map((f) => f.id));
+    setServiceBulkFailures(failed.map((f) => f.name));
+    setServiceBulkDone(updated.length);
+    setServiceBulkBusy(false);
+    serviceBulkDialogRef.current?.close();
+  }
+
+  // ---- Sprint 138 §2a — cascade archive / unarchive a category ------
+  function openCategoryArchiveDialog(category: ServiceCategory) {
+    setCategoryArchiveTarget(category);
+    categoryArchiveDialogRef.current?.open();
+  }
+
+  /**
+   * Archive a category TOGETHER WITH its services, or unarchive the
+   * category alone — one backend call, one transaction. Doing it
+   * client-side as N PATCHes would leave a half-archived category
+   * behind on any failure.
+   */
+  async function handleConfirmCategoryArchive() {
+    if (!categoryArchiveTarget) return;
+    const archiving = categoryArchiveTarget.is_active;
+    setCategoryArchiveBusy(true);
+    try {
+      const result = archiving
+        ? await archiveServiceCategory(categoryArchiveTarget.id)
+        : await unarchiveServiceCategory(categoryArchiveTarget.id);
+      setCategories((prev) =>
+        prev.map((c) => (c.id === result.category.id ? result.category : c)),
+      );
+      setSelectedCategory(result.category);
+      // The cascade changed Service.is_active rows underneath us.
+      try {
+        setServices(await listServices());
+      } catch {
+        // Non-fatal — the archive itself succeeded.
+      }
+      setCategoryArchiveResult(result);
+      categoryArchiveDialogRef.current?.close();
+      setCategoryArchiveTarget(null);
+    } catch (err) {
+      setLoadError(getApiError(err));
+      categoryArchiveDialogRef.current?.close();
+    } finally {
+      setCategoryArchiveBusy(false);
+    }
+  }
+
+  /**
+   * Sprint 138 §1 — single-row (de)activate from the detail panel. The
+   * action a referenced service gets in place of Delete.
+   */
+  async function handleToggleServiceActive(service: Service) {
+    setServiceToggleBusy(true);
+    try {
+      const updated = await updateService(service.id, {
+        is_active: !service.is_active,
+      });
+      setServices((prev) =>
+        prev.map((s) => (s.id === updated.id ? updated : s)),
+      );
+      setSelectedService(updated);
+    } catch (err) {
+      setLoadError(getApiError(err));
+    } finally {
+      setServiceToggleBusy(false);
+    }
+  }
+
+  function openServiceBulkAction(kind: "delete" | "deactivate" | "activate") {
+    setServiceBulkActionKind(kind);
+    setServiceBulkFailures([]);
+    setServiceBulkDone(null);
+    serviceBulkDialogRef.current?.open();
+  }
+
+  // ---- Sprint 138 §2b — bulk move to another category ---------------
+  function openMoveModal() {
+    setMoveTargetCategory("");
+    setMoveIncludeArchived(false);
+    setMoveError("");
+    setMoveOpen(true);
+  }
+
+  /**
+   * Move every selected service into the chosen category. N sequential
+   * PATCHes (no bulk endpoint — see `## NEXT`), per-row failure
+   * reporting. This is how a category is emptied so it can be deleted:
+   * `Service.category` is NOT nullable, so a service leaves a category
+   * only by joining another one.
+   */
+  async function handleConfirmMove() {
+    if (moveTargetCategory === "") {
+      setMoveError(t("services.move_error_no_target"));
+      return;
+    }
+    setMoveBusy(true);
+    setMoveError("");
+    const targets = services.filter((s) => serviceBulkIds.includes(s.id));
+    const updated: Service[] = [];
+    const failed: { id: number; name: string }[] = [];
+
+    for (const service of targets) {
+      try {
+        updated.push(
+          await updateService(service.id, {
+            category: Number(moveTargetCategory),
+          }),
+        );
+      } catch {
+        failed.push({ id: service.id, name: service.name });
+      }
+    }
+
+    if (updated.length > 0) {
+      const byId = new Map(updated.map((s) => [s.id, s]));
+      setServices((prev) => prev.map((s) => byId.get(s.id) ?? s));
+      if (selectedService && byId.has(selectedService.id)) {
+        setSelectedService(byId.get(selectedService.id) ?? null);
+      }
+      // A move changes every category's service_count, which is what
+      // decides whether Delete is offered on the Categories tab — so
+      // refresh them rather than let the counts go stale.
+      try {
+        setCategories(await listServiceCategories());
+      } catch {
+        // Non-fatal: the move itself succeeded. The counts refresh on
+        // the next page load.
+      }
+    }
+    setServiceBulkIds(failed.map((f) => f.id));
+    setServiceBulkFailures(failed.map((f) => f.name));
+    setServiceBulkDone(updated.length);
+    setMoveBusy(false);
+    setMoveOpen(false);
   }
 
   function handleCancelDelete() {
@@ -644,6 +853,66 @@ export function ServicesAdminPage() {
   // act on. Plain derived value (the earlier-defined openBulkRaise
   // captures it, so a manual useMemo would trip the hooks rule).
   const activeServices = services.filter((s) => s.is_active);
+
+  // ---- Sprint 138 §1 — which bulk actions may even be OFFERED -------
+  // The sprint's whole theme: an action the backend will always refuse
+  // should not be on screen. Delete appears only when EVERY selected
+  // service is unreferenced; otherwise the operator gets Deactiveren,
+  // plus a line saying how many rows forced that and why.
+  const selectedServices = services.filter((s) =>
+    serviceBulkIds.includes(s.id),
+  );
+  const selectedReferenced = selectedServices.filter((s) => s.has_price_rows);
+  const selectedActiveCount = selectedServices.filter(
+    (s) => s.is_active,
+  ).length;
+  const selectedInactiveCount = selectedServices.length - selectedActiveCount;
+  const bulkDeleteOffered =
+    selectedServices.length > 0 && selectedReferenced.length === 0;
+
+  const serviceBulkActions = [
+    ...(selectedActiveCount > 0
+      ? [
+          {
+            key: "deactivate",
+            label: t("services.bulk_deactivate_button"),
+            onClick: () => openServiceBulkAction("deactivate"),
+          },
+        ]
+      : []),
+    ...(selectedInactiveCount > 0
+      ? [
+          {
+            key: "activate",
+            label: t("services.bulk_activate_button"),
+            onClick: () => openServiceBulkAction("activate"),
+          },
+        ]
+      : []),
+    {
+      key: "move",
+      label: t("services.bulk_move_button"),
+      onClick: openMoveModal,
+    },
+    ...(bulkDeleteOffered
+      ? [
+          {
+            key: "delete",
+            label: t("services.bulk_delete_button"),
+            onClick: () => openServiceBulkAction("delete"),
+            destructive: true,
+          },
+        ]
+      : []),
+  ];
+
+  // Categories the bulk-move modal may target. Archived ones are opt-in
+  // (moving live work into a retired category is almost always a
+  // mistake), and the category every selected service is already in is
+  // still listed — moving a mixed selection "back" to it is legitimate.
+  const moveTargetCategories = categories.filter(
+    (c) => c.is_active || moveIncludeArchived,
+  );
 
   return (
     <div data-testid="services-admin-page">
@@ -832,18 +1101,24 @@ export function ServicesAdminPage() {
                         }
                         onClearAll={() => setServiceBulkIds([])}
                         disabled={serviceBulkBusy}
-                        actionLabel={t("services.bulk_delete_button")}
-                        onAction={openServiceBulkDelete}
-                        actionDestructive
+                        actions={serviceBulkActions}
                         testIdPrefix="services-bulk-delete"
                       />
                     </div>
+                    {/* Sprint 138 §1 — say WHY Delete is absent rather
+                        than leaving the operator to wonder. This is the
+                        screen that previously offered Delete and then
+                        reported "Deleted 0 service(s), 1 failed". */}
                     <div
                       className="muted small"
                       style={{ padding: "8px 16px 0" }}
                       data-testid="services-bulk-delete-explainer"
                     >
-                      {t("services.bulk_delete_explainer")}
+                      {selectedReferenced.length > 0
+                        ? t("services.bulk_delete_blocked_explainer", {
+                            count: selectedReferenced.length,
+                          })
+                        : t("services.bulk_delete_explainer")}
                     </div>
                   </>
                 )}
@@ -985,16 +1260,46 @@ export function ServicesAdminPage() {
                   >
                     {t("services.edit_button")}
                   </button>
+                  {/* Sprint 138 §1 — a service with ANY contract price
+                      row (active or ARCHIVED) can never be deleted:
+                      PROTECT, and "deleting" a price only archives it.
+                      Offer the action that actually works instead of a
+                      Delete that is guaranteed to 400. */}
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    data-testid="services-service-delete-button"
-                    onClick={() => openDeleteServiceDialog(selectedService)}
+                    data-testid="services-service-toggle-active-button"
+                    onClick={() =>
+                      void handleToggleServiceActive(selectedService)
+                    }
+                    disabled={serviceToggleBusy}
                   >
-                    {t("services.delete_button")}
+                    {selectedService.is_active
+                      ? t("services.deactivate_button")
+                      : t("services.activate_button")}
                   </button>
+                  {!selectedService.has_price_rows && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-testid="services-service-delete-button"
+                      onClick={() => openDeleteServiceDialog(selectedService)}
+                    >
+                      {t("services.delete_button")}
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {selectedService.has_price_rows && (
+                <div
+                  className="muted small"
+                  style={{ marginBottom: 12 }}
+                  data-testid="services-service-delete-blocked-note"
+                >
+                  {t("services.delete_blocked_note")}
+                </div>
+              )}
 
               <div className="detail-kv-list">
                 <div className="detail-kv-row">
@@ -1098,6 +1403,34 @@ export function ServicesAdminPage() {
             </div>
           </div>
 
+          {/* Sprint 138 §2a — report what the cascade actually did.
+              An unarchive says explicitly that the services stayed
+              archived, so nobody assumes a full restore. */}
+          {categoryArchiveResult && (
+            <div
+              className="alert-info"
+              role="status"
+              style={{ marginBottom: 12 }}
+              data-testid="services-category-archive-result"
+            >
+              {categoryArchiveResult.deactivated_service_count > 0
+                ? t("services.category_archive_result", {
+                    count: categoryArchiveResult.deactivated_service_count,
+                  })
+                : t("services.category_unarchive_result", {
+                    count:
+                      categoryArchiveResult.still_archived_service_count,
+                  })}
+              {categoryArchiveResult.affected_company_count > 1 && (
+                <div className="muted small" style={{ marginTop: 4 }}>
+                  {t("services.category_archive_multi_company", {
+                    count: categoryArchiveResult.affected_company_count,
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="card" data-testid="services-categories-list">
             {categories.length === 0 ? (
               <div
@@ -1118,6 +1451,10 @@ export function ServicesAdminPage() {
                     <tr>
                       <th>{t("services.col_name")}</th>
                       <th>{t("services.col_description")}</th>
+                      {/* Sprint 138 §2c — the count is visible on the
+                          row so the operator can see WHY a category is
+                          or is not deletable without clicking in. */}
+                      <th>{t("services.col_service_count")}</th>
                       <th>{t("services.col_active")}</th>
                     </tr>
                   </thead>
@@ -1127,11 +1464,24 @@ export function ServicesAdminPage() {
                         key={category.id}
                         data-testid="services-category-row"
                         data-category-id={category.id}
+                        data-service-count={category.service_count}
                         onClick={() => setSelectedCategory(category)}
                       >
                         <td>{category.name}</td>
                         <td className="muted small">
                           {category.description || "—"}
+                        </td>
+                        <td>
+                          {category.service_count === 0 ? (
+                            <span className="muted">
+                              {t("services.category_count_empty")}
+                            </span>
+                          ) : (
+                            t("services.category_count", {
+                              count: category.service_count,
+                              active: category.active_service_count,
+                            })
+                          )}
                         </td>
                         <td>
                           {category.is_active
@@ -1178,18 +1528,49 @@ export function ServicesAdminPage() {
                   >
                     {t("services.edit_button")}
                   </button>
+                  {/* Sprint 138 §2a — archive cascades to the
+                      category's services (they cannot exist outside a
+                      category); unarchive restores the category alone. */}
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
-                    data-testid="services-category-delete-button"
-                    onClick={() =>
-                      openDeleteCategoryDialog(selectedCategory)
-                    }
+                    data-testid="services-category-archive-button"
+                    onClick={() => openCategoryArchiveDialog(selectedCategory)}
+                    disabled={categoryArchiveBusy}
                   >
-                    {t("services.delete_button")}
+                    {selectedCategory.is_active
+                      ? t("services.category_archive_button")
+                      : t("services.category_unarchive_button")}
                   </button>
+                  {/* Sprint 138 §2c — `Service.category` is PROTECT, so
+                      Delete can only ever succeed on an EMPTY category.
+                      Offering it otherwise is the same defect as §1. */}
+                  {selectedCategory.service_count === 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-testid="services-category-delete-button"
+                      onClick={() =>
+                        openDeleteCategoryDialog(selectedCategory)
+                      }
+                    >
+                      {t("services.delete_button")}
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {selectedCategory.service_count > 0 && (
+                <div
+                  className="muted small"
+                  style={{ marginBottom: 12 }}
+                  data-testid="services-category-delete-blocked-note"
+                >
+                  {t("services.category_delete_blocked_note", {
+                    count: selectedCategory.service_count,
+                  })}
+                </div>
+              )}
 
               <div className="detail-kv-list">
                 <div className="detail-kv-row">
@@ -1916,18 +2297,188 @@ export function ServicesAdminPage() {
           Rendered unconditionally and driven through the ref only
           (CLAUDE.md §3: a conditionally mounted native <dialog> is
           invisible and its trigger looks dead). */}
+      {/* Sprint 138 §2a — ONE confirmation, and it NAMES the cascade:
+          archiving a category deactivates every service inside it, and
+          unarchiving brings back only the category. Unconditionally
+          rendered + ref-driven (CLAUDE.md §3). */}
+      <ConfirmDialog
+        ref={categoryArchiveDialogRef}
+        title={t(
+          categoryArchiveTarget?.is_active === false
+            ? "services.category_unarchive_confirm_title"
+            : "services.category_archive_confirm_title",
+        )}
+        body={t(
+          categoryArchiveTarget?.is_active === false
+            ? "services.category_unarchive_confirm_body"
+            : "services.category_archive_confirm_body",
+          {
+            count: categoryArchiveTarget?.active_service_count ?? 0,
+          },
+        )}
+        confirmLabel={t(
+          categoryArchiveTarget?.is_active === false
+            ? "services.category_unarchive_button"
+            : "services.category_archive_button",
+        )}
+        onConfirm={handleConfirmCategoryArchive}
+        onCancel={() => setCategoryArchiveTarget(null)}
+        busy={categoryArchiveBusy}
+        destructive={categoryArchiveTarget?.is_active !== false}
+      />
+
+      {/* Sprint 138 §2b — bulk move to another category. This is what
+          EMPTIES a category so it can be deleted; `Service.category` is
+          not nullable, so a service only leaves a category by joining
+          another one. */}
+      {moveOpen && (
+        <div
+          data-testid="services-move-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("services.bulk_move_button")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 520, width: "100%", padding: 24 }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("services.move_modal_title", {
+                count: serviceBulkIds.length,
+              })}
+            </h3>
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+              {t("services.move_modal_intro")}
+            </p>
+
+            {moveError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="services-move-error"
+              >
+                {moveError}
+              </div>
+            )}
+
+            <div className="field">
+              <label className="field-label" htmlFor="services-move-target">
+                {t("services.move_target_label")}
+              </label>
+              <select
+                id="services-move-target"
+                className="field-select"
+                data-testid="services-move-target"
+                value={moveTargetCategory === "" ? "" : String(moveTargetCategory)}
+                onChange={(event) =>
+                  setMoveTargetCategory(
+                    event.target.value === ""
+                      ? ""
+                      : Number(event.target.value),
+                  )
+                }
+                disabled={moveBusy}
+              >
+                <option value="">{t("services.move_target_placeholder")}</option>
+                {moveTargetCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.is_active
+                      ? category.name
+                      : `${category.name} — ${t("admin.status_inactive")}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field">
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Toggle
+                  checked={moveIncludeArchived}
+                  onChange={(event) =>
+                    setMoveIncludeArchived(event.target.checked)
+                  }
+                  data-testid="services-move-include-archived"
+                  disabled={moveBusy}
+                />
+                <span>{t("services.move_include_archived")}</span>
+              </label>
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {t("services.move_include_archived_hint")}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setMoveOpen(false)}
+                disabled={moveBusy}
+                data-testid="services-move-cancel"
+              >
+                {t("services.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => void handleConfirmMove()}
+                disabled={moveBusy || moveTargetCategory === ""}
+                data-testid="services-move-apply"
+              >
+                {moveBusy
+                  ? t("admin_form.saving")
+                  : t("services.move_apply")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialog
         ref={serviceBulkDialogRef}
-        title={t("services.bulk_delete_confirm_title", {
-          count: serviceBulkIds.length,
-        })}
-        body={t("services.bulk_delete_confirm_body", {
-          count: serviceBulkIds.length,
-        })}
-        confirmLabel={t("services.bulk_delete_button")}
+        title={t(
+          serviceBulkActionKind === "delete"
+            ? "services.bulk_delete_confirm_title"
+            : serviceBulkActionKind === "activate"
+              ? "services.bulk_activate_confirm_title"
+              : "services.bulk_deactivate_confirm_title",
+          { count: serviceBulkIds.length },
+        )}
+        body={t(
+          serviceBulkActionKind === "delete"
+            ? "services.bulk_delete_confirm_body"
+            : serviceBulkActionKind === "activate"
+              ? "services.bulk_activate_confirm_body"
+              : "services.bulk_deactivate_confirm_body",
+          { count: serviceBulkIds.length },
+        )}
+        confirmLabel={t(
+          serviceBulkActionKind === "delete"
+            ? "services.bulk_delete_button"
+            : serviceBulkActionKind === "activate"
+              ? "services.bulk_activate_button"
+              : "services.bulk_deactivate_button",
+        )}
         onConfirm={handleConfirmServiceBulkDelete}
         busy={serviceBulkBusy}
-        destructive
+        destructive={serviceBulkActionKind === "delete"}
       />
     </div>
   );

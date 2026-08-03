@@ -6614,15 +6614,42 @@ a.attn-row:hover {
 .ew-list-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px 12px;
   padding: 12px 14px;
   margin-bottom: 16px;
-  align-items: center;
+  /* Sprint 138 §6 — bottom-align, not centre. The stacked fields
+     (label over control) and the label-less search box have different
+     heights, and centring them left every control sitting at a slightly
+     different offset — the visual raggedness the owner reported. */
+  align-items: flex-end;
 }
+/* Sprint 138 §6 — each filter is a compact STACK (label above its
+   control) instead of label-beside-control. Nine inline label+control
+   pairs were far too wide to share a line, so the bar wrapped into
+   three ragged rows and read as unfinished. Stacking roughly halves
+   each item's width, so the same nine controls wrap into one tidy row
+   at 1280px and degrade gracefully below it. */
 .ew-list-filters .filter-field {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  /* Grow to share the row evenly so the right edge is flush instead of
+     ragged, but never shrink below a readable control width. */
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+.ew-list-filters .filter-field > .filter-label {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+/* The cascade hint spans the whole row beneath the controls it
+   describes, rather than floating between them as a pseudo-field. */
+.ew-list-filters-hint {
+  flex-basis: 100%;
+  margin-top: 2px;
 }
 /* Sprint 28 Batch 15.5 — keep the search icon inline-left of the
    input on wide screens. The previous rule inherited `flex-wrap`
@@ -6630,10 +6657,13 @@ a.attn-row:hover {
    >=1200px. Pinning the field to inline-flex with an explicit gap
    anchors the icon and lets the input flex to fill the remaining
    row width without ever flipping to two visual rows. */
+/* The search field keeps its icon INLINE with the input (it has no
+   label to stack), and is the one item allowed to absorb slack. */
 .ew-list-filters .filter-field.search {
-  flex: 1;
-  min-width: 200px;
+  flex: 1 1 200px;
+  min-width: 180px;
   display: inline-flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   position: relative;
@@ -8177,4 +8207,39 @@ details[open] > .ew-department-tree-summary::before {
 .list-edit-failure-list {
   margin: 6px 0 0;
   padding-left: 18px;
+}
+
+/* Sprint 138 §3 — an archived PRICE row is a read-only audit record:
+   visually quiet, no checkbox, not selectable. Kept deliberately
+   subtle rather than struck through — it is history, not an error. */
+.pricing-row-archived {
+  color: var(--text-muted);
+  background: var(--surface-2);
+  cursor: default;
+}
+.pricing-row-archived:hover {
+  background: var(--surface-2);
+}
+
+/* Sprint 138 §5 — copy-from-defaults picker grouped by category, with
+   a per-category select-all in each header. */
+.copy-default-group {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+.copy-default-group:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+.copy-default-group-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+.copy-default-group-name {
+  font-weight: 600;
+  font-size: 13px;
 }

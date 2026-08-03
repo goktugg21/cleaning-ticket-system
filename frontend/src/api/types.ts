@@ -1882,8 +1882,29 @@ export interface ServiceCategory {
   name: string;
   description: string;
   is_active: boolean;
+  // Sprint 138 §2 — how many services this category holds, so the UI
+  // can decide which actions to OFFER instead of offering all of them
+  // and letting the operator discover which ones 400. `Service.category`
+  // is PROTECT and NOT nullable, so a category holding ANY service is
+  // permanently undeletable: Delete is offered only at service_count 0.
+  // `active_service_count` is what the cascade-archive confirmation
+  // counts. Both are scoped to the catalog the actor can see.
+  service_count: number;
+  active_service_count: number;
   created_at: string;
   updated_at: string;
+}
+
+// Sprint 138 §2a — result of POST /services/categories/<id>/archive/
+// (or /unarchive/). Named for what ACTUALLY happened: an unarchive
+// deactivates nothing and reports how many services stayed archived.
+export interface ServiceCategoryArchiveResult {
+  category: ServiceCategory;
+  deactivated_service_count: number;
+  // A category is GLOBAL, so archiving one can reach services owned by
+  // several provider companies. Surfaced so that never happens silently.
+  affected_company_count: number;
+  still_archived_service_count: number;
 }
 
 export interface ServiceCategoryCreatePayload {
@@ -1938,6 +1959,12 @@ export interface Service {
   default_unit_price: string;
   default_vat_pct: string;
   is_active: boolean;
+  // Sprint 138 §1 — does ANY CustomerServicePrice row reference this
+  // service, ACTIVE OR ARCHIVED? `CustomerServicePrice.service` is
+  // PROTECT and "deleting" a price only archives it (Sprint 137 item 2),
+  // so true here means the service is permanently undeletable and the
+  // UI must offer Deactiveren rather than Delete.
+  has_price_rows: boolean;
   created_at: string;
   updated_at: string;
 }

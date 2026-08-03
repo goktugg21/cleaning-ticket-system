@@ -554,6 +554,30 @@ export function CustomerPricingPage() {
     return `${entry.kind}-${entry.row.id}`;
   }
 
+  /**
+   * Sprint 138 §3 — an ARCHIVED price row is a read-only audit record,
+   * not a manageable catalog row.
+   *
+   * Before this, "Show archived" plus edit mode let the operator select
+   * an already-archived price and archive it AGAIN: the backend
+   * returned 204 (it was already `is_active=false`), the row vanished
+   * from the list, and it was back on the next load — a success
+   * reported for something that never happened.
+   *
+   * Fixed BY CONSTRUCTION rather than by reporting: these rows carry no
+   * checkbox and are not selectable, so the second archive cannot be
+   * requested at all. There is deliberately no restore flow and no
+   * permanent delete for prices — archived prices stay archived,
+   * because `ExtraWorkRequestItem.snapshot_customer_service_price` is a
+   * live FK into them.
+   *
+   * PRICES ONLY. Archived CATEGORIES and SERVICES are catalog rows, not
+   * audit records, and keep their actions (see ServicesAdminPage).
+   */
+  function isArchivedRow(entry: PricingRow): boolean {
+    return !entry.row.is_active;
+  }
+
   function exitEditMode() {
     setEditMode(false);
     setBulkSelection([]);
@@ -730,6 +754,28 @@ export function CustomerPricingPage() {
   function toggleCopyAll(checked: boolean) {
     setCopySelectedServiceIds(
       checked ? activeServices.map((s) => s.id) : [],
+    );
+  }
+
+  /**
+   * Sprint 138 §5 — select or clear an ENTIRE category in one action.
+   *
+   * Acts on `group.services` (every active service in the category),
+   * NOT on `group.visible` (what the text filter currently shows). The
+   * filter is display-only on every other multi-select list in this
+   * codebase — "hidden-but-selected rows stay selected" — and the
+   * owner's ask was explicitly to copy a whole category at once, which
+   * a filter-narrowed select-all would quietly fail to do.
+   */
+  function toggleCopyGroup(
+    group: { services: Service[] },
+    checked: boolean,
+  ) {
+    const ids = group.services.map((s) => s.id);
+    setCopySelectedServiceIds((prev) =>
+      checked
+        ? [...new Set([...prev, ...ids])]
+        : prev.filter((id) => !ids.includes(id)),
     );
   }
 
@@ -916,6 +962,54 @@ export function CustomerPricingPage() {
   const visibleRows =
     activeCategory === null ? [] : (rowsByCategory.get(activeCategory) ?? []);
 
+  // Sprint 138 §3 — the rows edit mode may act on. Archived price rows
+  // are read-only records, so they are excluded from selection entirely
+  // rather than selected-then-skipped.
+  const selectableRows = visibleRows.filter((entry) => !isArchivedRow(entry));
+
+  // Sprint 138 §5 — the copy-from-defaults picker, grouped by real
+  // ServiceCategory. `services` holds every catalog row and `visible`
+  // is only what the text filter currently shows: the per-category
+  // select-all acts on the former, the rendered checkboxes on the
+  // latter. Categories with no active services at all are dropped —
+  // unlike the pricing INDEX (item 4), an empty group here would be a
+  // dead end, since there is nothing in it to copy.
+  const copyFilterTerm = copyFilter.trim().toLowerCase();
+  const copyGroups: {
+    key: string;
+    name: string;
+    services: Service[];
+    visible: Service[];
+  }[] = [
+    ...categories.map((category) => {
+      const groupServices = activeServices.filter(
+        (s) => s.category === category.id,
+      );
+      return {
+        key: String(category.id),
+        name: category.name,
+        services: groupServices,
+        visible: groupServices.filter(
+          (s) => !copyFilterTerm || s.name.toLowerCase().includes(copyFilterTerm),
+        ),
+      };
+    }),
+    // Defensive bucket: an active service whose category is missing
+    // from the category list must still be copyable, never dropped.
+    (() => {
+      const knownIds = new Set(categories.map((c) => c.id));
+      const orphans = activeServices.filter((s) => !knownIds.has(s.category));
+      return {
+        key: "__uncategorised__",
+        name: t("customer_pricing.category_unknown"),
+        services: orphans,
+        visible: orphans.filter(
+          (s) => !copyFilterTerm || s.name.toLowerCase().includes(copyFilterTerm),
+        ),
+      };
+    })(),
+  ].filter((group) => group.services.length > 0);
+
   const activeCategoryLabel =
     activeCategory === null
       ? ""
@@ -994,7 +1088,13 @@ export function CustomerPricingPage() {
             onClick={() => setShowArchived((current) => !current)}
             disabled={loading || numericId === null}
           >
-            {t("customer_pricing.show_archived_toggle")}
+            {/* Sprint 138 §4 — the label reflects STATE. It used to
+                read "Show archived" whether or not archived rows were
+                already showing, so hiding them meant pressing a button
+                that said "show". */}
+            {showArchived
+              ? t("customer_pricing.hide_archived_toggle")
+              : t("customer_pricing.show_archived_toggle")}
           </button>
           <button
             type="button"
@@ -1152,14 +1252,27 @@ export function CustomerPricingPage() {
                 <div className="list-edit-bar">
                   <MultiSelectToolbar
                     selectedCount={bulkSelection.length}
+                    // Sprint 138 §3 — select-all covers ACTIVE rows
+                    // only; archived rows are not selectable at all.
                     onSelectAll={() =>
-                      setBulkSelection(visibleRows.map(rowKey))
+                      setBulkSelection(selectableRows.map(rowKey))
                     }
                     onClearAll={() => setBulkSelection([])}
+                    // ...and the count says so, so "select all" picking
+                    // fewer rows than are on screen never looks broken.
+                    countLabel={t("customer_pricing.bulk_selected_count", {
+                      count: bulkSelection.length,
+                      total: selectableRows.length,
+                    })}
                     disabled={bulkArchiveBusy}
-                    actionLabel={t("customer_pricing.bulk_archive_button")}
-                    onAction={openBulkArchive}
-                    actionDestructive
+                    actions={[
+                      {
+                        key: "archive",
+                        label: t("customer_pricing.bulk_archive_button"),
+                        onClick: openBulkArchive,
+                        destructive: true,
+                      },
+                    ]}
                     testIdPrefix="customer-pricing-bulk-archive"
                   />
                 </div>
@@ -1180,7 +1293,9 @@ export function CustomerPricingPage() {
                     aria-pressed={showArchived}
                     onClick={() => setShowArchived((current) => !current)}
                   >
-                    {t("customer_pricing.show_archived_toggle")}
+                    {showArchived
+                      ? t("customer_pricing.hide_archived_toggle")
+                      : t("customer_pricing.show_archived_toggle")}
                   </button>
                 </div>
               </>
@@ -1218,6 +1333,22 @@ export function CustomerPricingPage() {
                 })}
               </div>
             )}
+            {/* Sprint 138 §4 — make it visible ON THE LIST that
+                archived rows are included, so the extra greyed rows are
+                never a mystery. */}
+            {showArchived && (
+              <div
+                className="alert-info"
+                role="status"
+                style={{ margin: "12px 20px 0" }}
+                data-testid="customer-pricing-archived-included-note"
+              >
+                {t("customer_pricing.archived_included_note", {
+                  count: visibleRows.filter(isArchivedRow).length,
+                })}
+              </div>
+            )}
+
             {visibleRows.length === 0 ? (
               <div
                 style={{ padding: "32px 24px", textAlign: "center" }}
@@ -1260,7 +1391,15 @@ export function CustomerPricingPage() {
                         // than opening the read-only detail panel:
                         // two different meanings for one click would
                         // be worse than either.
+                        data-archived={isArchivedRow(entry) ? "true" : "false"}
+                        className={
+                          isArchivedRow(entry) ? "pricing-row-archived" : ""
+                        }
                         onClick={() => {
+                          // An archived row is read-only: selecting it
+                          // in edit mode could only ever request an
+                          // archive that already happened.
+                          if (editMode && isArchivedRow(entry)) return;
                           if (!editMode) {
                             setSelected(entry);
                             return;
@@ -1273,22 +1412,27 @@ export function CustomerPricingPage() {
                       >
                         {editMode && (
                           <td className="list-edit-checkbox-cell">
-                            <input
-                              type="checkbox"
-                              className="checkbox-input"
-                              data-testid="customer-pricing-bulk-archive-row"
-                              data-price-id={entry.row.id}
-                              checked={bulkSelection.includes(rowKey(entry))}
-                              onChange={(event) =>
-                                toggleBulkRowSelection(
-                                  rowKey(entry),
-                                  event.target.checked,
-                                )
-                              }
-                              onClick={(event) => event.stopPropagation()}
-                              disabled={bulkArchiveBusy}
-                              aria-label={resolveRowName(entry)}
-                            />
+                            {/* No checkbox at all on an archived row —
+                                the re-archive bug cannot be requested,
+                                rather than being caught and reported. */}
+                            {!isArchivedRow(entry) && (
+                              <input
+                                type="checkbox"
+                                className="checkbox-input"
+                                data-testid="customer-pricing-bulk-archive-row"
+                                data-price-id={entry.row.id}
+                                checked={bulkSelection.includes(rowKey(entry))}
+                                onChange={(event) =>
+                                  toggleBulkRowSelection(
+                                    rowKey(entry),
+                                    event.target.checked,
+                                  )
+                                }
+                                onClick={(event) => event.stopPropagation()}
+                                disabled={bulkArchiveBusy}
+                                aria-label={resolveRowName(entry)}
+                              />
+                            )}
                           </td>
                         )}
                         <td>
@@ -1300,6 +1444,17 @@ export function CustomerPricingPage() {
                               data-testid="customer-pricing-custom-tag"
                             >
                               {t("customer_pricing.tag_custom")}
+                            </span>
+                          )}
+                          {/* Quiet badge so read-only reads as
+                              deliberate rather than broken. */}
+                          {isArchivedRow(entry) && (
+                            <span
+                              className="badge badge-muted"
+                              style={{ marginLeft: 8 }}
+                              data-testid="customer-pricing-archived-tag"
+                            >
+                              {t("customer_pricing.tag_archived")}
                             </span>
                           )}
                         </td>
@@ -1359,25 +1514,47 @@ export function CustomerPricingPage() {
                     {resolveRowName(selected)}
                   </h3>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-pricing-edit-button"
-                    onClick={() => openEditModal(selected)}
+                {/* Sprint 138 §3 — an archived price row carries NO row
+                    actions. It is a record of what was once agreed, kept
+                    because shipped Extra Work lines point at it. */}
+                {isArchivedRow(selected) ? (
+                  <span
+                    className="badge badge-muted"
+                    data-testid="customer-pricing-detail-archived-tag"
                   >
-                    {t("customer_pricing.edit_button")}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="customer-pricing-delete-button"
-                    onClick={() => openDeleteDialog(selected)}
-                  >
-                    {t("customer_pricing.delete_button")}
-                  </button>
-                </div>
+                    {t("customer_pricing.tag_archived")}
+                  </span>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-testid="customer-pricing-edit-button"
+                      onClick={() => openEditModal(selected)}
+                    >
+                      {t("customer_pricing.edit_button")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      data-testid="customer-pricing-delete-button"
+                      onClick={() => openDeleteDialog(selected)}
+                    >
+                      {t("customer_pricing.delete_button")}
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {isArchivedRow(selected) && (
+                <div
+                  className="muted small"
+                  style={{ marginBottom: 12 }}
+                  data-testid="customer-pricing-detail-archived-note"
+                >
+                  {t("customer_pricing.archived_readonly_note")}
+                </div>
+              )}
 
               <div className="detail-kv-list">
                 <div className="detail-kv-row">
@@ -2122,32 +2299,88 @@ export function CustomerPricingPage() {
                   onFilterChange={setCopyFilter}
                   testIdPrefix="customer-pricing-copy-default"
                 />
+                {/* Sprint 138 §5 — grouped by ServiceCategory with a
+                    per-category select-all, because the owner wants to
+                    copy an ENTIRE category in one action. The flat
+                    scrolling list made that a manual hunt. */}
                 <div className="multi-select-list">
-                  {activeServices
-                    .filter(
-                      (service) =>
-                        !copyFilter.trim() ||
-                        service.name
-                          .toLowerCase()
-                          .includes(copyFilter.trim().toLowerCase()),
-                    )
-                    .map((service) => (
-                    <label key={service.id}>
-                      <input
-                        type="checkbox"
-                        className="checkbox-input"
-                        data-testid="customer-pricing-copy-default-row"
-                        data-service-id={service.id}
-                        checked={copySelectedServiceIds.includes(service.id)}
-                        onChange={(event) =>
-                          toggleCopyService(service.id, event.target.checked)
-                        }
-                        disabled={copyBusy}
-                      />
-                      <span>
-                        {service.name} — {service.default_unit_price}
-                      </span>
-                    </label>
+                  {copyGroups.map((group) => (
+                    <div key={group.key} className="copy-default-group">
+                      <div className="copy-default-group-header">
+                        <span className="copy-default-group-name">
+                          {group.name}
+                        </span>
+                        <span className="muted small">
+                          {group.visible.length === group.services.length
+                            ? t("customer_pricing.copy_group_count", {
+                                count: group.services.length,
+                              })
+                            : t("customer_pricing.copy_group_count_filtered", {
+                                shown: group.visible.length,
+                                count: group.services.length,
+                              })}
+                        </span>
+                        {/* Selects EVERY service in the category — the
+                            ones scrolled out of view AND the ones the
+                            text filter is hiding. The filter is
+                            display-only here, exactly as it is on every
+                            other MultiSelectToolbar list; the count
+                            beside the name states the real total so
+                            that is never a surprise. */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          data-testid="customer-pricing-copy-group-select-all"
+                          data-category-key={group.key}
+                          onClick={() => toggleCopyGroup(group, true)}
+                          disabled={copyBusy}
+                        >
+                          {t("customer_pricing.copy_group_select_all", {
+                            count: group.services.length,
+                          })}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          data-testid="customer-pricing-copy-group-clear"
+                          onClick={() => toggleCopyGroup(group, false)}
+                          disabled={copyBusy}
+                        >
+                          {t("multi_select.clear_all")}
+                        </button>
+                      </div>
+                      {group.visible.map((service) => (
+                        <label key={service.id}>
+                          <input
+                            type="checkbox"
+                            className="checkbox-input"
+                            data-testid="customer-pricing-copy-default-row"
+                            data-service-id={service.id}
+                            checked={copySelectedServiceIds.includes(
+                              service.id,
+                            )}
+                            onChange={(event) =>
+                              toggleCopyService(
+                                service.id,
+                                event.target.checked,
+                              )
+                            }
+                            disabled={copyBusy}
+                          />
+                          <span>
+                            {service.name} — {service.default_unit_price}
+                          </span>
+                        </label>
+                      ))}
+                      {group.visible.length === 0 && (
+                        <div
+                          className="muted small"
+                          style={{ padding: "4px 0 8px 8px" }}
+                        >
+                          {t("customer_pricing.copy_group_all_filtered")}
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               </>
