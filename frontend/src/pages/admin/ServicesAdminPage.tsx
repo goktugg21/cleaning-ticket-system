@@ -604,12 +604,40 @@ export function ServicesAdminPage() {
    * decides whether the Categories tab offers Delete (Sprint 138 §2c).
    */
   async function refreshCatalogRows() {
-    const [servicesData, categoriesData] = await Promise.all([
-      listServices(currentServiceListParams()),
-      listServiceCategories(),
-    ]);
-    setServices(servicesData);
-    setCategories(categoriesData);
+    // Sprint 141 §1/§2 — THIS HELPER NEVER THROWS. That is its
+    // contract, and the reason the guard lives here rather than at the
+    // call sites.
+    //
+    // Round 4 turned thirteen synchronous state updates into
+    // `await refreshX()` without auditing the throw path. Every caller
+    // runs it AFTER a mutation that already committed, so a failed
+    // re-read is never a failed write — but it was reaching two places
+    // it had no business reaching:
+    //   * bulk handlers: it jumped over the lines that reset the busy
+    //     flag and closed the dialog, and `ConfirmDialog` swallows the
+    //     rejection (`void onConfirm()`) while disabling BOTH buttons
+    //     on `busy` — so the dialog went inert until a page reload;
+    //   * create/edit: it landed in the FORM's catch, so a committed
+    //     write was reported as a form error.
+    //
+    // Guarding at each call site would need try/finally AND a catch at
+    // all thirteen — and Round 4's defect was precisely that the guard
+    // was written once (at the cascade-archive) and omitted everywhere
+    // else. Swallowing here makes omission impossible.
+    //
+    // Failure mode is deliberately "stale list + visible page-level
+    // error", never a silent one: the operator is told the write landed
+    // and the list did not refresh.
+    try {
+      const [servicesData, categoriesData] = await Promise.all([
+        listServices(currentServiceListParams()),
+        listServiceCategories(),
+      ]);
+      setServices(servicesData);
+      setCategories(categoriesData);
+    } catch {
+      setLoadError(t("admin.refresh_after_save_failed"));
+    }
   }
 
   // ---- Sprint 137 item 7 — bulk delete (services list edit mode) ----
@@ -757,12 +785,9 @@ export function ServicesAdminPage() {
       );
       setSelectedCategory(result.category);
       // The cascade changed Service.is_active rows underneath us, and
-      // the category's own counts with them.
-      try {
-        await refreshCatalogRows();
-      } catch {
-        // Non-fatal — the archive itself succeeded.
-      }
+      // the category's own counts with them. No wrapper needed: the
+      // helper is non-throwing by contract (Sprint 141 §1).
+      await refreshCatalogRows();
       pushToast({
         variant: "success",
         title: archiving
@@ -802,11 +827,13 @@ export function ServicesAdminPage() {
       const updated = await updateService(service.id, {
         is_active: !service.is_active,
       });
-      await refreshCatalogRows();
       // Keep the detail panel on the row so the operator can flip it
       // straight back, even when the list itself no longer shows it —
       // and now the row genuinely RETURNS to the list when reactivated.
+      // Set BEFORE the re-read: the panel must not depend on a network
+      // call that is allowed to fail (Sprint 141 §2).
       setSelectedService(updated);
+      await refreshCatalogRows();
     } catch (err) {
       setLoadError(getApiError(err));
     } finally {

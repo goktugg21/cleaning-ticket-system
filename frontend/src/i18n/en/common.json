@@ -281,6 +281,7 @@
   "admin.view": "View",
   "admin.status_active": "Active",
   "admin.status_inactive": "Inactive",
+  "admin.refresh_after_save_failed": "Your change was saved, but the list could not be refreshed. Reload the page to see the current state.",
   "admin.status_all": "All",
   "admin.all_companies": "All companies",
   "admin.all_buildings": "All buildings",

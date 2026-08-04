@@ -57,8 +57,9 @@ docs-only pass — so this file always reflects where we actually are.
 
 **Branch:** `fix/sprint-137-ramazan-round-1` — Sprint 137 items 1-7, the
 Sprint 138 round-2 items, the Sprint 139 round-3 consistency fixes, and
-the Sprint 140 round-4 completion of them; each round found by the owner
-or the PM verifying the previous one before merging. Cut from `main`@`751bb8d`. **Still ONE PR**; nothing
+the Sprint 140 round-4 completion of them, and the Sprint 141 round-5
+failure-path audit; each round found by the owner or the PM verifying the
+previous one before merging. Cut from `main`@`751bb8d`. **Still ONE PR**; nothing
 merges in between, and CC does not open PRs — the owner does.
 
 **Last shipped PR on `main`: #126** — Sprints 133/134/135/136. Its
@@ -238,6 +239,49 @@ suite was deliberately NOT run — CI's parallel full regression on the PR
 is the gate, and this box has one core. The DEV database was one
 migration behind HEAD and was brought to `extra_work.0022`; crmtest was
 already there and was not touched.
+
+**Round 5 (Sprint 141) — the failure paths Round 4 never audited.**
+Round 4's fixes were correct and its five defects are genuinely gone,
+but converting thirteen synchronous state updates into
+`await refreshX()` was done without asking what happens when the REFETCH
+throws. That introduced two new classes, both caught in review.
+
+- **§1 Five bulk handlers could wedge until a page reload.** Each placed
+  `await refreshX()` before the lines that reset the busy flag and closed
+  the dialog, with no `finally`. `ConfirmDialog` invokes the handler as
+  `void onConfirm()` — the rejection is swallowed — and disables BOTH
+  Cancel and Confirm while `busy`, so the dialog went inert. The
+  hand-rolled move modal was worse: no Esc, no backdrop click, Cancel
+  disabled on `moveBusy`.
+- **§2 A committed write could be reported as a failure.** Create and
+  edit ran the refetch inside the form's existing `try`, so a re-read
+  failure set a FORM error and left the modal open. Worst on the pricing
+  page: `CustomerServicePrice` / `CustomerCustomPrice` have NO uniqueness
+  constraint — multiple active rows per (customer, service) are legal by
+  design and `resolve_price` disambiguates by `valid_from` — so an
+  operator retrying after a false failure would create a REAL duplicate
+  active price row.
+- **The fix, applied once rather than at thirteen call sites.** All three
+  refetch helpers are now non-throwing by contract: they catch, leave the
+  list stale, and surface a page-level (not form-level) message saying
+  the change was saved but the list could not be refreshed. Per-site
+  `try/finally` would have fixed §1 only — §2 needs the rejection to stop
+  reaching the form's `catch`, so every site would have needed BOTH.
+  Round 4's defect was precisely that the correct guard was written once
+  and omitted everywhere else; putting it in the helper makes omission
+  impossible. The now-redundant wrapper at the cascade-archive was
+  removed.
+- Three state writes that sat AFTER the refetch were moved BEFORE it, so
+  they no longer depend on a network call that is allowed to fail:
+  the two detail-panel selections, and the copy-from-defaults
+  created/skipped summary that the comment above it promises to keep
+  visible.
+
+**Standing rule recorded from this round:** whenever a synchronous state
+update becomes an `await`, audit the throw path — which flag stays set,
+which modal stays open, what the user is told, and what a retry does.
+Round 4's adversarial review covered filter-correctness thoroughly and
+failure paths not at all, which is exactly where its defects were.
 
 FE gate: tsc clean, ESLint **48** (46 errors, 2 warnings — baseline held,
 no new violations, no new `eslint-disable`), build OK. nl/en verified

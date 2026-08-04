@@ -533,12 +533,30 @@ export function CustomerPricingPage() {
    *     toggle exists to show.
    */
   async function refreshPricingRows(customerId: number) {
-    const [pricesData, customPricesData] = await Promise.all([
-      listCustomerPrices(customerId, { includeArchived: showArchived }),
-      listCustomerCustomPrices(customerId, { includeArchived: showArchived }),
-    ]);
-    setPrices(pricesData);
-    setCustomPrices(customPricesData);
+    // Sprint 141 §1/§2 — NEVER THROWS. Same contract as the catalog
+    // helpers, and it matters MOST here.
+    //
+    // `CustomerServicePrice` and `CustomerCustomPrice` carry no
+    // uniqueness constraint — only lookup indexes — because multiple
+    // active rows per (customer, service) are legal by design and
+    // `resolve_price` disambiguates by `valid_from` (latest wins).
+    // So if a failed RE-READ were reported as a failed WRITE, the
+    // operator's natural retry would submit the same price again and
+    // the backend would accept it: a real duplicate active price row,
+    // silently created by an error message that was wrong. Swallowing
+    // the re-read failure here is what makes that impossible.
+    try {
+      const [pricesData, customPricesData] = await Promise.all([
+        listCustomerPrices(customerId, { includeArchived: showArchived }),
+        listCustomerCustomPrices(customerId, {
+          includeArchived: showArchived,
+        }),
+      ]);
+      setPrices(pricesData);
+      setCustomPrices(customPricesData);
+    } catch {
+      setLoadError(t("admin.refresh_after_save_failed"));
+    }
   }
 
   function openDeleteDialog(entry: PricingRow) {
@@ -837,8 +855,11 @@ export function CustomerPricingPage() {
       // Refresh so the seeded rows surface; keep the modal open so the
       // created/skipped summary stays visible. Sprint 140 §4: through
       // the helper, so the archived toggle survives the copy.
-      await refreshPricingRows(numericId);
+      // Set the summary BEFORE the re-read (Sprint 141 §2): the
+      // created/skipped counts are what this modal exists to show, and
+      // they must not be discarded because a list refresh failed.
       setCopyResult(result);
+      await refreshPricingRows(numericId);
       setCopySelectedServiceIds([]);
     } catch (err) {
       setCopyError(getApiError(err));

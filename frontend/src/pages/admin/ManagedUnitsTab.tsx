@@ -203,12 +203,21 @@ export function ManagedUnitsTab({
    * reactivating a hidden unit would appear to do nothing.
    */
   async function refreshUnits() {
-    setUnits(
-      await listManagedUnits({
-        ...(showInactive ? {} : { is_active: true }),
-        ...(selectedCompany === "" ? {} : { company: selectedCompany }),
-      }),
-    );
+    // Sprint 141 §1/§2 — NEVER THROWS, same contract and same reasoning
+    // as `ServicesAdminPage.refreshCatalogRows`: every caller runs it
+    // after a mutation that already committed, so a failed re-read must
+    // not wedge a dialog's busy flag or turn a saved row into a form
+    // error. Stale list + visible page-level error, never silence.
+    try {
+      setUnits(
+        await listManagedUnits({
+          ...(showInactive ? {} : { is_active: true }),
+          ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+        }),
+      );
+    } catch {
+      setLoadError(t("admin.refresh_after_save_failed"));
+    }
   }
 
   /**
@@ -226,8 +235,10 @@ export function ManagedUnitsTab({
         label: unit.label,
         is_active: !unit.is_active,
       });
-      await refreshUnits();
+      // Set BEFORE the re-read (Sprint 141 §2): the detail panel must
+      // not depend on a network call that is allowed to fail.
       setSelected(updated);
+      await refreshUnits();
     } catch (err) {
       setLoadError(getApiError(err));
     } finally {

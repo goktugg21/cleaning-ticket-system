@@ -281,6 +281,7 @@
   "admin.view": "Bekijken",
   "admin.status_active": "Actief",
   "admin.status_inactive": "Inactief",
+  "admin.refresh_after_save_failed": "De wijziging is opgeslagen, maar de lijst kon niet ververst worden. Vernieuw de pagina om de actuele stand te zien.",
   "admin.status_all": "Alle",
   "admin.all_companies": "Alle bedrijven",
   "admin.all_buildings": "Alle gebouwen",
