@@ -178,6 +178,28 @@ function todayISO(): string {
   ).padStart(2, "0")}`;
 }
 
+/**
+ * Sprint 137 item 4 — the pricing page opens on a CATEGORY INDEX, not
+ * on a flat table: pick a category, drill in, breadcrumb back. Every
+ * assertion about a `customer-pricing-row` therefore has to drill into
+ * the owning category first. The rows themselves are unchanged.
+ */
+async function openPricingCategory(
+  page: import("@playwright/test").Page,
+  categoryName: string,
+): Promise<void> {
+  const card = page
+    .locator("[data-testid='customer-pricing-category-card']", {
+      hasText: categoryName,
+    })
+    .first();
+  await expect(card).toBeVisible({ timeout: 10_000 });
+  await card.click();
+  await expect(
+    page.locator("[data-testid='customer-pricing-category-title']"),
+  ).toContainText(categoryName, { timeout: 5_000 });
+}
+
 test("Sprint 28 B5 — Customer-scoped sidebar shows Pricing entry", async ({
   page,
   baseURL,
@@ -254,6 +276,10 @@ test("Sprint 28 B5 — Add price: pick service, fill price, save, row appears", 
       .click();
     await expect(modal).toBeHidden({ timeout: 10_000 });
 
+    // Sprint 137 item 4 — drill into the seeded service's category
+    // before asserting on its row.
+    await openPricingCategory(page, category.name);
+
     const newRow = page
       .locator("[data-testid='customer-pricing-row']", {
         hasText: service.name,
@@ -298,6 +324,9 @@ test("Sprint 28 B5 — Edit price: change unit_price, list reflects new value", 
     await loginAs(page, DEMO_USERS.companyAdmin);
     await page.goto(`/admin/customers/${customerId}/pricing`);
     await page.waitForLoadState("networkidle");
+
+    // Sprint 137 item 4 — rows live behind their category card now.
+    await openPricingCategory(page, category.name);
 
     const row = page
       .locator("[data-testid='customer-pricing-row']", {

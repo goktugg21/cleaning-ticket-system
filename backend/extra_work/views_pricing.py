@@ -264,6 +264,27 @@ def _parse_valid_on(raw_value):
         )
 
 
+def _include_archived(request) -> bool:
+    """Sprint 137 item 2 — `?include_archived=true` opt-in.
+
+    DELETE on both pricing endpoints soft-archives (`is_active=False`)
+    rather than hard-deleting, because `ExtraWorkRequestItem.
+    snapshot_customer_service_price` still points at contract rows
+    (SET_NULL) and archiving keeps that operational-history link intact.
+    The list endpoints used to return archived rows unconditionally, so
+    a "deleted" price reappeared greyed-out on the next page load and
+    the operator's delete looked like it had silently failed.
+
+    Archived rows are now hidden unless the caller opts in (the
+    frontend's "Show archived" toggle). Anything other than a truthy
+    string means "hide", so a malformed value fails safe.
+    """
+    raw = request.query_params.get("include_archived")
+    if raw is None:
+        return False
+    return raw.strip().lower() in {"true", "1", "yes", "y"}
+
+
 class CustomerServicePriceListCreateView(generics.ListCreateAPIView):
     """GET (list) + POST (create) at
     /api/customers/<customer_id>/pricing/.
@@ -359,6 +380,16 @@ class CustomerServicePriceListCreateView(generics.ListCreateAPIView):
                     qs = qs.filter(is_active=True)
                 elif lowered in {"false", "0", "no", "n"}:
                     qs = qs.filter(is_active=False)
+            elif not _include_archived(self.request):
+                # Sprint 137 item 2 — archived rows are HIDDEN by default.
+                # DELETE soft-archives (see `delete` below), and this list
+                # used to return the archived row again on the next load,
+                # so a "deleted" price reappeared greyed-out and the
+                # operator's delete looked like it had silently failed.
+                # `?include_archived=true` opts back in (the "Show
+                # archived" toggle); an explicit `?is_active=` still wins
+                # so existing callers are byte-identical.
+                qs = qs.filter(is_active=True)
 
         return qs.order_by("-valid_from", "-id")
 
@@ -952,6 +983,13 @@ class CustomerCustomPriceListCreateView(generics.ListCreateAPIView):
                 qs = qs.filter(is_active=True)
             elif lowered in {"false", "0", "no", "n"}:
                 qs = qs.filter(is_active=False)
+        elif not _include_archived(self.request):
+            # Sprint 137 item 2 — archived rows hidden by default, same
+            # rule as the contract-price list above. These two lists are
+            # merged into ONE table on the pricing page, so "delete" has
+            # to mean the same thing on both: a mixed selection that
+            # half-vanished and half-stayed would be worse than either.
+            qs = qs.filter(is_active=True)
         return qs.order_by("-valid_from", "-id")
 
     def perform_create(self, serializer):

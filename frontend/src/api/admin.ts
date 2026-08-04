@@ -42,6 +42,7 @@ import type {
   ServiceBulkRaisePayload,
   ServiceBulkRaiseResult,
   ServiceCategory,
+  ServiceCategoryArchiveResult,
   ServiceCategoryCreatePayload,
   ServiceCategoryUpdatePayload,
   ServiceCreatePayload,
@@ -1527,9 +1528,46 @@ export async function deleteServiceCategory(id: number): Promise<void> {
   await api.delete(`/services/categories/${id}/`);
 }
 
+/**
+ * Sprint 138 §2a — archive a category TOGETHER WITH its services, in
+ * one backend transaction. `Service.category` is not nullable, so a
+ * service cannot live outside a category; leaving a retired category's
+ * services active would strand them (live in every picker, invisible in
+ * the category UI).
+ *
+ * SUPER_ADMIN only — categories are global.
+ */
+export async function archiveServiceCategory(
+  id: number,
+): Promise<ServiceCategoryArchiveResult> {
+  const response = await api.post<ServiceCategoryArchiveResult>(
+    `/services/categories/${id}/archive/`,
+  );
+  return response.data;
+}
+
+/**
+ * Sprint 138 §2a — restore the CATEGORY only. Its services stay
+ * archived: reactivating one is a separate deliberate act (it becomes
+ * orderable again). `still_archived_service_count` is what the UI
+ * reports so the operator is not left assuming a full restore.
+ */
+export async function unarchiveServiceCategory(
+  id: number,
+): Promise<ServiceCategoryArchiveResult> {
+  const response = await api.post<ServiceCategoryArchiveResult>(
+    `/services/categories/${id}/unarchive/`,
+  );
+  return response.data;
+}
+
 export interface ServiceListParams {
   category?: number;
   is_active?: boolean;
+  // Sprint 139 §4 — narrow to one provider company. Applied by the
+  // backend BEFORE `filter_services_for`, so it can only ever narrow
+  // what the actor already sees, never widen it.
+  company?: number;
 }
 
 export async function listServices(
@@ -1541,6 +1579,9 @@ export async function listServices(
   }
   if (params.is_active !== undefined) {
     query.is_active = params.is_active ? "true" : "false";
+  }
+  if (params.company !== undefined) {
+    query.company = params.company;
   }
   const response = await api.get<PaginatedResponse<Service>>("/services/", {
     params: query,
@@ -1655,6 +1696,9 @@ export async function deleteManagedUnit(id: number): Promise<void> {
 
 export interface CustomerServicePriceListParams {
   service?: number;
+  // Sprint 137 item 2 — archived (soft-deleted) rows are hidden by the
+  // backend unless this is true. Omit it for the normal view.
+  includeArchived?: boolean;
 }
 
 export async function listCustomerPrices(
@@ -1664,6 +1708,9 @@ export async function listCustomerPrices(
   const query: Record<string, string | number> = {};
   if (params.service !== undefined) {
     query.service = params.service;
+  }
+  if (params.includeArchived) {
+    query.include_archived = "true";
   }
   const response = await api.get<PaginatedResponse<CustomerServicePrice>>(
     `/customers/${customerId}/pricing/`,
@@ -1717,9 +1764,17 @@ export async function deleteCustomerPrice(
 // `/api/customers/<customer_id>/custom-pricing/<custom_price_id>/` — detail.
 export async function listCustomerCustomPrices(
   customerId: number,
+  // Sprint 137 item 2 — same hide-archived-by-default rule as the
+  // contract-price list; both feed one merged table on the pricing page.
+  params: { includeArchived?: boolean } = {},
 ): Promise<CustomerCustomPrice[]> {
+  const query: Record<string, string> = {};
+  if (params.includeArchived) {
+    query.include_archived = "true";
+  }
   const response = await api.get<PaginatedResponse<CustomerCustomPrice>>(
     `/customers/${customerId}/custom-pricing/`,
+    { params: query },
   );
   return response.data.results;
 }

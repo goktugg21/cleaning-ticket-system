@@ -96,6 +96,13 @@ class LineClassification:
     snapshot_vat_pct: Optional[object] = None
     snapshot_service_name: str = ""
     snapshot_service_category_name: str = ""
+    # Sprint 137 item 6 — the CustomerCustomPrice a custom-price line
+    # was ordered from, plus the unit type + label to denormalise onto
+    # the cart row. Set ONLY for custom-price lines; None everywhere
+    # else, so every existing caller is byte-identical.
+    custom_price: Optional[object] = None
+    custom_unit_type: Optional[str] = None
+    custom_description: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,7 @@ def classify_line(
     customer,
     requested_date: date,
     custom_description: str,
+    custom_price=None,
 ) -> LineClassification:
     """Classify one cart line.
 
@@ -125,7 +133,30 @@ def classify_line(
         ⇒ AGREED_CUSTOMER_PRICE with snapshot.
       * service is set + resolver returns None ⇒
         NEEDS_PROVIDER_PRICING.
+
+    Sprint 137 item 6 — `custom_price` (a `CustomerCustomPrice`) is a
+    THIRD way to express a line with no catalog row. It still
+    classifies as AD_HOC: a custom price is not a `CustomerServicePrice`
+    and `resolve_price()` can never return one, so treating it as
+    "agreed" would put a line into the INSTANT route that
+    `instant_tickets.spawn_instant_ticket` then re-resolves and rejects
+    (`instant_spawn_price_lost`). Keeping it AD_HOC leaves routing,
+    `all_agreed` and the spawn guard byte-identical; the amount rides
+    along in the snapshot fields so the provider prices it with the
+    agreed number already in hand instead of retyping it.
     """
+    if custom_price is not None:
+        return LineClassification(
+            source=ExtraWorkLinePriceSource.AD_HOC,
+            contract=None,
+            snapshot_unit_price=custom_price.unit_price,
+            snapshot_vat_pct=custom_price.vat_pct,
+            snapshot_service_name=custom_price.custom_name,
+            custom_price=custom_price,
+            custom_unit_type=custom_price.unit_type,
+            custom_description=custom_price.custom_name,
+        )
+
     if service is None:
         # Ad-hoc / free-text line. `custom_description` is the
         # operator-facing label and is captured on the line; we do

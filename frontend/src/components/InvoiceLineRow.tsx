@@ -115,8 +115,18 @@ function normalize(props: InvoiceLineRowProps): NormalizedLine {
       // Cart lines have no own price snapshot. The Unit Price column
       // mirrors the live-resolved contract price when the backend
       // labels this line CONTRACT, else "—".
+      // `service_name` is null on every service-less line — free-text
+      // ad-hoc lines and, since Sprint 137 item 6, lines ordered from a
+      // CustomerCustomPrice. Fall back to `custom_description` (which
+      // for a custom-price line IS the price row's name, stamped at
+      // create time) exactly as the proposal branch below already does;
+      // without it the owner orders "Graffiti removal" and the detail
+      // page shows him "—".
       return {
-        label: line.service_name || "—",
+        label:
+          (line.service_name && line.service_name.trim()) ||
+          (line.custom_description && line.custom_description.trim()) ||
+          "—",
         quantity: line.quantity,
         unitType: line.unit_type,
         unitPrice: line.contract_unit_price,

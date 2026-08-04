@@ -2222,6 +2222,58 @@ table.data-table {
   cursor: pointer;
 }
 
+/* Sprint 137 item 1 — staged multi-attachment list on CreateTicketPage.
+   One row per staged file with a per-file remove button; the files are
+   uploaded as N sequential POSTs after the ticket is created. */
+.staged-attachment-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.staged-attachment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.staged-attachment-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.staged-attachment-size {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.staged-attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.staged-attachment-remove:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 /* Back link */
 .link-back {
   display: inline-flex;
@@ -6562,15 +6614,42 @@ a.attn-row:hover {
 .ew-list-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px 12px;
   padding: 12px 14px;
   margin-bottom: 16px;
-  align-items: center;
+  /* Sprint 138 §6 — bottom-align, not centre. The stacked fields
+     (label over control) and the label-less search box have different
+     heights, and centring them left every control sitting at a slightly
+     different offset — the visual raggedness the owner reported. */
+  align-items: flex-end;
 }
+/* Sprint 138 §6 — each filter is a compact STACK (label above its
+   control) instead of label-beside-control. Nine inline label+control
+   pairs were far too wide to share a line, so the bar wrapped into
+   three ragged rows and read as unfinished. Stacking roughly halves
+   each item's width, so the same nine controls wrap into one tidy row
+   at 1280px and degrade gracefully below it. */
 .ew-list-filters .filter-field {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  /* Grow to share the row evenly so the right edge is flush instead of
+     ragged, but never shrink below a readable control width. */
+  flex: 1 1 140px;
+  min-width: 140px;
+}
+.ew-list-filters .filter-field > .filter-label {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+/* The cascade hint spans the whole row beneath the controls it
+   describes, rather than floating between them as a pseudo-field. */
+.ew-list-filters-hint {
+  flex-basis: 100%;
+  margin-top: 2px;
 }
 /* Sprint 28 Batch 15.5 — keep the search icon inline-left of the
    input on wide screens. The previous rule inherited `flex-wrap`
@@ -6578,10 +6657,13 @@ a.attn-row:hover {
    >=1200px. Pinning the field to inline-flex with an explicit gap
    anchors the icon and lets the input flex to fill the remaining
    row width without ever flipping to two visual rows. */
+/* The search field keeps its icon INLINE with the input (it has no
+   label to stack), and is the one item allowed to absorb slack. */
 .ew-list-filters .filter-field.search {
-  flex: 1;
-  min-width: 200px;
+  flex: 1 1 200px;
+  min-width: 180px;
   display: inline-flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   position: relative;
@@ -8068,5 +8150,105 @@ details[open] > .ew-department-tree-summary::before {
   color: var(--text-2);
 }
 .ew-department-tree-worktype-row:hover {
+  background: var(--surface-2);
+}
+
+/* Sprint 137 item 4 — customer pricing category index. A responsive
+   grid of category cards replacing the single flat table; each card
+   drills into that category's priced rows. Grid rather than a fixed
+   column count so it collapses cleanly on narrow viewports. */
+.pricing-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+.pricing-category-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.pricing-category-card:hover {
+  border-color: var(--green-2);
+  background: var(--green-faint);
+}
+.pricing-category-card-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+}
+
+/* Sprint 137 item 7 — iOS-style list edit mode. The checkbox column
+   only exists while edit mode is on, so the default read view keeps
+   exactly the geometry it had before. */
+.list-edit-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.list-edit-checkbox-cell {
+  width: 34px;
+  text-align: center;
+}
+.list-edit-failure-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+/* Sprint 138 §3 — an archived PRICE row is a read-only audit record:
+   visually quiet, no checkbox, not selectable. Kept deliberately
+   subtle rather than struck through — it is history, not an error.
+   Sprint 139 §1 generalised the colours to `.list-row-archived`; the
+   not-selectable cursor stays price-specific, since an inactive
+   SERVICE row is still clickable (you reactivate it from its detail). */
+.list-row-archived[data-archived="true"] {
+  cursor: default;
+}
+.list-row-archived[data-archived="true"]:hover {
+  background: var(--surface-2);
+}
+
+/* Sprint 138 §5 — copy-from-defaults picker grouped by category, with
+   a per-category select-all in each header. */
+.copy-default-group {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+.copy-default-group:first-child {
+  border-top: none;
+  margin-top: 0;
+}
+.copy-default-group-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+.copy-default-group-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Sprint 139 §1 — one quiet-row treatment for every catalog list that
+   hides archived/inactive rows behind a toggle (customer prices,
+   services, units). Replaces the price-only `.pricing-row-archived`. */
+.list-row-archived {
+  color: var(--text-muted);
   background: var(--surface-2);
 }

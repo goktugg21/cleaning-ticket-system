@@ -1242,6 +1242,15 @@ export interface ExtraWorkRequestItem {
   id: number;
   service: number | null;
   service_name: string;
+  // Sprint 137 item 6 — the CustomerCustomPrice this line was ordered
+  // from, or null. Non-null identifies a custom-price line: no catalog
+  // service, but a name/unit/amount already agreed with the customer.
+  custom_price: number | null;
+  // Free-text label for any service-less line. Set by the operator on a
+  // free-text ad-hoc line, and stamped from the price row's
+  // `custom_name` on a custom-price line — the only label those lines
+  // have, since `service_name` is null for both.
+  custom_description: string;
   // DRF serialises Decimal as a string to preserve precision.
   quantity: string;
   unit_type: ServiceUnitType;
@@ -1452,6 +1461,12 @@ export interface ExtraWorkRequestCartCreatePayload {
   line_items: Array<{
     service?: number;
     custom_description?: string;
+    // Sprint 137 item 6 — a per-customer CustomerCustomPrice ordered
+    // as a cart line. Third mutually-exclusive alternative alongside
+    // `service` and `custom_description`; the backend snapshots the
+    // row's name / unit / amount onto the line and classifies it
+    // AD_HOC (so routing is unchanged).
+    custom_price?: number;
     // Decimal as string per DRF convention.
     quantity: string;
     requested_date: string;
@@ -1536,6 +1551,11 @@ export type ExtraWorkIntentErrorCode =
 export interface ExtraWorkPreviewLinePayload {
   service?: number | null;
   custom_description?: string;
+  // Sprint 137 item 6 — order a per-customer CustomerCustomPrice. A
+  // line carries exactly ONE of service / custom_description /
+  // custom_price; sending more than one is a 400 with code
+  // `line_requires_service_or_description`.
+  custom_price?: number | null;
   // Decimal as string per DRF convention.
   quantity: string;
   requested_date: string;
@@ -1565,6 +1585,14 @@ export interface ExtraWorkPreviewLine {
   service_category_name: string;
   agreed_unit_price: string | null;
   agreed_vat_pct: string | null;
+  // Sprint 137 item 6 — set only on a line ordered from a
+  // CustomerCustomPrice. The line's `price_source` stays AD_HOC (a
+  // custom price is not a contract price and never routes INSTANT),
+  // but its amount IS known, so it is returned instead of leaving the
+  // row as "to be priced by the provider".
+  custom_price: number | null;
+  custom_price_unit_price: string | null;
+  custom_price_vat_pct: string | null;
 }
 
 // Cart-level classification booleans.
@@ -1854,8 +1882,29 @@ export interface ServiceCategory {
   name: string;
   description: string;
   is_active: boolean;
+  // Sprint 138 §2 — how many services this category holds, so the UI
+  // can decide which actions to OFFER instead of offering all of them
+  // and letting the operator discover which ones 400. `Service.category`
+  // is PROTECT and NOT nullable, so a category holding ANY service is
+  // permanently undeletable: Delete is offered only at service_count 0.
+  // `active_service_count` is what the cascade-archive confirmation
+  // counts. Both are scoped to the catalog the actor can see.
+  service_count: number;
+  active_service_count: number;
   created_at: string;
   updated_at: string;
+}
+
+// Sprint 138 §2a — result of POST /services/categories/<id>/archive/
+// (or /unarchive/). Named for what ACTUALLY happened: an unarchive
+// deactivates nothing and reports how many services stayed archived.
+export interface ServiceCategoryArchiveResult {
+  category: ServiceCategory;
+  deactivated_service_count: number;
+  // A category is GLOBAL, so archiving one can reach services owned by
+  // several provider companies. Surfaced so that never happens silently.
+  affected_company_count: number;
+  still_archived_service_count: number;
 }
 
 export interface ServiceCategoryCreatePayload {
@@ -1890,6 +1939,13 @@ export type ManagedUnitUpdatePayload = Partial<ManagedUnitCreatePayload>;
 
 export interface Service {
   id: number;
+  // Sprint 3B — the owning provider company. Always present on reads
+  // (the model column is NOT NULL); write-once on CREATE, read-only on
+  // UPDATE. Added to this type in Sprint 139 §4, when the company
+  // selector started filtering the list client-side as well as server-
+  // side — the field was always on the wire, just not declared here.
+  company: number;
+  company_name: string;
   category: number;
   category_name: string;
   name: string;
@@ -1910,6 +1966,12 @@ export interface Service {
   default_unit_price: string;
   default_vat_pct: string;
   is_active: boolean;
+  // Sprint 138 §1 — does ANY CustomerServicePrice row reference this
+  // service, ACTIVE OR ARCHIVED? `CustomerServicePrice.service` is
+  // PROTECT and "deleting" a price only archives it (Sprint 137 item 2),
+  // so true here means the service is permanently undeletable and the
+  // UI must offer Deactiveren rather than Delete.
+  has_price_rows: boolean;
   created_at: string;
   updated_at: string;
 }
