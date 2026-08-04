@@ -55,10 +55,10 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-137-ramazan-round-1` — Sprint 137 items 1-7,
-the Sprint 138 round-2 items, and the Sprint 139 round-3 consistency
-fixes, all found by the owner testing the previous round on crmtest
-before merging. Cut from `main`@`751bb8d`. **Still ONE PR**; nothing
+**Branch:** `fix/sprint-137-ramazan-round-1` — Sprint 137 items 1-7, the
+Sprint 138 round-2 items, the Sprint 139 round-3 consistency fixes, and
+the Sprint 140 round-4 completion of them; each round found by the owner
+or the PM verifying the previous one before merging. Cut from `main`@`751bb8d`. **Still ONE PR**; nothing
 merges in between, and CC does not open PRs — the owner does.
 
 **Last shipped PR on `main`: #126** — Sprints 133/134/135/136. Its
@@ -181,6 +181,63 @@ places; these make them agree.
   list, never that company's catalog (asserted). Categories are global
   and unaffected; the page already said so on the Categories tab, and
   the Services/Units tabs now say what the selector DOES do there.
+
+**Round 4 (Sprint 140) — finishing round 3 properly.** The PM's
+verification of `649b854` found Sprint 139 §1 incomplete in four places,
+all one shape: **the list contradicted its own toggle.** Fixed by
+construction rather than site by site.
+
+- **§1/§2 The Services mutation paths bypassed the filter, and the
+  helper could drop a row but never bring one back.** Create and edit
+  wrote straight into `services`, so creating a service with Active
+  unticked (or unticking it in the edit modal) left a row on screen that
+  the toggle claimed to hide. Worse, `applyServiceUpdates` mapped over
+  the rows already displayed: once a deactivated row had LEFT the list,
+  pressing **Activeren** PATCHed successfully and the row never came
+  back. Every local-merge variant has that hole in one direction or the
+  other, so local merging was abandoned — every mutation now re-reads
+  through `refreshCatalogRows()`, which honours the archived toggle and
+  the company filter, and refetches category counts alongside (a
+  create, delete or category change moves the `service_count` that gates
+  Delete on the Categories tab).
+
+  Chosen over a merge-and-insert helper deliberately: the server orders
+  services by `category__name, name, id`, while the client insert it
+  would have replaced sorted by `name` alone — the two ALREADY
+  disagreed, so re-implementing insertion would have cemented a second,
+  wrong ordering rule. One round-trip on an admin page is the cheaper
+  correctness, and there is no flicker (single `setState`, loading bar
+  untouched, no intermediate empty render).
+- **§3 The Units tab had received none of Sprint 139's treatment.** Its
+  create and edit paths were bare `setUnits` with no helper in the file
+  at all — and since the edit modal's Active toggle was the only way to
+  deactivate a unit, deactivating one left it sitting in a list that
+  claimed to hide inactive rows. It now has the same `refreshUnits()`
+  treatment on create, edit, delete and bulk delete. It also gained the
+  **Activeren / Deactiveren** action the Services detail panel has:
+  Sprint 139 reused `services.inactive_included_note`, which tells the
+  operator inactive rows can be "reactivated from their detail panel",
+  and that panel had no such control. Fixed by adding the control, NOT
+  by softening the sentence.
+- **§4 The customer pricing page had the mirror-image bug, in both
+  directions, at more sites than the review flagged.** Bulk-adjust and
+  copy-from-defaults refetched without `{ includeArchived: showArchived }`
+  — but so did create, edit, single delete and bulk archive, each in its
+  own way. With the toggle OFF, creating or editing a row to inactive
+  inserted or kept a row that should not be listed; with the toggle ON,
+  deleting or bulk-archiving REMOVED a row from view even though an
+  archived row is precisely what that toggle exists to show. All six now
+  go through one `refreshPricingRows()`; only the load effect and that
+  helper write the price lists at all.
+- **§5** One stale comment corrected: the Units endpoint docstring still
+  claimed the admin surface requests the unfiltered list, which stopped
+  being true in Sprint 139 §1.
+
+No backend behaviour changed this round (one docstring), so the Django
+suite was deliberately NOT run — CI's parallel full regression on the PR
+is the gate, and this box has one core. The DEV database was one
+migration behind HEAD and was brought to `extra_work.0022`; crmtest was
+already there and was not touched.
 
 FE gate: tsc clean, ESLint **48** (46 errors, 2 warnings — baseline held,
 no new violations, no new `eslint-disable`), build OK. nl/en verified

@@ -903,9 +903,15 @@ class ManagedUnitListCreateView(generics.ListCreateAPIView):
     reuse the exact Service scoping/policy rules (same permission key,
     per the sprint brief — no new one invented).
 
-    `?is_active=true|false` filters the list (the frontend picker
-    requests `is_active=true`; the admin management surface requests
-    the unfiltered list so archived rows stay visible/reactivatable).
+    `?is_active=true|false` filters the list. BOTH consumers send
+    `is_active=true` by default: the `ManagedUnitPicker` (an archived
+    unit must not be offerable on a form) and — since Sprint 139 §1 —
+    the admin Units tab, which hides inactive rows behind a show/hide
+    toggle exactly as the Services and customer-pricing lists do.
+    Flipping that toggle drops the param entirely, which is how an
+    archived unit stays reachable to be reactivated. (This paragraph
+    previously claimed the admin surface requested the unfiltered list;
+    that stopped being true in Sprint 139 and was corrected in 140 §5.)
     `?company=<id>` lets a SUPER_ADMIN narrow to one company's units
     (mirrors Service's `?category=` filter shape).
     """

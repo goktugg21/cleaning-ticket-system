@@ -104,6 +104,7 @@ export function ManagedUnitsTab({
   const [bulkDone, setBulkDone] = useState<number | null>(null);
   // Sprint 139 §1 — off by default (see the load effect).
   const [showInactive, setShowInactive] = useState(false);
+  const [toggleBusy, setToggleBusy] = useState(false);
 
   // Sprint 139 §1 — inactive units are hidden by default, same rule
   // and same toggle shape as the Services list and the customer pricing
@@ -170,18 +171,16 @@ export function ManagedUnitsTab({
     };
     try {
       if (mode === "create") {
-        const created = await createManagedUnit(payload);
-        setUnits((prev) =>
-          [...prev, created].sort((a, b) => a.label.localeCompare(b.label)),
-        );
+        await createManagedUnit(payload);
+        // Sprint 140 §3 — the form carries an Active toggle, so a new
+        // row may not match the active filters at all.
+        await refreshUnits();
         closeModal();
       } else if (mode === "edit" && selected) {
         const updated = await updateManagedUnit(selected.id, payload);
-        setUnits((prev) =>
-          prev
-            .map((u) => (u.id === updated.id ? updated : u))
-            .sort((a, b) => a.label.localeCompare(b.label)),
-        );
+        // Sprint 140 §3 — unticking Active here used to leave the row
+        // in a list that claims to hide inactive rows.
+        await refreshUnits();
         setSelected(updated);
         closeModal();
       }
@@ -189,6 +188,50 @@ export function ManagedUnitsTab({
       setFormError(getApiError(err));
     } finally {
       setFormBusy(false);
+    }
+  }
+
+  /**
+   * Sprint 140 §3 — re-read the unit list after ANY mutation, honouring
+   * the active archived toggle and company filter. The Services tab got
+   * this treatment in Sprint 139; this tab got none of it, so a unit
+   * deactivated through the edit modal's Active toggle stayed sitting
+   * in a list that claimed to hide inactive rows.
+   *
+   * Same choice as the Services tab: re-read rather than merge locally.
+   * A local merge can drop a row but never bring one back, so
+   * reactivating a hidden unit would appear to do nothing.
+   */
+  async function refreshUnits() {
+    setUnits(
+      await listManagedUnits({
+        ...(showInactive ? {} : { is_active: true }),
+        ...(selectedCompany === "" ? {} : { company: selectedCompany }),
+      }),
+    );
+  }
+
+  /**
+   * Sprint 140 §3 — single-row (de)activate, mirroring the Services
+   * detail panel. Before this the edit modal's Active toggle was the
+   * ONLY way to deactivate a unit, while the list told the operator
+   * inactive rows could be "reactivated from their detail panel" — a
+   * control that did not exist. Adding it makes the sentence true and
+   * makes the two tabs behave identically.
+   */
+  async function handleToggleUnitActive(unit: ManagedUnit) {
+    setToggleBusy(true);
+    try {
+      const updated = await updateManagedUnit(unit.id, {
+        label: unit.label,
+        is_active: !unit.is_active,
+      });
+      await refreshUnits();
+      setSelected(updated);
+    } catch (err) {
+      setLoadError(getApiError(err));
+    } finally {
+      setToggleBusy(false);
     }
   }
 
@@ -207,7 +250,7 @@ export function ManagedUnitsTab({
     setDeleteBusy(true);
     try {
       await deleteManagedUnit(deleteTarget.id);
-      setUnits((prev) => prev.filter((u) => u.id !== deleteTarget.id));
+      await refreshUnits();
       if (selected?.id === deleteTarget.id) {
         setSelected(null);
       }
@@ -265,7 +308,7 @@ export function ManagedUnitsTab({
     }
 
     if (deletedIds.length > 0) {
-      setUnits((prev) => prev.filter((u) => !deletedIds.includes(u.id)));
+      await refreshUnits();
       if (selected && deletedIds.includes(selected.id)) {
         setSelected(null);
       }
@@ -508,6 +551,20 @@ export function ManagedUnitsTab({
               </h3>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
+              {/* Sprint 140 §3 — mirrors the Services detail panel.
+                  Without it, the list's "reactivate from their detail
+                  panel" note pointed at a control that did not exist. */}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                data-testid="services-unit-toggle-active-button"
+                onClick={() => void handleToggleUnitActive(selected)}
+                disabled={toggleBusy}
+              >
+                {selected.is_active
+                  ? t("services.deactivate_button")
+                  : t("services.activate_button")}
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"

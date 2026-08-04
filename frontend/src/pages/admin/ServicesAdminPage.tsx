@@ -485,20 +485,19 @@ export function ServicesAdminPage() {
     };
     try {
       if (serviceMode === "create") {
-        const created = await createService(
+        await createService(
           catalogCompany === "" ? payload : { ...payload, company: catalogCompany },
         );
-        setServices((prev) =>
-          [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
-        );
+        // Sprint 140 §1 — the form carries an Active toggle, so a
+        // freshly created row may not match the active filters at all.
+        // Re-read rather than blind-append.
+        await refreshCatalogRows();
         closeServiceModal();
       } else if (serviceMode === "edit" && selectedService) {
         const updated = await updateService(selectedService.id, payload);
-        setServices((prev) =>
-          prev
-            .map((s) => (s.id === updated.id ? updated : s))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        );
+        // Sprint 140 §1 — unticking Active in the edit modal used to
+        // leave the row on screen greyed out, contradicting the toggle.
+        await refreshCatalogRows();
         setSelectedService(updated);
         closeServiceModal();
       }
@@ -545,9 +544,11 @@ export function ServicesAdminPage() {
       setDeleteBusy(true);
       try {
         await deleteService(deleteServiceTarget.id);
-        setServices((prev) =>
-          prev.filter((s) => s.id !== deleteServiceTarget.id),
-        );
+        // Sprint 140 §1 — a removal is always filter-correct on its
+        // own, but the delete drops its category's `service_count`,
+        // which is what gates Delete on the Categories tab. Re-read
+        // both rather than let that count go stale.
+        await refreshCatalogRows();
         if (selectedService?.id === deleteServiceTarget.id) {
           setSelectedService(null);
         }
@@ -578,20 +579,37 @@ export function ServicesAdminPage() {
   }
 
   /**
-   * Drop a row that no longer matches the active filters (e.g. a
-   * service just deactivated while inactive rows are hidden) instead of
-   * leaving it on screen contradicting the toggle.
+   * Sprint 140 §1/§2 — re-read the catalog from the server after ANY
+   * mutation, honouring the active archived toggle and company filter.
+   *
+   * This replaces Sprint 139's `applyServiceUpdates`, which mapped over
+   * the rows already on screen and could therefore DROP a row but never
+   * bring one back: after deactivating a service (it left the list),
+   * pressing Activeren PATCHed successfully and the row never
+   * reappeared. Every local-merge variant has that hole in one
+   * direction or the other, so the fix is to stop merging locally.
+   *
+   * Chosen over a merge-and-insert helper deliberately: the server
+   * orders services by `category__name, name, id`
+   * (`ServiceListCreateView.get_queryset`), while the client insert it
+   * would replace sorted by `name` alone — the two ALREADY disagreed,
+   * so re-implementing insertion would have cemented a second, wrong
+   * ordering rule. One round-trip on an admin page is the cheaper
+   * correctness. No flicker: the list is swapped in a single setState
+   * with the loading bar untouched, so there is no intermediate empty
+   * render.
+   *
+   * Categories are refetched alongside because a create, delete, or
+   * category change moves a category's `service_count`, which is what
+   * decides whether the Categories tab offers Delete (Sprint 138 §2c).
    */
-  function applyServiceUpdates(updated: Service[]) {
-    const byId = new Map(updated.map((svc) => [svc.id, svc]));
-    setServices((prev) =>
-      prev
-        .map((svc) => byId.get(svc.id) ?? svc)
-        .filter((svc) => showInactive || svc.is_active)
-        .filter(
-          (svc) => catalogCompany === "" || svc.company === catalogCompany,
-        ),
-    );
+  async function refreshCatalogRows() {
+    const [servicesData, categoriesData] = await Promise.all([
+      listServices(currentServiceListParams()),
+      listServiceCategories(),
+    ]);
+    setServices(servicesData);
+    setCategories(categoriesData);
   }
 
   // ---- Sprint 137 item 7 — bulk delete (services list edit mode) ----
@@ -642,7 +660,8 @@ export function ServicesAdminPage() {
     }
 
     if (deletedIds.length > 0) {
-      setServices((prev) => prev.filter((s) => !deletedIds.includes(s.id)));
+      // Same reasoning as the single delete: category counts move.
+      await refreshCatalogRows();
       if (selectedService && deletedIds.includes(selectedService.id)) {
         setSelectedService(null);
       }
@@ -690,7 +709,7 @@ export function ServicesAdminPage() {
 
     if (updated.length > 0) {
       const byId = new Map(updated.map((s) => [s.id, s]));
-      applyServiceUpdates(updated);
+      await refreshCatalogRows();
       if (selectedService && byId.has(selectedService.id)) {
         setSelectedService(byId.get(selectedService.id) ?? null);
       }
@@ -737,9 +756,10 @@ export function ServicesAdminPage() {
         prev.map((c) => (c.id === result.category.id ? result.category : c)),
       );
       setSelectedCategory(result.category);
-      // The cascade changed Service.is_active rows underneath us.
+      // The cascade changed Service.is_active rows underneath us, and
+      // the category's own counts with them.
       try {
-        setServices(await listServices(currentServiceListParams()));
+        await refreshCatalogRows();
       } catch {
         // Non-fatal — the archive itself succeeded.
       }
@@ -782,9 +802,10 @@ export function ServicesAdminPage() {
       const updated = await updateService(service.id, {
         is_active: !service.is_active,
       });
-      applyServiceUpdates([updated]);
+      await refreshCatalogRows();
       // Keep the detail panel on the row so the operator can flip it
-      // straight back, even when the list itself no longer shows it.
+      // straight back, even when the list itself no longer shows it —
+      // and now the row genuinely RETURNS to the list when reactivated.
       setSelectedService(updated);
     } catch (err) {
       setLoadError(getApiError(err));
@@ -840,18 +861,10 @@ export function ServicesAdminPage() {
 
     if (updated.length > 0) {
       const byId = new Map(updated.map((s) => [s.id, s]));
-      applyServiceUpdates(updated);
+      // Refreshes services AND the category counts a move changes.
+      await refreshCatalogRows();
       if (selectedService && byId.has(selectedService.id)) {
         setSelectedService(byId.get(selectedService.id) ?? null);
-      }
-      // A move changes every category's service_count, which is what
-      // decides whether Delete is offered on the Categories tab — so
-      // refresh them rather than let the counts go stale.
-      try {
-        setCategories(await listServiceCategories());
-      } catch {
-        // Non-fatal: the move itself succeeded. The counts refresh on
-        // the next page load.
       }
     }
     setServiceBulkIds(failed.map((f) => f.id));

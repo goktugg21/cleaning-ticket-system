@@ -476,8 +476,8 @@ export function CustomerPricingPage() {
           managed_unit: form.unit_type === "OTHER" ? form.managed_unit : null,
         };
         if (mode === "create") {
-          const created = await createCustomerCustomPrice(numericId, payload);
-          setCustomPrices((prev) => [created, ...prev]);
+          await createCustomerCustomPrice(numericId, payload);
+          await refreshPricingRows(numericId);
           closeFormModal();
         } else if (mode === "edit" && selected?.kind === "custom") {
           const updated = await updateCustomerCustomPrice(
@@ -485,9 +485,7 @@ export function CustomerPricingPage() {
             selected.row.id,
             payload,
           );
-          setCustomPrices((prev) =>
-            prev.map((p) => (p.id === updated.id ? updated : p)),
-          );
+          await refreshPricingRows(numericId);
           setSelected({ kind: "custom", row: updated });
           closeFormModal();
         }
@@ -497,8 +495,8 @@ export function CustomerPricingPage() {
           service: Number(form.service),
         };
         if (mode === "create") {
-          const created = await createCustomerPrice(numericId, payload);
-          setPrices((prev) => [created, ...prev]);
+          await createCustomerPrice(numericId, payload);
+          await refreshPricingRows(numericId);
           closeFormModal();
         } else if (mode === "edit" && selected?.kind === "contract") {
           const updated = await updateCustomerPrice(
@@ -506,9 +504,7 @@ export function CustomerPricingPage() {
             selected.row.id,
             payload,
           );
-          setPrices((prev) =>
-            prev.map((p) => (p.id === updated.id ? updated : p)),
-          );
+          await refreshPricingRows(numericId);
           setSelected({ kind: "contract", row: updated });
           closeFormModal();
         }
@@ -518,6 +514,31 @@ export function CustomerPricingPage() {
     } finally {
       setFormBusy(false);
     }
+  }
+
+  /**
+   * Sprint 140 §4 — re-read BOTH price lists after any mutation,
+   * honouring the archived toggle. The load effect already passed
+   * `{ includeArchived: showArchived }`; every post-mutation path did
+   * not, so the toggle silently lost its effect the moment the operator
+   * did anything.
+   *
+   * The bug ran in both directions, which is why local merging was
+   * abandoned here too rather than patched:
+   *   - with the toggle OFF, creating or editing a row to INACTIVE
+   *     inserted/kept a row that should not be listed (the form has its
+   *     own Active toggle);
+   *   - with the toggle ON, deleting or bulk-archiving a row REMOVED it
+   *     from view, even though an archived row is exactly what that
+   *     toggle exists to show.
+   */
+  async function refreshPricingRows(customerId: number) {
+    const [pricesData, customPricesData] = await Promise.all([
+      listCustomerPrices(customerId, { includeArchived: showArchived }),
+      listCustomerCustomPrices(customerId, { includeArchived: showArchived }),
+    ]);
+    setPrices(pricesData);
+    setCustomPrices(customPricesData);
   }
 
   function openDeleteDialog(entry: PricingRow) {
@@ -532,11 +553,12 @@ export function CustomerPricingPage() {
     try {
       if (deleteTarget.kind === "custom") {
         await deleteCustomerCustomPrice(numericId, targetId);
-        setCustomPrices((prev) => prev.filter((p) => p.id !== targetId));
       } else {
         await deleteCustomerPrice(numericId, targetId);
-        setPrices((prev) => prev.filter((p) => p.id !== targetId));
       }
+      // DELETE archives rather than destroys, so with "Show archived"
+      // on the row must REMAIN listed (greyed) instead of vanishing.
+      await refreshPricingRows(numericId);
       if (selected?.kind === deleteTarget.kind && selected.row.id === targetId) {
         setSelected(null);
       }
@@ -638,15 +660,10 @@ export function CustomerPricingPage() {
       }
     }
 
-    if (archivedContractIds.length > 0) {
-      setPrices((prev) =>
-        prev.filter((p) => !archivedContractIds.includes(p.id)),
-      );
-    }
-    if (archivedCustomIds.length > 0) {
-      setCustomPrices((prev) =>
-        prev.filter((p) => !archivedCustomIds.includes(p.id)),
-      );
+    if (archivedContractIds.length > 0 || archivedCustomIds.length > 0) {
+      // Same rule as the single delete: archived rows stay listed while
+      // the toggle is on.
+      await refreshPricingRows(numericId);
     }
     // Keep only the rows that failed selected, so a retry acts on
     // exactly what is left rather than on rows already archived.
@@ -735,10 +752,10 @@ export function CustomerPricingPage() {
         direction: bulkDirection,
         valid_from: bulkValidFrom,
       });
-      // Re-fetch the catalog price list so the new validity-window rows
-      // surface (existing rows stay — history preserved server-side).
-      const refreshed = await listCustomerPrices(numericId);
-      setPrices(refreshed);
+      // Re-fetch so the new validity-window rows surface (existing rows
+      // stay — history preserved server-side). Sprint 140 §4: through
+      // the helper, so the archived toggle survives the adjust.
+      await refreshPricingRows(numericId);
       closeBulkRaise();
     } catch (err) {
       setBulkError(getApiError(err));
@@ -817,10 +834,10 @@ export function CustomerPricingPage() {
         valid_from: copyValidFrom,
         valid_to: copyValidTo || null,
       });
-      // Refresh the catalog price list so the seeded rows surface; keep
-      // the modal open so the created/skipped summary stays visible.
-      const refreshed = await listCustomerPrices(numericId);
-      setPrices(refreshed);
+      // Refresh so the seeded rows surface; keep the modal open so the
+      // created/skipped summary stays visible. Sprint 140 §4: through
+      // the helper, so the archived toggle survives the copy.
+      await refreshPricingRows(numericId);
       setCopyResult(result);
       setCopySelectedServiceIds([]);
     } catch (err) {
