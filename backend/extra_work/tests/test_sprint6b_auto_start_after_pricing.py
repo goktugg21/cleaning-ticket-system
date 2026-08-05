@@ -127,7 +127,7 @@ class AutoStartFixtureMixin:
             is_active=True,
         )
 
-        cls.cat = ServiceCategory.objects.create(name="Cat-6B")
+        cls.cat = ServiceCategory.objects.create(company=cls.company, name="Cat-6B")
         cls.service_unpriced = Service.objects.create(
             category=cls.cat,
             company=cls.company,

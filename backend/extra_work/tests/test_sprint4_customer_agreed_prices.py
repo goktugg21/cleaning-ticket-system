@@ -210,7 +210,15 @@ class Sprint4BFixtureMixin:
         )
 
         # Catalog.
-        cls.category = ServiceCategory.objects.create(name="Cleaning S4B")
+        # Sprint 142 — one category per provider. The two carry the
+        # same NAME on purpose: that is legal now (uniqueness is
+        # per-company) and it is the case worth exercising.
+        cls.category = ServiceCategory.objects.create(
+            company=cls.provider_a, name="Cleaning S4B"
+        )
+        cls.category_b = ServiceCategory.objects.create(
+            company=cls.provider_b, name="Cleaning S4B"
+        )
         cls.svc_a = Service.objects.create(
             company=cls.provider_a,
             category=cls.category,
@@ -238,7 +246,7 @@ class Sprint4BFixtureMixin:
         )
         cls.svc_b = Service.objects.create(
             company=cls.provider_b,
-            category=cls.category,
+            category=cls.category_b,
             name="Window cleaning B S4B",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("60.00"),

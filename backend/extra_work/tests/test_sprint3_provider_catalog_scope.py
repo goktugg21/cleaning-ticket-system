@@ -113,7 +113,9 @@ class TwoProviderFixtureMixin:
                                   CUSTOMER_COMPANY_ADMIN access
 
     Catalog:
-      * category               — global ServiceCategory
+      * category / category_b  — one ServiceCategory per provider
+                                  (Sprint 142; `category` was a single
+                                  GLOBAL row before)
       * svc_a / svc_a_other    — Services owned by provider_a
       * svc_b                  — Service owned by provider_b
     """
@@ -218,7 +220,15 @@ class TwoProviderFixtureMixin:
             ),
         )
 
-        cls.category = ServiceCategory.objects.create(name="Cleaning S3B")
+        # Sprint 142 — categories are company-scoped too, so provider B
+        # gets its own. Same name on both, which is exactly what
+        # per-company uniqueness now permits.
+        cls.category = ServiceCategory.objects.create(
+            company=cls.provider_a, name="Cleaning S3B"
+        )
+        cls.category_b = ServiceCategory.objects.create(
+            company=cls.provider_b, name="Cleaning S3B"
+        )
         cls.svc_a = Service.objects.create(
             company=cls.provider_a,
             category=cls.category,
@@ -237,7 +247,7 @@ class TwoProviderFixtureMixin:
         )
         cls.svc_b = Service.objects.create(
             company=cls.provider_b,
-            category=cls.category,
+            category=cls.category_b,
             name="Window cleaning B",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("60.00"),
@@ -544,8 +554,13 @@ class ServiceCreateCompanyResolutionTests(TwoProviderFixtureMixin, TestCase):
         self.assertIn("service_company_required", codes)
 
     def test_super_admin_post_with_company_creates(self):
+        # Sprint 142 — `category_b` too: a Service's category must
+        # belong to the Service's own company, so naming provider B
+        # here means naming provider B's category as well.
         payload = self._payload(
-            name="SA-explicit-company", company=self.provider_b.id
+            name="SA-explicit-company",
+            company=self.provider_b.id,
+            category=self.category_b.id,
         )
         response = self._api(self.super_admin).post(
             SERVICE_LIST_URL, payload, format="json"
@@ -555,22 +570,42 @@ class ServiceCreateCompanyResolutionTests(TwoProviderFixtureMixin, TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Sprint 3B BLOCKER 3 — ServiceCategory writes restricted to SUPER_ADMIN
+# Sprint 3B BLOCKER 3 — ServiceCategory writes (Sprint 142: now the ordinary
+# per-company catalog gate, not SUPER_ADMIN-only)
 # ---------------------------------------------------------------------------
 class ServiceCategoryWriteRestrictionTests(TwoProviderFixtureMixin, TestCase):
+    """Sprint 142 rewrote this class.
+
+    Sprint 3B locked category writes to SUPER_ADMIN and these tests
+    asserted the stable code `global_category_management_super_admin_
+    only` on the three CA paths. That rule existed for one reason —
+    categories were GLOBAL, so one Provider Admin's edit reached every
+    provider's catalog — and Sprint 142's `company` FK removes it. The
+    tests are updated to the new behaviour rather than deleted, because
+    what they were really guarding is still worth guarding: a CA must
+    not reach ANOTHER company's category. That half is asserted below,
+    now as a 404 (the scoped queryset) rather than a 403.
+    """
+
     @classmethod
     def setUpTestData(cls):
         cls._setup_fixture()
 
     def test_super_admin_can_create_and_update_and_delete_category(self):
         api = self._api(self.super_admin)
+        # `company` is REQUIRED for SA here since Sprint 142: with two
+        # Companies in the DB, `_resolve_catalog_create_company` refuses
+        # to guess (400 `service_company_required`) exactly as it does
+        # for a Service.
         create = api.post(
             CATEGORY_LIST_URL,
-            {"name": "S3B SA-only Cat"},
+            {"name": "S3B SA Cat", "company": self.provider_a.id},
             format="json",
         )
         self.assertEqual(create.status_code, 201, create.data)
         cat_id = create.data["id"]
+        self.assertEqual(create.data["company"], self.provider_a.id)
+        self.assertEqual(create.data["company_name"], self.provider_a.name)
 
         patch = api.patch(
             f"{CATEGORY_LIST_URL}{cat_id}/",
@@ -585,47 +620,140 @@ class ServiceCategoryWriteRestrictionTests(TwoProviderFixtureMixin, TestCase):
             ServiceCategory.objects.filter(pk=cat_id).exists()
         )
 
-    def test_company_admin_create_category_rejected(self):
-        response = self._api(self.pa_a).post(
-            CATEGORY_LIST_URL,
-            {"name": "PA-cat-attempt"},
-            format="json",
+    def test_super_admin_must_disambiguate_company_on_create(self):
+        response = self._api(self.super_admin).post(
+            CATEGORY_LIST_URL, {"name": "SA-ambiguous"}, format="json"
         )
-        self.assertEqual(response.status_code, 403, response.data)
-        self.assertEqual(
-            response.data.get("code"),
-            "global_category_management_super_admin_only",
-        )
-        self.assertFalse(
-            ServiceCategory.objects.filter(name="PA-cat-attempt").exists()
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "service_company_required", self._error_code(response, "company")
         )
 
-    def test_company_admin_update_category_rejected(self):
-        # Existing category (created by SA in fixture).
+    def test_company_admin_creates_category_for_own_company(self):
+        """Was `test_company_admin_create_category_rejected` (403
+        `global_category_management_super_admin_only`). A CA now manages
+        their own catalog groupings, which is what
+        `Company.provider_admin_may_manage_catalog` has claimed to
+        govern since Sprint 3B without actually doing so."""
+        response = self._api(self.pa_a).post(
+            CATEGORY_LIST_URL, {"name": "PA-own-cat"}, format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        # `company` omitted on the wire -> defaulted to the actor's own,
+        # the same `_resolve_catalog_create_company` rule Service uses.
+        self.assertEqual(response.data["company"], self.provider_a.id)
+        self.assertTrue(
+            ServiceCategory.objects.filter(
+                name="PA-own-cat", company=self.provider_a
+            ).exists()
+        )
+
+    def test_company_admin_updates_own_category(self):
+        """Was `test_company_admin_update_category_rejected`."""
         response = self._api(self.pa_a).patch(
             f"{CATEGORY_LIST_URL}{self.category.id}/",
-            {"description": "Hijack"},
+            {"description": "Renamed by its owner"},
             format="json",
         )
-        self.assertEqual(response.status_code, 403, response.data)
-        self.assertEqual(
-            response.data.get("code"),
-            "global_category_management_super_admin_only",
-        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.category.refresh_from_db()
+        self.assertEqual(self.category.description, "Renamed by its owner")
 
-    def test_company_admin_delete_category_rejected(self):
-        # Make a fresh, child-less category we could delete.
-        cat = ServiceCategory.objects.create(name="S3B PA-delete-attempt")
+    def test_company_admin_deletes_own_empty_category(self):
+        """Was `test_company_admin_delete_category_rejected`. Still an
+        EMPTY category — `Service.category` is PROTECT, which is a
+        separate rule this sprint did not touch."""
+        cat = ServiceCategory.objects.create(
+            company=self.provider_a, name="S3B PA-delete-own"
+        )
         response = self._api(self.pa_a).delete(
             f"{CATEGORY_LIST_URL}{cat.id}/"
         )
+        self.assertEqual(response.status_code, 204, response.data)
+        self.assertFalse(
+            ServiceCategory.objects.filter(pk=cat.id).exists()
+        )
+
+    def test_company_admin_cannot_create_category_for_another_company(self):
+        response = self._api(self.pa_a).post(
+            CATEGORY_LIST_URL,
+            {"name": "PA-cross-attempt", "company": self.provider_b.id},
+            format="json",
+        )
         self.assertEqual(response.status_code, 403, response.data)
         self.assertEqual(
-            response.data.get("code"),
-            "global_category_management_super_admin_only",
+            response.data.get("code"), "catalog_cross_company_forbidden"
         )
-        self.assertTrue(
-            ServiceCategory.objects.filter(pk=cat.id).exists()
+        self.assertFalse(
+            ServiceCategory.objects.filter(name="PA-cross-attempt").exists()
+        )
+
+    def test_company_admin_cannot_touch_another_companys_category(self):
+        """404, not 403: `ServiceCategoryDetailView.get_queryset` runs
+        `filter_categories_for`, so a foreign id does not resolve at
+        all. Asserted on all three write verbs plus the read."""
+        api = self._api(self.pa_a)
+        url = f"{CATEGORY_LIST_URL}{self.category_b.id}/"
+        self.assertEqual(api.get(url).status_code, 404)
+        self.assertEqual(
+            api.patch(url, {"description": "hijack"}, format="json").status_code,
+            404,
+        )
+        self.assertEqual(api.delete(url).status_code, 404)
+        self.category_b.refresh_from_db()
+        self.assertNotEqual(self.category_b.description, "hijack")
+
+    def test_company_admin_blocked_when_catalog_policy_disabled(self):
+        """The policy toggle now really governs categories — the whole
+        point of retiring the SA-only gate in favour of
+        `_enforce_catalog_management`."""
+        self.provider_a.provider_admin_may_manage_catalog = False
+        self.provider_a.save(
+            update_fields=["provider_admin_may_manage_catalog"]
+        )
+        try:
+            response = self._api(self.pa_a).post(
+                CATEGORY_LIST_URL, {"name": "PA-policy-off"}, format="json"
+            )
+            self.assertEqual(response.status_code, 403, response.data)
+            self.assertEqual(
+                response.data.get("code"),
+                "provider_admin_catalog_management_disabled",
+            )
+        finally:
+            self.provider_a.provider_admin_may_manage_catalog = True
+            self.provider_a.save(
+                update_fields=["provider_admin_may_manage_catalog"]
+            )
+
+    def test_same_category_name_allowed_in_two_companies(self):
+        """The platform-wide unique `name` is gone; uniqueness is
+        per-company and case/whitespace-insensitive."""
+        first = self._api(self.pa_a).post(
+            CATEGORY_LIST_URL, {"name": "Shared Name"}, format="json"
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        second = self._api(self.pa_b).post(
+            CATEGORY_LIST_URL, {"name": "Shared Name"}, format="json"
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertNotEqual(first.data["company"], second.data["company"])
+
+    def test_duplicate_name_within_one_company_is_a_400(self):
+        self._api(self.pa_a).post(
+            CATEGORY_LIST_URL, {"name": "Dup Guard"}, format="json"
+        )
+        # Different case AND surrounding whitespace -- the constraint
+        # normalizes with Lower(Trim(...)), so this is the same name.
+        response = self._api(self.pa_a).post(
+            CATEGORY_LIST_URL, {"name": "  dup guard  "}, format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertEqual(
+            ServiceCategory.objects.filter(
+                company=self.provider_a, name__iexact="dup guard"
+            ).count(),
+            1,
         )
 
     def test_building_manager_create_category_rejected(self):
@@ -641,9 +769,6 @@ class ServiceCategoryWriteRestrictionTests(TwoProviderFixtureMixin, TestCase):
         self.assertEqual(response.status_code, 403, response.data)
 
     def test_provider_admin_can_still_crud_own_services_using_existing_categories(self):
-        # Categories are SA-only to mutate, but PAs can still build
-        # Service rows under them when their company's catalog
-        # policy is True.
         payload = {
             "category": self.category.id,
             "name": "PA-service-existing-cat",
@@ -655,6 +780,170 @@ class ServiceCategoryWriteRestrictionTests(TwoProviderFixtureMixin, TestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["company"], self.provider_a.id)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 142 — category READ scoping (the leak this sprint closes) and the
+# Service <-> category same-company rule
+# ---------------------------------------------------------------------------
+class CategoryReadScopeTests(TwoProviderFixtureMixin, TestCase):
+    """RBAC H-1. Category GET is open to any authenticated user, because
+    a CUSTOMER_USER needs it to populate the Extra Work cart form. While
+    `filter_categories_for` was the identity that meant every customer
+    of every provider could enumerate EVERY provider's category names.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    def _names(self, user):
+        response = self._api(user).get(CATEGORY_LIST_URL)
+        self.assertEqual(response.status_code, 200, response.data)
+        return {row["name"] for row in response.data["results"]}, {
+            row["id"] for row in response.data["results"]
+        }
+
+    def test_customer_user_cannot_enumerate_another_providers_categories(self):
+        """THE test that locks the leak shut."""
+        names, ids = self._names(self.cust_user_a)
+        self.assertIn(self.category.id, ids)
+        self.assertNotIn(self.category_b.id, ids)
+
+    def test_customer_user_gets_404_on_a_foreign_category_by_id(self):
+        response = self._api(self.cust_user_a).get(
+            f"{CATEGORY_LIST_URL}{self.category_b.id}/"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_company_admin_and_bm_and_staff_are_scoped_too(self):
+        for user in (self.pa_a, self.bm_a, self.staff_a):
+            with self.subTest(user=user.email):
+                _names, ids = self._names(user)
+                self.assertIn(self.category.id, ids)
+                self.assertNotIn(self.category_b.id, ids)
+
+    def test_super_admin_sees_every_companys_categories(self):
+        _names, ids = self._names(self.super_admin)
+        self.assertIn(self.category.id, ids)
+        self.assertIn(self.category_b.id, ids)
+
+    def test_company_param_narrows_and_cannot_widen(self):
+        """Same rule the services list documents: `?company=` is applied
+        BEFORE the scope filter, so it can only ever narrow."""
+        sa_response = self._api(self.super_admin).get(
+            CATEGORY_LIST_URL, {"company": self.provider_b.id}
+        )
+        self.assertEqual(
+            {row["id"] for row in sa_response.data["results"]},
+            {self.category_b.id},
+        )
+
+        ca_response = self._api(self.pa_a).get(
+            CATEGORY_LIST_URL, {"company": self.provider_b.id}
+        )
+        self.assertEqual(ca_response.status_code, 200)
+        self.assertEqual(ca_response.data["results"], [])
+
+    def test_company_param_garbage_is_empty_not_500(self):
+        response = self._api(self.super_admin).get(
+            CATEGORY_LIST_URL, {"company": "not-an-int"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["results"], [])
+
+
+class ServiceCategorySameCompanyTests(TwoProviderFixtureMixin, TestCase):
+    """Sprint 142 — a Service's `category` must belong to the Service's
+    own company. Nothing enforced this before, because there was nothing
+    to enforce. HTTP 400, not 403: the actor may write here, the VALUE is
+    just not a legal one (same call as `_enforce_same_company_managed_
+    unit`)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    def test_company_admin_cannot_file_a_service_under_a_foreign_category(self):
+        response = self._api(self.pa_a).post(
+            SERVICE_LIST_URL,
+            {
+                "category": self.category_b.id,
+                "name": "cross-category-attempt",
+                "unit_type": ExtraWorkPricingUnitType.HOURS,
+                "default_unit_price": "10.00",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "category_company_mismatch",
+            self._error_code(response, "category"),
+        )
+        self.assertFalse(
+            Service.objects.filter(name="cross-category-attempt").exists()
+        )
+
+    def test_super_admin_cannot_either(self):
+        """A SUPER_ADMIN may write to any company, but this is a data
+        rule, not a permission one — it binds every actor."""
+        response = self._api(self.super_admin).post(
+            SERVICE_LIST_URL,
+            {
+                "company": self.provider_a.id,
+                "category": self.category_b.id,
+                "name": "sa-cross-category-attempt",
+                "unit_type": ExtraWorkPricingUnitType.HOURS,
+                "default_unit_price": "10.00",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "category_company_mismatch",
+            self._error_code(response, "category"),
+        )
+
+    def test_service_cannot_be_moved_into_a_foreign_category_on_update(self):
+        response = self._api(self.pa_a).patch(
+            f"{SERVICE_LIST_URL}{self.svc_a.id}/",
+            {"category": self.category_b.id},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "category_company_mismatch",
+            self._error_code(response, "category"),
+        )
+        self.svc_a.refresh_from_db()
+        self.assertEqual(self.svc_a.category_id, self.category.id)
+
+    def test_unrelated_patch_does_not_revalidate_category(self):
+        """The guard is keyed on `"category" in validated_data`, so a
+        PATCH that never sends the field is untouched by it."""
+        response = self._api(self.pa_a).patch(
+            f"{SERVICE_LIST_URL}{self.svc_a.id}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.svc_a.refresh_from_db()
+        self.assertFalse(self.svc_a.is_active)
+        self.svc_a.is_active = True
+        self.svc_a.save(update_fields=["is_active"])
+
+    def test_own_category_is_accepted(self):
+        response = self._api(self.pa_a).post(
+            SERVICE_LIST_URL,
+            {
+                "category": self.category.id,
+                "name": "same-company-ok",
+                "unit_type": ExtraWorkPricingUnitType.HOURS,
+                "default_unit_price": "10.00",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
 
 
 # ---------------------------------------------------------------------------
@@ -879,7 +1168,9 @@ class BackfillHelperTests(TransactionTestCase):
         """
         from django.db import connection
 
-        cat = ServiceCategory.objects.get_or_create(name="Backfill Cat")[0]
+        cat = ServiceCategory.objects.get_or_create(
+            company=helper_company, name="Backfill Cat"
+        )[0]
         svc = Service.objects.create(
             company=helper_company,
             category=cat,

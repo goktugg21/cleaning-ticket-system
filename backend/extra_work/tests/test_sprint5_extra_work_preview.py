@@ -197,7 +197,14 @@ class Sprint5PreviewFixtureMixin:
             is_active=False,
         )
 
-        cls.category = ServiceCategory.objects.create(name="Cleaning S5")
+        # Sprint 142 — one category per provider (same name on both,
+        # which is legal now that uniqueness is per-company).
+        cls.category = ServiceCategory.objects.create(
+            company=cls.provider_a, name="Cleaning S5"
+        )
+        cls.category_b = ServiceCategory.objects.create(
+            company=cls.provider_b, name="Cleaning S5"
+        )
         cls.svc_agreed = Service.objects.create(
             company=cls.provider_a,
             category=cls.category,
@@ -225,7 +232,7 @@ class Sprint5PreviewFixtureMixin:
         )
         cls.svc_b = Service.objects.create(
             company=cls.provider_b,
-            category=cls.category,
+            category=cls.category_b,
             name="Window cleaning B S5",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("60.00"),

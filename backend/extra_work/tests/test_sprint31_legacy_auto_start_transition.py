@@ -130,7 +130,7 @@ class LegacyAutoStartFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name="Sprint31-Cat")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name="Sprint31-Cat")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.company,

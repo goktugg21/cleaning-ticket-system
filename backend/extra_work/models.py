@@ -693,11 +693,28 @@ class ServiceCategory(models.Model):
     Sprint 28 Batch 5 — provider-side service catalog: top-level
     category groupings.
 
-    Categories are global (provider-wide). They are the parent rows
-    for `Service` entries that customers eventually pick from when
-    composing an Extra Work cart. A category can be soft-deactivated
-    by toggling `is_active=False`; deletion is blocked while any
-    `Service` row still references it (`PROTECT` on the FK below).
+    Categories are the parent rows for `Service` entries that customers
+    eventually pick from when composing an Extra Work cart. A category
+    can be soft-deactivated by toggling `is_active=False`; deletion is
+    blocked while any `Service` row still references it (`PROTECT` on
+    the FK below).
+
+    Sprint 142 — categories are PER-COMPANY, reversing the Sprint 3B
+    decision that left them global. Pre-142 there was no `company` FK
+    and `name` was unique platform-wide, which meant (a) one provider's
+    category could hold another provider's services and Sprint 138's
+    cascade-archive would deactivate all of them, and (b) any
+    authenticated user — including a CUSTOMER_USER — could read every
+    provider's category names, because `catalog_scope.
+    filter_categories_for` was the identity. Both are closed by the
+    `company` FK plus the per-company uniqueness constraint below.
+    Migration set `0023/0024/0025` mirrors the `Service.company`
+    precedent (`0007`/`0008`/`0009`): nullable column + the new
+    constraint, backfill, then NOT NULL.
+
+    `name`'s `max_length=128` is deliberately unchanged — it is in
+    lockstep with `ExtraWorkRequestItem.snapshot_service_category_name`,
+    which stores a frozen copy of it.
 
     Distinct from `ExtraWorkCategory` (the legacy text-choices enum
     on `ExtraWorkRequest.category`): that enum classifies a single
@@ -705,7 +722,22 @@ class ServiceCategory(models.Model):
     bookable services with their own per-customer pricing tables.
     """
 
-    name = models.CharField(max_length=128, unique=True)
+    # Sprint 142 — provider-company scope, same shape as
+    # `Service.company` / `ManagedUnit.company`. PROTECT so a Company
+    # cannot be hard-deleted while it still owns catalog groupings.
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="service_categories",
+        help_text=(
+            "Sprint 142 — provider company that owns this category. "
+            "Pre-142 rows are backfilled from the single company of "
+            "their services by migration 0024."
+        ),
+    )
+    # NOT `unique=True` since Sprint 142: uniqueness is per-company and
+    # case/whitespace-insensitive, expressed as the constraint below.
+    name = models.CharField(max_length=128)
     description = models.TextField(blank=True, default="")
     is_active = models.BooleanField(default=True)
 
@@ -716,9 +748,21 @@ class ServiceCategory(models.Model):
         ordering = ["name", "id"]
         verbose_name = "service category"
         verbose_name_plural = "service categories"
+        constraints = [
+            # Sprint 142 — same shape as `ManagedUnit`'s constraint:
+            # Trim() first so leading/trailing whitespace cannot bypass
+            # a Lower()-only dedupe, Lower() for case. Two DIFFERENT
+            # providers may now both carry a "Cleaning" category; one
+            # provider may not carry it twice.
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "company",
+                name="uniq_service_category_name_per_company_ci",
+            ),
+        ]
 
     def __str__(self):
-        return self.name
+        return f"{self.company.name} / {self.name}"
 
 
 class Service(models.Model):

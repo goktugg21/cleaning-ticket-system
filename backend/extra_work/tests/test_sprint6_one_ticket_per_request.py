@@ -116,7 +116,7 @@ class OneTicketFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name="Cat-6A")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name="Cat-6A")
         cls.service_a = Service.objects.create(
             category=cls.service_cat,
             company=cls.company,

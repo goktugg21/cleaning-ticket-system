@@ -136,7 +136,7 @@ class _B6Fixture(TestCase):
             AccessRole.CUSTOMER_USER,
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name="B6-Cat")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name="B6-Cat")
         cls.service = Service.objects.create(
             category=cls.service_cat, company=cls.company, name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,

@@ -134,7 +134,7 @@ class _DirectPublishFixtureMixin:
         )
 
         cls.service = Service.objects.create(
-            category=ServiceCategory.objects.create(name="Cat-DP"),
+            category=ServiceCategory.objects.create(company=cls.company, name="Cat-DP"),
             company=cls.company,
             name="Direct-publish service",
             unit_type=ExtraWorkPricingUnitType.HOURS,

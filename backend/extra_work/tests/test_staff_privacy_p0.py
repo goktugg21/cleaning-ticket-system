@@ -210,7 +210,7 @@ class _StaffPrivacyFixture(TestCase):
         )
 
         # Catalog + service.
-        cls.service_cat = ServiceCategory.objects.create(name=f"Cat {suffix}")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name=f"Cat {suffix}")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.company,

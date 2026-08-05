@@ -96,7 +96,7 @@ class ProposalStateMachineFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name="SM-Cat")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name="SM-Cat")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.company,

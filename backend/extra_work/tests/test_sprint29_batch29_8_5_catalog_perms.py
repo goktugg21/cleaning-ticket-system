@@ -52,6 +52,7 @@ class CatalogPermissionSplitTests(TenantFixtureMixin, APITestCase):
         # for CUSTOMER_USER has a row to fetch. The list tests pass
         # purely on status code regardless of result count.
         self.category = ServiceCategory.objects.create(
+            company=self.company,
             name="29.8.5 Reference Category"
         )
         self.service = Service.objects.create(

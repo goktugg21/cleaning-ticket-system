@@ -24,6 +24,13 @@ Sprint 3B:
   * `CustomerServicePriceSerializer.validate` rejects writes where
     `service.company_id != customer.company_id` (stable code
     `service_customer_company_mismatch`).
+
+Sprint 142:
+  * `ServiceCategorySerializer` gains the same `company` handling —
+    writable PK on CREATE, read-only on UPDATE — plus a manual
+    per-company case-insensitive name-uniqueness pre-check, replacing
+    the `UniqueValidator` DRF used to derive from the now-removed
+    field-level `unique=True`.
 """
 from __future__ import annotations
 
@@ -99,15 +106,35 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
     The `getattr` fallback only fires for a single object that never
     went through that queryset (the CREATE/UPDATE response), so it can
     never produce an N+1 on a list.
+
+    Sprint 142 — `company` is a writable PK on CREATE only, exactly
+    mirroring `ServiceSerializer` / `ManagedUnitSerializer`: optional on
+    the wire (the view's `_resolve_catalog_create_company` defaults it
+    for a COMPANY_ADMIN), and pinned read-only on UPDATE. Re-pinning an
+    existing category to another provider would strand every `Service`
+    still inside it in a category their own company cannot see — the
+    exact defect `_enforce_same_company_category` exists to prevent —
+    so the field is simply not movable.
     """
 
     service_count = serializers.SerializerMethodField()
     active_service_count = serializers.SerializerMethodField()
+    company_name = serializers.CharField(
+        source="company.name", read_only=True
+    )
+    company = serializers.PrimaryKeyRelatedField(
+        queryset=Company.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
 
     class Meta:
         model = ServiceCategory
         fields = [
             "id",
+            "company",
+            "company_name",
             "name",
             "description",
             "is_active",
@@ -118,11 +145,61 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "company_name",
             "service_count",
             "active_service_count",
             "created_at",
             "updated_at",
         ]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if self.instance is not None:
+            # UPDATE path — pin `company` to its current value; see the
+            # class docstring for why it must not move.
+            fields["company"].read_only = True
+        return fields
+
+    def validate(self, attrs):
+        """Sprint 142 — friendly-400 pre-check for the per-company,
+        case/whitespace-insensitive name uniqueness.
+
+        Needed because dropping the field-level `unique=True` also
+        dropped the `UniqueValidator` DRF generated from it, and DRF
+        cannot generate one for an EXPRESSION constraint
+        (`Lower(Trim("name")), company`) the way it does for a plain
+        `UniqueConstraint(fields=[...])`. Without this, a duplicate name
+        would reach Postgres and surface as a 500 instead of the 400
+        this endpoint has always returned.
+
+        Exactly the shape `ManagedUnitSerializer.validate` uses,
+        including its limitation: on a COMPANY_ADMIN's CREATE that omits
+        `company`, the target is not resolved until `perform_create`
+        runs, so the pre-check is skipped and the view's
+        `IntegrityError` handler is the sole backstop.
+        """
+        name = attrs.get("name", getattr(self.instance, "name", None))
+        company = attrs.get("company")
+        if company is None and self.instance is not None:
+            company = self.instance.company
+        if name and company is not None:
+            normalized = name.strip().lower()
+            existing = ServiceCategory.objects.filter(company=company)
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if any(c.name.strip().lower() == normalized for c in existing):
+                raise serializers.ValidationError(
+                    {
+                        "name": [
+                            serializers.ErrorDetail(
+                                f"A category named {name!r} already "
+                                "exists for this company.",
+                                code="service_category_name_not_unique",
+                            )
+                        ]
+                    }
+                )
+        return attrs
 
     def get_service_count(self, obj) -> int:
         annotated = getattr(obj, "annotated_service_count", None)

@@ -482,7 +482,7 @@ class ExtraWorkSchedulePropagationTest(APITestCase):
         self.actor = User.objects.create_user(
             email="sa@osius.nl", password="x", role=UserRole.SUPER_ADMIN
         )
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(company=self.company, name="Cleaning")
         self.service = Service.objects.create(
             company=self.company,
             category=self.category,

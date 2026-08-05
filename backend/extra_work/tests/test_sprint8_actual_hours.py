@@ -142,7 +142,7 @@ class ActualHoursFixtureMixin:
             user=cls.other_bm, building=cls.other_building
         )
 
-        cls.cat = ServiceCategory.objects.create(name="Cat-8B")
+        cls.cat = ServiceCategory.objects.create(company=cls.company, name="Cat-8B")
         # Hourly service WITH a customer contract price -> DIRECT route.
         cls.svc_hourly_agreed = Service.objects.create(
             category=cls.cat,

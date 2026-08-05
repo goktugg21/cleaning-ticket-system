@@ -40,6 +40,18 @@ Sprint 3B additions:
     company.
   * Service / Category UPDATE + DELETE run the same policy gate
     against the existing row's owning company.
+
+Sprint 142 additions:
+  * `ServiceCategory` gained its own `company` FK, so category reads are
+    now really scoped (`filter_categories_for` was the identity until
+    this sprint) and category WRITES moved off the SUPER_ADMIN-only
+    `_enforce_category_super_admin_only` — deleted — and onto the same
+    `_enforce_catalog_management` gate every other catalog row uses.
+  * `?company=<id>` on the categories list, applied BEFORE the scope
+    filter so it can only narrow (same rule as the services list).
+  * `_enforce_same_company_category` — a Service's category must belong
+    to the Service's own company. There was no such check before,
+    because there was nothing to check.
 """
 from __future__ import annotations
 
@@ -83,7 +95,17 @@ from .serializers_catalog import (
 ERR_CATALOG_POLICY_DISABLED = "provider_admin_catalog_management_disabled"
 ERR_CATALOG_CROSS_COMPANY = "catalog_cross_company_forbidden"
 ERR_SERVICE_COMPANY_REQUIRED = "service_company_required"
-ERR_CATEGORY_SA_ONLY = "global_category_management_super_admin_only"
+# Sprint 142 — a Service's category must belong to the Service's own
+# provider company. (This replaces `ERR_CATEGORY_SA_ONLY` /
+# `global_category_management_super_admin_only`, retired with
+# `_enforce_category_super_admin_only`: category writes are no longer
+# SUPER_ADMIN-only, because a category is no longer global.)
+ERR_CATEGORY_COMPANY_MISMATCH = "category_company_mismatch"
+# Sprint 142 — replaces the `UniqueValidator` DRF used to generate from
+# the field-level `unique=True` on `ServiceCategory.name`. DRF cannot
+# generate one for an expression constraint, so the friendly 400 is
+# raised by the serializer's pre-check and, as a backstop, here.
+ERR_CATEGORY_NAME_NOT_UNIQUE = "service_category_name_not_unique"
 ERR_SERVICE_BULK_RAISE_AMOUNT_INVALID = "service_bulk_raise_amount_invalid"
 ERR_SERVICE_BULK_RAISE_INVALID = "service_bulk_raise_invalid"
 # #108 Part C — a lower that would push any selected default price to
@@ -182,6 +204,46 @@ def _enforce_same_company_managed_unit(managed_unit, company):
         )
 
 
+def _enforce_same_company_category(category, company):
+    """Sprint 142 — a `Service`'s `category` must belong to the SAME
+    provider company as the Service itself.
+
+    NOTHING enforced this before this sprint, for the simple reason that
+    there was nothing to enforce: categories were global, so every
+    category was equally valid for every company. Now that they are
+    owned, an unchecked `category` id would let a COMPANY_ADMIN file
+    their own service under a RIVAL's category — which then hides the
+    service from its own company's category-grouped UI, and hands the
+    rival's admin a cascade-archive button over it (Sprint 138 §2a).
+
+    Deliberately shaped as an exact copy of
+    `_enforce_same_company_managed_unit`, including the HTTP 400 (not
+    403): like the managed-unit rule this is a data-integrity
+    constraint, not a permission boundary — the actor is allowed to
+    write here, the value is just not a legal one. Checked in the view
+    rather than the serializer for the same reason as the managed-unit
+    rule: on a CA's CREATE the target company is only known AFTER
+    `_resolve_catalog_create_company` runs, which is after `validate()`.
+
+    Note the two rules cannot be collapsed: `managed_unit` is optional
+    and nullable, `category` is neither.
+    """
+    if category is None or company is None:
+        return
+    if category.company_id != company.id:
+        raise serializers.ValidationError(
+            {
+                "category": [
+                    serializers.ErrorDetail(
+                        "This category belongs to a different provider "
+                        "company.",
+                        code=ERR_CATEGORY_COMPANY_MISMATCH,
+                    )
+                ]
+            }
+        )
+
+
 def _annotate_category_service_counts(queryset, user):
     """Sprint 138 §2 — annotate each category with how many services it
     holds, so the UI can decide which actions to OFFER instead of
@@ -191,14 +253,17 @@ def _annotate_category_service_counts(queryset, user):
 
     ONE aggregate per column for the whole page — no per-row query.
 
-    The counts are SCOPED to the catalog the actor can actually see
-    (`scope_company_ids_for_catalog`): categories are global but
-    services are company-scoped, so an unscoped count would tell a
-    COMPANY_ADMIN a category holds services they cannot see and cannot
-    act on. SUPER_ADMIN — the only role permitted to archive or delete
-    a category at all — has scope `None` and therefore always sees the
-    COMPLETE count, which is the number the PROTECT rule actually
-    depends on.
+    The counts stay SCOPED to the catalog the actor can actually see
+    (`scope_company_ids_for_catalog`). Since Sprint 142 that is very
+    nearly a no-op — a category and its services share one company, and
+    the actor already had to be in scope for that company to see the
+    category at all — but it is kept for the pre-142 rows a Service
+    could have been filed under a foreign category before
+    `_enforce_same_company_category` existed. Those rows would otherwise
+    inflate a COMPANY_ADMIN's `service_count` with services they cannot
+    see or act on, and the number gates whether the UI offers Delete.
+    SUPER_ADMIN has scope `None` and always sees the COMPLETE count,
+    which is the number the PROTECT rule actually depends on.
     """
     scope = scope_company_ids_for_catalog(user)
     service_filter = Q()
@@ -219,42 +284,27 @@ def _annotate_category_service_counts(queryset, user):
     )
 
 
-def _enforce_category_super_admin_only(user):
-    """Sprint 3B — categories are global, so non-Super-Admin must
-    not mutate them (one Provider Admin changing a category would
-    bleed across every provider company on the platform).
-
-    SUPER_ADMIN passes; anyone else gets HTTP 403 with stable code
-    `global_category_management_super_admin_only`. Read access is
-    governed at the DRF permission layer; this helper guards
-    write paths only.
-    """
-    if user.role == UserRole.SUPER_ADMIN:
-        return
-    raise PermissionDenied(
-        detail={
-            "detail": (
-                "Service categories are global; only Super Admin "
-                "may create, update, or delete them."
-            ),
-            "code": ERR_CATEGORY_SA_ONLY,
-        }
-    )
-
-
 class ServiceCategoryListCreateView(generics.ListCreateAPIView):
     """GET (list) + POST (create) at /api/services/categories/.
 
     Sprint 29 Batch 29.8.5 — GET opened to any authenticated user so
     CUSTOMER_USER can populate the Extra Work create-form category
-    dropdown.
+    dropdown. That read is now SCOPED (Sprint 142) — see
+    `get_queryset`.
 
-    Sprint 3B — categories remain GLOBAL, so write methods are
-    locked to SUPER_ADMIN only via `IsSuperAdmin`. COMPANY_ADMIN
-    used to have CRUD access pre-Sprint-3B; that surface bled
-    across every provider catalog, so it has been narrowed.
-    Stable error code on the 403 path: `global_category_
-    management_super_admin_only`.
+    Sprint 142 — categories are PER-COMPANY, so write methods run the
+    ordinary catalog gate (`_enforce_catalog_management`) against the
+    row's owning company, exactly as `Service` does. This retires
+    `_enforce_category_super_admin_only` and its stable code
+    `global_category_management_super_admin_only`: that rule existed
+    ONLY because a global category's edits bled across every provider,
+    which is no longer possible. It also makes
+    `Company.provider_admin_may_manage_catalog`'s help text true — it
+    has claimed to govern ServiceCategory since Sprint 3B and did not.
+
+    Filters: `?is_active=true|false` and `?company=<id>`. Both NARROW
+    only — `filter_categories_for` runs LAST, so no query param can
+    widen what an actor sees beyond their own catalog scope.
     """
 
     serializer_class = ServiceCategorySerializer
@@ -263,17 +313,25 @@ class ServiceCategoryListCreateView(generics.ListCreateAPIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [IsAuthenticated()]
-        # Use IsSuperAdminOrCompanyAdmin so the DRF gate lets the
-        # COMPANY_ADMIN through and the handler can surface the
-        # stable `global_category_management_super_admin_only`
-        # code. BM / STAFF / CUSTOMER_USER fail the gate with a
-        # generic 403, which the tests accept as-is.
         return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
         qs = _annotate_category_service_counts(
-            ServiceCategory.objects.all(), self.request.user
+            ServiceCategory.objects.select_related("company").all(),
+            self.request.user,
         )
+        # Sprint 142 §4 — `?company=<id>`, same shape and same ordering
+        # rule as `ServiceListCreateView`: applied BEFORE
+        # `filter_categories_for`, which then intersects the result with
+        # the actor's own catalog scope. A COMPANY_ADMIN asking for
+        # another company's id gets an empty list, never a widened one.
+        company_param = self.request.query_params.get("company")
+        if company_param:
+            try:
+                qs = qs.filter(company_id=int(company_param))
+            except (TypeError, ValueError):
+                # Bad input -> empty result rather than 500.
+                qs = qs.none()
         flag = _parse_bool_param(self.request.query_params.get("is_active"))
         if flag is not None:
             qs = qs.filter(is_active=flag)
@@ -281,8 +339,37 @@ class ServiceCategoryListCreateView(generics.ListCreateAPIView):
         return qs.order_by("name", "id")
 
     def perform_create(self, serializer):
-        _enforce_category_super_admin_only(self.request.user)
-        serializer.save()
+        # Sprint 142 — identical to `ServiceListCreateView.perform_
+        # create`: resolve the target company (defaulted for a CA,
+        # multi-Company guard for SA), then run the policy gate on it.
+        target_company = _resolve_catalog_create_company(
+            self.request.user,
+            serializer.validated_data.get("company"),
+        )
+        _enforce_catalog_management(self.request.user, target_company)
+        try:
+            # See ManagedUnitListCreateView.perform_create for why this
+            # inner atomic() is load-bearing, not decorative: without a
+            # savepoint boundary, Postgres refuses every further command
+            # in the surrounding transaction after the IntegrityError,
+            # even though Python catches it.
+            with transaction.atomic():
+                serializer.save(company=target_company)
+        except IntegrityError:
+            # Backstop for the case the serializer's pre-check cannot
+            # cover — a CA who omitted `company`, so the target was not
+            # known at validate() time — and for a genuine race.
+            raise serializers.ValidationError(
+                {
+                    "name": [
+                        serializers.ErrorDetail(
+                            "A category with this name already exists "
+                            "for this company.",
+                            code=ERR_CATEGORY_NAME_NOT_UNIQUE,
+                        )
+                    ]
+                }
+            )
 
 
 class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -290,9 +377,11 @@ class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     Sprint 29 Batch 29.8.5 — GET opened to any authenticated user.
 
-    Sprint 3B — write methods (PATCH / PUT / DELETE) restricted to
-    SUPER_ADMIN. See `ServiceCategoryListCreateView` docstring for
-    the rationale.
+    Sprint 142 — the queryset is scoped by `filter_categories_for` on
+    EVERY method (it is the single `get_queryset` all of them resolve
+    `get_object()` through), so an out-of-scope id is a 404 before any
+    handler runs. Write paths additionally run the catalog policy gate
+    against the row's existing company, mirroring `ServiceDetailView`.
     """
 
     serializer_class = ServiceCategorySerializer
@@ -301,25 +390,43 @@ class ServiceCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
     def get_permissions(self):
         if self.request.method == "GET":
             return [IsAuthenticated()]
-        # See `ServiceCategoryListCreateView` for the rationale —
-        # CA passes the gate; the handler returns the stable code.
         return [IsSuperAdminOrCompanyAdmin()]
 
     def get_queryset(self):
         return filter_categories_for(
             self.request.user,
             _annotate_category_service_counts(
-                ServiceCategory.objects.all(), self.request.user
+                ServiceCategory.objects.select_related("company").all(),
+                self.request.user,
             ),
         )
 
     def perform_update(self, serializer):
-        _enforce_category_super_admin_only(self.request.user)
-        serializer.save()
+        # `company` is read-only on UPDATE (serializer pins it) — the
+        # row's existing company governs the policy check.
+        _enforce_catalog_management(
+            self.request.user, serializer.instance.company
+        )
+        try:
+            # Same savepoint rationale as perform_create above.
+            with transaction.atomic():
+                serializer.save()
+        except IntegrityError:
+            raise serializers.ValidationError(
+                {
+                    "name": [
+                        serializers.ErrorDetail(
+                            "A category with this name already exists "
+                            "for this company.",
+                            code=ERR_CATEGORY_NAME_NOT_UNIQUE,
+                        )
+                    ]
+                }
+            )
 
     def delete(self, request, *args, **kwargs):
         instance = self.get_object()
-        _enforce_category_super_admin_only(request.user)
+        _enforce_catalog_management(request.user, instance.company)
         try:
             instance.delete()
         except ProtectedError:
@@ -366,12 +473,22 @@ class ServiceCategoryArchiveView(APIView):
     count that stayed archived so the UI can say so rather than let the
     operator assume everything came back.
 
-    SUPER_ADMIN only, same rule as every other category write
-    (`_enforce_category_super_admin_only`): categories are GLOBAL, so
-    one provider admin archiving a category would deactivate services
-    belonging to every other provider company on the platform. That
-    cross-company reach is exactly why this stays SA-only, and why the
-    response reports how many companies were touched.
+    Sprint 142 — gated by `_enforce_catalog_management` against the
+    category's OWN company, like every other catalog write. It was
+    SUPER_ADMIN-only before, and the reason was specific: a GLOBAL
+    category could hold several providers' services, so one provider
+    admin archiving it would deactivate services belonging to every
+    other provider on the platform. Categories are per-company now, so
+    that reach no longer exists and the restriction has no remaining
+    justification.
+
+    The response's `affected_company_count` went with it. A category's
+    services must belong to the category's own company (guarded on the
+    Service write paths by `_enforce_same_company_category`), so the
+    number is now permanently 0 or 1 — a "this touched N providers"
+    warning that can never fire. Reporting a count whose only possible
+    values are "none" and "the one you already know about" is noise the
+    UI would have to special-case forever.
 
     Per-row `save()` inside one `transaction.atomic()` rather than a
     bulk `.update()`: `Service` and `ServiceCategory` are both
@@ -385,14 +502,14 @@ class ServiceCategoryArchiveView(APIView):
     def _get_category(self, category_id, user):
         try:
             return filter_categories_for(
-                user, ServiceCategory.objects.all()
+                user, ServiceCategory.objects.select_related("company").all()
             ).get(pk=category_id)
         except ServiceCategory.DoesNotExist:
             raise NotFound(detail="Service category not found.")
 
     def post(self, request, category_id, *args, **kwargs):
         category = self._get_category(category_id, request.user)
-        _enforce_category_super_admin_only(request.user)
+        _enforce_catalog_management(request.user, category.company)
 
         archiving = self.archive
 
@@ -403,25 +520,24 @@ class ServiceCategoryArchiveView(APIView):
                 else "service_category_unarchive"
             )
             touched_services = 0
-            affected_company_ids = set()
             if archiving:
                 # Only the services that are still ACTIVE need writing;
                 # re-saving an already-archived row would add a no-op
                 # audit entry for a change that did not happen.
-                for service in category.services.filter(
-                    is_active=True
-                ).select_related("company"):
+                for service in category.services.filter(is_active=True):
                     service.is_active = False
                     service.save(update_fields=["is_active", "updated_at"])
                     touched_services += 1
-                    affected_company_ids.add(service.company_id)
             if category.is_active == archiving:
                 category.is_active = not archiving
                 category.save(update_fields=["is_active", "updated_at"])
 
         payload = ServiceCategorySerializer(
             _annotate_category_service_counts(
-                ServiceCategory.objects.filter(pk=category.pk), request.user
+                ServiceCategory.objects.select_related("company").filter(
+                    pk=category.pk
+                ),
+                request.user,
             ).first()
         ).data
         return Response(
@@ -430,7 +546,6 @@ class ServiceCategoryArchiveView(APIView):
                 # Named for what actually happened, not for what was
                 # requested: an unarchive deactivates nothing.
                 "deactivated_service_count": touched_services,
-                "affected_company_count": len(affected_company_ids),
                 # On unarchive: how many services stayed archived, so
                 # the UI can say "the category is back, its services are
                 # not" instead of implying a full restore.
@@ -671,6 +786,12 @@ class ServiceListCreateView(generics.ListCreateAPIView):
         _enforce_same_company_managed_unit(
             serializer.validated_data.get("managed_unit"), target_company
         )
+        # Sprint 142 — and so must the category, for the same reason and
+        # at the same point. `category` is required, so it is always in
+        # validated_data on CREATE.
+        _enforce_same_company_category(
+            serializer.validated_data.get("category"), target_company
+        )
         # Persist with the resolved company so an omitted field on
         # the wire still lands non-null on the DB row.
         serializer.save(company=target_company)
@@ -723,6 +844,16 @@ class ServiceDetailView(generics.RetrieveUpdateDestroyAPIView):
         if "managed_unit" in serializer.validated_data:
             _enforce_same_company_managed_unit(
                 serializer.validated_data["managed_unit"],
+                serializer.instance.company,
+            )
+        # Sprint 142 — same for category. Guarded on `in validated_data`
+        # so an unrelated PATCH (e.g. `{"is_active": false}`) does not
+        # re-validate a field it never sent — and so a pre-142 row whose
+        # category ended up in another company can still be archived or
+        # renamed while the operator fixes it.
+        if "category" in serializer.validated_data:
+            _enforce_same_company_category(
+                serializer.validated_data["category"],
                 serializer.instance.company,
             )
         serializer.save()

@@ -384,7 +384,7 @@ class CreateTests(ExtraWorkFixtureMixin, TestCase):
         # Batch 6 test module). A single shared Service fixture lets
         # the existing assertions stand as-is once we add the new
         # line_items field to the create payload.
-        cls.service_cat = ServiceCategory.objects.create(name="Standard")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.provider_a, name="Standard")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.provider_a,

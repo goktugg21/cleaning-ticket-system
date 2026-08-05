@@ -115,9 +115,15 @@ def scope_company_ids_for_catalog(user) -> Optional[frozenset[int]]:
 
 
 def filter_services_for(user, queryset):
-    """Apply `scope_company_ids_for_catalog` to a Service / Category
-    queryset. Returns the (possibly empty) filtered queryset. SUPER_
-    ADMIN gets the queryset back unchanged.
+    """Apply `scope_company_ids_for_catalog` to a `Service` queryset.
+    Returns the (possibly empty) filtered queryset. SUPER_ADMIN gets the
+    queryset back unchanged.
+
+    (The docstring used to say "Service / Category"; categories had no
+    `company` FK at the time, so it could never have been used for one.
+    Since Sprint 142 they do — and they have their own
+    `filter_categories_for`, matching the `filter_managed_units_for`
+    convention of one named helper per catalog noun.)
     """
     scope = scope_company_ids_for_catalog(user)
     if scope is None:
@@ -139,16 +145,30 @@ def filter_managed_units_for(user, queryset):
 
 
 def filter_categories_for(user, queryset):
-    """Sprint 3B — ServiceCategory stays GLOBAL (no `company` FK),
-    so this helper is the identity. It exists as a hook so a
-    future "provider-scoped categories" sprint can flip behaviour
-    in one place without revisiting the view layer.
+    """Sprint 142 — apply `scope_company_ids_for_catalog` to a
+    `ServiceCategory` queryset, identically to `filter_services_for`.
 
-    Anonymous callers still see an empty queryset because the view-
-    layer permission classes (IsAuthenticated) reject them before
-    this helper is reached.
+    Sprint 3B wrote this as the IDENTITY function, because categories
+    were global then, and said in its docstring that it existed as the
+    hook a future "provider-scoped categories" sprint would flip in one
+    place. This is that flip, and the view layer needed no change to
+    receive it.
+
+    That identity was also a live cross-tenant read leak, not merely a
+    placeholder: category GET is open to any authenticated user (a
+    CUSTOMER_USER needs it to populate the Extra Work cart form), so
+    with no scope filter every authenticated actor on the platform —
+    including every customer of every provider — could enumerate EVERY
+    provider's category names. RBAC H-1. Closed here.
+
+    Anonymous callers get an empty queryset both ways: the view-layer
+    `IsAuthenticated` rejects them first, and `scope_company_ids_for_
+    catalog` returns an empty frozenset for them regardless.
     """
-    return queryset
+    scope = scope_company_ids_for_catalog(user)
+    if scope is None:
+        return queryset
+    return queryset.filter(company_id__in=scope)
 
 
 # ---------------------------------------------------------------------------

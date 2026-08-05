@@ -157,7 +157,7 @@ class _Fixture(TestCase):
         )
 
         # ---- service catalog + per-customer contract price ----
-        cls.service_cat = ServiceCategory.objects.create(name="Cat B3 URL")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company_a, name="Cat B3 URL")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.company_a,

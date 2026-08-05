@@ -119,6 +119,7 @@ class Sprint30Batch30_1FixtureMixin:
         )
 
         cls.service_cat = ServiceCategory.objects.create(
+            company=cls.company,
             name="Sprint30-Cat"
         )
         cls.service = Service.objects.create(

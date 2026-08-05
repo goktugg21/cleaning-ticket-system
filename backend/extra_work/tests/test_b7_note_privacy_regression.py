@@ -124,7 +124,7 @@ class _B7EwFixture(TestCase):
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-        category = ServiceCategory.objects.create(name="B7-cat")
+        category = ServiceCategory.objects.create(company=cls.company, name="B7-cat")
         cls.service = Service.objects.create(
             category=category,
             company=cls.company,
