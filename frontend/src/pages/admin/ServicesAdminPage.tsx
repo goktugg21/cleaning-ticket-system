@@ -139,6 +139,12 @@ function formatDecimal(value: string): string {
   return value;
 }
 
+// Sprint 150 — remembering the SUPER_ADMIN's provider company across
+// visits. Deliberately localStorage and not a user preference on the
+// server: it is a view convenience, not a permission or a setting other
+// people should inherit.
+const CATALOG_COMPANY_STORAGE_KEY = "osius.catalog.company";
+
 export function ServicesAdminPage() {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
@@ -309,9 +315,29 @@ export function ServicesAdminPage() {
         // company the selector stays hidden and `""` still means "let
         // the backend default it", which is what a COMPANY_ADMIN relies
         // on.
+        //
+        // Sprint 150 — WHICH one. `response` is ordered by NAME (see
+        // `Company.Meta.ordering`), so taking `[0]` opened the page on
+        // whichever tenant sorts first alphabetically rather than the
+        // one the operator actually works in. Two rules instead:
+        //   * the operator's LAST choice wins, if it is still in the
+        //     list — after the first visit the default stops mattering;
+        //   * otherwise the lowest id, i.e. the first provider company
+        //     created on this deployment. That is the platform's own
+        //     tenant, not an alphabetical accident.
         if (response.length > 1) {
+          const stored = Number(
+            window.localStorage.getItem(CATALOG_COMPANY_STORAGE_KEY),
+          );
+          const remembered = response.some((c) => c.id === stored)
+            ? stored
+            : null;
+          const primary = response.reduce(
+            (lowest, c) => (c.id < lowest.id ? c : lowest),
+            response[0],
+          );
           setCatalogCompany((current) =>
-            current === "" ? response[0].id : current,
+            current === "" ? (remembered ?? primary.id) : current,
           );
         }
       })
@@ -1229,6 +1255,11 @@ export function ServicesAdminPage() {
             onChange={(event) => {
               const v = event.target.value;
               setCatalogCompany(v === "" ? "" : Number(v));
+              // Remember it, so the next visit opens where this one
+              // left off rather than on a default at all.
+              if (v !== "") {
+                window.localStorage.setItem(CATALOG_COMPANY_STORAGE_KEY, v);
+              }
             }}
             data-testid="catalog-company-selector"
           >
