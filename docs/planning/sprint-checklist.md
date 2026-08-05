@@ -55,243 +55,69 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `fix/sprint-137-ramazan-round-1` — Sprint 137 items 1-7, the
-Sprint 138 round-2 items, the Sprint 139 round-3 consistency fixes, and
-the Sprint 140 round-4 completion of them, and the Sprint 141 round-5
-failure-path audit; each round found by the owner or the PM verifying the
-previous one before merging. Cut from `main`@`751bb8d`. **Still ONE PR**; nothing
-merges in between, and CC does not open PRs — the owner does.
+**Branch:** `feat/sprint-142-company-scoped-categories` — Sprint 142,
+company-scoped service categories. Cut from `main`@`91230a0`. CC does not
+open PRs; the owner does.
 
-**Last shipped PR on `main`: #126** — Sprints 133/134/135/136. Its
-SHIPPED line was appended by this branch.
+**Last shipped PR on `main`: #127** — Sprints 137/138/139/140/141. Its
+SHIPPED line was appended by this branch (a PR cannot cite its own
+number).
 
-**Round 1 (Sprint 137, commits `8399028` + `82397bb`):** multi-attachment
-tickets; archived prices hidden by default; the "copy from defaults
-duplicates" report resolved as NOT a duplication bug (code analysis, the
-owner verifies on crmtest); the customer-pricing category drill-down;
-the Extra Work form's real catalog-category filter; orderable
-`CustomerCustomPrice` lines; and iOS-style bulk edit mode on three lists.
+**What this sprint reverses, deliberately.** `ServiceCategory` was GLOBAL:
+no `company` FK, `name` unique platform-wide, and writes locked to
+SUPER_ADMIN precisely BECAUSE it was global. That was recorded as
+intentional in `(I-7)`, and the cross-tenant blast radius it created was
+recorded as `## NEXT` item 21. The owner now needs per-company catalogs,
+which is exactly the "concrete need" `(I-7)` said was missing — so both
+entries are DELETED rather than left contradicting the code.
 
-**Round 2 (Sprint 138) — the theme the owner named: the interface
-offered actions that cannot succeed, or carried machinery for states
-nobody needs to manage. Removing an impossible button beats making it
-work.**
-
-- **§1 Services — Delete only when it can actually work.** The catalog
-  offered Delete on every row. For a priced service it ALWAYS failed,
-  and the 400 named prices the operator believed he had already deleted
-  — they were archived, and archived rows still PROTECT. That is the
-  "Deleted 0 service(s), 1 failed" screen. `Service` now carries
-  `has_price_rows`, from ONE `Exists` subquery annotated on the list
-  queryset (no per-row query). A referenced service offers
-  **Deactiveren / Activeren** instead of Delete, single and bulk; an
-  unreferenced one keeps a Delete that works. The 400 survives as a
-  server-side backstop, reworded to say archived prices block deletion
-  too and to point at deactivation instead of the dead end it used to
-  recommend.
-- **§2 Categories — archive → empty → delete.** Archiving a category now
-  cascades to its services in ONE transaction
-  (`POST /api/services/categories/<id>/archive/`), because
-  `Service.category` is NOT nullable and leaving a retired category's
-  services active would strand them: live in every picker, invisible in
-  the category UI. Unarchive restores the CATEGORY ONLY and reports how
-  many services stayed archived, so nobody assumes a full restore.
-  Services can be **moved between categories in bulk** from the Services
-  edit mode — the mechanism that empties a category, with archived
-  targets opt-in. An EMPTY category (active or archived) offers Delete;
-  a non-empty one never does, and the per-row service count is on the
-  list so the operator can see WHY without clicking in.
-- **§3 Archived PRICES are read-only, by construction.** With "Show
-  archived" on, an archived price could be selected and archived AGAIN:
-  the backend returned 204 (it was already inactive), the row vanished,
-  and it was back on reload — a success reported for something that did
-  not happen. Archived price rows now render quiet, carry NO checkbox,
-  are not selectable and have no row actions, so the second archive
-  cannot be requested at all. Select-all covers ACTIVE rows only and the
-  count says so. No restore flow, no permanent delete, no "skipped"
-  reporting was built — deliberately. **PRICES only:** archived
-  CATEGORIES and SERVICES are catalog rows, not audit records, and keep
-  their actions per §1/§2.
-- **§4 The archived toggle reflects state.** It read "Show archived"
-  whether or not archived rows were showing, so hiding them meant
-  pressing a button labelled "show". It now toggles its label, and the
-  list itself says when archived rows are included.
-- **§5 Copy-from-defaults groups by category.** One flat scrolling list
-  became per-category groups with a per-category select-all that covers
-  every service in the category — including rows the text filter is
-  hiding — so "copy this whole category" is one click. The endpoint is
-  unchanged; the created/skipped summary it already returned is still
-  surfaced.
-- **§6 The Extra Work filter bar, MEASURED not eyeballed.** Nine
-  controls wrapped into three ragged rows with the cascade hint floating
-  beside them. Each filter is now a compact label-over-control stack,
-  bottom-aligned, growing to share its row so the right edge is flush;
-  the hint moved to one line beneath the controls it describes (and onto
-  each disabled control's `title`). Measured with Playwright against the
-  real built page: **1280px → 2 rows (was 3), 0px horizontal page
-  overflow, no inner scroll; 1440px → 2 rows; 1024px → 3 rows, still 0px
-  overflow.** A literal single line is geometrically impossible here:
-  the content column is 966px at 1280px viewport, and nine controls at a
-  usable 140px plus 12px gaps need ~1356px. Getting to one line would
-  mean hiding filters behind a disclosure, which risks concealing an
-  ACTIVE filter — the exact class of defect this sprint exists to
-  remove — so it was not done. Recorded in `## NEXT`.
-
-**Round 3 (Sprint 139) — four consistency defects found on crmtest.**
-The same underlying idea was implemented differently in different
-places; these make them agree.
-
-- **§1 Deactivating a service now behaves like archiving a price.** The
-  customer pricing list hid archived rows behind a toggle while the
-  Services catalog kept deactivated rows on screen forever marked
-  "Inactive" — two lists, two behaviours, one idea. Inactive services
-  (and inactive Units, which had the same shape) are now HIDDEN by
-  default and revealed by the same show/hide toggle with a
-  state-reflecting label, rendered with the same quiet row treatment
-  (`.list-row-archived`, generalised from the price-only class). Reuses
-  the endpoints' EXISTING `?is_active=` param — no second mechanism.
-  The Deactiveren / Activeren actions are unchanged; an inactive row
-  stays reachable through the toggle, and its detail panel still opens
-  so it can be reactivated.
-- **§2 Result banners auto-dismiss — but only the SUCCESSFUL ones.**
-  "Deleted 1 service(s)." used to sit on the page indefinitely. Success
-  results now go through the app's existing `ToastProvider`
-  (`useToast().push`), whose defaults already encode the right rule:
-  4s for success, and **sticky for errors**. Failure and partial-failure
-  results deliberately stay as in-page alerts, because they name the
-  rows the operator still has to deal with — those must not disappear
-  on a timer. No second toast pattern was introduced.
-- **§3 One category-grouped picker, used three times.** The bulk
-  price-adjust modals (catalog defaults, and customer contract prices)
-  were still flat scrolling lists while copy-from-defaults had been
-  grouped in Sprint 138 §5, so the same catalog looked different
-  depending on which modal you opened. Extracted
-  `CategoryGroupedPicker` + `buildPickerGroups` and moved all THREE onto
-  it, including the "select-all covers rows the filter is hiding" rule
-  and the real-total count in each group header. The grouping helper
-  lives in `lib/pickerGroups.ts` rather than beside the component,
-  because `react-refresh/only-export-components` rejects a component
-  module that also exports plain functions.
-- **§4 The company dropdown filters the lists.** It previously only
-  disambiguated which company a NEW row belonged to (Sprint 135), which
-  is not what an operator expects from a dropdown above a list. It now
-  also narrows the Services and Units lists, via `?company=` — already
-  supported by the Units endpoint, added to the Service endpoint this
-  round. It is applied BEFORE `filter_services_for`, so it can only
-  narrow: a COMPANY_ADMIN naming another company's id gets an empty
-  list, never that company's catalog (asserted). Categories are global
-  and unaffected; the page already said so on the Categories tab, and
-  the Services/Units tabs now say what the selector DOES do there.
-
-**Round 4 (Sprint 140) — finishing round 3 properly.** The PM's
-verification of `649b854` found Sprint 139 §1 incomplete in four places,
-all one shape: **the list contradicted its own toggle.** Fixed by
-construction rather than site by site.
-
-- **§1/§2 The Services mutation paths bypassed the filter, and the
-  helper could drop a row but never bring one back.** Create and edit
-  wrote straight into `services`, so creating a service with Active
-  unticked (or unticking it in the edit modal) left a row on screen that
-  the toggle claimed to hide. Worse, `applyServiceUpdates` mapped over
-  the rows already displayed: once a deactivated row had LEFT the list,
-  pressing **Activeren** PATCHed successfully and the row never came
-  back. Every local-merge variant has that hole in one direction or the
-  other, so local merging was abandoned — every mutation now re-reads
-  through `refreshCatalogRows()`, which honours the archived toggle and
-  the company filter, and refetches category counts alongside (a
-  create, delete or category change moves the `service_count` that gates
-  Delete on the Categories tab).
-
-  Chosen over a merge-and-insert helper deliberately: the server orders
-  services by `category__name, name, id`, while the client insert it
-  would have replaced sorted by `name` alone — the two ALREADY
-  disagreed, so re-implementing insertion would have cemented a second,
-  wrong ordering rule. One round-trip on an admin page is the cheaper
-  correctness, and there is no flicker (single `setState`, loading bar
-  untouched, no intermediate empty render).
-- **§3 The Units tab had received none of Sprint 139's treatment.** Its
-  create and edit paths were bare `setUnits` with no helper in the file
-  at all — and since the edit modal's Active toggle was the only way to
-  deactivate a unit, deactivating one left it sitting in a list that
-  claimed to hide inactive rows. It now has the same `refreshUnits()`
-  treatment on create, edit, delete and bulk delete. It also gained the
-  **Activeren / Deactiveren** action the Services detail panel has:
-  Sprint 139 reused `services.inactive_included_note`, which tells the
-  operator inactive rows can be "reactivated from their detail panel",
-  and that panel had no such control. Fixed by adding the control, NOT
-  by softening the sentence.
-- **§4 The customer pricing page had the mirror-image bug, in both
-  directions, at more sites than the review flagged.** Bulk-adjust and
-  copy-from-defaults refetched without `{ includeArchived: showArchived }`
-  — but so did create, edit, single delete and bulk archive, each in its
-  own way. With the toggle OFF, creating or editing a row to inactive
-  inserted or kept a row that should not be listed; with the toggle ON,
-  deleting or bulk-archiving REMOVED a row from view even though an
-  archived row is precisely what that toggle exists to show. All six now
-  go through one `refreshPricingRows()`; only the load effect and that
-  helper write the price lists at all.
-- **§5** One stale comment corrected: the Units endpoint docstring still
-  claimed the admin surface requests the unfiltered list, which stopped
-  being true in Sprint 139 §1.
-
-No backend behaviour changed this round (one docstring), so the Django
-suite was deliberately NOT run — CI's parallel full regression on the PR
-is the gate, and this box has one core. The DEV database was one
-migration behind HEAD and was brought to `extra_work.0022`; crmtest was
-already there and was not touched.
-
-**Round 5 (Sprint 141) — the failure paths Round 4 never audited.**
-Round 4's fixes were correct and its five defects are genuinely gone,
-but converting thirteen synchronous state updates into
-`await refreshX()` was done without asking what happens when the REFETCH
-throws. That introduced two new classes, both caught in review.
-
-- **§1 Five bulk handlers could wedge until a page reload.** Each placed
-  `await refreshX()` before the lines that reset the busy flag and closed
-  the dialog, with no `finally`. `ConfirmDialog` invokes the handler as
-  `void onConfirm()` — the rejection is swallowed — and disables BOTH
-  Cancel and Confirm while `busy`, so the dialog went inert. The
-  hand-rolled move modal was worse: no Esc, no backdrop click, Cancel
-  disabled on `moveBusy`.
-- **§2 A committed write could be reported as a failure.** Create and
-  edit ran the refetch inside the form's existing `try`, so a re-read
-  failure set a FORM error and left the modal open. Worst on the pricing
-  page: `CustomerServicePrice` / `CustomerCustomPrice` have NO uniqueness
-  constraint — multiple active rows per (customer, service) are legal by
-  design and `resolve_price` disambiguates by `valid_from` — so an
-  operator retrying after a false failure would create a REAL duplicate
-  active price row.
-- **The fix, applied once rather than at thirteen call sites.** All three
-  refetch helpers are now non-throwing by contract: they catch, leave the
-  list stale, and surface a page-level (not form-level) message saying
-  the change was saved but the list could not be refreshed. Per-site
-  `try/finally` would have fixed §1 only — §2 needs the rejection to stop
-  reaching the form's `catch`, so every site would have needed BOTH.
-  Round 4's defect was precisely that the correct guard was written once
-  and omitted everywhere else; putting it in the helper makes omission
-  impossible. The now-redundant wrapper at the cascade-archive was
-  removed.
-- Three state writes that sat AFTER the refetch were moved BEFORE it, so
-  they no longer depend on a network call that is allowed to fail:
-  the two detail-panel selections, and the copy-from-defaults
-  created/skipped summary that the comment above it promises to keep
-  visible.
-
-**Standing rule recorded from this round:** whenever a synchronous state
-update becomes an `await`, audit the throw path — which flag stays set,
-which modal stays open, what the user is told, and what a retry does.
-Round 4's adversarial review covered filter-correctness thoroughly and
-failure paths not at all, which is exactly where its defects were.
-
-FE gate: tsc clean, ESLint **48** (46 errors, 2 warnings — baseline held,
-no new violations, no new `eslint-disable`), build OK. nl/en verified
-identical across all 11 namespaces, every referenced key resolving in
-both locales.
-
-Production hardening remains **postponed at the owner's instruction** — it
-needs his own inputs (SMTP credentials, a Sentry DSN, the real production
-`PLATFORM_BRAND_SLUG`); see `## NEXT`. Off-site backups are BUILT but not
-yet running — also its own `## NEXT` item.
+- **§1 The migration** — `extra_work.0023`–`0027`, mirroring the
+  `Service.company` precedent (nullable → backfill → NOT NULL): add
+  `ServiceCategory.company` (PROTECT, `related_name="service_categories"`)
+  nullable; drop the field-level `unique=True` on `name` and add the
+  per-company `UniqueConstraint(Lower(Trim("name")), "company")` in the
+  SAME migration, so there is never a window where two companies can
+  insert a colliding name; backfill each category from the single company
+  of its services, **raising** on more than one distinct company and
+  pinning a zero-service category to the sole `Company` (raising if there
+  is not exactly one); then flip `company` NOT NULL. Verified against the
+  live crmtest DB: 6 categories, each belonging to exactly one company,
+  zero zero-service categories. That is encoded as a guard, not assumed.
+  `name`'s `max_length=128` is unchanged — it is in lockstep with
+  `ExtraWorkRequestItem.snapshot_service_category_name`.
+- **§2 Scoping closes a live cross-tenant leak.**
+  `catalog_scope.filter_categories_for` was written in Sprint 3B as an
+  identity function, explicitly as the hook for this sprint; it now filters
+  on `company_id__in=scope` exactly as `filter_services_for` does. Because
+  it was the identity AND category GET is open to any authenticated user, a
+  CUSTOMER_USER could read EVERY provider's category names (H-1). Locked
+  shut by test.
+- **§3 Category writes move onto the normal catalog gate.**
+  `_enforce_category_super_admin_only` is retired at all four call sites
+  (`perform_create`, `perform_update`, `delete`, the archive view) in
+  favour of `_enforce_catalog_management` — the gate `Service` already
+  uses — with `_resolve_catalog_create_company` for CREATE. A COMPANY_ADMIN
+  can now manage their OWN categories, which is what
+  `Company.provider_admin_may_manage_catalog`'s help text has claimed all
+  along and did not do.
+- **§4 Two guards that did not exist.** A `Service`'s `category` must
+  belong to the Service's own company — nothing enforced that before, so a
+  service could be attached to ANY category. And `?company=<id>` on the
+  categories list, applied BEFORE `filter_categories_for` so it can only
+  ever narrow (the ordering `ServiceListCreateView` already documents).
+- **§5 A warning that can never fire, removed.**
+  `ServiceCategoryArchiveView`'s `affected_company_count` is now
+  permanently ≤ 1, so the field and the FE's "this touched N providers"
+  branch are gone. Same anti-pattern this whole sprint series has been
+  removing.
+- **§6 Five carry-over one-liners from the #127 review** — the Edit-mode
+  button gated on `visibleRows` (which includes archived rows) instead of
+  `selectableRows`; the catalog bulk price-adjust's raw refetch, whose
+  failure reported a committed +10% as failed and whose retry COMPOUNDED
+  it to +21%; `loadError` never cleared at any of its 14 set-sites; the
+  copy-from-defaults refresh banner rendering BEHIND its own
+  `aria-modal` overlay; and a `.then()` with no `.catch()` that could leave
+  the SA company selector silently absent.
 
 ---
 
@@ -547,18 +373,18 @@ item has moved to `## SHIPPED` or been resolved below instead.
     selecting ~50+ routinely, the fix is one real bulk endpoint per
     action (id list in, per-id result array out, one transaction — the
     shape `ServiceBulkRaiseView` already uses). Not built.
-21. **A GLOBAL category's cascade-archive reaches every provider
-    company's services.** `ServiceCategory` has no `company` FK, so one
-    category can hold services from several providers; Sprint 138 §2a's
-    archive deactivates all of them. This is contained for now because
-    category writes are SUPER_ADMIN-only
-    (`_enforce_category_super_admin_only`) and the response reports
-    `affected_company_count`, which the UI surfaces as an explicit
-    warning when it exceeds 1. It is still a real cross-tenant blast
-    radius sitting behind one button. The proper fix is the long-deferred
-    "provider-scoped categories" decision recorded in the
-    documented-intentional section (I-7) — until then, do not widen
-    category writes beyond SUPER_ADMIN.
+21. **Five state writes still sit AFTER their refetch — consistency, not
+    a bug.** Sprint 141 moved three such writes to BEFORE the refetch so
+    they no longer depend on a network call that is allowed to fail, but
+    left five structurally identical sites behind:
+    `ServicesAdminPage.tsx:500`, `:740`, `:892`, `ManagedUnitsTab.tsx:183`
+    and `CustomerPricingPage.tsx:488`/`:507`. They are harmless ONLY
+    because the three refetch helpers are non-throwing by contract — the
+    line after `await refreshX()` always runs today. That contract is the
+    single thing keeping them correct, so the day someone makes a helper
+    throw again, these five silently regress into Sprint 141 §1. Either
+    move them ahead of the refetch like the other three, or make the
+    non-throwing contract enforceable rather than conventional.
 
 ---
 
@@ -569,6 +395,42 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#127** (`91230a0`) — Sprints 137, 138, 139, 140 and 141 on one branch,
+  one PR: five review rounds on the same body of work, each round found by
+  the owner or the PM verifying the one before it. **Round 1 (137)**:
+  multi-attachment tickets; archived customer prices hidden behind a
+  toggle; the "copy from defaults duplicates" report resolved as NOT a
+  duplication bug; the customer-pricing category drill-down; the Extra Work
+  cart's real catalog-category filter; orderable `CustomerCustomPrice`
+  lines; iOS-style bulk edit mode on three lists. **Round 2 (138)** — the
+  interface offered actions that cannot succeed: `Service.has_price_rows`
+  (one `Exists` annotation) so a priced row offers Deactiveren instead of a
+  Delete that always 400s; category archive cascades to its services in one
+  transaction and unarchive restores the category ONLY, reporting how many
+  services stayed archived; bulk move-to-category; archived PRICE rows made
+  unselectable and action-free; the archived toggle made to reflect its own
+  state; copy-from-defaults grouped by category; the Extra Work filter bar
+  re-laid-out and MEASURED (3 ragged rows → 2 flush rows at 1280px, 0px
+  overflow). **Round 3 (139)** — four consistency defects: inactive
+  services and units hidden by default behind the same toggle prices
+  already had; success banners routed through the existing `ToastProvider`
+  (4s success, sticky errors) while failure banners deliberately stayed
+  in-page; `CategoryGroupedPicker` + `buildPickerGroups` extracted and all
+  three bulk pickers moved onto it; the company dropdown made to actually
+  filter the Services and Units lists via `?company=`, applied BEFORE
+  `filter_services_for` so it can only narrow. **Round 4 (140)** — the
+  lists contradicted their own toggle in five places; local merging
+  abandoned in favour of one `refreshCatalogRows()` / `refreshUnits()` /
+  `refreshPricingRows()` per page that honours the toggle and the company
+  filter; the Units detail panel gained the Activeren/Deactiveren control
+  its own hint text had been promising. **Round 5 (141)** — the failure
+  paths round 4 never audited: five bulk handlers could wedge a dialog
+  inert until reload, and a committed write could be reported as a failure
+  whose retry created a REAL duplicate active price row (those tables have
+  no uniqueness constraint by design). Fixed once, in the three refetch
+  helpers, which are now non-throwing by contract — not at thirteen call
+  sites. Standing rule recorded: whenever a synchronous state update
+  becomes an `await`, audit the throw path.
 - **#126** (`751bb8d`) — Sprints 133, 134, 135 and 136 on one branch, one
   PR · **Sprint 133**: `build_extra_work_by_department_pdf` mixed two VAT
   bases in one table — detail rows rendered ex-VAT under an "Excl. BTW"
@@ -841,16 +703,12 @@ These surfaced during the #109 audit and are intentional — recorded so a futur
 - **(I-4)** `clear-invoiced` clears by the EW's CURRENT billing month (COALESCE(invoice_date, spawned-ticket completion)), not the month it was originally marked in.
 - **(I-5)** The customer logo GET is open to any authenticated user by design; writes are gated (a customer's logo only by that customer's CUSTOMER_COMPANY_ADMIN; SA may change any).
 - **(I-6)** The user profile-photo GET is open by design; writes are self/SA only.
-- **(I-7)** `ServiceCategory` stays global (system-wide unique `name`, no
-  `company` FK) while `Service`, `CustomerCustomPrice`, and `ManagedUnit`
-  are all company-scoped — found during Sprint 123, decided intentional
-  in Sprint 136: reconciling them means migrating a system-wide unique
-  constraint with live data behind it (splitting one global category
-  namespace into per-company ones, backfilling every existing row's
-  company, and resolving any name collision that split would create) — a
-  real schema migration, not a small change, and not worth it without a
-  concrete need driving it. Recorded so a future sprint touching either
-  catalog doesn't re-flag it as an oversight.
+
+(There is no I-7. It recorded `ServiceCategory` staying global as
+intentional; Sprint 142 reversed that decision and removed the entry
+rather than leave it contradicting the code. The reversal is recorded in
+`## NOW` / `## SHIPPED`, which is where decisions live — this section is
+only for behaviours a future audit should NOT re-flag.)
 
 ---
 
