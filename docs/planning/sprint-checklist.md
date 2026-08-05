@@ -71,7 +71,7 @@ recorded as `## NEXT` item 21. The owner now needs per-company catalogs,
 which is exactly the "concrete need" `(I-7)` said was missing — so both
 entries are DELETED rather than left contradicting the code.
 
-- **§1 The migration** — `extra_work.0023`–`0027`, mirroring the
+- **§1 The migration** — `extra_work.0023`–`0025`, mirroring the
   `Service.company` precedent (nullable → backfill → NOT NULL): add
   `ServiceCategory.company` (PROTECT, `related_name="service_categories"`)
   nullable; drop the field-level `unique=True` on `name` and add the
@@ -373,7 +373,26 @@ item has moved to `## SHIPPED` or been resolved below instead.
     selecting ~50+ routinely, the fix is one real bulk endpoint per
     action (id list in, per-id result array out, one transaction — the
     shape `ServiceBulkRaiseView` already uses). Not built.
-21. **Five state writes still sit AFTER their refetch — consistency, not
+21. **`seed_demo_data` seeds the catalog for one company and the demo
+    Extra Work for another.** `_seed_service_catalog()` pins its 4
+    categories + 14 services to `Company.objects.order_by("id").first()`,
+    while `_seed_demo_extra_work` resolves its tenant by
+    `slug="osius-demo"`. On a multi-company dev DB those are different
+    companies, so the seeded `CustomerServicePrice` links a customer
+    under one provider to a service owned by another — a shape
+    `CustomerServicePriceSerializer` REJECTS over the API
+    (`service_customer_company_mismatch`); the seeder only gets away
+    with it by writing through the ORM. This predates Sprint 142 and was
+    deliberately not fixed there: making the two agree re-targets the
+    seeded catalog to a different company than existing dev DBs already
+    have it under, which duplicates rather than moves it. Sprint 142
+    narrowed the demo-EW lookup to the CATALOG's company (so the
+    now-per-company `category__name="Cleaning"` fallback cannot pick a
+    foreign provider's category) and left the mismatch itself alone. The
+    real fix is one company for both, plus a note on what an existing DB
+    should do with the old rows.
+
+22. **Five state writes still sit AFTER their refetch — consistency, not
     a bug.** Sprint 141 moved three such writes to BEFORE the refetch so
     they no longer depend on a network call that is allowed to fail, but
     left five structurally identical sites behind:

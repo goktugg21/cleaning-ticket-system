@@ -243,7 +243,9 @@ export function CustomerPricingPage() {
   // sprint brief) — DELETE on both pricing endpoints soft-archives, so
   // a button saying "Delete" would be the exact lie item 2 set out to
   // fix.
-  const [editMode, setEditMode] = useState(false);
+  // The operator's INTENT to be in edit mode. What the UI actually
+  // renders is the derived `editMode` further down — see the note there.
+  const [editModeRequested, setEditModeRequested] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<string[]>([]);
   const bulkArchiveDialogRef = useRef<ConfirmDialogHandle>(null);
   const [bulkArchiveBusy, setBulkArchiveBusy] = useState(false);
@@ -329,7 +331,23 @@ export function CustomerPricingPage() {
         setPrices(pricesData);
         setServices(servicesData);
         setCustomPrices(customPricesData);
-        setCategories(categoriesData);
+        // Sprint 142 — narrow to THIS customer's provider company.
+        // Categories gained a `company` FK this sprint, and "every
+        // category" (Sprint 137 item 4) was the right call only while
+        // they were global: for a SUPER_ADMIN on a multi-company tenant
+        // it would now put ANOTHER provider's category headings on this
+        // customer's pricing page, none of which can ever hold a row
+        // that is priceable here. Filtered client-side rather than by a
+        // `?company=` param because the customer's company is only known
+        // once `getCustomer` resolves, and these six calls are
+        // deliberately parallel — a serial round-trip to save a
+        // one-line filter is the wrong trade.
+        setCategories(
+          categoriesData.filter((c) => c.company === customerData.company),
+        );
+        // Sprint 142 (#127 review carry-over) — clear a stale banner on
+        // a successful (re)load. See `ServicesAdminPage`'s load effect.
+        setLoadError("");
         setLoading(false);
       } catch (err) {
         if (!cancelled.current) {
@@ -554,6 +572,7 @@ export function CustomerPricingPage() {
       ]);
       setPrices(pricesData);
       setCustomPrices(customPricesData);
+      setLoadError("");
     } catch {
       setLoadError(t("admin.refresh_after_save_failed"));
     }
@@ -624,7 +643,7 @@ export function CustomerPricingPage() {
   }
 
   function exitEditMode() {
-    setEditMode(false);
+    setEditModeRequested(false);
     setBulkSelection([]);
   }
 
@@ -657,8 +676,12 @@ export function CustomerPricingPage() {
   async function handleConfirmBulkArchive() {
     if (numericId === null) return;
     setBulkArchiveBusy(true);
-    const targets = visibleRows.filter((entry) =>
-      bulkSelection.includes(rowKey(entry)),
+    // Sprint 142 (#127 review carry-over) — `selectableRows`, and the
+    // pruned `activeBulkSelection`: an archived row must never be a
+    // bulk-archive target (Sprint 138 §3), and a stale key must not
+    // resurrect one. See the note beside `activeBulkSelection`.
+    const targets = selectableRows.filter((entry) =>
+      activeBulkSelection.includes(rowKey(entry)),
     );
     const failed: string[] = [];
     const archivedContractIds: number[] = [];
@@ -1015,6 +1038,40 @@ export function CustomerPricingPage() {
   // rather than selected-then-skipped.
   const selectableRows = visibleRows.filter((entry) => !isArchivedRow(entry));
 
+  // Sprint 142 (#127 review carry-over) — edit mode is only MEANINGFUL
+  // while there is at least one selectable row, so what the UI renders
+  // is DERIVED from the row set rather than read straight off the
+  // operator's `editModeRequested` intent.
+  //
+  // The reported case: in a category where every row is archived,
+  // `visibleRows` is non-empty but `selectableRows` is empty. The Edit
+  // button was gated on `visibleRows.length === 0`, so it was enabled,
+  // edit mode opened, and the operator got "0 of 0 selected" above a
+  // dead "Archive selected" — archived rows carry no checkbox by
+  // construction (Sprint 138 §3). The same state is reachable from the
+  // other direction: archive the category's last active row WHILE in
+  // edit mode, and the toolbar is left hanging over nothing.
+  //
+  // Deriving closes both at once and needs no effect — a resync effect
+  // here would be a synchronous setState in an effect body, which this
+  // codebase forbids (CLAUDE.md, and `react-hooks/set-state-in-effect`
+  // is already at its ESLint baseline).
+  const editMode = editModeRequested && selectableRows.length > 0;
+
+  // ...and the SELECTION is derived the same way, for the same reason.
+  // `bulkSelection` is raw state that nothing prunes, so a key can
+  // outlive its row's selectability: select the only active row, archive
+  // it (edit mode collapses, the key remains), then add a new price to
+  // the category — edit mode resumes with a stale selection pointing at
+  // an ARCHIVED row, and "Archive selected" would re-archive it for a
+  // 204 and a phantom success. That is precisely the defect Sprint 138
+  // §3 removed. Every count and the bulk handler read THIS, not the raw
+  // array.
+  const selectableKeys = new Set(selectableRows.map(rowKey));
+  const activeBulkSelection = bulkSelection.filter((key) =>
+    selectableKeys.has(key),
+  );
+
   // Sprint 138 §5 — the copy-from-defaults picker, grouped by real
   // ServiceCategory. `services` holds every catalog row and `visible`
   // is only what the text filter currently shows: the per-category
@@ -1275,9 +1332,19 @@ export function CustomerPricingPage() {
                 data-testid="customer-pricing-edit-mode-toggle"
                 aria-pressed={editMode}
                 onClick={() =>
-                  editMode ? exitEditMode() : setEditMode(true)
+                  editMode ? exitEditMode() : setEditModeRequested(true)
                 }
-                disabled={visibleRows.length === 0}
+                // Sprint 142 (#127 review carry-over) — `selectableRows`,
+                // not `visibleRows`: the latter INCLUDES archived rows,
+                // which are read-only and carry no checkbox, so a
+                // category of nothing but archived rows enabled a button
+                // that could only open an empty toolbar.
+                disabled={selectableRows.length === 0}
+                title={
+                  selectableRows.length === 0
+                    ? t("customer_pricing.list_edit_disabled_hint")
+                    : undefined
+                }
               >
                 {editMode
                   ? t("customer_pricing.list_edit_done")
@@ -1289,7 +1356,7 @@ export function CustomerPricingPage() {
               <>
                 <div className="list-edit-bar">
                   <MultiSelectToolbar
-                    selectedCount={bulkSelection.length}
+                    selectedCount={activeBulkSelection.length}
                     // Sprint 138 §3 — select-all covers ACTIVE rows
                     // only; archived rows are not selectable at all.
                     onSelectAll={() =>
@@ -1299,7 +1366,7 @@ export function CustomerPricingPage() {
                     // ...and the count says so, so "select all" picking
                     // fewer rows than are on screen never looks broken.
                     countLabel={t("customer_pricing.bulk_selected_count", {
-                      count: bulkSelection.length,
+                      count: activeBulkSelection.length,
                       total: selectableRows.length,
                     })}
                     disabled={bulkArchiveBusy}
@@ -2292,6 +2359,29 @@ export function CustomerPricingPage() {
               </div>
             )}
 
+            {/* Sprint 142 (#127 review carry-over) — `loadError` is a
+                PAGE-level banner, and this modal is `position: fixed;
+                inset: 0; zIndex: 100; aria-modal="true"`. So when the
+                copy succeeded but the refresh that follows it failed,
+                the "saved, but the list could not be refreshed" message
+                rendered BEHIND this overlay: invisible on screen and,
+                because `aria-modal` hides everything outside the dialog
+                from the accessibility tree, unreachable to a screen
+                reader as well. The modal stays open on purpose (the
+                created/skipped summary below is what it exists to
+                show), so the message is repeated INSIDE it rather than
+                the modal being closed out from under that summary. */}
+            {loadError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-pricing-copy-default-refresh-error"
+              >
+                {loadError}
+              </div>
+            )}
+
             {copyResult && (
               <div
                 className="alert-info"
@@ -2444,10 +2534,10 @@ export function CustomerPricingPage() {
       <ConfirmDialog
         ref={bulkArchiveDialogRef}
         title={t("customer_pricing.bulk_archive_confirm_title", {
-          count: bulkSelection.length,
+          count: activeBulkSelection.length,
         })}
         body={t("customer_pricing.bulk_archive_confirm_body", {
-          count: bulkSelection.length,
+          count: activeBulkSelection.length,
         })}
         confirmLabel={t("customer_pricing.bulk_archive_button")}
         onConfirm={handleConfirmBulkArchive}

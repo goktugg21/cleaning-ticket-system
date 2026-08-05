@@ -1846,7 +1846,8 @@ export interface PromoteContactResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Sprint 28 Batch 5 — Service catalog (provider-wide) + per-customer pricing
+// Sprint 28 Batch 5 — Service catalog (per provider company since Sprint 142)
+// + per-customer pricing
 // ---------------------------------------------------------------------------
 //
 // A `ServiceCategory` groups related `Service` rows (e.g. "Deep cleaning",
@@ -1879,6 +1880,13 @@ export type ServiceUnitType =
 
 export interface ServiceCategory {
   id: number;
+  // Sprint 142 — categories are per provider company, like the services
+  // under them. Optional on the wire on CREATE (a COMPANY_ADMIN's
+  // frontend omits it and the backend defaults to their own company),
+  // read-only on UPDATE — re-pinning would strand every Service inside
+  // it in a category their own company cannot see.
+  company: number;
+  company_name: string;
   name: string;
   description: string;
   is_active: boolean;
@@ -1901,9 +1909,13 @@ export interface ServiceCategory {
 export interface ServiceCategoryArchiveResult {
   category: ServiceCategory;
   deactivated_service_count: number;
-  // A category is GLOBAL, so archiving one can reach services owned by
-  // several provider companies. Surfaced so that never happens silently.
-  affected_company_count: number;
+  // Sprint 142 removed `affected_company_count`. It existed because a
+  // GLOBAL category could hold several providers' services, so archiving
+  // one reached all of them. A category belongs to one company now and
+  // its services must belong to that same company, so the number could
+  // only ever be 0 or 1 — a "this touched N providers" warning that can
+  // never fire. Do not re-add it, and do not reintroduce the warning
+  // branch that read it.
   still_archived_service_count: number;
 }
 
@@ -1911,6 +1923,10 @@ export interface ServiceCategoryCreatePayload {
   name: string;
   description?: string;
   is_active?: boolean;
+  // Sprint 142 — only a SUPER_ADMIN needs to send this (and MUST, when
+  // more than one provider Company exists). A COMPANY_ADMIN omits it and
+  // the backend resolves their own company.
+  company?: number;
 }
 
 export type ServiceCategoryUpdatePayload = Partial<ServiceCategoryCreatePayload>;

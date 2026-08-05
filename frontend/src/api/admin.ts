@@ -1482,14 +1482,22 @@ export async function setAutoCompleteFlag(
 
 export interface ServiceCategoryListParams {
   is_active?: boolean;
+  // Sprint 142 — narrow to one provider company. Same contract as
+  // `ServiceListParams.company`: the backend applies it BEFORE
+  // `filter_categories_for`, so it can only ever narrow what the actor
+  // already sees, never widen it.
+  company?: number;
 }
 
 export async function listServiceCategories(
   params: ServiceCategoryListParams = {},
 ): Promise<ServiceCategory[]> {
-  const query: Record<string, string> = {};
+  const query: Record<string, string | number> = {};
   if (params.is_active !== undefined) {
     query.is_active = params.is_active ? "true" : "false";
+  }
+  if (params.company !== undefined) {
+    query.company = params.company;
   }
   const response = await api.get<PaginatedResponse<ServiceCategory>>(
     "/services/categories/",
@@ -1535,7 +1543,11 @@ export async function deleteServiceCategory(id: number): Promise<void> {
  * services active would strand them (live in every picker, invisible in
  * the category UI).
  *
- * SUPER_ADMIN only — categories are global.
+ * Sprint 142 — no longer SUPER_ADMIN-only: a COMPANY_ADMIN may archive
+ * their own company's categories, gated by the same
+ * `provider_admin_may_manage_catalog` policy as every other catalog
+ * write. The cascade cannot reach another provider's services, because
+ * a category and its services share one company.
  */
 export async function archiveServiceCategory(
   id: number,

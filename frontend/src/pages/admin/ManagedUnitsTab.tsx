@@ -120,6 +120,10 @@ export function ManagedUnitsTab({
       .then((data) => {
         if (cancelled) return;
         setUnits(data);
+        // Sprint 142 (#127 review carry-over) — clear a stale banner
+        // once the list is genuinely fresh again. See
+        // `ServicesAdminPage`'s load effect for the full note.
+        setLoadError("");
         setLoading(false);
       })
       .catch((err) => {
@@ -215,6 +219,7 @@ export function ManagedUnitsTab({
           ...(selectedCompany === "" ? {} : { company: selectedCompany }),
         }),
       );
+      setLoadError("");
     } catch {
       setLoadError(t("admin.refresh_after_save_failed"));
     }
