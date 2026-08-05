@@ -253,17 +253,35 @@ def _annotate_category_service_counts(queryset, user):
 
     ONE aggregate per column for the whole page — no per-row query.
 
-    The counts stay SCOPED to the catalog the actor can actually see
-    (`scope_company_ids_for_catalog`). Since Sprint 142 that is very
-    nearly a no-op — a category and its services share one company, and
-    the actor already had to be in scope for that company to see the
-    category at all — but it is kept for the pre-142 rows a Service
-    could have been filed under a foreign category before
-    `_enforce_same_company_category` existed. Those rows would otherwise
-    inflate a COMPANY_ADMIN's `service_count` with services they cannot
-    see or act on, and the number gates whether the UI offers Delete.
-    SUPER_ADMIN has scope `None` and always sees the COMPLETE count,
-    which is the number the PROTECT rule actually depends on.
+    The counts are SCOPED to the catalog the actor can actually see
+    (`scope_company_ids_for_catalog`). Since Sprint 142 that branch is
+    DEAD for a COMPANY_ADMIN, and this docstring is careful to say so
+    rather than invent a reason for it:
+
+      A cross-company service — one whose company differs from its
+      category's — cannot exist after Sprint 142. Migration `0024`
+      ABORTS on any category holding two companies' services rather than
+      backfilling it, and `_enforce_same_company_category` blocks new
+      ones on both Service write paths. That is the SAME fact
+      `ServiceCategoryArchiveView`'s docstring relies on when it deletes
+      `affected_company_count` as a number that can only ever be 0 or 1.
+      Both statements must agree, and they do: there is no such row.
+
+      An earlier version of this comment justified the scope branch by
+      "pre-142 rows a Service could have been filed under a foreign
+      category". That contradicted the archive view and was wrong —
+      0024's abort is precisely what stops those rows from surviving the
+      migration. Corrected in Sprint 142.1 so nobody later reconciles
+      the two by "fixing" the archive view instead.
+
+    The branch stays because SUPER_ADMIN needs the other side of it:
+    scope `None` means no filter, so an SA always sees the COMPLETE
+    count, which is the number the PROTECT rule actually depends on when
+    the UI decides whether to offer Delete. Removing the scoping to
+    match "the CA branch is dead" would take the SA's unfiltered count
+    with it. It is also the correct default if a future sprint ever
+    relaxes the same-company rule — but that is a side benefit, not the
+    reason.
     """
     scope = scope_company_ids_for_catalog(user)
     service_filter = Q()

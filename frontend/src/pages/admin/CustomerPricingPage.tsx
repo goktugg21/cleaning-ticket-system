@@ -112,12 +112,14 @@ type PricingRow =
  *   "CUSTOM"  — `CustomerCustomPrice` rows. They have no `service` FK
  *               and therefore no category at all (see the model
  *               docstring); they still have to live somewhere.
- *   "UNKNOWN" — a contract row whose `service` is missing from the
- *               catalog map. Should not happen (the page loads the FULL
- *               catalog, archived services included), but a row that
- *               silently vanished from every bucket is exactly the class
- *               of bug this sprint exists to kill, so it gets a visible
- *               home rather than a filter that drops it.
+ *   "UNKNOWN" — a contract row with no reachable category card. Two
+ *               ways in: its `service` is missing from the catalog map,
+ *               or (Sprint 142.1) its service's CATEGORY is missing from
+ *               `categories`, which Sprint 142 narrowed to the
+ *               customer's own provider. Neither should happen, but a
+ *               row that silently vanished from every bucket is exactly
+ *               the class of bug this sprint exists to kill, so it gets
+ *               a visible home rather than a filter that drops it.
  */
 type CategoryKey = number | "CUSTOM" | "UNKNOWN";
 
@@ -964,14 +966,37 @@ export function CustomerPricingPage() {
     ...customPrices.map((row): PricingRow => ({ kind: "custom", row })),
   ];
 
+  // Sprint 142.1 — the category ids that actually HAVE an index card.
+  // `categories` is narrowed to the customer's own provider (Sprint 142),
+  // so "the row's category id" and "a bucket the index can reach" stopped
+  // being the same thing the moment that narrowing landed.
+  const knownCategoryIds = new Set(categories.map((c) => c.id));
+
   /**
    * Sprint 137 item 4 — which bucket a row is filed under. A custom row
    * has no category by construction; a contract row takes its service's.
    * See the `CategoryKey` docstring for why "UNKNOWN" exists.
+   *
+   * Sprint 142.1 — a category id with no card resolves to "UNKNOWN" too.
+   * Before this, such a row landed in a NUMERIC bucket that
+   * `categoryCards` never builds a card for: unreachable from the index,
+   * missing from every count. It did not degrade, it vanished — the
+   * exact failure this function's sentinel exists to prevent, arriving
+   * through a door the sentinel did not cover.
+   *
+   * Fixed here rather than by widening `categoryCards` back out to
+   * categories the page deliberately narrowed away: the narrowing is
+   * correct (a foreign provider's category can never hold a row that is
+   * priceable for this customer), so the row needs a HOME, not its
+   * foreign category restored to the index. That is the same call
+   * `lib/pickerGroups.ts` makes with its trailing `__uncategorised__`
+   * group, and this page already had the bucket for it.
    */
   function categoryKeyOf(entry: PricingRow): CategoryKey {
     if (entry.kind === "custom") return "CUSTOM";
-    return serviceById.get(entry.row.service)?.category ?? "UNKNOWN";
+    const categoryId = serviceById.get(entry.row.service)?.category;
+    if (categoryId === undefined) return "UNKNOWN";
+    return knownCategoryIds.has(categoryId) ? categoryId : "UNKNOWN";
   }
 
   // Bucket EVERY row by category. Derived from `unifiedRows`, so the

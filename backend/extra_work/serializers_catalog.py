@@ -40,7 +40,11 @@ from rest_framework import serializers
 
 from companies.models import Company
 
-from .catalog_scope import can_view_provider_defaults
+from .catalog_scope import (
+    can_view_provider_defaults,
+    filter_categories_for,
+    filter_managed_units_for,
+)
 from .models import (
     CustomerCustomPrice,
     CustomerServicePrice,
@@ -49,6 +53,60 @@ from .models import (
     Service,
     ServiceCategory,
 )
+
+
+def _scoped_siblings(serializer, queryset, scope_filter):
+    """Sprint 142.1 (H-1) — apply the actor's catalog scope to a
+    uniqueness pre-check's sibling queryset.
+
+    A uniqueness pre-check runs inside `is_valid()`, which DRF calls
+    BEFORE `perform_create()`. So the 400 it raises fires before
+    `_resolve_catalog_create_company` ever gets to raise its 403. With
+    an UNSCOPED sibling queryset that turns the pre-check into a name
+    oracle against any company id the client cares to send:
+
+        POST {"company": <rival id>, "name": "X"}
+          -> 400 "already exists for this company"   if the rival has X
+          -> 403 catalog_cross_company_forbidden     if it does not
+
+    Two different answers, so the status code alone reports whether the
+    rival owns that name. Narrower than the read leak Sprint 142 closed
+    — that one handed the whole list to every authenticated user,
+    customers included — but the same class, and newly introduced by the
+    pre-check itself.
+
+    The rule this enforces: **a pre-check must never confirm or deny the
+    existence of a row the actor is not allowed to see.**
+
+    Scoping the queryset here rather than authorising the company before
+    validation, because:
+      * it reuses the scope helpers this sprint already wired up
+        (`filter_categories_for` / `filter_managed_units_for`) instead
+        of inventing a second authorisation path that would then have to
+        be kept in step with `_enforce_catalog_management`;
+      * it composes with DRF's order rather than fighting it. Hoisting
+        the company resolution ahead of `is_valid()` means overriding
+        `create()` on both views to run a 403 gate against a field that
+        has not been validated yet — and it reorders every OTHER field
+        error behind a permission check, changing responses this sprint
+        never intended to touch;
+      * a foreign company simply yields an empty sibling set, so the
+        request falls through to the 403 it should always have had. The
+        two foreign cases become byte-identical, which is what "no
+        oracle" means — not merely "both are errors".
+
+    A SUPER_ADMIN's scope is `None`, so their queryset comes back
+    unfiltered and the pre-check keeps working exactly as before.
+
+    With no `request` in context (a serializer used outside the view
+    layer) the scope helper sees no user and returns an empty set: the
+    pre-check goes quiet and the DB constraint + the view's
+    `IntegrityError` handler remain the backstop. That fails toward
+    "no friendly message", never toward "leaks a name".
+    """
+    request = serializer.context.get("request") if serializer.context else None
+    user = getattr(request, "user", None) if request else None
+    return scope_filter(user, queryset)
 
 
 def _resolve_effective_unit(attrs, instance):
@@ -177,6 +235,10 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
         `company`, the target is not resolved until `perform_create`
         runs, so the pre-check is skipped and the view's
         `IntegrityError` handler is the sole backstop.
+
+        Sprint 142.1 — the sibling queryset is SCOPED. Unscoped it was a
+        name oracle against any company id the client sent; see
+        `_scoped_siblings` for the full argument.
         """
         name = attrs.get("name", getattr(self.instance, "name", None))
         company = attrs.get("company")
@@ -184,7 +246,11 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
             company = self.instance.company
         if name and company is not None:
             normalized = name.strip().lower()
-            existing = ServiceCategory.objects.filter(company=company)
+            existing = _scoped_siblings(
+                self,
+                ServiceCategory.objects.filter(company=company),
+                filter_categories_for,
+            )
             if self.instance is not None:
                 existing = existing.exclude(pk=self.instance.pk)
             if any(c.name.strip().lower() == normalized for c in existing):
@@ -290,7 +356,18 @@ class ManagedUnitSerializer(serializers.ModelSerializer):
         # -400 via the IntegrityError handler in the view instead.
         if label and company is not None:
             normalized = label.lower()
-            existing = ManagedUnit.objects.filter(company=company)
+            # Sprint 142.1 — SCOPED, same H-1 fix as
+            # `ServiceCategorySerializer.validate`. This one is the
+            # ORIGINAL of the shape (Sprint 123); Sprint 142 copied the
+            # bug along with the pattern. Fixing only the copy would be
+            # the "written once, omitted elsewhere" defect rounds 4 and
+            # 5 were spent on — and this endpoint leaks unit LABELS to a
+            # COMPANY_ADMIN of another company in exactly the same way.
+            existing = _scoped_siblings(
+                self,
+                ManagedUnit.objects.filter(company=company),
+                filter_managed_units_for,
+            )
             if self.instance is not None:
                 existing = existing.exclude(pk=self.instance.pk)
             if any(u.label.strip().lower() == normalized for u in existing):

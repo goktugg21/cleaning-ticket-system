@@ -56,7 +56,8 @@ docs-only pass — so this file always reflects where we actually are.
 ## NOW
 
 **Branch:** `feat/sprint-142-company-scoped-categories` — Sprint 142,
-company-scoped service categories. Cut from `main`@`91230a0`. CC does not
+company-scoped service categories, plus the Sprint 142.1 review round on
+the same branch. Cut from `main`@`91230a0`. **Still ONE PR.** CC does not
 open PRs; the owner does.
 
 **Last shipped PR on `main`: #127** — Sprints 137/138/139/140/141. Its
@@ -119,6 +120,86 @@ entries are DELETED rather than left contradicting the code.
   `aria-modal` overlay; and a `.then()` with no `.catch()` that could leave
   the SA company selector silently absent.
 
+
+**Round 2 (Sprint 142.1) — three one-line defects the review found in
+142's own work, plus two comments that overstated what the code does.**
+
+- **§1 The sprint re-opened, on the WRITE path, the exact leak it closed
+  on the read path (H-1).** The friendly-400 uniqueness pre-check added
+  to `ServiceCategorySerializer.validate` queried an UNSCOPED sibling
+  set keyed on whatever `company` the client sent. DRF runs `is_valid()`
+  BEFORE `perform_create()`, so that 400 fired ahead of
+  `_resolve_catalog_create_company`'s 403 — and the status code alone
+  reported whether a RIVAL owned a given name (400 = yes, 403 = no).
+  Worse, the 400 body NAMED it back: *"A category named 'Cleaning S3B'
+  already exists for this company."* **`ManagedUnitSerializer` had the
+  identical shape since Sprint 123** — 142 copied the bug along with the
+  pattern — and leaked unit labels the same way. Both fixed, because
+  fixing one is the "written once, omitted elsewhere" defect rounds 4
+  and 5 were spent on. The sibling queryset now runs through
+  `filter_categories_for` / `filter_managed_units_for`, so a foreign
+  company yields an empty set, no 400, and the request falls through to
+  the 403 it should always have had. Chosen over hoisting the company
+  authorisation ahead of validation, which would mean overriding
+  `create()` on both views to gate on an unvalidated field and would
+  reorder every other field error behind a permission check.
+  A SUPER_ADMIN's scope is `None`, so their pre-check is unaffected.
+- **§2 A priced row could silently disappear from the pricing index.**
+  Sprint 142 narrowed `CustomerPricingPage`'s category list to the
+  customer's own provider — correct, and kept. But `categoryKeyOf` fell
+  back to the `"UNKNOWN"` bucket only when the SERVICE was missing from
+  the catalog map, not when the service's CATEGORY was missing from the
+  narrowed list. Such a row landed in a numeric bucket
+  `categoryCards` never builds a card for: unreachable from the index,
+  absent from every count. It did not degrade, it vanished — the exact
+  class of bug Sprint 137 item 4's own comment says the sentinel exists
+  to kill, arriving through a door the sentinel did not cover. A
+  category id with no card now resolves to `"UNKNOWN"` too, which is the
+  same call `lib/pickerGroups.ts` makes with its trailing
+  `__uncategorised__` group. Latent — crmtest has zero cross-company
+  price rows — so nothing beyond making the row reachable was built.
+- **§3 Two of the five #127 carry-overs cancelled each other out.**
+  `ServicesAdminPage` had ONE `loadError`. Carry-over 5 added the
+  `.catch()` that reports a failed company fetch; carry-over 3 made the
+  catalog load clear `loadError` on success. The company fetch is one
+  request and the catalog load is two, so the catalog reliably resolved
+  last and wiped the banner — leaving the SUPER_ADMIN with exactly the
+  state carry-over 5 exists to prevent: no selector, no error, then a
+  raw `service_company_required` 400. The company-selector failure now
+  has its own state, because it is a different failure with a different
+  remedy (a stale list resolves itself on the next mutation; a missing
+  selector needs a reload and blocks creates until it returns) and both
+  can be true at once. `ManagedUnitsTab` and `CustomerPricingPage` were
+  checked for the same collision and have none — each has a single
+  loader writing its `loadError`.
+- **§4 `0023`'s docstring claimed a window it does not close.** Keeping
+  the drop-unique and add-constraint operations in one migration removes
+  an ADDITIONAL window, but the real one remains: between 0023 and 0025
+  every row has `company IS NULL`, and Postgres treats NULLs in an
+  indexed column as distinct — so the new constraint is toothless for
+  those rows while the old platform-wide unique is already gone. It
+  becomes PERMANENT if 0024 aborts, which is a designed outcome, not an
+  edge case. The docstring now says so, and names what a live-traffic
+  deploy would need instead (a partial unique index on
+  `name WHERE company_id IS NULL`, or a maintenance lock). The design is
+  unchanged — it is fine for a deploy with downtime.
+- **§5 Two comments could not both be right.**
+  `_annotate_category_service_counts` justified its scope branch by
+  "pre-142 rows a Service could have been filed under a foreign
+  category", while `ServiceCategoryArchiveView`'s docstring removes
+  `affected_company_count` on the grounds that no such row can exist.
+  The archive view is right: `0024` ABORTS rather than backfill a
+  category holding two companies' services, and
+  `_enforce_same_company_category` blocks new ones. The comment is
+  corrected to say the CA branch is DEAD and that the scoping stays for
+  the SUPER_ADMIN side of it — an SA's `None` scope is what yields the
+  complete count PROTECT depends on. Code unchanged.
+
+Round 2 verified the H-1 fix by REVERTING it and watching the two oracle
+tests fail with the rival's name in the response body, then restoring.
+The pre-existing duplicate-name test could never have caught it: it
+posts as a CA with `company` omitted, which skips the pre-check entirely
+and exercises only the `IntegrityError` backstop.
 ---
 
 ## NEXT
@@ -373,7 +454,33 @@ item has moved to `## SHIPPED` or been resolved below instead.
     selecting ~50+ routinely, the fix is one real bulk endpoint per
     action (id list in, per-id result array out, one transaction — the
     shape `ServiceBulkRaiseView` already uses). Not built.
-21. **`seed_demo_data` seeds the catalog for one company and the demo
+21. **Two PRE-EXISTING existence oracles of the same class as Sprint
+    142.1 §1, found by auditing every `validate*` method that runs an
+    ORM query.** Neither was introduced by this branch and neither was
+    fixed here (the round was explicitly scoped to three one-liners), but
+    both are the same shape and should be closed together.
+    (a) `accounts/serializers_invitations.py:159-161` resolves
+    client-supplied `company_ids` / `building_ids` / `customer_ids`
+    BEFORE the actor-scope authorisation that follows it, so an unknown
+    id returns `"Unknown company id."` while a known-but-foreign id
+    returns the scope error — distinguishing "exists" from "exists but
+    is not yours". Leaks bare id existence, not names.
+    (b) `tickets/serializers.py:1131` (`TicketCreateSerializer`) and its
+    twins at `extra_work/serializers.py:1245`/`:1632` check the
+    `CustomerBuildingMembership` link for a client-supplied
+    (customer, building) pair BEFORE any role branch, on plain unscoped
+    FK fields — so any authenticated writer can probe whether an
+    arbitrary pair is linked. The fix in both cases is the Sprint 142.1
+    one: authorise, or scope the queryset, before answering. Audited and
+    found CLEAN: `customers/serializers_labels.py` (customer is
+    URL-bound and `_get_customer()` 403s first),
+    `customers/serializers_contacts.py` (customer is `read_only`),
+    `planned_work/serializers.py` (queries keyed on the ACTOR), and
+    `tickets/serializers.py:1501` +
+    `extra_work/serializers_messages.py:113`/`:201` (already query
+    through `scope_tickets_for` / `scope_extra_work_for`).
+
+22. **`seed_demo_data` seeds the catalog for one company and the demo
     Extra Work for another.** `_seed_service_catalog()` pins its 4
     categories + 14 services to `Company.objects.order_by("id").first()`,
     while `_seed_demo_extra_work` resolves its tenant by
@@ -392,7 +499,7 @@ item has moved to `## SHIPPED` or been resolved below instead.
     real fix is one company for both, plus a note on what an existing DB
     should do with the old rows.
 
-22. **Five state writes still sit AFTER their refetch — consistency, not
+23. **Five state writes still sit AFTER their refetch — consistency, not
     a bug.** Sprint 141 moved three such writes to BEFORE the refetch so
     they no longer depend on a network call that is allowed to fail, but
     left five structurally identical sites behind:

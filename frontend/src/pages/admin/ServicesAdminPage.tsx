@@ -153,6 +153,21 @@ export function ServicesAdminPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  // Sprint 142.1 — the company-selector fetch gets its OWN error state.
+  // Sharing `loadError` made Sprint 142's carry-overs 3 and 5 cancel each
+  // other out: 5 added the `.catch()` that reports a failed company
+  // fetch, 3 made the catalog load clear `loadError` on success — and the
+  // company fetch is ONE request while the catalog load is two, so the
+  // catalog reliably resolves last and wiped the banner. The SUPER_ADMIN
+  // was left with exactly the state carry-over 5 exists to prevent: no
+  // selector, no error, then a raw `service_company_required` 400.
+  //
+  // Separate state rather than "don't clear what you didn't cause",
+  // because these are different failures with different remedies: a
+  // stale LIST resolves itself on the next mutation, a missing SELECTOR
+  // needs a page reload and blocks creates until it comes back. They can
+  // also be true at the same time, and the operator needs to see both.
+  const [companyLoadError, setCompanyLoadError] = useState("");
 
   // Read-only detail panels.
   const [selectedCategory, setSelectedCategory] =
@@ -285,7 +300,8 @@ export function ServicesAdminPage() {
         if (!cancelled) setCatalogCompanies(response);
       })
       .catch(() => {
-        if (!cancelled) setLoadError(t("catalog.company_load_failed"));
+        // Sprint 142.1 — its own state; see `companyLoadError`.
+        if (!cancelled) setCompanyLoadError(t("catalog.company_load_failed"));
       });
     return () => {
       cancelled = true;
@@ -1220,6 +1236,17 @@ export function ServicesAdminPage() {
               ? t("catalog.company_selector_hint_all")
               : t("catalog.company_selector_hint_filtering")}
           </p>
+        </div>
+      )}
+
+      {companyLoadError && (
+        <div
+          className="alert-error"
+          role="alert"
+          style={{ marginBottom: 16 }}
+          data-testid="catalog-company-load-error"
+        >
+          {companyLoadError}
         </div>
       )}
 

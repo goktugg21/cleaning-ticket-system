@@ -65,6 +65,7 @@ from extra_work.models import (
     ExtraWorkPricingUnitType,
     ExtraWorkRequest,
     ExtraWorkRequestIntent,
+    ManagedUnit,
     Service,
     ServiceCategory,
 )
@@ -76,6 +77,7 @@ SERVICE_LIST_URL = "/api/services/"
 SERVICE_DETAIL_URL = "/api/services/{svc_id}/"
 CATEGORY_LIST_URL = "/api/services/categories/"
 CUSTOMER_PRICING_LIST_URL = "/api/customers/{cid}/pricing/"
+UNITS_URL = "/api/services/units/"
 EW_URL = "/api/extra-work/"
 
 
@@ -780,6 +782,174 @@ class ServiceCategoryWriteRestrictionTests(TwoProviderFixtureMixin, TestCase):
         )
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["company"], self.provider_a.id)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 142.1 — the uniqueness PRE-CHECK must not become a name oracle
+# ---------------------------------------------------------------------------
+class UniquenessPreCheckIsScopedTests(TwoProviderFixtureMixin, TestCase):
+    """H-1. Sprint 142 added a friendly-400 uniqueness pre-check to
+    `ServiceCategorySerializer.validate` (replacing the `UniqueValidator`
+    DRF derived from the removed field-level `unique=True`), copying the
+    shape `ManagedUnitSerializer` has had since Sprint 123. Both queried
+    an UNSCOPED sibling set keyed on whatever `company` the client sent.
+
+    DRF runs `is_valid()` BEFORE `perform_create()`, so that 400 fired
+    ahead of `_resolve_catalog_create_company`'s 403 — making the status
+    code itself report whether a RIVAL company owns a given name:
+
+        400 -> the rival has it       403 -> the rival does not
+
+    Both are now 403, byte-identical. The existing
+    `test_duplicate_name_within_one_company_is_a_400` could not have
+    caught this: it posts as a CA with `company` OMITTED, which skips the
+    pre-check entirely and exercises only the view's `IntegrityError`
+    backstop.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls._setup_fixture()
+
+    # -- ServiceCategory ------------------------------------------------
+    def test_foreign_company_probe_is_indistinguishable(self):
+        """THE oracle test. `category_b` is provider B's and is named
+        "Cleaning S3B"; "Definitely Not There" is not. A COMPANY_ADMIN of
+        provider A must not be able to tell those two apart."""
+        api = self._api(self.pa_a)
+        hit = api.post(
+            CATEGORY_LIST_URL,
+            {"company": self.provider_b.id, "name": self.category_b.name},
+            format="json",
+        )
+        miss = api.post(
+            CATEGORY_LIST_URL,
+            {"company": self.provider_b.id, "name": "Definitely Not There"},
+            format="json",
+        )
+        # Same status...
+        self.assertEqual(hit.status_code, 403, hit.data)
+        self.assertEqual(miss.status_code, 403, miss.data)
+        # ...and the same body. Equal status codes alone would still leak
+        # if the payloads differed.
+        self.assertEqual(hit.data, miss.data)
+        self.assertEqual(
+            hit.data.get("code"), "catalog_cross_company_forbidden"
+        )
+        # And nothing was written into the rival's catalog either way.
+        self.assertFalse(
+            ServiceCategory.objects.filter(
+                company=self.provider_b, name="Definitely Not There"
+            ).exists()
+        )
+
+    def test_super_admin_explicit_company_still_gets_the_friendly_400(self):
+        """The pre-check must still WORK for an actor in scope — a
+        SUPER_ADMIN's scope is `None`, so the queryset comes back
+        unfiltered."""
+        response = self._api(self.super_admin).post(
+            CATEGORY_LIST_URL,
+            {"company": self.provider_a.id, "name": self.category.name},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "service_category_name_not_unique",
+            self._error_code(response, "name"),
+        )
+
+    def test_company_admin_explicit_own_company_gets_the_friendly_400(self):
+        response = self._api(self.pa_a).post(
+            CATEGORY_LIST_URL,
+            {"company": self.provider_a.id, "name": self.category.name},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "service_category_name_not_unique",
+            self._error_code(response, "name"),
+        )
+
+    def test_rename_to_a_duplicate_is_a_400(self):
+        """The PATCH path, where `exclude(pk=self.instance.pk)` is the
+        only thing between a rename and a false positive — so this is
+        also the regression guard for that self-exclusion."""
+        other = ServiceCategory.objects.create(
+            company=self.provider_a, name="Rename Target"
+        )
+        response = self._api(self.pa_a).patch(
+            f"{CATEGORY_LIST_URL}{other.id}/",
+            {"name": self.category.name},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        other.refresh_from_db()
+        self.assertEqual(other.name, "Rename Target")
+
+    def test_renaming_a_category_to_its_own_name_is_not_a_duplicate(self):
+        """The self-exclusion working in the other direction: a no-op
+        rename must not collide with the row being renamed."""
+        response = self._api(self.pa_a).patch(
+            f"{CATEGORY_LIST_URL}{self.category.id}/",
+            {"name": self.category.name, "description": "touched"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+
+    # -- ManagedUnit (the ORIGINAL of the shape, Sprint 123) -------------
+    def test_managed_unit_foreign_probe_is_indistinguishable(self):
+        ManagedUnit.objects.create(company=self.provider_b, label="pallet")
+        api = self._api(self.pa_a)
+        hit = api.post(
+            UNITS_URL,
+            {"company": self.provider_b.id, "label": "pallet"},
+            format="json",
+        )
+        miss = api.post(
+            UNITS_URL,
+            {"company": self.provider_b.id, "label": "not-there-at-all"},
+            format="json",
+        )
+        self.assertEqual(hit.status_code, 403, hit.data)
+        self.assertEqual(miss.status_code, 403, miss.data)
+        self.assertEqual(hit.data, miss.data)
+        self.assertFalse(
+            ManagedUnit.objects.filter(
+                company=self.provider_b, label="not-there-at-all"
+            ).exists()
+        )
+
+    def test_managed_unit_super_admin_explicit_company_still_400s(self):
+        ManagedUnit.objects.create(company=self.provider_a, label="m3")
+        response = self._api(self.super_admin).post(
+            UNITS_URL,
+            {"company": self.provider_a.id, "label": "  M3 "},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn(
+            "managed_unit_label_not_unique",
+            self._error_code(response, "label"),
+        )
+
+    def test_managed_unit_rename_to_a_duplicate_is_a_400(self):
+        ManagedUnit.objects.create(company=self.provider_a, label="m3")
+        other = ManagedUnit.objects.create(
+            company=self.provider_a, label="pallet"
+        )
+        response = self._api(self.pa_a).patch(
+            f"{UNITS_URL}{other.id}/", {"label": "m3"}, format="json"
+        )
+        self.assertEqual(response.status_code, 400, response.data)
+        other.refresh_from_db()
+        self.assertEqual(other.label, "pallet")
+
+    def test_managed_unit_rename_to_its_own_label_is_allowed(self):
+        unit = ManagedUnit.objects.create(company=self.provider_a, label="m3")
+        response = self._api(self.pa_a).patch(
+            f"{UNITS_URL}{unit.id}/", {"label": "m3"}, format="json"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
 
 
 # ---------------------------------------------------------------------------
