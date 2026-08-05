@@ -1948,7 +1948,11 @@ export function CreateExtraWorkPage({
                       className="muted small"
                       data-testid="extra-work-create-agreed-prices-empty"
                     >
-                      {t("create.prices.empty")}
+                      {t(
+                        isCustomerActor
+                          ? "create.prices.empty_customer"
+                          : "create.prices.empty",
+                      )}
                     </div>
                   ) : (
                     <>
@@ -2572,7 +2576,11 @@ export function CreateExtraWorkPage({
                       </div>
                     )}
                     <div className="muted small" style={{ marginTop: 6 }}>
-                      {t("create.preview.totals_display_only")}
+                      {t(
+                        isCustomerActor
+                          ? "create.preview.totals_display_only_customer"
+                          : "create.preview.totals_display_only",
+                      )}
                     </div>
                   </div>
                 )}
