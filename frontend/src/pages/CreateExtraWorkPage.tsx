@@ -309,11 +309,9 @@ export function CreateExtraWorkPage({
 }: CreateExtraWorkPageProps) {
   const { t } = useTranslation(["extra_work", "common"]);
   const { me } = useAuth();
-  // Sprint 145 — a customer browses their own agreed services by
-  // default; everything else is behind an explicit opt-in (see
-  // `catalogForActor`).
+  // Sprint 147 — a customer sees ONLY the services they have an agreed
+  // price for (see `catalogForActor`).
   const isCustomerActor = me?.role === "CUSTOMER_USER";
-  const [showAllServices, setShowAllServices] = useState(false);
   const isQuoteMode = intentMode === "quote";
 
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -328,7 +326,14 @@ export function CreateExtraWorkPage({
   // hard scope contract); without a service the user cannot submit
   // the cart, but the dropdowns still appear so they can see what they
   // would normally pick from.
-  const [catalogWarning, setCatalogWarning] = useState("");
+  // Sprint 147 — the KIND of catalog problem, not its wording. The
+  // load effect classifies; the message is chosen at render, where the
+  // actor's role is already in scope. Keeping the role out of the
+  // effect keeps its dep array honest — pulling `isCustomerActor` in
+  // would re-run the whole mount-time load when `me` resolves.
+  const [catalogWarningKind, setCatalogWarningKind] = useState<
+    "" | "empty" | "unavailable"
+  >("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
   const [cartLines, setCartLines] = useState<CartLineState[]>([emptyCartLine()]);
 
@@ -454,11 +459,11 @@ export function CreateExtraWorkPage({
       if (servicesResult.status === "fulfilled") {
         setServices(servicesResult.value);
         if (servicesResult.value.length === 0) {
-          setCatalogWarning(t("create.warning_catalog_empty"));
+          setCatalogWarningKind("empty");
         }
       } else {
         setServices([]);
-        setCatalogWarning(t("create.warning_catalog_unavailable"));
+        setCatalogWarningKind("unavailable");
       }
 
       // Sprint 143 §1 — NOTHING is pre-selected here any more.
@@ -980,22 +985,24 @@ export function CreateExtraWorkPage({
   // deliberately ignored while searching. Every option label already
   // carries its category name, so a match from outside the current
   // filter is self-describing.
-  // Sprint 145 — what a CUSTOMER may browse.
+  // Sprint 147 — what a CUSTOMER may pick from.
   //
-  // The catalog the backend returns is the whole provider catalog, and
-  // dropping all of it in front of a customer is not right: most of it
-  // has nothing to do with them. But hiding it outright would be worse
-  // — a line with no agreed price is exactly what routes a request into
-  // the PROPOSAL flow, so a customer who can only pick pre-priced
-  // services can never ask for anything new.
+  // Owner's rule: a customer sees ONLY the services a price has been
+  // agreed with them for, and those are the ones they can put in the
+  // cart. The rest of the provider's catalog is not theirs to browse.
   //
-  // So: a customer sees the services they have an agreed price for, and
-  // an explicit opt-in to see the rest, labelled with what happens if
-  // they order one. A provider-side actor is unaffected.
+  // This does not close the door on asking for something new — the
+  // free-text custom line is still open to them, and a custom line is
+  // what routes the request into the pricing-proposal flow. So the
+  // proposal path survives; it is just reached by writing what you want
+  // rather than by shopping in someone else's catalog.
+  //
+  // Applied upstream of BOTH the category filter and the search, so a
+  // customer cannot reach past it by typing a name.
   const catalogForActor = useMemo(() => {
-    if (!isCustomerActor || showAllServices) return services;
+    if (!isCustomerActor) return services;
     return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
-  }, [services, isCustomerActor, showAllServices, agreedPriceByServiceId]);
+  }, [services, isCustomerActor, agreedPriceByServiceId]);
 
   const searchMatches = useMemo(() => {
     if (!serviceSearchTerm) return null;
@@ -1592,14 +1599,25 @@ export function CreateExtraWorkPage({
         </div>
       )}
 
-      {catalogWarning && (
+      {/* Sprint 147 — "empty" means two different things. The endpoint
+          returns a CUSTOMER only the services a price has been agreed
+          with them for, so empty means "nothing agreed with you yet",
+          NOT "the provider has no catalog". Telling a customer an admin
+          must go and set the catalog up is false and unactionable. */}
+      {catalogWarningKind && (
         <div
           className="alert-warning"
           style={{ marginBottom: 16 }}
           role="status"
           data-testid="create-ew-catalog-warning"
         >
-          {catalogWarning}
+          {t(
+            catalogWarningKind === "unavailable"
+              ? "create.warning_catalog_unavailable"
+              : isCustomerActor
+                ? "create.warning_no_agreed_services"
+                : "create.warning_catalog_empty",
+          )}
         </div>
       )}
 
@@ -2116,28 +2134,14 @@ export function CreateExtraWorkPage({
                     {t("create.catalog_filter.search_hint")}
                   </div>
                 </div>
-                {/* Sprint 145 — a customer browses their own agreed
-                    services by default. The rest of the provider's
-                    catalog is one click away, labelled with what
-                    ordering from it actually means, because a line
-                    without an agreed price is what sends the request to
-                    a pricing proposal. */}
+                {/* Sprint 147 — say plainly what this list is, and
+                    where to go for anything else, so an absent service
+                    reads as "not agreed with you" rather than as a
+                    broken search. */}
                 {isCustomerActor && (
                   <div className="field">
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        className="checkbox-input"
-                        data-testid="extra-work-create-show-all-services"
-                        checked={showAllServices}
-                        onChange={(event) =>
-                          setShowAllServices(event.target.checked)
-                        }
-                      />
-                      <span>{t("create.catalog_filter.show_all_label")}</span>
-                    </label>
-                    <div className="muted small" style={{ marginTop: 4 }}>
-                      {t("create.catalog_filter.show_all_hint")}
+                    <div className="muted small">
+                      {t("create.catalog_filter.customer_scope_note")}
                     </div>
                   </div>
                 )}

@@ -59,6 +59,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, OuterRef, ProtectedError, Q
+from django.utils import timezone
 from rest_framework import generics, serializers, status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -788,6 +789,44 @@ class ServiceListCreateView(generics.ListCreateAPIView):
         if flag is not None:
             qs = qs.filter(is_active=flag)
         qs = filter_services_for(self.request.user, qs)
+
+        # Sprint 147 — A CUSTOMER MAY NOT REACH THE PROVIDER'S GENERAL
+        # CATALOG. They see only the services a price has actually been
+        # agreed with them for.
+        #
+        # `filter_services_for` narrows to the provider COMPANY, which
+        # is not the same thing: it still handed every customer of that
+        # provider the provider's entire active catalog. The Extra Work
+        # form filters the same way client-side, but a client-side
+        # filter is "not shown", not "cannot reach" — the endpoint is
+        # what makes it true.
+        #
+        # Same predicate the customer branch of the pricing list uses
+        # (`CustomerServicePriceListCreateView`): active, and valid
+        # today. A service whose agreed price has expired stops being
+        # offerable, exactly as `resolve_price` would stop returning it.
+        #
+        # This does not close the door on asking for something new: the
+        # Extra Work cart's free-text custom line takes no `service`, so
+        # it is unaffected, and it is what routes the request into the
+        # pricing-proposal flow.
+        if getattr(self.request.user, "role", None) == UserRole.CUSTOMER_USER:
+            from accounts.scoping import customer_ids_for
+
+            today = timezone.localdate()
+            qs = qs.filter(
+                Exists(
+                    CustomerServicePrice.objects.filter(
+                        service=OuterRef("pk"),
+                        customer_id__in=list(customer_ids_for(self.request.user)),
+                        is_active=True,
+                        valid_from__lte=today,
+                    ).filter(
+                        Q(valid_to__isnull=True) | Q(valid_to__gte=today)
+                    )
+                )
+            )
+
         return qs.order_by("category__name", "name", "id")
 
     def perform_create(self, serializer):
