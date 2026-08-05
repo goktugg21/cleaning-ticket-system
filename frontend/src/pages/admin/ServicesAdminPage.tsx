@@ -297,7 +297,23 @@ export function ServicesAdminPage() {
     // act on it. Failing loudly is the point.
     listAllCompanies({ is_active: "true" })
       .then((response) => {
-        if (!cancelled) setCatalogCompanies(response);
+        if (cancelled) return;
+        setCatalogCompanies(response);
+        // Sprint 149 — a SUPER_ADMIN always has exactly ONE provider
+        // company in view; there is no "all companies" state any more.
+        // Seeding it here (in the callback, not an effect body) is what
+        // removes the need for a company column on every row, and makes
+        // a cross-company multi-select structurally impossible rather
+        // than something the operator discovers from a partial-failure
+        // report. Only when a choice is actually offered — with one
+        // company the selector stays hidden and `""` still means "let
+        // the backend default it", which is what a COMPANY_ADMIN relies
+        // on.
+        if (response.length > 1) {
+          setCatalogCompany((current) =>
+            current === "" ? response[0].id : current,
+          );
+        }
       })
       .catch(() => {
         // Sprint 142.1 — its own state; see `companyLoadError`.
@@ -1216,7 +1232,12 @@ export function ServicesAdminPage() {
             }}
             data-testid="catalog-company-selector"
           >
-            <option value="">
+            {/* Sprint 149 — the placeholder stays on screen but is
+                DISABLED: there is no "all companies" state to pick any
+                more. It renders only in the edge case where the list
+                has not resolved yet, so the select never shows a blank
+                box or, worse, a company the operator did not choose. */}
+            <option value="" disabled>
               {t("catalog.company_selector_placeholder")}
             </option>
             {catalogCompanies.map((company) => (
@@ -1232,9 +1253,7 @@ export function ServicesAdminPage() {
               is now false, and categories behave exactly like the other
               two tabs. One hint for all three. */}
           <p className="field-hint muted small">
-            {catalogCompany === ""
-              ? t("catalog.company_selector_hint_all")
-              : t("catalog.company_selector_hint_filtering")}
+            {t("catalog.company_selector_hint_filtering")}
           </p>
         </div>
       )}

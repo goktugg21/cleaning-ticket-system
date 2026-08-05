@@ -917,7 +917,6 @@
   "catalog.company_selector_placeholder": "Select a company…",
   "catalog.company_load_failed": "The company list could not be loaded. Reload the page; without it you cannot pick a company for new catalog rows.",
   "catalog.company_selector_hint_filtering": "The list shows only this company's categories, services and units. New rows are created under this company too.",
-  "catalog.company_selector_hint_all": "No company selected: the list shows every company you have access to.",
   "services.show_inactive_toggle": "Show inactive",
   "services.hide_inactive_toggle": "Hide inactive",
   "services.inactive_included_note": "Inactive rows are shown ({{count}}). They are greyed out and can be reactivated from their detail panel.",

@@ -917,7 +917,6 @@
   "catalog.company_selector_placeholder": "Selecteer een bedrijf…",
   "catalog.company_load_failed": "De bedrijvenlijst kon niet worden geladen. Herlaad de pagina; zonder deze lijst kunt u geen bedrijf kiezen voor nieuwe catalogusrijen.",
   "catalog.company_selector_hint_filtering": "De lijst toont alleen categorieën, diensten en eenheden van dit bedrijf. Nieuwe rijen worden ook onder dit bedrijf aangemaakt.",
-  "catalog.company_selector_hint_all": "Geen bedrijf gekozen: de lijst toont alle bedrijven waar u toegang toe heeft.",
   "services.show_inactive_toggle": "Inactieve tonen",
   "services.hide_inactive_toggle": "Inactieve verbergen",
   "services.inactive_included_note": "Inactieve rijen worden getoond ({{count}}). Ze zijn grijs weergegeven en kunnen via hun detailpaneel weer geactiveerd worden.",
