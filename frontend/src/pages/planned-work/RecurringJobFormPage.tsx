@@ -26,6 +26,8 @@ import {
   getBuildingEligibleCrew,
   listAllBuildings,
   listAllCustomers,
+  listCustomerPriceFolders,
+  listServiceCategories,
 } from "../../api/admin";
 import type { AdminFieldErrors, CrewUser } from "../../api/admin";
 import {
@@ -39,7 +41,14 @@ import type {
   RecurringJobWritePayload,
   SelectablePricingMode,
 } from "../../api/plannedWork.types";
-import type { Building, Customer } from "../../api/types";
+import { listLabels } from "../../api/customerLabels";
+import type {
+  Building,
+  Customer,
+  CustomerLabel,
+  CustomerPriceFolder,
+  ServiceCategory,
+} from "../../api/types";
 import { useToast } from "../../components/ToastProvider";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 
@@ -113,6 +122,32 @@ export function RecurringJobFormPage() {
   const [defaultStaffIds, setDefaultStaffIds] = useState<number[]>([]);
   const [defaultManagerIds, setDefaultManagerIds] = useState<number[]>([]);
 
+  // ---- Sprint 144 §2 — Department / Work type / Category ---------------
+  // All three optional, all three bound to the SELECTED CUSTOMER (the
+  // owner asked for the customer's own vocabulary, not a generic global
+  // list). Selections are stored raw and DERIVED to "" when they do not
+  // belong to the current customer — never resynced in an effect, which
+  // is the pattern that produced the customer-lock regression Sprint 143
+  // §1 had to undo (and which CLAUDE.md bans).
+  const [departmentId, setDepartmentId] = useState("");
+  const [workTypeId, setWorkTypeId] = useState("");
+  // Prefixed, same shape as CreateExtraWorkPage: "" | "cat:<id>" | "fol:<id>".
+  const [categoryChoice, setCategoryChoice] = useState("");
+  // Tagged with the customer id so a list fetched for a previously
+  // selected customer is never offered against the current one.
+  const [labelLists, setLabelLists] = useState<{
+    customerId: number;
+    departments: CustomerLabel[];
+    workTypes: CustomerLabel[];
+  } | null>(null);
+  const [companyCategories, setCompanyCategories] = useState<ServiceCategory[]>(
+    [],
+  );
+  const [customerFolders, setCustomerFolders] = useState<{
+    customerId: number;
+    rows: CustomerPriceFolder[];
+  } | null>(null);
+
   // Fallback labels so a building/customer outside the fetched page still
   // renders a sensible option in edit mode.
   const [loadedJobTitle, setLoadedJobTitle] = useState("");
@@ -154,6 +189,16 @@ export function RecurringJobFormPage() {
           setLoadedJobTitle(job.title);
           setBuilding(job.building);
           setCustomer(job.customer);
+          // Sprint 144 §2 — hydrate the three classifiers on EDIT.
+          setDepartmentId(job.department ? String(job.department) : "");
+          setWorkTypeId(job.work_type ? String(job.work_type) : "");
+          setCategoryChoice(
+            job.service_category
+              ? `cat:${job.service_category}`
+              : job.price_folder
+                ? `fol:${job.price_folder}`
+                : "",
+          );
           setTitle(job.title);
           setDescription(job.description);
           setFrequency(job.frequency);
@@ -243,6 +288,102 @@ export function RecurringJobFormPage() {
     if (building === "") return customers;
     return customers.filter((c) => customerMatchesBuilding(c, Number(building)));
   }, [customers, building]);
+
+  // Sprint 144 §2 — the customer's own label lists. Reuses the SAME
+  // `listLabels` helper the Extra Work form uses; no second path.
+  // Load-only (no setState in the effect body): a stale selection is
+  // neutralised by the `effective*` derivations below.
+  useEffect(() => {
+    if (customer === "") return;
+    const customerId = Number(customer);
+    let cancelled = false;
+    Promise.all([
+      listLabels(customerId, "department", { is_active: true }).catch(
+        () => [] as CustomerLabel[],
+      ),
+      listLabels(customerId, "work_type", { is_active: true }).catch(
+        () => [] as CustomerLabel[],
+      ),
+    ]).then(([departments, workTypes]) => {
+      if (!cancelled) {
+        setLabelLists({ customerId, departments, workTypes });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer]);
+
+  // The company's ACTIVE catalog categories — fetched once. An archived
+  // category must never be offerable.
+  useEffect(() => {
+    let cancelled = false;
+    listServiceCategories({ is_active: true })
+      .then((rows) => {
+        if (!cancelled) setCompanyCategories(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ...and the selected customer's ACTIVE folders.
+  useEffect(() => {
+    if (customer === "") return;
+    const customerId = Number(customer);
+    let cancelled = false;
+    listCustomerPriceFolders(customerId, { is_active: true })
+      .then((rows) => {
+        if (!cancelled) setCustomerFolders({ customerId, rows });
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerFolders({ customerId, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer]);
+
+  // Guarded inline so TS narrows AND a list fetched for a previous
+  // customer is never shown against the current one.
+  const currentDepartments =
+    labelLists && labelLists.customerId === Number(customer)
+      ? labelLists.departments
+      : [];
+  const currentWorkTypes =
+    labelLists && labelLists.customerId === Number(customer)
+      ? labelLists.workTypes
+      : [];
+  const currentFolders =
+    customerFolders && customerFolders.customerId === Number(customer)
+      ? customerFolders.rows
+      : [];
+
+  // DERIVED, not resynced: an id that does not belong to the current
+  // customer's list collapses to "" for both the dropdown value and the
+  // payload, so switching customer cannot carry a selection across.
+  const effectiveDepartmentId = currentDepartments.some(
+    (d) => String(d.id) === departmentId,
+  )
+    ? departmentId
+    : "";
+  const effectiveWorkTypeId = currentWorkTypes.some(
+    (w) => String(w.id) === workTypeId,
+  )
+    ? workTypeId
+    : "";
+  const effectiveCategoryChoice = categoryChoice.startsWith("fol:")
+    ? currentFolders.some((f) => `fol:${f.id}` === categoryChoice)
+      ? categoryChoice
+      : ""
+    : categoryChoice.startsWith("cat:")
+      ? companyCategories.some((c) => `cat:${c.id}` === categoryChoice)
+        ? categoryChoice
+        : ""
+      : "";
 
   function toggleId(list: number[], value: number): number[] {
     return list.includes(value)
@@ -351,6 +492,18 @@ export function RecurringJobFormPage() {
       pricing_mode: pricingMode,
       vat_pct: vatPct || "21",
       fixed_price: pricingMode === "FIXED" ? fixedPrice.trim() : null,
+      // Sprint 144 §2 — all optional. `effective*` has already collapsed
+      // any selection that belongs to a different customer, so a stale
+      // one can never reach the wire. Explicit `null` (not omitted) so
+      // clearing a field on EDIT actually clears it.
+      department: effectiveDepartmentId ? Number(effectiveDepartmentId) : null,
+      work_type: effectiveWorkTypeId ? Number(effectiveWorkTypeId) : null,
+      service_category: effectiveCategoryChoice.startsWith("cat:")
+        ? Number(effectiveCategoryChoice.slice(4))
+        : null,
+      price_folder: effectiveCategoryChoice.startsWith("fol:")
+        ? Number(effectiveCategoryChoice.slice(4))
+        : null,
     };
     // Only touch crew when eligible crew loaded for this building, so a
     // transient fetch error on edit does not wipe the job's existing crew
@@ -511,6 +664,100 @@ export function RecurringJobFormPage() {
                     {fieldErrors.customer}
                   </div>
                 )}
+              </div>
+
+              {/* Sprint 144 §2 — Department / Work type / Category, all
+                  bound to the SELECTED CUSTOMER and all optional. Each is
+                  disabled with a reason when the customer has none of
+                  that kind, the way the Extra Work form already does it —
+                  an empty enabled dropdown tells the operator nothing. */}
+              <div className="field">
+                <label className="field-label" htmlFor="rj-department">
+                  {t("form.field_department")}
+                </label>
+                <select
+                  id="rj-department"
+                  className="field-select"
+                  data-testid="recurring-job-department"
+                  value={effectiveDepartmentId}
+                  onChange={(event) => setDepartmentId(event.target.value)}
+                  disabled={customer === "" || currentDepartments.length === 0}
+                >
+                  <option value="">{t("form.field_label_none")}</option>
+                  {currentDepartments.map((d) => (
+                    <option key={d.id} value={String(d.id)}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+                {customer !== "" && currentDepartments.length === 0 && (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {t("form.field_department_none")}
+                  </div>
+                )}
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="rj-work-type">
+                  {t("form.field_work_type")}
+                </label>
+                <select
+                  id="rj-work-type"
+                  className="field-select"
+                  data-testid="recurring-job-work-type"
+                  value={effectiveWorkTypeId}
+                  onChange={(event) => setWorkTypeId(event.target.value)}
+                  disabled={customer === "" || currentWorkTypes.length === 0}
+                >
+                  <option value="">{t("form.field_label_none")}</option>
+                  {currentWorkTypes.map((w) => (
+                    <option key={w.id} value={String(w.id)}>
+                      {w.name}
+                    </option>
+                  ))}
+                </select>
+                {customer !== "" && currentWorkTypes.length === 0 && (
+                  <div className="muted small" style={{ marginTop: 4 }}>
+                    {t("form.field_work_type_none")}
+                  </div>
+                )}
+              </div>
+
+              <div className="field">
+                <label className="field-label" htmlFor="rj-category">
+                  {t("form.field_category")}
+                </label>
+                <select
+                  id="rj-category"
+                  className="field-select"
+                  data-testid="recurring-job-category"
+                  value={effectiveCategoryChoice}
+                  onChange={(event) => setCategoryChoice(event.target.value)}
+                >
+                  <option value="">{t("form.field_label_none")}</option>
+                  {/* Same two groups as the Extra Work form: the
+                      company's categories, plus this customer's folders
+                      once a customer is chosen. ACTIVE only on both
+                      sides. */}
+                  {companyCategories.length > 0 && (
+                    <optgroup label={t("form.field_category_group_company")}>
+                      {companyCategories.map((c) => (
+                        <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {currentFolders.length > 0 && (
+                    <optgroup label={t("form.field_category_group_folders")}>
+                      {currentFolders.map((f) => (
+                        <option key={`fol-${f.id}`} value={`fol:${f.id}`}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
               </div>
               <div className="field">
                 <label className="field-label" htmlFor="rj-building">

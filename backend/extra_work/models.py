@@ -315,6 +315,46 @@ class ExtraWorkRequest(models.Model):
         related_name="extra_work_requests",
     )
 
+    # Sprint 144 §1 — what the operator ACTUALLY classifies a request as
+    # now: one of the company's own `ServiceCategory` rows, or one of the
+    # customer's own `CustomerPriceFolder`s. AT MOST ONE is set.
+    #
+    # These replace the `category` enum above as the QUESTION the create
+    # form asks. The enum itself is untouched and keeps its
+    # `default=OTHER`: the form simply stops asking, so new rows take the
+    # default and every one of the 65 live crmtest rows keeps the value
+    # it already has. Migrating the enum away is its own job (`## NEXT`
+    # item 18); this is not that, it just stops asking for it.
+    #
+    # Nullable is required, not a convenience — no backfill, and a
+    # request created before this sprint has neither. PROTECT mirrors
+    # `department` / `work_type` above: a category or folder still
+    # referenced by any request cannot be hard-deleted. That matters
+    # doubly for the folder, whose "delete with contents" path
+    # (Sprint 143) must not be able to take request history with it.
+    service_category = models.ForeignKey(
+        "ServiceCategory",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="extra_work_requests",
+        help_text=(
+            "Sprint 144 — the company catalog category this request is "
+            "filed under. Mutually exclusive with `price_folder`."
+        ),
+    )
+    price_folder = models.ForeignKey(
+        "CustomerPriceFolder",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="extra_work_requests",
+        help_text=(
+            "Sprint 144 — the customer's own price folder this request "
+            "is filed under. Mutually exclusive with `service_category`."
+        ),
+    )
+
     urgency = models.CharField(
         max_length=16,
         choices=ExtraWorkUrgency.choices,

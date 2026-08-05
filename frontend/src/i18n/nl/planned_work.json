@@ -219,5 +219,17 @@
   "archive.toast_archived": "Terugkerende taak gearchiveerd",
   "archive.toast_unarchived": "Terugkerende taak hersteld",
   "errors.load_failed": "Kon terugkerend werk niet laden.",
-  "errors.generic": "Er ging iets mis. Probeer het opnieuw."
+  "errors.generic": "Er ging iets mis. Probeer het opnieuw.",
+  "form.field_department": "Afdeling",
+  "form.field_work_type": "Werksoort",
+  "form.field_category": "Categorie",
+  "form.field_label_none": "Geen",
+  "form.field_department_none": "Deze klant heeft nog geen afdelingen.",
+  "form.field_work_type_none": "Deze klant heeft nog geen werksoorten.",
+  "form.field_category_group_company": "Categorieen van uw bedrijf",
+  "form.field_category_group_folders": "Mappen van deze klant",
+  "detail.field_department": "Afdeling",
+  "detail.field_work_type": "Werksoort",
+  "detail.field_category": "Categorie",
+  "detail.field_none": "—"
 }

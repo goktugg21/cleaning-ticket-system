@@ -44,6 +44,7 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
+import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   DEEP_CLEANING: "category.deep_cleaning",
@@ -822,7 +823,9 @@ export function ExtraWorkListPage() {
                       <RouteBadge value={row.routing_decision} />
                     </td>
                     <td>
-                      {t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
+                      {/* Sprint 144 §1 — new shape first, enum fallback. */}
+                      {extraWorkCategoryName(row) ??
+                        t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
                     </td>
                     <td>{row.building_name}</td>
                     <td>{row.customer_name}</td>
@@ -901,7 +904,8 @@ export function ExtraWorkListPage() {
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_category")}</dt>
                       <dd>
-                        {t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
+                        {extraWorkCategoryName(row) ??
+                          t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
                       </dd>
                     </div>
                     <div className="admin-card-meta-row">

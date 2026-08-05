@@ -76,6 +76,16 @@ export interface RecurringJob {
   building_name: string;
   customer: number;
   customer_name: string;
+  // Sprint 144 §2 — the three optional classifiers, plus their resolved
+  // names for display. `*_name` is null for an untagged job.
+  department: number | null;
+  department_name: string | null;
+  work_type: number | null;
+  work_type_name: string | null;
+  service_category: number | null;
+  service_category_name: string | null;
+  price_folder: number | null;
+  price_folder_name: string | null;
   title: string;
   description: string;
   frequency: RecurringJobFrequency;
@@ -112,6 +122,14 @@ export interface RecurringJob {
 export interface RecurringJobWritePayload {
   building: number;
   customer: number;
+  // Sprint 144 §2 — three optional classifiers, all bound to the
+  // customer. Explicit `null` (rather than omitted) clears one on EDIT.
+  // `service_category` and `price_folder` are mutually exclusive; the
+  // backend rejects both being set.
+  department?: number | null;
+  work_type?: number | null;
+  service_category?: number | null;
+  price_folder?: number | null;
   title: string;
   description?: string;
   frequency: RecurringJobFrequency;

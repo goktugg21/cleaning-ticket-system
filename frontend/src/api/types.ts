@@ -1150,6 +1150,14 @@ export interface ExtraWorkRequestList {
   department_name: string | null;
   work_type: number | null;
   work_type_name: string | null;
+  // Sprint 144 §1 — the classifier the operator actually chose. At most
+  // one is set; a pre-144 request has neither and only the `category`
+  // enum below. Both surfaces render whichever is present and fall back
+  // to the enum label, so the two shapes coexist.
+  service_category: number | null;
+  service_category_name: string | null;
+  price_folder: number | null;
+  price_folder_name: string | null;
   title: string;
   category: ExtraWorkCategory;
   urgency: ExtraWorkUrgency;
@@ -1438,8 +1446,17 @@ export interface ExtraWorkRequestCartCreatePayload {
   description: string;
   building: number;
   customer: number;
-  category: string;
+  // Sprint 144 §1 — `category` (the fixed `ExtraWorkCategory` enum) is
+  // now OPTIONAL on the wire and the create form no longer sends it: the
+  // column keeps its server-side `default=OTHER`. It stays on the type
+  // for API back-compat and for any caller that still classifies with
+  // the enum. `category_other_text` follows it.
+  category?: string;
   category_other_text?: string;
+  // Sprint 144 §1 — what the form actually sends now: AT MOST ONE. A
+  // company `ServiceCategory`, or this customer's `CustomerPriceFolder`.
+  service_category?: number | null;
+  price_folder?: number | null;
   // Sprint 128 — optional per-customer labels the customer may set at
   // create (both optional; the backend enforces they belong to `customer`).
   department?: number | null;

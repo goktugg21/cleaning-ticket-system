@@ -47,6 +47,49 @@ class RecurringJob(models.Model):
         related_name="recurring_jobs",
     )
 
+    # Sprint 144 §2 — the same three classifiers Extra Work carries, and
+    # for the same reason: the owner wants recurring work grouped by the
+    # CUSTOMER's own vocabulary, not a generic global list.
+    #
+    # `department` / `work_type` are per-customer label lists (they must
+    # belong to THIS job's customer — enforced by the serializer, the
+    # sole write path, exactly as `ExtraWorkRequestCreateSerializer`
+    # does). `service_category` / `price_folder` are the §1 pair, at most
+    # one set.
+    #
+    # All four NULLABLE with no backfill: every existing job predates
+    # them, and all four are optional on the form. PROTECT throughout,
+    # mirroring the scope FKs above — a label, category or folder still
+    # referenced by a recurring job cannot be hard-deleted.
+    department = models.ForeignKey(
+        "customers.Department",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="recurring_jobs",
+    )
+    work_type = models.ForeignKey(
+        "customers.WorkType",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="recurring_jobs",
+    )
+    service_category = models.ForeignKey(
+        "extra_work.ServiceCategory",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="recurring_jobs",
+    )
+    price_folder = models.ForeignKey(
+        "extra_work.CustomerPriceFolder",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="recurring_jobs",
+    )
+
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
 

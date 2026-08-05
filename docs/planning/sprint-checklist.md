@@ -121,6 +121,43 @@ entries are DELETED rather than left contradicting the code.
   the SA company selector silently absent.
 
 
+**Round 4 (Sprint 144) — one Category control, and recurring work gains
+the customer's own vocabulary.** Deployed to crmtest by CC.
+
+- **§1 The Extra Work form had TWO "Category" controls.** One was
+  `ExtraWorkRequest.category`, the fixed generic enum (Deep cleaning /
+  Window cleaning / …), under "What needs to happen"; the other was
+  Sprint 143's real picker (company catalog categories + this customer's
+  price folders) sitting above the cart as a filter. They are now ONE
+  control: choosing both CLASSIFIES the request and FILTERS the service
+  lines. Storage is additive — two nullable PROTECT FKs on
+  `ExtraWorkRequest` (`service_category` / `price_folder`, at most one
+  set). The enum column is UNTOUCHED and keeps its `default=OTHER`: the
+  form simply stops asking, so the 65 live crmtest rows keep their
+  values and new rows take the default. The
+  `category=OTHER ⇒ category_other_text required` rule is dropped from
+  the CREATE path only, since the operator can no longer choose OTHER.
+  Recon confirmed the only readers of the enum are the three EW
+  serializers, `conversion.py` (pins converted tickets to OTHER) and the
+  seeder — `reports/` does NOT read it, nor does invoicing, the proposal
+  PDF or any template. Both list and detail render the FK name when
+  present and fall back to the enum label, so the two shapes coexist.
+  Migrating the enum away stays `## NEXT` item 18.
+- **§2 Recurring work gains Department, Work type and Category**, all
+  bound to the selected CUSTOMER rather than a generic global list. Four
+  nullable PROTECT FKs on `RecurringJob`; labels load through the
+  existing `listLabels` helper the Extra Work form uses (no second
+  path), category offers the same two groups as §1. All optional, empty
+  by default, with a reason shown on the disabled control when the
+  customer has none of a kind. A selection made for one customer is
+  DERIVED away on switch (`effective*`), never resynced in an effect —
+  that pattern is what produced the customer-lock regression Sprint 143
+  §1 had to undo. Shown on the job detail page too.
+
+Both migrations are additive (nullable FKs only, no backfill). Per the
+owner's instruction this round ran WITHOUT the backend suite and without
+Playwright; CI's full regression on the PR is the gate.
+
 **Round 3 (Sprint 143) — the customer-price FOLDERS feature the owner
 asked for weeks ago, plus the regression blocking his testing.** Same
 branch, same PR. Per the owner's instruction this round ran WITHOUT the

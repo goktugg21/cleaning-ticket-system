@@ -37,7 +37,6 @@ import type {
   CustomerLabel,
   CustomerPriceFolder,
   CustomerServicePrice,
-  ExtraWorkCategory,
   ExtraWorkIntentErrorCode,
   ExtraWorkPreviewLine,
   ExtraWorkPreviewPriceSource,
@@ -59,8 +58,10 @@ interface ParentFormState {
   customer: string;
   title: string;
   description: string;
-  category: ExtraWorkCategory;
-  category_other_text: string;
+  // Sprint 144 §1 — `category` / `category_other_text` are GONE from the
+  // form. The operator classifies with `categoryFilter` (a catalog
+  // category or a customer folder) instead; the enum column keeps its
+  // `default=OTHER` server-side.
   urgency: ExtraWorkUrgency;
   preferred_date: string;
 }
@@ -114,37 +115,11 @@ const EMPTY_PARENT: ParentFormState = {
   customer: "",
   title: "",
   description: "",
-  category: "DEEP_CLEANING",
-  category_other_text: "",
   urgency: "NORMAL",
   preferred_date: "",
 };
 
-const CATEGORY_VALUES: ExtraWorkCategory[] = [
-  "DEEP_CLEANING",
-  "WINDOW_CLEANING",
-  "FLOOR_MAINTENANCE",
-  "SANITARY_SERVICE",
-  "WASTE_REMOVAL",
-  "FURNITURE_MOVING",
-  "EVENT_CLEANING",
-  "EMERGENCY_CLEANING",
-  "OTHER",
-];
-
 const URGENCY_VALUES: ExtraWorkUrgency[] = ["NORMAL", "HIGH", "URGENT"];
-
-const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
-  DEEP_CLEANING: "category.deep_cleaning",
-  WINDOW_CLEANING: "category.window_cleaning",
-  FLOOR_MAINTENANCE: "category.floor_maintenance",
-  SANITARY_SERVICE: "category.sanitary_service",
-  WASTE_REMOVAL: "category.waste_removal",
-  FURNITURE_MOVING: "category.furniture_moving",
-  EVENT_CLEANING: "category.event_cleaning",
-  EMERGENCY_CLEANING: "category.emergency_cleaning",
-  OTHER: "category.other",
-};
 
 const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
   NORMAL: "urgency.normal",
@@ -1218,11 +1193,6 @@ export function CreateExtraWorkPage({
       setError(t("create.error_building_customer_required"));
       return;
     }
-    if (form.category === "OTHER" && !form.category_other_text.trim()) {
-      setError(t("create.error_category_other_required"));
-      return;
-    }
-
     // Cart validation.
     if (cartLines.length === 0) {
       setError(t("create.error_empty_cart"));
@@ -1364,9 +1334,17 @@ export function CreateExtraWorkPage({
         customer: Number(form.customer),
         title: form.title.trim(),
         description: form.description.trim(),
-        category: form.category,
-        category_other_text:
-          form.category === "OTHER" ? form.category_other_text.trim() : "",
+        // Sprint 144 §1 — the single Category control writes ONE of
+        // these two (at most): a company catalog category, or this
+        // customer's price folder. `category` (the enum) is deliberately
+        // NOT sent — the server default (OTHER) applies, which is what
+        // "the form stopped asking" means.
+        ...(categoryFilter.startsWith("cat:")
+          ? { service_category: Number(categoryFilter.slice(4)) }
+          : {}),
+        ...(categoryFilter.startsWith("fol:")
+          ? { price_folder: Number(categoryFilter.slice(4)) }
+          : {}),
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
         // Sprint 128 — optional per-customer labels. `effective*` collapses a
@@ -1738,31 +1716,68 @@ export function CreateExtraWorkPage({
               {t("create.what_section_title")}
             </div>
             <div className="form-2col">
+              {/* Sprint 144 §1 — ONE "Category" on the page.
+                  This used to be `ExtraWorkRequest.category`, the fixed
+                  generic enum (Deep cleaning / Window cleaning / …),
+                  while the REAL picker — the company's catalog
+                  categories plus this customer's price folders — sat
+                  separately above the cart as a filter. Two controls
+                  called "Category", one of which had nothing to do with
+                  the operator's catalog.
+                  They are now the same control: choosing here both
+                  CLASSIFIES the request (`service_category` /
+                  `price_folder` on the model) and FILTERS the service
+                  lines below. The enum column is untouched and keeps its
+                  `default=OTHER` — the form simply stops asking, so old
+                  rows keep their value and new ones take the default.
+                  Fully migrating the enum away is `## NEXT` item 18. */}
               <div className="field">
-                <label className="field-label" htmlFor="ew-category">
+                <label className="field-label" htmlFor="ew-catalog-category">
                   {t("create.field_category")}
                 </label>
                 <select
-                  id="ew-category"
+                  id="ew-catalog-category"
                   className="field-select"
-                  value={form.category}
-                  onChange={(event) =>
-                    update("category", event.target.value as ExtraWorkCategory)
-                  }
+                  data-testid="extra-work-create-catalog-category"
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
                 >
-                  {CATEGORY_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {t(CATEGORY_I18N_KEY[value])}
-                    </option>
-                  ))}
+                  <option value="">
+                    {t("create.catalog_filter.all_categories")}
+                  </option>
+                  {/* Sprint 143 §4 — two labelled groups. The folder
+                      group only appears once a customer is chosen, and
+                      only when that customer actually has folders.
+                      Archived categories and folders are excluded
+                      upstream (`catalogCategories` / `currentFolders`):
+                      the form offers only what can be ordered now. */}
+                  {catalogCategories.length > 0 && (
+                    <optgroup
+                      label={t("create.catalog_filter.group_categories")}
+                    >
+                      {catalogCategories.map((category) => (
+                        <option
+                          key={`cat-${category.id}`}
+                          value={`cat:${category.id}`}
+                        >
+                          {category.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {currentFolders.length > 0 && (
+                    <optgroup label={t("create.catalog_filter.group_folders")}>
+                      {currentFolders.map((folder) => (
+                        <option
+                          key={`fol-${folder.id}`}
+                          value={`fol:${folder.id}`}
+                        >
+                          {folder.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
-                {/* Sprint 137 item 5 — this dropdown is
-                    `ExtraWorkRequest.category`, the fixed enum that
-                    classifies the REQUEST. It is NOT the ServiceCategory
-                    catalog the pricing page manages, and the two were
-                    silently sharing the word "category". Naming the
-                    difference is the cheap half of the fix; the cart's
-                    own catalog-category filter is the other half. */}
                 <div className="muted small" style={{ marginTop: 4 }}>
                   {t("create.field_category_hint")}
                 </div>
@@ -1787,28 +1802,6 @@ export function CreateExtraWorkPage({
                 </select>
               </div>
             </div>
-
-            {form.category === "OTHER" && (
-              <div className="field">
-                <label className="field-label" htmlFor="ew-category-other">
-                  {t("create.field_category_other_text")}
-                </label>
-                <input
-                  id="ew-category-other"
-                  className="field-input"
-                  type="text"
-                  maxLength={128}
-                  placeholder={t(
-                    "create.field_category_other_text_placeholder",
-                  )}
-                  value={form.category_other_text}
-                  onChange={(event) =>
-                    update("category_other_text", event.target.value)
-                  }
-                  required
-                />
-              </div>
-            )}
 
             <div className="field">
               <label className="field-label" htmlFor="ew-title">
@@ -2083,53 +2076,16 @@ export function CreateExtraWorkPage({
                 catalog category, plus a catalog-wide search. Both are
                 opt-in: the default is "All categories" with no search,
                 which is byte-identical to the pre-137 picker. */}
+            {/* Sprint 144 §1 — the category half of this bar MOVED UP
+                into the single "Category" control under "What needs to
+                happen". Only the search box is left here, beside the
+                lines it searches. */}
             {services.length > 0 && (
               <div
                 className="form-2col"
                 data-testid="extra-work-create-catalog-filter"
                 style={{ marginBottom: 12 }}
               >
-                <div className="field">
-                  <label className="field-label" htmlFor="ew-catalog-category">
-                    {t("create.catalog_filter.category_label")}
-                  </label>
-                  <select
-                    id="ew-catalog-category"
-                    className="field-select"
-                    data-testid="extra-work-create-catalog-category"
-                    value={categoryFilter}
-                    onChange={(event) => setCategoryFilter(event.target.value)}
-                  >
-                    <option value="">
-                      {t("create.catalog_filter.all_categories")}
-                    </option>
-                    {/* Sprint 143 §4 — two labelled groups. The folder
-                        group only appears once a customer is chosen, and
-                        only when that customer actually has folders. */}
-                    {catalogCategories.length > 0 && (
-                      <optgroup
-                        label={t("create.catalog_filter.group_categories")}
-                      >
-                        {catalogCategories.map((category) => (
-                          <option key={`cat-${category.id}`} value={`cat:${category.id}`}>
-                            {category.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {currentFolders.length > 0 && (
-                      <optgroup
-                        label={t("create.catalog_filter.group_folders")}
-                      >
-                        {currentFolders.map((folder) => (
-                          <option key={`fol-${folder.id}`} value={`fol:${folder.id}`}>
-                            {folder.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-                </div>
                 <div className="field">
                   <label className="field-label" htmlFor="ew-catalog-search">
                     {t("create.catalog_filter.search_label")}

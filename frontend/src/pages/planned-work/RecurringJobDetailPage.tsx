@@ -319,6 +319,26 @@ export function RecurringJobDetailPage() {
           <SummaryRow label={t("detail.field_building")} value={job.building_name} />
           <SummaryRow label={t("detail.field_customer")} value={job.customer_name} />
           <SummaryRow label={t("detail.field_company")} value={job.company_name} />
+          {/* Sprint 144 §2 — the three optional classifiers. Always
+              shown, with an em-dash when unset, so the operator can see
+              at a glance that a job is untagged rather than having to
+              open the edit form to find out. */}
+          <SummaryRow
+            label={t("detail.field_department")}
+            value={job.department_name ?? t("detail.field_none")}
+          />
+          <SummaryRow
+            label={t("detail.field_work_type")}
+            value={job.work_type_name ?? t("detail.field_none")}
+          />
+          <SummaryRow
+            label={t("detail.field_category")}
+            value={
+              job.service_category_name ??
+              job.price_folder_name ??
+              t("detail.field_none")
+            }
+          />
           <SummaryRow
             label={t("detail.field_frequency")}
             value={t(`frequency.${job.frequency}`)}

@@ -94,6 +94,22 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
     created_by_email = serializers.CharField(
         source="created_by.email", read_only=True
     )
+    # Sprint 144 §2 — the three classifiers, all optional. `allow_null`
+    # so an untagged job renders the key as null rather than dropping it
+    # (the `x.name` traversal raises otherwise) — same shape as
+    # `ExtraWorkRequestListSerializer`'s label names.
+    department_name = serializers.CharField(
+        source="department.name", read_only=True, allow_null=True
+    )
+    work_type_name = serializers.CharField(
+        source="work_type.name", read_only=True, allow_null=True
+    )
+    service_category_name = serializers.CharField(
+        source="service_category.name", read_only=True, allow_null=True
+    )
+    price_folder_name = serializers.CharField(
+        source="price_folder.name", read_only=True, allow_null=True
+    )
     default_staff_ids = serializers.SerializerMethodField()
     default_manager_ids = serializers.SerializerMethodField()
     occurrences_count = serializers.SerializerMethodField()
@@ -111,6 +127,14 @@ class RecurringJobReadSerializer(serializers.ModelSerializer):
             "building_name",
             "customer",
             "customer_name",
+            "department",
+            "department_name",
+            "work_type",
+            "work_type_name",
+            "service_category",
+            "service_category_name",
+            "price_folder",
+            "price_folder_name",
             "title",
             "description",
             "frequency",
@@ -198,6 +222,14 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
         fields = [
             "building",
             "customer",
+            # Sprint 144 §2 — all optional; the same-customer /
+            # same-company invariants are enforced in validate() below,
+            # this being the sole write path (the shape
+            # `ExtraWorkRequestCreateSerializer` uses).
+            "department",
+            "work_type",
+            "service_category",
+            "price_folder",
             "title",
             "description",
             "frequency",
@@ -245,6 +277,60 @@ class RecurringJobWriteSerializer(serializers.ModelSerializer):
                         "Building and customer must belong to the same "
                         "company.",
                         code="company_mismatch",
+                    )
+                }
+            )
+
+        # Sprint 144 §2 — the four optional classifiers must belong to
+        # THIS job's customer / company. Same tenant-scoping intent as
+        # `ExtraWorkRequestCreateSerializer`'s label guard (RBAC H-1/H-2):
+        # a label list is per-customer, a category per-company, a folder
+        # per-customer, and this serializer is the sole write path.
+        for field in ("department", "work_type"):
+            label = attrs.get(field)
+            if label is not None and label.customer_id != customer.id:
+                raise serializers.ValidationError(
+                    {
+                        field: serializers.ErrorDetail(
+                            "This label belongs to a different customer.",
+                            code="label_customer_mismatch",
+                        )
+                    }
+                )
+        if attrs.get("service_category") and attrs.get("price_folder"):
+            raise serializers.ValidationError(
+                {
+                    "service_category": serializers.ErrorDetail(
+                        "Choose either a catalog category or a customer "
+                        "price folder, not both.",
+                        code="category_folder_exclusive",
+                    )
+                }
+            )
+        chosen_category = attrs.get("service_category")
+        if (
+            chosen_category is not None
+            and chosen_category.company_id != customer.company_id
+        ):
+            raise serializers.ValidationError(
+                {
+                    "service_category": serializers.ErrorDetail(
+                        "This category belongs to a different provider "
+                        "company.",
+                        code="category_company_mismatch",
+                    )
+                }
+            )
+        chosen_folder = attrs.get("price_folder")
+        if (
+            chosen_folder is not None
+            and chosen_folder.customer_id != customer.id
+        ):
+            raise serializers.ValidationError(
+                {
+                    "price_folder": serializers.ErrorDetail(
+                        "This folder belongs to a different customer.",
+                        code="folder_customer_mismatch",
                     )
                 }
             )
