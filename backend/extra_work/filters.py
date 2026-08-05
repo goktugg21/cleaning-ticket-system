@@ -28,6 +28,21 @@ class ExtraWorkRequestFilter(df.FilterSet):
     # uses) and return a queryset (pk__in) so DRF pagination and the other
     # filters still compose. The already-scoped queryset is small, so the
     # one-shot materialisation to compute matching ids is cheap.
+    # Sprint 143 §6 — filter by CATALOG category, server-side.
+    #
+    # The list page's "Categorie" dropdown used to filter on the
+    # `ExtraWorkCategory` ENUM, client-side, and this FilterSet had no
+    # `category` field at all. It now filters on the real
+    # `ServiceCategory` a request's ordered lines came from.
+    #
+    # Matched against `ExtraWorkRequestItem.snapshot_service_category_name`
+    # — the denormalised string written at order time — NOT the live FK.
+    # That is deliberate and is what makes the "deleted categories" group
+    # possible: the snapshot survives a rename and outlives the category
+    # itself, so history stays filterable after the catalog moves on. A
+    # live-FK join would silently drop exactly those requests.
+    category = df.CharFilter(method="filter_category")
+
     billing_period = df.CharFilter(method="filter_billing_period")
     invoice_status = df.ChoiceFilter(
         method="filter_invoice_status",
@@ -50,6 +65,18 @@ class ExtraWorkRequestFilter(df.FilterSet):
             "request_intent": ["exact", "in"],
             "created_by": ["exact"],
         }
+
+    def filter_category(self, queryset, name, value):
+        """`?category=<name>` — requests holding at least one line
+        ordered from a category of that name. Case-insensitive exact
+        match on the snapshot, `distinct()` because the join to line
+        items multiplies rows."""
+        raw = (value or "").strip()
+        if not raw:
+            return queryset
+        return queryset.filter(
+            line_items__snapshot_service_category_name__iexact=raw
+        ).distinct()
 
     def filter_billing_period(self, queryset, name, value):
         # value = "YYYY-MM". Unparseable -> no rows (fail closed: never

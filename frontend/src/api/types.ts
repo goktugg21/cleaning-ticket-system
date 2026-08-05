@@ -2042,9 +2042,45 @@ export interface ServiceBulkRaiseResult {
 // Per-customer contract price. Only an active row triggers the instant-
 // ticket path (Batch 7); absence means the request must go through the
 // proposal phase. `valid_to` null means open-ended.
+// Sprint 143 §3 — a folder that belongs to ONE CUSTOMER and groups that
+// customer's price rows. NOT a `ServiceCategory`: that is the PROVIDER's
+// catalog grouping, shared across the company's customers. A folder is
+// the customer's own arrangement of the prices agreed with them, and a
+// folder copied from a category keeps no link back to it.
+export interface CustomerPriceFolder {
+  id: number;
+  customer: number;
+  name: string;
+  is_active: boolean;
+  // Contract + custom rows inside, from one annotation on the list
+  // queryset. Drives the index card and the delete confirmation's count.
+  price_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerPriceFolderCreatePayload {
+  name: string;
+  is_active?: boolean;
+}
+
+export type CustomerPriceFolderUpdatePayload =
+  Partial<CustomerPriceFolderCreatePayload>;
+
+// Result of DELETE .../price-folders/<id>/?with_contents=…. Named for
+// what ACTUALLY happened: a folder-only delete archives nothing.
+export interface CustomerPriceFolderDeleteResult {
+  archived_price_count: number;
+  with_contents: boolean;
+}
+
 export interface CustomerServicePrice {
   id: number;
   customer: number;
+  // Sprint 143 §3 — null when the row sits outside every folder. Legal
+  // and permanent: every pre-143 row is folderless, and "delete the
+  // folder, keep the prices" produces more of them.
+  folder: number | null;
   service: number;
   service_name: string;
   unit_price: string;
@@ -2058,6 +2094,7 @@ export interface CustomerServicePrice {
 
 export interface CustomerServicePriceCreatePayload {
   service: number;
+  folder?: number | null;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -2075,6 +2112,8 @@ export type CustomerServicePriceUpdatePayload =
 export interface CustomerCustomPrice {
   id: number;
   customer: number;
+  // Sprint 143 §3 — see `CustomerServicePrice.folder`.
+  folder: number | null;
   custom_name: string;
   unit_type: ServiceUnitType;
   unit_type_display: string;
@@ -2098,6 +2137,7 @@ export interface CustomerCustomPrice {
 }
 
 export interface CustomerCustomPriceCreatePayload {
+  folder?: number | null;
   custom_name: string;
   unit_type: ServiceUnitType;
   custom_unit_label?: string;
@@ -2149,6 +2189,12 @@ export interface CustomerPriceCopyFromDefaultPayload {
   services: number[];
   valid_from: string;
   valid_to: string | null;
+  // Sprint 143 §3 — copy INTO a folder. Either an existing folder id or
+  // a name to create one with (the "copy a company category, with its
+  // services" flow). Mutually exclusive; both in the SAME request so a
+  // failed copy cannot strand an empty folder.
+  folder?: number | null;
+  folder_name?: string;
 }
 
 export interface CustomerPriceCopyFromDefaultResultRow {
@@ -2160,6 +2206,10 @@ export interface CustomerPriceCopyFromDefaultResultRow {
 export interface CustomerPriceCopyFromDefaultResult {
   created_count: number;
   skipped_count: number;
+  // Sprint 143 §3 — the folder the rows landed in, so the UI can drill
+  // straight into the one it just created. Null when no folder was asked
+  // for (the pre-143 flat copy).
+  folder: CustomerPriceFolder | null;
   results: CustomerPriceCopyFromDefaultResultRow[];
 }
 

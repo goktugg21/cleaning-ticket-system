@@ -891,6 +891,77 @@ class Service(models.Model):
         return f"{self.category.name} / {self.name}"
 
 
+class CustomerPriceFolder(models.Model):
+    """
+    Sprint 143 §3 — a folder that belongs to ONE CUSTOMER and groups
+    that customer's price rows.
+
+    Distinct from `ServiceCategory`, and deliberately so. A
+    `ServiceCategory` is the PROVIDER's catalog grouping, shared by every
+    customer under that company (and company-scoped since Sprint 142). A
+    `CustomerPriceFolder` is the CUSTOMER's own arrangement of the prices
+    agreed with them. Renaming one never touches the other, and a folder
+    copied from a category keeps no link back to it — the copy seeds
+    price rows, it does not adopt the category.
+
+    A folder holds PRICE ROWS, never catalog services: the service is
+    shared and is not moved. Both price models get a nullable `folder`
+    FK below, so a row belongs to at most one folder and a FOLDERLESS
+    row stays perfectly legal — every pre-143 row is one, and they must
+    remain visible on the pricing page.
+
+    Shaped after `documents.models.DocumentFolder`, the proven
+    per-customer folder in this codebase: `customer` CASCADE (a folder
+    is owned by its customer and should not outlive it), a nullable
+    `created_by` on PROTECT (system writes have no actor, but a user who
+    created folders cannot be deleted), and case-insensitive name
+    uniqueness per customer. The constraint uses `Lower(Trim(...))`
+    rather than DocumentFolder's `Lower(...)` — the same normalization
+    `uniq_service_category_name_per_company_ci` settled on in Sprint 142,
+    so leading/trailing whitespace cannot bypass the dedupe. There is no
+    `parent`: these are flat, so DocumentFolder's two partial
+    constraints collapse to one.
+    """
+
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="price_folders",
+    )
+    name = models.CharField(max_length=128)
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archiving a folder hides it from the Extra Work form's "
+            "picker without touching the price rows inside it."
+        ),
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="created_price_folders",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "customer price folder"
+        verbose_name_plural = "customer price folders"
+        constraints = [
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "customer",
+                name="uniq_price_folder_name_per_customer_ci",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.customer.name} / {self.name}"
+
+
 class CustomerServicePrice(models.Model):
     """
     Sprint 28 Batch 5 — per-customer contract price for a Service.
@@ -923,6 +994,19 @@ class CustomerServicePrice(models.Model):
         "customers.Customer",
         on_delete=models.CASCADE,
         related_name="service_prices",
+    )
+
+    # Sprint 143 §3 — optional per-customer folder. NULLABLE and
+    # SET_NULL: every pre-143 row has no folder and must keep working,
+    # and "delete the folder, keep the prices" is one of the two delete
+    # modes the UI offers — SET_NULL is what makes that a one-liner
+    # instead of a cascade the operator did not ask for.
+    folder = models.ForeignKey(
+        "CustomerPriceFolder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="prices",
     )
 
     unit_price = models.DecimalField(
@@ -985,6 +1069,15 @@ class CustomerCustomPrice(models.Model):
     customer = models.ForeignKey(
         "customers.Customer",
         on_delete=models.CASCADE,
+        related_name="custom_prices",
+    )
+    # Sprint 143 §3 — see `CustomerServicePrice.folder`. A customer-only
+    # line is exactly the kind of row an operator adds INTO a folder.
+    folder = models.ForeignKey(
+        "CustomerPriceFolder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="custom_prices",
     )
     custom_name = models.CharField(max_length=200)

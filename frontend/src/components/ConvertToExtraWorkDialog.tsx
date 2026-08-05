@@ -20,12 +20,19 @@ import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listServices } from "../api/admin";
+import {
+  listCustomerPriceFolders,
+  listCustomerPrices,
+  listServiceCategories,
+  listServices,
+} from "../api/admin";
 import { getApiError } from "../api/client";
 import { convertTicketToExtraWork } from "../api/tickets";
 import type {
+  CustomerPriceFolder,
   ExtraWorkRequestIntent,
   Service,
+  ServiceCategory,
   TicketConvertLinePayload,
 } from "../api/types";
 
@@ -99,6 +106,10 @@ function lineIsValid(line: ConvertLineState): boolean {
 
 export interface ConvertToExtraWorkDialogProps {
   ticketId: number;
+  // Sprint 143 §5 — the ticket's customer. Always known here, which
+  // makes this the "customer chosen" case of the Extra Work form's
+  // filter: company categories PLUS that customer's price folders.
+  customerId: number;
   onClose: () => void;
   // Called with the new ExtraWorkRequest id after a successful convert
   // so the parent can navigate to /extra-work/<id>.
@@ -107,13 +118,28 @@ export interface ConvertToExtraWorkDialogProps {
 
 export function ConvertToExtraWorkDialog({
   ticketId,
+  customerId,
   onClose,
   onConverted,
 }: ConvertToExtraWorkDialogProps) {
-  const { t } = useTranslation(["ticket_detail", "common"]);
+  const { t } = useTranslation(["ticket_detail", "common", "extra_work"]);
 
   const [services, setServices] = useState<Service[]>([]);
   const [servicesLoading, setServicesLoading] = useState(true);
+  // Sprint 143 §5 — the same catalog filter `CreateExtraWorkPage` has,
+  // and the same guards. This dialog was a flat list with neither: the
+  // provider converting a ticket for a customer needs to narrow by the
+  // same groupings the customer-facing form offers.
+  //
+  // Prefixed values so one control offers two kinds of grouping without
+  // their ids colliding: "" | "cat:<id>" | "fol:<id>".
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [serviceSearch, setServiceSearch] = useState("");
+  const [categories, setCategories] = useState<ServiceCategory[]>([]);
+  const [folders, setFolders] = useState<CustomerPriceFolder[]>([]);
+  const [folderServiceIds, setFolderServiceIds] = useState<
+    Map<number, Set<number>>
+  >(new Map());
   const [intent, setIntent] = useState<ExtraWorkRequestIntent>(
     PROVIDER_CONVERT_INTENTS[0],
   );
@@ -143,6 +169,113 @@ export function ConvertToExtraWorkDialog({
       cancelled = true;
     };
   }, []);
+
+  // Sprint 143 §5 — the filter's two option groups. ACTIVE only on both
+  // sides: the form offers what can be ordered NOW, so an archived
+  // category or folder must not appear. Every branch degrades to an
+  // empty list rather than blocking the dialog — losing the filter is
+  // recoverable, losing the convert is not.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      listServiceCategories({ is_active: true }).catch(
+        () => [] as ServiceCategory[],
+      ),
+      listCustomerPriceFolders(customerId, { is_active: true }).catch(
+        () => [] as CustomerPriceFolder[],
+      ),
+      listCustomerPrices(customerId).catch(() => []),
+    ]).then(([categoryRows, folderRows, priceRows]) => {
+      if (cancelled) return;
+      setCategories(categoryRows);
+      setFolders(folderRows);
+      const map = new Map<number, Set<number>>();
+      for (const row of priceRows) {
+        if (row.folder === null) continue;
+        const bucket = map.get(row.folder);
+        if (bucket) bucket.add(row.service);
+        else map.set(row.folder, new Set([row.service]));
+      }
+      setFolderServiceIds(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const serviceSearchTerm = serviceSearch.trim().toLowerCase();
+
+  // GUARD 3 — search spans the ENTIRE catalog; the category filter is
+  // deliberately ignored while searching. Every option label carries its
+  // category name, so a match from outside the filter is self-describing.
+  const searchMatches = useMemo(() => {
+    if (!serviceSearchTerm) return null;
+    return services.filter((svc) =>
+      `${svc.category_name} ${svc.name}`.toLowerCase().includes(
+        serviceSearchTerm,
+      ),
+    );
+  }, [services, serviceSearchTerm]);
+
+  const categoryFilteredServices = useMemo(() => {
+    if (!categoryFilter) return services;
+    if (categoryFilter.startsWith("cat:")) {
+      const id = Number(categoryFilter.slice(4));
+      return services.filter((svc) => svc.category === id);
+    }
+    if (categoryFilter.startsWith("fol:")) {
+      const ids = folderServiceIds.get(Number(categoryFilter.slice(4)));
+      if (!ids) return [];
+      return services.filter((svc) => ids.has(svc.id));
+    }
+    return services;
+  }, [services, categoryFilter, folderServiceIds]);
+
+  const offeredServices = searchMatches ?? categoryFilteredServices;
+  const narrowingActive =
+    Boolean(categoryFilter) || Boolean(serviceSearchTerm);
+  const hiddenServiceCount = services.length - offeredServices.length;
+
+  /**
+   * GUARD 1 — the service a line ALREADY holds is always in that line's
+   * own options, even when the active filter would exclude it.
+   * Otherwise narrowing the filter silently blanks a line the operator
+   * has already built, which is the failure this whole guard set exists
+   * to prevent.
+   *
+   * GUARD 4 — and the list is never bare: with a filter that matches
+   * nothing, the line still offers its own selection.
+   */
+  function optionsForLine(line: ConvertLineState): Service[] {
+    if (!line.serviceId) return offeredServices;
+    const selectedId = Number(line.serviceId);
+    if (offeredServices.some((svc) => svc.id === selectedId)) {
+      return offeredServices;
+    }
+    const selected = services.find((svc) => svc.id === selectedId);
+    return selected ? [selected, ...offeredServices] : offeredServices;
+  }
+
+  /**
+   * GUARD 2 — picking a service from OUTSIDE the active filter clears
+   * that filter, so the list on screen never contradicts the line just
+   * built.
+   */
+  function onLineServiceChange(tempId: string, value: string) {
+    updateLine(tempId, "serviceId", value);
+    if (!categoryFilter || !value) return;
+    const picked = services.find((svc) => svc.id === Number(value));
+    if (!picked) return;
+    const stillMatches = categoryFilter.startsWith("cat:")
+      ? picked.category === Number(categoryFilter.slice(4))
+      : categoryFilter.startsWith("fol:")
+        ? (
+            folderServiceIds.get(Number(categoryFilter.slice(4))) ??
+            new Set<number>()
+          ).has(picked.id)
+        : true;
+    if (!stillMatches) setCategoryFilter("");
+  }
 
   const canSubmit = useMemo(
     () => lines.length > 0 && lines.every(lineIsValid),
@@ -301,6 +434,91 @@ export function ConvertToExtraWorkDialog({
               </p>
             )}
 
+            {/* Sprint 143 §5 — the catalog filter, mirroring
+                CreateExtraWorkPage's. */}
+            <div className="form-2col" style={{ marginBottom: 12 }}>
+              <div className="field">
+                <label
+                  className="field-label"
+                  htmlFor="convert-catalog-category"
+                >
+                  {t("extra_work:create.catalog_filter.category_label")}
+                </label>
+                <select
+                  id="convert-catalog-category"
+                  className="field-select"
+                  data-testid="convert-to-ew-catalog-category"
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                >
+                  <option value="">
+                    {t("extra_work:create.catalog_filter.all_categories")}
+                  </option>
+                  {categories.length > 0 && (
+                    <optgroup
+                      label={t("extra_work:create.catalog_filter.group_categories")}
+                    >
+                      {categories.map((c) => (
+                        <option key={`cat-${c.id}`} value={`cat:${c.id}`}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {folders.length > 0 && (
+                    <optgroup
+                      label={t("extra_work:create.catalog_filter.group_folders")}
+                    >
+                      {folders.map((f) => (
+                        <option key={`fol-${f.id}`} value={`fol:${f.id}`}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label" htmlFor="convert-catalog-search">
+                  {t("extra_work:create.catalog_filter.search_label")}
+                </label>
+                <input
+                  id="convert-catalog-search"
+                  className="field-input"
+                  type="search"
+                  data-testid="convert-to-ew-catalog-search"
+                  placeholder={t(
+                    "extra_work:create.catalog_filter.search_placeholder",
+                  )}
+                  value={serviceSearch}
+                  onChange={(event) => setServiceSearch(event.target.value)}
+                />
+              </div>
+            </div>
+            {narrowingActive && hiddenServiceCount > 0 && (
+              <p
+                className="muted small"
+                style={{ margin: "0 0 8px" }}
+                data-testid="convert-to-ew-catalog-narrowed"
+              >
+                {t("extra_work:create.catalog_filter.hidden_note", {
+                  shown: offeredServices.length,
+                  total: services.length,
+                })}{" "}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-testid="convert-to-ew-catalog-clear"
+                  onClick={() => {
+                    setCategoryFilter("");
+                    setServiceSearch("");
+                  }}
+                >
+                  {t("extra_work:create.catalog_filter.clear")}
+                </button>
+              </p>
+            )}
+
             {lines.map((line, index) => (
               <div
                 key={line.tempId}
@@ -366,13 +584,13 @@ export function ConvertToExtraWorkDialog({
                     data-testid={`convert-to-ew-line-service-${index}`}
                     value={line.serviceId}
                     onChange={(event) =>
-                      updateLine(line.tempId, "serviceId", event.target.value)
+                      onLineServiceChange(line.tempId, event.target.value)
                     }
                   >
                     <option value="" disabled>
                       {t("convert.line_service_placeholder")}
                     </option>
-                    {services.map((svc) => (
+                    {optionsForLine(line).map((svc) => (
                       <option key={svc.id} value={svc.id}>
                         {svc.category_name
                           ? `${svc.category_name} — ${svc.name}`

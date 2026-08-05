@@ -12,6 +12,9 @@ class TicketType(models.TextChoices):
     REQUEST = "REQUEST", "Verzoek / Request"
     SUGGESTION = "SUGGESTION", "Suggestie / Suggestion"
     QUOTE_REQUEST = "QUOTE_REQUEST", "Offerteaanvraag / Quote Request"
+    # Sprint 143 §2 — the catch-all the operators asked for. Additive:
+    # `AlterField` on the choices only, no data change.
+    OTHER = "OTHER", "Overig / Other"
 
 
 class TicketPriority(models.TextChoices):

@@ -49,12 +49,12 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import transaction
-from django.db.models import Q
+from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, serializers, status
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import BasePermission
+from rest_framework.permissions import BasePermission, SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -73,9 +73,15 @@ from customers.models import (
     CustomerUserMembership,
 )
 
-from .models import CustomerCustomPrice, CustomerServicePrice, Service
+from .models import (
+    CustomerCustomPrice,
+    CustomerPriceFolder,
+    CustomerServicePrice,
+    Service,
+)
 from .serializers_catalog import (
     CustomerCustomPriceSerializer,
+    CustomerPriceFolderSerializer,
     CustomerServicePriceSerializer,
 )
 # Sprint 123 — reuse the Service-side cross-company guard verbatim
@@ -100,6 +106,9 @@ ERR_BULK_RAISE_PRICE_INVALID = "bulk_raise_price_invalid"
 # #108 Part C — a lower that would push any selected price to zero or
 # below rejects the WHOLE batch (all-or-nothing, zero writes).
 ERR_BULK_RAISE_RESULT_INVALID = "bulk_raise_result_invalid"
+# Sprint 143 §3 — customer price folders.
+ERR_FOLDER_CUSTOMER_MISMATCH = "price_folder_customer_mismatch"
+ERR_FOLDER_NAME_NOT_UNIQUE = "price_folder_name_not_unique"
 
 
 def _enforce_customer_price_policy(user, customer):
@@ -235,6 +244,35 @@ class IsCustomerPriceReader(IsAuthenticatedAndActive):
             detail={
                 "detail": "Only Super Admin or Provider Admin may write.",
                 "code": ERR_CUSTOMER_PRICE_READ_FORBIDDEN,
+            }
+        )
+
+
+def _enforce_same_customer_folder(folder, customer):
+    """Sprint 143 §3 — a price row's `folder` must belong to the SAME
+    customer as the row.
+
+    Exactly the shape `_enforce_same_company_managed_unit` uses, and for
+    the same reason: `folder` is a writable PK on both price
+    serializers, so without this an operator could file THIS customer's
+    price row under ANOTHER customer's folder — where its own customer's
+    page would never show it and the other customer's "delete with
+    contents" would archive it.
+
+    HTTP 400, not 403: the actor is allowed to write here, the value is
+    just not a legal one.
+    """
+    if folder is None or customer is None:
+        return
+    if folder.customer_id != customer.id:
+        raise serializers.ValidationError(
+            {
+                "folder": [
+                    serializers.ErrorDetail(
+                        "This folder belongs to a different customer.",
+                        code=ERR_FOLDER_CUSTOMER_MISMATCH,
+                    )
+                ]
             }
         )
 
@@ -396,6 +434,9 @@ class CustomerServicePriceListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         customer = self._get_customer()
         _enforce_customer_price_policy(self.request.user, customer)
+        _enforce_same_customer_folder(
+            serializer.validated_data.get("folder"), customer
+        )
         serializer.save(customer=customer)
 
 
@@ -462,6 +503,13 @@ class CustomerServicePriceDetailView(generics.RetrieveUpdateDestroyAPIView):
         _enforce_customer_price_policy(
             self.request.user, serializer.instance.customer
         )
+        # Sprint 143 §3 — moving a row into or out of a folder is a PATCH
+        # of this field, so the same-customer guard runs here too.
+        if "folder" in serializer.validated_data:
+            _enforce_same_customer_folder(
+                serializer.validated_data["folder"],
+                serializer.instance.customer,
+            )
         serializer.save()
 
     def delete(self, request, *args, **kwargs):
@@ -515,10 +563,30 @@ class _CopyFromDefaultInputSerializer(serializers.Serializer):
     valid_to = serializers.DateField(
         required=False, allow_null=True, default=None
     )
+    # Sprint 143 §3 — copy INTO a folder. Either an existing folder id,
+    # or a name to create one with (the "copy a company category, with
+    # its services" flow, whose default name is the category's). Both in
+    # the SAME request so a failed copy cannot strand an empty folder
+    # the operator never asked for.
+    folder = serializers.IntegerField(
+        required=False, allow_null=True, default=None, min_value=1
+    )
+    folder_name = serializers.CharField(
+        required=False, allow_blank=True, default=""
+    )
 
     def validate(self, attrs):
         valid_from = attrs.get("valid_from")
         valid_to = attrs.get("valid_to")
+        if attrs.get("folder") and (attrs.get("folder_name") or "").strip():
+            raise serializers.ValidationError(
+                {
+                    "folder": (
+                        "Supply either an existing folder or a name for a "
+                        "new one, not both."
+                    )
+                }
+            )
         if valid_from is not None and valid_to is not None:
             if valid_to < valid_from:
                 raise serializers.ValidationError(
@@ -735,11 +803,27 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
         services_data = payload.validated_data["services"]
         valid_from = payload.validated_data["valid_from"]
         valid_to = payload.validated_data.get("valid_to")
+        folder_id = payload.validated_data.get("folder")
+        folder_name = (payload.validated_data.get("folder_name") or "").strip()
 
         # All-or-nothing validation pass.
         resolved_services = self._classify_services(
             services_data, customer
         )
+
+        # Sprint 143 §3 — resolve the folder BEFORE the write loop so an
+        # invalid one is a clean 400 with zero rows written, same
+        # all-or-nothing discipline as the service pass above.
+        folder = None
+        if folder_id:
+            folder = CustomerPriceFolder.objects.filter(
+                pk=folder_id
+            ).first()
+            if folder is None:
+                raise serializers.ValidationError(
+                    {"folder": "Unknown folder."}
+                )
+            _enforce_same_customer_folder(folder, customer)
 
         # Provenance marker for downstream AuditLog rows.
         try:
@@ -753,6 +837,33 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
         created_count = 0
         skipped_count = 0
         with transaction.atomic():
+            # Created inside the same transaction as the rows: if the
+            # copy fails, the folder goes with it rather than being left
+            # behind empty.
+            if folder is None and folder_name:
+                clash = any(
+                    f.name.strip().lower() == folder_name.lower()
+                    for f in CustomerPriceFolder.objects.filter(
+                        customer=customer
+                    )
+                )
+                if clash:
+                    raise serializers.ValidationError(
+                        {
+                            "folder_name": [
+                                serializers.ErrorDetail(
+                                    f"A folder named {folder_name!r} "
+                                    "already exists for this customer.",
+                                    code=ERR_FOLDER_NAME_NOT_UNIQUE,
+                                )
+                            ]
+                        }
+                    )
+                folder = CustomerPriceFolder.objects.create(
+                    customer=customer,
+                    name=folder_name,
+                    created_by=request.user,
+                )
             for svc in resolved_services:
                 if self._has_overlapping_active(
                     customer, svc, valid_from, valid_to
@@ -768,6 +879,7 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
                 row = CustomerServicePrice.objects.create(
                     service=svc,
                     customer=customer,
+                    folder=folder,
                     unit_price=svc.default_unit_price,
                     vat_pct=svc.default_vat_pct,
                     valid_from=valid_from,
@@ -787,7 +899,204 @@ class CustomerServicePriceCopyFromDefaultView(APIView):
             {
                 "created_count": created_count,
                 "skipped_count": skipped_count,
+                # Sprint 143 §3 — so the UI can drill straight into the
+                # folder it just created.
+                "folder": (
+                    CustomerPriceFolderSerializer(folder).data
+                    if folder is not None
+                    else None
+                ),
                 "results": results,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CustomerPriceFolderListCreateView(generics.ListCreateAPIView):
+    """Sprint 143 §3 — GET (list) + POST (create) at
+    /api/customers/<customer_id>/price-folders/.
+
+    Provider-operator-only, same gate as the custom-pricing endpoints:
+    a folder is a provider-side arrangement of the prices agreed with a
+    customer, and the customer does not manage it.
+
+    POST creates an EMPTY folder from a name the operator typed. The
+    other creation route — copy a company category WITH its services —
+    is `copy-from-default`'s `folder_name`, which creates the folder and
+    its price rows in one transaction so a failed copy cannot strand an
+    empty folder.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    serializer_class = CustomerPriceFolderSerializer
+    pagination_class = UnboundedPagination
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        inner = IsSuperAdminOrCompanyAdminForCompany()
+        if not inner.has_object_permission(self.request, self, customer):
+            raise PermissionDenied(detail="Forbidden.")
+        return customer
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        # The uniqueness pre-check needs the URL-bound customer. Resolving
+        # it here also re-runs the permission check before the serializer
+        # touches the DB — and it is what keeps that pre-check scoped, so
+        # it can never become the cross-tenant name oracle Sprint 142.1
+        # fixed in the catalog serializers.
+        if self.request.method not in SAFE_METHODS:
+            ctx["customer"] = self._get_customer()
+        return ctx
+
+    def get_queryset(self):
+        customer = self._get_customer()
+        qs = CustomerPriceFolder.objects.filter(
+            customer=customer
+        ).annotate(
+            # ONE aggregate per column for the whole page, no per-row
+            # query. `distinct=True` because the two joins multiply.
+            annotated_price_count=Count("prices", distinct=True)
+            + Count("custom_prices", distinct=True)
+        )
+        flag = self.request.query_params.get("is_active")
+        if flag is not None:
+            lowered = flag.strip().lower()
+            if lowered in {"true", "1", "yes", "y"}:
+                qs = qs.filter(is_active=True)
+            elif lowered in {"false", "0", "no", "n"}:
+                qs = qs.filter(is_active=False)
+        return qs.order_by("name", "id")
+
+    def perform_create(self, serializer):
+        customer = self._get_customer()
+        _enforce_customer_price_policy(self.request.user, customer)
+        try:
+            # Savepoint boundary: without it Postgres refuses every
+            # further command in the surrounding transaction after the
+            # IntegrityError, even though Python catches it. Same
+            # rationale as ManagedUnitListCreateView.perform_create.
+            with transaction.atomic():
+                serializer.save(
+                    customer=customer, created_by=self.request.user
+                )
+        except IntegrityError:
+            raise serializers.ValidationError(
+                {
+                    "name": [
+                        serializers.ErrorDetail(
+                            "A folder with this name already exists for "
+                            "this customer.",
+                            code=ERR_FOLDER_NAME_NOT_UNIQUE,
+                        )
+                    ]
+                }
+            )
+
+
+class CustomerPriceFolderDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Sprint 143 §3 — GET / PATCH / DELETE at
+    /api/customers/<customer_id>/price-folders/<int:folder_id>/.
+
+    PATCH renames (or archives via `is_active`). The folder is the
+    CUSTOMER's own label: renaming one copied from a company category
+    never touches that category, because the copy seeded price rows and
+    kept no link back.
+
+    DELETE takes `?with_contents=true|false` — TWO honest actions, both
+    offered explicitly in the UI rather than one ambiguous "delete":
+
+      * `false` (default) — FOLDER ONLY. The rows survive and become
+        folderless, which `on_delete=SET_NULL` does for us. They stay
+        visible on the pricing page under its folderless bucket; that is
+        the whole reason a folderless row is legal.
+      * `true` — WITH CONTENTS. The rows are ARCHIVED
+        (`is_active=False`), never hard-deleted, and then the folder
+        goes. Archiving is permanent policy for prices (`## NEXT` item
+        16): `ExtraWorkRequestItem.snapshot_customer_service_price` is a
+        live FK from shipped Extra Work, so destroying a price row would
+        break history.
+
+    Per-row `save()` inside one `transaction.atomic()` rather than a
+    queryset `.update()`: both price models are registered for generic
+    audit and `.update()` fires no `post_save`, so it would silently
+    write nothing to `AuditLog` (RBAC H-10).
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    serializer_class = CustomerPriceFolderSerializer
+    lookup_url_kwarg = "folder_id"
+
+    def _get_customer(self):
+        customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
+        inner = IsSuperAdminOrCompanyAdminForCompany()
+        if not inner.has_object_permission(self.request, self, customer):
+            raise PermissionDenied(detail="Forbidden.")
+        return customer
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        if self.request.method not in SAFE_METHODS:
+            ctx["customer"] = self._get_customer()
+        return ctx
+
+    def get_queryset(self):
+        # Scoped BY the URL-bound customer, so another customer's folder
+        # id is a clean 404 rather than a silent cross-customer write.
+        return CustomerPriceFolder.objects.filter(
+            customer=self._get_customer()
+        )
+
+    def perform_update(self, serializer):
+        _enforce_customer_price_policy(
+            self.request.user, serializer.instance.customer
+        )
+        try:
+            with transaction.atomic():
+                serializer.save()
+        except IntegrityError:
+            raise serializers.ValidationError(
+                {
+                    "name": [
+                        serializers.ErrorDetail(
+                            "A folder with this name already exists for "
+                            "this customer.",
+                            code=ERR_FOLDER_NAME_NOT_UNIQUE,
+                        )
+                    ]
+                }
+            )
+
+    def delete(self, request, *args, **kwargs):
+        folder = self.get_object()
+        _enforce_customer_price_policy(request.user, folder.customer)
+
+        raw = (request.query_params.get("with_contents") or "").strip().lower()
+        with_contents = raw in {"true", "1", "yes", "y"}
+
+        archived = 0
+        with transaction.atomic():
+            if with_contents:
+                try:
+                    audit_context.set_current_reason(
+                        "price_folder_delete_with_contents"
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    pass
+                for row in list(folder.prices.filter(is_active=True)) + list(
+                    folder.custom_prices.filter(is_active=True)
+                ):
+                    row.is_active = False
+                    row.save(update_fields=["is_active", "updated_at"])
+                    archived += 1
+            folder.delete()
+
+        return Response(
+            {
+                # Named for what actually happened. A folder-only delete
+                # archives nothing and says so.
+                "archived_price_count": archived,
+                "with_contents": with_contents,
             },
             status=status.HTTP_200_OK,
         )
@@ -1001,6 +1310,9 @@ class CustomerCustomPriceListCreateView(generics.ListCreateAPIView):
         _enforce_same_company_managed_unit(
             serializer.validated_data.get("managed_unit"), customer.company
         )
+        _enforce_same_customer_folder(
+            serializer.validated_data.get("folder"), customer
+        )
         serializer.save(customer=customer)
 
 
@@ -1035,6 +1347,11 @@ class CustomerCustomPriceDetailView(generics.RetrieveUpdateDestroyAPIView):
             _enforce_same_company_managed_unit(
                 serializer.validated_data["managed_unit"],
                 serializer.instance.customer.company,
+            )
+        if "folder" in serializer.validated_data:
+            _enforce_same_customer_folder(
+                serializer.validated_data["folder"],
+                serializer.instance.customer,
             )
         serializer.save()
 

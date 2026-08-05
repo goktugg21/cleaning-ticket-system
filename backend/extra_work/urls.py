@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    ExtraWorkCategoryOptionsView,
     ExtraWorkPricingLineItemDetailView,
     ExtraWorkPricingLineItemListCreateView,
     ExtraWorkRequestViewSet,
@@ -29,6 +30,14 @@ router.register(r"", ExtraWorkRequestViewSet, basename="extra-work")
 
 
 urlpatterns = [
+    # Sprint 143 §6 — MUST precede the router: the DefaultRouter is
+    # registered at the empty prefix, so its detail route would otherwise
+    # swallow this path as a lookup value.
+    path(
+        "category-options/",
+        ExtraWorkCategoryOptionsView.as_view(),
+        name="extra-work-category-options",
+    ),
     path("", include(router.urls)),
     path(
         "<int:ew_id>/pricing-items/",

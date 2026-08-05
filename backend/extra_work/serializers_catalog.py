@@ -47,6 +47,7 @@ from .catalog_scope import (
 )
 from .models import (
     CustomerCustomPrice,
+    CustomerPriceFolder,
     CustomerServicePrice,
     ExtraWorkPricingUnitType,
     ManagedUnit,
@@ -581,6 +582,86 @@ class ServiceSerializer(serializers.ModelSerializer):
         return data
 
 
+class CustomerPriceFolderSerializer(serializers.ModelSerializer):
+    """Sprint 143 §3 — the customer's OWN grouping of their price rows.
+
+    `customer` is read-only: the URL kwarg owns the binding, so a body
+    cannot smuggle a different customer (same rule as
+    `CustomerServicePriceSerializer`). `price_count` is what the index
+    card shows and what the delete confirmation counts.
+
+    The case-insensitive uniqueness pre-check is the friendly-400 layer
+    over `uniq_price_folder_name_per_customer_ci`; it is scoped to the
+    URL-bound customer by construction (the view supplies it via
+    context, having already run the per-customer permission check), so
+    it cannot become the cross-tenant name oracle Sprint 142.1 fixed in
+    the catalog serializers.
+    """
+
+    customer = serializers.PrimaryKeyRelatedField(read_only=True)
+    price_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomerPriceFolder
+        fields = [
+            "id",
+            "customer",
+            "name",
+            "is_active",
+            "price_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "customer",
+            "price_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_price_count(self, obj) -> int:
+        annotated = getattr(obj, "annotated_price_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.prices.count() + obj.custom_prices.count()
+
+    def validate_name(self, value):
+        stripped = (value or "").strip()
+        if not stripped:
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "name must not be blank.",
+                    code="price_folder_name_required",
+                )
+            )
+        return stripped
+
+    def validate(self, attrs):
+        name = attrs.get("name", getattr(self.instance, "name", None))
+        customer = self.context.get("customer")
+        if customer is None and self.instance is not None:
+            customer = self.instance.customer
+        if name and customer is not None:
+            normalized = name.strip().lower()
+            existing = CustomerPriceFolder.objects.filter(customer=customer)
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if any(f.name.strip().lower() == normalized for f in existing):
+                raise serializers.ValidationError(
+                    {
+                        "name": [
+                            serializers.ErrorDetail(
+                                f"A folder named {name!r} already exists "
+                                "for this customer.",
+                                code="price_folder_name_not_unique",
+                            )
+                        ]
+                    }
+                )
+        return attrs
+
+
 class CustomerServicePriceSerializer(serializers.ModelSerializer):
     """Read/write serializer for `extra_work.CustomerServicePrice`.
 
@@ -597,6 +678,15 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(
         source="service.name", read_only=True
     )
+    # Sprint 143 §3 — the customer's own folder. Writable so a row can be
+    # moved into or out of one; the view validates the folder belongs to
+    # the URL-bound customer (a folder id from another customer would
+    # otherwise re-file this row under someone else's grouping).
+    folder = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerPriceFolder.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = CustomerServicePrice
@@ -605,6 +695,7 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
             "service",
             "service_name",
             "customer",
+            "folder",
             "unit_price",
             "vat_pct",
             "valid_from",
@@ -718,6 +809,13 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
     """
 
     customer = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Sprint 143 §3 — see `CustomerServicePriceSerializer.folder`. A
+    # customer-only line is exactly what an operator adds into a folder.
+    folder = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerPriceFolder.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     unit_type_display = serializers.CharField(
         source="get_unit_type_display", read_only=True
     )
@@ -739,6 +837,7 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
         model = CustomerCustomPrice
         fields = [
             "id",
+            "folder",
             "custom_name",
             "unit_type",
             "unit_type_display",

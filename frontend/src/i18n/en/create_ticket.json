@@ -8,11 +8,9 @@
   "melding_subtitle": "Report an issue or request for your location.",
   "melding_submit": "Submit report",
   "required_fields_hint": "Fields marked with * are required.",
-
   "no_access_message": "You don't have access to any building or customer to create a ticket against. Ask your company admin to grant access, then refresh this page.",
-
   "section_issue_title": "Issue details",
-  "field_category_label": "Category",
+  "field_category_label": "Type",
   "field_location_label": "Location *",
   "field_location_placeholder": "Select facility / zone…",
   "field_customer_label": "Customer *",
@@ -24,13 +22,12 @@
   "field_title_placeholder": "Brief summary of the issue",
   "field_description_label": "Detailed description *",
   "field_description_placeholder": "Provide as much context as possible — equipment, location, observed behaviour, urgency.",
-
   "type_report": "Report",
   "type_complaint": "Complaint",
   "type_request": "Request",
   "type_suggestion": "Suggestion",
   "type_quote_request": "Quote request",
-
+  "type_other": "Other",
   "section_priority_title": "Priority level",
   "section_priority_helper": "Select the impact level of this issue.",
   "priority_normal_label": "Medium",
@@ -39,7 +36,6 @@
   "priority_high_helper": "Expedited — 4 h SLA",
   "priority_urgent_label": "Urgent",
   "priority_urgent_helper": "Critical — 1 h SLA",
-
   "section_attachments_title": "Attachments",
   "section_attachments_helper": "Optional. Photos and PDFs help the team respond faster.",
   "attachment_drop_hint": "Click to upload or drag and drop",
@@ -49,16 +45,13 @@
   "attachment_partial_failure_one": "The ticket was created, but 1 attachment could not be uploaded. The other attachments were saved. Not uploaded:",
   "attachment_partial_failure_other": "The ticket was created, but {{count}} attachments could not be uploaded. The other attachments were saved. Not uploaded:",
   "attachment_partial_goto_ticket": "Go to ticket",
-
   "validation_title_required": "Short description is required.",
   "validation_description_required": "Detailed description is required.",
   "validation_location_required": "Please choose a location.",
   "validation_customer_required": "Please choose a customer.",
-
   "cancel": "Cancel",
   "creating": "Creating…",
   "submit": "Create ticket",
-
   "summary_title": "Summary",
   "summary_location": "Location",
   "summary_customer": "Customer",
@@ -68,12 +61,10 @@
   "summary_attachment_count_one": "{{count}} file",
   "summary_attachment_count_other": "{{count}} files",
   "summary_none": "None",
-
   "guidelines_title": "Ticket guidelines",
   "guideline_1": "Be as specific as possible in the short description for faster routing.",
   "guideline_2": "Include exact room numbers or asset IDs if known.",
   "guideline_3": "Photos drastically improve response times for maintenance issues.",
-
   "response_slas_title": "Response SLAs",
   "sla_medium_name": "Medium priority",
   "sla_medium_time": "24 hours",

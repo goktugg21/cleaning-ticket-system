@@ -22,7 +22,9 @@ import {
   listAllBuildings,
   listAllCustomers,
   listCustomerCustomPrices,
+  listCustomerPriceFolders,
   listCustomerPrices,
+  listServiceCategories,
   listServices,
 } from "../api/admin";
 import { getApiError } from "../api/client";
@@ -33,6 +35,7 @@ import type {
   Customer,
   CustomerCustomPrice,
   CustomerLabel,
+  CustomerPriceFolder,
   CustomerServicePrice,
   ExtraWorkCategory,
   ExtraWorkIntentErrorCode,
@@ -43,6 +46,7 @@ import type {
   ExtraWorkRequestIntent,
   ExtraWorkUrgency,
   Service,
+  ServiceCategory,
   ServiceUnitType,
 } from "../api/types";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
@@ -409,7 +413,24 @@ export function CreateExtraWorkPage({
   // "" is "All categories" and is the DEFAULT — filtering is opt-in,
   // per the hard requirement that there is never a loop where a
   // service cannot be found.
+  // Sprint 143 §4 — the value is PREFIXED so one control can offer two
+  // different kinds of grouping without their ids colliding:
+  //   ""          = no filter
+  //   "cat:<id>"  = a company `ServiceCategory`
+  //   "fol:<id>"  = this customer's `CustomerPriceFolder`
   const [categoryFilter, setCategoryFilter] = useState("");
+  // The COMPANY's own categories, fetched rather than derived from the
+  // loaded services (see `catalogCategories` below for why).
+  const [companyCategories, setCompanyCategories] = useState<
+    ServiceCategory[]
+  >([]);
+  // The chosen customer's folders, tagged with the customer id so a set
+  // fetched for a previously chosen customer is never offered against
+  // the current one (same guard shape as `labelLists`).
+  const [customerFolders, setCustomerFolders] = useState<{
+    customerId: number;
+    rows: CustomerPriceFolder[];
+  } | null>(null);
   // Free-text service search. Deliberately searches the WHOLE catalog,
   // never the filtered subset, so a category filter can never hide a
   // service the operator is explicitly looking for.
@@ -464,19 +485,32 @@ export function CreateExtraWorkPage({
         setCatalogWarning(t("create.warning_catalog_unavailable"));
       }
 
-      const firstBuilding = buildingResults[0];
-      const firstCustomer = firstBuilding
-        ? customerResults.find((customer) =>
-            customerMatchesBuilding(customer, firstBuilding.id),
-          )
-        : undefined;
-      setForm((current) => ({
-        ...current,
-        building:
-          current.building || (firstBuilding ? String(firstBuilding.id) : ""),
-        customer:
-          current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
-      }));
+      // Sprint 143 §4 — the company's own categories. Fetched (not
+      // derived from the services above) because the filter must offer
+      // exactly what the catalog defines, and must exclude archived
+      // categories that loaded services might still point at.
+      try {
+        const categoryRows = await listServiceCategories({ is_active: true });
+        if (!cancelled) setCompanyCategories(categoryRows);
+      } catch {
+        // Non-fatal: the picker degrades to "all services", which is the
+        // pre-137 behaviour and still orderable.
+        if (!cancelled) setCompanyCategories([]);
+      }
+
+      // Sprint 143 §1 — NOTHING is pre-selected here any more.
+      //
+      // This block used to default `building` to the first building and
+      // then `customer` to the one customer linked to it. Together with
+      // the two effects below (now gone) that made the customer field
+      // effectively read-only: a building was always set, so the customer
+      // list was always filtered to that building, and any attempt to
+      // pick another customer was snapped straight back. The operator
+      // could only ever create Extra Work for B Amsterdam.
+      //
+      // Customer is the PRIMARY choice and building follows from it, so
+      // there is nothing sensible to pre-select: guessing the building
+      // first is what inverted the relationship in the first place.
       setLoadingOptions(false);
     }
     load();
@@ -485,13 +519,27 @@ export function CreateExtraWorkPage({
     };
   }, [t]);
 
-  const filteredCustomers = useMemo(() => {
-    if (!form.building) return customers;
-    const buildingId = Number(form.building);
-    return customers.filter((customer) =>
-      customerMatchesBuilding(customer, buildingId),
-    );
-  }, [customers, form.building]);
+  // Sprint 143 §1 — CUSTOMER IS THE PRIMARY CHOICE. Every customer the
+  // operator has access to is always offerable; the building list is what
+  // narrows, from the customer, never the other way round.
+  //
+  // What this replaces: `filteredCustomers` used to be the customers
+  // linked to `form.building`, and two effects kept `form.customer`
+  // pinned inside that list — one auto-selecting the sole match, one
+  // snapping any other choice back to `filteredCustomers[0]`. With a
+  // building pre-selected on load the customer field was unusable: pick
+  // anyone else and the effect immediately undid it. Reported as a
+  // regression that had been fixed once before, which is exactly what a
+  // setState-in-an-effect resync invites — it re-creates itself the
+  // moment anyone touches the filter it depends on.
+  //
+  // Both effects are DERIVED away rather than reordered. CLAUDE.md bans
+  // a synchronous setState in an effect body, and the ban is the point
+  // here: the "stale" value is not state to be corrected, it is a
+  // selection that no longer applies, so it collapses to "" at the point
+  // of use and the operator picks again. Same pattern the department /
+  // work-type fields below already use (`effectiveDepartmentId`).
+  const selectableCustomers = customers;
 
   const filteredBuildings = useMemo(() => {
     if (!form.customer) return buildings;
@@ -500,47 +548,15 @@ export function CreateExtraWorkPage({
     return buildings.filter((b) => customerMatchesBuilding(c, b.id));
   }, [buildings, customers, form.customer]);
 
-  // Auto-select the only matching customer when there's exactly one.
-  useEffect(() => {
-    if (!form.building) return;
-    if (form.customer) return;
-    if (filteredCustomers.length === 1) {
-      setForm((current) => ({
-        ...current,
-        customer: String(filteredCustomers[0].id),
-      }));
-    }
-  }, [form.building, form.customer, filteredCustomers]);
-
-  useEffect(() => {
-    if (!form.customer) return;
-    const stillValid = filteredCustomers.some(
-      (customer) => String(customer.id) === form.customer,
-    );
-    if (!stillValid) {
-      setForm((current) => ({
-        ...current,
-        customer: filteredCustomers[0]
-          ? String(filteredCustomers[0].id)
-          : "",
-      }));
-    }
-  }, [filteredCustomers, form.customer]);
-
-  useEffect(() => {
-    if (!form.building) return;
-    const stillValid = filteredBuildings.some(
-      (b) => String(b.id) === form.building,
-    );
-    if (!stillValid) {
-      setForm((current) => ({
-        ...current,
-        building: filteredBuildings[0]
-          ? String(filteredBuildings[0].id)
-          : "",
-      }));
-    }
-  }, [filteredBuildings, form.building]);
+  // A building chosen before the customer changed may not belong to the
+  // new customer. It collapses to "" — the select falls back to its
+  // placeholder and `previewable` / submit already require a building,
+  // so nothing downstream can consume the stale id.
+  const effectiveBuilding = filteredBuildings.some(
+    (b) => String(b.id) === form.building,
+  )
+    ? form.building
+    : "";
 
   // Sprint 128 — the label lists to OFFER right now, guarded inline (so TS
   // narrows `labelLists` and a list fetched for a previously selected
@@ -571,7 +587,7 @@ export function CreateExtraWorkPage({
   // every line carries a service, a positive quantity, and a date —
   // exactly what the preview serializer requires.
   const previewable = useMemo(() => {
-    if (!form.building || !form.customer) return false;
+    if (!effectiveBuilding || !form.customer) return false;
     if (cartLines.length === 0) return false;
     return cartLines.every((line) => {
       // A line is previewable when it is a catalog service (a chosen
@@ -587,7 +603,7 @@ export function CreateExtraWorkPage({
       if (!Number.isFinite(q) || q <= 0) return false;
       return Boolean(line.requestedDate);
     });
-  }, [form.building, form.customer, cartLines]);
+  }, [effectiveBuilding, form.customer, cartLines]);
 
   // Stable signature of ONLY the pricing-relevant fields (note text is
   // excluded so editing a note never re-fetches). `null` when the cart
@@ -597,7 +613,7 @@ export function CreateExtraWorkPage({
   const previewKey = useMemo(() => {
     if (!previewable) return null;
     return JSON.stringify({
-      b: Number(form.building),
+      b: Number(effectiveBuilding),
       c: Number(form.customer),
       l: cartLines.map((line) => {
         const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
@@ -614,7 +630,7 @@ export function CreateExtraWorkPage({
         };
       }),
     });
-  }, [previewable, form.building, form.customer, cartLines]);
+  }, [previewable, effectiveBuilding, form.customer, cartLines]);
 
   // Debounced live preview. All state writes happen inside the timer's
   // async callback (deferred), never synchronously in the effect body.
@@ -758,6 +774,27 @@ export function CreateExtraWorkPage({
       })
       .catch(() => {
         if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.customer]);
+
+  // Sprint 143 §4 — the chosen customer's ACTIVE folders. Load-only, no
+  // setState in the effect body; a stale set is neutralised by the
+  // customer-id tag when it is read. A 403 (customer-side actor)
+  // degrades to an empty list: the company categories still stand, so
+  // the picker is never left with nothing.
+  useEffect(() => {
+    const customerId = form.customer ? Number(form.customer) : null;
+    if (!customerId) return;
+    let cancelled = false;
+    listCustomerPriceFolders(customerId, { is_active: true })
+      .then((rows) => {
+        if (!cancelled) setCustomerFolders({ customerId, rows });
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerFolders({ customerId, rows: [] });
       });
     return () => {
       cancelled = true;
@@ -944,22 +981,59 @@ export function CreateExtraWorkPage({
       : ` — ${money}`;
   };
 
-  // ---- Sprint 137 item 5 — catalog category filter ------------------
-  // The categories OFFERED are derived from the loaded catalog rather
-  // than fetched separately, so a category can never be offered that
-  // would yield an empty picker: every option here has >= 1 service
-  // behind it by construction.
-  const catalogCategories = useMemo(() => {
-    const byId = new Map<number, string>();
-    for (const svc of services) {
-      if (!byId.has(svc.category)) {
-        byId.set(svc.category, svc.category_name || String(svc.category));
-      }
+  // ---- Sprint 137 item 5 / Sprint 143 §4 — the catalog filter --------
+  //
+  // Sprint 137 derived the options from the LOADED SERVICES. Sprint 143
+  // fetches the company's own `ServiceCategory` rows instead, because
+  // the filter now has to offer two different things and only one of
+  // them can be derived that way:
+  //
+  //   * with NO customer chosen — the company's categories;
+  //   * with a customer chosen  — those categories PLUS that customer's
+  //     price folders, in two labelled <optgroup>s.
+  //
+  // Folders ADD to the categories, they never replace them. That is not
+  // cosmetic: `resolve_price` has NO fallback to a company default, so a
+  // service with no price row for this customer must still be orderable
+  // — ordering it is exactly what routes the request into the proposal
+  // flow. If folders replaced the list, every unpriced service would
+  // become unreachable and the proposal path would die with it.
+  //
+  // ARCHIVED categories and folders are excluded on both sides: the form
+  // offers only what can be ordered now.
+  const catalogCategories = useMemo(
+    () =>
+      companyCategories
+        .filter((c) => c.is_active)
+        .map((c) => ({ id: c.id, name: c.name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [companyCategories],
+  );
+
+  // Guarded inline so TS narrows and a folder set fetched for a
+  // previously chosen customer is never shown against the current one.
+  const currentFolders =
+    customerFolders && String(customerFolders.customerId) === form.customer
+      ? customerFolders.rows.filter((f) => f.is_active)
+      : [];
+
+  // Which service ids each folder holds a price row for. Contract rows
+  // only — a `CustomerCustomPrice` has no `service` FK by construction,
+  // so it cannot narrow a catalog picker.
+  const serviceIdsByFolder = useMemo(() => {
+    const map = new Map<number, Set<number>>();
+    const rows =
+      customerPrices && String(customerPrices.customerId) === form.customer
+        ? customerPrices.rows
+        : [];
+    for (const row of rows) {
+      if (row.folder === null) continue;
+      const bucket = map.get(row.folder);
+      if (bucket) bucket.add(row.service);
+      else map.set(row.folder, new Set([row.service]));
     }
-    return [...byId.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [services]);
+    return map;
+  }, [customerPrices, form.customer]);
 
   const serviceSearchTerm = serviceSearch.trim().toLowerCase();
 
@@ -978,8 +1052,18 @@ export function CreateExtraWorkPage({
 
   const categoryFilteredServices = useMemo(() => {
     if (!categoryFilter) return services;
-    return services.filter((svc) => String(svc.category) === categoryFilter);
-  }, [services, categoryFilter]);
+    if (categoryFilter.startsWith("cat:")) {
+      const id = Number(categoryFilter.slice(4));
+      return services.filter((svc) => svc.category === id);
+    }
+    if (categoryFilter.startsWith("fol:")) {
+      const id = Number(categoryFilter.slice(4));
+      const ids = serviceIdsByFolder.get(id);
+      if (!ids) return [];
+      return services.filter((svc) => ids.has(svc.id));
+    }
+    return services;
+  }, [services, categoryFilter, serviceIdsByFolder]);
 
   // What the per-line pickers offer right now: search wins over the
   // category filter when one is typed.
@@ -1039,7 +1123,17 @@ export function CreateExtraWorkPage({
     if (parseCustomPriceId(value) !== null) return;
     if (!categoryFilter || value === CUSTOM_SERVICE_VALUE || !value) return;
     const picked = services.find((svc) => svc.id === Number(value));
-    if (picked && String(picked.category) !== categoryFilter) {
+    if (!picked) return;
+    // Sprint 143 §4 — the same guard, taught the two key shapes. A
+    // service picked from OUTSIDE the active filter clears that filter,
+    // so the list the operator is looking at never contradicts the line
+    // they just built.
+    const stillMatches = categoryFilter.startsWith("cat:")
+      ? picked.category === Number(categoryFilter.slice(4))
+      : categoryFilter.startsWith("fol:")
+        ? (serviceIdsByFolder.get(Number(categoryFilter.slice(4))) ?? new Set()).has(picked.id)
+        : true;
+    if (!stillMatches) {
       setCategoryFilter("");
     }
   }
@@ -1120,7 +1214,7 @@ export function CreateExtraWorkPage({
       setError(t("create.error_description_required"));
       return;
     }
-    if (!form.building || !form.customer) {
+    if (!effectiveBuilding || !form.customer) {
       setError(t("create.error_building_customer_required"));
       return;
     }
@@ -1266,7 +1360,7 @@ export function CreateExtraWorkPage({
     setSubmitting(true);
     try {
       const created = await createExtraWork({
-        building: Number(form.building),
+        building: Number(effectiveBuilding),
         customer: Number(form.customer),
         title: form.title.trim(),
         description: form.description.trim(),
@@ -1544,13 +1638,13 @@ export function CreateExtraWorkPage({
                   className="field-select"
                   value={form.customer}
                   onChange={(event) => update("customer", event.target.value)}
-                  disabled={filteredCustomers.length === 0}
+                  disabled={selectableCustomers.length === 0}
                   required
                 >
                   <option value="" disabled>
                     {t("create.field_customer_placeholder")}
                   </option>
-                  {filteredCustomers.map((c) => (
+                  {selectableCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -1565,7 +1659,7 @@ export function CreateExtraWorkPage({
                   id="ew-building"
                   data-testid="extra-work-create-building"
                   className="field-select"
-                  value={form.building}
+                  value={effectiveBuilding}
                   onChange={(event) => update("building", event.target.value)}
                   disabled={filteredBuildings.length === 0}
                   required
@@ -2009,11 +2103,31 @@ export function CreateExtraWorkPage({
                     <option value="">
                       {t("create.catalog_filter.all_categories")}
                     </option>
-                    {catalogCategories.map((category) => (
-                      <option key={category.id} value={String(category.id)}>
-                        {category.name}
-                      </option>
-                    ))}
+                    {/* Sprint 143 §4 — two labelled groups. The folder
+                        group only appears once a customer is chosen, and
+                        only when that customer actually has folders. */}
+                    {catalogCategories.length > 0 && (
+                      <optgroup
+                        label={t("create.catalog_filter.group_categories")}
+                      >
+                        {catalogCategories.map((category) => (
+                          <option key={`cat-${category.id}`} value={`cat:${category.id}`}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {currentFolders.length > 0 && (
+                      <optgroup
+                        label={t("create.catalog_filter.group_folders")}
+                      >
+                        {currentFolders.map((folder) => (
+                          <option key={`fol-${folder.id}`} value={`fol:${folder.id}`}>
+                            {folder.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
                 <div className="field">

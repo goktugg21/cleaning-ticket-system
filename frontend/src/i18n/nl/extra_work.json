@@ -73,6 +73,8 @@
   "create.cart_empty": "Nog geen diensten toegevoegd.",
   "create.catalog_filter.category_label": "Catalogus­categorie",
   "create.catalog_filter.all_categories": "Alle categorieën",
+  "create.catalog_filter.group_categories": "Categorieen van uw bedrijf",
+  "create.catalog_filter.group_folders": "Mappen van deze klant",
   "create.catalog_filter.search_label": "Dienst zoeken",
   "create.catalog_filter.search_placeholder": "Zoek op naam of categorie…",
   "create.catalog_filter.search_hint": "Zoekt altijd in de volledige catalogus, ook buiten het gekozen categoriefilter.",

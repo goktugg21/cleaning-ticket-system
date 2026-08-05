@@ -121,6 +121,59 @@ entries are DELETED rather than left contradicting the code.
   the SA company selector silently absent.
 
 
+**Round 3 (Sprint 143) — the customer-price FOLDERS feature the owner
+asked for weeks ago, plus the regression blocking his testing.** Same
+branch, same PR. Per the owner's instruction this round ran WITHOUT the
+backend suite and without Playwright; CI's full regression on the PR is
+the gate.
+
+- **§1 The Extra Work form locked the customer to one building.** A
+  building was pre-selected on load and two `setState`-in-effect resyncs
+  then pinned `form.customer` inside that building's customer list —
+  auto-selecting the sole match, and snapping any other choice straight
+  back. Reported as a regression that had been fixed once before, which
+  is what a resync effect invites. CUSTOMER is now the primary choice
+  (every customer the operator can reach is always offerable) and the
+  BUILDING list narrows from it; nothing is pre-selected, and both
+  effects are DERIVED away rather than reordered — a building that no
+  longer belongs to the chosen customer collapses to `""` at the point
+  of use, including in the preview key and the submit payload.
+- **§2 `TicketType.OTHER`**, additive `AlterField`. The Create-Ticket
+  field labelled "Categorie" that actually held `TicketType` is now
+  labelled "Type" in nl+en, so it stops colliding with the two real
+  category concepts.
+- **§3 Customer price folders.** New `CustomerPriceFolder` (per-customer,
+  CASCADE, `created_by` PROTECT, case-insensitive unique name per
+  customer via `Lower(Trim(name))`), plus a nullable `folder` FK with
+  `SET_NULL` on BOTH price models. Purely additive: one table, two
+  nullable columns, no backfill. A folder holds PRICE ROWS, never
+  catalog services. Two creation routes — an empty folder from a typed
+  name, or copy a company category with its services, which reuses
+  `copy-from-default`'s existing skip/overlap rules verbatim and creates
+  the folder inside the SAME transaction as the rows so a failed copy
+  cannot strand an empty one. Two deletes, both named honestly with the
+  row count: folder-only (rows survive, become folderless) or with
+  contents (rows ARCHIVED, never destroyed — shipped Extra Work holds a
+  live FK). The pricing page is folder-first, with `NO_FOLDER` joining
+  the CUSTOM / UNKNOWN sentinels and the `knownIds` guard kept, because
+  "a row in a bucket with no card" has now bitten twice.
+- **§4/§5 The Extra Work form and the convert-a-ticket dialog offer
+  categories AND folders.** Two labelled `<optgroup>`s: the company's
+  own `ServiceCategory` rows, plus (once a customer is known) that
+  customer's folders. Folders ADD, never replace — `resolve_price` has
+  no fallback, so an unpriced service must stay orderable or the
+  proposal path dies. Archived categories and folders are excluded on
+  both sides. The convert dialog was a flat list with none of the five
+  anti-service-loss guards and now has them.
+- **§6 The Extra Work list filters on real categories, server-side.**
+  `ExtraWorkRequestFilter` gained `category`, matched against
+  `ExtraWorkRequestItem.snapshot_service_category_name` — the
+  denormalised order-time string — NOT the live FK, which is what makes
+  the second dropdown group ("no longer in the catalog") possible at
+  all. A new `GET /api/extra-work/category-options/` computes both
+  groups from the SCOPED queryset.
+- **§7 The dead Edit button is hidden, not disabled.**
+
 **Round 2 (Sprint 142.1) — three one-line defects the review found in
 142's own work, plus two comments that overstated what the code does.**
 

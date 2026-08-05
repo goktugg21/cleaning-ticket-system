@@ -34,7 +34,9 @@ type TicketTypeValue =
   | "COMPLAINT"
   | "REQUEST"
   | "SUGGESTION"
-  | "QUOTE_REQUEST";
+  | "QUOTE_REQUEST"
+  // Sprint 143 §2 — the catch-all operators asked for.
+  | "OTHER";
 
 type PriorityValue = "NORMAL" | "HIGH" | "URGENT";
 
@@ -51,6 +53,7 @@ const TICKET_TYPE_VALUES: TicketTypeValue[] = [
   "REQUEST",
   "SUGGESTION",
   "QUOTE_REQUEST",
+  "OTHER",
 ];
 
 const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
@@ -59,6 +62,7 @@ const TICKET_TYPE_KEYS: Record<TicketTypeValue, string> = {
   REQUEST: "type_request",
   SUGGESTION: "type_suggestion",
   QUOTE_REQUEST: "type_quote_request",
+  OTHER: "type_other",
 };
 
 const PRIORITY_CARDS: PriorityCard[] = [

@@ -3409,6 +3409,11 @@ export function TicketDetailPage() {
       {convertOpen && (
         <ConvertToExtraWorkDialog
           ticketId={ticket.id}
+          // Sprint 143 §5 — the ticket already knows its customer, so
+          // the dialog is always the "customer chosen" case: it can
+          // offer that customer's price folders beside the company's
+          // categories without asking for anything.
+          customerId={ticket.customer}
           onClose={() => setConvertOpen(false)}
           onConverted={(extraWorkRequestId) => {
             setConvertOpen(false);

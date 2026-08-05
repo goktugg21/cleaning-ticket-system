@@ -73,6 +73,8 @@
   "create.cart_empty": "No services added yet.",
   "create.catalog_filter.category_label": "Catalogue category",
   "create.catalog_filter.all_categories": "All categories",
+  "create.catalog_filter.group_categories": "Your company's categories",
+  "create.catalog_filter.group_folders": "This customer's folders",
   "create.catalog_filter.search_label": "Search services",
   "create.catalog_filter.search_placeholder": "Search by name or category…",
   "create.catalog_filter.search_hint": "Always searches the full catalogue, including outside the selected category filter.",
