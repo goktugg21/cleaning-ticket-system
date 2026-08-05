@@ -78,6 +78,8 @@
   "create.catalog_filter.search_label": "Search services",
   "create.catalog_filter.search_placeholder": "Search by name or category…",
   "create.catalog_filter.search_hint": "Always searches the full catalogue, including outside the selected category filter.",
+  "create.catalog_filter.show_all_label": "Also show services without an agreed price",
+  "create.catalog_filter.show_all_hint": "By default you only see the services you have an agreed price for. You can request the others too — the provider prices them after you submit.",
   "create.catalog_filter.no_search_match": "No service found for “{{search}}”. The catalogue holds {{total}} service(s).",
   "create.catalog_filter.category_empty": "This category filter is hiding all {{total}} service(s).",
   "create.catalog_filter.hidden_note": "Showing {{shown}} of {{total}} service(s) — the filter is hiding the rest.",

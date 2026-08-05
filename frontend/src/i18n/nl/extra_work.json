@@ -78,6 +78,8 @@
   "create.catalog_filter.search_label": "Dienst zoeken",
   "create.catalog_filter.search_placeholder": "Zoek op naam of categorie…",
   "create.catalog_filter.search_hint": "Zoekt altijd in de volledige catalogus, ook buiten het gekozen categoriefilter.",
+  "create.catalog_filter.show_all_label": "Ook diensten zonder afgesproken prijs tonen",
+  "create.catalog_filter.show_all_hint": "Standaard ziet u alleen de diensten waarvoor met u een prijs is afgesproken. De overige diensten kunt u ook aanvragen — die worden na indiening door de aanbieder geprijsd.",
   "create.catalog_filter.no_search_match": "Geen dienst gevonden voor „{{search}}”. De catalogus bevat {{total}} dienst(en).",
   "create.catalog_filter.category_empty": "Dit categoriefilter verbergt alle {{total}} dienst(en).",
   "create.catalog_filter.hidden_note": "{{shown}} van {{total}} dienst(en) zichtbaar — de rest wordt door het filter verborgen.",

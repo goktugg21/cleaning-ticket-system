@@ -927,15 +927,34 @@ class CustomerPriceFolderListCreateView(generics.ListCreateAPIView):
     empty folder.
     """
 
-    permission_classes = [IsSuperAdminOrCompanyAdmin]
+    # Sprint 145 — READ is open to a CUSTOMER_USER with active access to
+    # this customer; writes stay provider-only. `IsCustomerPriceReader`
+    # already draws exactly that line for `/pricing/`, so reuse it rather
+    # than inventing a second rule.
+    #
+    # This was `IsSuperAdminOrCompanyAdmin`, i.e. provider-only on GET
+    # too — so a customer user composing an Extra Work request got a 403,
+    # the form degraded to an empty list, and it told them "this customer
+    # has no categories yet" while the customer had two. The screen was
+    # stating a fact about the data that was really a fact about
+    # permissions.
+    permission_classes = [IsCustomerPriceReader]
     serializer_class = CustomerPriceFolderSerializer
     pagination_class = UnboundedPagination
 
     def _get_customer(self):
         customer = get_object_or_404(Customer, pk=self.kwargs["customer_id"])
-        inner = IsSuperAdminOrCompanyAdminForCompany()
-        if not inner.has_object_permission(self.request, self, customer):
-            raise PermissionDenied(detail="Forbidden.")
+        # Provider-side actors keep the COMPANY_ADMIN "own company only"
+        # object check; a CUSTOMER_USER has already been checked against
+        # their own access rows by `IsCustomerPriceReader`. Same shape as
+        # `CustomerServicePriceListCreateView._get_customer`.
+        if self.request.user.role in (
+            UserRole.SUPER_ADMIN,
+            UserRole.COMPANY_ADMIN,
+        ):
+            inner = IsSuperAdminOrCompanyAdminForCompany()
+            if not inner.has_object_permission(self.request, self, customer):
+                raise PermissionDenied(detail="Forbidden.")
         return customer
 
     def get_serializer_context(self):

@@ -18,6 +18,8 @@ import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useAuth } from "../auth/AuthContext";
+
 import {
   listAllBuildings,
   listAllCustomers,
@@ -306,6 +308,12 @@ export function CreateExtraWorkPage({
   intentMode = "standard",
 }: CreateExtraWorkPageProps) {
   const { t } = useTranslation(["extra_work", "common"]);
+  const { me } = useAuth();
+  // Sprint 145 — a customer browses their own agreed services by
+  // default; everything else is behind an explicit opt-in (see
+  // `catalogForActor`).
+  const isCustomerActor = me?.role === "CUSTOMER_USER";
+  const [showAllServices, setShowAllServices] = useState(false);
   const isQuoteMode = intentMode === "quote";
 
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -972,35 +980,52 @@ export function CreateExtraWorkPage({
   // deliberately ignored while searching. Every option label already
   // carries its category name, so a match from outside the current
   // filter is self-describing.
+  // Sprint 145 — what a CUSTOMER may browse.
+  //
+  // The catalog the backend returns is the whole provider catalog, and
+  // dropping all of it in front of a customer is not right: most of it
+  // has nothing to do with them. But hiding it outright would be worse
+  // — a line with no agreed price is exactly what routes a request into
+  // the PROPOSAL flow, so a customer who can only pick pre-priced
+  // services can never ask for anything new.
+  //
+  // So: a customer sees the services they have an agreed price for, and
+  // an explicit opt-in to see the rest, labelled with what happens if
+  // they order one. A provider-side actor is unaffected.
+  const catalogForActor = useMemo(() => {
+    if (!isCustomerActor || showAllServices) return services;
+    return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
+  }, [services, isCustomerActor, showAllServices, agreedPriceByServiceId]);
+
   const searchMatches = useMemo(() => {
     if (!serviceSearchTerm) return null;
-    return services.filter((svc) =>
+    return catalogForActor.filter((svc) =>
       `${svc.category_name} ${svc.name}`
         .toLowerCase()
         .includes(serviceSearchTerm),
     );
-  }, [services, serviceSearchTerm]);
+  }, [catalogForActor, serviceSearchTerm]);
 
   const categoryFilteredServices = useMemo(() => {
-    if (!categoryFilter) return services;
+    if (!categoryFilter) return catalogForActor;
     if (categoryFilter.startsWith("cat:")) {
       const id = Number(categoryFilter.slice(4));
-      return services.filter((svc) => svc.category === id);
+      return catalogForActor.filter((svc) => svc.category === id);
     }
     if (categoryFilter.startsWith("fol:")) {
       const id = Number(categoryFilter.slice(4));
       const ids = serviceIdsByFolder.get(id);
       if (!ids) return [];
-      return services.filter((svc) => ids.has(svc.id));
+      return catalogForActor.filter((svc) => ids.has(svc.id));
     }
-    return services;
-  }, [services, categoryFilter, serviceIdsByFolder]);
+    return catalogForActor;
+  }, [catalogForActor, categoryFilter, serviceIdsByFolder]);
 
   // What the per-line pickers offer right now: search wins over the
   // category filter when one is typed.
   const offeredServices = searchMatches ?? categoryFilteredServices;
   const narrowingActive = Boolean(categoryFilter) || Boolean(serviceSearchTerm);
-  const hiddenServiceCount = services.length - offeredServices.length;
+  const hiddenServiceCount = catalogForActor.length - offeredServices.length;
 
   // Sprint 145 — the agreed-prices browse panel obeys the SAME category
   // choice as the service pickers. Picking a category and still being
@@ -2091,6 +2116,31 @@ export function CreateExtraWorkPage({
                     {t("create.catalog_filter.search_hint")}
                   </div>
                 </div>
+                {/* Sprint 145 — a customer browses their own agreed
+                    services by default. The rest of the provider's
+                    catalog is one click away, labelled with what
+                    ordering from it actually means, because a line
+                    without an agreed price is what sends the request to
+                    a pricing proposal. */}
+                {isCustomerActor && (
+                  <div className="field">
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        className="checkbox-input"
+                        data-testid="extra-work-create-show-all-services"
+                        checked={showAllServices}
+                        onChange={(event) =>
+                          setShowAllServices(event.target.checked)
+                        }
+                      />
+                      <span>{t("create.catalog_filter.show_all_label")}</span>
+                    </label>
+                    <div className="muted small" style={{ marginTop: 4 }}>
+                      {t("create.catalog_filter.show_all_hint")}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
