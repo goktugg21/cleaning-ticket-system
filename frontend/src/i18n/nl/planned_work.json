@@ -227,7 +227,7 @@
   "form.field_department_none": "Deze klant heeft nog geen afdelingen.",
   "form.field_work_type_none": "Deze klant heeft nog geen werksoorten.",
   "form.field_category_group_company": "Categorieen van uw bedrijf",
-  "form.field_category_group_folders": "Mappen van deze klant",
+  "form.field_category_group_folders": "Categorieën van deze klant",
   "detail.field_department": "Afdeling",
   "detail.field_work_type": "Werksoort",
   "detail.field_category": "Categorie",

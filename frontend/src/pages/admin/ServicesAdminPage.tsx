@@ -1692,6 +1692,13 @@ export function ServicesAdminPage() {
                           or is not deletable without clicking in. */}
                       <th>{t("services.col_service_count")}</th>
                       <th>{t("services.col_active")}</th>
+                      {/* Sprint 145 — the actions used to exist ONLY in
+                          the detail panel below, which you reach by
+                          clicking a row. The owner reported he "can't
+                          rename or delete a category": the controls
+                          were there, just undiscoverable. A hidden
+                          action is a missing action. */}
+                      <th aria-label={t("services.col_actions")} />
                     </tr>
                   </thead>
                   <tbody>
@@ -1723,6 +1730,49 @@ export function ServicesAdminPage() {
                           {category.is_active
                             ? t("admin.status_active")
                             : t("admin.status_inactive")}
+                        </td>
+                        {/* stopPropagation so acting on a row does not
+                            also select it and scroll the detail panel
+                            into view underneath. */}
+                        <td
+                          style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            data-testid="services-category-row-edit"
+                            onClick={() => openEditCategoryModal(category)}
+                          >
+                            {t("services.edit_button")}
+                          </button>{" "}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            data-testid="services-category-row-archive"
+                            onClick={() => openCategoryArchiveDialog(category)}
+                          >
+                            {category.is_active
+                              ? t("services.category_archive_button")
+                              : t("services.category_unarchive_button")}
+                          </button>{" "}
+                          {/* Delete only when it can actually succeed —
+                              `Service.category` is PROTECT, so a
+                              category holding services can never be
+                              deleted. Offering it would be a button
+                              that always fails (Sprint 138). */}
+                          {category.service_count === 0 && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              data-testid="services-category-row-delete"
+                              onClick={() =>
+                                openDeleteCategoryDialog(category)
+                              }
+                            >
+                              {t("services.delete_button")}
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

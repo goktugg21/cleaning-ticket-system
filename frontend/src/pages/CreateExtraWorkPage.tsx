@@ -24,7 +24,6 @@ import {
   listCustomerCustomPrices,
   listCustomerPriceFolders,
   listCustomerPrices,
-  listServiceCategories,
   listServices,
 } from "../api/admin";
 import { getApiError } from "../api/client";
@@ -45,7 +44,6 @@ import type {
   ExtraWorkRequestIntent,
   ExtraWorkUrgency,
   Service,
-  ServiceCategory,
   ServiceUnitType,
 } from "../api/types";
 import { InvoiceLineRow } from "../components/InvoiceLineRow";
@@ -394,11 +392,6 @@ export function CreateExtraWorkPage({
   //   "cat:<id>"  = a company `ServiceCategory`
   //   "fol:<id>"  = this customer's `CustomerPriceFolder`
   const [categoryFilter, setCategoryFilter] = useState("");
-  // The COMPANY's own categories, fetched rather than derived from the
-  // loaded services (see `catalogCategories` below for why).
-  const [companyCategories, setCompanyCategories] = useState<
-    ServiceCategory[]
-  >([]);
   // The chosen customer's folders, tagged with the customer id so a set
   // fetched for a previously chosen customer is never offered against
   // the current one (same guard shape as `labelLists`).
@@ -458,19 +451,6 @@ export function CreateExtraWorkPage({
       } else {
         setServices([]);
         setCatalogWarning(t("create.warning_catalog_unavailable"));
-      }
-
-      // Sprint 143 §4 — the company's own categories. Fetched (not
-      // derived from the services above) because the filter must offer
-      // exactly what the catalog defines, and must exclude archived
-      // categories that loaded services might still point at.
-      try {
-        const categoryRows = await listServiceCategories({ is_active: true });
-        if (!cancelled) setCompanyCategories(categoryRows);
-      } catch {
-        // Non-fatal: the picker degrades to "all services", which is the
-        // pre-137 behaviour and still orderable.
-        if (!cancelled) setCompanyCategories([]);
       }
 
       // Sprint 143 §1 — NOTHING is pre-selected here any more.
@@ -920,18 +900,6 @@ export function CreateExtraWorkPage({
     return t(UNIT_TYPE_I18N_KEY[price.unit_type]);
   };
 
-  const filteredAgreedPrices = useMemo(() => {
-    const q = priceSearch.trim().toLowerCase();
-    if (!q) return agreedPrices;
-    return agreedPrices.filter((p) => {
-      const svc = serviceById.get(p.service);
-      const label = svc
-        ? `${svc.category_name} ${svc.name}`
-        : p.service_name;
-      return label.toLowerCase().includes(q);
-    });
-  }, [agreedPrices, priceSearch, serviceById]);
-
   // Owner request: surface each service's AGREED/contract price inline in
   // the cart's service-select option label. Built from the SAME currently-
   // valid agreed rows the browse panel shows (active + in-window for the
@@ -951,39 +919,27 @@ export function CreateExtraWorkPage({
     const svc = serviceById.get(serviceId);
     const unitLabel = svc ? t(UNIT_TYPE_I18N_KEY[svc.unit_type]) : "";
     const money = formatMoney(price.unit_price);
-    return unitLabel
-      ? ` — ${money} / ${unitLabel}`
-      : ` — ${money}`;
+    return unitLabel ? ` — ${money} / ${unitLabel}` : ` — ${money}`;
   };
 
-  // ---- Sprint 137 item 5 / Sprint 143 §4 — the catalog filter --------
+  // Sprint 145 — the Category control offers ONE thing: the categories
+  // that belong to the SELECTED CUSTOMER. Nothing before a customer is
+  // chosen (the select is disabled with a note saying so).
   //
-  // Sprint 137 derived the options from the LOADED SERVICES. Sprint 143
-  // fetches the company's own `ServiceCategory` rows instead, because
-  // the filter now has to offer two different things and only one of
-  // them can be derived that way:
+  // It used to also offer the provider's own catalog groupings in a
+  // "your company's categories" group. That was wrong twice over: the
+  // owner never asked for it, and it put the provider's whole catalog
+  // in front of a CUSTOMER_USER — Amanda saw categories that have
+  // nothing to do with her customer.
   //
-  //   * with NO customer chosen — the company's categories;
-  //   * with a customer chosen  — those categories PLUS that customer's
-  //     price folders, in two labelled <optgroup>s.
+  // Nothing becomes unreachable: "All categories" is still the default
+  // and still shows the entire orderable catalog, so a service with no
+  // agreed price for this customer can still be ordered — which is what
+  // routes the request into the proposal flow (`resolve_price` has no
+  // fallback to a company default).
   //
-  // Folders ADD to the categories, they never replace them. That is not
-  // cosmetic: `resolve_price` has NO fallback to a company default, so a
-  // service with no price row for this customer must still be orderable
-  // — ordering it is exactly what routes the request into the proposal
-  // flow. If folders replaced the list, every unpriced service would
-  // become unreachable and the proposal path would die with it.
-  //
-  // ARCHIVED categories and folders are excluded on both sides: the form
-  // offers only what can be ordered now.
-  const catalogCategories = useMemo(
-    () =>
-      companyCategories
-        .filter((c) => c.is_active)
-        .map((c) => ({ id: c.id, name: c.name }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [companyCategories],
-  );
+  // ARCHIVED categories are excluded: the form offers only what can be
+  // ordered now.
 
   // Guarded inline so TS narrows and a folder set fetched for a
   // previously chosen customer is never shown against the current one.
@@ -1045,6 +1001,50 @@ export function CreateExtraWorkPage({
   const offeredServices = searchMatches ?? categoryFilteredServices;
   const narrowingActive = Boolean(categoryFilter) || Boolean(serviceSearchTerm);
   const hiddenServiceCount = services.length - offeredServices.length;
+
+  // Sprint 145 — the agreed-prices browse panel obeys the SAME category
+  // choice as the service pickers. Picking a category and still being
+  // shown every agreed price underneath it is the "the screen
+  // contradicts itself" defect this series keeps removing.
+  //
+  // Defined here, below `serviceIdsByFolder`, because it reads it: a
+  // `const` is in the temporal dead zone until its own initialiser
+  // runs, so this cannot live further up the component.
+  //
+  // Search still wins over the category filter, exactly as it does for
+  // the service pickers, so a price the operator types the name of is
+  // never hidden by a filter they forgot was on.
+  const filteredAgreedPrices = useMemo(() => {
+    const q = priceSearch.trim().toLowerCase();
+    if (q) {
+      return agreedPrices.filter((p) => {
+        const svc = serviceById.get(p.service);
+        const label = svc
+          ? `${svc.category_name} ${svc.name}`
+          : p.service_name;
+        return label.toLowerCase().includes(q);
+      });
+    }
+    if (!categoryFilter) return agreedPrices;
+    if (categoryFilter.startsWith("fol:")) {
+      const ids = serviceIdsByFolder.get(Number(categoryFilter.slice(4)));
+      if (!ids) return [];
+      return agreedPrices.filter((p) => ids.has(p.service));
+    }
+    if (categoryFilter.startsWith("cat:")) {
+      const id = Number(categoryFilter.slice(4));
+      return agreedPrices.filter(
+        (p) => serviceById.get(p.service)?.category === id,
+      );
+    }
+    return agreedPrices;
+  }, [
+    agreedPrices,
+    priceSearch,
+    serviceById,
+    categoryFilter,
+    serviceIdsByFolder,
+  ]);
 
   function clearServiceNarrowing() {
     setCategoryFilter("");
@@ -1741,45 +1741,33 @@ export function CreateExtraWorkPage({
                   data-testid="extra-work-create-catalog-category"
                   value={categoryFilter}
                   onChange={(event) => setCategoryFilter(event.target.value)}
+                  // Sprint 145 — a category belongs to a CUSTOMER, so
+                  // there is nothing to choose from before one is
+                  // picked. Disabled rather than showing the provider's
+                  // own catalog groupings: those are not the customer's
+                  // categories, and offering them here put a foreign
+                  // provider's headings in front of a customer user.
+                  disabled={!form.customer}
                 >
                   <option value="">
                     {t("create.catalog_filter.all_categories")}
                   </option>
-                  {/* Sprint 143 §4 — two labelled groups. The folder
-                      group only appears once a customer is chosen, and
-                      only when that customer actually has folders.
-                      Archived categories and folders are excluded
-                      upstream (`catalogCategories` / `currentFolders`):
-                      the form offers only what can be ordered now. */}
-                  {catalogCategories.length > 0 && (
-                    <optgroup
-                      label={t("create.catalog_filter.group_categories")}
-                    >
-                      {catalogCategories.map((category) => (
-                        <option
-                          key={`cat-${category.id}`}
-                          value={`cat:${category.id}`}
-                        >
-                          {category.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {currentFolders.length > 0 && (
-                    <optgroup label={t("create.catalog_filter.group_folders")}>
-                      {currentFolders.map((folder) => (
-                        <option
-                          key={`fol-${folder.id}`}
-                          value={`fol:${folder.id}`}
-                        >
-                          {folder.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
+                  {/* Sprint 145 — ONE flat list: the categories that
+                      belong to the selected customer. Archived ones are
+                      excluded upstream (`currentFolders`), so the form
+                      only ever offers what can be ordered now. */}
+                  {currentFolders.map((folder) => (
+                    <option key={`fol-${folder.id}`} value={`fol:${folder.id}`}>
+                      {folder.name}
+                    </option>
+                  ))}
                 </select>
                 <div className="muted small" style={{ marginTop: 4 }}>
-                  {t("create.field_category_hint")}
+                  {!form.customer
+                    ? t("create.field_category_pick_customer_first")
+                    : currentFolders.length === 0
+                      ? t("create.field_category_customer_has_none")
+                      : t("create.field_category_hint")}
                 </div>
               </div>
               <div className="field">
