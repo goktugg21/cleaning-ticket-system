@@ -63,6 +63,9 @@ urlpatterns = [
     # by the viewset permission classes.
     path("api/planned-work/", include("planned_work.urls")),
     path("api/reports/", include("reports.urls")),
+    # Sprint 152 — employee hours (urenregistratie). Provider-side only;
+    # every endpoint 403s CUSTOMER_* roles.
+    path("api/timesheets/", include("timesheets.urls")),
     path("api/invoices/", include("invoicing.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),

@@ -77,6 +77,7 @@ from tickets.models import (
     TicketMessage,
     TicketStaffAssignment,
 )
+from timesheets.models import HourType, TimeEntry, WeekLock
 
 from . import context
 from .diff import (
@@ -1513,6 +1514,29 @@ def _connect():
         # Document gets hand-crafted handlers below (the StaffCredential
         # pattern).
         DocumentFolder,
+        # Sprint 152 — employee hours. All three take the full CRUD trio:
+        #
+        #   * `HourType` carries editable fields (name / multiplier /
+        #     is_active / sort_order) and a multiplier edit is the single
+        #     most consequential change in the module — it rewrites the
+        #     weighted totals of every OPEN week, so the before/after
+        #     diff is what makes that attributable.
+        #   * `TimeEntry` is the record itself; CREATE / UPDATE / DELETE
+        #     all need to be attributable, not least because an admin may
+        #     write one on an employee's behalf (`created_by` differs
+        #     from `employee`).
+        #   * `WeekLock` has no editable field, but it is NOT a
+        #     membership-shape row: its CREATE is the week-close trail
+        #     and its DELETE is the REOPEN trail — reopening deletes the
+        #     row, so the DELETE log is the only record that it happened.
+        #     The membership handlers would drop it (they key off
+        #     `_MEMBERSHIP_ENTITY_ATTR`), so the full trio it is.
+        #
+        # No `*StatusHistory` equivalent exists here to double-write
+        # against (H-11): this module has no state machine.
+        HourType,
+        TimeEntry,
+        WeekLock,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
