@@ -37,7 +37,7 @@ from .serializers import (
     HourTypeStandardSetSerializer,
     snapshot_multiplier,
 )
-from .standard_set import STANDARD_HOUR_TYPES
+from .standard_set import slot_aliases, standard_hour_types
 from .views_common import parse_bool_param, resolve_target_company
 
 
@@ -235,13 +235,26 @@ class HourTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 class HourTypeStandardSetView(APIView):
     """POST /api/timesheets/hour-types/standard-set/ — create the
-    standard Dutch six for a company, skipping names it already has.
+    standard six for a company, skipping slots it already has.
 
-    Idempotent by construction: the skip test is the SAME
-    case/whitespace-insensitive comparison the uniqueness constraint
-    uses, so pressing the button twice creates nothing the second time
-    rather than 400-ing on the first collision and leaving a partial
-    set behind. One transaction.
+    Sprint 152.1 — the names come from the ACTOR'S LANGUAGE
+    (`User.language`, nl or en; anything else falls back to nl). The
+    column itself stays a single operator-typed value — see
+    `standard_set` for why that distinction is deliberate.
+
+    Idempotent ACROSS languages, which is the part that needs saying:
+    the skip test matches a SLOT when either of its names already
+    exists, not just the name about to be created. Comparing only the
+    latter would hand a Dutch-seeded company six English duplicates the
+    first time an English-profile operator pressed the button — six rows
+    meaning the same thing, and the per-company uniqueness constraint
+    would not object, because "Overwerk" and "Overtime" genuinely are
+    different strings. Pressing the button twice, in either language, in
+    any order, creates nothing the second time.
+
+    The comparison is the same `Lower(Trim(...))` the constraint uses,
+    so the skip test and the DB agree on what "the same name" means. One
+    transaction, so a partial set can never be left behind.
 
     The response reports `created` and `skipped` by name, because "6
     added" and "6 already there" are the two outcomes an operator needs
@@ -267,11 +280,19 @@ class HourTypeStandardSetView(APIView):
             ).values_list("name", flat=True)
         }
 
+        wanted = standard_hour_types(getattr(request.user, "language", None))
+        aliases = slot_aliases()
+
         created, skipped = [], []
         audit_context.set_current_reason("hour_type_standard_set")
         with transaction.atomic():
-            for name, multiplier, sort_order in STANDARD_HOUR_TYPES:
-                if name.strip().lower() in existing:
+            for (name, multiplier, sort_order), slot_names in zip(
+                wanted, aliases
+            ):
+                # The SLOT is taken if ANY of its language variants is
+                # already on this company — not merely the one name this
+                # request would create.
+                if slot_names & existing:
                     skipped.append(name)
                     continue
                 HourType.objects.create(

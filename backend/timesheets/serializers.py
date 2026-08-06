@@ -504,11 +504,37 @@ class TimeEntrySerializer(serializers.ModelSerializer):
         """Pick the tenant anchor for this entry.
 
         On UPDATE the row's existing company is authoritative and
-        immutable. On CREATE it is the employee's own membership
-        company, intersected with what the actor may reach: a supplied
-        `company` narrows within that set, it never widens it.
+        immutable — but the EMPLOYEE is not, so it is re-checked against
+        that company. On CREATE the company is the employee's own
+        membership company, intersected with what the actor may reach: a
+        supplied `company` narrows within that set, it never widens it.
         """
         if instance is not None:
+            # Sprint 152.1 (review finding) — this used to return
+            # immediately, so nothing verified that a NEWLY NAMED
+            # employee belongs to the row's company. A COMPANY_ADMIN is
+            # stopped earlier by the scoped `employee` queryset, but a
+            # SUPER_ADMIN's scope is `None`: they could PATCH an entry in
+            # company A onto company B's employee. The row would keep
+            # company A, so that employee could never see their own entry
+            # (their scope is B) and A's admin would see a name from
+            # another provider in their list. Nothing rejected it and no
+            # test covered it — the CREATE path had this check, the
+            # UPDATE path did not.
+            if employee is not None and employee.pk != instance.employee_id:
+                if instance.company_id not in employee_company_ids(employee):
+                    raise serializers.ValidationError(
+                        {
+                            "employee": [
+                                serializers.ErrorDetail(
+                                    "This employee is not a member of the "
+                                    "provider company this entry belongs "
+                                    "to.",
+                                    code=ERR_EMPLOYEE_NOT_IN_COMPANY,
+                                )
+                            ]
+                        }
+                    )
             return instance.company
 
         candidates = employee_company_ids(employee)
@@ -596,7 +622,7 @@ class HourTypeStandardSetSerializer(serializers.Serializer):
     """Input for POST /api/timesheets/hour-types/standard-set/.
 
     Only `company` — the standard set itself is fixed (see
-    `standard_set.STANDARD_HOUR_TYPES`). Optional, and resolved the same
+    `standard_set.STANDARD_SLOTS`). Optional, and resolved the same
     way every other create in this app resolves it.
     """
 

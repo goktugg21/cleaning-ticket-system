@@ -11,6 +11,7 @@ change to a converter cannot quietly break it.
 """
 from django.urls import path
 
+from .views_employees import TimesheetEmployeeListView
 from .views_entries import TimeEntryDetailView, TimeEntryListCreateView
 from .views_hour_types import (
     HourTypeDetailView,
@@ -41,6 +42,14 @@ urlpatterns = [
         "hour-types/<int:hour_type_id>/",
         HourTypeDetailView.as_view(),
         name="timesheet-hour-type-detail",
+    ),
+    # Sprint 152.1 — the admin entry form's employee picker. Its own
+    # endpoint rather than a param on `/api/employees/`; see
+    # `views_employees` for why.
+    path(
+        "employees/",
+        TimesheetEmployeeListView.as_view(),
+        name="timesheet-employee-list",
     ),
     path(
         "entries/",

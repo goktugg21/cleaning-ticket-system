@@ -35,6 +35,7 @@ PASSWORD = "StrongerTestPassword152!"
 
 HOUR_TYPES_URL = "/api/timesheets/hour-types/"
 STANDARD_SET_URL = "/api/timesheets/hour-types/standard-set/"
+EMPLOYEES_URL = "/api/timesheets/employees/"
 ENTRIES_URL = "/api/timesheets/entries/"
 WEEKS_URL = "/api/timesheets/weeks/"
 WEEK_STATUS_URL = "/api/timesheets/weeks/status/"

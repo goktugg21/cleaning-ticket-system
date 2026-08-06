@@ -11,7 +11,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 
 from timesheets.models import HourType
-from timesheets.standard_set import STANDARD_HOUR_TYPES
+from timesheets.standard_set import STANDARD_SLOTS, standard_hour_types
 
 from .fixtures import (
     HOUR_TYPES_URL,
@@ -326,7 +326,7 @@ class StandardSetTests(TimesheetsFixture):
         self.assertEqual(response.data["created_count"], 4)
         self.assertEqual(
             HourType.objects.filter(company=self.company_a).count(),
-            len(STANDARD_HOUR_TYPES),
+            len(STANDARD_SLOTS),
         )
 
     def test_standard_set_is_idempotent(self):
@@ -334,10 +334,10 @@ class StandardSetTests(TimesheetsFixture):
         second = self.api(self.ca_a).post(STANDARD_SET_URL, {}, format="json")
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.data["created_count"], 0)
-        self.assertEqual(second.data["skipped_count"], len(STANDARD_HOUR_TYPES))
+        self.assertEqual(second.data["skipped_count"], len(STANDARD_SLOTS))
         self.assertEqual(
             HourType.objects.filter(company=self.company_a).count(),
-            len(STANDARD_HOUR_TYPES),
+            len(STANDARD_SLOTS),
         )
 
     def test_skip_is_case_and_whitespace_insensitive(self):
@@ -347,7 +347,7 @@ class StandardSetTests(TimesheetsFixture):
             HourType.objects.filter(company=self.company_b).count(),
             # 2 pre-existing (Normale uren + the padded "vakantie"),
             # 4 created — Vakantie was skipped on the fuzzy match.
-            len(STANDARD_HOUR_TYPES),
+            len(STANDARD_SLOTS),
         )
 
     def test_standard_set_cannot_target_a_rival_company(self):
@@ -365,5 +365,102 @@ class StandardSetTests(TimesheetsFixture):
             h.name: h.multiplier
             for h in HourType.objects.filter(company=self.company_b)
         }
-        for name, multiplier, _sort in STANDARD_HOUR_TYPES:
+        for name, multiplier, _sort in standard_hour_types("nl"):
             self.assertEqual(created[name], multiplier, name)
+
+
+class StandardSetLanguageTests(TimesheetsFixture):
+    """Sprint 152.1 — the button follows the OPERATOR's language, and is
+    idempotent ACROSS languages.
+
+    `HourType.name` is still one operator-typed column, not four
+    language columns. Only the names the button CREATES are translated.
+    """
+
+    def _set_language(self, user, language):
+        user.language = language
+        user.save(update_fields=["language"])
+
+    def _names_in(self, company):
+        return set(
+            HourType.objects.filter(company=company).values_list(
+                "name", flat=True
+            )
+        )
+
+    def test_english_profile_creates_english_names(self):
+        self._set_language(self.ca_b, "en")
+        response = self.api(self.ca_b).post(
+            STANDARD_SET_URL, {}, format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        names = self._names_in(self.company_b)
+        self.assertIn("Overtime", names)
+        self.assertIn("Public holiday", names)
+        self.assertNotIn("Overwerk", names)
+
+    def test_dutch_profile_creates_dutch_names(self):
+        self._set_language(self.ca_b, "nl")
+        self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        names = self._names_in(self.company_b)
+        self.assertIn("Overwerk", names)
+        self.assertNotIn("Overtime", names)
+
+    def test_unknown_language_falls_back_to_dutch(self):
+        # nl is the project's primary language, so an unset or future
+        # third value gets the deployment default rather than an error.
+        self.ca_b.language = "de"
+        self.ca_b.save(update_fields=["language"])
+        self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        self.assertIn("Overwerk", self._names_in(self.company_b))
+
+    def test_dutch_then_english_creates_nothing_the_second_time(self):
+        """The defect this rule exists to prevent: without pairing the
+        two names per slot, a Dutch-seeded company would gain six
+        ENGLISH duplicates — and the per-company uniqueness constraint
+        would not object, because "Overwerk" and "Overtime" really are
+        different strings.
+        """
+        self._set_language(self.ca_b, "nl")
+        first = self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        self.assertEqual(first.data["created_count"], len(STANDARD_SLOTS) - 1)
+
+        self._set_language(self.ca_b, "en")
+        second = self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.data["created_count"], 0)
+        self.assertEqual(second.data["skipped_count"], len(STANDARD_SLOTS))
+        self.assertEqual(
+            HourType.objects.filter(company=self.company_b).count(),
+            len(STANDARD_SLOTS),
+        )
+
+    def test_english_then_dutch_creates_nothing_the_second_time(self):
+        """The same rule in the other order — the pairing has to be
+        symmetric, not a one-way check against the Dutch names.
+        """
+        HourType.objects.filter(company=self.company_b).delete()
+        self._set_language(self.ca_b, "en")
+        self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        self.assertEqual(
+            HourType.objects.filter(company=self.company_b).count(),
+            len(STANDARD_SLOTS),
+        )
+
+        self._set_language(self.ca_b, "nl")
+        second = self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        self.assertEqual(second.data["created_count"], 0)
+        self.assertEqual(
+            HourType.objects.filter(company=self.company_b).count(),
+            len(STANDARD_SLOTS),
+        )
+
+    def test_cross_language_skip_is_case_and_whitespace_insensitive(self):
+        HourType.objects.filter(company=self.company_b).delete()
+        HourType.objects.create(company=self.company_b, name="  OVERTIME ")
+        self._set_language(self.ca_b, "nl")
+        self.api(self.ca_b).post(STANDARD_SET_URL, {}, format="json")
+        names = self._names_in(self.company_b)
+        # The padded, upper-case English name claimed the Overwerk slot.
+        self.assertNotIn("Overwerk", names)
+        self.assertEqual(len(names), len(STANDARD_SLOTS))

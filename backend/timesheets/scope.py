@@ -234,6 +234,57 @@ def employee_company_ids(employee) -> frozenset[int]:
     return frozenset(ids)
 
 
+def user_ids_in_companies(company_ids) -> frozenset[int]:
+    """`employee_company_ids` read in the other direction: which USERS
+    are employees of any of `company_ids`.
+
+    The same three-way definition (`CompanyUserMembership`,
+    `BuildingManagerAssignment.building.company`,
+    `BuildingStaffVisibility.building.company`), expressed once so the
+    forward and reverse questions cannot answer differently. That
+    matters here more than it usually would: the employee PICKER
+    (`views_employees`) and the write VALIDATOR
+    (`TimeEntrySerializer`) both resolve through this, so "who is
+    offerable" and "who is acceptable" are the same set by
+    construction — not two lists that happen to agree today.
+    """
+    ids = frozenset(company_ids)
+    if not ids:
+        return frozenset()
+
+    from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
+    from companies.models import CompanyUserMembership
+
+    ca_ids = CompanyUserMembership.objects.filter(
+        company_id__in=ids
+    ).values_list("user_id", flat=True)
+    bm_ids = BuildingManagerAssignment.objects.filter(
+        building__company_id__in=ids
+    ).values_list("user_id", flat=True)
+    staff_ids = BuildingStaffVisibility.objects.filter(
+        building__company_id__in=ids
+    ).values_list("user_id", flat=True)
+    return frozenset(set(ca_ids) | set(bm_ids) | set(staff_ids))
+
+
+def employees_of_company_queryset(company_id):
+    """The eligible provider employees of ONE company.
+
+    Backs `GET /api/timesheets/employees/?company=<id>`. The base
+    filter (provider roles, live account, not soft-deleted) is the same
+    predicate `is_eligible_employee` applies to a single user, so a
+    person the picker offers is a person the write path accepts.
+    """
+    from accounts.models import User
+
+    return User.objects.filter(
+        role__in=PROVIDER_EMPLOYEE_ROLES,
+        is_active=True,
+        deleted_at__isnull=True,
+        pk__in=user_ids_in_companies({company_id}),
+    )
+
+
 def is_eligible_employee(employee) -> bool:
     """True iff hours may be filed against this user at all.
 
@@ -278,18 +329,7 @@ def eligible_employees_queryset(user):
     if scope is None:
         return base
 
-    from buildings.models import BuildingManagerAssignment, BuildingStaffVisibility
-    from companies.models import CompanyUserMembership
-
-    ca_ids = CompanyUserMembership.objects.filter(
-        company_id__in=scope
-    ).values_list("user_id", flat=True)
-    bm_ids = BuildingManagerAssignment.objects.filter(
-        building__company_id__in=scope
-    ).values_list("user_id", flat=True)
-    staff_ids = BuildingStaffVisibility.objects.filter(
-        building__company_id__in=scope
-    ).values_list("user_id", flat=True)
-    return base.filter(
-        pk__in=set(ca_ids) | set(bm_ids) | set(staff_ids)
-    )
+    # Sprint 152.1 — the membership fan-out moved into
+    # `user_ids_in_companies` so the picker endpoint and this validator
+    # queryset share ONE definition. See that helper's docstring.
+    return base.filter(pk__in=user_ids_in_companies(scope))
