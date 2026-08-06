@@ -56,8 +56,9 @@ docs-only pass — so this file always reflects where we actually are.
 ## NOW
 
 **Branch:** `feat/sprint-152-employee-hours` — Sprint 152, employee hours
-(urenregistratie). Cut from `main`@`6a93e77`. **ONE PR.** CC does not open
-PRs; the owner does. CC did NOT deploy this branch.
+(urenregistratie), plus the Sprint 152.1 round on the same branch after
+the owner tested it on crmtest. Cut from `main`@`6a93e77`. **Still ONE
+PR.** CC does not open PRs; the owner does. CC did NOT deploy this branch.
 
 **Last shipped PR on `main`: #128** — Sprints 142 through 151.1. Its
 SHIPPED line was appended by this branch (a PR cannot cite its own
@@ -197,6 +198,114 @@ in `node:22-alpine`: `tsc --noEmit` clean, `eslint .` **45 problems (43
 errors, 2 warnings) = the baseline exactly**, zero in the new files,
 `npm run build` succeeded. CLAUDE.md §3's ESLint baseline line was STALE
 (it said 48 / "46 errors, 2 warnings"); corrected to 45 in this branch.
+
+### Round 2 (Sprint 152.1) — the module the owner can actually USE
+
+Same branch, same PR. Sprint 152's backend is sound and stands unchanged
+in its architecture: module independence, the multiplier-snapshot rule,
+week locks and the H-1 scoping are all untouched. This round is what the
+owner hit when he tested it on crmtest. **No migration** — nothing here
+changes a model.
+
+- **§1 The headline defect: an admin could not enter hours for an
+  employee.** That is the single thing the feature exists for, the
+  backend has accepted it since Sprint 152 (`created_by` differs from
+  `employee`, and the tests proved it), and the entries tab had **zero
+  write calls**. It was built read-only because the Sprint 152 prompt
+  asked for a read-only overview and nothing in the round questioned
+  whether that was enough — a scope that was followed exactly and was
+  wrong. The tab now has an "Uren toevoegen" form plus Edit / Delete per
+  row, reusing the same client functions `MyHoursPage` already uses (no
+  parallel set) and sending the page's selected company as the
+  disambiguator `TimeEntrySerializer` documents. Week-closed handling is
+  two-layered: `is_locked` disables the row actions, and the server's
+  `week_closed` message is surfaced VERBATIM if a write is refused
+  anyway — a page left open while an admin closed the week still gets
+  there, and the server is the authority.
+- **§1a A picker endpoint inside the module** —
+  `GET /api/timesheets/employees/?company=<id>`, `IsTimesheetManager`.
+  `/api/employees/` cannot serve this: it takes no `?company=` (it
+  scopes by VIEWER) and its payload carries no company, so a SUPER_ADMIN
+  got three providers' people in one dropdown where every wrong pick
+  400s. Adding the param there was rejected as a fix — it is another
+  module's contract, shared with the Employees page. The load-bearing
+  reason it lives in `timesheets` is not routing: the picker and the
+  write validator now resolve through ONE helper
+  (`scope.user_ids_in_companies`), so "who is offerable" and "who is
+  acceptable" are the same set by construction. A test walks the
+  picker's whole output through the create endpoint to hold that.
+- **§2 A SUPER_ADMIN must not be shown "Mijn uren".** The reported error
+  — *"`company` is required when more than one provider Company
+  exists"* — was `resolve_view_company` refusing to guess (the page
+  sends no `?company=`, an SA's scope is `None`, crmtest has three
+  companies). Passing a company would have fixed the ERROR and left the
+  DEAD END: `PROVIDER_EMPLOYEE_ROLES` excludes SUPER_ADMIN by design, so
+  an SA can never file their own hours. `canAccessTimesheets` now admits
+  STAFF / BUILDING_MANAGER / COMPANY_ADMIN only; the route guard reads
+  the same predicate, so both the nav entry and the route go.
+  `/admin/hours` is unchanged, and the BACKEND is deliberately untouched
+  — `IsTimesheetUser` may keep admitting SA, since its read paths are
+  harmless and the entry write already rejects them on eligibility. This
+  is a UI dead end, not a permission boundary. **Known and deliberate:**
+  a COMPANY_ADMIN in more than one provider company hits the same 400 —
+  recorded in `## NEXT` rather than built.
+- **§3 The standard set follows the operator's language.**
+  `HourType.name` stays ONE operator-typed column — not four language
+  columns; that decision stands. Only the names the BUTTON creates are
+  translated, chosen from `User.language` with nl as the fallback. The
+  subtle half is idempotency ACROSS languages: the old skip test
+  compared existing names against the set being created, so a
+  Dutch-seeded company would have gained six ENGLISH duplicates the
+  first time an English-profile operator pressed the button — and the
+  per-company uniqueness constraint would not have objected, because
+  "Overwerk" and "Overtime" really are different strings.
+  `STANDARD_SLOTS` now pairs the two names per slot and a slot is
+  skipped when EITHER exists, using the same `Lower(Trim(...))`
+  comparison the constraint uses. Tested in both orders.
+- **§4 The report nobody could see.** `build_summary` has computed
+  `by_week` (entries / raw / weighted per ISO week, with `is_closed`)
+  since Sprint 152 and the frontend typed it, but **nothing rendered
+  it** — one of the five things the agreed design asked for, present in
+  the payload and invisible on screen. There is now a titled Rapport
+  section: totals, a per-hour-type table, and a per-week table with each
+  week's open/closed badge. Kept on the entries tab rather than given
+  its own: the totals are computed from the SAME filter object as the
+  table, so the numbers always describe the rows on screen, and that
+  property is worth more than the discoverability a separate tab would
+  buy. Empty state says so in words instead of a wall of `0.00` that
+  reads as a broken feature. The per-type columns are labelled "current
+  multiplier" and "weighted (as recorded)" — after a multiplier edit
+  that left closed weeks alone those two legitimately disagree, and an
+  unlabelled pair invites the operator to conclude the numbers are
+  wrong.
+- **§5 The weeks tab explains itself.** It performed the right actions
+  and said nothing about what they mean. It now states, on screen, that
+  closing locks EVERY employee's hours in that week for that company
+  (nobody, including an admin, can add / edit / delete in it, and a date
+  move into or out of it is refused too), and that reopening is
+  available to SA/CA and is recorded in the audit log.
+- **§6 The two Sprint 152 review findings.** (a) The `HourTypesTab`
+  unbounded-list finding did **not** reproduce — the table is inside a
+  `BoundedList` (its `count`/`emptyState`/`size` are all wired), so
+  nothing was changed and this line records the check rather than a fix.
+  (b) `TimeEntrySerializer._resolve_company` returned the row's company
+  immediately on UPDATE, so nothing re-checked a NEWLY NAMED employee
+  against it. A COMPANY_ADMIN was already stopped by the scoped employee
+  queryset, but a SUPER_ADMIN's scope is `None`: they could PATCH an
+  entry in company A onto company B's employee, leaving a row whose
+  employee can never see it (their scope is B) while A's admin sees a
+  foreign name. The CREATE path had this check and a test; the UPDATE
+  path had neither. Both now exist, on the existing
+  `timesheet_employee_not_in_company` code, firing only when the
+  employee actually changes.
+
+**Gates.** Per the owner's standing rule only the relevant module ran:
+`python manage.py test timesheets` → **OK, 143 tests** (up from 115).
+`audit` was NOT re-run — `audit/signals.py` is untouched this round.
+`makemigrations --dry-run --check` → *No changes detected*; no model
+changed, so no migration was needed. Frontend gate in `node:22-alpine`:
+`tsc --noEmit` clean, `eslint .` **45 problems (43 errors, 2 warnings) =
+the baseline**, zero in the touched files, `npm run build` succeeded.
 ---
 
 ## NEXT
@@ -206,6 +315,20 @@ across ("Owner's forward queue", "Deferred / undecided items", "Standing
 milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
+
+0. **A COMPANY_ADMIN in MORE than one provider company cannot open
+   "Mijn uren".** (Sprint 152.1 §2, deliberately deferred.) The page
+   sends no `?company=`, so `views_common.resolve_view_company` refuses
+   to guess and returns `timesheet_company_required`. Everyone else
+   resolves cleanly: STAFF and BUILDING_MANAGER hold a one-company scope
+   in practice, and SUPER_ADMIN no longer sees the page at all.
+   Fix shape if taken up: a compact company selector on the page itself,
+   sourced from the timesheets scope helper — **not** from
+   `me.company_ids`. That field is `CompanyUserMembership` only, and a
+   STAFF member belongs to a company through `BuildingStaffVisibility`,
+   so it would report zero companies for exactly the role that uses the
+   page most. Same trap as the employee-picker one §1a avoided: the
+   membership question has three answers, not one.
 
 0. **`ServiceDetailView` is not narrowed for a CUSTOMER_USER.** Sprint
    147 stopped a customer LISTING the provider's general catalog
