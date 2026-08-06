@@ -348,13 +348,45 @@ class CatalogScopeListTests(TwoProviderFixtureMixin, TestCase):
         self.assertNotIn("default_unit_price", a_row)
         self.assertNotIn("default_vat_pct", a_row)
 
-    def test_customer_user_sees_own_provider_catalog_without_defaults(self):
+    def test_customer_user_sees_only_their_agreed_services_without_defaults(
+        self,
+    ):
+        """Sprint 147 — a customer sees ONLY the services a price has
+        been agreed with them for.
+
+        This test used to assert the Sprint 3B rule: a customer saw
+        their PROVIDER's whole catalog, narrowed by company alone. The
+        owner changed that rule deliberately — a customer has no
+        business browsing the provider's general catalog — so the
+        assertion moves with it rather than the code being reverted.
+
+        Company scoping is still asserted (`svc_b` belongs to the other
+        provider), and so is the Sprint 3B rule that survives untouched:
+        provider default prices are never serialized to a customer.
+
+        `svc_a_other` is the load-bearing half. It belongs to the SAME
+        provider as `svc_a` and has NO agreed price, so it is exactly
+        what the old rule would have shown and the new one must not.
+        """
+        CustomerServicePrice.objects.create(
+            service=self.svc_a,
+            customer=self.customer_a,
+            unit_price=Decimal("42.00"),
+            vat_pct=Decimal("21.00"),
+            valid_from=date(2020, 1, 1),
+            valid_to=None,
+            is_active=True,
+        )
         for actor in (self.cust_user_a, self.cust_loc_a, self.cust_cca_a):
             with self.subTest(actor=actor.email):
                 response = self._api(actor).get(SERVICE_LIST_URL)
                 self.assertEqual(response.status_code, 200)
                 ids = {row["id"] for row in response.data["results"]}
+                # Agreed with them -> visible.
                 self.assertIn(self.svc_a.id, ids)
+                # Same provider, NOT agreed with them -> not visible.
+                self.assertNotIn(self.svc_a_other.id, ids)
+                # Another provider entirely -> still not visible.
                 self.assertNotIn(self.svc_b.id, ids)
                 a_row = next(
                     row
