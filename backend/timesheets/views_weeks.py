@@ -27,6 +27,7 @@ from audit import context as audit_context
 from config.pagination import UnboundedPagination
 
 from .models import WeekLock
+from .periods import iso_week_exists
 from .permissions import (
     IsTimesheetManager,
     IsTimesheetUser,
@@ -47,11 +48,20 @@ ERR_WEEK_NOT_CLOSED = "week_not_closed"
 
 
 def _parse_week(data):
-    """Read and range-check `iso_year` / `iso_week` from a payload.
+    """Read and validate `iso_year` / `iso_week` from a payload.
 
-    ISO weeks run 1..53. A year bound is applied too — not because a
+    ISO weeks run 1..53, and a year bound is applied too — not because a
     wider one would break anything, but because a typo'd `iso_year` of
     20260 would silently create a lock nobody can ever find again.
+
+    Sprint 152.2 — the range check alone was NOT enough. Most years have
+    52 ISO weeks and only some have 53 (2025 has 52; 2026 has 53), so
+    `1 <= iso_week <= 53` accepted `2025-W53` — a week that does not
+    exist. Closing it created a `WeekLock` no `TimeEntry` could ever
+    belong to: invisible in the entries list, permanently listed as a
+    closed week, and locking nothing. `iso_week_exists` asks
+    `date.fromisocalendar` instead of guessing, so week 53 is accepted
+    exactly in the years that have one.
     """
     iso_year = parse_int_param(data.get("iso_year"))
     iso_week = parse_int_param(data.get("iso_week"))
@@ -60,13 +70,14 @@ def _parse_week(data):
         or iso_week is None
         or not (1970 <= iso_year <= 2200)
         or not (1 <= iso_week <= 53)
+        or not iso_week_exists(iso_year, iso_week)
     ):
         raise serializers.ValidationError(
             {
                 "iso_week": [
                     serializers.ErrorDetail(
-                        "iso_year and iso_week are required; iso_week must "
-                        "be between 1 and 53.",
+                        "iso_year and iso_week must together name a real "
+                        "ISO week (note not every year has a week 53).",
                         code=ERR_WEEK_INVALID,
                     )
                 ]

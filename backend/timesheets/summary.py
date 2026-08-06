@@ -50,6 +50,23 @@ def weighted_expr():
 # of to the column. It fails loudly (`FieldError: ... is an aggregate`)
 # rather than quietly, which is the only reason this is a comment and
 # not a bug report.
+# Sprint 152.2 — the "no building recorded" bucket's stable id. A
+# SENTINEL, not a label: the API must not choose a display language for
+# the client, and `null` alone would force every consumer to invent its
+# own name for the same bucket.
+NO_BUILDING_MARKER = "__none__"
+
+
+def _employee_name(row) -> str:
+    """The name to show for an employee bucket, falling back to email.
+
+    Same rule as `TimeEntrySerializer.get_employee_name`: `full_name` is
+    optional on `User`, and a bucket labelled with an empty string is
+    indistinguishable from every other unnamed one.
+    """
+    return row.get("employee__full_name") or row.get("employee__email") or ""
+
+
 def _sum_hours():
     return Coalesce(Sum("hours"), ZERO, output_field=_DECIMAL_OUT)
 
@@ -120,6 +137,56 @@ def build_summary(queryset) -> dict:
         .order_by("hour_type__sort_order", "hour_type__name", "hour_type_id")
     ]
 
+    # Sprint 152.2 — "in this period, who worked in which buildings?" is
+    # the owner's actual question and the payload could not answer it.
+    # Both breakdowns are purely ADDITIVE: every pre-existing key keeps
+    # its name and shape.
+    #
+    # `restrict_entries_to_self` has already been applied by the caller,
+    # so for a STAFF / BUILDING_MANAGER actor `by_employee` contains
+    # exactly one row — themselves. That is correct, not a degenerate
+    # case to special-case away.
+    by_employee = [
+        {
+            "employee": row["employee_id"],
+            "employee_name": _employee_name(row),
+            "entries": row["entries"],
+            "hours": _money(row["sum_hours"]),
+            "weighted_hours": _money(row["sum_weighted"]),
+        }
+        for row in queryset.values(
+            "employee_id", "employee__full_name", "employee__email"
+        )
+        .annotate(
+            entries=Count("id"),
+            sum_hours=_sum_hours(),
+            sum_weighted=_sum_weighted(),
+        )
+        .order_by("-sum_weighted", "employee__full_name", "employee_id")
+    ]
+
+    by_building = [
+        {
+            "building": row["building_id"],
+            # A NULL building is its own explicit bucket, never dropped:
+            # hours with no location recorded are exactly the ones an
+            # operator needs to notice. The marker is a stable SENTINEL,
+            # not a Dutch string — the frontend translates it, so the API
+            # does not pick a language on the client's behalf.
+            "building_name": row["building__name"] or NO_BUILDING_MARKER,
+            "entries": row["entries"],
+            "hours": _money(row["sum_hours"]),
+            "weighted_hours": _money(row["sum_weighted"]),
+        }
+        for row in queryset.values("building_id", "building__name")
+        .annotate(
+            entries=Count("id"),
+            sum_hours=_sum_hours(),
+            sum_weighted=_sum_weighted(),
+        )
+        .order_by("-sum_weighted", "building__name", "building_id")
+    ]
+
     week_rows = list(
         queryset.values("company_id", "iso_year", "iso_week")
         .annotate(
@@ -156,5 +223,7 @@ def build_summary(queryset) -> dict:
         "total_hours": _money(totals["total_hours"]),
         "total_weighted_hours": _money(totals["total_weighted_hours"]),
         "by_hour_type": by_hour_type,
+        "by_employee": by_employee,
+        "by_building": by_building,
         "by_week": by_week,
     }

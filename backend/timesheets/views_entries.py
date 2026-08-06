@@ -30,6 +30,7 @@ from .scope import (
     is_timesheet_manager,
     restrict_entries_to_self,
 )
+from .periods import parse_period
 from .serializers import TimeEntrySerializer, snapshot_multiplier
 from .views_common import parse_int_param
 from .weeks import enforce_week_open
@@ -70,11 +71,22 @@ def _apply_entry_filters(qs, query_params):
     if iso_week is not None:
         qs = qs.filter(iso_week=iso_week)
 
-    date_from = query_params.get("date_from")
-    if date_from:
+    # Sprint 152.2 — PARSED, not passed through. These two used to go
+    # straight into `.filter(date__gte=...)`, where an unparseable value
+    # raises Django's own `ValidationError` — which DRF does not
+    # translate, so it was an unhandled 500 on all three endpoints that
+    # share this helper. `parse_period` raises a DRF ValidationError
+    # instead (HTTP 400, stable code) and also rejects a reversed range,
+    # which previously returned an empty set that reads as "nobody
+    # worked" rather than "your dates are the wrong way round".
+    #
+    # `None` on either side means UNBOUNDED there — absent stays "no
+    # filter". No default window is imposed: these endpoints legitimately
+    # answer "everything".
+    date_from, date_to = parse_period(query_params)
+    if date_from is not None:
         qs = qs.filter(date__gte=date_from)
-    date_to = query_params.get("date_to")
-    if date_to:
+    if date_to is not None:
         qs = qs.filter(date__lte=date_to)
     return qs
 

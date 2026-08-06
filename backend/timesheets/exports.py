@@ -88,6 +88,45 @@ def build_timesheet_summary_csv(payload: dict) -> bytes:
             }
         )
 
+    # Sprint 152.2 — two new sections. APPENDED after HOUR_TYPE and
+    # before WEEK, which is a row-ORDER change only: the column tuple is
+    # untouched, and `section` is what a consumer keys on. Reordering or
+    # renaming the columns would break every saved spreadsheet formula
+    # pointed at this file.
+    for bucket in payload.get("by_employee", []):
+        writer.writerow(
+            {
+                "section": "EMPLOYEE",
+                "key": bucket["employee"],
+                "label": bucket["employee_name"],
+                "entries": bucket["entries"],
+                "hours": bucket["hours"],
+                "weighted_hours": bucket["weighted_hours"],
+                "is_closed": "",
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+
+    for bucket in payload.get("by_building", []):
+        writer.writerow(
+            {
+                "section": "BUILDING",
+                # `key` is empty for the no-building bucket rather than
+                # the sentinel: the id column should hold an id or
+                # nothing. The LABEL carries the marker, which is what a
+                # reader sorts and filters on anyway.
+                "key": "" if bucket["building"] is None else bucket["building"],
+                "label": bucket["building_name"],
+                "entries": bucket["entries"],
+                "hours": bucket["hours"],
+                "weighted_hours": bucket["weighted_hours"],
+                "is_closed": "",
+                "period_from": period_from,
+                "period_to": period_to,
+            }
+        )
+
     for bucket in payload.get("by_week", []):
         writer.writerow(
             {
