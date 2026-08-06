@@ -31,8 +31,14 @@ import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
 import { fromDateString, toDateString } from "../../lib/isoWeek";
 import { HourTypesTab } from "./HourTypesTab";
-import { WeekCloseTab } from "./WeekCloseTab";
+import { HoursFilterRow } from "./HoursFilterRow";
+import { HoursOverviewTab } from "./HoursOverviewTab";
 
+// Sprint 152.2 — "weeks" became the OVERVIEW tab: the read-only
+// analytical surface (period selector, graphs, breakdowns), which
+// still owns week close/reopen because a lock acts on a PERIOD, not
+// on an entry. The tab KEY is unchanged so the stored value stays
+// stable; only the label and the content moved.
 type Tab = "entries" | "hour_types" | "weeks";
 
 // Sprint 152 — the SUPER_ADMIN's provider company, remembered across
@@ -534,7 +540,7 @@ export function HoursAdminPage() {
           data-testid="hours-tab-weeks"
           onClick={() => setTab("weeks")}
         >
-          {t("hours_admin.tab_weeks")}
+          {t("hours_admin.tab_overview")}
         </button>
       </div>
 
@@ -589,88 +595,23 @@ export function HoursAdminPage() {
                 gap: 12,
               }}
             >
-              <div className="field" style={{ margin: 0 }}>
-                <label className="field-label" htmlFor="hours-filter-employee">
-                  {t("hours_admin.filter_employee")}
-                </label>
-                <select
-                  id="hours-filter-employee"
-                  className="field-select"
-                  value={filters.employee === "" ? "" : String(filters.employee)}
-                  onChange={(event) =>
-                    patchFilters({
-                      employee:
-                        event.target.value === ""
-                          ? ""
-                          : Number(event.target.value),
-                    })
-                  }
-                  data-testid="hours-filter-employee"
-                >
-                  <option value="">{t("hours_admin.filter_all")}</option>
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.full_name || employee.email}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label className="field-label" htmlFor="hours-filter-hour-type">
-                  {t("hours_admin.filter_hour_type")}
-                </label>
-                <select
-                  id="hours-filter-hour-type"
-                  className="field-select"
-                  value={
-                    filters.hour_type === "" ? "" : String(filters.hour_type)
-                  }
-                  onChange={(event) =>
-                    patchFilters({
-                      hour_type:
-                        event.target.value === ""
-                          ? ""
-                          : Number(event.target.value),
-                    })
-                  }
-                  data-testid="hours-filter-hour-type"
-                >
-                  <option value="">{t("hours_admin.filter_all")}</option>
-                  {hourTypes.map((hourType) => (
-                    <option key={hourType.id} value={hourType.id}>
-                      {hourType.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label className="field-label" htmlFor="hours-filter-building">
-                  {t("hours_admin.filter_building")}
-                </label>
-                <select
-                  id="hours-filter-building"
-                  className="field-select"
-                  value={filters.building === "" ? "" : String(filters.building)}
-                  onChange={(event) =>
-                    patchFilters({
-                      building:
-                        event.target.value === ""
-                          ? ""
-                          : Number(event.target.value),
-                    })
-                  }
-                  data-testid="hours-filter-building"
-                >
-                  <option value="">{t("hours_admin.filter_all")}</option>
-                  {buildings.map((building) => (
-                    <option key={building.id} value={building.id}>
-                      {building.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Sprint 152.2 — the SHARED filter row. The Overview tab
+                  filters the same collection with the same three
+                  controls; a second hand-maintained copy is the
+                  "written once, omitted elsewhere" defect this project
+                  keeps paying for. */}
+              <HoursFilterRow
+                values={{
+                  employee: filters.employee,
+                  hour_type: filters.hour_type,
+                  building: filters.building,
+                }}
+                onChange={patchFilters}
+                employees={employees}
+                hourTypes={hourTypes}
+                buildings={buildings}
+                idPrefix="hours"
+              />
 
               <div className="field" style={{ margin: 0 }}>
                 <label className="field-label" htmlFor="hours-filter-from">
@@ -1095,7 +1036,14 @@ export function HoursAdminPage() {
         />
       )}
 
-      {tab === "weeks" && <WeekCloseTab selectedCompany={company} />}
+      {tab === "weeks" && (
+        <HoursOverviewTab
+          selectedCompany={company}
+          employees={employees}
+          hourTypes={hourTypes}
+          buildings={buildings}
+        />
+      )}
 
       {entryMode !== null && (
         <div

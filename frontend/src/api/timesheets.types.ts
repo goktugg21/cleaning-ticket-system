@@ -150,6 +150,33 @@ export interface TimesheetSummaryHourTypeBucket {
   weighted_hours: string;
 }
 
+/**
+ * Sprint 152.2 — the sentinel the API returns as `building_name` for
+ * entries with no building recorded. A marker, not a label: the backend
+ * does not pick a display language, so the UI maps this to a translated
+ * string. Must stay in lockstep with
+ * `backend/timesheets/summary.py::NO_BUILDING_MARKER`.
+ */
+export const NO_BUILDING_MARKER = "__none__";
+
+export interface TimesheetSummaryEmployeeBucket {
+  employee: number;
+  employee_name: string;
+  entries: number;
+  hours: string;
+  weighted_hours: string;
+}
+
+export interface TimesheetSummaryBuildingBucket {
+  /** `null` is the "no building recorded" bucket. */
+  building: number | null;
+  /** `NO_BUILDING_MARKER` when `building` is null — translate it. */
+  building_name: string;
+  entries: number;
+  hours: string;
+  weighted_hours: string;
+}
+
 export interface TimesheetSummaryWeekBucket {
   iso_year: number;
   iso_week: number;
@@ -170,5 +197,8 @@ export interface TimesheetSummary {
   total_hours: string;
   total_weighted_hours: string;
   by_hour_type: TimesheetSummaryHourTypeBucket[];
+  // Sprint 152.2 — additive.
+  by_employee: TimesheetSummaryEmployeeBucket[];
+  by_building: TimesheetSummaryBuildingBucket[];
   by_week: TimesheetSummaryWeekBucket[];
 }
