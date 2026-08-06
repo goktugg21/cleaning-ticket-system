@@ -446,18 +446,39 @@ class CreateTests(ExtraWorkFixtureMixin, TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_category_other_requires_other_text(self):
+    def test_category_other_no_longer_requires_other_text(self):
+        """Sprint 144 — `category=OTHER` no longer demands
+        `category_other_text` on CREATE, and the rule could not survive.
+
+        The Extra Work form stopped asking for the `ExtraWorkCategory`
+        enum: its Category control is now the real customer/catalog
+        category picker, and the enum field keeps its `default=OTHER`.
+        So EVERY request created from the form arrives as OTHER with an
+        empty `category_other_text` — the old rule would have rejected
+        all of them with a 400.
+
+        The field itself is untouched and still populated, so historical
+        rows keep their value (`## NEXT` item 18 tracks migrating the
+        enum away properly). What is gone is only the CREATE-time
+        requirement.
+
+        Supplying the text stays valid: an API client that still sends
+        it is not broken by the relaxation.
+        """
         payload = self._create_payload(
             self.customer_a,
             self.building_a1,
             category=ExtraWorkCategory.OTHER,
         )
-        # Missing category_other_text -> 400
+        # No category_other_text -> accepted now (was 400 pre-Sprint-144).
         response = self._api(self.cust_basic_a).post(
             "/api/extra-work/", payload, format="json"
         )
-        self.assertEqual(response.status_code, 400)
-        # With category_other_text -> 201
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["category"], ExtraWorkCategory.OTHER)
+
+        # Still accepted WITH the text — the relaxation removes a
+        # requirement, it does not reject the field.
         payload["category_other_text"] = "Sealant repair"
         response = self._api(self.cust_basic_a).post(
             "/api/extra-work/", payload, format="json"
