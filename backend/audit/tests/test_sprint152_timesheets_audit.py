@@ -110,6 +110,64 @@ class TimesheetsAuditTests(TestCase):
             self.logs("timesheets.HourType", AuditAction.DELETE, hour_type_id).exists()
         )
 
+    def test_a_rename_records_the_derived_standard_slot_alongside_it(self):
+        """Sprint 152.3 — `HourType.standard_slot` is LEFT auto-tracked.
+
+        CLAUDE.md's audit rule says a new tracked field means editing the
+        matching `_*_TRACKED_FIELDS` tuple in `audit/signals.py`. There
+        is none to edit here: those tuples belong to the models with
+        HAND-WRITTEN handlers, and `HourType` uses the generic full-CRUD
+        trio, whose diff engine auto-introspects every concrete field.
+        So `standard_slot` is picked up with no signals.py change — which
+        is why this round did not touch that file.
+
+        The one real question was whether to SUPPRESS it, since it is
+        derived from `name`, which is already tracked. Decided against:
+
+          * the only mechanism available is `diff.NOISY_FIELDS`, a GLOBAL
+            frozenset keyed on field NAME, so excluding it would silently
+            suppress a `standard_slot` on any future model — a worse
+            trade than one redundant key;
+          * it is not a second AuditLog ROW, just an extra key in the one
+            row the rename already writes;
+          * and the key is the CONSEQUENTIAL half. "name changed" is
+            cosmetic; "this row stopped being the standard Overtime type"
+            is the part an operator would want to see, and reading it off
+            a name diff means knowing the twelve recognised spellings.
+        """
+        client = self.api(self.ca)
+        created = client.post(
+            "/api/timesheets/hour-types/",
+            {"name": "Overwerk", "multiplier": "1.50"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        hour_type_id = created.data["id"]
+
+        create_log = self.logs(
+            "timesheets.HourType", AuditAction.CREATE, hour_type_id
+        ).get()
+        self.assertEqual(
+            create_log.changes["standard_slot"]["after"], "overtime"
+        )
+
+        client.patch(
+            f"/api/timesheets/hour-types/{hour_type_id}/",
+            {"name": "Nachtploeg"},
+            format="json",
+        )
+        update_log = self.logs(
+            "timesheets.HourType", AuditAction.UPDATE, hour_type_id
+        ).latest("id")
+        self.assertEqual(
+            update_log.changes["name"],
+            {"before": "Overwerk", "after": "Nachtploeg"},
+        )
+        self.assertEqual(
+            update_log.changes["standard_slot"],
+            {"before": "overtime", "after": ""},
+        )
+
     # -- TimeEntry --------------------------------------------------------
     def test_time_entry_create_update_delete_are_logged(self):
         hour_type = HourType.objects.create(

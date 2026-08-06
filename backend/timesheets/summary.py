@@ -115,6 +115,10 @@ def build_summary(queryset) -> dict:
         {
             "hour_type": row["hour_type_id"],
             "hour_type_name": row["hour_type__name"],
+            # Sprint 152.3 — alongside the stored name, never replacing
+            # it: the client translates a known slot and falls back to
+            # `hour_type_name` for a custom type.
+            "standard_slot": row["hour_type__standard_slot"],
             # The type's CURRENT multiplier, for display only. The
             # weighted total beside it comes from the SNAPSHOTS, so the
             # two can legitimately disagree after a multiplier edit that
@@ -127,7 +131,10 @@ def build_summary(queryset) -> dict:
             "weighted_hours": _money(row["sum_weighted"]),
         }
         for row in queryset.values(
-            "hour_type_id", "hour_type__name", "hour_type__multiplier"
+            "hour_type_id",
+            "hour_type__name",
+            "hour_type__standard_slot",
+            "hour_type__multiplier",
         )
         .annotate(
             entries=Count("id"),

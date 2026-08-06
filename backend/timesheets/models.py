@@ -32,6 +32,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models.functions import Lower, Trim
 
+from .standard_set import STANDARD_SLOT_CHOICES, slot_for_name
+
 
 # The bounds are repeated as module constants so the serializer layer
 # can quote the SAME numbers in its friendly-400 messages instead of
@@ -113,6 +115,21 @@ class HourType(models.Model):
         default=0,
         help_text="Ascending display order in the pickers; ties break on name.",
     )
+    # Sprint 152.3 — which of the six standard kinds this row IS, or ""
+    # for a company's own custom type. DERIVED from `name` in `save()`;
+    # never set by a client, never hand-edited.
+    standard_slot = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        choices=STANDARD_SLOT_CHOICES,
+        help_text=(
+            "Derived from `name`: the standard kind this row is "
+            "recognised as, or blank for a custom type. Lets the UI show "
+            "a standard name in each reader's own language while `name` "
+            "stays a single operator-typed column."
+        ),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -131,6 +148,29 @@ class HourType(models.Model):
                 name="uniq_hour_type_name_per_company_ci",
             ),
         ]
+
+    def save(self, *args, **kwargs):
+        """Derive `standard_slot` from `name` on EVERY save.
+
+        Here rather than in the serializer, for the same reason
+        `TimeEntry.save` derives `iso_year` / `iso_week` here: a
+        management command, a data migration or a shell write must not be
+        able to produce a row whose stored slot contradicts its own name.
+        There is exactly one derivation (`slot_for_name`) and every write
+        path goes through it.
+
+        `update_fields` is widened when `name` is among them — otherwise
+        a targeted `save(update_fields=["name"])` would persist the new
+        name and leave the old slot behind, which is the precise
+        contradiction this method exists to prevent.
+        """
+        self.standard_slot = slot_for_name(self.name)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "name" in set(update_fields):
+            kwargs["update_fields"] = list(
+                set(update_fields) | {"standard_slot"}
+            )
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} (x{self.multiplier})"

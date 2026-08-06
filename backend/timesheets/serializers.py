@@ -150,6 +150,7 @@ class HourTypeSerializer(serializers.ModelSerializer):
             "multiplier",
             "is_active",
             "sort_order",
+            "standard_slot",
             "entry_count",
             "created_at",
             "updated_at",
@@ -157,6 +158,11 @@ class HourTypeSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "company_name",
+            # Sprint 152.3 — DERIVED from `name` in `HourType.save()`,
+            # so read-only on the wire. A client that could set it would
+            # be able to make the slot contradict the name it describes,
+            # which is the whole thing the derivation prevents.
+            "standard_slot",
             "entry_count",
             "created_at",
             "updated_at",
@@ -272,6 +278,13 @@ class TimeEntrySerializer(serializers.ModelSerializer):
     hour_type_name = serializers.CharField(
         source="hour_type.name", read_only=True
     )
+    # Sprint 152.3 — travels alongside `hour_type_name`, never instead of
+    # it. `hour_type_name` keeps carrying the STORED name: it is the
+    # fallback for a custom type and the value an admin edits. The client
+    # picks which to display; the JSON is not translated server-side.
+    hour_type_standard_slot = serializers.CharField(
+        source="hour_type.standard_slot", read_only=True
+    )
     hour_type_multiplier = serializers.DecimalField(
         source="hour_type.multiplier",
         max_digits=4,
@@ -309,6 +322,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "iso_week",
             "hour_type",
             "hour_type_name",
+            "hour_type_standard_slot",
             "hour_type_multiplier",
             "hours",
             "multiplier_snapshot",
@@ -328,6 +342,7 @@ class TimeEntrySerializer(serializers.ModelSerializer):
             "iso_year",
             "iso_week",
             "hour_type_name",
+            "hour_type_standard_slot",
             "hour_type_multiplier",
             "multiplier_snapshot",
             "weighted_hours",

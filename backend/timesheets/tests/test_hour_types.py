@@ -365,7 +365,10 @@ class StandardSetTests(TimesheetsFixture):
             h.name: h.multiplier
             for h in HourType.objects.filter(company=self.company_b)
         }
-        for name, multiplier, _sort in standard_hour_types("nl"):
+        # Sprint 152.3 — `standard_hour_types` now yields the SLOT key
+        # first (`(slot, name, multiplier, sort_order)`). Only the
+        # unpacking moved; the assertion is unchanged.
+        for _slot, name, multiplier, _sort in standard_hour_types("nl"):
             self.assertEqual(created[name], multiplier, name)
 
 

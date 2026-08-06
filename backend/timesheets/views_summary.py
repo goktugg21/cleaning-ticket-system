@@ -77,7 +77,12 @@ class TimesheetSummaryCSVView(APIView):
 
     def get(self, request, *args, **kwargs):
         payload = _summary_payload(request)
-        body = build_timesheet_summary_csv(payload)
+        # Sprint 152.3 — the DOWNLOADER's language. The CSV is the one
+        # surface that resolves a standard hour type's label server-side,
+        # because it has no client to do it; see the builder's docstring.
+        body = build_timesheet_summary_csv(
+            payload, getattr(request.user, "language", None)
+        )
         period = ""
         if payload["date_from"] or payload["date_to"]:
             period = f"_{payload['date_from'] or ''}_{payload['date_to'] or ''}"

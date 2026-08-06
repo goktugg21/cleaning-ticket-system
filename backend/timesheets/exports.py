@@ -22,6 +22,8 @@ import csv
 import io
 from typing import Iterable
 
+from .standard_set import render_standard_label
+
 
 CSV_BOM = "﻿"  # Excel-friendly UTF-8 marker.
 
@@ -48,12 +50,32 @@ def _csv_writer(columns: Iterable[str]):
     return buffer, writer
 
 
-def build_timesheet_summary_csv(payload: dict) -> bytes:
+def build_timesheet_summary_csv(payload: dict, language: str | None = None) -> bytes:
     """Render the `summary.build_summary` payload as CSV bytes.
 
     Row order is TOTAL first, then hour types, then weeks — the same
     order the screen shows them in, so a reader comparing the two does
     not have to re-sort either.
+
+    ## The CSV translates; the JSON does not
+
+    Sprint 152.3 — a DELIBERATE asymmetry, stated here so it does not
+    read as an accident. Every JSON payload sends the stored `name` plus
+    `standard_slot` and lets the client choose the wording. This file has
+    no client: it is a server-generated artefact that lands in a
+    downloads folder and is opened by a spreadsheet, so the label has to
+    be resolved here or not at all.
+
+    `language` is the DOWNLOADER's (`request.user.language`, the same
+    source the standard-set action reads). A file reading in the language
+    of the person who asked for it is the correct behaviour — the
+    alternative is a Dutch-only export for an English-profile admin, or
+    an English-named column an NL admin cannot reconcile with their
+    screen.
+
+    Falls back to the stored name for a custom type, and to Dutch for an
+    unset or unknown language — the same fallbacks
+    `render_standard_label` applies everywhere else.
     """
     buffer, writer = _csv_writer(SUMMARY_CSV_COLUMNS)
     period_from = payload.get("date_from") or ""
@@ -78,7 +100,11 @@ def build_timesheet_summary_csv(payload: dict) -> bytes:
             {
                 "section": "HOUR_TYPE",
                 "key": bucket["hour_type"],
-                "label": bucket["hour_type_name"],
+                "label": render_standard_label(
+                    bucket.get("standard_slot", ""),
+                    bucket["hour_type_name"],
+                    language,
+                ),
                 "entries": bucket["entries"],
                 "hours": bucket["hours"],
                 "weighted_hours": bucket["weighted_hours"],

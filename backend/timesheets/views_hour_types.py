@@ -37,7 +37,7 @@ from .serializers import (
     HourTypeStandardSetSerializer,
     snapshot_multiplier,
 )
-from .standard_set import slot_aliases, standard_hour_types
+from .standard_set import normalise_name, slot_aliases, standard_hour_types
 from .views_common import parse_bool_param, resolve_target_company
 
 
@@ -273,12 +273,22 @@ class HourTypeStandardSetView(APIView):
         )
         _enforce_timesheet_management(request.user, target_company)
 
-        existing = {
-            name.strip().lower()
-            for name in HourType.objects.filter(
-                company=target_company
-            ).values_list("name", flat=True)
-        }
+        # Sprint 152.3 — the skip test asks the SLOT first. Every row
+        # carries a derived `standard_slot`, so "does this company
+        # already have an Overwerk/Overtime row" is now a direct lookup
+        # rather than an inference from spelling.
+        rows = list(
+            HourType.objects.filter(company=target_company).values_list(
+                "name", "standard_slot"
+            )
+        )
+        taken_slots = {slot for _name, slot in rows if slot}
+        # The NAME aliases stay as the backstop. A row written before
+        # 152.3 and never re-saved would carry an empty slot; the data
+        # migration backfills those, so this is belt and braces — but the
+        # belt costs one set lookup and the failure it guards against
+        # (six duplicate rows) is the exact one 152.1 was spent fixing.
+        existing_names = {normalise_name(name) for name, _slot in rows}
 
         wanted = standard_hour_types(getattr(request.user, "language", None))
         aliases = slot_aliases()
@@ -286,15 +296,16 @@ class HourTypeStandardSetView(APIView):
         created, skipped = [], []
         audit_context.set_current_reason("hour_type_standard_set")
         with transaction.atomic():
-            for (name, multiplier, sort_order), slot_names in zip(
+            for (slot, name, multiplier, sort_order), slot_names in zip(
                 wanted, aliases
             ):
-                # The SLOT is taken if ANY of its language variants is
-                # already on this company — not merely the one name this
-                # request would create.
-                if slot_names & existing:
+                if slot in taken_slots or (slot_names & existing_names):
                     skipped.append(name)
                     continue
+                # `standard_slot` is NOT passed: `HourType.save()` derives
+                # it from the name we are about to write, and letting a
+                # caller supply it would create a second way for the two
+                # to disagree.
                 HourType.objects.create(
                     company=target_company,
                     name=name,
