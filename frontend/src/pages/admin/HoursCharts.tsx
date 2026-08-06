@@ -20,6 +20,7 @@ import type {
   TimesheetSummaryEmployeeBucket,
 } from "../../api/timesheets.types";
 import { NO_BUILDING_MARKER } from "../../api/timesheets.types";
+import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 
 /**
  * Sprint 152.2 — the Overview tab's four graphs.
@@ -200,10 +201,14 @@ export function HoursCharts({ summary }: HoursChartsProps) {
   const hourTypeData = useMemo(
     () =>
       summary.by_hour_type.map((bucket) => ({
-        name: bucket.hour_type_name,
+        name: hourTypeLabelFrom(
+          bucket.hour_type_name,
+          bucket.standard_slot,
+          t,
+        ),
         hours: Number(bucket.hours),
       })),
-    [summary.by_hour_type],
+    [summary.by_hour_type, t],
   );
 
   const otherLabel = t("hours_admin.chart_other");

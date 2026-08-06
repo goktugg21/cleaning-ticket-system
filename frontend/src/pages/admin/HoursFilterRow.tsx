@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import type { BuildingAdmin } from "../../api/types";
+import { hourTypeLabel } from "../../lib/hourTypeLabel";
 
 /**
  * Sprint 152.2 — the employee / hour-type / building filter row, shared
@@ -96,7 +97,7 @@ export function HoursFilterRow({
           <option value="">{t("hours_admin.filter_all")}</option>
           {hourTypes.map((hourType) => (
             <option key={hourType.id} value={hourType.id}>
-              {hourType.name}
+              {hourTypeLabel(hourType, t)}
             </option>
           ))}
         </select>

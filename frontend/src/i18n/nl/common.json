@@ -1889,5 +1889,13 @@
   "hours_admin.chart_by_building_subtitle": "Inclusief uren zonder gebouw.",
   "hours_admin.chart_by_hour_type_title": "Uren per uursoort",
   "hours_admin.chart_by_hour_type_subtitle": "Verdeling van normale uren, overwerk en verlof.",
-  "weeks.range_mode_note": "Afsluiten gaat per week. Schakel hierboven naar Week om een week af te sluiten of te heropenen."
+  "weeks.range_mode_note": "Afsluiten gaat per week. Schakel hierboven naar Week om een week af te sluiten of te heropenen.",
+  "hour_type_slot.normal_hours": "Normale uren",
+  "hour_type_slot.overtime": "Overwerk",
+  "hour_type_slot.weekend": "Weekenduren",
+  "hour_type_slot.public_holiday": "Feestdag",
+  "hour_type_slot.sick_leave": "Ziekteverlof",
+  "hour_type_slot.vacation": "Vakantie",
+  "hour_types.standard_marker": "standaard",
+  "hour_types.field_name_standard_hint": "Een standaardnaam wordt aan iedere gebruiker in zijn eigen taal getoond. Hier staat de opgeslagen naam. Wijzig je die in een eigen naam, dan wordt het een eigen uursoort en blijft de naam staan zoals je hem typt."
 }

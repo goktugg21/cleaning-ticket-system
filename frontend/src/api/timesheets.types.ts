@@ -19,6 +19,18 @@ export interface HourType {
   is_active: boolean;
   sort_order: number;
   /**
+   * Sprint 152.3 — which of the six standard kinds this row is
+   * recognised as, or `""` for a custom type. DERIVED server-side from
+   * `name`, so it is read-only: the API rejects nothing, it simply
+   * ignores a client-supplied value.
+   *
+   * `name` remains the STORED, operator-typed value in every payload —
+   * the fallback for a custom type and the thing an admin edits. Use
+   * `lib/hourTypeLabel` to decide what to display; never render one of
+   * the two directly.
+   */
+  standard_slot: string;
+  /**
    * How many TimeEntry rows reference this type. Drives the delete
    * affordance: `TimeEntry.hour_type` is PROTECT, so anything above 0
    * can only be archived, never deleted.
@@ -58,6 +70,8 @@ export interface TimeEntry {
   iso_week: number;
   hour_type: number;
   hour_type_name: string;
+  /** Sprint 152.3 — see `HourType.standard_slot`. */
+  hour_type_standard_slot: string;
   /**
    * The type's CURRENT multiplier. NOT the one that produced
    * `weighted_hours` — that is `multiplier_snapshot`. The two differ on
@@ -144,6 +158,8 @@ export interface WeekStatus {
 export interface TimesheetSummaryHourTypeBucket {
   hour_type: number;
   hour_type_name: string;
+  /** Sprint 152.3 — see `HourType.standard_slot`. */
+  standard_slot: string;
   current_multiplier: string;
   entries: number;
   hours: string;

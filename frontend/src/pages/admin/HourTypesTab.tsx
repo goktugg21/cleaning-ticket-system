@@ -18,6 +18,10 @@ import { BoundedList } from "../../components/BoundedList";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
+import {
+  hourTypeLabel,
+  isStandardHourType,
+} from "../../lib/hourTypeLabel";
 import { Toggle } from "../../components/Toggle";
 
 interface HourTypeFormState {
@@ -342,7 +346,22 @@ export function HourTypesTab({
                     data-inactive={hourType.is_active ? "false" : "true"}
                     className={hourType.is_active ? "" : "list-row-archived"}
                   >
-                    <td>{hourType.name}</td>
+                    <td>
+                      {hourTypeLabel(hourType, t)}
+                      {/* The management screen is the one place
+                          that shows BOTH: an admin editing these
+                          rows must be able to tell a recognised
+                          standard row from a custom one. */}
+                      {isStandardHourType(hourType) && (
+                        <span
+                          className="badge badge-normal"
+                          style={{ marginLeft: 6 }}
+                          data-testid="hour-type-standard-marker"
+                        >
+                          {t("hour_types.standard_marker")}
+                        </span>
+                      )}
+                    </td>
                     <td>x{hourType.multiplier}</td>
                     <td className="muted small">{hourType.sort_order}</td>
                     <td className="muted small">{hourType.entry_count}</td>
@@ -462,6 +481,15 @@ export function HourTypesTab({
                 required
                 disabled={formBusy}
               />
+              {/* Sprint 152.3 — the form carries the STORED name, not
+                  the translated label, because that is the value being
+                  edited. Without this line an English-profile admin
+                  opens a row listed as "Overtime", finds "Overwerk" in
+                  the input, and reasonably concludes the form is
+                  broken. */}
+              <div className="muted small" style={{ marginTop: 4 }}>
+                {t("hour_types.field_name_standard_hint")}
+              </div>
             </div>
 
             <div className="field">

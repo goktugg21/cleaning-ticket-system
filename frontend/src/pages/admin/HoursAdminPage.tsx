@@ -30,6 +30,10 @@ import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
 import { fromDateString, toDateString } from "../../lib/isoWeek";
+import {
+  hourTypeLabel,
+  hourTypeLabelFrom,
+} from "../../lib/hourTypeLabel";
 import { HourTypesTab } from "./HourTypesTab";
 import { HoursFilterRow } from "./HoursFilterRow";
 import { HoursOverviewTab } from "./HoursOverviewTab";
@@ -808,7 +812,13 @@ export function HoursAdminPage() {
                             key={bucket.hour_type}
                             data-testid="hours-report-hour-type-row"
                           >
-                            <td>{bucket.hour_type_name}</td>
+                            <td>
+                              {hourTypeLabelFrom(
+                                bucket.hour_type_name,
+                                bucket.standard_slot,
+                                t,
+                              )}
+                            </td>
                             <td className="muted small">
                               x{bucket.current_multiplier}
                             </td>
@@ -945,7 +955,13 @@ export function HoursAdminPage() {
                           )}
                         </td>
                         <td>{entry.employee_name}</td>
-                        <td>{entry.hour_type_name}</td>
+                        <td>
+                          {hourTypeLabelFrom(
+                            entry.hour_type_name,
+                            entry.hour_type_standard_slot,
+                            t,
+                          )}
+                        </td>
                         <td>{entry.hours}</td>
                         <td className="muted">{entry.weighted_hours}</td>
                         <td className="muted small">
@@ -1170,7 +1186,7 @@ export function HoursAdminPage() {
                 </option>
                 {activeHourTypes.map((hourType) => (
                   <option key={hourType.id} value={hourType.id}>
-                    {hourType.name} (x{hourType.multiplier})
+                    {hourTypeLabel(hourType, t)} (x{hourType.multiplier})
                   </option>
                 ))}
               </select>

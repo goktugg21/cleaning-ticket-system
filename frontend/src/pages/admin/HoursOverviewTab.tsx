@@ -35,6 +35,7 @@ import {
   toDateString,
 } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
+import { hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HoursCharts } from "./HoursCharts";
 import { HoursFilterRow } from "./HoursFilterRow";
 import type { HoursFilterValues } from "./HoursFilterRow";
@@ -721,7 +722,13 @@ export function HoursOverviewTab({
                   <tbody>
                     {summary.by_hour_type.map((bucket) => (
                       <tr key={bucket.hour_type}>
-                        <td>{bucket.hour_type_name}</td>
+                        <td>
+                          {hourTypeLabelFrom(
+                            bucket.hour_type_name,
+                            bucket.standard_slot,
+                            t,
+                          )}
+                        </td>
                         <td className="muted small">
                           x{bucket.current_multiplier}
                         </td>
@@ -845,7 +852,13 @@ export function HoursOverviewTab({
                         )}
                       </td>
                       <td>{entry.employee_name}</td>
-                      <td>{entry.hour_type_name}</td>
+                      <td>
+                        {hourTypeLabelFrom(
+                          entry.hour_type_name,
+                          entry.hour_type_standard_slot,
+                          t,
+                        )}
+                      </td>
                       <td>{entry.hours}</td>
                       <td className="muted">{entry.weighted_hours}</td>
                       <td className="muted small">

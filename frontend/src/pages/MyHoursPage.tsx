@@ -19,6 +19,10 @@ import type {
 } from "../api/timesheets.types";
 import type { BuildingAdmin } from "../api/types";
 import { BoundedList } from "../components/BoundedList";
+import {
+  hourTypeLabel,
+  hourTypeLabelFrom,
+} from "../lib/hourTypeLabel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../components/ConfirmDialog";
 import { PageHeader } from "../components/PageHeader";
@@ -220,7 +224,11 @@ export function MyHoursPage() {
     const buckets = new Map<number, { name: string; hours: string[] }>();
     for (const entry of entries) {
       const bucket = buckets.get(entry.hour_type) ?? {
-        name: entry.hour_type_name,
+        name: hourTypeLabelFrom(
+          entry.hour_type_name,
+          entry.hour_type_standard_slot,
+          t,
+        ),
         hours: [],
       };
       bucket.hours.push(entry.hours);
@@ -231,7 +239,7 @@ export function MyHoursPage() {
       name: bucket.name,
       hours: sumDecimalStrings(bucket.hours),
     }));
-  }, [entries]);
+  }, [entries, t]);
 
   function openCreate(dateValue?: string) {
     setMode("create");
@@ -474,7 +482,13 @@ export function MyHoursPage() {
                     data-entry-id={entry.id}
                   >
                     <td>{formatDayLabel(entry.date, dateLocale)}</td>
-                    <td>{entry.hour_type_name}</td>
+                    <td>
+                      {hourTypeLabelFrom(
+                        entry.hour_type_name,
+                        entry.hour_type_standard_slot,
+                        t,
+                      )}
+                    </td>
                     <td>{entry.hours}</td>
                     <td className="muted">{entry.weighted_hours}</td>
                     <td className="muted small">{entry.building_name ?? "—"}</td>
@@ -635,7 +649,7 @@ export function MyHoursPage() {
                 <option value="">{t("my_hours.field_hour_type_empty")}</option>
                 {hourTypes.map((hourType) => (
                   <option key={hourType.id} value={hourType.id}>
-                    {hourType.name} (x{hourType.multiplier})
+                    {hourTypeLabel(hourType, t)} (x{hourType.multiplier})
                   </option>
                 ))}
               </select>

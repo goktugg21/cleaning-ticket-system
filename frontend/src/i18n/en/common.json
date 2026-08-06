@@ -1889,5 +1889,13 @@
   "hours_admin.chart_by_building_subtitle": "Including hours with no building recorded.",
   "hours_admin.chart_by_hour_type_title": "Hours per hour type",
   "hours_admin.chart_by_hour_type_subtitle": "Split across normal hours, overtime and leave.",
-  "weeks.range_mode_note": "Closing works per week. Switch to Week above to close or reopen one."
+  "weeks.range_mode_note": "Closing works per week. Switch to Week above to close or reopen one.",
+  "hour_type_slot.normal_hours": "Normal hours",
+  "hour_type_slot.overtime": "Overtime",
+  "hour_type_slot.weekend": "Weekend hours",
+  "hour_type_slot.public_holiday": "Public holiday",
+  "hour_type_slot.sick_leave": "Sick leave",
+  "hour_type_slot.vacation": "Vacation",
+  "hour_types.standard_marker": "standard",
+  "hour_types.field_name_standard_hint": "A standard name is shown to every user in their own language. This field holds the stored name. Renaming it to something of your own makes it a custom hour type, kept exactly as you type it."
 }
