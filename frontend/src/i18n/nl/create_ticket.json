@@ -8,11 +8,9 @@
   "melding_subtitle": "Meld een probleem of verzoek voor uw locatie.",
   "melding_submit": "Melding indienen",
   "required_fields_hint": "Velden met * zijn verplicht.",
-
   "no_access_message": "U heeft geen toegang tot een gebouw of klant om een ticket voor aan te maken. Vraag uw bedrijfsbeheerder om toegang en ververs deze pagina.",
-
   "section_issue_title": "Probleemgegevens",
-  "field_category_label": "Categorie",
+  "field_category_label": "Type",
   "field_location_label": "Locatie *",
   "field_location_placeholder": "Selecteer locatie / zone…",
   "field_customer_label": "Klant *",
@@ -24,13 +22,12 @@
   "field_title_placeholder": "Korte samenvatting van het probleem",
   "field_description_label": "Gedetailleerde beschrijving *",
   "field_description_placeholder": "Geef zoveel mogelijk context — apparatuur, locatie, waargenomen gedrag, urgentie.",
-
   "type_report": "Melding",
   "type_complaint": "Klacht",
   "type_request": "Verzoek",
   "type_suggestion": "Suggestie",
   "type_quote_request": "Offerteverzoek",
-
+  "type_other": "Overig",
   "section_priority_title": "Prioriteitsniveau",
   "section_priority_helper": "Kies het impactniveau van dit probleem.",
   "priority_normal_label": "Gemiddeld",
@@ -39,7 +36,6 @@
   "priority_high_helper": "Versneld — 4 u SLA",
   "priority_urgent_label": "Urgent",
   "priority_urgent_helper": "Kritiek — 1 u SLA",
-
   "section_attachments_title": "Bijlagen",
   "section_attachments_helper": "Optioneel. Foto's en PDF's helpen het team sneller te reageren.",
   "attachment_drop_hint": "Klik om te uploaden of sleep hierheen",
@@ -49,16 +45,13 @@
   "attachment_partial_failure_one": "De melding is aangemaakt, maar 1 bijlage kon niet worden geüpload. De overige bijlagen zijn wel opgeslagen. Niet geüpload:",
   "attachment_partial_failure_other": "De melding is aangemaakt, maar {{count}} bijlagen konden niet worden geüpload. De overige bijlagen zijn wel opgeslagen. Niet geüpload:",
   "attachment_partial_goto_ticket": "Ga naar melding",
-
   "validation_title_required": "Korte beschrijving is verplicht.",
   "validation_description_required": "Gedetailleerde beschrijving is verplicht.",
   "validation_location_required": "Kies een locatie.",
   "validation_customer_required": "Kies een klant.",
-
   "cancel": "Annuleren",
   "creating": "Aanmaken…",
   "submit": "Ticket aanmaken",
-
   "summary_title": "Samenvatting",
   "summary_location": "Locatie",
   "summary_customer": "Klant",
@@ -68,12 +61,10 @@
   "summary_attachment_count_one": "{{count}} bestand",
   "summary_attachment_count_other": "{{count}} bestanden",
   "summary_none": "Geen",
-
   "guidelines_title": "Ticketrichtlijnen",
   "guideline_1": "Wees zo specifiek mogelijk in de korte beschrijving voor snellere routering.",
   "guideline_2": "Vermeld exacte kamernummers of asset-ID's indien bekend.",
   "guideline_3": "Foto's verkorten de reactietijd voor onderhoudskwesties aanzienlijk.",
-
   "response_slas_title": "Reactie-SLA's",
   "sla_medium_name": "Gemiddelde prioriteit",
   "sla_medium_time": "24 uur",

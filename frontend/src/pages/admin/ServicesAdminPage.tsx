@@ -139,6 +139,12 @@ function formatDecimal(value: string): string {
   return value;
 }
 
+// Sprint 150 — remembering the SUPER_ADMIN's provider company across
+// visits. Deliberately localStorage and not a user preference on the
+// server: it is a view convenience, not a permission or a setting other
+// people should inherit.
+const CATALOG_COMPANY_STORAGE_KEY = "osius.catalog.company";
+
 export function ServicesAdminPage() {
   const { t, i18n } = useTranslation("common");
   const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
@@ -153,6 +159,21 @@ export function ServicesAdminPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  // Sprint 142.1 — the company-selector fetch gets its OWN error state.
+  // Sharing `loadError` made Sprint 142's carry-overs 3 and 5 cancel each
+  // other out: 5 added the `.catch()` that reports a failed company
+  // fetch, 3 made the catalog load clear `loadError` on success — and the
+  // company fetch is ONE request while the catalog load is two, so the
+  // catalog reliably resolves last and wiped the banner. The SUPER_ADMIN
+  // was left with exactly the state carry-over 5 exists to prevent: no
+  // selector, no error, then a raw `service_company_required` 400.
+  //
+  // Separate state rather than "don't clear what you didn't cause",
+  // because these are different failures with different remedies: a
+  // stale LIST resolves itself on the next mutation, a missing SELECTOR
+  // needs a page reload and blocks creates until it comes back. They can
+  // also be true at the same time, and the operator needs to see both.
+  const [companyLoadError, setCompanyLoadError] = useState("");
 
   // Read-only detail panels.
   const [selectedCategory, setSelectedCategory] =
@@ -253,12 +274,16 @@ export function ServicesAdminPage() {
   const [bulkFilter, setBulkFilter] = useState("");
 
   // Sprint 135 — a SUPER_ADMIN managing a tenant with 2+ provider
-  // companies must disambiguate `company` on Service / ManagedUnit
-  // create (backend/extra_work/views_catalog.py::
+  // companies must disambiguate `company` on create
+  // (backend/extra_work/views_catalog.py::
   // _resolve_catalog_create_company 400s `service_company_required`
-  // otherwise) — Categories are GLOBAL (SUPER_ADMIN-only, no `company`
-  // field at all), so this selector never applies to that tab. One
-  // shared control for both the Services and Units tabs.
+  // otherwise).
+  //
+  // Sprint 142 — this selector now applies to ALL THREE tabs. Categories
+  // gained a `company` FK, so the Categories tab is filtered and
+  // targeted by it exactly like Services and Units; the old comment here
+  // (and the hint on screen) said categories were global and unaffected,
+  // which stopped being true this sprint.
   const [catalogCompanies, setCatalogCompanies] = useState<CompanyAdmin[]>([]);
   const [catalogCompany, setCatalogCompany] = useState<number | "">("");
   // Sprint 139 §1 — off by default: an inactive service is hidden the
@@ -269,13 +294,61 @@ export function ServicesAdminPage() {
   useEffect(() => {
     if (!isSuperAdmin) return;
     let cancelled = false;
-    listAllCompanies({ is_active: "true" }).then((response) => {
-      if (!cancelled) setCatalogCompanies(response);
-    });
+    // Sprint 142 (#127 review carry-over) — this was a bare `.then()`
+    // with no `.catch()`. An unhandled rejection left the selector
+    // silently ABSENT: `showCompanySelector` is derived from
+    // `catalogCompanies.length > 1`, so on failure a SUPER_ADMIN on a
+    // multi-company tenant saw no selector, no error, and then a
+    // `service_company_required` 400 on the first create with no way to
+    // act on it. Failing loudly is the point.
+    listAllCompanies({ is_active: "true" })
+      .then((response) => {
+        if (cancelled) return;
+        setCatalogCompanies(response);
+        // Sprint 149 — a SUPER_ADMIN always has exactly ONE provider
+        // company in view; there is no "all companies" state any more.
+        // Seeding it here (in the callback, not an effect body) is what
+        // removes the need for a company column on every row, and makes
+        // a cross-company multi-select structurally impossible rather
+        // than something the operator discovers from a partial-failure
+        // report. Only when a choice is actually offered — with one
+        // company the selector stays hidden and `""` still means "let
+        // the backend default it", which is what a COMPANY_ADMIN relies
+        // on.
+        //
+        // Sprint 150 — WHICH one. `response` is ordered by NAME (see
+        // `Company.Meta.ordering`), so taking `[0]` opened the page on
+        // whichever tenant sorts first alphabetically rather than the
+        // one the operator actually works in. Two rules instead:
+        //   * the operator's LAST choice wins, if it is still in the
+        //     list — after the first visit the default stops mattering;
+        //   * otherwise the lowest id, i.e. the first provider company
+        //     created on this deployment. That is the platform's own
+        //     tenant, not an alphabetical accident.
+        if (response.length > 1) {
+          const stored = Number(
+            window.localStorage.getItem(CATALOG_COMPANY_STORAGE_KEY),
+          );
+          const remembered = response.some((c) => c.id === stored)
+            ? stored
+            : null;
+          const primary = response.reduce(
+            (lowest, c) => (c.id < lowest.id ? c : lowest),
+            response[0],
+          );
+          setCatalogCompany((current) =>
+            current === "" ? (remembered ?? primary.id) : current,
+          );
+        }
+      })
+      .catch(() => {
+        // Sprint 142.1 — its own state; see `companyLoadError`.
+        if (!cancelled) setCompanyLoadError(t("catalog.company_load_failed"));
+      });
     return () => {
       cancelled = true;
     };
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, t]);
 
   // Initial parallel load.
   //
@@ -295,7 +368,10 @@ export function ServicesAdminPage() {
     async function load() {
       try {
         const [categoriesData, servicesData] = await Promise.all([
-          listServiceCategories(),
+          // Sprint 142 — categories take the company filter too now.
+          listServiceCategories(
+            catalogCompany === "" ? {} : { company: catalogCompany },
+          ),
           listServices({
             ...(showInactive ? {} : { is_active: true }),
             ...(catalogCompany === "" ? {} : { company: catalogCompany }),
@@ -304,6 +380,12 @@ export function ServicesAdminPage() {
         if (cancelled.current) return;
         setCategories(categoriesData);
         setServices(servicesData);
+        // Sprint 142 (#127 review carry-over) — CLEAR the banner on a
+        // successful load. Not one of the 14 `setLoadError` sites passed
+        // "", so a single transient blip left "reload the page" on
+        // screen for the rest of the session, sitting above a list that
+        // had since refreshed successfully.
+        setLoadError("");
         setLoading(false);
       } catch (err) {
         if (!cancelled.current) {
@@ -353,6 +435,19 @@ export function ServicesAdminPage() {
       setCategoryFormError(t("services.error_name_required"));
       return;
     }
+    // Sprint 142 — categories are company-scoped, so a SUPER_ADMIN on a
+    // multi-company tenant must disambiguate exactly as they already do
+    // for a Service. Same guard, same message: catching it here beats
+    // letting the backend's `service_company_required` 400 surface as a
+    // raw field error on a form that has no company field.
+    if (
+      categoryMode === "create" &&
+      showCompanySelector &&
+      catalogCompany === ""
+    ) {
+      setCategoryFormError(t("catalog.error_company_required"));
+      return;
+    }
     setCategoryFormBusy(true);
     setCategoryFormError("");
     const payload: ServiceCategoryCreatePayload = {
@@ -362,22 +457,29 @@ export function ServicesAdminPage() {
     };
     try {
       if (categoryMode === "create") {
-        const created = await createServiceCategory(payload);
-        setCategories((prev) =>
-          [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
+        await createServiceCategory(
+          catalogCompany === ""
+            ? payload
+            : { ...payload, company: catalogCompany },
         );
+        // Sprint 142 — re-read rather than blind-append, the Sprint 140
+        // §1 rule now that this list has a filter of its own: a category
+        // created with Active unticked, or created while a company
+        // filter is on, must not be spliced into a list that claims to
+        // exclude it. `refreshCatalogRows` is non-throwing by contract
+        // (Sprint 141), so this cannot report a committed write as a
+        // form failure.
+        await refreshCatalogRows();
         closeCategoryModal();
       } else if (categoryMode === "edit" && selectedCategory) {
         const updated = await updateServiceCategory(
           selectedCategory.id,
           payload,
         );
-        setCategories((prev) =>
-          prev
-            .map((c) => (c.id === updated.id ? updated : c))
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        );
+        // Set the panel BEFORE the re-read — it must not depend on a
+        // network call that is allowed to fail (Sprint 141 §2).
         setSelectedCategory(updated);
+        await refreshCatalogRows();
         closeCategoryModal();
       }
     } catch (err) {
@@ -579,6 +681,18 @@ export function ServicesAdminPage() {
   }
 
   /**
+   * Sprint 142 — the category list has a company filter now, so it needs
+   * the same single source of truth the service list has. Re-reading
+   * categories with `listServiceCategories()` bare would silently
+   * repopulate the tab with every company's categories the moment any
+   * mutation happened, contradicting the selector above it — the exact
+   * defect Sprint 140 §1 fixed for services.
+   */
+  function currentCategoryListParams() {
+    return catalogCompany === "" ? {} : { company: catalogCompany };
+  }
+
+  /**
    * Sprint 140 §1/§2 — re-read the catalog from the server after ANY
    * mutation, honouring the active archived toggle and company filter.
    *
@@ -631,10 +745,13 @@ export function ServicesAdminPage() {
     try {
       const [servicesData, categoriesData] = await Promise.all([
         listServices(currentServiceListParams()),
-        listServiceCategories(),
+        listServiceCategories(currentCategoryListParams()),
       ]);
       setServices(servicesData);
       setCategories(categoriesData);
+      // Sprint 142 (#127 review carry-over) — clear a stale banner once
+      // the list is genuinely fresh again.
+      setLoadError("");
     } catch {
       setLoadError(t("admin.refresh_after_save_failed"));
     }
@@ -788,6 +905,12 @@ export function ServicesAdminPage() {
       // the category's own counts with them. No wrapper needed: the
       // helper is non-throwing by contract (Sprint 141 §1).
       await refreshCatalogRows();
+      // Sprint 142 — the "this archive touched N providers" description
+      // and its 8s duration are GONE with `affected_company_count`. A
+      // category and its services share one company now, so the count
+      // could only ever be 0 or 1 and the branch could never fire. A
+      // warning that cannot fire is the exact anti-pattern this sprint
+      // series has been removing; do not reinstate it.
       pushToast({
         variant: "success",
         title: archiving
@@ -797,15 +920,6 @@ export function ServicesAdminPage() {
           : t("services.category_unarchive_result", {
               count: result.still_archived_service_count,
             }),
-        // A cascade that reached several providers is worth more than
-        // four seconds of the operator's attention.
-        description:
-          result.affected_company_count > 1
-            ? t("services.category_archive_multi_company", {
-                count: result.affected_company_count,
-              })
-            : undefined,
-        durationMs: result.affected_company_count > 1 ? 8_000 : undefined,
       });
       categoryArchiveDialogRef.current?.close();
       setCategoryArchiveTarget(null);
@@ -969,9 +1083,16 @@ export function ServicesAdminPage() {
         amount: bulkAmount.trim(),
         direction: bulkDirection,
       });
-      // Re-fetch so the updated catalog defaults surface in the table.
-      const refreshed = await listServices(currentServiceListParams());
-      setServices(refreshed);
+      // Sprint 142 (#127 review carry-over) — this was the ONE remaining
+      // raw refetch outside the non-throwing helpers, and it sat inside
+      // this form's own `try`. A re-read failure therefore landed in the
+      // `catch` below and reported a COMMITTED price adjustment as
+      // failed — and the obvious retry does not repeat the write, it
+      // COMPOUNDS it: +10% applied twice is +21%, silently, on every
+      // selected service. Exactly Sprint 141 §2, at the one site Round 5
+      // missed. Routed through the non-throwing helper, which also
+      // refreshes the category counts alongside.
+      await refreshCatalogRows();
       closeBulkRaise();
     } catch (err) {
       setBulkError(getApiError(err));
@@ -1134,10 +1255,20 @@ export function ServicesAdminPage() {
             onChange={(event) => {
               const v = event.target.value;
               setCatalogCompany(v === "" ? "" : Number(v));
+              // Remember it, so the next visit opens where this one
+              // left off rather than on a default at all.
+              if (v !== "") {
+                window.localStorage.setItem(CATALOG_COMPANY_STORAGE_KEY, v);
+              }
             }}
             data-testid="catalog-company-selector"
           >
-            <option value="">
+            {/* Sprint 149 — the placeholder stays on screen but is
+                DISABLED: there is no "all companies" state to pick any
+                more. It renders only in the edge case where the list
+                has not resolved yet, so the select never shows a blank
+                box or, worse, a company the operator did not choose. */}
+            <option value="" disabled>
               {t("catalog.company_selector_placeholder")}
             </option>
             {catalogCompanies.map((company) => (
@@ -1146,23 +1277,26 @@ export function ServicesAdminPage() {
               </option>
             ))}
           </select>
-          {/* Sprint 139 §4 — the selector now FILTERS the Services and
-              Units lists as well as targeting new rows, so say which
-              one applies on the tab you are looking at. The categories
-              hint already stated that categories are global and
-              unaffected; it stays, and is now the honest counterpart to
-              the filtering hint rather than the only explanation. */}
-          {tab === "categories" ? (
-            <p className="field-hint muted small">
-              {t("catalog.company_selector_hint_categories")}
-            </p>
-          ) : (
-            <p className="field-hint muted small">
-              {catalogCompany === ""
-                ? t("catalog.company_selector_hint_all")
-                : t("catalog.company_selector_hint_filtering")}
-            </p>
-          )}
+          {/* Sprint 139 §4 — the selector FILTERS the lists as well as
+              targeting new rows, so say which applies.
+              Sprint 142 — the Categories tab no longer gets its own
+              "categories are shared and unaffected" hint: that sentence
+              is now false, and categories behave exactly like the other
+              two tabs. One hint for all three. */}
+          <p className="field-hint muted small">
+            {t("catalog.company_selector_hint_filtering")}
+          </p>
+        </div>
+      )}
+
+      {companyLoadError && (
+        <div
+          className="alert-error"
+          role="alert"
+          style={{ marginBottom: 16 }}
+          data-testid="catalog-company-load-error"
+        >
+          {companyLoadError}
         </div>
       )}
 
@@ -1608,6 +1742,13 @@ export function ServicesAdminPage() {
                           or is not deletable without clicking in. */}
                       <th>{t("services.col_service_count")}</th>
                       <th>{t("services.col_active")}</th>
+                      {/* Sprint 145 — the actions used to exist ONLY in
+                          the detail panel below, which you reach by
+                          clicking a row. The owner reported he "can't
+                          rename or delete a category": the controls
+                          were there, just undiscoverable. A hidden
+                          action is a missing action. */}
+                      <th aria-label={t("services.col_actions")} />
                     </tr>
                   </thead>
                   <tbody>
@@ -1640,6 +1781,49 @@ export function ServicesAdminPage() {
                             ? t("admin.status_active")
                             : t("admin.status_inactive")}
                         </td>
+                        {/* stopPropagation so acting on a row does not
+                            also select it and scroll the detail panel
+                            into view underneath. */}
+                        <td
+                          style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            data-testid="services-category-row-edit"
+                            onClick={() => openEditCategoryModal(category)}
+                          >
+                            {t("services.edit_button")}
+                          </button>{" "}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            data-testid="services-category-row-archive"
+                            onClick={() => openCategoryArchiveDialog(category)}
+                          >
+                            {category.is_active
+                              ? t("services.category_archive_button")
+                              : t("services.category_unarchive_button")}
+                          </button>{" "}
+                          {/* Delete only when it can actually succeed —
+                              `Service.category` is PROTECT, so a
+                              category holding services can never be
+                              deleted. Offering it would be a button
+                              that always fails (Sprint 138). */}
+                          {category.service_count === 0 && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              data-testid="services-category-row-delete"
+                              onClick={() =>
+                                openDeleteCategoryDialog(category)
+                              }
+                            >
+                              {t("services.delete_button")}
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1670,6 +1854,18 @@ export function ServicesAdminPage() {
                   <h3 className="section-title" style={{ margin: 0 }}>
                     {selectedCategory.name}
                   </h3>
+                  {/* Sprint 142 — a category belongs to one provider
+                      now, so say which. Only shown where it can be
+                      ambiguous: a COMPANY_ADMIN has exactly one. */}
+                  {showCompanySelector && (
+                    <div
+                      className="muted small"
+                      style={{ marginTop: 4 }}
+                      data-testid="services-category-company"
+                    >
+                      {selectedCategory.company_name}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button

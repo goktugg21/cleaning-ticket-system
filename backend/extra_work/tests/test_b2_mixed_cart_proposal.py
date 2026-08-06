@@ -141,7 +141,7 @@ class _B2Fixture(TestCase):
             membership=membership, building=cls.building
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name=f"Cat {suffix}")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name=f"Cat {suffix}")
         # Service A: contract-priced for this customer.
         cls.svc_window = Service.objects.create(
             category=cls.service_cat,

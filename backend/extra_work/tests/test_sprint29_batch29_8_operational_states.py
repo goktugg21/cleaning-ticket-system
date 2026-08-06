@@ -138,6 +138,7 @@ class _OperationalFixtureMixin:
         )
 
         cls.service_cat = ServiceCategory.objects.create(
+            company=cls.company,
             name=f"Cat {suffix}"
         )
         cls.service = Service.objects.create(

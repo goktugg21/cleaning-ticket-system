@@ -18,10 +18,13 @@ import { Link } from "react-router-dom";
 import { Check, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useAuth } from "../auth/AuthContext";
+
 import {
   listAllBuildings,
   listAllCustomers,
   listCustomerCustomPrices,
+  listCustomerPriceFolders,
   listCustomerPrices,
   listServices,
 } from "../api/admin";
@@ -33,8 +36,8 @@ import type {
   Customer,
   CustomerCustomPrice,
   CustomerLabel,
+  CustomerPriceFolder,
   CustomerServicePrice,
-  ExtraWorkCategory,
   ExtraWorkIntentErrorCode,
   ExtraWorkPreviewLine,
   ExtraWorkPreviewPriceSource,
@@ -55,8 +58,10 @@ interface ParentFormState {
   customer: string;
   title: string;
   description: string;
-  category: ExtraWorkCategory;
-  category_other_text: string;
+  // Sprint 144 §1 — `category` / `category_other_text` are GONE from the
+  // form. The operator classifies with `categoryFilter` (a catalog
+  // category or a customer folder) instead; the enum column keeps its
+  // `default=OTHER` server-side.
   urgency: ExtraWorkUrgency;
   preferred_date: string;
 }
@@ -110,37 +115,11 @@ const EMPTY_PARENT: ParentFormState = {
   customer: "",
   title: "",
   description: "",
-  category: "DEEP_CLEANING",
-  category_other_text: "",
   urgency: "NORMAL",
   preferred_date: "",
 };
 
-const CATEGORY_VALUES: ExtraWorkCategory[] = [
-  "DEEP_CLEANING",
-  "WINDOW_CLEANING",
-  "FLOOR_MAINTENANCE",
-  "SANITARY_SERVICE",
-  "WASTE_REMOVAL",
-  "FURNITURE_MOVING",
-  "EVENT_CLEANING",
-  "EMERGENCY_CLEANING",
-  "OTHER",
-];
-
 const URGENCY_VALUES: ExtraWorkUrgency[] = ["NORMAL", "HIGH", "URGENT"];
-
-const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
-  DEEP_CLEANING: "category.deep_cleaning",
-  WINDOW_CLEANING: "category.window_cleaning",
-  FLOOR_MAINTENANCE: "category.floor_maintenance",
-  SANITARY_SERVICE: "category.sanitary_service",
-  WASTE_REMOVAL: "category.waste_removal",
-  FURNITURE_MOVING: "category.furniture_moving",
-  EVENT_CLEANING: "category.event_cleaning",
-  EMERGENCY_CLEANING: "category.emergency_cleaning",
-  OTHER: "category.other",
-};
 
 const URGENCY_I18N_KEY: Record<ExtraWorkUrgency, string> = {
   NORMAL: "urgency.normal",
@@ -329,6 +308,10 @@ export function CreateExtraWorkPage({
   intentMode = "standard",
 }: CreateExtraWorkPageProps) {
   const { t } = useTranslation(["extra_work", "common"]);
+  const { me } = useAuth();
+  // Sprint 147 — a customer sees ONLY the services they have an agreed
+  // price for (see `catalogForActor`).
+  const isCustomerActor = me?.role === "CUSTOMER_USER";
   const isQuoteMode = intentMode === "quote";
 
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -343,7 +326,14 @@ export function CreateExtraWorkPage({
   // hard scope contract); without a service the user cannot submit
   // the cart, but the dropdowns still appear so they can see what they
   // would normally pick from.
-  const [catalogWarning, setCatalogWarning] = useState("");
+  // Sprint 147 — the KIND of catalog problem, not its wording. The
+  // load effect classifies; the message is chosen at render, where the
+  // actor's role is already in scope. Keeping the role out of the
+  // effect keeps its dep array honest — pulling `isCustomerActor` in
+  // would re-run the whole mount-time load when `me` resolves.
+  const [catalogWarningKind, setCatalogWarningKind] = useState<
+    "" | "empty" | "unavailable"
+  >("");
   const [form, setForm] = useState<ParentFormState>(EMPTY_PARENT);
   const [cartLines, setCartLines] = useState<CartLineState[]>([emptyCartLine()]);
 
@@ -409,7 +399,19 @@ export function CreateExtraWorkPage({
   // "" is "All categories" and is the DEFAULT — filtering is opt-in,
   // per the hard requirement that there is never a loop where a
   // service cannot be found.
+  // Sprint 143 §4 — the value is PREFIXED so one control can offer two
+  // different kinds of grouping without their ids colliding:
+  //   ""          = no filter
+  //   "cat:<id>"  = a company `ServiceCategory`
+  //   "fol:<id>"  = this customer's `CustomerPriceFolder`
   const [categoryFilter, setCategoryFilter] = useState("");
+  // The chosen customer's folders, tagged with the customer id so a set
+  // fetched for a previously chosen customer is never offered against
+  // the current one (same guard shape as `labelLists`).
+  const [customerFolders, setCustomerFolders] = useState<{
+    customerId: number;
+    rows: CustomerPriceFolder[];
+  } | null>(null);
   // Free-text service search. Deliberately searches the WHOLE catalog,
   // never the filtered subset, so a category filter can never hide a
   // service the operator is explicitly looking for.
@@ -457,26 +459,26 @@ export function CreateExtraWorkPage({
       if (servicesResult.status === "fulfilled") {
         setServices(servicesResult.value);
         if (servicesResult.value.length === 0) {
-          setCatalogWarning(t("create.warning_catalog_empty"));
+          setCatalogWarningKind("empty");
         }
       } else {
         setServices([]);
-        setCatalogWarning(t("create.warning_catalog_unavailable"));
+        setCatalogWarningKind("unavailable");
       }
 
-      const firstBuilding = buildingResults[0];
-      const firstCustomer = firstBuilding
-        ? customerResults.find((customer) =>
-            customerMatchesBuilding(customer, firstBuilding.id),
-          )
-        : undefined;
-      setForm((current) => ({
-        ...current,
-        building:
-          current.building || (firstBuilding ? String(firstBuilding.id) : ""),
-        customer:
-          current.customer || (firstCustomer ? String(firstCustomer.id) : ""),
-      }));
+      // Sprint 143 §1 — NOTHING is pre-selected here any more.
+      //
+      // This block used to default `building` to the first building and
+      // then `customer` to the one customer linked to it. Together with
+      // the two effects below (now gone) that made the customer field
+      // effectively read-only: a building was always set, so the customer
+      // list was always filtered to that building, and any attempt to
+      // pick another customer was snapped straight back. The operator
+      // could only ever create Extra Work for B Amsterdam.
+      //
+      // Customer is the PRIMARY choice and building follows from it, so
+      // there is nothing sensible to pre-select: guessing the building
+      // first is what inverted the relationship in the first place.
       setLoadingOptions(false);
     }
     load();
@@ -485,13 +487,27 @@ export function CreateExtraWorkPage({
     };
   }, [t]);
 
-  const filteredCustomers = useMemo(() => {
-    if (!form.building) return customers;
-    const buildingId = Number(form.building);
-    return customers.filter((customer) =>
-      customerMatchesBuilding(customer, buildingId),
-    );
-  }, [customers, form.building]);
+  // Sprint 143 §1 — CUSTOMER IS THE PRIMARY CHOICE. Every customer the
+  // operator has access to is always offerable; the building list is what
+  // narrows, from the customer, never the other way round.
+  //
+  // What this replaces: `filteredCustomers` used to be the customers
+  // linked to `form.building`, and two effects kept `form.customer`
+  // pinned inside that list — one auto-selecting the sole match, one
+  // snapping any other choice back to `filteredCustomers[0]`. With a
+  // building pre-selected on load the customer field was unusable: pick
+  // anyone else and the effect immediately undid it. Reported as a
+  // regression that had been fixed once before, which is exactly what a
+  // setState-in-an-effect resync invites — it re-creates itself the
+  // moment anyone touches the filter it depends on.
+  //
+  // Both effects are DERIVED away rather than reordered. CLAUDE.md bans
+  // a synchronous setState in an effect body, and the ban is the point
+  // here: the "stale" value is not state to be corrected, it is a
+  // selection that no longer applies, so it collapses to "" at the point
+  // of use and the operator picks again. Same pattern the department /
+  // work-type fields below already use (`effectiveDepartmentId`).
+  const selectableCustomers = customers;
 
   const filteredBuildings = useMemo(() => {
     if (!form.customer) return buildings;
@@ -500,47 +516,15 @@ export function CreateExtraWorkPage({
     return buildings.filter((b) => customerMatchesBuilding(c, b.id));
   }, [buildings, customers, form.customer]);
 
-  // Auto-select the only matching customer when there's exactly one.
-  useEffect(() => {
-    if (!form.building) return;
-    if (form.customer) return;
-    if (filteredCustomers.length === 1) {
-      setForm((current) => ({
-        ...current,
-        customer: String(filteredCustomers[0].id),
-      }));
-    }
-  }, [form.building, form.customer, filteredCustomers]);
-
-  useEffect(() => {
-    if (!form.customer) return;
-    const stillValid = filteredCustomers.some(
-      (customer) => String(customer.id) === form.customer,
-    );
-    if (!stillValid) {
-      setForm((current) => ({
-        ...current,
-        customer: filteredCustomers[0]
-          ? String(filteredCustomers[0].id)
-          : "",
-      }));
-    }
-  }, [filteredCustomers, form.customer]);
-
-  useEffect(() => {
-    if (!form.building) return;
-    const stillValid = filteredBuildings.some(
-      (b) => String(b.id) === form.building,
-    );
-    if (!stillValid) {
-      setForm((current) => ({
-        ...current,
-        building: filteredBuildings[0]
-          ? String(filteredBuildings[0].id)
-          : "",
-      }));
-    }
-  }, [filteredBuildings, form.building]);
+  // A building chosen before the customer changed may not belong to the
+  // new customer. It collapses to "" — the select falls back to its
+  // placeholder and `previewable` / submit already require a building,
+  // so nothing downstream can consume the stale id.
+  const effectiveBuilding = filteredBuildings.some(
+    (b) => String(b.id) === form.building,
+  )
+    ? form.building
+    : "";
 
   // Sprint 128 — the label lists to OFFER right now, guarded inline (so TS
   // narrows `labelLists` and a list fetched for a previously selected
@@ -571,7 +555,7 @@ export function CreateExtraWorkPage({
   // every line carries a service, a positive quantity, and a date —
   // exactly what the preview serializer requires.
   const previewable = useMemo(() => {
-    if (!form.building || !form.customer) return false;
+    if (!effectiveBuilding || !form.customer) return false;
     if (cartLines.length === 0) return false;
     return cartLines.every((line) => {
       // A line is previewable when it is a catalog service (a chosen
@@ -587,7 +571,7 @@ export function CreateExtraWorkPage({
       if (!Number.isFinite(q) || q <= 0) return false;
       return Boolean(line.requestedDate);
     });
-  }, [form.building, form.customer, cartLines]);
+  }, [effectiveBuilding, form.customer, cartLines]);
 
   // Stable signature of ONLY the pricing-relevant fields (note text is
   // excluded so editing a note never re-fetches). `null` when the cart
@@ -597,7 +581,7 @@ export function CreateExtraWorkPage({
   const previewKey = useMemo(() => {
     if (!previewable) return null;
     return JSON.stringify({
-      b: Number(form.building),
+      b: Number(effectiveBuilding),
       c: Number(form.customer),
       l: cartLines.map((line) => {
         const isCustom = line.serviceId === CUSTOM_SERVICE_VALUE;
@@ -614,7 +598,7 @@ export function CreateExtraWorkPage({
         };
       }),
     });
-  }, [previewable, form.building, form.customer, cartLines]);
+  }, [previewable, effectiveBuilding, form.customer, cartLines]);
 
   // Debounced live preview. All state writes happen inside the timer's
   // async callback (deferred), never synchronously in the effect body.
@@ -758,6 +742,27 @@ export function CreateExtraWorkPage({
       })
       .catch(() => {
         if (!cancelled) setCustomCustomPrices({ customerId, rows: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.customer]);
+
+  // Sprint 143 §4 — the chosen customer's ACTIVE folders. Load-only, no
+  // setState in the effect body; a stale set is neutralised by the
+  // customer-id tag when it is read. A 403 (customer-side actor)
+  // degrades to an empty list: the company categories still stand, so
+  // the picker is never left with nothing.
+  useEffect(() => {
+    const customerId = form.customer ? Number(form.customer) : null;
+    if (!customerId) return;
+    let cancelled = false;
+    listCustomerPriceFolders(customerId, { is_active: true })
+      .then((rows) => {
+        if (!cancelled) setCustomerFolders({ customerId, rows });
+      })
+      .catch(() => {
+        if (!cancelled) setCustomerFolders({ customerId, rows: [] });
       });
     return () => {
       cancelled = true;
@@ -908,18 +913,6 @@ export function CreateExtraWorkPage({
     return t(UNIT_TYPE_I18N_KEY[price.unit_type]);
   };
 
-  const filteredAgreedPrices = useMemo(() => {
-    const q = priceSearch.trim().toLowerCase();
-    if (!q) return agreedPrices;
-    return agreedPrices.filter((p) => {
-      const svc = serviceById.get(p.service);
-      const label = svc
-        ? `${svc.category_name} ${svc.name}`
-        : p.service_name;
-      return label.toLowerCase().includes(q);
-    });
-  }, [agreedPrices, priceSearch, serviceById]);
-
   // Owner request: surface each service's AGREED/contract price inline in
   // the cart's service-select option label. Built from the SAME currently-
   // valid agreed rows the browse panel shows (active + in-window for the
@@ -939,27 +932,52 @@ export function CreateExtraWorkPage({
     const svc = serviceById.get(serviceId);
     const unitLabel = svc ? t(UNIT_TYPE_I18N_KEY[svc.unit_type]) : "";
     const money = formatMoney(price.unit_price);
-    return unitLabel
-      ? ` — ${money} / ${unitLabel}`
-      : ` — ${money}`;
+    return unitLabel ? ` — ${money} / ${unitLabel}` : ` — ${money}`;
   };
 
-  // ---- Sprint 137 item 5 — catalog category filter ------------------
-  // The categories OFFERED are derived from the loaded catalog rather
-  // than fetched separately, so a category can never be offered that
-  // would yield an empty picker: every option here has >= 1 service
-  // behind it by construction.
-  const catalogCategories = useMemo(() => {
-    const byId = new Map<number, string>();
-    for (const svc of services) {
-      if (!byId.has(svc.category)) {
-        byId.set(svc.category, svc.category_name || String(svc.category));
-      }
+  // Sprint 145 — the Category control offers ONE thing: the categories
+  // that belong to the SELECTED CUSTOMER. Nothing before a customer is
+  // chosen (the select is disabled with a note saying so).
+  //
+  // It used to also offer the provider's own catalog groupings in a
+  // "your company's categories" group. That was wrong twice over: the
+  // owner never asked for it, and it put the provider's whole catalog
+  // in front of a CUSTOMER_USER — Amanda saw categories that have
+  // nothing to do with her customer.
+  //
+  // Nothing becomes unreachable: "All categories" is still the default
+  // and still shows the entire orderable catalog, so a service with no
+  // agreed price for this customer can still be ordered — which is what
+  // routes the request into the proposal flow (`resolve_price` has no
+  // fallback to a company default).
+  //
+  // ARCHIVED categories are excluded: the form offers only what can be
+  // ordered now.
+
+  // Guarded inline so TS narrows and a folder set fetched for a
+  // previously chosen customer is never shown against the current one.
+  const currentFolders =
+    customerFolders && String(customerFolders.customerId) === form.customer
+      ? customerFolders.rows.filter((f) => f.is_active)
+      : [];
+
+  // Which service ids each folder holds a price row for. Contract rows
+  // only — a `CustomerCustomPrice` has no `service` FK by construction,
+  // so it cannot narrow a catalog picker.
+  const serviceIdsByFolder = useMemo(() => {
+    const map = new Map<number, Set<number>>();
+    const rows =
+      customerPrices && String(customerPrices.customerId) === form.customer
+        ? customerPrices.rows
+        : [];
+    for (const row of rows) {
+      if (row.folder === null) continue;
+      const bucket = map.get(row.folder);
+      if (bucket) bucket.add(row.service);
+      else map.set(row.folder, new Set([row.service]));
     }
-    return [...byId.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [services]);
+    return map;
+  }, [customerPrices, form.customer]);
 
   const serviceSearchTerm = serviceSearch.trim().toLowerCase();
 
@@ -967,25 +985,98 @@ export function CreateExtraWorkPage({
   // deliberately ignored while searching. Every option label already
   // carries its category name, so a match from outside the current
   // filter is self-describing.
+  // Sprint 147 — what a CUSTOMER may pick from.
+  //
+  // Owner's rule: a customer sees ONLY the services a price has been
+  // agreed with them for, and those are the ones they can put in the
+  // cart. The rest of the provider's catalog is not theirs to browse.
+  //
+  // This does not close the door on asking for something new — the
+  // free-text custom line is still open to them, and a custom line is
+  // what routes the request into the pricing-proposal flow. So the
+  // proposal path survives; it is just reached by writing what you want
+  // rather than by shopping in someone else's catalog.
+  //
+  // Applied upstream of BOTH the category filter and the search, so a
+  // customer cannot reach past it by typing a name.
+  const catalogForActor = useMemo(() => {
+    if (!isCustomerActor) return services;
+    return services.filter((svc) => agreedPriceByServiceId.has(svc.id));
+  }, [services, isCustomerActor, agreedPriceByServiceId]);
+
   const searchMatches = useMemo(() => {
     if (!serviceSearchTerm) return null;
-    return services.filter((svc) =>
+    return catalogForActor.filter((svc) =>
       `${svc.category_name} ${svc.name}`
         .toLowerCase()
         .includes(serviceSearchTerm),
     );
-  }, [services, serviceSearchTerm]);
+  }, [catalogForActor, serviceSearchTerm]);
 
   const categoryFilteredServices = useMemo(() => {
-    if (!categoryFilter) return services;
-    return services.filter((svc) => String(svc.category) === categoryFilter);
-  }, [services, categoryFilter]);
+    if (!categoryFilter) return catalogForActor;
+    if (categoryFilter.startsWith("cat:")) {
+      const id = Number(categoryFilter.slice(4));
+      return catalogForActor.filter((svc) => svc.category === id);
+    }
+    if (categoryFilter.startsWith("fol:")) {
+      const id = Number(categoryFilter.slice(4));
+      const ids = serviceIdsByFolder.get(id);
+      if (!ids) return [];
+      return catalogForActor.filter((svc) => ids.has(svc.id));
+    }
+    return catalogForActor;
+  }, [catalogForActor, categoryFilter, serviceIdsByFolder]);
 
   // What the per-line pickers offer right now: search wins over the
   // category filter when one is typed.
   const offeredServices = searchMatches ?? categoryFilteredServices;
   const narrowingActive = Boolean(categoryFilter) || Boolean(serviceSearchTerm);
-  const hiddenServiceCount = services.length - offeredServices.length;
+  const hiddenServiceCount = catalogForActor.length - offeredServices.length;
+
+  // Sprint 145 — the agreed-prices browse panel obeys the SAME category
+  // choice as the service pickers. Picking a category and still being
+  // shown every agreed price underneath it is the "the screen
+  // contradicts itself" defect this series keeps removing.
+  //
+  // Defined here, below `serviceIdsByFolder`, because it reads it: a
+  // `const` is in the temporal dead zone until its own initialiser
+  // runs, so this cannot live further up the component.
+  //
+  // Search still wins over the category filter, exactly as it does for
+  // the service pickers, so a price the operator types the name of is
+  // never hidden by a filter they forgot was on.
+  const filteredAgreedPrices = useMemo(() => {
+    const q = priceSearch.trim().toLowerCase();
+    if (q) {
+      return agreedPrices.filter((p) => {
+        const svc = serviceById.get(p.service);
+        const label = svc
+          ? `${svc.category_name} ${svc.name}`
+          : p.service_name;
+        return label.toLowerCase().includes(q);
+      });
+    }
+    if (!categoryFilter) return agreedPrices;
+    if (categoryFilter.startsWith("fol:")) {
+      const ids = serviceIdsByFolder.get(Number(categoryFilter.slice(4)));
+      if (!ids) return [];
+      return agreedPrices.filter((p) => ids.has(p.service));
+    }
+    if (categoryFilter.startsWith("cat:")) {
+      const id = Number(categoryFilter.slice(4));
+      return agreedPrices.filter(
+        (p) => serviceById.get(p.service)?.category === id,
+      );
+    }
+    return agreedPrices;
+  }, [
+    agreedPrices,
+    priceSearch,
+    serviceById,
+    categoryFilter,
+    serviceIdsByFolder,
+  ]);
 
   function clearServiceNarrowing() {
     setCategoryFilter("");
@@ -1039,7 +1130,17 @@ export function CreateExtraWorkPage({
     if (parseCustomPriceId(value) !== null) return;
     if (!categoryFilter || value === CUSTOM_SERVICE_VALUE || !value) return;
     const picked = services.find((svc) => svc.id === Number(value));
-    if (picked && String(picked.category) !== categoryFilter) {
+    if (!picked) return;
+    // Sprint 143 §4 — the same guard, taught the two key shapes. A
+    // service picked from OUTSIDE the active filter clears that filter,
+    // so the list the operator is looking at never contradicts the line
+    // they just built.
+    const stillMatches = categoryFilter.startsWith("cat:")
+      ? picked.category === Number(categoryFilter.slice(4))
+      : categoryFilter.startsWith("fol:")
+        ? (serviceIdsByFolder.get(Number(categoryFilter.slice(4))) ?? new Set()).has(picked.id)
+        : true;
+    if (!stillMatches) {
       setCategoryFilter("");
     }
   }
@@ -1120,15 +1221,10 @@ export function CreateExtraWorkPage({
       setError(t("create.error_description_required"));
       return;
     }
-    if (!form.building || !form.customer) {
+    if (!effectiveBuilding || !form.customer) {
       setError(t("create.error_building_customer_required"));
       return;
     }
-    if (form.category === "OTHER" && !form.category_other_text.trim()) {
-      setError(t("create.error_category_other_required"));
-      return;
-    }
-
     // Cart validation.
     if (cartLines.length === 0) {
       setError(t("create.error_empty_cart"));
@@ -1266,13 +1362,21 @@ export function CreateExtraWorkPage({
     setSubmitting(true);
     try {
       const created = await createExtraWork({
-        building: Number(form.building),
+        building: Number(effectiveBuilding),
         customer: Number(form.customer),
         title: form.title.trim(),
         description: form.description.trim(),
-        category: form.category,
-        category_other_text:
-          form.category === "OTHER" ? form.category_other_text.trim() : "",
+        // Sprint 144 §1 — the single Category control writes ONE of
+        // these two (at most): a company catalog category, or this
+        // customer's price folder. `category` (the enum) is deliberately
+        // NOT sent — the server default (OTHER) applies, which is what
+        // "the form stopped asking" means.
+        ...(categoryFilter.startsWith("cat:")
+          ? { service_category: Number(categoryFilter.slice(4)) }
+          : {}),
+        ...(categoryFilter.startsWith("fol:")
+          ? { price_folder: Number(categoryFilter.slice(4)) }
+          : {}),
         urgency: form.urgency,
         preferred_date: form.preferred_date || null,
         // Sprint 128 — optional per-customer labels. `effective*` collapses a
@@ -1495,14 +1599,25 @@ export function CreateExtraWorkPage({
         </div>
       )}
 
-      {catalogWarning && (
+      {/* Sprint 147 — "empty" means two different things. The endpoint
+          returns a CUSTOMER only the services a price has been agreed
+          with them for, so empty means "nothing agreed with you yet",
+          NOT "the provider has no catalog". Telling a customer an admin
+          must go and set the catalog up is false and unactionable. */}
+      {catalogWarningKind && (
         <div
           className="alert-warning"
           style={{ marginBottom: 16 }}
           role="status"
           data-testid="create-ew-catalog-warning"
         >
-          {catalogWarning}
+          {t(
+            catalogWarningKind === "unavailable"
+              ? "create.warning_catalog_unavailable"
+              : isCustomerActor
+                ? "create.warning_no_agreed_services"
+                : "create.warning_catalog_empty",
+          )}
         </div>
       )}
 
@@ -1544,13 +1659,13 @@ export function CreateExtraWorkPage({
                   className="field-select"
                   value={form.customer}
                   onChange={(event) => update("customer", event.target.value)}
-                  disabled={filteredCustomers.length === 0}
+                  disabled={selectableCustomers.length === 0}
                   required
                 >
                   <option value="" disabled>
                     {t("create.field_customer_placeholder")}
                   </option>
-                  {filteredCustomers.map((c) => (
+                  {selectableCustomers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
@@ -1565,7 +1680,7 @@ export function CreateExtraWorkPage({
                   id="ew-building"
                   data-testid="extra-work-create-building"
                   className="field-select"
-                  value={form.building}
+                  value={effectiveBuilding}
                   onChange={(event) => update("building", event.target.value)}
                   disabled={filteredBuildings.length === 0}
                   required
@@ -1644,33 +1759,58 @@ export function CreateExtraWorkPage({
               {t("create.what_section_title")}
             </div>
             <div className="form-2col">
+              {/* Sprint 144 §1 — ONE "Category" on the page.
+                  This used to be `ExtraWorkRequest.category`, the fixed
+                  generic enum (Deep cleaning / Window cleaning / …),
+                  while the REAL picker — the company's catalog
+                  categories plus this customer's price folders — sat
+                  separately above the cart as a filter. Two controls
+                  called "Category", one of which had nothing to do with
+                  the operator's catalog.
+                  They are now the same control: choosing here both
+                  CLASSIFIES the request (`service_category` /
+                  `price_folder` on the model) and FILTERS the service
+                  lines below. The enum column is untouched and keeps its
+                  `default=OTHER` — the form simply stops asking, so old
+                  rows keep their value and new ones take the default.
+                  Fully migrating the enum away is `## NEXT` item 18. */}
               <div className="field">
-                <label className="field-label" htmlFor="ew-category">
+                <label className="field-label" htmlFor="ew-catalog-category">
                   {t("create.field_category")}
                 </label>
                 <select
-                  id="ew-category"
+                  id="ew-catalog-category"
                   className="field-select"
-                  value={form.category}
-                  onChange={(event) =>
-                    update("category", event.target.value as ExtraWorkCategory)
-                  }
+                  data-testid="extra-work-create-catalog-category"
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  // Sprint 145 — a category belongs to a CUSTOMER, so
+                  // there is nothing to choose from before one is
+                  // picked. Disabled rather than showing the provider's
+                  // own catalog groupings: those are not the customer's
+                  // categories, and offering them here put a foreign
+                  // provider's headings in front of a customer user.
+                  disabled={!form.customer}
                 >
-                  {CATEGORY_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {t(CATEGORY_I18N_KEY[value])}
+                  <option value="">
+                    {t("create.catalog_filter.all_categories")}
+                  </option>
+                  {/* Sprint 145 — ONE flat list: the categories that
+                      belong to the selected customer. Archived ones are
+                      excluded upstream (`currentFolders`), so the form
+                      only ever offers what can be ordered now. */}
+                  {currentFolders.map((folder) => (
+                    <option key={`fol-${folder.id}`} value={`fol:${folder.id}`}>
+                      {folder.name}
                     </option>
                   ))}
                 </select>
-                {/* Sprint 137 item 5 — this dropdown is
-                    `ExtraWorkRequest.category`, the fixed enum that
-                    classifies the REQUEST. It is NOT the ServiceCategory
-                    catalog the pricing page manages, and the two were
-                    silently sharing the word "category". Naming the
-                    difference is the cheap half of the fix; the cart's
-                    own catalog-category filter is the other half. */}
                 <div className="muted small" style={{ marginTop: 4 }}>
-                  {t("create.field_category_hint")}
+                  {!form.customer
+                    ? t("create.field_category_pick_customer_first")
+                    : currentFolders.length === 0
+                      ? t("create.field_category_customer_has_none")
+                      : t("create.field_category_hint")}
                 </div>
               </div>
               <div className="field">
@@ -1693,28 +1833,6 @@ export function CreateExtraWorkPage({
                 </select>
               </div>
             </div>
-
-            {form.category === "OTHER" && (
-              <div className="field">
-                <label className="field-label" htmlFor="ew-category-other">
-                  {t("create.field_category_other_text")}
-                </label>
-                <input
-                  id="ew-category-other"
-                  className="field-input"
-                  type="text"
-                  maxLength={128}
-                  placeholder={t(
-                    "create.field_category_other_text_placeholder",
-                  )}
-                  value={form.category_other_text}
-                  onChange={(event) =>
-                    update("category_other_text", event.target.value)
-                  }
-                  required
-                />
-              </div>
-            )}
 
             <div className="field">
               <label className="field-label" htmlFor="ew-title">
@@ -1830,7 +1948,11 @@ export function CreateExtraWorkPage({
                       className="muted small"
                       data-testid="extra-work-create-agreed-prices-empty"
                     >
-                      {t("create.prices.empty")}
+                      {t(
+                        isCustomerActor
+                          ? "create.prices.empty_customer"
+                          : "create.prices.empty",
+                      )}
                     </div>
                   ) : (
                     <>
@@ -1989,33 +2111,16 @@ export function CreateExtraWorkPage({
                 catalog category, plus a catalog-wide search. Both are
                 opt-in: the default is "All categories" with no search,
                 which is byte-identical to the pre-137 picker. */}
+            {/* Sprint 144 §1 — the category half of this bar MOVED UP
+                into the single "Category" control under "What needs to
+                happen". Only the search box is left here, beside the
+                lines it searches. */}
             {services.length > 0 && (
               <div
                 className="form-2col"
                 data-testid="extra-work-create-catalog-filter"
                 style={{ marginBottom: 12 }}
               >
-                <div className="field">
-                  <label className="field-label" htmlFor="ew-catalog-category">
-                    {t("create.catalog_filter.category_label")}
-                  </label>
-                  <select
-                    id="ew-catalog-category"
-                    className="field-select"
-                    data-testid="extra-work-create-catalog-category"
-                    value={categoryFilter}
-                    onChange={(event) => setCategoryFilter(event.target.value)}
-                  >
-                    <option value="">
-                      {t("create.catalog_filter.all_categories")}
-                    </option>
-                    {catalogCategories.map((category) => (
-                      <option key={category.id} value={String(category.id)}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="field">
                   <label className="field-label" htmlFor="ew-catalog-search">
                     {t("create.catalog_filter.search_label")}
@@ -2033,6 +2138,17 @@ export function CreateExtraWorkPage({
                     {t("create.catalog_filter.search_hint")}
                   </div>
                 </div>
+                {/* Sprint 147 — say plainly what this list is, and
+                    where to go for anything else, so an absent service
+                    reads as "not agreed with you" rather than as a
+                    broken search. */}
+                {isCustomerActor && (
+                  <div className="field">
+                    <div className="muted small">
+                      {t("create.catalog_filter.customer_scope_note")}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2460,7 +2576,11 @@ export function CreateExtraWorkPage({
                       </div>
                     )}
                     <div className="muted small" style={{ marginTop: 6 }}>
-                      {t("create.preview.totals_display_only")}
+                      {t(
+                        isCustomerActor
+                          ? "create.preview.totals_display_only_customer"
+                          : "create.preview.totals_display_only",
+                      )}
                     </div>
                   </div>
                 )}

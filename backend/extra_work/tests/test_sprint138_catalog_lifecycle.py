@@ -31,7 +31,9 @@ Covered here:
   * category service counts, scoped to the actor's visible catalog
   * cascade archive: category + services, one transaction, counted
   * unarchive restores the category alone
-  * cascade archive is SUPER_ADMIN-only (categories are GLOBAL)
+  * cascade archive is gated by the ordinary per-company catalog rule
+    (Sprint 142; it was SUPER_ADMIN-only while categories were GLOBAL —
+    a COMPANY_ADMIN now archives their own and 404s on a foreign one)
   * an emptied category really can be deleted (nothing else PROTECTs it)
 """
 from __future__ import annotations
@@ -67,8 +69,18 @@ class CatalogLifecycleFixtureMixin(TenantFixtureMixin):
         CompanyUserMembership.objects.get_or_create(
             user=self.company_admin, company=self.company
         )
-        self.category = ServiceCategory.objects.create(name="Cleaning")
-        self.empty_category = ServiceCategory.objects.create(name="Empty")
+        self.category = ServiceCategory.objects.create(
+            company=self.company, name="Cleaning"
+        )
+        self.empty_category = ServiceCategory.objects.create(
+            company=self.company, name="Empty"
+        )
+        # Sprint 142 — the other provider's catalog now needs its own
+        # category. Several tests below assert this one is INVISIBLE to
+        # `self.company_admin`, which is the point of the sprint.
+        self.other_category = ServiceCategory.objects.create(
+            company=self.other_company, name="Cleaning"
+        )
         self.priced_service = Service.objects.create(
             category=self.category,
             company=self.company,
@@ -204,11 +216,21 @@ class CategoryServiceCountTests(CatalogLifecycleFixtureMixin, APITestCase):
             by_id[self.category.id]["active_service_count"], 1
         )
 
-    def test_counts_are_scoped_to_the_actors_visible_catalog(self):
-        """Categories are GLOBAL but services are company-scoped, so an
-        unscoped count would tell a COMPANY_ADMIN a category holds rows
-        they cannot see."""
-        other_category = ServiceCategory.objects.create(name="Foreign only")
+    def test_foreign_category_is_not_listed_at_all(self):
+        """Sprint 142 replaces the Sprint 138 version of this test.
+
+        The old one asserted a COMPANY_ADMIN could SEE a foreign
+        category but with a `service_count` of 0 — correct while
+        categories were global, and now the wrong shape entirely: the
+        foreign category is not in the CA's list at all. The count
+        scoping it exercised still exists (see
+        `_annotate_category_service_counts`) but is only reachable by
+        pre-142 rows now, so the assertion worth keeping is the
+        stronger one.
+        """
+        other_category = ServiceCategory.objects.create(
+            company=self.other_company, name="Foreign only"
+        )
         Service.objects.create(
             category=other_category,
             company=self.other_company,
@@ -219,13 +241,18 @@ class CategoryServiceCountTests(CatalogLifecycleFixtureMixin, APITestCase):
 
         self.authenticate(self.company_admin)
         response = self.client.get(CATEGORY_LIST_URL)
-        by_id = {row["id"]: row for row in response.data["results"]}
-        # Visible to the CA as a (global) category, but holding nothing
-        # the CA owns.
-        self.assertEqual(by_id[other_category.id]["service_count"], 0)
+        ids = {row["id"] for row in response.data["results"]}
+        self.assertNotIn(other_category.id, ids)
+        self.assertIn(self.category.id, ids)
 
-        # SUPER_ADMIN — the only role that may act on a category — sees
-        # the COMPLETE count, which is what PROTECT actually depends on.
+        # And it is a 404 by id, not a 403 — the scoped queryset is what
+        # `get_object()` resolves through.
+        detail = self.client.get(
+            CATEGORY_DETAIL_URL.format(cat_id=other_category.id)
+        )
+        self.assertEqual(detail.status_code, status.HTTP_404_NOT_FOUND)
+
+        # SUPER_ADMIN sees it, with the COMPLETE count PROTECT depends on.
         self.authenticate(self.super_admin)
         sa_response = self.client.get(CATEGORY_LIST_URL)
         sa_by_id = {row["id"]: row for row in sa_response.data["results"]}
@@ -276,37 +303,67 @@ class CategoryCascadeArchiveTests(
             0,
         )
 
-    def test_archive_reports_the_companies_it_reached(self):
-        """A GLOBAL category can hold services from several providers;
-        archiving it reaches all of them. The count is reported so the
-        UI can say so rather than let it happen silently."""
+    def test_archive_no_longer_reports_a_company_count(self):
+        """Sprint 142 replaces `test_archive_reports_the_companies_it_
+        reached`.
+
+        That test archived a category holding TWO providers' services
+        and asserted `affected_company_count == 2`. Neither half is
+        reachable now: a category belongs to one company, its services
+        must belong to that same company
+        (`_enforce_same_company_category`), so the count could only ever
+        be 0 or 1 — a "this touched N providers" warning that can never
+        fire. The field is gone, and this asserts it stays gone rather
+        than silently returning a constant the UI would keep
+        special-casing.
+        """
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            CATEGORY_ARCHIVE_URL.format(cat_id=self.category.id)
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["deactivated_service_count"], 2)
+        self.assertNotIn("affected_company_count", response.data)
+
+    def test_company_admin_can_cascade_archive_its_own_category(self):
+        """Sprint 142 — the SA-only rule existed ONLY because a global
+        category's archive reached every provider. It cannot now, so a
+        COMPANY_ADMIN manages their own categories like any other
+        catalog row."""
+        self.authenticate(self.company_admin)
+        response = self.client.post(
+            CATEGORY_ARCHIVE_URL.format(cat_id=self.category.id)
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.category.refresh_from_db()
+        self.assertFalse(self.category.is_active)
+        self.assertFalse(
+            Service.objects.filter(
+                category=self.category, is_active=True
+            ).exists()
+        )
+
+    def test_company_admin_cannot_cascade_archive_a_foreign_category(self):
+        """The other half of the same rule: opening writes to CA must
+        not open them to ANOTHER company's rows. 404, because the
+        archive view resolves through `filter_categories_for`."""
         Service.objects.create(
-            category=self.category,
+            category=self.other_category,
             company=self.other_company,
             name="Other provider's service",
             unit_type=ExtraWorkPricingUnitType.HOURS,
             default_unit_price=Decimal("12.00"),
         )
-        self.authenticate(self.super_admin)
-        response = self.client.post(
-            CATEGORY_ARCHIVE_URL.format(cat_id=self.category.id)
-        )
-        self.assertEqual(response.data["deactivated_service_count"], 3)
-        self.assertEqual(response.data["affected_company_count"], 2)
-
-    def test_company_admin_cannot_cascade_archive(self):
-        """Categories are global — same SA-only rule as every other
-        category write."""
         self.authenticate(self.company_admin)
         response = self.client.post(
-            CATEGORY_ARCHIVE_URL.format(cat_id=self.category.id)
+            CATEGORY_ARCHIVE_URL.format(cat_id=self.other_category.id)
         )
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.category.refresh_from_db()
-        self.assertTrue(self.category.is_active)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.other_category.refresh_from_db()
+        self.assertTrue(self.other_category.is_active)
         self.assertTrue(
             Service.objects.filter(
-                category=self.category, is_active=True
+                category=self.other_category, is_active=True
             ).exists()
         )
 
@@ -376,7 +433,7 @@ class ServiceCompanyFilterTests(CatalogLifecycleFixtureMixin, APITestCase):
     def setUp(self):
         super().setUp()
         self.foreign_service = Service.objects.create(
-            category=self.category,
+            category=self.other_category,
             company=self.other_company,
             name="Other provider service",
             unit_type=ExtraWorkPricingUnitType.HOURS,

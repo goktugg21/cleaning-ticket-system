@@ -85,7 +85,7 @@ class ProposalAuditFixtureMixin:
             building=cls.building,
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
-        cls.service_cat = ServiceCategory.objects.create(name="Audit-B8-Cat")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name="Audit-B8-Cat")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.company,

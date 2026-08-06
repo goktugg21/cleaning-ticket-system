@@ -159,7 +159,7 @@ class _B3Fixture(TestCase):
 
         # A contract price so the "can_use_contract_price_direct_order"
         # branch evaluates True for customer A.
-        cls.service_cat = ServiceCategory.objects.create(name="Cat B3")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company_a, name="Cat B3")
         cls.service = Service.objects.create(
             category=cls.service_cat,
             company=cls.company_a,

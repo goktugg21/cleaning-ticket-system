@@ -29,6 +29,7 @@ from rest_framework import generics, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from accounts.models import UserRole
 from accounts.permissions import IsAuthenticatedAndActive
@@ -48,6 +49,7 @@ from .models import (
     ExtraWorkPricingLineItem,
     ExtraWorkRequest,
     ExtraWorkRequestIntent,
+    ExtraWorkRequestItem,
     ExtraWorkStatus,
     ExtraWorkStatusHistory,
 )
@@ -990,6 +992,67 @@ class ExtraWorkRequestViewSet(
                 }
                 for row in rows
             ],
+            status=status.HTTP_200_OK,
+        )
+
+
+class ExtraWorkCategoryOptionsView(APIView):
+    """Sprint 143 §6 — the options for the Extra Work list's category
+    filter, split into what still exists and what only survives in
+    history.
+
+    The client cannot compute the second group: it needs the set of
+    `ExtraWorkRequestItem.snapshot_service_category_name` values that no
+    longer match any live `ServiceCategory`, and it never sees line items
+    on the list endpoint. Hence one small server-side view.
+
+    Both lists are derived from the SCOPED Extra Work queryset
+    (`scope_extra_work_for`), so a filter option can never reveal a
+    category name from a company the actor cannot see — the same rule
+    Sprint 142 established for the catalog itself, applied to the
+    dropdown that filters over it.
+
+    `live` is what the actor's own catalog currently offers, ACTIVE only:
+    the filter should not offer a retired category as if it were current
+    (it will still appear under `historical` if any shipped request used
+    it, which is exactly where a retired category belongs).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        from .catalog_scope import filter_categories_for
+        from .models import ServiceCategory
+
+        live_qs = filter_categories_for(
+            request.user, ServiceCategory.objects.filter(is_active=True)
+        )
+        live = sorted({c.name for c in live_qs})
+        live_normalized = {n.strip().lower() for n in live}
+
+        scoped = scope_extra_work_for(request.user)
+        used = (
+            ExtraWorkRequestItem.objects.filter(extra_work_request__in=scoped)
+            .exclude(snapshot_service_category_name="")
+            .values_list("snapshot_service_category_name", flat=True)
+            .distinct()
+        )
+        # A name is "historical" when nothing live matches it — the
+        # category was renamed, archived or deleted after the order was
+        # placed. Deduped case-insensitively so two spellings of the same
+        # retired name do not both appear.
+        historical = {}
+        for raw in used:
+            key = (raw or "").strip().lower()
+            if not key or key in live_normalized:
+                continue
+            historical.setdefault(key, raw)
+
+        return Response(
+            {
+                "live": live,
+                "historical": sorted(historical.values()),
+            },
             status=status.HTTP_200_OK,
         )
 

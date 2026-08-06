@@ -55,7 +55,16 @@ class _TwoCompanyFixture(TestCase):
         cls.customer_user_a = _mk("cu-a-123@example.com", "CUSTOMER_USER")
         CompanyUserMembership.objects.create(user=cls.ca_a, company=cls.company_a)
         CompanyUserMembership.objects.create(user=cls.ca_b, company=cls.company_b)
-        cls.category = ServiceCategory.objects.create(name="Cat 123 shared")
+        # Sprint 142 — a category belongs to one provider, so the
+        # "shared" category this fixture used to have is now one per
+        # company. `self.category` stays the company-A one so the many
+        # ca_a call sites below are unchanged.
+        cls.category = ServiceCategory.objects.create(
+            company=cls.company_a, name="Cat 123"
+        )
+        cls.category_b = ServiceCategory.objects.create(
+            company=cls.company_b, name="Cat 123"
+        )
         cls.customer_a = Customer.objects.create(
             company=cls.company_a, name="Customer A"
         )
@@ -250,10 +259,14 @@ class ManagedUnitCrossTenantTests(_TwoCompanyFixture):
         self.assertEqual(ids, {self.unit_a.id, unit_b.id})
 
     def test_service_cannot_link_a_foreign_companys_managed_unit_on_create(self):
+        # Sprint 142 — `category_b`, deliberately: with company A's
+        # category here the request would be rejected by
+        # `_enforce_same_company_category` instead, and this test would
+        # silently stop covering the managed-unit rule it is named for.
         resp = self._api(self.ca_b).post(
             "/api/services/",
             {
-                "category": self.category.id,
+                "category": self.category_b.id,
                 "name": "cross-tenant-attempt",
                 "unit_type": "OTHER",
                 "managed_unit": self.unit_a.id,
@@ -272,7 +285,7 @@ class ManagedUnitCrossTenantTests(_TwoCompanyFixture):
     def test_service_cannot_be_repointed_at_a_foreign_unit_on_update(self):
         svc = Service.objects.create(
             company=self.company_b,
-            category=self.category,
+            category=self.category_b,
             name="svc-b",
             unit_type="OTHER",
             custom_unit_label="pallet",

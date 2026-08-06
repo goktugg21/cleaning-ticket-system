@@ -47,7 +47,14 @@ def bulk_raise_url(customer_id):
 class BulkRaiseFixtureMixin(TenantFixtureMixin):
     def setUp(self):
         super().setUp()
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(
+            company=self.company, name="Cleaning"
+        )
+        # Sprint 142 — see test_m5_service_bulk_raise: the other-company
+        # service needs its own company's category.
+        self.other_category = ServiceCategory.objects.create(
+            company=self.other_company, name="Cleaning"
+        )
         self.service_a = Service.objects.create(
             category=self.category,
             company=self.company,
@@ -70,7 +77,7 @@ class BulkRaiseFixtureMixin(TenantFixtureMixin):
             default_unit_price=Decimal("80.00"),
         )
         self.other_service = Service.objects.create(
-            category=self.category,
+            category=self.other_category,
             company=self.other_company,
             name="Other-company service",
             unit_type=ExtraWorkPricingUnitType.HOURS,

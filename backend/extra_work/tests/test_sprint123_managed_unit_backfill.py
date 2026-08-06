@@ -70,7 +70,15 @@ class ManagedUnitBackfillTests(TestCase):
             role="COMPANY_ADMIN",
             full_name="Admin",
         )
-        cls.category = ServiceCategory.objects.create(name="Cat 123")
+        # Sprint 142 — one category per company. This fixture creates
+        # services for BOTH, and a category now belongs to exactly one
+        # provider, so `_service()` below picks the matching one.
+        cls.category = ServiceCategory.objects.create(
+            company=cls.company_a, name="Cat 123"
+        )
+        cls.category_b = ServiceCategory.objects.create(
+            company=cls.company_b, name="Cat 123"
+        )
         cls.customer_a = Customer.objects.create(
             company=cls.company_a, name="Customer A"
         )
@@ -81,7 +89,11 @@ class ManagedUnitBackfillTests(TestCase):
     def _service(self, company, label, created_day):
         svc = Service.objects.create(
             company=company,
-            category=self.category,
+            category=(
+                self.category
+                if company == self.company_a
+                else self.category_b
+            ),
             name=f"svc-{label}-{created_day}",
             unit_type="OTHER",
             custom_unit_label=label,
@@ -194,6 +206,10 @@ class ManagedUnitBackfillTests(TestCase):
         Service.objects.all().delete()
         CustomerCustomPrice.objects.all().delete()
         Customer.objects.all().delete()
+        # Sprint 142 — categories must go before companies now:
+        # `ServiceCategory.company` is PROTECT, so a leftover category
+        # would make the Company delete raise instead of clearing the DB.
+        ServiceCategory.objects.all().delete()
         Company.objects.all().delete()
         backfill_managed_units(live_apps, None)  # must not raise
         self.assertEqual(ManagedUnit.objects.count(), 0)

@@ -10,12 +10,16 @@ import {
   copyDefaultPricesToCustomer,
   createCustomerCustomPrice,
   createCustomerPrice,
+  createCustomerPriceFolder,
   deleteCustomerCustomPrice,
   deleteCustomerPrice,
+  deleteCustomerPriceFolder,
   getCustomer,
   listCustomerCustomPrices,
+  listCustomerPriceFolders,
   listCustomerPrices,
   listServiceCategories,
+  updateCustomerPriceFolder,
   listServices,
   updateCustomerCustomPrice,
   updateCustomerPrice,
@@ -25,6 +29,7 @@ import type {
   CustomerCustomPrice,
   CustomerCustomPriceCreatePayload,
   CustomerPriceCopyFromDefaultResult,
+  CustomerPriceFolder,
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   Service,
@@ -113,13 +118,21 @@ type PricingRow =
  *               and therefore no category at all (see the model
  *               docstring); they still have to live somewhere.
  *   "UNKNOWN" — a contract row whose `service` is missing from the
- *               catalog map. Should not happen (the page loads the FULL
- *               catalog, archived services included), but a row that
- *               silently vanished from every bucket is exactly the class
- *               of bug this sprint exists to kill, so it gets a visible
- *               home rather than a filter that drops it.
+ *               catalog map. Should not happen, but a row that silently
+ *               vanished from every bucket is exactly the class of bug
+ *               this sprint exists to kill, so it gets a visible home
+ *               rather than a filter that drops it.
+ *   "NO_FOLDER" — Sprint 143: a contract row that is in no folder.
+ *               Folderless is LEGAL and permanent (every pre-143 row is
+ *               one, and "delete the folder, keep the prices" makes
+ *               more), so it is a first-class bucket, not an error case.
+ *
+ * A number is a `CustomerPriceFolder.id` since Sprint 143 — it was a
+ * `ServiceCategory.id` before. The page is folder-first now: folders
+ * belong to the CUSTOMER, catalog categories belong to the provider,
+ * and it is the customer's own arrangement this page exists to show.
  */
-type CategoryKey = number | "CUSTOM" | "UNKNOWN";
+type CategoryKey = number | "CUSTOM" | "UNKNOWN" | "NO_FOLDER";
 
 function todayISO(): string {
   const d = new Date();
@@ -213,6 +226,9 @@ export function CustomerPricingPage() {
   // an EMPTY category still shows up: the operator has to be able to
   // see that a category exists before pricing anything into it.
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
+  // Sprint 143 §3 — the customer's own folders. `categories` stays: the
+  // "copy a company category with its services" flow picks from it.
+  const [folders, setFolders] = useState<CustomerPriceFolder[]>([]);
   // null = the category-list (index) view; otherwise the drilled-into
   // bucket. The drill-down is a pure view concern — it never filters
   // what is fetched, so nothing is lost by navigating.
@@ -243,7 +259,9 @@ export function CustomerPricingPage() {
   // sprint brief) — DELETE on both pricing endpoints soft-archives, so
   // a button saying "Delete" would be the exact lie item 2 set out to
   // fix.
-  const [editMode, setEditMode] = useState(false);
+  // The operator's INTENT to be in edit mode. What the UI actually
+  // renders is the derived `editMode` further down — see the note there.
+  const [editModeRequested, setEditModeRequested] = useState(false);
   const [bulkSelection, setBulkSelection] = useState<string[]>([]);
   const bulkArchiveDialogRef = useRef<ConfirmDialogHandle>(null);
   const [bulkArchiveBusy, setBulkArchiveBusy] = useState(false);
@@ -274,6 +292,42 @@ export function CustomerPricingPage() {
   // only). `copyResult` holds the created/skipped summary after a
   // successful run so the per-service skip outcome stays visible.
   const [copyOpen, setCopyOpen] = useState(false);
+
+  // ---- Sprint 143 §3 — folder CRUD -------------------------------------
+  // "New folder" / "Rename" share one modal; `folderEditTarget` null =
+  // create.
+  const [folderModalOpen, setFolderModalOpen] = useState(false);
+  const [folderEditTarget, setFolderEditTarget] =
+    useState<CustomerPriceFolder | null>(null);
+  const [folderName, setFolderName] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderError, setFolderError] = useState("");
+
+  // Delete offers TWO honest actions rather than one ambiguous one:
+  // folder-only (rows survive, become folderless) or with-contents (rows
+  // ARCHIVED, never destroyed — shipped Extra Work holds a live FK).
+  const [folderDeleteTarget, setFolderDeleteTarget] =
+    useState<CustomerPriceFolder | null>(null);
+  const [folderDeleteBusy, setFolderDeleteBusy] = useState(false);
+
+  // "Copy a company category, with its services" — the second way to
+  // create a folder. Picks ONE category, then services from it (at least
+  // one required); the folder name defaults to the category's and is
+  // editable before confirming.
+  const [fromCategoryOpen, setFromCategoryOpen] = useState(false);
+  const [fromCategoryId, setFromCategoryId] = useState<number | "">("");
+  const [fromCategoryName, setFromCategoryName] = useState("");
+  const [fromCategoryServiceIds, setFromCategoryServiceIds] = useState<
+    number[]
+  >([]);
+  const [fromCategoryBusy, setFromCategoryBusy] = useState(false);
+  const [fromCategoryError, setFromCategoryError] = useState("");
+
+  // Bulk "move to folder", the mechanism that fills and empties folders.
+  const [moveFolderOpen, setMoveFolderOpen] = useState(false);
+  const [moveFolderTarget, setMoveFolderTarget] = useState<number | "">("");
+  const [moveFolderBusy, setMoveFolderBusy] = useState(false);
+  const [moveFolderError, setMoveFolderError] = useState("");
   const [copySelectedServiceIds, setCopySelectedServiceIds] = useState<
     number[]
   >([]);
@@ -303,6 +357,7 @@ export function CustomerPricingPage() {
           servicesData,
           customPricesData,
           categoriesData,
+          foldersData,
         ] = await Promise.all([
             getCustomer(customerId),
             // Sprint 137 item 2 — archived rows are hidden unless the
@@ -323,13 +378,32 @@ export function CustomerPricingPage() {
             // Sprint 137 item 4 — every category, including the ones
             // with no priced rows yet (see the `categories` state).
             listServiceCategories(),
+            // Sprint 143 §3 — the customer's own folders.
+            listCustomerPriceFolders(customerId),
           ]);
         if (cancelled.current) return;
         setCustomer(customerData);
         setPrices(pricesData);
         setServices(servicesData);
         setCustomPrices(customPricesData);
-        setCategories(categoriesData);
+        // Sprint 142 — narrow to THIS customer's provider company.
+        // Categories gained a `company` FK this sprint, and "every
+        // category" (Sprint 137 item 4) was the right call only while
+        // they were global: for a SUPER_ADMIN on a multi-company tenant
+        // it would now put ANOTHER provider's category headings on this
+        // customer's pricing page, none of which can ever hold a row
+        // that is priceable here. Filtered client-side rather than by a
+        // `?company=` param because the customer's company is only known
+        // once `getCustomer` resolves, and these six calls are
+        // deliberately parallel — a serial round-trip to save a
+        // one-line filter is the wrong trade.
+        setCategories(
+          categoriesData.filter((c) => c.company === customerData.company),
+        );
+        setFolders(foldersData);
+        // Sprint 142 (#127 review carry-over) — clear a stale banner on
+        // a successful (re)load. See `ServicesAdminPage`'s load effect.
+        setLoadError("");
         setLoading(false);
       } catch (err) {
         if (!cancelled.current) {
@@ -463,6 +537,12 @@ export function CustomerPricingPage() {
       valid_to: form.valid_to === "" ? null : form.valid_to,
       is_active: form.is_active,
     };
+    // Sprint 143 §3 — the folder a NEW row lands in: the one the
+    // operator is currently inside, or none when they are on the index
+    // or in a sentinel bucket (folderless / custom / unknown), where
+    // "no folder" is the honest answer.
+    const creatingInFolderId =
+      typeof activeCategory === "number" ? activeCategory : null;
     try {
       if (isCustom) {
         const payload: CustomerCustomPriceCreatePayload = {
@@ -476,7 +556,14 @@ export function CustomerPricingPage() {
           managed_unit: form.unit_type === "OTHER" ? form.managed_unit : null,
         };
         if (mode === "create") {
-          await createCustomerCustomPrice(numericId, payload);
+          // Sprint 143 §3 — adding from INSIDE a folder files the new
+          // row there. That is the "add a customer-only line to a
+          // folder" flow: the operator drilled into the folder, so the
+          // folder is what they meant.
+          await createCustomerCustomPrice(numericId, {
+            ...payload,
+            folder: creatingInFolderId,
+          });
           await refreshPricingRows(numericId);
           closeFormModal();
         } else if (mode === "edit" && selected?.kind === "custom") {
@@ -495,7 +582,10 @@ export function CustomerPricingPage() {
           service: Number(form.service),
         };
         if (mode === "create") {
-          await createCustomerPrice(numericId, payload);
+          await createCustomerPrice(numericId, {
+            ...payload,
+            folder: creatingInFolderId,
+          });
           await refreshPricingRows(numericId);
           closeFormModal();
         } else if (mode === "edit" && selected?.kind === "contract") {
@@ -546,14 +636,20 @@ export function CustomerPricingPage() {
     // silently created by an error message that was wrong. Swallowing
     // the re-read failure here is what makes that impossible.
     try {
-      const [pricesData, customPricesData] = await Promise.all([
+      const [pricesData, customPricesData, foldersData] = await Promise.all([
         listCustomerPrices(customerId, { includeArchived: showArchived }),
         listCustomerCustomPrices(customerId, {
           includeArchived: showArchived,
         }),
+        // Sprint 143 §3 — folders move with the rows: a create, a
+        // delete, or a bulk move changes a folder's `price_count`, which
+        // is what every index card shows.
+        listCustomerPriceFolders(customerId),
       ]);
       setPrices(pricesData);
       setCustomPrices(customPricesData);
+      setFolders(foldersData);
+      setLoadError("");
     } catch {
       setLoadError(t("admin.refresh_after_save_failed"));
     }
@@ -624,7 +720,7 @@ export function CustomerPricingPage() {
   }
 
   function exitEditMode() {
-    setEditMode(false);
+    setEditModeRequested(false);
     setBulkSelection([]);
   }
 
@@ -657,8 +753,12 @@ export function CustomerPricingPage() {
   async function handleConfirmBulkArchive() {
     if (numericId === null) return;
     setBulkArchiveBusy(true);
-    const targets = visibleRows.filter((entry) =>
-      bulkSelection.includes(rowKey(entry)),
+    // Sprint 142 (#127 review carry-over) — `selectableRows`, and the
+    // pruned `activeBulkSelection`: an archived row must never be a
+    // bulk-archive target (Sprint 138 §3), and a stale key must not
+    // resurrect one. See the note beside `activeBulkSelection`.
+    const targets = selectableRows.filter((entry) =>
+      activeBulkSelection.includes(rowKey(entry)),
     );
     const failed: string[] = [];
     const archivedContractIds: number[] = [];
@@ -941,14 +1041,40 @@ export function CustomerPricingPage() {
     ...customPrices.map((row): PricingRow => ({ kind: "custom", row })),
   ];
 
+  // Sprint 143 §3 — the folder ids that actually HAVE an index card.
+  // Same `knownIds` guard Sprint 142.1 introduced for categories, kept
+  // because the rule it enforces has now bitten twice: NO PRICED ROW MAY
+  // BE UNREACHABLE FROM THE INDEX. A row pointing at a folder the page
+  // did not load falls back to a sentinel rather than into a numeric
+  // bucket with no card.
+  const knownFolderIds = new Set(folders.map((f) => f.id));
+
   /**
-   * Sprint 137 item 4 — which bucket a row is filed under. A custom row
-   * has no category by construction; a contract row takes its service's.
-   * See the `CategoryKey` docstring for why "UNKNOWN" exists.
+   * Sprint 143 §3 — which bucket a row is filed under. FOLDER FIRST:
+   * the page groups by the customer's own folders, not by the provider's
+   * catalog categories (a category is shared across the company's
+   * customers; a folder is this customer's arrangement of what was
+   * agreed with them).
+   *
+   * Precedence, and every branch lands on a key that has a card:
+   *   1. its folder, when set AND loaded (`knownFolderIds`);
+   *   2. "CUSTOM"    — a folderless customer-only line;
+   *   3. "UNKNOWN"   — a contract row whose service is missing from the
+   *                    catalog map;
+   *   4. "NO_FOLDER" — a folderless contract row. The common case for
+   *                    every pre-143 row.
+   *
+   * The `knownFolderIds` guard is Sprint 142.1's, kept deliberately: the
+   * "row in a numeric bucket with no card" failure has now happened
+   * twice, and it does not degrade — the row vanishes from the index and
+   * from every count.
    */
   function categoryKeyOf(entry: PricingRow): CategoryKey {
+    const folderId = entry.row.folder;
+    if (folderId !== null && knownFolderIds.has(folderId)) return folderId;
     if (entry.kind === "custom") return "CUSTOM";
-    return serviceById.get(entry.row.service)?.category ?? "UNKNOWN";
+    if (serviceById.get(entry.row.service) === undefined) return "UNKNOWN";
+    return "NO_FOLDER";
   }
 
   // Bucket EVERY row by category. Derived from `unifiedRows`, so the
@@ -965,43 +1091,62 @@ export function CustomerPricingPage() {
     }
   }
 
-  // The index cards: every real category (INCLUDING the empty ones —
-  // the operator needs to see a category exists before pricing into
-  // it), then the synthetic buckets, which appear only when they
-  // actually hold rows.
+  // The index cards: every FOLDER (including the empty ones — an
+  // operator who just created one has to see it exists before filing
+  // anything into it), then the three synthetic buckets, which appear
+  // only when they actually hold rows.
+  const bucketCount = (key: CategoryKey) =>
+    (rowsByCategory.get(key) ?? []).length;
   const categoryCards: {
     key: CategoryKey;
     label: string;
     count: number;
     isActive: boolean;
   }[] = [
-    ...categories.map((category) => ({
-      key: category.id as CategoryKey,
-      label: category.name,
-      count: (rowsByCategory.get(category.id) ?? []).length,
-      isActive: category.is_active,
+    ...folders.map((folder) => ({
+      key: folder.id as CategoryKey,
+      label: folder.name,
+      count: bucketCount(folder.id),
+      isActive: folder.is_active,
     })),
-    ...((rowsByCategory.get("CUSTOM") ?? []).length > 0
+    ...(bucketCount("NO_FOLDER") > 0
       ? [
           {
-            key: "CUSTOM" as CategoryKey,
-            label: t("customer_pricing.category_custom"),
-            count: (rowsByCategory.get("CUSTOM") ?? []).length,
+            key: "NO_FOLDER" as CategoryKey,
+            label: t("customer_pricing.folder_none"),
+            count: bucketCount("NO_FOLDER"),
             isActive: true,
           },
         ]
       : []),
-    ...((rowsByCategory.get("UNKNOWN") ?? []).length > 0
+    ...(bucketCount("CUSTOM") > 0
+      ? [
+          {
+            key: "CUSTOM" as CategoryKey,
+            label: t("customer_pricing.category_custom"),
+            count: bucketCount("CUSTOM"),
+            isActive: true,
+          },
+        ]
+      : []),
+    ...(bucketCount("UNKNOWN") > 0
       ? [
           {
             key: "UNKNOWN" as CategoryKey,
             label: t("customer_pricing.category_unknown"),
-            count: (rowsByCategory.get("UNKNOWN") ?? []).length,
+            count: bucketCount("UNKNOWN"),
             isActive: true,
           },
         ]
       : []),
   ];
+
+  // The folder the drill-down is currently inside, or null for a
+  // sentinel bucket (which has no folder to rename or delete).
+  const activeFolder =
+    typeof activeCategory === "number"
+      ? (folders.find((f) => f.id === activeCategory) ?? null)
+      : null;
 
   // Rows shown by the drill-down. An `activeCategory` whose bucket
   // emptied out (e.g. the archived rows were just hidden again)
@@ -1014,6 +1159,40 @@ export function CustomerPricingPage() {
   // are read-only records, so they are excluded from selection entirely
   // rather than selected-then-skipped.
   const selectableRows = visibleRows.filter((entry) => !isArchivedRow(entry));
+
+  // Sprint 142 (#127 review carry-over) — edit mode is only MEANINGFUL
+  // while there is at least one selectable row, so what the UI renders
+  // is DERIVED from the row set rather than read straight off the
+  // operator's `editModeRequested` intent.
+  //
+  // The reported case: in a category where every row is archived,
+  // `visibleRows` is non-empty but `selectableRows` is empty. The Edit
+  // button was gated on `visibleRows.length === 0`, so it was enabled,
+  // edit mode opened, and the operator got "0 of 0 selected" above a
+  // dead "Archive selected" — archived rows carry no checkbox by
+  // construction (Sprint 138 §3). The same state is reachable from the
+  // other direction: archive the category's last active row WHILE in
+  // edit mode, and the toolbar is left hanging over nothing.
+  //
+  // Deriving closes both at once and needs no effect — a resync effect
+  // here would be a synchronous setState in an effect body, which this
+  // codebase forbids (CLAUDE.md, and `react-hooks/set-state-in-effect`
+  // is already at its ESLint baseline).
+  const editMode = editModeRequested && selectableRows.length > 0;
+
+  // ...and the SELECTION is derived the same way, for the same reason.
+  // `bulkSelection` is raw state that nothing prunes, so a key can
+  // outlive its row's selectability: select the only active row, archive
+  // it (edit mode collapses, the key remains), then add a new price to
+  // the category — edit mode resumes with a stale selection pointing at
+  // an ARCHIVED row, and "Archive selected" would re-archive it for a
+  // 204 and a phantom success. That is precisely the defect Sprint 138
+  // §3 removed. Every count and the bulk handler read THIS, not the raw
+  // array.
+  const selectableKeys = new Set(selectableRows.map(rowKey));
+  const activeBulkSelection = bulkSelection.filter((key) =>
+    selectableKeys.has(key),
+  );
 
   // Sprint 138 §5 — the copy-from-defaults picker, grouped by real
   // ServiceCategory. `services` holds every catalog row and `visible`
@@ -1053,7 +1232,7 @@ export function CustomerPricingPage() {
       ? ""
       : (categoryCards.find((card) => card.key === activeCategory)?.label ??
         (typeof activeCategory === "number"
-          ? (categories.find((c) => c.id === activeCategory)?.name ?? "")
+          ? (folders.find((f) => f.id === activeCategory)?.name ?? "")
           : ""));
 
   // Navigating between the index and a category clears the row detail
@@ -1076,6 +1255,222 @@ export function CustomerPricingPage() {
     exitEditMode();
     setBulkFailures([]);
     setBulkDoneCount(null);
+  }
+
+  // ---- Sprint 143 §3 — folder handlers ----------------------------------
+  function openCreateFolder() {
+    setFolderEditTarget(null);
+    setFolderName("");
+    setFolderError("");
+    setFolderModalOpen(true);
+  }
+
+  function openRenameFolder(folder: CustomerPriceFolder) {
+    setFolderEditTarget(folder);
+    setFolderName(folder.name);
+    setFolderError("");
+    setFolderModalOpen(true);
+  }
+
+  /**
+   * Create an empty folder, or rename an existing one. A rename touches
+   * ONLY this customer's label — a folder copied from a company category
+   * keeps no link back to it, so renaming can never reach the catalog.
+   */
+  async function submitFolder(event: FormEvent) {
+    event.preventDefault();
+    if (numericId === null) return;
+    const trimmed = folderName.trim();
+    if (!trimmed) {
+      setFolderError(t("customer_pricing.folder_error_name_required"));
+      return;
+    }
+    setFolderBusy(true);
+    setFolderError("");
+    try {
+      if (folderEditTarget) {
+        await updateCustomerPriceFolder(numericId, folderEditTarget.id, {
+          name: trimmed,
+        });
+      } else {
+        await createCustomerPriceFolder(numericId, { name: trimmed });
+      }
+      // Non-throwing by contract (Sprint 141), so a failed re-read can
+      // never report this committed write as a form error.
+      await refreshPricingRows(numericId);
+      setFolderModalOpen(false);
+    } catch (err) {
+      setFolderError(getApiError(err));
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function confirmDeleteFolder(withContents: boolean) {
+    if (numericId === null || !folderDeleteTarget) return;
+    setFolderDeleteBusy(true);
+    try {
+      const result = await deleteCustomerPriceFolder(
+        numericId,
+        folderDeleteTarget.id,
+        withContents,
+      );
+      // Leave the drill-down: the folder it was showing is gone.
+      setActiveCategory(null);
+      setSelected(null);
+      exitEditMode();
+      setFolderDeleteTarget(null);
+      pushToast({
+        variant: "success",
+        title: withContents
+          ? t("customer_pricing.folder_deleted_with_contents", {
+              count: result.archived_price_count,
+            })
+          : t("customer_pricing.folder_deleted_only"),
+      });
+      await refreshPricingRows(numericId);
+    } catch (err) {
+      setLoadError(getApiError(err));
+      setFolderDeleteTarget(null);
+    } finally {
+      setFolderDeleteBusy(false);
+    }
+  }
+
+  // Services offered by the "copy a company category" modal: the chosen
+  // category's ACTIVE rows only. An archived service must never be
+  // seeded into a new agreed-price folder.
+  const fromCategoryServices =
+    fromCategoryId === ""
+      ? []
+      : services.filter(
+          (svc) => svc.category === fromCategoryId && svc.is_active,
+        );
+
+  function openFromCategory() {
+    setFromCategoryId("");
+    setFromCategoryName("");
+    setFromCategoryServiceIds([]);
+    setFromCategoryError("");
+    setFromCategoryOpen(true);
+  }
+
+  function pickFromCategory(rawId: string) {
+    const id = rawId === "" ? "" : Number(rawId);
+    setFromCategoryId(id);
+    // Default the folder name to the category's, still editable. Select
+    // every active service by default — the operator is copying a
+    // category, so "all of it" is the expected starting point.
+    const category = categories.find((c) => c.id === id);
+    setFromCategoryName(category ? category.name : "");
+    setFromCategoryServiceIds(
+      id === ""
+        ? []
+        : services
+            .filter((svc) => svc.category === id && svc.is_active)
+            .map((svc) => svc.id),
+    );
+  }
+
+  /**
+   * Create a folder AND seed it with `CustomerServicePrice` rows copied
+   * from the chosen catalog services' default prices.
+   *
+   * ONE request: `copy-from-default` takes `folder_name` and creates the
+   * folder inside the same transaction as the rows, so a failed copy
+   * cannot strand an empty folder nobody asked for. It also reuses that
+   * endpoint's existing per-service skip/overlap rules verbatim rather
+   * than re-implementing them, and returns the same "X copied, Y
+   * skipped" summary this page already renders.
+   *
+   * The rows it creates ARE this customer's agreed prices — that is what
+   * a `CustomerServicePrice` row IS to `resolve_price`; nothing extra is
+   * needed to make it true, only care not to break it.
+   */
+  async function submitFromCategory(event: FormEvent) {
+    event.preventDefault();
+    if (numericId === null) return;
+    if (fromCategoryId === "") {
+      setFromCategoryError(t("customer_pricing.folder_error_category"));
+      return;
+    }
+    if (!fromCategoryName.trim()) {
+      setFromCategoryError(t("customer_pricing.folder_error_name_required"));
+      return;
+    }
+    if (fromCategoryServiceIds.length === 0) {
+      setFromCategoryError(t("customer_pricing.folder_error_no_services"));
+      return;
+    }
+    setFromCategoryBusy(true);
+    setFromCategoryError("");
+    try {
+      const result = await copyDefaultPricesToCustomer(numericId, {
+        services: fromCategoryServiceIds,
+        valid_from: todayISO(),
+        valid_to: null,
+        folder_name: fromCategoryName.trim(),
+      });
+      setCopyResult(result);
+      setFromCategoryOpen(false);
+      pushToast({
+        variant: "success",
+        title: t("customer_pricing.copy_from_default_result", {
+          created: result.created_count,
+          skipped: result.skipped_count,
+        }),
+      });
+      await refreshPricingRows(numericId);
+      // Drill straight into the folder that was just created.
+      if (result.folder) setActiveCategory(result.folder.id as CategoryKey);
+    } catch (err) {
+      setFromCategoryError(getApiError(err));
+    } finally {
+      setFromCategoryBusy(false);
+    }
+  }
+
+  /**
+   * Move every selected row into a folder, or out of all folders
+   * ("" = no folder). N sequential PATCHes, like every other bulk action
+   * on this page (no bulk endpoint — see `## NEXT`), with per-row
+   * failure reporting so a partial run is never reported as clean.
+   */
+  async function confirmMoveToFolder() {
+    if (numericId === null) return;
+    setMoveFolderBusy(true);
+    setMoveFolderError("");
+    const targets = selectableRows.filter((entry) =>
+      activeBulkSelection.includes(rowKey(entry)),
+    );
+    const target =
+      moveFolderTarget === "" ? null : Number(moveFolderTarget);
+    const failed: string[] = [];
+    for (const entry of targets) {
+      try {
+        if (entry.kind === "custom") {
+          await updateCustomerCustomPrice(numericId, entry.row.id, {
+            folder: target,
+          });
+        } else {
+          await updateCustomerPrice(numericId, entry.row.id, {
+            folder: target,
+          });
+        }
+      } catch {
+        failed.push(
+          entry.kind === "custom"
+            ? entry.row.custom_name
+            : entry.row.service_name,
+        );
+      }
+    }
+    setBulkFailures(failed);
+    setBulkDoneCount(targets.length - failed.length);
+    setMoveFolderOpen(false);
+    exitEditMode();
+    setMoveFolderBusy(false);
+    await refreshPricingRows(numericId);
   }
 
   const isCustomForm = form.service === CUSTOM_SERVICE_SENTINEL;
@@ -1185,6 +1580,33 @@ export function CustomerPricingPage() {
               category, drill in, breadcrumb back. */}
           {activeCategory === null && (
             <div className="card" data-testid="customer-pricing-categories">
+              {/* Sprint 143 §3 — the two ways to create a folder. Always
+                  offered, including on a brand-new customer's empty page,
+                  which is where they matter most: a new customer opens
+                  with no folders and no prices (there is no fallback to
+                  company defaults — `resolve_price` has none), so these
+                  buttons are the whole starting point. */}
+              <div
+                className="page-header-actions"
+                style={{ padding: "14px 20px 0", justifyContent: "flex-end" }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  data-testid="customer-pricing-new-folder"
+                  onClick={openCreateFolder}
+                >
+                  {t("customer_pricing.folder_new_button")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  data-testid="customer-pricing-folder-from-category"
+                  onClick={openFromCategory}
+                >
+                  {t("customer_pricing.folder_from_category_button")}
+                </button>
+              </div>
               {categoryCards.length === 0 ? (
                 <div
                   style={{ padding: "32px 24px", textAlign: "center" }}
@@ -1200,7 +1622,7 @@ export function CustomerPricingPage() {
               ) : (
                 <div style={{ padding: "18px 20px" }}>
                   <div className="muted small" style={{ marginBottom: 12 }}>
-                    {t("customer_pricing.categories_helper")}
+                    {t("customer_pricing.folders_helper")}
                   </div>
                   <div className="pricing-category-grid">
                     {categoryCards.map((card) => (
@@ -1266,30 +1688,65 @@ export function CustomerPricingPage() {
               >
                 {activeCategoryLabel}
               </span>
+              {/* Sprint 143 §3 — a real folder can be renamed or
+                  deleted; the sentinel buckets (folderless / custom /
+                  unknown) are not folders and get neither. */}
+              {activeFolder && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ marginLeft: "auto" }}
+                    data-testid="customer-pricing-folder-rename"
+                    onClick={() => openRenameFolder(activeFolder)}
+                  >
+                    {t("customer_pricing.folder_rename_button")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-testid="customer-pricing-folder-delete"
+                    onClick={() => setFolderDeleteTarget(activeFolder)}
+                  >
+                    {t("customer_pricing.folder_delete_button")}
+                  </button>
+                </>
+              )}
               {/* Sprint 137 item 7 — Edit / Done. Outside edit mode the
-                  table below looks exactly as it did before. */}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ marginLeft: "auto" }}
-                data-testid="customer-pricing-edit-mode-toggle"
-                aria-pressed={editMode}
-                onClick={() =>
-                  editMode ? exitEditMode() : setEditMode(true)
-                }
-                disabled={visibleRows.length === 0}
-              >
-                {editMode
-                  ? t("customer_pricing.list_edit_done")
-                  : t("customer_pricing.list_edit_start")}
-              </button>
+                  table below looks exactly as it did before.
+
+                  Sprint 143 §7 — HIDDEN, not disabled, when there is
+                  nothing it could act on. Sprint 142 fixed the GATE
+                  (`selectableRows`, not `visibleRows` — the latter
+                  includes archived rows, which are read-only and carry
+                  no checkbox) but left the button on screen greyed out
+                  with a tooltip. The running theme of Sprints 138-141 is
+                  that a control which cannot work should not be offered
+                  at all: a disabled button still asks the operator to
+                  hover it to find out why. */}
+              {selectableRows.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  style={activeFolder ? undefined : { marginLeft: "auto" }}
+                  data-testid="customer-pricing-edit-mode-toggle"
+                  aria-pressed={editMode}
+                  onClick={() =>
+                    editMode ? exitEditMode() : setEditModeRequested(true)
+                  }
+                >
+                  {editMode
+                    ? t("customer_pricing.list_edit_done")
+                    : t("customer_pricing.list_edit_start")}
+                </button>
+              )}
             </div>
 
             {editMode && (
               <>
                 <div className="list-edit-bar">
                   <MultiSelectToolbar
-                    selectedCount={bulkSelection.length}
+                    selectedCount={activeBulkSelection.length}
                     // Sprint 138 §3 — select-all covers ACTIVE rows
                     // only; archived rows are not selectable at all.
                     onSelectAll={() =>
@@ -1299,11 +1756,23 @@ export function CustomerPricingPage() {
                     // ...and the count says so, so "select all" picking
                     // fewer rows than are on screen never looks broken.
                     countLabel={t("customer_pricing.bulk_selected_count", {
-                      count: bulkSelection.length,
+                      count: activeBulkSelection.length,
                       total: selectableRows.length,
                     })}
                     disabled={bulkArchiveBusy}
                     actions={[
+                      // Sprint 143 §3 — the mechanism that fills and
+                      // empties folders. "No folder" is a legitimate
+                      // target, which is how a row leaves one.
+                      {
+                        key: "move-folder",
+                        label: t("customer_pricing.folder_move_button"),
+                        onClick: () => {
+                          setMoveFolderTarget("");
+                          setMoveFolderError("");
+                          setMoveFolderOpen(true);
+                        },
+                      },
                       {
                         key: "archive",
                         label: t("customer_pricing.bulk_archive_button"),
@@ -2246,6 +2715,412 @@ export function CustomerPricingPage() {
       {/* Sprint 8B — copy-from-default modal. Seeds contract prices from
           the provider catalog defaults for the selected ACTIVE services.
           Mirrors the bulk-raise modal shell. */}
+      {/* ---- Sprint 143 §3 — folder create / rename ---------------- */}
+      {folderModalOpen && (
+        <div
+          data-testid="customer-pricing-folder-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            folderEditTarget
+              ? t("customer_pricing.folder_rename_title")
+              : t("customer_pricing.folder_new_title")
+          }
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <form
+            className="card"
+            style={{ maxWidth: 460, width: "100%", padding: 24 }}
+            onSubmit={submitFolder}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {folderEditTarget
+                ? t("customer_pricing.folder_rename_title")
+                : t("customer_pricing.folder_new_title")}
+            </h3>
+            {folderError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+              >
+                {folderError}
+              </div>
+            )}
+            <div className="field">
+              <label className="field-label" htmlFor="price-folder-name">
+                {t("customer_pricing.folder_name_label")}
+              </label>
+              <input
+                id="price-folder-name"
+                className="field-input"
+                data-testid="customer-pricing-folder-name"
+                value={folderName}
+                onChange={(event) => setFolderName(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <div
+              className="page-header-actions"
+              style={{ marginTop: 16, justifyContent: "flex-end" }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setFolderModalOpen(false)}
+                disabled={folderBusy}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                data-testid="customer-pricing-folder-submit"
+                disabled={folderBusy}
+              >
+                {t("save")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ---- Sprint 143 §3 — delete: TWO honest actions ------------- */}
+      {folderDeleteTarget && (
+        <div
+          data-testid="customer-pricing-folder-delete-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("customer_pricing.folder_delete_title")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 520, width: "100%", padding: 24 }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_pricing.folder_delete_title", {
+                name: folderDeleteTarget.name,
+              })}
+            </h3>
+            {/* Both outcomes named honestly, with the row count — the
+                operator chooses between them rather than discovering
+                which one a single "Delete" meant. */}
+            <p className="muted" style={{ marginTop: 0 }}>
+              {t("customer_pricing.folder_delete_body", {
+                count: folderDeleteTarget.price_count,
+              })}
+            </p>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: 10 }}
+            >
+              <button
+                type="button"
+                className="btn btn-secondary"
+                data-testid="customer-pricing-folder-delete-only"
+                onClick={() => confirmDeleteFolder(false)}
+                disabled={folderDeleteBusy}
+              >
+                {t("customer_pricing.folder_delete_only_action", {
+                  count: folderDeleteTarget.price_count,
+                })}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                data-testid="customer-pricing-folder-delete-with-contents"
+                onClick={() => confirmDeleteFolder(true)}
+                disabled={folderDeleteBusy}
+              >
+                {t("customer_pricing.folder_delete_with_contents_action", {
+                  count: folderDeleteTarget.price_count,
+                })}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setFolderDeleteTarget(null)}
+                disabled={folderDeleteBusy}
+              >
+                {t("cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---- Sprint 143 §3 — copy a company category into a folder --- */}
+      {fromCategoryOpen && (
+        <div
+          data-testid="customer-pricing-from-category-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("customer_pricing.folder_from_category_title")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <form
+            className="card"
+            style={{
+              maxWidth: 620,
+              width: "100%",
+              padding: 24,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+            onSubmit={submitFromCategory}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_pricing.folder_from_category_title")}
+            </h3>
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+              {t("customer_pricing.folder_from_category_intro")}
+            </p>
+            {fromCategoryError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+              >
+                {fromCategoryError}
+              </div>
+            )}
+            <div className="field">
+              <label className="field-label" htmlFor="folder-from-category">
+                {t("customer_pricing.folder_from_category_label")}
+              </label>
+              <select
+                id="folder-from-category"
+                className="field-select"
+                data-testid="customer-pricing-from-category-select"
+                value={fromCategoryId === "" ? "" : String(fromCategoryId)}
+                onChange={(event) => pickFromCategory(event.target.value)}
+              >
+                <option value="">
+                  {t("customer_pricing.folder_from_category_placeholder")}
+                </option>
+                {/* ACTIVE categories only: a retired category must not be
+                    offered as the basis for a new agreed-price folder. */}
+                {categories
+                  .filter((c) => c.is_active)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {fromCategoryId !== "" && (
+              <>
+                <div className="field">
+                  <label
+                    className="field-label"
+                    htmlFor="folder-from-category-name"
+                  >
+                    {t("customer_pricing.folder_name_label")}
+                  </label>
+                  <input
+                    id="folder-from-category-name"
+                    className="field-input"
+                    data-testid="customer-pricing-from-category-name"
+                    value={fromCategoryName}
+                    onChange={(event) =>
+                      setFromCategoryName(event.target.value)
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <span className="field-label">
+                    {t("customer_pricing.folder_from_category_services", {
+                      count: fromCategoryServiceIds.length,
+                      total: fromCategoryServices.length,
+                    })}
+                  </span>
+                  {fromCategoryServices.length === 0 ? (
+                    <p className="muted small" style={{ margin: 0 }}>
+                      {t("customer_pricing.folder_from_category_no_services")}
+                    </p>
+                  ) : (
+                    <div
+                      style={{
+                        maxHeight: 240,
+                        overflowY: "auto",
+                        border: "1px solid var(--border)",
+                        borderRadius: 8,
+                        padding: 10,
+                      }}
+                    >
+                      {fromCategoryServices.map((svc) => (
+                        <label
+                          key={svc.id}
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                            padding: "4px 0",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="checkbox-input"
+                            data-testid="customer-pricing-from-category-service"
+                            checked={fromCategoryServiceIds.includes(svc.id)}
+                            onChange={(event) =>
+                              setFromCategoryServiceIds((current) =>
+                                event.target.checked
+                                  ? [...current, svc.id]
+                                  : current.filter((id) => id !== svc.id),
+                              )
+                            }
+                          />
+                          <span>{svc.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            <div
+              className="page-header-actions"
+              style={{ marginTop: 16, justifyContent: "flex-end" }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setFromCategoryOpen(false)}
+                disabled={fromCategoryBusy}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                data-testid="customer-pricing-from-category-submit"
+                disabled={fromCategoryBusy}
+              >
+                {t("customer_pricing.folder_from_category_confirm")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* ---- Sprint 143 §3 — bulk move into / out of a folder -------- */}
+      {moveFolderOpen && (
+        <div
+          data-testid="customer-pricing-move-folder-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("customer_pricing.folder_move_title")}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+            padding: 16,
+          }}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 460, width: "100%", padding: 24 }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+              {t("customer_pricing.folder_move_title", {
+                count: activeBulkSelection.length,
+              })}
+            </h3>
+            {moveFolderError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+              >
+                {moveFolderError}
+              </div>
+            )}
+            <div className="field">
+              <label className="field-label" htmlFor="move-folder-target">
+                {t("customer_pricing.folder_move_target_label")}
+              </label>
+              <select
+                id="move-folder-target"
+                className="field-select"
+                data-testid="customer-pricing-move-folder-target"
+                value={moveFolderTarget === "" ? "" : String(moveFolderTarget)}
+                onChange={(event) =>
+                  setMoveFolderTarget(
+                    event.target.value === ""
+                      ? ""
+                      : Number(event.target.value),
+                  )
+                }
+              >
+                {/* "No folder" is a real destination — it is how a row
+                    LEAVES a folder without being archived. */}
+                <option value="">{t("customer_pricing.folder_none")}</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div
+              className="page-header-actions"
+              style={{ marginTop: 16, justifyContent: "flex-end" }}
+            >
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setMoveFolderOpen(false)}
+                disabled={moveFolderBusy}
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                data-testid="customer-pricing-move-folder-confirm"
+                onClick={confirmMoveToFolder}
+                disabled={moveFolderBusy}
+              >
+                {t("customer_pricing.folder_move_confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {copyOpen && (
         <div
           data-testid="customer-pricing-copy-default-modal"
@@ -2289,6 +3164,29 @@ export function CustomerPricingPage() {
                 data-testid="customer-pricing-copy-default-error"
               >
                 {copyError}
+              </div>
+            )}
+
+            {/* Sprint 142 (#127 review carry-over) — `loadError` is a
+                PAGE-level banner, and this modal is `position: fixed;
+                inset: 0; zIndex: 100; aria-modal="true"`. So when the
+                copy succeeded but the refresh that follows it failed,
+                the "saved, but the list could not be refreshed" message
+                rendered BEHIND this overlay: invisible on screen and,
+                because `aria-modal` hides everything outside the dialog
+                from the accessibility tree, unreachable to a screen
+                reader as well. The modal stays open on purpose (the
+                created/skipped summary below is what it exists to
+                show), so the message is repeated INSIDE it rather than
+                the modal being closed out from under that summary. */}
+            {loadError && (
+              <div
+                className="alert-error"
+                role="alert"
+                style={{ marginBottom: 12 }}
+                data-testid="customer-pricing-copy-default-refresh-error"
+              >
+                {loadError}
               </div>
             )}
 
@@ -2444,10 +3342,10 @@ export function CustomerPricingPage() {
       <ConfirmDialog
         ref={bulkArchiveDialogRef}
         title={t("customer_pricing.bulk_archive_confirm_title", {
-          count: bulkSelection.length,
+          count: activeBulkSelection.length,
         })}
         body={t("customer_pricing.bulk_archive_confirm_body", {
-          count: bulkSelection.length,
+          count: activeBulkSelection.length,
         })}
         confirmLabel={t("customer_pricing.bulk_archive_button")}
         onConfirm={handleConfirmBulkArchive}

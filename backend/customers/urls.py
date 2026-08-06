@@ -2,6 +2,8 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from extra_work.views_pricing import (
+    CustomerPriceFolderDetailView,
+    CustomerPriceFolderListCreateView,
     CustomerCustomPriceDetailView,
     CustomerCustomPriceListCreateView,
     CustomerServicePriceBulkRaiseView,
@@ -215,6 +217,17 @@ urlpatterns = [
         name="customer-pricing-bulk-raise",
     ),
     # M5 A — per-customer ad-hoc / custom price lines (non-catalog).
+    # Sprint 143 §3 — the customer's OWN folders over their price rows.
+    path(
+        "<int:customer_id>/price-folders/",
+        CustomerPriceFolderListCreateView.as_view(),
+        name="customer-price-folder-list",
+    ),
+    path(
+        "<int:customer_id>/price-folders/<int:folder_id>/",
+        CustomerPriceFolderDetailView.as_view(),
+        name="customer-price-folder-detail",
+    ),
     path(
         "<int:customer_id>/custom-pricing/",
         CustomerCustomPriceListCreateView.as_view(),

@@ -170,7 +170,7 @@ class B4FixtureMixin:
         )
 
         # Service catalog.
-        cls.service_cat = ServiceCategory.objects.create(name="B4-Cat")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company_a, name="B4-Cat")
         cls.service_priced = Service.objects.create(
             category=cls.service_cat,
             company=cls.company_a,

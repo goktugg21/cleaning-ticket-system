@@ -59,7 +59,7 @@ class CustomCustomPriceFixtureMixin(TenantFixtureMixin):
         super().setUp()
         # A concrete catalog service used only by the resolver-isolation
         # test; the custom-price endpoint itself never references it.
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(company=self.company, name="Cleaning")
         self.service = Service.objects.create(
             category=self.category,
             company=self.company,

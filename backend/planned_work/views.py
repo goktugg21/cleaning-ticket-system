@@ -199,7 +199,19 @@ class RecurringJobViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return (
             scope_recurring_jobs_for(self.request.user)
-            .select_related("company", "building", "customer", "created_by")
+            .select_related(
+                "company",
+                "building",
+                "customer",
+                "created_by",
+                # Sprint 144 §2 — the four classifier FKs are rendered by
+                # name on every row; without this each one is an extra
+                # query per job.
+                "department",
+                "work_type",
+                "service_category",
+                "price_folder",
+            )
             .prefetch_related("default_staff", "default_managers", "windows")
         )
 

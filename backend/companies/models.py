@@ -75,6 +75,15 @@ class Company(models.Model):
     # layer (`extra_work.views_catalog`) raises HTTP 403 with the
     # stable code `provider_admin_catalog_management_disabled` when
     # the toggle is False.
+    #
+    # Sprint 142 — the `ServiceCategory` half of that sentence is
+    # finally TRUE. It was written in Sprint 3B and was wrong for the
+    # whole time in between: the same sprint that wrote it also locked
+    # category writes to SUPER_ADMIN unconditionally
+    # (`_enforce_category_super_admin_only`), because categories were
+    # global. That helper is gone and categories now run the same
+    # `_enforce_catalog_management` gate Services do, which is the one
+    # that reads this toggle.
     provider_admin_may_manage_catalog = models.BooleanField(
         default=True,
         help_text=(

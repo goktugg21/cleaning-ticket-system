@@ -456,11 +456,12 @@ class Command(BaseCommand):
                 User, super_admin, company_spec, reset_tickets=options["reset_tickets"]
             )
 
-        # Sprint 29 Batch 29.8.5 — provider-global service catalog +
-        # one demo Extra Work request that's already operational so
-        # the 29.8 frontend surfaces (spawned-tickets panel, IN_PROGRESS
-        # auto-trigger, cancel-with-warning) have data to demo against.
-        # Both helpers are idempotent.
+        # Sprint 29 Batch 29.8.5 — the service catalog + one demo Extra
+        # Work request that's already operational so the 29.8 frontend
+        # surfaces (spawned-tickets panel, IN_PROGRESS auto-trigger,
+        # cancel-with-warning) have data to demo against. Both helpers
+        # are idempotent.
+        #
         self._seed_service_catalog()
         self._seed_demo_extra_work(User, super_admin)
 
@@ -932,14 +933,20 @@ class Command(BaseCommand):
                 return
 
     # -----------------------------------------------------------------
-    # Sprint 29 Batch 29.8.5 — provider-global service catalog
+    # Sprint 29 Batch 29.8.5 — per-company service catalog
     # -----------------------------------------------------------------
     def _seed_service_catalog(self, primary_company=None):
         """
         Idempotently upsert a small but realistic provider-side service
-        catalog (4 categories, 14 services). The catalog is provider-
-        wide reference data: it is NOT scoped per-company, so we seed
-        it once per `handle()` invocation rather than per company.
+        catalog (4 categories, 14 services) for ONE provider company.
+
+        Sprint 142 — `ServiceCategory` gained a `company` FK, so the
+        header above ("provider-global") and the paragraph that said the
+        catalog "is NOT scoped per-company" are both false now:
+        categories are scoped exactly like the services under them, and
+        both are pinned to `primary_company` below. Seeding stays a
+        once-per-`handle()` pass because the demo fixture only needs one
+        provider's catalog, not because the rows are shared.
 
         Imported here (not at module top) to keep the seed command's
         boot time fast for stacks that don't run extra_work, and to
@@ -1005,12 +1012,23 @@ class Command(BaseCommand):
             primary_company = Company.objects.order_by("id").first()
         if primary_company is None:
             self._service_catalog_counts = {"categories": 0, "services": 0}
+            self._service_catalog_company = None
             return
+
+        # Sprint 142 — remember WHICH company the catalog was seeded
+        # under. Categories are company-scoped now, so the demo-EW
+        # lookup below can no longer match a category by name alone.
+        self._service_catalog_company = primary_company
 
         cat_count = 0
         svc_count = 0
         for cat_name, cat_description, services in catalog:
+            # Sprint 142 — `company` is part of the lookup, not the
+            # defaults: it is half of the row's identity now (uniqueness
+            # is per-company), and it is NOT NULL, so an omitted key
+            # would raise on the create branch.
             category, _ = ServiceCategory.objects.update_or_create(
+                company=primary_company,
                 name=cat_name,
                 defaults={"description": cat_description, "is_active": True},
             )
@@ -1137,9 +1155,32 @@ class Command(BaseCommand):
         # `_seed_service_catalog` above. Use "Floor strip and seal" to
         # match the demo marker title; fall back to the first Cleaning
         # service if it's missing (e.g. an operator renamed it).
+        # Sprint 142 — both lookups are narrowed to the company the
+        # catalog was actually seeded under (`_seed_service_catalog`
+        # records it). `category__name="Cleaning"` alone stopped being
+        # unambiguous this sprint: category names are unique PER COMPANY
+        # now, so on a multi-company DB several providers may each have
+        # a "Cleaning" and the fallback could pick a foreign one.
+        #
+        # NB this is deliberately the CATALOG's company, not `company`
+        # (the osius-demo tenant the EW itself belongs to). Those two
+        # already differ on a multi-company DB, and the resulting
+        # cross-company `CustomerServicePrice` below predates this
+        # sprint — reconciling the demo fixture is recorded in the
+        # checklist rather than smuggled into a scoping sprint, because
+        # it would re-target the seeded catalog to a different company
+        # than existing dev DBs already have it under.
+        catalog_company = getattr(self, "_service_catalog_company", None)
+        catalog_scope = (
+            {"company": catalog_company} if catalog_company else {}
+        )
         service = (
-            Service.objects.filter(name="Floor strip and seal").first()
-            or Service.objects.filter(category__name="Cleaning").first()
+            Service.objects.filter(
+                **catalog_scope, name="Floor strip and seal"
+            ).first()
+            or Service.objects.filter(
+                **catalog_scope, category__name="Cleaning"
+            ).first()
         )
         if service is None:
             self.stdout.write(self.style.WARNING(

@@ -193,7 +193,7 @@ class _B6Fixture(TestCase):
         """Build an EW request + a SENT proposal so customer-decision
         paths are reachable. Both built directly to avoid going through
         the cart routing logic which is out of scope for B6."""
-        category = ServiceCategory.objects.create(name="B6-cat")
+        category = ServiceCategory.objects.create(company=self.company, name="B6-cat")
         service = Service.objects.create(
             category=category,
             company=self.company,
@@ -237,7 +237,7 @@ class _B6Fixture(TestCase):
         are reachable (POST line / PATCH line / DELETE line / DRAFT->
         SENT). EW is held at UNDER_REVIEW (required by the SEND
         precondition)."""
-        category = ServiceCategory.objects.create(name="B6-cat-draft")
+        category = ServiceCategory.objects.create(company=self.company, name="B6-cat-draft")
         service = Service.objects.create(
             category=category,
             company=self.company,

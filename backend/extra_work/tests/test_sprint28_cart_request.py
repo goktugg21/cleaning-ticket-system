@@ -148,7 +148,7 @@ class CartFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name="Cleaning")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.provider_a, name="Cleaning")
         cls.service_priced = Service.objects.create(
             category=cls.service_cat,
             company=cls.provider_a,

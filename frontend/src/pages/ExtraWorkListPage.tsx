@@ -20,7 +20,11 @@ import { useTranslation } from "react-i18next";
 
 import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
-import { listAllExtraWork } from "../api/extraWork";
+import {
+  listAllExtraWork,
+  listExtraWorkCategoryOptions,
+} from "../api/extraWork";
+import type { ExtraWorkCategoryOptions } from "../api/extraWork";
 import type {
   CustomerAdmin,
   CustomerBuildingMembership,
@@ -40,6 +44,7 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { rowAmounts } from "../lib/billing";
 import { formatDate, formatMoney } from "../lib/intl";
+import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 
 const CATEGORY_I18N_KEY: Record<ExtraWorkCategory, string> = {
   DEEP_CLEANING: "category.deep_cleaning",
@@ -80,7 +85,12 @@ const STATUS_FILTER_OPTIONS: ReadonlyArray<ExtraWorkStatus> = [
 ];
 
 type StatusFilter = ExtraWorkStatus | "ALL";
-type CategoryFilter = ExtraWorkCategory | "ALL";
+// Sprint 143 §6 — the filter is a catalog category NAME now, not an
+// `ExtraWorkCategory` enum member. "" = no filter. The enum still drives
+// the table's own "Categorie" COLUMN (a different field on the request,
+// left alone this sprint — see `## NEXT`), which is exactly why the two
+// were confusable and why this filter had to stop using it.
+type CategoryFilter = string;
 
 interface ExtraWorkKpis {
   open: number; // REQUESTED + UNDER_REVIEW
@@ -144,7 +154,9 @@ export function ExtraWorkListPage() {
       ? (raw as StatusFilter)
       : "ALL";
   });
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
+  const [categoryOptions, setCategoryOptions] =
+    useState<ExtraWorkCategoryOptions>({ live: [], historical: [] });
 
   // Server-side filters (M4): these drive the 2d list endpoint
   // (?billing_period / ?invoice_status). Search / status / category stay
@@ -198,6 +210,9 @@ export function ExtraWorkListPage() {
           building: buildingFilter ? Number(buildingFilter) : undefined,
           department: departmentFilter ? Number(departmentFilter) : undefined,
           work_type: workTypeFilter ? Number(workTypeFilter) : undefined,
+          // Sprint 143 §6 — server-side now (was a client-side enum
+          // compare over rows that had already been fetched).
+          category: categoryFilter || undefined,
         });
         if (!cancelled) setRows(allRows);
       } catch (err) {
@@ -219,7 +234,25 @@ export function ExtraWorkListPage() {
     buildingFilter,
     departmentFilter,
     workTypeFilter,
+    categoryFilter,
   ]);
+
+  // Sprint 143 §6 — the category dropdown's two groups. Own effect
+  // because it does not depend on any filter; a failure leaves the
+  // dropdown with just "all", which still lists everything.
+  useEffect(() => {
+    let cancelled = false;
+    listExtraWorkCategoryOptions()
+      .then((res) => {
+        if (!cancelled) setCategoryOptions(res);
+      })
+      .catch(() => {
+        /* non-fatal: the list itself is unaffected */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Sprint 128 — load the customer list once (provider only; a CUSTOMER_USER
   // has no customer picker).
@@ -313,7 +346,6 @@ export function ExtraWorkListPage() {
     const needle = searchInput.trim().toLowerCase();
     return rows.filter((r) => {
       if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
-      if (categoryFilter !== "ALL" && r.category !== categoryFilter) return false;
       if (needle) {
         const hay = `${r.title} ${r.building_name ?? ""} ${
           r.customer_name ?? ""
@@ -322,7 +354,7 @@ export function ExtraWorkListPage() {
       }
       return true;
     });
-  }, [rows, searchInput, statusFilter, categoryFilter]);
+  }, [rows, searchInput, statusFilter]);
 
   // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
   // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
@@ -489,21 +521,41 @@ export function ExtraWorkListPage() {
           </select>
         </div>
         <div className="filter-field">
-          <span className="filter-label">{t("list.column_category")}</span>
+          <span className="filter-label">
+            {t("list.filter_catalog_category")}
+          </span>
+          {/* Sprint 143 §6 — real catalog categories, filtered
+              SERVER-side (`?category=`, matched on the order-time
+              snapshot). Two groups: what the catalog still offers, and
+              names that only survive in history because the category was
+              renamed, archived or deleted after the order. The second
+              group is why the backend matches the snapshot rather than
+              the live FK — a join would silently drop exactly those
+              requests. */}
           <select
             className="filter-control"
             value={categoryFilter}
-            onChange={(event) =>
-              setCategoryFilter(event.target.value as CategoryFilter)
-            }
+            onChange={(event) => setCategoryFilter(event.target.value)}
+            data-testid="extra-work-category-filter"
           >
-            <option value="ALL">{t("list.filter_all_categories")}</option>
-            {(Object.keys(CATEGORY_I18N_KEY) as ExtraWorkCategory[]).map(
-              (c) => (
-                <option key={c} value={c}>
-                  {t(CATEGORY_I18N_KEY[c])}
-                </option>
-              ),
+            <option value="">{t("list.filter_all_categories")}</option>
+            {categoryOptions.live.length > 0 && (
+              <optgroup label={t("list.filter_category_group_live")}>
+                {categoryOptions.live.map((name) => (
+                  <option key={`live-${name}`} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {categoryOptions.historical.length > 0 && (
+              <optgroup label={t("list.filter_category_group_historical")}>
+                {categoryOptions.historical.map((name) => (
+                  <option key={`hist-${name}`} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </optgroup>
             )}
           </select>
         </div>
@@ -771,7 +823,9 @@ export function ExtraWorkListPage() {
                       <RouteBadge value={row.routing_decision} />
                     </td>
                     <td>
-                      {t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
+                      {/* Sprint 144 §1 — new shape first, enum fallback. */}
+                      {extraWorkCategoryName(row) ??
+                        t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
                     </td>
                     <td>{row.building_name}</td>
                     <td>{row.customer_name}</td>
@@ -850,7 +904,8 @@ export function ExtraWorkListPage() {
                     <div className="admin-card-meta-row">
                       <dt>{t("list.column_category")}</dt>
                       <dd>
-                        {t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
+                        {extraWorkCategoryName(row) ??
+                          t(CATEGORY_I18N_KEY[row.category] ?? row.category)}
                       </dd>
                     </div>
                     <div className="admin-card-meta-row">

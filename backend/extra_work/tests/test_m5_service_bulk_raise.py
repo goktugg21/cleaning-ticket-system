@@ -45,7 +45,17 @@ BULK_RAISE_URL = "/api/services/bulk-raise/"
 class ServiceBulkRaiseFixtureMixin(TenantFixtureMixin):
     def setUp(self):
         super().setUp()
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(
+            company=self.company, name="Cleaning"
+        )
+        # Sprint 142 — categories are company-scoped, so the
+        # other-company service (the one this suite asserts a CA may not
+        # bulk-adjust) needs its OWN company's category. Reusing
+        # `self.category` here would model data the API can no longer
+        # create (`_enforce_same_company_category`).
+        self.other_category = ServiceCategory.objects.create(
+            company=self.other_company, name="Cleaning"
+        )
         self.service_a = Service.objects.create(
             category=self.category,
             company=self.company,
@@ -71,7 +81,7 @@ class ServiceBulkRaiseFixtureMixin(TenantFixtureMixin):
             is_active=False,
         )
         self.other_service = Service.objects.create(
-            category=self.category,
+            category=self.other_category,
             company=self.other_company,
             name="Other-company service",
             unit_type=ExtraWorkPricingUnitType.HOURS,

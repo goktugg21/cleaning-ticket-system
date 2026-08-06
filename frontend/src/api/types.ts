@@ -1150,6 +1150,14 @@ export interface ExtraWorkRequestList {
   department_name: string | null;
   work_type: number | null;
   work_type_name: string | null;
+  // Sprint 144 §1 — the classifier the operator actually chose. At most
+  // one is set; a pre-144 request has neither and only the `category`
+  // enum below. Both surfaces render whichever is present and fall back
+  // to the enum label, so the two shapes coexist.
+  service_category: number | null;
+  service_category_name: string | null;
+  price_folder: number | null;
+  price_folder_name: string | null;
   title: string;
   category: ExtraWorkCategory;
   urgency: ExtraWorkUrgency;
@@ -1438,8 +1446,17 @@ export interface ExtraWorkRequestCartCreatePayload {
   description: string;
   building: number;
   customer: number;
-  category: string;
+  // Sprint 144 §1 — `category` (the fixed `ExtraWorkCategory` enum) is
+  // now OPTIONAL on the wire and the create form no longer sends it: the
+  // column keeps its server-side `default=OTHER`. It stays on the type
+  // for API back-compat and for any caller that still classifies with
+  // the enum. `category_other_text` follows it.
+  category?: string;
   category_other_text?: string;
+  // Sprint 144 §1 — what the form actually sends now: AT MOST ONE. A
+  // company `ServiceCategory`, or this customer's `CustomerPriceFolder`.
+  service_category?: number | null;
+  price_folder?: number | null;
   // Sprint 128 — optional per-customer labels the customer may set at
   // create (both optional; the backend enforces they belong to `customer`).
   department?: number | null;
@@ -1846,7 +1863,8 @@ export interface PromoteContactResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Sprint 28 Batch 5 — Service catalog (provider-wide) + per-customer pricing
+// Sprint 28 Batch 5 — Service catalog (per provider company since Sprint 142)
+// + per-customer pricing
 // ---------------------------------------------------------------------------
 //
 // A `ServiceCategory` groups related `Service` rows (e.g. "Deep cleaning",
@@ -1879,6 +1897,13 @@ export type ServiceUnitType =
 
 export interface ServiceCategory {
   id: number;
+  // Sprint 142 — categories are per provider company, like the services
+  // under them. Optional on the wire on CREATE (a COMPANY_ADMIN's
+  // frontend omits it and the backend defaults to their own company),
+  // read-only on UPDATE — re-pinning would strand every Service inside
+  // it in a category their own company cannot see.
+  company: number;
+  company_name: string;
   name: string;
   description: string;
   is_active: boolean;
@@ -1901,9 +1926,13 @@ export interface ServiceCategory {
 export interface ServiceCategoryArchiveResult {
   category: ServiceCategory;
   deactivated_service_count: number;
-  // A category is GLOBAL, so archiving one can reach services owned by
-  // several provider companies. Surfaced so that never happens silently.
-  affected_company_count: number;
+  // Sprint 142 removed `affected_company_count`. It existed because a
+  // GLOBAL category could hold several providers' services, so archiving
+  // one reached all of them. A category belongs to one company now and
+  // its services must belong to that same company, so the number could
+  // only ever be 0 or 1 — a "this touched N providers" warning that can
+  // never fire. Do not re-add it, and do not reintroduce the warning
+  // branch that read it.
   still_archived_service_count: number;
 }
 
@@ -1911,6 +1940,10 @@ export interface ServiceCategoryCreatePayload {
   name: string;
   description?: string;
   is_active?: boolean;
+  // Sprint 142 — only a SUPER_ADMIN needs to send this (and MUST, when
+  // more than one provider Company exists). A COMPANY_ADMIN omits it and
+  // the backend resolves their own company.
+  company?: number;
 }
 
 export type ServiceCategoryUpdatePayload = Partial<ServiceCategoryCreatePayload>;
@@ -2026,9 +2059,45 @@ export interface ServiceBulkRaiseResult {
 // Per-customer contract price. Only an active row triggers the instant-
 // ticket path (Batch 7); absence means the request must go through the
 // proposal phase. `valid_to` null means open-ended.
+// Sprint 143 §3 — a folder that belongs to ONE CUSTOMER and groups that
+// customer's price rows. NOT a `ServiceCategory`: that is the PROVIDER's
+// catalog grouping, shared across the company's customers. A folder is
+// the customer's own arrangement of the prices agreed with them, and a
+// folder copied from a category keeps no link back to it.
+export interface CustomerPriceFolder {
+  id: number;
+  customer: number;
+  name: string;
+  is_active: boolean;
+  // Contract + custom rows inside, from one annotation on the list
+  // queryset. Drives the index card and the delete confirmation's count.
+  price_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerPriceFolderCreatePayload {
+  name: string;
+  is_active?: boolean;
+}
+
+export type CustomerPriceFolderUpdatePayload =
+  Partial<CustomerPriceFolderCreatePayload>;
+
+// Result of DELETE .../price-folders/<id>/?with_contents=…. Named for
+// what ACTUALLY happened: a folder-only delete archives nothing.
+export interface CustomerPriceFolderDeleteResult {
+  archived_price_count: number;
+  with_contents: boolean;
+}
+
 export interface CustomerServicePrice {
   id: number;
   customer: number;
+  // Sprint 143 §3 — null when the row sits outside every folder. Legal
+  // and permanent: every pre-143 row is folderless, and "delete the
+  // folder, keep the prices" produces more of them.
+  folder: number | null;
   service: number;
   service_name: string;
   unit_price: string;
@@ -2042,6 +2111,7 @@ export interface CustomerServicePrice {
 
 export interface CustomerServicePriceCreatePayload {
   service: number;
+  folder?: number | null;
   unit_price: string;
   vat_pct: string;
   valid_from: string;
@@ -2059,6 +2129,8 @@ export type CustomerServicePriceUpdatePayload =
 export interface CustomerCustomPrice {
   id: number;
   customer: number;
+  // Sprint 143 §3 — see `CustomerServicePrice.folder`.
+  folder: number | null;
   custom_name: string;
   unit_type: ServiceUnitType;
   unit_type_display: string;
@@ -2082,6 +2154,7 @@ export interface CustomerCustomPrice {
 }
 
 export interface CustomerCustomPriceCreatePayload {
+  folder?: number | null;
   custom_name: string;
   unit_type: ServiceUnitType;
   custom_unit_label?: string;
@@ -2133,6 +2206,12 @@ export interface CustomerPriceCopyFromDefaultPayload {
   services: number[];
   valid_from: string;
   valid_to: string | null;
+  // Sprint 143 §3 — copy INTO a folder. Either an existing folder id or
+  // a name to create one with (the "copy a company category, with its
+  // services" flow). Mutually exclusive; both in the SAME request so a
+  // failed copy cannot strand an empty folder.
+  folder?: number | null;
+  folder_name?: string;
 }
 
 export interface CustomerPriceCopyFromDefaultResultRow {
@@ -2144,6 +2223,10 @@ export interface CustomerPriceCopyFromDefaultResultRow {
 export interface CustomerPriceCopyFromDefaultResult {
   created_count: number;
   skipped_count: number;
+  // Sprint 143 §3 — the folder the rows landed in, so the UI can drill
+  // straight into the one it just created. Null when no folder was asked
+  // for (the pre-143 flat copy).
+  folder: CustomerPriceFolder | null;
   results: CustomerPriceCopyFromDefaultResultRow[];
 }
 

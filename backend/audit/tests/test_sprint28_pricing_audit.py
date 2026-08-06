@@ -19,6 +19,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from audit.models import AuditAction, AuditLog
+from companies.models import CompanyUserMembership
 from extra_work.models import (
     CustomerServicePrice,
     ExtraWorkPricingUnitType,
@@ -49,9 +50,14 @@ class ServiceCategoryAuditTests(TenantFixtureMixin, APITestCase):
 
     def test_create_via_api_writes_create_audit_log(self):
         self.authenticate(self.super_admin)
+        # Sprint 142 — `company` required for SA with 2+ Companies.
         response = self.client.post(
             CATEGORY_LIST_URL,
-            {"name": "Audit Cat", "description": "for audit"},
+            {
+                "company": self.company.id,
+                "name": "Audit Cat",
+                "description": "for audit",
+            },
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -65,9 +71,106 @@ class ServiceCategoryAuditTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(log.target_id, response.data["id"])
         self.assertEqual(log.changes["name"]["after"], "Audit Cat")
         self.assertIsNone(log.changes["name"]["before"])
+        # Sprint 142 — the new `company` FK is picked up by the generic
+        # diff engine (ServiceCategory has no explicit tracked-field
+        # tuple), so the row records WHICH provider the category was
+        # created for. Asserted because that is the field the whole
+        # scope boundary now rests on.
+        self.assertEqual(log.changes["company"]["after"], self.company.id)
+
+    def test_company_admin_category_writes_are_audited(self):
+        """RBAC H-10 for the surface Sprint 142 OPENED. Category writes
+        moved off the SUPER_ADMIN-only gate onto
+        `_enforce_catalog_management`, so a COMPANY_ADMIN can now create,
+        rename, archive and delete their own categories — every one of
+        those must still land an AuditLog row attributed to them."""
+        CompanyUserMembership.objects.get_or_create(
+            user=self.company_admin, company=self.company
+        )
+        self.authenticate(self.company_admin)
+
+        created = self.client.post(
+            CATEGORY_LIST_URL, {"name": "CA Audit Cat"}, format="json"
+        )
+        self.assertEqual(
+            created.status_code, status.HTTP_201_CREATED, created.data
+        )
+        cat_id = created.data["id"]
+        create_log = AuditLog.objects.get(
+            target_model="extra_work.ServiceCategory",
+            target_id=cat_id,
+            action=AuditAction.CREATE,
+        )
+        self.assertEqual(create_log.actor, self.company_admin)
+
+        self.client.patch(
+            CATEGORY_DETAIL_URL.format(cat_id=cat_id),
+            {"name": "CA Audit Cat renamed"},
+            format="json",
+        )
+        update_log = AuditLog.objects.get(
+            target_model="extra_work.ServiceCategory",
+            target_id=cat_id,
+            action=AuditAction.UPDATE,
+        )
+        self.assertEqual(update_log.actor, self.company_admin)
+        self.assertEqual(
+            update_log.changes["name"]["after"], "CA Audit Cat renamed"
+        )
+
+        self.client.delete(CATEGORY_DETAIL_URL.format(cat_id=cat_id))
+        delete_log = AuditLog.objects.get(
+            target_model="extra_work.ServiceCategory",
+            target_id=cat_id,
+            action=AuditAction.DELETE,
+        )
+        self.assertEqual(delete_log.actor, self.company_admin)
+
+    def test_cascade_archive_audits_the_category_and_every_service(self):
+        """H-10 for the archive view, whose gate this sprint also moved
+        to `_enforce_catalog_management`. The view writes per-row
+        `save()` rather than a queryset `.update()` precisely so these
+        rows exist — `.update()` fires no `post_save` and would audit
+        nothing."""
+        CompanyUserMembership.objects.get_or_create(
+            user=self.company_admin, company=self.company
+        )
+        category = ServiceCategory.objects.create(
+            company=self.company, name="Cascade Audit"
+        )
+        service = Service.objects.create(
+            category=category,
+            company=self.company,
+            name="Cascade Audit Svc",
+            unit_type=ExtraWorkPricingUnitType.HOURS,
+            default_unit_price=Decimal("10.00"),
+        )
+        AuditLog.objects.all().delete()
+
+        self.authenticate(self.company_admin)
+        response = self.client.post(
+            f"{CATEGORY_LIST_URL}{category.id}/archive/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+        cat_log = AuditLog.objects.get(
+            target_model="extra_work.ServiceCategory",
+            target_id=category.id,
+            action=AuditAction.UPDATE,
+        )
+        self.assertEqual(cat_log.actor, self.company_admin)
+        self.assertFalse(cat_log.changes["is_active"]["after"])
+
+        svc_log = AuditLog.objects.get(
+            target_model="extra_work.Service",
+            target_id=service.id,
+            action=AuditAction.UPDATE,
+        )
+        self.assertEqual(svc_log.actor, self.company_admin)
+        self.assertFalse(svc_log.changes["is_active"]["after"])
 
     def test_update_via_api_writes_update_audit_log(self):
-        cat = ServiceCategory.objects.create(name="Before Name")
+        cat = ServiceCategory.objects.create(company=self.company, name="Before Name")
         AuditLog.objects.all().delete()  # drop the CREATE row
 
         self.authenticate(self.super_admin)
@@ -88,7 +191,7 @@ class ServiceCategoryAuditTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(log.changes["name"]["after"], "After Name")
 
     def test_delete_via_api_writes_delete_audit_log(self):
-        cat = ServiceCategory.objects.create(name="To Delete")
+        cat = ServiceCategory.objects.create(company=self.company, name="To Delete")
         cat_id = cat.id
         AuditLog.objects.all().delete()
 
@@ -110,7 +213,7 @@ class ServiceCategoryAuditTests(TenantFixtureMixin, APITestCase):
 class ServiceAuditTests(TenantFixtureMixin, APITestCase):
     def setUp(self):
         super().setUp()
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(company=self.company, name="Cleaning")
         AuditLog.objects.all().delete()
 
     def test_create_via_api_writes_create_audit_log(self):
@@ -196,7 +299,7 @@ class ServiceAuditTests(TenantFixtureMixin, APITestCase):
 class CustomerServicePriceAuditTests(TenantFixtureMixin, APITestCase):
     def setUp(self):
         super().setUp()
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(company=self.company, name="Cleaning")
         self.service = Service.objects.create(
             category=self.category,
             company=self.company,

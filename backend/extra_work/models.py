@@ -315,6 +315,46 @@ class ExtraWorkRequest(models.Model):
         related_name="extra_work_requests",
     )
 
+    # Sprint 144 §1 — what the operator ACTUALLY classifies a request as
+    # now: one of the company's own `ServiceCategory` rows, or one of the
+    # customer's own `CustomerPriceFolder`s. AT MOST ONE is set.
+    #
+    # These replace the `category` enum above as the QUESTION the create
+    # form asks. The enum itself is untouched and keeps its
+    # `default=OTHER`: the form simply stops asking, so new rows take the
+    # default and every one of the 65 live crmtest rows keeps the value
+    # it already has. Migrating the enum away is its own job (`## NEXT`
+    # item 18); this is not that, it just stops asking for it.
+    #
+    # Nullable is required, not a convenience — no backfill, and a
+    # request created before this sprint has neither. PROTECT mirrors
+    # `department` / `work_type` above: a category or folder still
+    # referenced by any request cannot be hard-deleted. That matters
+    # doubly for the folder, whose "delete with contents" path
+    # (Sprint 143) must not be able to take request history with it.
+    service_category = models.ForeignKey(
+        "ServiceCategory",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="extra_work_requests",
+        help_text=(
+            "Sprint 144 — the company catalog category this request is "
+            "filed under. Mutually exclusive with `price_folder`."
+        ),
+    )
+    price_folder = models.ForeignKey(
+        "CustomerPriceFolder",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="extra_work_requests",
+        help_text=(
+            "Sprint 144 — the customer's own price folder this request "
+            "is filed under. Mutually exclusive with `service_category`."
+        ),
+    )
+
     urgency = models.CharField(
         max_length=16,
         choices=ExtraWorkUrgency.choices,
@@ -693,11 +733,28 @@ class ServiceCategory(models.Model):
     Sprint 28 Batch 5 — provider-side service catalog: top-level
     category groupings.
 
-    Categories are global (provider-wide). They are the parent rows
-    for `Service` entries that customers eventually pick from when
-    composing an Extra Work cart. A category can be soft-deactivated
-    by toggling `is_active=False`; deletion is blocked while any
-    `Service` row still references it (`PROTECT` on the FK below).
+    Categories are the parent rows for `Service` entries that customers
+    eventually pick from when composing an Extra Work cart. A category
+    can be soft-deactivated by toggling `is_active=False`; deletion is
+    blocked while any `Service` row still references it (`PROTECT` on
+    the FK below).
+
+    Sprint 142 — categories are PER-COMPANY, reversing the Sprint 3B
+    decision that left them global. Pre-142 there was no `company` FK
+    and `name` was unique platform-wide, which meant (a) one provider's
+    category could hold another provider's services and Sprint 138's
+    cascade-archive would deactivate all of them, and (b) any
+    authenticated user — including a CUSTOMER_USER — could read every
+    provider's category names, because `catalog_scope.
+    filter_categories_for` was the identity. Both are closed by the
+    `company` FK plus the per-company uniqueness constraint below.
+    Migration set `0023/0024/0025` mirrors the `Service.company`
+    precedent (`0007`/`0008`/`0009`): nullable column + the new
+    constraint, backfill, then NOT NULL.
+
+    `name`'s `max_length=128` is deliberately unchanged — it is in
+    lockstep with `ExtraWorkRequestItem.snapshot_service_category_name`,
+    which stores a frozen copy of it.
 
     Distinct from `ExtraWorkCategory` (the legacy text-choices enum
     on `ExtraWorkRequest.category`): that enum classifies a single
@@ -705,7 +762,22 @@ class ServiceCategory(models.Model):
     bookable services with their own per-customer pricing tables.
     """
 
-    name = models.CharField(max_length=128, unique=True)
+    # Sprint 142 — provider-company scope, same shape as
+    # `Service.company` / `ManagedUnit.company`. PROTECT so a Company
+    # cannot be hard-deleted while it still owns catalog groupings.
+    company = models.ForeignKey(
+        "companies.Company",
+        on_delete=models.PROTECT,
+        related_name="service_categories",
+        help_text=(
+            "Sprint 142 — provider company that owns this category. "
+            "Pre-142 rows are backfilled from the single company of "
+            "their services by migration 0024."
+        ),
+    )
+    # NOT `unique=True` since Sprint 142: uniqueness is per-company and
+    # case/whitespace-insensitive, expressed as the constraint below.
+    name = models.CharField(max_length=128)
     description = models.TextField(blank=True, default="")
     is_active = models.BooleanField(default=True)
 
@@ -716,9 +788,21 @@ class ServiceCategory(models.Model):
         ordering = ["name", "id"]
         verbose_name = "service category"
         verbose_name_plural = "service categories"
+        constraints = [
+            # Sprint 142 — same shape as `ManagedUnit`'s constraint:
+            # Trim() first so leading/trailing whitespace cannot bypass
+            # a Lower()-only dedupe, Lower() for case. Two DIFFERENT
+            # providers may now both carry a "Cleaning" category; one
+            # provider may not carry it twice.
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "company",
+                name="uniq_service_category_name_per_company_ci",
+            ),
+        ]
 
     def __str__(self):
-        return self.name
+        return f"{self.company.name} / {self.name}"
 
 
 class Service(models.Model):
@@ -847,6 +931,77 @@ class Service(models.Model):
         return f"{self.category.name} / {self.name}"
 
 
+class CustomerPriceFolder(models.Model):
+    """
+    Sprint 143 §3 — a folder that belongs to ONE CUSTOMER and groups
+    that customer's price rows.
+
+    Distinct from `ServiceCategory`, and deliberately so. A
+    `ServiceCategory` is the PROVIDER's catalog grouping, shared by every
+    customer under that company (and company-scoped since Sprint 142). A
+    `CustomerPriceFolder` is the CUSTOMER's own arrangement of the prices
+    agreed with them. Renaming one never touches the other, and a folder
+    copied from a category keeps no link back to it — the copy seeds
+    price rows, it does not adopt the category.
+
+    A folder holds PRICE ROWS, never catalog services: the service is
+    shared and is not moved. Both price models get a nullable `folder`
+    FK below, so a row belongs to at most one folder and a FOLDERLESS
+    row stays perfectly legal — every pre-143 row is one, and they must
+    remain visible on the pricing page.
+
+    Shaped after `documents.models.DocumentFolder`, the proven
+    per-customer folder in this codebase: `customer` CASCADE (a folder
+    is owned by its customer and should not outlive it), a nullable
+    `created_by` on PROTECT (system writes have no actor, but a user who
+    created folders cannot be deleted), and case-insensitive name
+    uniqueness per customer. The constraint uses `Lower(Trim(...))`
+    rather than DocumentFolder's `Lower(...)` — the same normalization
+    `uniq_service_category_name_per_company_ci` settled on in Sprint 142,
+    so leading/trailing whitespace cannot bypass the dedupe. There is no
+    `parent`: these are flat, so DocumentFolder's two partial
+    constraints collapse to one.
+    """
+
+    customer = models.ForeignKey(
+        "customers.Customer",
+        on_delete=models.CASCADE,
+        related_name="price_folders",
+    )
+    name = models.CharField(max_length=128)
+    is_active = models.BooleanField(
+        default=True,
+        help_text=(
+            "Archiving a folder hides it from the Extra Work form's "
+            "picker without touching the price rows inside it."
+        ),
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="created_price_folders",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+        verbose_name = "customer price folder"
+        verbose_name_plural = "customer price folders"
+        constraints = [
+            models.UniqueConstraint(
+                Lower(Trim("name")),
+                "customer",
+                name="uniq_price_folder_name_per_customer_ci",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.customer.name} / {self.name}"
+
+
 class CustomerServicePrice(models.Model):
     """
     Sprint 28 Batch 5 — per-customer contract price for a Service.
@@ -879,6 +1034,19 @@ class CustomerServicePrice(models.Model):
         "customers.Customer",
         on_delete=models.CASCADE,
         related_name="service_prices",
+    )
+
+    # Sprint 143 §3 — optional per-customer folder. NULLABLE and
+    # SET_NULL: every pre-143 row has no folder and must keep working,
+    # and "delete the folder, keep the prices" is one of the two delete
+    # modes the UI offers — SET_NULL is what makes that a one-liner
+    # instead of a cascade the operator did not ask for.
+    folder = models.ForeignKey(
+        "CustomerPriceFolder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="prices",
     )
 
     unit_price = models.DecimalField(
@@ -941,6 +1109,15 @@ class CustomerCustomPrice(models.Model):
     customer = models.ForeignKey(
         "customers.Customer",
         on_delete=models.CASCADE,
+        related_name="custom_prices",
+    )
+    # Sprint 143 §3 — see `CustomerServicePrice.folder`. A customer-only
+    # line is exactly the kind of row an operator adds INTO a folder.
+    folder = models.ForeignKey(
+        "CustomerPriceFolder",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="custom_prices",
     )
     custom_name = models.CharField(max_length=200)

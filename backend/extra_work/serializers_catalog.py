@@ -24,6 +24,13 @@ Sprint 3B:
   * `CustomerServicePriceSerializer.validate` rejects writes where
     `service.company_id != customer.company_id` (stable code
     `service_customer_company_mismatch`).
+
+Sprint 142:
+  * `ServiceCategorySerializer` gains the same `company` handling —
+    writable PK on CREATE, read-only on UPDATE — plus a manual
+    per-company case-insensitive name-uniqueness pre-check, replacing
+    the `UniqueValidator` DRF used to derive from the now-removed
+    field-level `unique=True`.
 """
 from __future__ import annotations
 
@@ -33,15 +40,74 @@ from rest_framework import serializers
 
 from companies.models import Company
 
-from .catalog_scope import can_view_provider_defaults
+from .catalog_scope import (
+    can_view_provider_defaults,
+    filter_categories_for,
+    filter_managed_units_for,
+)
 from .models import (
     CustomerCustomPrice,
+    CustomerPriceFolder,
     CustomerServicePrice,
     ExtraWorkPricingUnitType,
     ManagedUnit,
     Service,
     ServiceCategory,
 )
+
+
+def _scoped_siblings(serializer, queryset, scope_filter):
+    """Sprint 142.1 (H-1) — apply the actor's catalog scope to a
+    uniqueness pre-check's sibling queryset.
+
+    A uniqueness pre-check runs inside `is_valid()`, which DRF calls
+    BEFORE `perform_create()`. So the 400 it raises fires before
+    `_resolve_catalog_create_company` ever gets to raise its 403. With
+    an UNSCOPED sibling queryset that turns the pre-check into a name
+    oracle against any company id the client cares to send:
+
+        POST {"company": <rival id>, "name": "X"}
+          -> 400 "already exists for this company"   if the rival has X
+          -> 403 catalog_cross_company_forbidden     if it does not
+
+    Two different answers, so the status code alone reports whether the
+    rival owns that name. Narrower than the read leak Sprint 142 closed
+    — that one handed the whole list to every authenticated user,
+    customers included — but the same class, and newly introduced by the
+    pre-check itself.
+
+    The rule this enforces: **a pre-check must never confirm or deny the
+    existence of a row the actor is not allowed to see.**
+
+    Scoping the queryset here rather than authorising the company before
+    validation, because:
+      * it reuses the scope helpers this sprint already wired up
+        (`filter_categories_for` / `filter_managed_units_for`) instead
+        of inventing a second authorisation path that would then have to
+        be kept in step with `_enforce_catalog_management`;
+      * it composes with DRF's order rather than fighting it. Hoisting
+        the company resolution ahead of `is_valid()` means overriding
+        `create()` on both views to run a 403 gate against a field that
+        has not been validated yet — and it reorders every OTHER field
+        error behind a permission check, changing responses this sprint
+        never intended to touch;
+      * a foreign company simply yields an empty sibling set, so the
+        request falls through to the 403 it should always have had. The
+        two foreign cases become byte-identical, which is what "no
+        oracle" means — not merely "both are errors".
+
+    A SUPER_ADMIN's scope is `None`, so their queryset comes back
+    unfiltered and the pre-check keeps working exactly as before.
+
+    With no `request` in context (a serializer used outside the view
+    layer) the scope helper sees no user and returns an empty set: the
+    pre-check goes quiet and the DB constraint + the view's
+    `IntegrityError` handler remain the backstop. That fails toward
+    "no friendly message", never toward "leaks a name".
+    """
+    request = serializer.context.get("request") if serializer.context else None
+    user = getattr(request, "user", None) if request else None
+    return scope_filter(user, queryset)
 
 
 def _resolve_effective_unit(attrs, instance):
@@ -99,15 +165,35 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
     The `getattr` fallback only fires for a single object that never
     went through that queryset (the CREATE/UPDATE response), so it can
     never produce an N+1 on a list.
+
+    Sprint 142 — `company` is a writable PK on CREATE only, exactly
+    mirroring `ServiceSerializer` / `ManagedUnitSerializer`: optional on
+    the wire (the view's `_resolve_catalog_create_company` defaults it
+    for a COMPANY_ADMIN), and pinned read-only on UPDATE. Re-pinning an
+    existing category to another provider would strand every `Service`
+    still inside it in a category their own company cannot see — the
+    exact defect `_enforce_same_company_category` exists to prevent —
+    so the field is simply not movable.
     """
 
     service_count = serializers.SerializerMethodField()
     active_service_count = serializers.SerializerMethodField()
+    company_name = serializers.CharField(
+        source="company.name", read_only=True
+    )
+    company = serializers.PrimaryKeyRelatedField(
+        queryset=Company.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
 
     class Meta:
         model = ServiceCategory
         fields = [
             "id",
+            "company",
+            "company_name",
             "name",
             "description",
             "is_active",
@@ -118,11 +204,69 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "company_name",
             "service_count",
             "active_service_count",
             "created_at",
             "updated_at",
         ]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if self.instance is not None:
+            # UPDATE path — pin `company` to its current value; see the
+            # class docstring for why it must not move.
+            fields["company"].read_only = True
+        return fields
+
+    def validate(self, attrs):
+        """Sprint 142 — friendly-400 pre-check for the per-company,
+        case/whitespace-insensitive name uniqueness.
+
+        Needed because dropping the field-level `unique=True` also
+        dropped the `UniqueValidator` DRF generated from it, and DRF
+        cannot generate one for an EXPRESSION constraint
+        (`Lower(Trim("name")), company`) the way it does for a plain
+        `UniqueConstraint(fields=[...])`. Without this, a duplicate name
+        would reach Postgres and surface as a 500 instead of the 400
+        this endpoint has always returned.
+
+        Exactly the shape `ManagedUnitSerializer.validate` uses,
+        including its limitation: on a COMPANY_ADMIN's CREATE that omits
+        `company`, the target is not resolved until `perform_create`
+        runs, so the pre-check is skipped and the view's
+        `IntegrityError` handler is the sole backstop.
+
+        Sprint 142.1 — the sibling queryset is SCOPED. Unscoped it was a
+        name oracle against any company id the client sent; see
+        `_scoped_siblings` for the full argument.
+        """
+        name = attrs.get("name", getattr(self.instance, "name", None))
+        company = attrs.get("company")
+        if company is None and self.instance is not None:
+            company = self.instance.company
+        if name and company is not None:
+            normalized = name.strip().lower()
+            existing = _scoped_siblings(
+                self,
+                ServiceCategory.objects.filter(company=company),
+                filter_categories_for,
+            )
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if any(c.name.strip().lower() == normalized for c in existing):
+                raise serializers.ValidationError(
+                    {
+                        "name": [
+                            serializers.ErrorDetail(
+                                f"A category named {name!r} already "
+                                "exists for this company.",
+                                code="service_category_name_not_unique",
+                            )
+                        ]
+                    }
+                )
+        return attrs
 
     def get_service_count(self, obj) -> int:
         annotated = getattr(obj, "annotated_service_count", None)
@@ -213,7 +357,18 @@ class ManagedUnitSerializer(serializers.ModelSerializer):
         # -400 via the IntegrityError handler in the view instead.
         if label and company is not None:
             normalized = label.lower()
-            existing = ManagedUnit.objects.filter(company=company)
+            # Sprint 142.1 — SCOPED, same H-1 fix as
+            # `ServiceCategorySerializer.validate`. This one is the
+            # ORIGINAL of the shape (Sprint 123); Sprint 142 copied the
+            # bug along with the pattern. Fixing only the copy would be
+            # the "written once, omitted elsewhere" defect rounds 4 and
+            # 5 were spent on — and this endpoint leaks unit LABELS to a
+            # COMPANY_ADMIN of another company in exactly the same way.
+            existing = _scoped_siblings(
+                self,
+                ManagedUnit.objects.filter(company=company),
+                filter_managed_units_for,
+            )
             if self.instance is not None:
                 existing = existing.exclude(pk=self.instance.pk)
             if any(u.label.strip().lower() == normalized for u in existing):
@@ -427,6 +582,86 @@ class ServiceSerializer(serializers.ModelSerializer):
         return data
 
 
+class CustomerPriceFolderSerializer(serializers.ModelSerializer):
+    """Sprint 143 §3 — the customer's OWN grouping of their price rows.
+
+    `customer` is read-only: the URL kwarg owns the binding, so a body
+    cannot smuggle a different customer (same rule as
+    `CustomerServicePriceSerializer`). `price_count` is what the index
+    card shows and what the delete confirmation counts.
+
+    The case-insensitive uniqueness pre-check is the friendly-400 layer
+    over `uniq_price_folder_name_per_customer_ci`; it is scoped to the
+    URL-bound customer by construction (the view supplies it via
+    context, having already run the per-customer permission check), so
+    it cannot become the cross-tenant name oracle Sprint 142.1 fixed in
+    the catalog serializers.
+    """
+
+    customer = serializers.PrimaryKeyRelatedField(read_only=True)
+    price_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomerPriceFolder
+        fields = [
+            "id",
+            "customer",
+            "name",
+            "is_active",
+            "price_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "customer",
+            "price_count",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_price_count(self, obj) -> int:
+        annotated = getattr(obj, "annotated_price_count", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.prices.count() + obj.custom_prices.count()
+
+    def validate_name(self, value):
+        stripped = (value or "").strip()
+        if not stripped:
+            raise serializers.ValidationError(
+                serializers.ErrorDetail(
+                    "name must not be blank.",
+                    code="price_folder_name_required",
+                )
+            )
+        return stripped
+
+    def validate(self, attrs):
+        name = attrs.get("name", getattr(self.instance, "name", None))
+        customer = self.context.get("customer")
+        if customer is None and self.instance is not None:
+            customer = self.instance.customer
+        if name and customer is not None:
+            normalized = name.strip().lower()
+            existing = CustomerPriceFolder.objects.filter(customer=customer)
+            if self.instance is not None:
+                existing = existing.exclude(pk=self.instance.pk)
+            if any(f.name.strip().lower() == normalized for f in existing):
+                raise serializers.ValidationError(
+                    {
+                        "name": [
+                            serializers.ErrorDetail(
+                                f"A folder named {name!r} already exists "
+                                "for this customer.",
+                                code="price_folder_name_not_unique",
+                            )
+                        ]
+                    }
+                )
+        return attrs
+
+
 class CustomerServicePriceSerializer(serializers.ModelSerializer):
     """Read/write serializer for `extra_work.CustomerServicePrice`.
 
@@ -443,6 +678,15 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(
         source="service.name", read_only=True
     )
+    # Sprint 143 §3 — the customer's own folder. Writable so a row can be
+    # moved into or out of one; the view validates the folder belongs to
+    # the URL-bound customer (a folder id from another customer would
+    # otherwise re-file this row under someone else's grouping).
+    folder = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerPriceFolder.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = CustomerServicePrice
@@ -451,6 +695,7 @@ class CustomerServicePriceSerializer(serializers.ModelSerializer):
             "service",
             "service_name",
             "customer",
+            "folder",
             "unit_price",
             "vat_pct",
             "valid_from",
@@ -564,6 +809,13 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
     """
 
     customer = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Sprint 143 §3 — see `CustomerServicePriceSerializer.folder`. A
+    # customer-only line is exactly what an operator adds into a folder.
+    folder = serializers.PrimaryKeyRelatedField(
+        queryset=CustomerPriceFolder.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     unit_type_display = serializers.CharField(
         source="get_unit_type_display", read_only=True
     )
@@ -585,6 +837,7 @@ class CustomerCustomPriceSerializer(serializers.ModelSerializer):
         model = CustomerCustomPrice
         fields = [
             "id",
+            "folder",
             "custom_name",
             "unit_type",
             "unit_type_display",

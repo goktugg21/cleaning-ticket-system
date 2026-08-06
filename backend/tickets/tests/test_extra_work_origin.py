@@ -107,6 +107,7 @@ class ExtraWorkOriginFixtureMixin:
         )
 
         cls.service_cat = ServiceCategory.objects.create(
+            company=cls.company,
             name="Cat-Origin"
         )
         cls.service = Service.objects.create(

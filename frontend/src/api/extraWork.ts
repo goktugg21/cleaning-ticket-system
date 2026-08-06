@@ -50,9 +50,33 @@ export interface ListExtraWorkParams {
   routing_decision?: "INSTANT" | "PROPOSAL";
   request_intent?: ExtraWorkRequestIntent;
   created_by?: number;
+  // Sprint 143 §6 — catalog category by NAME, server-side. Matched
+  // against `ExtraWorkRequestItem.snapshot_service_category_name`, the
+  // denormalised string written at order time — so a request stays
+  // filterable after its category is renamed or deleted, which is what
+  // makes the "no longer in the catalog" group in the list page's
+  // dropdown possible.
+  category?: string;
   billing_period?: string; // "YYYY-MM" — server buckets on COALESCE(invoice_date, completion date)
   invoice_status?: "completed" | "invoiced";
   page_size?: number;
+}
+
+// Sprint 143 §6 — the two groups the list page's category dropdown
+// offers. `historical` is the set of snapshot names with no matching
+// live category (renamed, archived or deleted after the order) and can
+// only be computed server-side — the list endpoint never carries line
+// items. Both groups come from the actor's SCOPED Extra Work queryset.
+export interface ExtraWorkCategoryOptions {
+  live: string[];
+  historical: string[];
+}
+
+export async function listExtraWorkCategoryOptions(): Promise<ExtraWorkCategoryOptions> {
+  const response = await api.get<ExtraWorkCategoryOptions>(
+    "/extra-work/category-options/",
+  );
+  return response.data;
 }
 
 export async function listExtraWork(

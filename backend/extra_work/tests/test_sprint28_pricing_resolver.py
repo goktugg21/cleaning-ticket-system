@@ -42,7 +42,7 @@ class PricingResolverFixtureMixin(TenantFixtureMixin):
 
     def setUp(self):
         super().setUp()
-        self.category = ServiceCategory.objects.create(name="Cleaning")
+        self.category = ServiceCategory.objects.create(company=self.company, name="Cleaning")
         self.service = Service.objects.create(
             category=self.category,
             company=self.company,

@@ -132,7 +132,7 @@ class ConvertFixtureMixin:
         )
 
         # --- catalog -----------------------------------------------------
-        cls.cat = ServiceCategory.objects.create(name="Cat-7B")
+        cls.cat = ServiceCategory.objects.create(company=cls.company, name="Cat-7B")
         cls.service_agreed = Service.objects.create(
             category=cls.cat,
             company=cls.company,

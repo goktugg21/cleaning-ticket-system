@@ -94,7 +94,7 @@ class _EwLabelFixture(TestCase):
                 ),
             )
 
-        cls.cat = ServiceCategory.objects.create(name="Cleaning 127e")
+        cls.cat = ServiceCategory.objects.create(company=cls.company_a, name="Cleaning 127e")
         # Unpriced (no CustomerServicePrice) so carts route PROPOSAL and do
         # not spawn instant tickets — keeps these tests about the labels.
         cls.service = Service.objects.create(

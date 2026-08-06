@@ -91,6 +91,7 @@ import { RouteBadge } from "../components/RouteBadge";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/ToastProvider";
 import { formatDate, formatDateTime, formatMoney, formatRelative, useLocaleCode } from "../lib/intl";
+import { extraWorkCategoryName } from "../lib/extraWorkCategoryLabel";
 import { Avatar } from "../components/Avatar";
 
 // Sprint 29 Batch 29.8 — terminal ticket statuses. A spawned ticket in
@@ -1587,10 +1588,14 @@ export function ExtraWorkDetailPage() {
             <StatusBadge status={{ kind: "extra-work", value: ew.status }} />
             <RouteBadge value={ew.routing_decision} />
             <span className="muted small">
-              {t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}
-              {ew.category === "OTHER" && ew.category_other_text
-                ? ` — ${ew.category_other_text}`
-                : ""}
+              {/* Sprint 144 §1 — the real classifier when the request
+                  has one, the enum label for a pre-144 row. */}
+              {extraWorkCategoryName(ew) ??
+                `${t(CATEGORY_I18N_KEY[ew.category] ?? ew.category)}${
+                  ew.category === "OTHER" && ew.category_other_text
+                    ? ` — ${ew.category_other_text}`
+                    : ""
+                }`}
             </span>
             <span className="muted small">
               · {t(URGENCY_I18N_KEY[ew.urgency] ?? ew.urgency)}

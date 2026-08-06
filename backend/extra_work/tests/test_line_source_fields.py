@@ -131,7 +131,7 @@ class _LineSourceFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
 
-        cls.service_cat = ServiceCategory.objects.create(name="Cleaning-LS")
+        cls.service_cat = ServiceCategory.objects.create(company=cls.company, name="Cleaning-LS")
         cls.service_priced = Service.objects.create(
             category=cls.service_cat,
             company=cls.company,

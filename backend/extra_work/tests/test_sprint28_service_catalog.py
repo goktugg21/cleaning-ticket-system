@@ -5,9 +5,10 @@ Sprint 28 Batch 5 — provider service catalog CRUD tests
 Coverage matrix:
 
   * SUPER_ADMIN + COMPANY_ADMIN can CRUD both ServiceCategory and
-    Service (the catalog is provider-wide, not company-scoped, so
-    EVERY COMPANY_ADMIN sees the same global list — there is no
-    cross-company "isolation" to test on this surface).
+    Service. Sprint 142 made BOTH company-scoped, so the isolation
+    this file's header used to say did not exist now does — it is
+    covered in `test_sprint3_provider_catalog_scope.py`, which owns
+    the two-provider fixture. These tests stay single-company.
   * BUILDING_MANAGER / STAFF / CUSTOMER_USER → 403 on every endpoint.
   * Unique constraints — duplicate ServiceCategory name and
     duplicate Service name within a category are 400.
@@ -23,6 +24,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from accounts.models import UserRole
+from companies.models import CompanyUserMembership
 from extra_work.models import (
     ExtraWorkPricingUnitType,
     Service,
@@ -40,9 +42,16 @@ SERVICE_DETAIL_URL = "/api/services/{svc_id}/"
 class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
     def test_super_admin_can_create_and_list_categories(self):
         self.authenticate(self.super_admin)
+        # Sprint 142 — `company` is required for a SUPER_ADMIN whenever
+        # the DB holds more than one Company (this fixture has two), the
+        # same `_resolve_catalog_create_company` rule Service uses.
         response = self.client.post(
             CATEGORY_LIST_URL,
-            {"name": "Cleaning", "description": "Regular cleaning"},
+            {
+                "company": self.company.id,
+                "name": "Cleaning",
+                "description": "Regular cleaning",
+            },
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -53,51 +62,76 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
         names = {row["name"] for row in list_resp.data["results"]}
         self.assertIn("Cleaning", names)
 
-    def test_company_admin_cannot_crud_category(self):
-        # Sprint 3B narrows ServiceCategory writes to SUPER_ADMIN
-        # only because the model is global. Provider Admin attempts
-        # land on 403 with the stable code; the pre-Sprint-3B "PA
-        # may CRUD categories" surface is intentionally gone.
+    def test_company_admin_can_crud_its_own_category(self):
+        """Sprint 142 reverses the Sprint 3B narrowing this test used to
+        assert. Categories were locked to SUPER_ADMIN because they were
+        GLOBAL — one Provider Admin's edit reached every provider. They
+        are per-company now, so a CA manages their own, gated by the
+        same `_enforce_catalog_management` every other catalog row uses.
+        The cross-company half is asserted in
+        `test_sprint3_provider_catalog_scope.py`, which has the
+        two-provider fixture for it.
+        """
+        CompanyUserMembership.objects.get_or_create(
+            user=self.company_admin, company=self.company
+        )
         self.authenticate(self.company_admin)
         create = self.client.post(
             CATEGORY_LIST_URL, {"name": "Maintenance"}, format="json"
         )
-        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(create.status_code, status.HTTP_201_CREATED, create.data)
+        # `company` omitted on the wire, defaulted to the actor's own.
+        self.assertEqual(create.data["company"], self.company.id)
 
-        # Reads still work — the GET surface is unchanged.
-        cat = ServiceCategory.objects.create(name="Maintenance-PA-read")
-        retrieve = self.client.get(
-            CATEGORY_DETAIL_URL.format(cat_id=cat.id)
-        )
+        cat_id = create.data["id"]
+        retrieve = self.client.get(CATEGORY_DETAIL_URL.format(cat_id=cat_id))
         self.assertEqual(retrieve.status_code, status.HTTP_200_OK)
 
-        # PATCH / DELETE land on 403 too.
         update = self.client.patch(
-            CATEGORY_DETAIL_URL.format(cat_id=cat.id),
-            {"description": "Hijack"},
+            CATEGORY_DETAIL_URL.format(cat_id=cat_id),
+            {"description": "Renamed by its owner"},
             format="json",
         )
-        self.assertEqual(update.status_code, status.HTTP_403_FORBIDDEN)
-        delete = self.client.delete(
-            CATEGORY_DETAIL_URL.format(cat_id=cat.id)
-        )
-        self.assertEqual(delete.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertTrue(
-            ServiceCategory.objects.filter(pk=cat.id).exists()
+        self.assertEqual(update.status_code, status.HTTP_200_OK, update.data)
+
+        delete = self.client.delete(CATEGORY_DETAIL_URL.format(cat_id=cat_id))
+        self.assertEqual(delete.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(
+            ServiceCategory.objects.filter(pk=cat_id).exists()
         )
 
     def test_duplicate_category_name_returns_400(self):
-        ServiceCategory.objects.create(name="Cleaning")
+        """Sprint 142 — still a 400, but from the serializer's own
+        per-company pre-check rather than the `UniqueValidator` DRF used
+        to derive from the (now removed) field-level `unique=True`. DRF
+        cannot generate one for an expression constraint."""
+        ServiceCategory.objects.create(company=self.company, name="Cleaning")
         self.authenticate(self.super_admin)
         response = self.client.post(
-            CATEGORY_LIST_URL, {"name": "Cleaning"}, format="json"
+            CATEGORY_LIST_URL,
+            {"company": self.company.id, "name": "Cleaning"},
+            format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("name", response.data)
 
+    def test_same_category_name_in_another_company_is_allowed(self):
+        """The other side of the same rule — the platform-wide unique
+        `name` is gone."""
+        ServiceCategory.objects.create(company=self.company, name="Cleaning")
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            CATEGORY_LIST_URL,
+            {"company": self.other_company.id, "name": "Cleaning"},
+            format="json",
+        )
+        self.assertEqual(
+            response.status_code, status.HTTP_201_CREATED, response.data
+        )
+
     def test_is_active_filter(self):
-        ServiceCategory.objects.create(name="Active Cat", is_active=True)
-        ServiceCategory.objects.create(name="Inactive Cat", is_active=False)
+        ServiceCategory.objects.create(company=self.company, name="Active Cat", is_active=True)
+        ServiceCategory.objects.create(company=self.company, name="Inactive Cat", is_active=False)
         self.authenticate(self.super_admin)
         only_active = self.client.get(CATEGORY_LIST_URL + "?is_active=true")
         self.assertEqual(only_active.status_code, status.HTTP_200_OK)
@@ -114,7 +148,7 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
         """Sprint 29 Batch 29.8.5 — BM can GET (catalog is reference
         data the EW create form needs to populate) but is blocked
         from every write endpoint."""
-        cat = ServiceCategory.objects.create(name="Existing")
+        cat = ServiceCategory.objects.create(company=self.company, name="Existing")
         self.authenticate(self.manager)
         list_resp = self.client.get(CATEGORY_LIST_URL)
         self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
@@ -142,7 +176,7 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
         """Sprint 29 Batch 29.8.5 — CUSTOMER_USER GETs catalog (needed
         by the EW create form's category dropdown); writes are
         still 403."""
-        cat = ServiceCategory.objects.create(name="Existing")
+        cat = ServiceCategory.objects.create(company=self.company, name="Existing")
         self.authenticate(self.customer_user)
         list_resp = self.client.get(CATEGORY_LIST_URL)
         self.assertEqual(list_resp.status_code, status.HTTP_200_OK)
@@ -170,8 +204,8 @@ class ServiceCategoryCrudTests(TenantFixtureMixin, APITestCase):
 class ServiceCrudTests(TenantFixtureMixin, APITestCase):
     def setUp(self):
         super().setUp()
-        self.cat_a = ServiceCategory.objects.create(name="Category A")
-        self.cat_b = ServiceCategory.objects.create(name="Category B")
+        self.cat_a = ServiceCategory.objects.create(company=self.company, name="Category A")
+        self.cat_b = ServiceCategory.objects.create(company=self.company, name="Category B")
 
     def test_super_admin_can_create_and_list_services(self):
         self.authenticate(self.super_admin)
@@ -409,7 +443,7 @@ class ServiceCategoryProtectsServiceTests(TenantFixtureMixin, APITestCase):
 
     def setUp(self):
         super().setUp()
-        self.cat = ServiceCategory.objects.create(name="Locked Cat")
+        self.cat = ServiceCategory.objects.create(company=self.company, name="Locked Cat")
         self.svc = Service.objects.create(
             category=self.cat,
             company=self.company,
@@ -449,7 +483,7 @@ class ServiceCustomUnitLabelTests(TenantFixtureMixin, APITestCase):
 
     def setUp(self):
         super().setUp()
-        self.cat = ServiceCategory.objects.create(name="Custom-unit cat")
+        self.cat = ServiceCategory.objects.create(company=self.company, name="Custom-unit cat")
 
     def _payload(self, **over):
         base = {

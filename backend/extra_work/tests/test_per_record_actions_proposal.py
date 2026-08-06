@@ -111,7 +111,7 @@ class _ActionsFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
         cls.service = Service.objects.create(
-            category=ServiceCategory.objects.create(name="Cat-PR"),
+            category=ServiceCategory.objects.create(company=cls.company, name="Cat-PR"),
             company=cls.company,
             name="Window cleaning",
             unit_type=ExtraWorkPricingUnitType.HOURS,

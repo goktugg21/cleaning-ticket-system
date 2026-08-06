@@ -91,6 +91,7 @@ class CartAuditFixtureMixin:
             access_role=CustomerUserBuildingAccess.AccessRole.CUSTOMER_USER,
         )
         cls.service_cat = ServiceCategory.objects.create(
+            company=cls.company,
             name="Audit Cat"
         )
         cls.service = Service.objects.create(

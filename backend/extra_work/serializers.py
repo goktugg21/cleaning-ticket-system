@@ -39,7 +39,6 @@ from .classification import (
 )
 from .models import (
     CustomerCustomPrice,
-    ExtraWorkCategory,
     ExtraWorkLinePriceSource,
     ExtraWorkPricingLineItem,
     ExtraWorkPricingUnitType,
@@ -639,6 +638,17 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
     work_type_name = serializers.CharField(
         source="work_type.name", read_only=True, allow_null=True
     )
+    # Sprint 144 §1 — what the operator actually classified this request
+    # as. At most one is set; a pre-144 request has neither and the
+    # `category` enum below is all it has. Both surfaces render whichever
+    # is present and fall back to the enum label, so the two shapes
+    # coexist without a migration.
+    service_category_name = serializers.CharField(
+        source="service_category.name", read_only=True, allow_null=True
+    )
+    price_folder_name = serializers.CharField(
+        source="price_folder.name", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = ExtraWorkRequest
@@ -654,6 +664,10 @@ class ExtraWorkRequestListSerializer(serializers.ModelSerializer):
             "department_name",
             "work_type",
             "work_type_name",
+            "service_category",
+            "service_category_name",
+            "price_folder",
+            "price_folder_name",
             "title",
             "category",
             "urgency",
@@ -731,6 +745,17 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
     work_type_name = serializers.CharField(
         source="work_type.name", read_only=True, allow_null=True
     )
+    # Sprint 144 §1 — what the operator actually classified this request
+    # as. At most one is set; a pre-144 request has neither and the
+    # `category` enum below is all it has. Both surfaces render whichever
+    # is present and fall back to the enum label, so the two shapes
+    # coexist without a migration.
+    service_category_name = serializers.CharField(
+        source="service_category.name", read_only=True, allow_null=True
+    )
+    price_folder_name = serializers.CharField(
+        source="price_folder.name", read_only=True, allow_null=True
+    )
     pricing_line_items = serializers.SerializerMethodField()
     line_items = ExtraWorkRequestItemSerializer(many=True, read_only=True)
     allowed_next_statuses = serializers.SerializerMethodField()
@@ -765,6 +790,10 @@ class ExtraWorkRequestDetailSerializer(serializers.ModelSerializer):
             "department_name",
             "work_type",
             "work_type_name",
+            "service_category",
+            "service_category_name",
+            "price_folder",
+            "price_folder_name",
             "title",
             "description",
             "category",
@@ -1184,8 +1213,15 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             "customer",
             "title",
             "description",
+            # Sprint 144 §1 — `category` / `category_other_text` stay on
+            # the wire (read-write) for API back-compat, but the create
+            # FORM no longer asks: it sends `service_category` or
+            # `price_folder` instead and lets the enum take its
+            # `default=OTHER`.
             "category",
             "category_other_text",
+            "service_category",
+            "price_folder",
             # Sprint 127 — optional per-customer labels (same-customer
             # enforced in validate()).
             "department",
@@ -1307,13 +1343,48 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
                 line_custom_price, customer, line["requested_date"]
             )
 
-        if attrs.get("category") == ExtraWorkCategory.OTHER and not attrs.get(
-            "category_other_text", ""
-        ).strip():
+        # Sprint 144 §1 — the `category=OTHER => category_other_text
+        # required` rule is GONE from the create path. The form no longer
+        # offers the enum at all, so every new request takes
+        # `default=OTHER` and this rule would have made a field the
+        # operator can no longer see mandatory on every single create.
+        # The column and its data are untouched; only the demand is.
+
+        # Sprint 144 §1 — at most ONE of the two classifiers. They are
+        # alternatives on one control, so both being set means the client
+        # is confused about which it picked, not that the request belongs
+        # to both.
+        if attrs.get("service_category") and attrs.get("price_folder"):
             raise serializers.ValidationError(
                 {
-                    "category_other_text": (
-                        "Required when category is OTHER."
+                    "service_category": (
+                        "Choose either a catalog category or a customer "
+                        "price folder, not both."
+                    )
+                }
+            )
+        # Tenant scoping (RBAC H-1/H-2), same intent as the label guard:
+        # a category must belong to THIS request's company and a folder
+        # to THIS request's customer.
+        chosen_category = attrs.get("service_category")
+        if (
+            chosen_category is not None
+            and chosen_category.company_id != customer.company_id
+        ):
+            raise serializers.ValidationError(
+                {
+                    "service_category": (
+                        "This category belongs to a different provider "
+                        "company."
+                    )
+                }
+            )
+        chosen_folder = attrs.get("price_folder")
+        if chosen_folder is not None and chosen_folder.customer_id != customer.id:
+            raise serializers.ValidationError(
+                {
+                    "price_folder": (
+                        "This folder belongs to a different customer."
                     )
                 }
             )

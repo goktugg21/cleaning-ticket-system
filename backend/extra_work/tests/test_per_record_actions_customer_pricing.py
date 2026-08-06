@@ -98,7 +98,7 @@ class CustomerSpecificContractPricingRoutingTests(TestCase):
             )
 
         cls.service_priced = Service.objects.create(
-            category=ServiceCategory.objects.create(name="Cat-PR-Pricing"),
+            category=ServiceCategory.objects.create(company=cls.company, name="Cat-PR-Pricing"),
             company=cls.company,
             name="Shared service (different prices per customer)",
             unit_type=ExtraWorkPricingUnitType.HOURS,
