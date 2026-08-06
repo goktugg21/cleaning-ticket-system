@@ -121,6 +121,61 @@ entries are DELETED rather than left contradicting the code.
   the SA company selector silently absent.
 
 
+**Rounds 5-11 (Sprints 145-151.1) — the customer's side of the catalog,
+and the four CI failures that followed.** Written directly by the PM at
+the owner's instruction (no CC round), with the backend suite
+deliberately NOT run per-round — CI's full regression was the gate.
+
+- **§145 The Extra Work Category control is the CUSTOMER's.** It offered
+  a "your company's categories" group nobody asked for, which also put
+  the provider's whole catalog grouping in front of a CUSTOMER_USER. The
+  control is now DISABLED until a customer is chosen (with a note saying
+  so) and then lists only that customer's categories. Choosing one also
+  filters the AGREED PRICES panel, which previously kept showing every
+  price beneath a narrowed picker. "Folder" left the interface entirely
+  — 29 strings now say categorie/category; the owner used the word to
+  explain the concept, not to name it. Category actions moved onto the
+  Services rows: Edit/Archive/Delete existed only in a detail panel you
+  reached by clicking a row, so the owner reported he could not rename
+  or delete a category at all. **A hidden action is a missing action.**
+- **§146 A customer could not see their own categories.**
+  `CustomerPriceFolderListCreateView` was `IsSuperAdminOrCompanyAdmin`
+  on GET too, so a customer got a 403, the form degraded to an empty
+  list, and told her "this customer has no categories yet" while the
+  customer had two. Read is now `IsCustomerPriceReader`; writes
+  unchanged.
+- **§147 A customer cannot REACH the provider's general catalog.**
+  `ServiceListCreateView` narrows for a CUSTOMER_USER to services with
+  an active, currently-valid `CustomerServicePrice`.
+  `filter_services_for` only narrowed to the COMPANY, which still handed
+  every customer that provider's entire catalog. A client-side filter is
+  "not shown", not "cannot reach". The free-text custom line is
+  untouched, so the proposal path survives. **Known gap:**
+  `ServiceDetailView` is NOT narrowed — a customer cannot enumerate the
+  catalog but can still fetch a service by id. Left deliberately:
+  narrowing it risks 404ing historical rows. See `## NEXT`.
+- **§148 Two provider-flavoured strings shown to customers** ("No agreed
+  contract prices for this customer yet") rewritten in the reader's own
+  terms.
+- **§149-150 A SUPER_ADMIN works in ONE provider company at a time.**
+  The selector's empty option is gone as a choice (the placeholder stays,
+  `disabled`), so Services/Categories/Units always show exactly one
+  company. That removes the need for a company column on every row AND
+  makes a cross-company multi-select impossible by construction. The
+  default is the LOWEST-ID company, not `[0]` of a name-ordered list, and
+  the operator's last choice is remembered in localStorage.
+- **§151 + §151.1 The four CI failures.** All four were tests still
+  encoding rules the owner deliberately changed; **none was a behaviour
+  defect.** Three were
+  `test_customer_user_sees_own_provider_catalog_without_defaults`
+  (counted once per customer actor kind) — moved onto §147's rule, with
+  `svc_a_other` (same provider, no agreed price) as the load-bearing
+  assertion. The fourth was `test_category_other_requires_other_text`:
+  Sprint 144 dropped that CREATE requirement and had to, because the
+  form no longer sends the enum and the field defaults to OTHER — the
+  rule would have 400'd every request created from the form. Verified
+  locally: 159 catalog tests + 32 MVP tests, OK.
+
 **Round 4 (Sprint 144) — one Category control, and recurring work gains
 the customer's own vocabulary.** Deployed to crmtest by CC.
 
@@ -299,6 +354,20 @@ across ("Owner's forward queue", "Deferred / undecided items", "Standing
 milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
+
+0. **`ServiceDetailView` is not narrowed for a CUSTOMER_USER.** Sprint
+   147 stopped a customer LISTING the provider's general catalog
+   (`ServiceListCreateView` requires an active, currently-valid
+   `CustomerServicePrice`), but `/api/services/<id>/` still resolves any
+   service of their provider company. So a customer cannot enumerate the
+   catalog, but can still fetch one by id — walking integer ids
+   reconstructs it. Left deliberately: narrowing the detail view risks
+   404ing a service referenced by an older request whose agreed price has
+   since expired, and that path was not traced. Fix shape if taken up:
+   apply the same predicate as the list view, but first confirm nothing
+   customer-facing resolves a historical line through this endpoint
+   (Extra Work detail uses the `snapshot_*` columns, which is why it is
+   probably safe).
 
 1. **SUPER_ADMIN "My Work" page content** — what should an SA see on a
    "my work" surface? An SA creates little of their own work; the
