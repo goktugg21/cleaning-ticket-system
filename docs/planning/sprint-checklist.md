@@ -56,8 +56,9 @@ docs-only pass — so this file always reflects where we actually are.
 ## NOW
 
 **Branch:** `feat/sprint-152-employee-hours` — Sprint 152, employee hours
-(urenregistratie), plus the Sprint 152.1 and 152.2 rounds on the same
-branch after the owner tested it on crmtest. Cut from `main`@`6a93e77`.
+(urenregistratie), plus the Sprint 152.1, 152.2 and 152.3 rounds on the
+same branch after the owner tested it on crmtest. Cut from
+`main`@`6a93e77`.
 **Still ONE PR.** CC does not open PRs; the owner does. CC did NOT deploy
 this branch.
 
@@ -414,6 +415,112 @@ round. `makemigrations --dry-run --check` → *No changes detected*.
 Frontend gate in `node:22-alpine`: `tsc --noEmit` clean, `eslint .`
 **45 problems (43 errors, 2 warnings) = the baseline**, zero in the new
 files, `npm run build` succeeded.
+
+### Round 4 (Sprint 152.3) — the standard types read in the reader's language
+
+Same branch, same PR. Sprint 152.1 made the "Add standard set" BUTTON
+language-aware, but the rows it wrote were then fixed: switching the UI
+to English left "Normale uren" reading "Normale uren". This round makes
+the six STANDARD kinds follow the reader. **One migration pair**
+(`0002` AddField, `0003` data) — additive, no destructive change.
+
+**The shape that was REJECTED, and why.** The obvious answer is
+multilingual columns — `name_nl` / `name_en` / `name_tr` / `name_bg`,
+the shape the reference system uses. It was considered and turned down:
+an hour type is a company's own payroll vocabulary and **most rows are
+custom**, so those columns would sit empty for exactly the rows that
+make up the bulk of a real catalog, and every consumer would need the
+fallback-to-`name` path regardless. `HourType.name` stays ONE
+operator-typed column.
+
+**Recognition instead.** `STANDARD_SLOTS` already paired each slot's
+Dutch and English name for Sprint 152.1's cross-language idempotency;
+this round makes that pairing do double duty as a RECOGNISER.
+`slot_for_name()` maps any of the twelve known spellings to a slot key,
+and the new `HourType.standard_slot` stores the result — DERIVED in
+`save()`, for the same reason `TimeEntry.save()` derives
+`iso_year`/`iso_week` there: no management command, data migration or
+shell write can produce a row whose stored slot contradicts its own
+name. The consequences are intended and commented at the source:
+
+  * renaming a standard row to something of the company's own DETACHES
+    it — it becomes custom and keeps the typed name verbatim;
+  * renaming it back, in EITHER language, RE-ATTACHES it — symmetric,
+    precisely because nothing is latched;
+  * a custom type someone happens to name "Vakantie" WILL read as
+    "Vacation" in English. Accepted: same word, same concept, and the
+    alternative (a flag set once at creation) drifts from the name it
+    claims to describe the moment anybody edits either one.
+
+**The data migration imports the derivation** rather than reimplementing
+it. A migration carrying its own copy of the twelve names would be a
+second source of truth that stops matching `standard_set.py` the first
+time a wording is adjusted — and, being a migration, would keep claiming
+to have applied the rule correctly. It uses the historical model and
+`.update()`, so the backfill fires no audit signals: a schema operation
+with no operator behind it should not write `AuditLog` rows attributed
+to nobody.
+
+**The slot travels on every payload that carries a name** —
+`HourTypeSerializer.standard_slot`,
+`TimeEntrySerializer.hour_type_standard_slot`, and `by_hour_type`'s
+`standard_slot` — all read-only, all ADDITIVE, with `hour_type_name`
+still carrying the STORED name everywhere. The JSON is never translated
+server-side; the client decides.
+
+**The CSV is the deliberate exception.** It is a server-generated
+artefact with no client to translate it, so it resolves the label itself
+in the DOWNLOADER's language (`request.user.language`, the same source
+the standard-set action reads), falling back to the stored name for a
+custom type and to Dutch for an unset language. Stated in the builder's
+docstring so it reads as a decision, not an accident.
+
+**ONE frontend helper, twelve call sites.** `lib/hourTypeLabel.ts`
+exports the rule; `HoursFilterRow`, `MyHoursPage` (×3),
+`HoursOverviewTab` (×2), `HourTypesTab` (×2), `HoursAdminPage` (×3) and
+`HoursCharts` all go through it — no local re-implementations, no inline
+ternaries doing the same job. This is CLAUDE.md's own frontend rule:
+a second, independently-maintained copy of a rendering rule is what
+drifts, and Sprint 126's headerless permission column survived three
+sprints on exactly that. The i18n script ASSERTS its six strings against
+the backend's `STANDARD_SLOTS` tuple, so the button's wording and the
+UI's cannot silently diverge.
+
+**The management screen is the one place that shows both.**
+`HourTypesTab`'s list renders the translated label with a small
+"standaard / standard" marker; its EDIT form holds the STORED name plus
+one line of help text. Without that, an English-profile admin opens a
+row listed as "Overtime", finds "Overwerk" in the input, and reasonably
+concludes the form is broken.
+
+**Audit: `standard_slot` is LEFT auto-tracked.** CLAUDE.md's rule points
+at `_*_TRACKED_FIELDS` in `audit/signals.py`; there is none to edit,
+because those tuples belong to the models with hand-written handlers and
+`HourType` uses the generic full-CRUD trio, whose diff engine
+auto-introspects every concrete field. The real question was whether to
+SUPPRESS it as a derivative of `name`. Decided against: the only
+mechanism is `diff.NOISY_FIELDS`, a GLOBAL frozenset keyed on field
+name, so excluding it would silently suppress a `standard_slot` on any
+future model; it is an extra key in one row, not a second row; and it is
+the CONSEQUENTIAL half — "this row stopped being the standard Overtime
+type" is what an operator wants to see, and reading that off a name diff
+means knowing the twelve recognised spellings. `audit/signals.py` was
+therefore not touched, and a test in `audit/tests/` pins the behaviour.
+
+**One pre-existing test changed, and it is not an idempotency test.**
+`test_multipliers_match_the_declared_set` unpacked
+`standard_hour_types()`'s 3-tuples; the helper now yields the slot key
+first. Only the unpacking moved — the assertion is unchanged. All four
+cross-language idempotency tests passed **unmodified**, which was the
+condition this round had to meet.
+
+**Gates.** `python manage.py test timesheets audit` → **OK, 302 tests**.
+`audit` WAS run this round, because a test was added to
+`backend/audit/tests/` — `audit/signals.py` itself is untouched.
+`makemigrations --dry-run --check` → *No changes detected*. Frontend
+gate in `node:22-alpine`: `tsc --noEmit` clean, `eslint .` **45 problems
+(43 errors, 2 warnings) = the baseline**, zero in the touched files,
+`npm run build` succeeded.
 ---
 
 ## NEXT
