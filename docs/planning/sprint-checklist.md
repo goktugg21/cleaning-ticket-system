@@ -56,9 +56,10 @@ docs-only pass — so this file always reflects where we actually are.
 ## NOW
 
 **Branch:** `feat/sprint-152-employee-hours` — Sprint 152, employee hours
-(urenregistratie), plus the Sprint 152.1 round on the same branch after
-the owner tested it on crmtest. Cut from `main`@`6a93e77`. **Still ONE
-PR.** CC does not open PRs; the owner does. CC did NOT deploy this branch.
+(urenregistratie), plus the Sprint 152.1 and 152.2 rounds on the same
+branch after the owner tested it on crmtest. Cut from `main`@`6a93e77`.
+**Still ONE PR.** CC does not open PRs; the owner does. CC did NOT deploy
+this branch.
 
 **Last shipped PR on `main`: #128** — Sprints 142 through 151.1. Its
 SHIPPED line was appended by this branch (a PR cannot cite its own
@@ -306,6 +307,113 @@ changes a model.
 changed, so no migration was needed. Frontend gate in `node:22-alpine`:
 `tsc --noEmit` clean, `eslint .` **45 problems (43 errors, 2 warnings) =
 the baseline**, zero in the touched files, `npm run build` succeeded.
+
+### Round 3 (Sprint 152.2) — the Overview tab, and three real bugs
+
+Same branch, same PR. The Sprint 152 architecture is untouched: module
+independence, the snapshot rule, week locks, H-1 scoping, no existence
+oracles. **No migration** — nothing here changes a model.
+
+**Three confirmed bugs, all reproduced before being fixed.**
+
+- **§1a A malformed date was an unhandled 500.**
+  `views_entries._apply_entry_filters` passed `date_from` / `date_to`
+  straight into `.filter(date__gte=...)`. The DB layer's coercion raises
+  Django's OWN `ValidationError`, which DRF does not translate — so any
+  unparseable value 500'd, and because all three date-filtered endpoints
+  share that helper it 500'd on **`/entries/`, `/summary/` AND
+  `/summary/export.csv` at once**. Reproduced first: the new tests
+  errored with the raw `django.core.exceptions.ValidationError` escaping
+  the view. New `timesheets/periods.py` mirrors the SHAPE of
+  `reports/scoping.py::parse_date_range` and imports nothing from it.
+  It differs deliberately in one way: **no default window.**
+  `parse_date_range` falls back to 30 days; these endpoints legitimately
+  answer "everything ever recorded", and quietly imposing a window would
+  make an unfiltered total silently wrong — the worst kind of wrong,
+  because it still looks like an answer. `strptime` rather than a regex,
+  so `2026-02-30` (correctly shaped, not a date) is rejected here rather
+  than 500-ing downstream.
+- **§1b A reversed range returned an empty set**, which reads as "nobody
+  worked in this period" rather than "your two dates are the wrong way
+  round". Now a 400 on the same `timesheet_period_invalid` code.
+- **§1c A week that does not exist could be closed.** `_parse_week`
+  accepted any `iso_week` in 1..53, but most years have 52 ISO weeks and
+  only some have 53 — **2025-W53 does not exist**, and closing it created
+  a `WeekLock` no `TimeEntry` could ever belong to: invisible in the
+  entries list, permanently listed as a closed week, locking nothing.
+  `periods.iso_week_exists` asks `date.fromisocalendar` instead of
+  guessing, so week 53 is accepted exactly in the years that have one
+  (2026 does — the test asserts both directions). `weeks.week_bounds` is
+  deliberately NOT guarded: it is only ever called with pairs read back
+  from stored rows, so it cannot receive an impossible one.
+
+**§2 The summary gains two breakdowns**, purely additive — every
+pre-existing key keeps its name and shape, pinned by a test.
+`by_employee` and `by_building` answer the owner's actual question,
+which the payload could not: *"in this period, who worked in which
+buildings?"* The NULL-building bucket is EXPLICIT, never dropped —
+hours with no location recorded are exactly the ones an operator needs
+to notice — and its label is a stable sentinel (`__none__`), not a Dutch
+string baked into the API, so the frontend picks the language. Two tests
+assert the buckets sum to the grand total, which proves nothing is
+dropped independently of which bucket anything landed in. Both use the
+same `sum_`-prefixed alias discipline as the existing breakdowns (a
+`hours=Sum("hours")` alias shadows the column and makes `F("hours")` in
+the weighted expression bind to the aggregate). `restrict_entries_to_
+self` still applies, so a STAFF actor's `by_employee` is exactly
+themselves — correct, not special-cased. CSV gains EMPLOYEE and BUILDING
+sections: rows appended, columns untouched, because the column tuple is
+a contract with every saved spreadsheet formula pointed at that file.
+
+**§3 The Weeks tab became the OVERVIEW tab** (`Overzicht` / `Overview`)
+— the read-only analytical surface. Stated at the top of the file
+because it is a decision, not an omission: entries are created and
+edited on the Entries tab, and nothing on Overview mutates a
+`TimeEntry`. The one thing it still writes is the WEEK LOCK, which
+belongs there — a close acts on a PERIOD, not on an entry, and that is
+the surface with a period selected. The period selector has two MODES
+(week stepper; from/to range with this-month / last-month / last-3-months
+/ this-year presets) but **one query shape**: both resolve to the same
+`date_from`/`date_to` pair before anything is fetched, so there are not
+two code paths downstream. Presets are shortcuts, never the only way in
+— an arbitrary span ("3 months and 24 days") is the point. Close/reopen
+renders only in Week mode and Range mode SAYS why rather than disabling
+a control silently. The three filters are EXTRACTED into
+`HoursFilterRow` and used by both tabs; the PERIOD controls deliberately
+are not shared, since the two tabs differ there on purpose. The Entries
+tab keeps its compact totals panel unchanged — it describes the filtered
+table directly above it.
+
+**§4 Four graphs**, mirroring `src/pages/reports/charts/*` (same
+`ResponsiveContainer`, same grid stroke, same palette hexes, same
+card/empty shape, a donut for the hour-type split matching
+`StatusDistributionChart`). They are PRESENTATIONAL and take the summary
+the tab already loaded: four components each fetching the identical
+`/summary/` response would be four times the work for one screen and
+would let the graphs disagree with the tables beside them mid-refresh.
+**Every categorical chart is BOUNDED** — top 10 by hours plus one
+aggregated "Overige" bar, with the caption saying how many were folded
+in; the tables below keep every row, so the chart is the summary and the
+table is the record. Same principle as `BoundedList`: "looks fine on
+seed data, breaks on real data" is the defect. The hour-type donut needs
+no bound and says why (six rows by domain reality).
+
+**One comment corrected.** `App.tsx` claimed ReportsPage is recharts'
+only consumer (`HoursCharts` is now a second) and that lazy-loading
+lands recharts in a separate chunk. It does not, and **did not before
+this sprint either**: the build emits no recharts chunk, `ReportsPage-*.js`
+is ~22 kB, and `index-*.js` was already 2,178 kB before these charts
+existed — they cost +21 kB, their own code. Splitting recharts out for
+real is a deliberate `manualChunks` change measured against both
+consumers, not a side effect of this round; recorded here rather than
+done.
+
+**Gates.** `python manage.py test timesheets` → **OK, 172 tests** (up
+from 143). `audit` NOT re-run — `audit/signals.py` is untouched this
+round. `makemigrations --dry-run --check` → *No changes detected*.
+Frontend gate in `node:22-alpine`: `tsc --noEmit` clean, `eslint .`
+**45 problems (43 errors, 2 warnings) = the baseline**, zero in the new
+files, `npm run build` succeeded.
 ---
 
 ## NEXT
