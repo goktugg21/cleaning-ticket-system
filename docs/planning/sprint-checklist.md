@@ -55,296 +55,148 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-142-company-scoped-categories` — Sprint 142,
-company-scoped service categories, plus the Sprint 142.1 review round on
-the same branch. Cut from `main`@`91230a0`. **Still ONE PR.** CC does not
-open PRs; the owner does.
+**Branch:** `feat/sprint-152-employee-hours` — Sprint 152, employee hours
+(urenregistratie). Cut from `main`@`6a93e77`. **ONE PR.** CC does not open
+PRs; the owner does. CC did NOT deploy this branch.
 
-**Last shipped PR on `main`: #127** — Sprints 137/138/139/140/141. Its
+**Last shipped PR on `main`: #128** — Sprints 142 through 151.1. Its
 SHIPPED line was appended by this branch (a PR cannot cite its own
 number).
 
-**What this sprint reverses, deliberately.** `ServiceCategory` was GLOBAL:
-no `company` FK, `name` unique platform-wide, and writes locked to
-SUPER_ADMIN precisely BECAUSE it was global. That was recorded as
-intentional in `(I-7)`, and the cross-tenant blast radius it created was
-recorded as `## NEXT` item 21. The owner now needs per-company catalogs,
-which is exactly the "concrete need" `(I-7)` said was missing — so both
-entries are DELETED rather than left contradicting the code.
+**What this sprint is.** A new, INDEPENDENT business module recording how
+much an employee worked — not what work was performed. The hard
+architectural rule, held throughout: **no relationship to Tickets, Extra
+Work or Planned Work.** No FK, no import in either direction, no "while
+we're here" integration. It must work for a company that uses nothing
+else in the system. Payroll is out of scope: the module records hours and
+WEIGHTED hours; it never holds a wage and never computes money.
 
-- **§1 The migration** — `extra_work.0023`–`0025`, mirroring the
-  `Service.company` precedent (nullable → backfill → NOT NULL): add
-  `ServiceCategory.company` (PROTECT, `related_name="service_categories"`)
-  nullable; drop the field-level `unique=True` on `name` and add the
-  per-company `UniqueConstraint(Lower(Trim("name")), "company")` in the
-  SAME migration, so there is never a window where two companies can
-  insert a colliding name; backfill each category from the single company
-  of its services, **raising** on more than one distinct company and
-  pinning a zero-service category to the sole `Company` (raising if there
-  is not exactly one); then flip `company` NOT NULL. Verified against the
-  live crmtest DB: 6 categories, each belonging to exactly one company,
-  zero zero-service categories. That is encoded as a guard, not assumed.
-  `name`'s `max_length=128` is unchanged — it is in lockstep with
-  `ExtraWorkRequestItem.snapshot_service_category_name`.
-- **§2 Scoping closes a live cross-tenant leak.**
-  `catalog_scope.filter_categories_for` was written in Sprint 3B as an
-  identity function, explicitly as the hook for this sprint; it now filters
-  on `company_id__in=scope` exactly as `filter_services_for` does. Because
-  it was the identity AND category GET is open to any authenticated user, a
-  CUSTOMER_USER could read EVERY provider's category names (H-1). Locked
-  shut by test.
-- **§3 Category writes move onto the normal catalog gate.**
-  `_enforce_category_super_admin_only` is retired at all four call sites
-  (`perform_create`, `perform_update`, `delete`, the archive view) in
-  favour of `_enforce_catalog_management` — the gate `Service` already
-  uses — with `_resolve_catalog_create_company` for CREATE. A COMPANY_ADMIN
-  can now manage their OWN categories, which is what
-  `Company.provider_admin_may_manage_catalog`'s help text has claimed all
-  along and did not do.
-- **§4 Two guards that did not exist.** A `Service`'s `category` must
-  belong to the Service's own company — nothing enforced that before, so a
-  service could be attached to ANY category. And `?company=<id>` on the
-  categories list, applied BEFORE `filter_categories_for` so it can only
-  ever narrow (the ordering `ServiceListCreateView` already documents).
-- **§5 A warning that can never fire, removed.**
-  `ServiceCategoryArchiveView`'s `affected_company_count` is now
-  permanently ≤ 1, so the field and the FE's "this touched N providers"
-  branch are gone. Same anti-pattern this whole sprint series has been
-  removing.
-- **§6 Five carry-over one-liners from the #127 review** — the Edit-mode
-  button gated on `visibleRows` (which includes archived rows) instead of
-  `selectableRows`; the catalog bulk price-adjust's raw refetch, whose
-  failure reported a committed +10% as failed and whose retry COMPOUNDED
-  it to +21%; `loadError` never cleared at any of its 14 set-sites; the
-  copy-from-defaults refresh banner rendering BEHIND its own
-  `aria-modal` overlay; and a `.then()` with no `.catch()` that could leave
-  the SA company selector silently absent.
+Explicitly OUT of v1, and not built toward: clock in/out, GPS/attendance,
+approval workflows, auto-derivation from other modules, PDF export,
+per-user `osius.*` permission keys.
 
+### Backend — new app `timesheets`, at `/api/timesheets/`
 
-**Rounds 5-11 (Sprints 145-151.1) — the customer's side of the catalog,
-and the four CI failures that followed.** Written directly by the PM at
-the owner's instruction (no CC round), with the backend suite
-deliberately NOT run per-round — CI's full regression was the gate.
+- **§1 Three models, one additive migration** (`timesheets.0001`, three
+  new tables, no existing table touched, no backfill).
+  - `HourType` — the per-company catalog of hour kinds and their
+    multipliers, on the post-142 architecture: `company` FK PROTECT plus
+    `UniqueConstraint(Lower(Trim("name")), "company")`. The constraint is
+    created WITH the table, so unlike `ServiceCategory` / `ManagedUnit`
+    (which were retrofitting a company FK onto existing rows through
+    nullable → backfill → NOT NULL) there is never a window in which the
+    table exists without its uniqueness rule. **`multiplier` 0.00 is
+    legal** — unpaid leave — which is why the floor is not 0.01.
+    Archive = `is_active=False`; DELETE only while unused (`TimeEntry.
+    hour_type` is PROTECT, surfaced as a friendly 400).
+  - `TimeEntry` — one amount of work, one employee, one day. `company` is
+    a denormalized tenant anchor resolved from the employee's membership.
+    `iso_year`/`iso_week` are derived from `date` in `save()`, never
+    client-supplied, so no write path — management command, data
+    migration, shell — can produce a row whose stored week contradicts its
+    date and thus escapes the lock that governs it. Past AND future dates
+    are legal (vacation is planned ahead). Multiple entries per employee
+    per day are allowed; there is deliberately no per-day sum rule in v1.
+  - `WeekLock` — a company-wide week close. **INVARIANT: absence of a row
+    = the week is OPEN.** Weeks are never pre-created, so there is no
+    "open" state to keep in sync and nothing to backfill for a new
+    company. Reopen DELETES the row (owner-approved: corrections and late
+    sick-leave entries are routine); the AuditLog DELETE row is the reopen
+    trail.
+- **§2 The snapshot rule — the immutability core.**
+  `multiplier_snapshot` is copied from the hour type on every create and
+  every update, and EVERY weighted computation reads the snapshot, never
+  the live multiplier. Editing a type's multiplier refreshes the snapshot
+  on that type's entries in OPEN weeks of that company only, in the same
+  transaction; closed weeks are never touched. The test asserts the
+  strong form: a closed week's summary payload is byte-identical before
+  and after the edit, not merely that the column did not move. The
+  refresh uses per-row `save()` rather than a queryset `.update()`
+  precisely because the latter fires no `post_save` and would silently
+  write nothing to `AuditLog` (H-10) — the `ServiceCategoryArchiveView`
+  precedent.
+- **§3 Permissions — role-based, NO new `osius.*` keys.** STAFF and
+  BUILDING_MANAGER: their OWN entries only, while the week is open; they
+  never see another employee's rows or NAME through any endpoint here.
+  COMPANY_ADMIN: everything in their own company. SUPER_ADMIN: the same,
+  in the one company they are working in (Sprint 149's model, `?company=`).
+  **CUSTOMER_\* roles: nothing, ever** — multipliers are wage-adjacent and
+  hour records are personnel data; tested on every endpoint. A BM is an
+  ordinary employee here, NOT admitted to the admin surface as they are in
+  Reports: a BM manages buildings, not personnel records. Gate is
+  `_enforce_timesheet_management`, mirroring the SHAPE of
+  `_enforce_catalog_management` but with only one failure mode — there is
+  no company policy toggle for timesheets and this sprint does not add
+  one.
+- **§4 Tenant scoping (H-1), and no existence oracles.** `scope.py`
+  mirrors `extra_work/catalog_scope.py` in shape but imports nothing from
+  it (module independence). Two floors applied in order and never
+  collapsed: `filter_*_for` answers the TENANT question,
+  `restrict_entries_to_self` answers the PRIVACY one. Every serializer
+  validation lookup (`employee`, `hour_type`, `building`, `company`)
+  resolves through a SCOPED queryset, so a foreign id reads as
+  `does_not_exist` — identical to a fictional one. The `HourType`
+  uniqueness pre-check uses Sprint 142.1's `_scoped_siblings` shape **from
+  day one** rather than re-introducing the defect and fixing it in a
+  follow-up: a rival's company id yields an empty sibling set, the
+  pre-check goes quiet, and both foreign cases fall through to the same
+  403. The test asserts the two responses are EQUAL, not merely that both
+  are errors.
+- **§5 Reporting lives inside the app** (module independence), mirroring
+  only the CODE SHAPE of `reports/exports.py`'s `build_*_csv`.
+  `GET /summary/` returns totals, a per-hour-type breakdown and a per-ISO-week
+  breakdown, all weighted from the snapshots; STAFF/BM may call it but are
+  force-scoped to themselves. CSV export is CA/SA only. Two notes worth
+  keeping: the weighted expression is a FUNCTION, not a shared constant
+  (Django caches resolution state on the instance); and the aggregate
+  aliases are `sum_hours`/`sum_weighted`, never `hours` — an alias that
+  shadows the column makes `F("hours")` in a sibling annotation bind to
+  the aggregate instead of the column.
+- **§6 Audit (H-10).** All three models registered for full-CRUD generic
+  audit. `WeekLock` takes the full trio rather than the membership shape
+  because its CREATE is the close trail and its DELETE is the *only*
+  surviving record of a reopen. No `*StatusHistory` to double-write
+  against (H-11): this module has no state machine.
 
-- **§145 The Extra Work Category control is the CUSTOMER's.** It offered
-  a "your company's categories" group nobody asked for, which also put
-  the provider's whole catalog grouping in front of a CUSTOMER_USER. The
-  control is now DISABLED until a customer is chosen (with a note saying
-  so) and then lists only that customer's categories. Choosing one also
-  filters the AGREED PRICES panel, which previously kept showing every
-  price beneath a narrowed picker. "Folder" left the interface entirely
-  — 29 strings now say categorie/category; the owner used the word to
-  explain the concept, not to name it. Category actions moved onto the
-  Services rows: Edit/Archive/Delete existed only in a detail panel you
-  reached by clicking a row, so the owner reported he could not rename
-  or delete a category at all. **A hidden action is a missing action.**
-- **§146 A customer could not see their own categories.**
-  `CustomerPriceFolderListCreateView` was `IsSuperAdminOrCompanyAdmin`
-  on GET too, so a customer got a 403, the form degraded to an empty
-  list, and told her "this customer has no categories yet" while the
-  customer had two. Read is now `IsCustomerPriceReader`; writes
-  unchanged.
-- **§147 A customer cannot REACH the provider's general catalog.**
-  `ServiceListCreateView` narrows for a CUSTOMER_USER to services with
-  an active, currently-valid `CustomerServicePrice`.
-  `filter_services_for` only narrowed to the COMPANY, which still handed
-  every customer that provider's entire catalog. A client-side filter is
-  "not shown", not "cannot reach". The free-text custom line is
-  untouched, so the proposal path survives. **Known gap:**
-  `ServiceDetailView` is NOT narrowed — a customer cannot enumerate the
-  catalog but can still fetch a service by id. Left deliberately:
-  narrowing it risks 404ing historical rows. See `## NEXT`.
-- **§148 Two provider-flavoured strings shown to customers** ("No agreed
-  contract prices for this customer yet") rewritten in the reader's own
-  terms.
-- **§149-150 A SUPER_ADMIN works in ONE provider company at a time.**
-  The selector's empty option is gone as a choice (the placeholder stays,
-  `disabled`), so Services/Categories/Units always show exactly one
-  company. That removes the need for a company column on every row AND
-  makes a cross-company multi-select impossible by construction. The
-  default is the LOWEST-ID company, not `[0]` of a name-ordered list, and
-  the operator's last choice is remembered in localStorage.
-- **§151 + §151.1 The four CI failures.** All four were tests still
-  encoding rules the owner deliberately changed; **none was a behaviour
-  defect.** Three were
-  `test_customer_user_sees_own_provider_catalog_without_defaults`
-  (counted once per customer actor kind) — moved onto §147's rule, with
-  `svc_a_other` (same provider, no agreed price) as the load-bearing
-  assertion. The fourth was `test_category_other_requires_other_text`:
-  Sprint 144 dropped that CREATE requirement and had to, because the
-  form no longer sends the enum and the field defaults to OTHER — the
-  rule would have 400'd every request created from the form. Verified
-  locally: 159 catalog tests + 32 MVP tests, OK.
+### Frontend
 
-**Round 4 (Sprint 144) — one Category control, and recurring work gains
-the customer's own vocabulary.** Deployed to crmtest by CC.
+- **§7 "Mijn uren"** (`/my-hours`, every provider-side role incl. STAFF):
+  ISO-week picker (prev/next + date jump), the week's entries, add/edit/
+  delete, weekly totals raw and per type, and a lock notice with actions
+  disabled when the week is closed. The lock state is fetched ALONGSIDE
+  the entries, not read off them — absence of a lock row means open, so an
+  empty week has no entry to read `is_locked` from, and an empty week can
+  very much be closed.
+- **§8 The "Uren" admin area** (`/admin/hours`, CA/SA): entries overview
+  with filters + totals panel + CSV, the Uursoorten tab (mirroring
+  `ManagedUnitsTab`, plus the standard-set button reporting created vs
+  skipped), and the week close/reopen control behind a `ConfirmDialog`.
+  Follows the Sprint 149/150 SA company model with its OWN localStorage
+  key — the catalog and hours surfaces are navigated independently.
+  Delete is offered on an hour type exactly when `entry_count` is 0,
+  because the FK is PROTECT and offering it otherwise offers an action
+  that always 400s.
+- **§9 `lib/isoWeek.ts`** — pure ISO 8601 arithmetic matching Python's
+  `date.isocalendar()`. Dates are formatted in LOCAL time, never via
+  `toISOString()` (which converts to UTC first and files an entry against
+  the previous day east of Greenwich); week totals sum in cent-integers,
+  not floats.
+- **§10 `loading` is DERIVED** (`loadedKey !== fetchKey`) in all four new
+  components, and the entries page resets to page 1 in its filter
+  HANDLERS rather than in an effect. The first draft added exactly 6
+  `react-hooks/set-state-in-effect` violations, all of that shape; the
+  rule is CLAUDE.md's and the baseline is what enforces it.
 
-- **§1 The Extra Work form had TWO "Category" controls.** One was
-  `ExtraWorkRequest.category`, the fixed generic enum (Deep cleaning /
-  Window cleaning / …), under "What needs to happen"; the other was
-  Sprint 143's real picker (company catalog categories + this customer's
-  price folders) sitting above the cart as a filter. They are now ONE
-  control: choosing both CLASSIFIES the request and FILTERS the service
-  lines. Storage is additive — two nullable PROTECT FKs on
-  `ExtraWorkRequest` (`service_category` / `price_folder`, at most one
-  set). The enum column is UNTOUCHED and keeps its `default=OTHER`: the
-  form simply stops asking, so the 65 live crmtest rows keep their
-  values and new rows take the default. The
-  `category=OTHER ⇒ category_other_text required` rule is dropped from
-  the CREATE path only, since the operator can no longer choose OTHER.
-  Recon confirmed the only readers of the enum are the three EW
-  serializers, `conversion.py` (pins converted tickets to OTHER) and the
-  seeder — `reports/` does NOT read it, nor does invoicing, the proposal
-  PDF or any template. Both list and detail render the FK name when
-  present and fall back to the enum label, so the two shapes coexist.
-  Migrating the enum away stays `## NEXT` item 18.
-- **§2 Recurring work gains Department, Work type and Category**, all
-  bound to the selected CUSTOMER rather than a generic global list. Four
-  nullable PROTECT FKs on `RecurringJob`; labels load through the
-  existing `listLabels` helper the Extra Work form uses (no second
-  path), category offers the same two groups as §1. All optional, empty
-  by default, with a reason shown on the disabled control when the
-  customer has none of a kind. A selection made for one customer is
-  DERIVED away on switch (`effective*`), never resynced in an effect —
-  that pattern is what produced the customer-lock regression Sprint 143
-  §1 had to undo. Shown on the job detail page too.
+### Gates
 
-Both migrations are additive (nullable FKs only, no backfill). Per the
-owner's instruction this round ran WITHOUT the backend suite and without
-Playwright; CI's full regression on the PR is the gate.
-
-**Round 3 (Sprint 143) — the customer-price FOLDERS feature the owner
-asked for weeks ago, plus the regression blocking his testing.** Same
-branch, same PR. Per the owner's instruction this round ran WITHOUT the
-backend suite and without Playwright; CI's full regression on the PR is
-the gate.
-
-- **§1 The Extra Work form locked the customer to one building.** A
-  building was pre-selected on load and two `setState`-in-effect resyncs
-  then pinned `form.customer` inside that building's customer list —
-  auto-selecting the sole match, and snapping any other choice straight
-  back. Reported as a regression that had been fixed once before, which
-  is what a resync effect invites. CUSTOMER is now the primary choice
-  (every customer the operator can reach is always offerable) and the
-  BUILDING list narrows from it; nothing is pre-selected, and both
-  effects are DERIVED away rather than reordered — a building that no
-  longer belongs to the chosen customer collapses to `""` at the point
-  of use, including in the preview key and the submit payload.
-- **§2 `TicketType.OTHER`**, additive `AlterField`. The Create-Ticket
-  field labelled "Categorie" that actually held `TicketType` is now
-  labelled "Type" in nl+en, so it stops colliding with the two real
-  category concepts.
-- **§3 Customer price folders.** New `CustomerPriceFolder` (per-customer,
-  CASCADE, `created_by` PROTECT, case-insensitive unique name per
-  customer via `Lower(Trim(name))`), plus a nullable `folder` FK with
-  `SET_NULL` on BOTH price models. Purely additive: one table, two
-  nullable columns, no backfill. A folder holds PRICE ROWS, never
-  catalog services. Two creation routes — an empty folder from a typed
-  name, or copy a company category with its services, which reuses
-  `copy-from-default`'s existing skip/overlap rules verbatim and creates
-  the folder inside the SAME transaction as the rows so a failed copy
-  cannot strand an empty one. Two deletes, both named honestly with the
-  row count: folder-only (rows survive, become folderless) or with
-  contents (rows ARCHIVED, never destroyed — shipped Extra Work holds a
-  live FK). The pricing page is folder-first, with `NO_FOLDER` joining
-  the CUSTOM / UNKNOWN sentinels and the `knownIds` guard kept, because
-  "a row in a bucket with no card" has now bitten twice.
-- **§4/§5 The Extra Work form and the convert-a-ticket dialog offer
-  categories AND folders.** Two labelled `<optgroup>`s: the company's
-  own `ServiceCategory` rows, plus (once a customer is known) that
-  customer's folders. Folders ADD, never replace — `resolve_price` has
-  no fallback, so an unpriced service must stay orderable or the
-  proposal path dies. Archived categories and folders are excluded on
-  both sides. The convert dialog was a flat list with none of the five
-  anti-service-loss guards and now has them.
-- **§6 The Extra Work list filters on real categories, server-side.**
-  `ExtraWorkRequestFilter` gained `category`, matched against
-  `ExtraWorkRequestItem.snapshot_service_category_name` — the
-  denormalised order-time string — NOT the live FK, which is what makes
-  the second dropdown group ("no longer in the catalog") possible at
-  all. A new `GET /api/extra-work/category-options/` computes both
-  groups from the SCOPED queryset.
-- **§7 The dead Edit button is hidden, not disabled.**
-
-**Round 2 (Sprint 142.1) — three one-line defects the review found in
-142's own work, plus two comments that overstated what the code does.**
-
-- **§1 The sprint re-opened, on the WRITE path, the exact leak it closed
-  on the read path (H-1).** The friendly-400 uniqueness pre-check added
-  to `ServiceCategorySerializer.validate` queried an UNSCOPED sibling
-  set keyed on whatever `company` the client sent. DRF runs `is_valid()`
-  BEFORE `perform_create()`, so that 400 fired ahead of
-  `_resolve_catalog_create_company`'s 403 — and the status code alone
-  reported whether a RIVAL owned a given name (400 = yes, 403 = no).
-  Worse, the 400 body NAMED it back: *"A category named 'Cleaning S3B'
-  already exists for this company."* **`ManagedUnitSerializer` had the
-  identical shape since Sprint 123** — 142 copied the bug along with the
-  pattern — and leaked unit labels the same way. Both fixed, because
-  fixing one is the "written once, omitted elsewhere" defect rounds 4
-  and 5 were spent on. The sibling queryset now runs through
-  `filter_categories_for` / `filter_managed_units_for`, so a foreign
-  company yields an empty set, no 400, and the request falls through to
-  the 403 it should always have had. Chosen over hoisting the company
-  authorisation ahead of validation, which would mean overriding
-  `create()` on both views to gate on an unvalidated field and would
-  reorder every other field error behind a permission check.
-  A SUPER_ADMIN's scope is `None`, so their pre-check is unaffected.
-- **§2 A priced row could silently disappear from the pricing index.**
-  Sprint 142 narrowed `CustomerPricingPage`'s category list to the
-  customer's own provider — correct, and kept. But `categoryKeyOf` fell
-  back to the `"UNKNOWN"` bucket only when the SERVICE was missing from
-  the catalog map, not when the service's CATEGORY was missing from the
-  narrowed list. Such a row landed in a numeric bucket
-  `categoryCards` never builds a card for: unreachable from the index,
-  absent from every count. It did not degrade, it vanished — the exact
-  class of bug Sprint 137 item 4's own comment says the sentinel exists
-  to kill, arriving through a door the sentinel did not cover. A
-  category id with no card now resolves to `"UNKNOWN"` too, which is the
-  same call `lib/pickerGroups.ts` makes with its trailing
-  `__uncategorised__` group. Latent — crmtest has zero cross-company
-  price rows — so nothing beyond making the row reachable was built.
-- **§3 Two of the five #127 carry-overs cancelled each other out.**
-  `ServicesAdminPage` had ONE `loadError`. Carry-over 5 added the
-  `.catch()` that reports a failed company fetch; carry-over 3 made the
-  catalog load clear `loadError` on success. The company fetch is one
-  request and the catalog load is two, so the catalog reliably resolved
-  last and wiped the banner — leaving the SUPER_ADMIN with exactly the
-  state carry-over 5 exists to prevent: no selector, no error, then a
-  raw `service_company_required` 400. The company-selector failure now
-  has its own state, because it is a different failure with a different
-  remedy (a stale list resolves itself on the next mutation; a missing
-  selector needs a reload and blocks creates until it returns) and both
-  can be true at once. `ManagedUnitsTab` and `CustomerPricingPage` were
-  checked for the same collision and have none — each has a single
-  loader writing its `loadError`.
-- **§4 `0023`'s docstring claimed a window it does not close.** Keeping
-  the drop-unique and add-constraint operations in one migration removes
-  an ADDITIONAL window, but the real one remains: between 0023 and 0025
-  every row has `company IS NULL`, and Postgres treats NULLs in an
-  indexed column as distinct — so the new constraint is toothless for
-  those rows while the old platform-wide unique is already gone. It
-  becomes PERMANENT if 0024 aborts, which is a designed outcome, not an
-  edge case. The docstring now says so, and names what a live-traffic
-  deploy would need instead (a partial unique index on
-  `name WHERE company_id IS NULL`, or a maintenance lock). The design is
-  unchanged — it is fine for a deploy with downtime.
-- **§5 Two comments could not both be right.**
-  `_annotate_category_service_counts` justified its scope branch by
-  "pre-142 rows a Service could have been filed under a foreign
-  category", while `ServiceCategoryArchiveView`'s docstring removes
-  `affected_company_count` on the grounds that no such row can exist.
-  The archive view is right: `0024` ABORTS rather than backfill a
-  category holding two companies' services, and
-  `_enforce_same_company_category` blocks new ones. The comment is
-  corrected to say the CA branch is DEAD and that the scoping stays for
-  the SUPER_ADMIN side of it — an SA's `None` scope is what yields the
-  complete count PROTECT depends on. Code unchanged.
-
-Round 2 verified the H-1 fix by REVERTING it and watching the two oracle
-tests fail with the rival's name in the response body, then restoring.
-The pre-existing duplicate-name test could never have caught it: it
-posts as a CA with `company` omitted, which skips the pre-check entirely
-and exercises only the `IntegrityError` backstop.
+Per the owner's standing rule the FULL backend suite was NOT run; CI on
+the PR is the full gate. Run here: `python manage.py test timesheets
+audit` → **OK, 220 tests** (115 of them the new `timesheets` package).
+`makemigrations --dry-run --check` → *No changes detected*. Frontend gate
+in `node:22-alpine`: `tsc --noEmit` clean, `eslint .` **45 problems (43
+errors, 2 warnings) = the baseline exactly**, zero in the new files,
+`npm run build` succeeded. CLAUDE.md §3's ESLint baseline line was STALE
+(it said 48 / "46 errors, 2 warnings"); corrected to 45 in this branch.
 ---
 
 ## NEXT
@@ -680,6 +532,34 @@ original record — wording preserved as shipped; #115 onward extends it
 (Sprint 122.1). The old heading here cited `git log --oneline master` —
 stale, since PR #116 renamed the default branch to `main`.
 
+- **#128** (`6a93e77`) — Sprints 142 through 151.1 on one branch, one PR:
+  eleven rounds on the catalog and its customer-facing side. **142** made
+  `ServiceCategory` per-company (`company` FK + `UniqueConstraint(Lower(
+  Trim(name)), company)`, migrations 0023–0025 with an ABORTING backfill
+  rather than a guessing one), which closed a live H-1 read leak — category
+  GET is open to any authenticated user and `filter_categories_for` was the
+  IDENTITY, so every customer of every provider could enumerate every
+  provider's category names. Category writes moved off the SUPER_ADMIN-only
+  gate onto `_enforce_catalog_management`, finally making
+  `provider_admin_may_manage_catalog`'s help text true. **142.1** found the
+  sprint had re-opened the same leak on the WRITE path: the new friendly-400
+  uniqueness pre-check ran an UNSCOPED sibling query, so the status code
+  alone reported whether a rival owned a name (400 = yes, 403 = no) and the
+  400 body named it back — and `ManagedUnitSerializer` had carried the
+  identical shape since Sprint 123. Both fixed via `_scoped_siblings`, and
+  verified by REVERTING the fix and watching the oracle tests fail with the
+  rival's name in the body. **143** shipped customer price folders and undid
+  the setState-in-effect resync that locked the Extra Work form to one
+  building. **144** collapsed the form's TWO "Category" controls into one
+  (two nullable PROTECT FKs; the enum column untouched). **145–148** gave
+  the customer's side its own vocabulary and stopped
+  `ServiceListCreateView` handing every customer the provider's whole
+  catalog — a client-side filter is "not shown", not "cannot reach".
+  **149–150** established that a SUPER_ADMIN works in ONE provider company
+  at a time, defaulting to the lowest-id tenant and remembering the
+  operator's last choice. **151/151.1** resolved the four CI failures; all
+  four were tests still encoding rules the owner had deliberately changed,
+  **none was a behaviour defect.**
 - **#127** (`91230a0`) — Sprints 137, 138, 139, 140 and 141 on one branch,
   one PR: five review rounds on the same body of work, each round found by
   the owner or the PM verifying the one before it. **Round 1 (137)**:

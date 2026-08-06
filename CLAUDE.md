@@ -133,7 +133,7 @@ change writes an `AuditLog`), H-11 (permission override ≠ workflow override).
   provides one); mock only the SMTP transport. Test-first for new features.
 - **Frontend gate** (all three, in `node:22-alpine`):
   `tsc --noEmit -p tsconfig.app.json` + `eslint .` + `npm run build`.
-  **ESLint baseline is EXACTLY 48 (46 errors, 2 warnings).** Add **no** new
+  **ESLint baseline is EXACTLY 45 (43 errors, 2 warnings).** Add **no** new
   violations and **no** new `eslint-disable`. No synchronous `setState` in an
   effect body; for prop-derived state, key the component by id.
 
