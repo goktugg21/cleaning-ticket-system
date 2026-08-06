@@ -171,6 +171,27 @@ export function WeekCloseTab({ selectedCompany = "" }: WeekCloseTabProps) {
         </div>
       )}
 
+      {/* Sprint 152.1 — the tab performed the right actions and said
+          nothing about what they MEAN. Closing a week is a company-wide
+          act that stops every employee writing into it, and reopening is
+          audited; both facts belong on screen, not only in a docstring
+          the operator will never read. */}
+      <div
+        className="alert-info"
+        role="note"
+        style={{ marginBottom: 16 }}
+        data-testid="weeks-explainer"
+      >
+        <p style={{ margin: "0 0 6px" }}>
+          <strong>{t("weeks.explainer_close_title")}</strong>{" "}
+          {t("weeks.explainer_close_body")}
+        </p>
+        <p style={{ margin: 0 }}>
+          <strong>{t("weeks.explainer_reopen_title")}</strong>{" "}
+          {t("weeks.explainer_reopen_body")}
+        </p>
+      </div>
+
       <div className="card" style={{ padding: "18px 22px", marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>
           {t("weeks.picker_title")}

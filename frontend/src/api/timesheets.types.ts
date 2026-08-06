@@ -104,6 +104,21 @@ export interface TimeEntryFilters {
   page_size?: number;
 }
 
+/**
+ * Sprint 152.1 — one row of `GET /api/timesheets/employees/`.
+ *
+ * Distinct from `ProviderEmployee` (`/api/employees/`) on purpose: this
+ * one is resolved per COMPANY through the same helper the write path
+ * validates against, so every row it returns is an employee the entry
+ * form can actually file hours for.
+ */
+export interface TimesheetEmployee {
+  id: number;
+  full_name: string;
+  email: string;
+  role: string;
+}
+
 /** A closed week. Its EXISTENCE is what "closed" means. */
 export interface WeekLock {
   id: number;

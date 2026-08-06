@@ -189,14 +189,36 @@ export function canAccessBilling(role: Role | null | undefined): boolean {
 // on every route (including reads). Mirrors the backend role set exactly.
 export const canAccessPlannedWork = isProviderManagementRole;
 
-// Sprint 152 — `/my-hours` (Mijn uren). Every PROVIDER-side role,
-// including STAFF: recording your own hours is the module's base case,
-// not an admin feature. Backend: `timesheets.permissions.IsTimesheetUser`
-// admits the same four roles and 403s CUSTOMER_USER on every endpoint —
-// hour records are personnel data and multipliers are wage-adjacent, so
-// no customer-side actor sees any trace of the module.
+// Sprint 152 — `/my-hours` (Mijn uren). STAFF, BUILDING_MANAGER and
+// COMPANY_ADMIN: recording your OWN hours is the module's base case, not
+// an admin feature.
+//
+// Sprint 152.1 — SUPER_ADMIN is EXCLUDED, and not as a tidy-up. The page
+// is a dead end for that role by construction: `timesheets.scope.
+// PROVIDER_EMPLOYEE_ROLES` omits SUPER_ADMIN, because a platform admin
+// is not a provider employee, so an SA can never file hours against
+// themselves. What the owner actually hit was one layer earlier —
+// `MyHoursPage` sends no `?company=`, an SA's scope is `None`, and
+// crmtest has three companies, so `resolve_view_company` refused to
+// guess and the page opened on a bare "`company` is required when more
+// than one provider Company exists". Passing a company would have fixed
+// the error and left the dead end. An SA's surface is `/admin/hours`.
+//
+// `isStaffRole` is deliberately NOT reused: it admits SA + CA and drives
+// PROVIDER_INTERNAL note access, so widening it later must not quietly
+// hand an SA a page they cannot use.
+//
+// The BACKEND is left alone here. `IsTimesheetUser` may keep admitting
+// SUPER_ADMIN: its read paths are harmless and the entry WRITE already
+// rejects them on employee eligibility. This FE gate is the fix — it
+// removes a route and a nav entry that lead nowhere, which is a UI
+// concern, not a permission boundary.
 export function canAccessTimesheets(role: Role | null | undefined): boolean {
-  return isStaffRole(role);
+  return (
+    role === "STAFF" ||
+    role === "BUILDING_MANAGER" ||
+    role === "COMPANY_ADMIN"
+  );
 }
 
 // Sprint 152 — `/admin/hours` (the Uren admin area: all employees'

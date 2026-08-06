@@ -17,6 +17,12 @@ import { AppShell } from "../layout/AppShell";
  * The frontend is not the boundary — every timesheets endpoint enforces
  * the same split independently. This only stops a customer-side user
  * seeing a route that would 403, and keeps the module invisible to them.
+ *
+ * Sprint 152.1 — because the non-manager branch reads
+ * `canAccessTimesheets`, which no longer admits SUPER_ADMIN, an SA
+ * landing on `/my-hours` is redirected to `/`. That is deliberate: the
+ * page cannot work for them (see the predicate's comment), so leaving
+ * the route reachable would only trade one dead end for another.
  */
 export function TimesheetsRoute({
   children,

@@ -13,6 +13,7 @@ import type {
   TimeEntry,
   TimeEntryFilters,
   TimeEntryWritePayload,
+  TimesheetEmployee,
   TimesheetSummary,
   WeekLock,
   WeekStatus,
@@ -104,6 +105,33 @@ export async function addStandardHourTypes(
     company === "" || company === undefined ? {} : { company },
   );
   return response.data;
+}
+
+// ---------------------------------------------------------------------------
+// Employees (the admin entry form's picker)
+// ---------------------------------------------------------------------------
+
+/**
+ * The employees hours may be filed against, for ONE provider company.
+ *
+ * NOT `listProviderEmployees` from `admin.ts`: that endpoint takes no
+ * company and returns no company either, so for a SUPER_ADMIN it mixes
+ * tenants into one dropdown where every wrong pick 400s. This one
+ * resolves through the same helper the write path validates against, so
+ * everything it offers is accepted.
+ *
+ * `UnboundedPagination` server-side — a company's workforce is bounded
+ * by domain reality — so the flat array is returned and the caller
+ * never pages.
+ */
+export async function listTimesheetEmployees(
+  company?: number | "",
+): Promise<TimesheetEmployee[]> {
+  const response = await api.get<PaginatedResponse<TimesheetEmployee>>(
+    "/timesheets/employees/",
+    { params: cleanParams({ company }) },
+  );
+  return response.data.results;
 }
 
 // ---------------------------------------------------------------------------
