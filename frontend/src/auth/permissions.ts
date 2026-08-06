@@ -189,6 +189,28 @@ export function canAccessBilling(role: Role | null | undefined): boolean {
 // on every route (including reads). Mirrors the backend role set exactly.
 export const canAccessPlannedWork = isProviderManagementRole;
 
+// Sprint 152 — `/my-hours` (Mijn uren). Every PROVIDER-side role,
+// including STAFF: recording your own hours is the module's base case,
+// not an admin feature. Backend: `timesheets.permissions.IsTimesheetUser`
+// admits the same four roles and 403s CUSTOMER_USER on every endpoint —
+// hour records are personnel data and multipliers are wage-adjacent, so
+// no customer-side actor sees any trace of the module.
+export function canAccessTimesheets(role: Role | null | undefined): boolean {
+  return isStaffRole(role);
+}
+
+// Sprint 152 — `/admin/hours` (the Uren admin area: all employees'
+// entries, hour types, week close/reopen, CSV export). SA / CA only.
+// Backend: `timesheets.permissions.IsTimesheetManager`.
+//
+// BUILDING_MANAGER is deliberately NOT admitted, unlike Reports: a BM
+// manages BUILDINGS, and these rows are personnel records. `isProviderAdmin`
+// is not reused here so a future widening of THAT predicate cannot
+// silently hand a BM the whole company's hours.
+export function canManageTimesheets(role: Role | null | undefined): boolean {
+  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN";
+}
+
 // `/agenda` (My Work) — role-adaptive since Sprint 111. Shown to STAFF and
 // BUILDING_MANAGER ONLY; HIDDEN for SUPER_ADMIN + COMPANY_ADMIN (owner
 // decision) and for CUSTOMER_USER. The surface adapts per role:

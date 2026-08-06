@@ -17,6 +17,7 @@ import { BillingRoute } from "./components/BillingRoute";
 import { CustomerRoute } from "./components/CustomerRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
+import { TimesheetsRoute } from "./components/TimesheetsRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
@@ -24,6 +25,7 @@ import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { AgendaPage } from "./pages/AgendaPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { MyHoursPage } from "./pages/MyHoursPage";
 import { ExtraWorkDetailPage } from "./pages/ExtraWorkDetailPage";
 import { ExtraWorkListPage } from "./pages/ExtraWorkListPage";
 import { PlannedWorkListPage } from "./pages/planned-work/PlannedWorkListPage";
@@ -73,6 +75,7 @@ import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissi
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
+import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
 import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
@@ -710,6 +713,26 @@ export default function App() {
               <StaffRequestReviewRoute>
                 <StaffAssignmentRequestsAdminPage />
               </StaffRequestReviewRoute>
+            }
+          />
+          {/* Sprint 152 — employee hours (urenregistratie). Two
+              surfaces, two guards: `/my-hours` for every provider-side
+              role, `/admin/hours` for SA / CA. Customer-side users are
+              redirected by the guard and 403'd by every endpoint. */}
+          <Route
+            path="/my-hours"
+            element={
+              <TimesheetsRoute>
+                <MyHoursPage />
+              </TimesheetsRoute>
+            }
+          />
+          <Route
+            path="/admin/hours"
+            element={
+              <TimesheetsRoute manager>
+                <HoursAdminPage />
+              </TimesheetsRoute>
             }
           />
           <Route
