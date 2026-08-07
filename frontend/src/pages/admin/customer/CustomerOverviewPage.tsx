@@ -14,43 +14,46 @@ import { getApiError } from "../../../api/client";
 import {
   getCompany,
   getCustomer,
+  getCustomerSummary,
   listCustomerBuildings,
-  listCustomerContacts,
-  listCustomerPrices,
-  listCustomerUsers,
   reactivateCustomer,
 } from "../../../api/admin";
 import type {
   CompanyAdmin,
   CustomerAdmin,
   CustomerBuildingMembership,
+  CustomerSummary,
 } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
+import { BoundedList } from "../../../components/BoundedList";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 
-import { CustomerFacturatieSection } from "./CustomerFacturatieSection";
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
 /**
- * Sprint 28 Batch 13 (rework) — Customer Overview page (admin variant).
+ * Customer Overview page (admin variant).
  *
- * View-first per the 2026-05-15 stakeholder doc §3. The page is a
- * useful operator dashboard for a single customer — not a tile menu.
- * Composition top-to-bottom:
+ * Sprint 153 §4 rebuilt the order. The owner's complaint was that the
+ * page opened with an explainer paragraph and an address card, and said
+ * nothing operational. Top-to-bottom now:
  *
  *   1. CustomerSubPageHeader (back link + name + Edit basics action).
- *   2. Explainer paragraph naming the provider company + linked-
- *      building count.
- *   3. Four-card clickable stat strip (Buildings / Users / Contacts /
- *      Pricing) routing into the sub-pages.
- *   4. Linked buildings preview (first 5 + View-all footer link), with
- *      a friendly empty-state when none are linked.
- *   5. Quicklink grid for the six management areas.
+ *   2. The six count-chips, IMMEDIATELY — Buildings / Users / Contacts /
+ *      Pricing / Extra work / Tickets, each routing to its sub-page.
+ *   3. A dashboard row of live operational numbers from the new
+ *      `/summary/` endpoint: open tickets, open extra work, outstanding
+ *      invoiced.
+ *   4. About and Linked buildings SIDE BY SIDE — each was spending a
+ *      full-width card on half a card of content.
+ *   5. The quicklink grid.
  *
- * Nothing on this page mutates a permission, a policy, or a per-
- * building access row — those affordances live exclusively on the
- * Permissions sub-page. The Playwright spec locks that contract.
+ * Gone: the `section-explainer` paragraph (the chips say it better) and
+ * the Facturatie section, which moved to the Settings tab (§4.2).
+ *
+ * Nothing on this page mutates a permission, a policy, or a per-building
+ * access row — those affordances live exclusively on the Permissions
+ * sub-page. The Playwright spec locks that contract.
  */
 export function CustomerOverviewPage() {
   const { id } = useParams();
@@ -72,9 +75,7 @@ export function CustomerOverviewPage() {
   const [linkedBuildings, setLinkedBuildings] = useState<
     CustomerBuildingMembership[]
   >([]);
-  const [memberCount, setMemberCount] = useState<number | null>(null);
-  const [contactCount, setContactCount] = useState<number | null>(null);
-  const [pricingCount, setPricingCount] = useState<number | null>(null);
+  const [summary, setSummary] = useState<CustomerSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -93,10 +94,13 @@ export function CustomerOverviewPage() {
     }
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     setError("");
-    // Run the five reads in parallel. Each non-customer fetch falls
-    // back to a friendly "—" placeholder if the endpoint 403s or 404s
-    // for the current operator (e.g. a COMPANY_ADMIN looking at a
-    // legacy customer with no pricing rows yet).
+    // Sprint 153: THREE reads, down from five. The per-module counts
+    // that used to be `listCustomerUsers(...).count` /
+    // `listCustomerContacts(...).length` / `listCustomerPrices(...)
+    // .length` now arrive from the one `/summary/` call, which also
+    // brings the ticket / extra-work / invoice numbers the page needs.
+    // The buildings list is still fetched in full because the linked-
+    // buildings card renders names, not just a count.
     Promise.all([
       getCustomer(numericId),
       listCustomerBuildings(numericId).catch(() => ({
@@ -105,40 +109,24 @@ export function CustomerOverviewPage() {
         previous: null,
         results: [],
       })),
-      listCustomerUsers(numericId).catch(() => ({
-        count: 0,
-        next: null,
-        previous: null,
-        results: [],
-      })),
-      listCustomerContacts(numericId).catch(() => [] as never[]),
-      listCustomerPrices(numericId).catch(() => [] as never[]),
+      // A summary failure degrades the dashboard to em dashes; it must
+      // not take the whole page down.
+      getCustomerSummary(numericId).catch(() => null),
     ])
-      .then(
-        ([
-          customerData,
-          buildingsResponse,
-          usersResponse,
-          contactsResponse,
-          pricesResponse,
-        ]) => {
-          if (cancelled) return;
-          setCustomer(customerData);
-          setLinkedBuildings(buildingsResponse.results);
-          setMemberCount(usersResponse.count ?? usersResponse.results.length);
-          setContactCount(contactsResponse.length);
-          setPricingCount(pricesResponse.length);
-          // Provider company name is informational; if the lookup fails
-          // we fall back to the generic explainer.
-          getCompany(customerData.company)
-            .then((company) => {
-              if (!cancelled) setProviderCompany(company);
-            })
-            .catch(() => {
-              if (!cancelled) setProviderCompany(null);
-            });
-        },
-      )
+      .then(([customerData, buildingsResponse, summaryData]) => {
+        if (cancelled) return;
+        setCustomer(customerData);
+        setLinkedBuildings(buildingsResponse.results);
+        setSummary(summaryData);
+        // Provider company name is informational.
+        getCompany(customerData.company)
+          .then((company) => {
+            if (!cancelled) setProviderCompany(company);
+          })
+          .catch(() => {
+            if (!cancelled) setProviderCompany(null);
+          });
+      })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
       })
@@ -192,17 +180,6 @@ export function CustomerOverviewPage() {
     </>
   ) : null;
 
-  const explainerText = providerCompany
-    ? t("customer_view.overview.explainer_with_provider", {
-        customer: customerName,
-        provider: providerCompany.name,
-        count: buildingsCount,
-      })
-    : t("customer_view.overview.explainer_generic", {
-        customer: customerName,
-        count: buildingsCount,
-      });
-
   // Mirror the languageLabel helper from CompanyDetailPage (Sprint 29.3).
   // Falls back to the raw code when the language isn't one of the two
   // bundled options.
@@ -216,6 +193,11 @@ export function CustomerOverviewPage() {
     }
     return customer.language;
   })();
+
+  // A `null` count means the module is not readable by this operator —
+  // render an em dash, never a zero. See `CustomerSummary` in types.ts.
+  const chipValue = (value: number | null | undefined) =>
+    value === null || value === undefined ? "—" : value;
 
   return (
     <div data-testid="customer-overview-page">
@@ -237,97 +219,9 @@ export function CustomerOverviewPage() {
         </div>
       ) : customer ? (
         <>
-          <p
-            className="section-explainer"
-            data-testid="customer-overview-explainer"
-          >
-            {explainerText}
-          </p>
-
-          <section
-            className="card"
-            data-testid="customer-overview-about-card"
-            style={{ padding: "20px 22px", marginBottom: 16 }}
-          >
-            <div className="section-head" style={{ marginBottom: 8 }}>
-              <div>
-                <div className="section-head-title">
-                  {t("customer_view.overview.about_title")}
-                </div>
-                <div className="section-head-sub">
-                  {t("customer_view.overview.about_desc")}
-                </div>
-              </div>
-            </div>
-
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_company")}
-              </div>
-              <div className="detail-field-value">
-                {providerCompany ? (
-                  <Link to={`/admin/companies/${customer.company}`}>
-                    {providerCompany.name}
-                  </Link>
-                ) : (
-                  <span className="muted-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_contact_email")}
-              </div>
-              <div className="detail-field-value">
-                {customer.contact_email ? (
-                  <a href={`mailto:${customer.contact_email}`}>
-                    {customer.contact_email}
-                  </a>
-                ) : (
-                  <span className="muted-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_phone")}
-              </div>
-              <div className="detail-field-value">
-                {customer.phone ? (
-                  <a href={`tel:${customer.phone}`}>{customer.phone}</a>
-                ) : (
-                  <span className="muted-empty">—</span>
-                )}
-              </div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_language")}
-              </div>
-              <div className="detail-field-value">{languageLabel}</div>
-            </div>
-            <div className="detail-field-row">
-              <div className="detail-field-label">
-                {t("customer_view.overview.field_status")}
-              </div>
-              <div className="detail-field-value">
-                {isActive ? (
-                  <span className="cell-tag cell-tag-open">
-                    <i />
-                    {t("customer_view.overview.status_active")}
-                  </span>
-                ) : (
-                  <span className="cell-tag cell-tag-closed">
-                    <i />
-                    {t("customer_view.overview.status_inactive")}
-                  </span>
-                )}
-              </div>
-            </div>
-          </section>
-
+          {/* 1. The chips, first thing on the page. */}
           <div
-            className="summary-grid"
+            className="summary-grid summary-grid-6"
             data-testid="customer-overview-stat-strip"
           >
             <Link
@@ -338,9 +232,11 @@ export function CustomerOverviewPage() {
               <span className="summary-stat-label">
                 {t("customer_view.overview.stat_linked_buildings")}
               </span>
-              <span className="summary-stat-value">{buildingsCount}</span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_buildings_desc")}
+              <span className="summary-stat-value">
+                {chipValue(
+                  summary?.linked_building_count ??
+                    customer.linked_building_count,
+                )}
               </span>
             </Link>
             <Link
@@ -352,10 +248,7 @@ export function CustomerOverviewPage() {
                 {t("customer_view.overview.stat_customer_users")}
               </span>
               <span className="summary-stat-value">
-                {memberCount ?? "—"}
-              </span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_users_desc")}
+                {chipValue(summary?.user_count ?? customer.user_count)}
               </span>
             </Link>
             <Link
@@ -367,10 +260,7 @@ export function CustomerOverviewPage() {
                 {t("customer_view.overview.stat_contacts")}
               </span>
               <span className="summary-stat-value">
-                {contactCount ?? "—"}
-              </span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_contacts_desc")}
+                {chipValue(summary?.contact_count ?? customer.contact_count)}
               </span>
             </Link>
             <Link
@@ -382,69 +272,263 @@ export function CustomerOverviewPage() {
                 {t("customer_view.overview.stat_pricing")}
               </span>
               <span className="summary-stat-value">
-                {pricingCount ?? "—"}
+                {chipValue(summary?.pricing_rule_count)}
               </span>
-              <span className="summary-stat-meta">
-                {t("customer_view.overview.quicklink_pricing_desc")}
+            </Link>
+            <Link
+              to={`/admin/customers/${customer.id}/extra-work`}
+              className="summary-stat"
+              data-testid="customer-overview-stat-extra-work"
+            >
+              <span className="summary-stat-label">
+                {t("customer_view.overview.stat_extra_work")}
+              </span>
+              <span className="summary-stat-value">
+                {chipValue(summary?.extra_work_count)}
+              </span>
+            </Link>
+            <Link
+              to={`/admin/customers/${customer.id}/tickets`}
+              className="summary-stat"
+              data-testid="customer-overview-stat-tickets"
+            >
+              <span className="summary-stat-label">
+                {t("customer_view.overview.stat_tickets")}
+              </span>
+              <span className="summary-stat-value">
+                {chipValue(summary?.ticket_count)}
               </span>
             </Link>
           </div>
 
-          <div
+          {/* 2. The dashboard row. Numbers with a label, not links to
+              nowhere: a null value renders an em dash and does NOT link,
+              because there is no page behind it for this operator. */}
+          <section
             className="card"
-            data-testid="customer-overview-buildings-preview"
+            data-testid="customer-overview-dashboard"
             style={{ marginBottom: 18 }}
           >
             <div className="section-head">
-              <div className="section-head-title">
-                {t("customer_view.overview.buildings_preview_title")}
-              </div>
-              {buildingsCount > 5 && (
-                <Link
-                  to={`/admin/customers/${customer.id}/buildings`}
-                  className="btn btn-ghost btn-sm"
-                >
-                  {t("customer_view.overview.buildings_preview_view_all", {
-                    count: buildingsCount,
-                  })}
-                </Link>
-              )}
-            </div>
-            <div style={{ padding: "14px 18px 18px" }}>
-              {buildingsCount === 0 ? (
-                <p className="muted small">
-                  {t("customer_view.overview.buildings_preview_empty")}
-                </p>
-              ) : (
-                <div className="bld-list">
-                  {linkedBuildings.slice(0, 5).map((link) => (
-                    <div
-                      key={link.id}
-                      className="bld-row-head"
-                      style={{ alignItems: "flex-start" }}
-                    >
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        <span className="bld-row-name">{link.building_name}</span>
-                        {link.building_address && (
-                          <span
-                            className="muted small"
-                            style={{ marginTop: 2 }}
-                          >
-                            {link.building_address}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+              <div>
+                <div className="section-head-title">
+                  {t("customer_view.overview.dashboard_title")}
                 </div>
-              )}
+                <div className="section-head-sub">
+                  {t("customer_view.overview.dashboard_sub")}
+                </div>
+              </div>
+            </div>
+            <div
+              className="summary-grid"
+              style={{
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                margin: 0,
+                padding: "14px 18px 18px",
+              }}
+            >
+              <DashboardMetric
+                testId="customer-overview-metric-open-tickets"
+                label={t("customer_view.overview.metric_open_tickets")}
+                value={summary?.open_ticket_count ?? null}
+                meta={
+                  summary?.ticket_count === null ||
+                  summary?.ticket_count === undefined
+                    ? t("customer_view.overview.metric_unreadable")
+                    : t("customer_view.overview.metric_of_total", {
+                        count: summary.ticket_count,
+                      })
+                }
+                to={`/admin/customers/${customer.id}/tickets`}
+              />
+              <DashboardMetric
+                testId="customer-overview-metric-open-extra-work"
+                label={t("customer_view.overview.metric_open_extra_work")}
+                value={summary?.open_extra_work_count ?? null}
+                meta={
+                  summary?.extra_work_count === null ||
+                  summary?.extra_work_count === undefined
+                    ? t("customer_view.overview.metric_unreadable")
+                    : t("customer_view.overview.metric_of_total", {
+                        count: summary.extra_work_count,
+                      })
+                }
+                to={`/admin/customers/${customer.id}/extra-work`}
+              />
+              <DashboardMetric
+                testId="customer-overview-metric-unpaid-invoices"
+                label={t("customer_view.overview.metric_unpaid_invoices")}
+                value={
+                  summary?.unpaid_invoice_total == null
+                    ? null
+                    : formatEuro(summary.unpaid_invoice_total)
+                }
+                meta={
+                  summary?.unpaid_invoice_count == null
+                    ? t("customer_view.overview.metric_unreadable")
+                    : t("customer_view.overview.metric_sent_invoices", {
+                        count: summary.unpaid_invoice_count,
+                      })
+                }
+                to={`/admin/customers/${customer.id}/invoices`}
+              />
+            </div>
+          </section>
+
+          {/* 3. About + Linked buildings, side by side. */}
+          <div className="customer-overview-split">
+            <section
+              className="card"
+              data-testid="customer-overview-about-card"
+              style={{ padding: "20px 22px" }}
+            >
+              <div className="section-head" style={{ marginBottom: 8 }}>
+                <div>
+                  <div className="section-head-title">
+                    {t("customer_view.overview.about_title")}
+                  </div>
+                  <div className="section-head-sub">
+                    {t("customer_view.overview.about_desc")}
+                  </div>
+                </div>
+              </div>
+
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_company")}
+                </div>
+                <div className="detail-field-value">
+                  {providerCompany ? (
+                    <Link to={`/admin/companies/${customer.company}`}>
+                      {providerCompany.name}
+                    </Link>
+                  ) : (
+                    <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_contact_email")}
+                </div>
+                <div className="detail-field-value">
+                  {customer.contact_email ? (
+                    <a href={`mailto:${customer.contact_email}`}>
+                      {customer.contact_email}
+                    </a>
+                  ) : (
+                    <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_phone")}
+                </div>
+                <div className="detail-field-value">
+                  {customer.phone ? (
+                    <a href={`tel:${customer.phone}`}>{customer.phone}</a>
+                  ) : (
+                    <span className="muted-empty">—</span>
+                  )}
+                </div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_language")}
+                </div>
+                <div className="detail-field-value">{languageLabel}</div>
+              </div>
+              <div className="detail-field-row">
+                <div className="detail-field-label">
+                  {t("customer_view.overview.field_status")}
+                </div>
+                <div className="detail-field-value">
+                  {isActive ? (
+                    <span className="cell-tag cell-tag-open">
+                      <i />
+                      {t("customer_view.overview.status_active")}
+                    </span>
+                  ) : (
+                    <span className="cell-tag cell-tag-closed">
+                      <i />
+                      {t("customer_view.overview.status_inactive")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <div
+              className="card"
+              data-testid="customer-overview-buildings-preview"
+            >
+              <div className="section-head">
+                <div className="section-head-title">
+                  {t("customer_view.overview.buildings_preview_title")}
+                </div>
+                {/* Sprint 153 §4.3 — the view-all link is ALWAYS offered
+                    now, not only past five rows. */}
+                {buildingsCount > 0 && (
+                  <Link
+                    to={`/admin/customers/${customer.id}/buildings`}
+                    className="btn btn-ghost btn-sm"
+                    data-testid="customer-overview-buildings-view-all"
+                  >
+                    {t("customer_view.overview.buildings_preview_view_all", {
+                      count: buildingsCount,
+                    })}
+                  </Link>
+                )}
+              </div>
+              <div style={{ padding: "14px 18px 18px" }}>
+                {/* BoundedList replaces the hand-rolled `.slice(0, 5)`.
+                    Same rule (CLAUDE.md §8 — no unbounded server-
+                    collection list), but the app-wide primitive, so the
+                    scroll cap and the overflow count come for free. */}
+                <BoundedList
+                  size="sm"
+                  count={buildingsCount}
+                  ariaLabel={t("customer_view.overview.buildings_list_label")}
+                  testIdPrefix="customer-overview-buildings"
+                  emptyState={
+                    <p className="muted small">
+                      {t("customer_view.overview.buildings_preview_empty")}
+                    </p>
+                  }
+                >
+                  <div className="bld-list">
+                    {linkedBuildings.map((link) => (
+                      <div
+                        key={link.id}
+                        className="bld-row-head"
+                        style={{ alignItems: "flex-start" }}
+                      >
+                        <div
+                          style={{ display: "flex", flexDirection: "column" }}
+                        >
+                          <span className="bld-row-name">
+                            {link.building_name}
+                          </span>
+                          {/* City first — it is what an operator scans
+                              for. Falls back to the street address when
+                              the building has no city on file. */}
+                          {(link.building_city || link.building_address) && (
+                            <span
+                              className="muted small"
+                              style={{ marginTop: 2 }}
+                            >
+                              {link.building_city || link.building_address}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </BoundedList>
+              </div>
             </div>
           </div>
-
-          <CustomerFacturatieSection
-            customer={customer}
-            onUpdated={setCustomer}
-          />
 
           <div
             className="quicklink-grid"
@@ -546,3 +630,56 @@ export function CustomerOverviewPage() {
   );
 }
 
+/**
+ * One number on the operational dashboard row. When `value` is null the
+ * module is not readable by this operator: render an em dash and do NOT
+ * link, because there is no page behind it for them.
+ */
+function DashboardMetric({
+  label,
+  value,
+  meta,
+  to,
+  testId,
+}: {
+  label: string;
+  value: number | string | null;
+  meta: string;
+  to: string;
+  testId: string;
+}) {
+  const body = (
+    <>
+      <span className="summary-stat-label">{label}</span>
+      <span className="summary-stat-value">{value ?? "—"}</span>
+      <span className="summary-stat-meta">{meta}</span>
+    </>
+  );
+  if (value === null) {
+    return (
+      <div className="summary-stat" data-testid={testId}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <Link to={to} className="summary-stat" data-testid={testId}>
+      {body}
+    </Link>
+  );
+}
+
+/**
+ * Format the decimal STRING the summary endpoint returns. Parsing is for
+ * display only — grouping and the decimal separator; the string from the
+ * server stays the authority for the amount. An unparseable value is
+ * shown verbatim rather than as NaN.
+ */
+function formatEuro(decimalString: string): string {
+  const parsed = Number(decimalString);
+  if (!Number.isFinite(parsed)) return decimalString;
+  return new Intl.NumberFormat("nl-NL", {
+    style: "currency",
+    currency: "EUR",
+  }).format(parsed);
+}

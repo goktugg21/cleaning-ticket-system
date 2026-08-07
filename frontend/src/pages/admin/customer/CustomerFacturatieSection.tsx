@@ -1,10 +1,17 @@
-// Invoicing Phase 4b — the "Facturatie" section on the Customer Overview
-// page: the informational contract PDF (upload / view / replace / remove) +
-// the billing-schedule settings (invoice_day_rule + invoice_granularity_
-// default). Provider-admin-gated in the UI (the backend enforces OSIUS-admin
-// on write; the controls hide for non-admins). Self-contained so the overview
-// page only imports + mounts it.
-import { useEffect, useRef, useState } from "react";
+// Invoicing Phase 4b — the "Facturatie" section: the informational contract
+// PDF (upload / view / replace / remove) + the billing-schedule settings
+// (invoice_day_rule + invoice_granularity_default). Provider-admin-gated in
+// the UI (the backend enforces OSIUS-admin on write; the controls hide for
+// non-admins). Self-contained so the host page only imports + mounts it.
+//
+// Sprint 153 §4.2 — this section now mounts on the customer SETTINGS page,
+// not the Overview. The file keeps its name and location; only the mount
+// moved. The inline contract-PDF preview was removed at the same time: the
+// owner does not want a PDF rendering inside a settings screen. "View PDF"
+// stays and is unaffected — `handleView` always fetched its OWN blob and
+// object URL and never read the preview's, so deleting the preview effect
+// cannot break the download.
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -73,44 +80,8 @@ export function CustomerFacturatieSection({
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState("");
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState("");
 
   const hasContract = Boolean(customer.contract_pdf_url);
-
-  // Inline live preview of the contract PDF. The serve endpoint is auth-gated
-  // (Bearer), so we fetch the blob via the API helper and render it through an
-  // object URL — the same idiom as the invoice / proposal preview. Keyed on
-  // contract_pdf_url so upload / replace (a fresh ?v= URL) refetches and remove
-  // (null) clears it; the object URL is revoked on cleanup. All setState runs
-  // inside the async helper, so no synchronous set-state-in-effect is added.
-  useEffect(() => {
-    let cancelled = false;
-    let created: string | null = null;
-    async function loadPreview() {
-      setPreviewError("");
-      if (!customer.contract_pdf_url) {
-        setPreviewUrl(null);
-        return;
-      }
-      try {
-        const blob = await fetchCustomerContractPdf(customer.id);
-        if (cancelled) return;
-        created = URL.createObjectURL(blob);
-        setPreviewUrl(created);
-      } catch (err) {
-        if (!cancelled) {
-          setPreviewUrl(null);
-          setPreviewError(getApiError(err));
-        }
-      }
-    }
-    loadPreview();
-    return () => {
-      cancelled = true;
-      if (created) URL.revokeObjectURL(created);
-    };
-  }, [customer.id, customer.contract_pdf_url]);
 
   async function handleSaveSchedule() {
     setSavingSchedule(true);
@@ -328,39 +299,6 @@ export function CustomerFacturatieSection({
             </>
           )}
         </div>
-
-        {/* Embedded live preview — primary affordance; the "View PDF"
-            button above stays as a secondary open-in-new-tab action. Only
-            renders when a contract is present; a fetch error surfaces inline
-            without crashing the section. */}
-        {hasContract && (
-          <div
-            style={{ marginTop: 12 }}
-            data-testid="facturatie-contract-preview"
-          >
-            {previewError ? (
-              <div className="alert-error" role="alert">
-                {previewError}
-              </div>
-            ) : previewUrl ? (
-              <iframe
-                title={t("facturatie.contract_preview_title")}
-                src={previewUrl}
-                data-testid="facturatie-contract-frame"
-                style={{
-                  width: "100%",
-                  height: 520,
-                  border: "1px solid var(--border, #e2e2e2)",
-                  borderRadius: 6,
-                }}
-              />
-            ) : (
-              <div className="loading-bar">
-                <div className="loading-bar-fill" />
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </section>
   );
