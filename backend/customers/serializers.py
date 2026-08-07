@@ -5,6 +5,38 @@ from accounts.models import UserRole
 from .models import Customer, CustomerBuildingMembership, CustomerUserBuildingAccess
 
 
+def _user_is_company_member(user, company_id) -> bool:
+    """Is `user` a CompanyUserMembership holder of `company_id`?
+
+    Memoised on the user INSTANCE, which in DRF lives exactly as long as
+    the request does. Sprint 153: `compute_customer_actions` below ran
+    this `.exists()` once PER ROW, so a COMPANY_ADMIN loading a 25-row
+    customers page paid 25 extra queries for what is a single membership
+    fact about themselves. That N+1 predates this sprint and is invisible
+    on seed data; the §2.2 assertNumQueries guard is what surfaced it.
+
+    Read-only helper, so a per-request memo cannot go stale: nothing in a
+    GET mutates the caller's own company memberships. The answer is
+    byte-identical to the uncached call.
+    """
+    from companies.models import CompanyUserMembership
+
+    cache = getattr(user, "_customer_company_membership_cache", None)
+    if cache is None:
+        cache = {}
+        try:
+            user._customer_company_membership_cache = cache
+        except AttributeError:  # pragma: no cover - exotic user objects
+            return CompanyUserMembership.objects.filter(
+                user=user, company_id=company_id
+            ).exists()
+    if company_id not in cache:
+        cache[company_id] = CompanyUserMembership.objects.filter(
+            user=user, company_id=company_id
+        ).exists()
+    return cache[company_id]
+
+
 def compute_customer_actions(user, customer) -> dict:
     """
     Per-current-user, per-customer capability block. Used by the
@@ -45,16 +77,15 @@ def compute_customer_actions(user, customer) -> dict:
     # accounts ↔ customers ↔ companies cycle (already exercised by
     # `customers.permissions`).
     from accounts.scoping import _user_in_actor_company
-    from companies.models import CompanyUserMembership
     from .permissions import user_can
 
     role = getattr(user, "role", None)
     company = customer.company
 
     is_super = role == UserRole.SUPER_ADMIN
-    is_ca_in = role == UserRole.COMPANY_ADMIN and CompanyUserMembership.objects.filter(
-        user=user, company_id=company.id
-    ).exists()
+    is_ca_in = role == UserRole.COMPANY_ADMIN and _user_is_company_member(
+        user, company.id
+    )
 
     # `can_manage_customer_users` — SA always; CA in scope always;
     # CUSTOMER_USER whose customer-level `customer.users.manage`
@@ -154,6 +185,17 @@ class CustomerSerializer(serializers.ModelSerializer):
     """
 
     linked_building_ids = serializers.SerializerMethodField()
+    # Sprint 153 §2.2 — per-row counts for the customers list table and
+    # the customer overview chips. READ THE ANNOTATION FIRST: the
+    # CustomerViewSet queryset annotates all three with
+    # `Count(..., distinct=True)`, so a 25-row page costs zero extra
+    # queries. The `.count()` fallback exists only for the single-object
+    # paths that re-serialise a bare `Customer` outside the viewset
+    # queryset (`reactivate`, and the objects returned by the membership
+    # endpoints) — never for a list page.
+    linked_building_count = serializers.SerializerMethodField()
+    user_count = serializers.SerializerMethodField()
+    contact_count = serializers.SerializerMethodField()
     # Per-current-user, per-customer capability block. Frontend reads
     # this to render writable role dropdowns (via
     # `allowed_target_customer_access_roles`) and to gate the
@@ -178,6 +220,11 @@ class CustomerSerializer(serializers.ModelSerializer):
             # later linked to many buildings via CustomerBuildingMembership.
             "building",
             "linked_building_ids",
+            # Sprint 153 §2.2 — annotated per-row counts (see the field
+            # declarations above).
+            "linked_building_count",
+            "user_count",
+            "contact_count",
             "name",
             "contact_email",
             "phone",
@@ -209,6 +256,9 @@ class CustomerSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "linked_building_ids",
+            "linked_building_count",
+            "user_count",
+            "contact_count",
             "logo_url",
             "contract_pdf_url",
             "is_active",
@@ -237,6 +287,38 @@ class CustomerSerializer(serializers.ModelSerializer):
         if obj.building_id is not None:
             return [obj.building_id]
         return []
+
+    # Sprint 153 §2.2 — the three count fields. Each reads the viewset's
+    # queryset annotation when present and only falls back to a real
+    # COUNT(*) for a bare instance. `getattr(obj, name, None)` is the
+    # whole guard: an annotated value of 0 is a legitimate answer and
+    # must NOT fall through to the query (hence the `is None` test, not
+    # a truthiness test).
+    #
+    # NOTE on `linked_building_count` vs `linked_building_ids`: the count
+    # is the number of M:N CustomerBuildingMembership rows, full stop. It
+    # deliberately does NOT include the deprecated `Customer.building`
+    # anchor that `get_linked_building_ids` still falls back to
+    # (CLAUDE.md §8 — do not build on that FK). The 0003 migration
+    # backfilled a membership row for every legacy customer, so the two
+    # agree on real data.
+    def get_linked_building_count(self, obj: Customer) -> int:
+        annotated = getattr(obj, "_linked_building_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.building_memberships.count()
+
+    def get_user_count(self, obj: Customer) -> int:
+        annotated = getattr(obj, "_user_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.user_memberships.count()
+
+    def get_contact_count(self, obj: Customer) -> int:
+        annotated = getattr(obj, "_contact_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.contacts.count()
 
     def get_logo_url(self, obj: Customer):
         from .media_urls import customer_logo_url

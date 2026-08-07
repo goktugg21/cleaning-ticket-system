@@ -19,7 +19,8 @@ from documents.views import (
     DocumentListCreateView,
 )
 
-from .views import CustomerViewSet
+from .views import CustomerBulkDeactivateView, CustomerViewSet
+from .views_summary import CustomerSummaryView
 from .views_labels import (
     DepartmentDetailView,
     DepartmentListCreateView,
@@ -50,6 +51,22 @@ router.register(r"", CustomerViewSet, basename="customer")
 
 
 urlpatterns = [
+    # Sprint 153 §2.3 — bulk deactivate. MUST stay above `router.urls`:
+    # the router registers this app at the empty prefix, so its detail
+    # route `^(?P<pk>[^/.]+)/$` would happily swallow "bulk-deactivate"
+    # as a pk. Every explicit path in this list is above the router for
+    # the same reason.
+    path(
+        "bulk-deactivate/",
+        CustomerBulkDeactivateView.as_view(),
+        name="customer-bulk-deactivate",
+    ),
+    # Sprint 153 §2.4 — the customer overview dashboard read.
+    path(
+        "<int:customer_id>/summary/",
+        CustomerSummaryView.as_view(),
+        name="customer-summary",
+    ),
     # Employees directory — a single customer's people with their
     # effective access role (read-first). Distinct from /users/ (the
     # membership-management surface): SA / PA / CCA-CLM-CU read; the
