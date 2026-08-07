@@ -17,6 +17,7 @@ import { BillingRoute } from "./components/BillingRoute";
 import { CustomerRoute } from "./components/CustomerRoute";
 import { ReportsRoute } from "./components/ReportsRoute";
 import { StaffRequestReviewRoute } from "./components/StaffRequestReviewRoute";
+import { TimesheetsRoute } from "./components/TimesheetsRoute";
 import { SuperAdminRoute } from "./components/SuperAdminRoute";
 import { AppShell } from "./layout/AppShell";
 import { AcceptInvitationPage } from "./pages/AcceptInvitationPage";
@@ -24,6 +25,7 @@ import { CreateExtraWorkPage } from "./pages/CreateExtraWorkPage";
 import { CreateTicketPage } from "./pages/CreateTicketPage";
 import { AgendaPage } from "./pages/AgendaPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { MyHoursPage } from "./pages/MyHoursPage";
 import { ExtraWorkDetailPage } from "./pages/ExtraWorkDetailPage";
 import { ExtraWorkListPage } from "./pages/ExtraWorkListPage";
 import { PlannedWorkListPage } from "./pages/planned-work/PlannedWorkListPage";
@@ -73,17 +75,34 @@ import { CustomerPermissionsPage } from "./pages/admin/customer/CustomerPermissi
 import { CustomerSettingsPage } from "./pages/admin/customer/CustomerSettingsPage";
 import { CustomerUsersPage } from "./pages/admin/customer/CustomerUsersPage";
 import { InvitationsAdminPage } from "./pages/admin/InvitationsAdminPage";
+import { HoursAdminPage } from "./pages/admin/HoursAdminPage";
 import { ServicesAdminPage } from "./pages/admin/ServicesAdminPage";
 import { StaffAssignmentRequestsAdminPage } from "./pages/admin/StaffAssignmentRequestsAdminPage";
 import { UserDetailPage } from "./pages/admin/UserDetailPage";
 import { UserFormPage } from "./pages/admin/UserFormPage";
 import { UsersAdminPage } from "./pages/admin/UsersAdminPage";
 
-// ReportsPage is the only consumer of recharts. Lazy-loaded so the
-// charting library lands in a separate chunk and the non-reports bundle
-// stays at the pre-Reports baseline. recharts 2.x does not tree-shake
-// cleanly from its main entry; route-level code splitting is the only
-// way to keep the initial bundle small.
+// ReportsPage is lazy-loaded. recharts 2.x does not tree-shake cleanly
+// from its main entry, so route-level splitting is the lever available
+// for keeping it out of the initial bundle.
+//
+// Sprint 152.2 — two claims this comment used to make are no longer
+// true, and are corrected rather than left to mislead:
+//
+//   1. "ReportsPage is the only consumer of recharts" — `HoursCharts`
+//      (the Uren Overview tab) is a second one, and it is reached
+//      through the eagerly-imported `HoursAdminPage`.
+//   2. "the charting library lands in a separate chunk" — it does not,
+//      and did not before this sprint either. The build emits no
+//      recharts chunk: `ReportsPage-*.js` is ~22 kB, far too small to
+//      contain it, and `index-*.js` was already ~2,178 kB before the
+//      Uren charts were added (they cost +21 kB, i.e. their own code).
+//      recharts is in the entry bundle whatever this lazy import does.
+//
+// Splitting it out for real would mean a deliberate `manualChunks`
+// change measured against both consumers — its own piece of work, not a
+// side effect of adding a second chart page. The lazy import stays
+// because it still splits ReportsPage's OWN code.
 const ReportsPage = lazy(() =>
   import("./pages/reports/ReportsPage").then((m) => ({ default: m.ReportsPage })),
 );
@@ -710,6 +729,26 @@ export default function App() {
               <StaffRequestReviewRoute>
                 <StaffAssignmentRequestsAdminPage />
               </StaffRequestReviewRoute>
+            }
+          />
+          {/* Sprint 152 — employee hours (urenregistratie). Two
+              surfaces, two guards: `/my-hours` for every provider-side
+              role, `/admin/hours` for SA / CA. Customer-side users are
+              redirected by the guard and 403'd by every endpoint. */}
+          <Route
+            path="/my-hours"
+            element={
+              <TimesheetsRoute>
+                <MyHoursPage />
+              </TimesheetsRoute>
+            }
+          />
+          <Route
+            path="/admin/hours"
+            element={
+              <TimesheetsRoute manager>
+                <HoursAdminPage />
+              </TimesheetsRoute>
             }
           />
           <Route

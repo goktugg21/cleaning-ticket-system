@@ -71,6 +71,11 @@ INSTALLED_APPS = [
     "audit",
     "invoicing",
     "documents",
+    # Sprint 152 — employee hours (urenregistratie). An INDEPENDENT
+    # module: no FK to and no import from tickets / extra_work /
+    # planned_work. It records how much an employee worked, never what
+    # work was performed.
+    "timesheets",
 ]
 
 MIDDLEWARE = [

@@ -30,6 +30,7 @@ import {
   Tag,
   Tags,
   Ticket,
+  Timer,
   UserCog,
   Users,
   X,
@@ -45,6 +46,8 @@ import {
   canAccessBilling,
   canAccessReports,
   canAccessStaffRequestReview,
+  canAccessTimesheets,
+  canManageTimesheets,
   isBuildingManager,
   isCustomerUser,
   roleLabelKey,
@@ -566,6 +569,21 @@ export function AppShell({ children }: AppShellProps) {
                   )}
                 </>
               )}
+              {/* Sprint 152 — employee hours. Every provider-side
+                  role including STAFF; customer-side users see no
+                  trace of the module. */}
+              {canAccessTimesheets(me?.role) && (
+                <NavLink
+                  to="/my-hours"
+                  className={navClass}
+                  data-testid="sidebar-my-hours"
+                >
+                  <span className="nav-icon">
+                    <Timer size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.my_hours")}
+                </NavLink>
+              )}
               {canAccessReports(me?.role) && (
                 <NavLink to="/reports" className={navClass}>
                   <span className="nav-icon">
@@ -623,6 +641,23 @@ export function AppShell({ children }: AppShellProps) {
                     </span>
                     {t("nav.services")}
                   </NavLink>
+                  {/* Sprint 152 — the Uren admin area. Gated on
+                      `canManageTimesheets` (SA / CA), NOT on the admin
+                      group alone: the group also admits nobody else
+                      today, but the backend rule is its own and the
+                      nav should mirror that rule, not a coincidence. */}
+                  {canManageTimesheets(me?.role) && (
+                    <NavLink
+                      to="/admin/hours"
+                      className={navClass}
+                      data-testid="sidebar-hours-admin"
+                    >
+                      <span className="nav-icon">
+                        <Timer size={16} strokeWidth={2} />
+                      </span>
+                      {t("nav.hours_admin")}
+                    </NavLink>
+                  )}
                   <NavLink to="/admin/users" className={navClass}>
                     <span className="nav-icon">
                       <UserCog size={16} strokeWidth={2} />
