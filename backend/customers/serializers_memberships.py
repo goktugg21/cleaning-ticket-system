@@ -125,6 +125,12 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
     building_address = serializers.CharField(
         source="building.address", read_only=True
     )
+    # Sprint 153 §4.3 — the linked-buildings card shows the city under
+    # the name. Additive read-only field; `Building.city` is blank=True,
+    # so this is "" for a building that has none, never null.
+    building_city = serializers.CharField(
+        source="building.city", read_only=True
+    )
 
     class Meta:
         model = CustomerBuildingMembership
@@ -134,6 +140,7 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
             "building_id",
             "building_name",
             "building_address",
+            "building_city",
             "created_at",
         ]
         read_only_fields = fields

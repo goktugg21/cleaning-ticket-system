@@ -27,6 +27,7 @@ import type {
   CustomerServicePrice,
   CustomerServicePriceCreatePayload,
   CustomerServicePriceUpdatePayload,
+  CustomerSummary,
   CustomerEmployee,
   CustomerUserBuildingAccess,
   CustomerUserMembership,
@@ -95,6 +96,10 @@ export interface AdminListParams {
   // list to users with >=1 CustomerUserBuildingAccess row of that role.
   // cleanParams() passes it through to ?access_role=.
   access_role?: string;
+  // Sprint 153 — DRF OrderingFilter field, "-" prefixed for descending.
+  // The endpoint's `ordering_fields` allowlist decides what is honoured;
+  // an unlisted field is ignored, not an error.
+  ordering?: string;
 }
 
 function cleanParams(input: AdminListParams): Record<string, string | number> {
@@ -356,6 +361,28 @@ export async function updateCustomer(
 
 export async function deactivateCustomer(id: number): Promise<void> {
   await api.delete(`/customers/${id}/`);
+}
+
+// Sprint 153 §2.3 — deactivate many customers in ONE request. All-or-
+// nothing on the server: one unresolvable id rejects the whole batch
+// with zero writes, so there is no partial-success shape to handle here.
+export async function bulkDeactivateCustomers(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  const response = await api.post<{ deactivated: number }>(
+    "/customers/bulk-deactivate/",
+    { customers: ids },
+  );
+  return response.data;
+}
+
+// Sprint 153 §2.4 — the customer overview dashboard read. ONE call
+// instead of six list calls counted by array length.
+export async function getCustomerSummary(
+  id: number,
+): Promise<CustomerSummary> {
+  const response = await api.get<CustomerSummary>(`/customers/${id}/summary/`);
+  return response.data;
 }
 
 export async function reactivateCustomer(id: number): Promise<CustomerAdmin> {

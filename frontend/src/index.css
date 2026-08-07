@@ -1348,6 +1348,71 @@ table.data-table {
 .data-table tbody td:first-child { padding-left: 20px; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover td { background: var(--green-faint); cursor: pointer; }
+/* Sprint 153 §3.6 — density MODIFIER. `.data-table` itself is used by
+   dozens of pages and is deliberately untouched; only a table that opts
+   in by adding `.data-table-dense` gets the tighter row box. Font size
+   stays at 13px and the row hover stays, per the prompt's floor. */
+.data-table-dense thead th { padding: 8px 14px; }
+.data-table-dense thead th:first-child { padding-left: 16px; }
+.data-table-dense tbody td { padding: 8px 14px; }
+.data-table-dense tbody td:first-child { padding-left: 16px; }
+
+/* Sprint 153 §3.3 — sortable column header. The clickable thing is a
+   real <button> inside the <th> so it is reachable and operable from the
+   keyboard; an onClick on the <th> would not be. */
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.th-sort:hover { color: var(--text); }
+
+.th-sort:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.th-sort-caret {
+  font-size: 9px;
+  line-height: 1;
+  /* Reserve the caret's box on every sortable header so the columns do
+     not shift sideways when the active sort moves. */
+  width: 8px;
+  display: inline-block;
+  text-align: center;
+}
+
+/* `aria-sort` belongs on the column header cell, not on the button, so
+   the button carries a data attribute for styling only. */
+.th-sort[data-sort="none"] .th-sort-caret { opacity: 0; }
+.th-sort:hover .th-sort-caret { opacity: 0.45; }
+.th-sort[data-sort="ascending"] .th-sort-caret,
+.th-sort[data-sort="descending"] .th-sort-caret {
+  opacity: 1;
+  color: var(--green);
+}
+
+/* Sprint 153 §3.4 — the row-selection checkbox column. Narrow, and it
+   must not inherit the clickable-row cursor. */
+.data-table .td-select,
+.data-table .th-select {
+  width: 34px;
+  padding-right: 0;
+}
+
+.data-table tbody tr:hover .td-select { cursor: default; }
+
 .td-id {
   font-family: 'DM Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 11px;
@@ -4537,6 +4602,15 @@ a.attn-row:hover {
     width: 100%;
     justify-content: center;
   }
+  /* Sprint 153 §3.5 — the customers card list moved its action OUT of
+     the card's <a> (a <button> nested in an <a> is invalid HTML and the
+     click would navigate instead of opening the edit dialog). As a
+     direct child of .admin-card it no longer inherits the link's
+     12px/14px padding, so restate it here. */
+  .admin-card > .admin-card-actions {
+    margin-top: 0;
+    padding: 8px 14px 12px;
+  }
 
   /* Audit-log Changes details disclosure inside the card: behave as
      a normal block so the long JSON payload reads naturally. */
@@ -4773,6 +4847,41 @@ a.attn-row:hover {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* Sprint 153 §4.1 — the count-chip strip carries six chips now
+   (Buildings / Users / Contacts / Pricing / Extra work / Tickets). The
+   base .summary-grid is a hard `repeat(4, 1fr)` used by a dozen other
+   pages, so this is a MODIFIER, not an edit to the base rule. */
+.summary-grid-6 { grid-template-columns: repeat(6, 1fr); }
+
+@media (max-width: 1400px) {
+  .summary-grid-6 { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .summary-grid-6 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 560px) {
+  .summary-grid-6 { grid-template-columns: 1fr; }
+}
+
+/* Sprint 153 §4.1 — About and Linked buildings side by side. Each was
+   using a full-width card for a half-card of content. Stacks below the
+   900px breakpoint named in the prompt. */
+.customer-overview-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+  .customer-overview-split { grid-template-columns: 1fr; }
+}
+
+.customer-overview-split > .card { margin-bottom: 0; }
 
 .quicklink-grid {
   display: grid;

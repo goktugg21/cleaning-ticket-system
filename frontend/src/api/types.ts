@@ -683,6 +683,12 @@ export interface CustomerAdmin {
   // consolidated customers can be created with no anchor and linked
   // to multiple buildings via the M:N CustomerBuildingMembership.
   building: number | null;
+  // Sprint 153 — per-row counts, annotated on the list queryset (no
+  // N+1). `linked_building_count` counts M:N membership rows only; it
+  // deliberately ignores the deprecated `building` anchor above.
+  linked_building_count: number;
+  user_count: number;
+  contact_count: number;
   name: string;
   contact_email: string;
   phone: string;
@@ -711,6 +717,29 @@ export interface CustomerAdmin {
   actions?: CustomerActions;
 }
 
+/**
+ * Sprint 153 §2.4 — GET /api/customers/<id>/summary/.
+ *
+ * Every field is nullable ON PURPOSE. `null` means "this module is not
+ * yours to read" and renders as an unlinked em dash; `0` means "you can
+ * read it and it is empty". Do not collapse the two with `?? 0` — that
+ * would tell a staff user there is no extra work when in fact there is
+ * extra work they may not see.
+ */
+export interface CustomerSummary {
+  linked_building_count: number | null;
+  user_count: number | null;
+  contact_count: number | null;
+  pricing_rule_count: number | null;
+  open_ticket_count: number | null;
+  ticket_count: number | null;
+  open_extra_work_count: number | null;
+  extra_work_count: number | null;
+  unpaid_invoice_count: number | null;
+  /** Decimal STRING (e.g. "1250.00") — money never goes through a float. */
+  unpaid_invoice_total: string | null;
+}
+
 // Sprint 14 — Customer ↔ Building (M:N) link.
 export interface CustomerBuildingMembership {
   id: number;
@@ -718,6 +747,8 @@ export interface CustomerBuildingMembership {
   building_id: number;
   building_name: string;
   building_address: string;
+  // Sprint 153 §4.3 — "" when the building has no city on file.
+  building_city: string;
   created_at: string;
 }
 
