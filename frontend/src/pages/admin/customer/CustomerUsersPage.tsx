@@ -469,6 +469,7 @@ export function CustomerUsersPage() {
                   <tr>
                     <th>{t("users.col_email")}</th>
                     <th>{t("users.col_full_name")}</th>
+                    <th>{t("users.col_phone")}</th>
                     <th>{t("customer_form.col_user_access")}</th>
                     <th aria-label={t("admin.col_actions")} />
                   </tr>
@@ -482,6 +483,16 @@ export function CustomerUsersPage() {
                         <tr data-testid="customer-user-row">
                           <td className="td-subject">{membership.user_email}</td>
                           <td>{membership.user_full_name || "—"}</td>
+                          {/* Sprint 154 §K — empty renders an em dash. */}
+                          <td data-testid="customer-user-phone">
+                            {membership.user_phone ? (
+                              <a href={`tel:${membership.user_phone}`}>
+                                {membership.user_phone}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
                           <td data-testid="customer-user-access-summary">
                             {isCompanyAdmin ? (
                               // SoT Addendum A.1 — a company-wide CCA is

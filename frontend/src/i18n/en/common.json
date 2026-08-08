@@ -2043,5 +2043,8 @@
   "building_detail.add_summary": "{{count}} selection(s) will be linked to this building.",
   "building_detail.no_candidates": "Nothing further to link.",
   "building_detail.select_row": "Select {{name}}",
-  "building_detail.no_phone": "No phone number"
+  "building_detail.no_phone": "No phone number",
+  "users.col_phone": "Phone",
+  "user_form.field_phone": "Phone",
+  "user_form.field_phone_hint": "Optional. This user's own phone number."
 }

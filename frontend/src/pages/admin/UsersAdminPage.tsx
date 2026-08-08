@@ -210,6 +210,11 @@ export function UsersAdminPage() {
           <Link to={detailPath}>{user.email}</Link>
         </td>
         <td>{user.full_name || "—"}</td>
+        {/* Sprint 154 §K — empty renders an em dash, never a blank cell:
+            a blank one reads as a rendering bug rather than "not set". */}
+        <td data-testid="user-row-phone">
+          {user.phone ? <a href={`tel:${user.phone}`}>{user.phone}</a> : "—"}
+        </td>
         <td data-testid="user-row-role" data-role={user.role}>
           <RoleBadge role={user.role} compact />
         </td>
@@ -386,6 +391,7 @@ export function UsersAdminPage() {
               <tr>
                 <th>{t("users.col_email")}</th>
                 <th>{t("users.col_full_name")}</th>
+                <th>{t("users.col_phone")}</th>
                 <th>{t("users.col_role")}</th>
                 <th>{t("users.col_access_role")}</th>
                 <th>{t("users.col_language")}</th>
@@ -400,7 +406,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-provider"
                   >
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <span className="users-group-header-label">
                         {t("users.group_provider")}
                       </span>
@@ -418,7 +424,7 @@ export function UsersAdminPage() {
                     className="users-group-header"
                     data-testid="users-group-customer"
                   >
-                    <td colSpan={7}>
+                    <td colSpan={8}>
                       <span className="users-group-header-label">
                         {t("users.group_customer")}
                       </span>
@@ -471,6 +477,13 @@ export function UsersAdminPage() {
                         <dd>{user.full_name}</dd>
                       </div>
                     )}
+                    {/* Sprint 154 §K — the phone travels with the card
+                        list too, or the phone layout drifts from the
+                        table it mirrors. */}
+                    <div className="admin-card-meta-row">
+                      <dt>{t("users.col_phone")}</dt>
+                      <dd>{user.phone || "—"}</dd>
+                    </div>
                     <div className="admin-card-meta-row">
                       <dt>{t("users.col_role")}</dt>
                       <dd>

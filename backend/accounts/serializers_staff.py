@@ -222,9 +222,25 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
     COMPANY_ADMIN / BUILDING_MANAGER / STAFF rows. `employment_type` is the
     StaffProfile category for STAFF rows and ``None`` for PA/BM (who hold no
     profile). Privacy floor: this is the same provider read surface as the
-    roster — it MUST NOT leak `internal_note`, `phone`, customer linkage, or
-    any pricing field; only name / email / role / employment category /
-    active flag are exposed.
+    roster — it MUST NOT leak `internal_note`, `StaffProfile.phone`,
+    customer linkage, or any pricing field.
+
+    Sprint 154 §K/§I.1 — `phone` here is `User.phone`, the account's OWN
+    contact number, and NOT `StaffProfile.phone`. The two are different
+    fields and only one of them is safe on this surface:
+
+      * `StaffProfile.phone` is a STAFF-only number whose visibility is
+        governed by `Customer.show_assigned_staff_phone` / the
+        CustomerCompanyPolicy mirror. The privacy floor above names it
+        explicitly, and this sprint does NOT lift that — putting it here
+        would expose a gated number on an ungated read.
+      * `User.phone` is additive, ungated, and set by the user or an
+        admin on the account record. It is the right one for a directory
+        column.
+
+    The prompt asked for "prefer StaffProfile.phone, fall back to
+    User.phone" on this page. That would breach the floor above, so it is
+    deliberately not done; see the sprint report.
     """
 
     full_name = serializers.CharField(read_only=True)
@@ -236,6 +252,7 @@ class ProviderEmployeeSerializer(serializers.ModelSerializer):
             "id",
             "full_name",
             "email",
+            "phone",
             "role",
             "employment_type",
             "is_active",

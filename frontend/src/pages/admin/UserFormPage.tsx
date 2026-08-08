@@ -38,6 +38,8 @@ import { Toggle } from "../../components/Toggle";
 
 interface UserUpdatePayload {
   full_name: string;
+  // Sprint 154 §I.1 — the user's own contact number.
+  phone: string;
   language: string;
   role: Role;
 }
@@ -77,6 +79,7 @@ export function UserFormPage() {
   });
 
   const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [language, setLanguage] = useState("nl");
   const [role, setRole] = useState<Role>("CUSTOMER_USER");
 
@@ -90,11 +93,13 @@ export function UserFormPage() {
     updateFn: updateUser,
     buildPayload: () => ({
       full_name: fullName.trim(),
+      phone: phone.trim(),
       language,
       role,
     }),
     applyEntity: (entity) => {
       setFullName(entity.full_name);
+      setPhone(entity.phone ?? "");
       setLanguage(entity.language);
       setRole(entity.role);
     },
@@ -267,6 +272,32 @@ export function UserFormPage() {
               {form.fieldErrors.full_name && (
                 <div className="alert-error login-error" role="alert">
                   {form.fieldErrors.full_name}
+                </div>
+              )}
+            </div>
+
+            {/* Sprint 154 §K — the phone input. `StaffProfile.phone` is a
+                SEPARATE field on the staff profile section below; this one
+                is the account's own number and has no customer-visibility
+                gate attached. */}
+            <div className="field">
+              <label className="field-label" htmlFor="user-phone">
+                {t("user_form.field_phone")}
+              </label>
+              <input
+                id="user-phone"
+                className="field-input"
+                type="tel"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                data-testid="user-form-phone"
+              />
+              <span className="muted small" style={{ display: "block", marginTop: 4 }}>
+                {t("user_form.field_phone_hint")}
+              </span>
+              {form.fieldErrors.phone && (
+                <div className="alert-error login-error" role="alert">
+                  {form.fieldErrors.phone}
                 </div>
               )}
             </div>

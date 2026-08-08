@@ -6,9 +6,12 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   addBuildingManager,
+  bulkLinkBuildings,
   createBuilding,
   getBuilding,
   listAllCompanies,
+  listAllCustomers,
+  listBuildingCustomers,
   listBuildingManagers,
   listUsers,
   removeBuildingManager,
@@ -19,10 +22,15 @@ import type {
   BuildingAdmin,
   BuildingManagerMembership,
   CompanyAdmin,
+  CustomerAdmin,
+  CustomerBuildingMembership,
   UserAdmin,
 } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { BoundedList } from "../../components/BoundedList";
+import { EntityPicker } from "../../components/EntityPicker";
+import { useToast } from "../../components/ToastProvider";
 import { useEntityForm } from "../../hooks/useEntityForm";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
@@ -30,6 +38,7 @@ export function BuildingFormPage() {
   const { id } = useParams();
   const isCreate = id === undefined;
   const { t, i18n } = useTranslation("common");
+  const { push: pushToast } = useToast();
 
   const [savedBanner, setSavedBanner] = useSavedBanner({
     saved: t("buildings.banner_saved"),
@@ -45,10 +54,47 @@ export function BuildingFormPage() {
   const [country, setCountry] = useState("");
   const [postalCode, setPostalCode] = useState("");
 
+  // Sprint 154 §H (building half) — the mirror image of the customer
+  // form's linked-buildings section: pick the CUSTOMERS served here, in
+  // create mode as well as edit mode.
+  const [linkedCustomers, setLinkedCustomers] = useState<
+    CustomerBuildingMembership[]
+  >([]);
+  const [companyCustomers, setCompanyCustomers] = useState<CustomerAdmin[]>([]);
+  const [customersToLink, setCustomersToLink] = useState<number[]>([]);
+  const [pendingCustomerIds, setPendingCustomerIds] = useState<number[]>([]);
+  const [customerLinkError, setCustomerLinkError] = useState("");
+  const [customerLinkBusy, setCustomerLinkBusy] = useState(false);
+  const [customerLinkToken, setCustomerLinkToken] = useState(0);
+
   const form = useEntityForm<BuildingAdmin, BuildingWritePayload>({
     id,
     fetchFn: getBuilding,
-    createFn: createBuilding,
+    // Sprint 154 §H — link the chosen customers in the same trip that
+    // creates the building. The M:N rows need a building id, so the
+    // create lands first. A link failure must NOT lose the created
+    // building: it is swallowed and surfaced as a toast, which survives
+    // the navigation to the detail page.
+    createFn: async (payload) => {
+      const created = await createBuilding(payload);
+      if (pendingCustomerIds.length > 0) {
+        try {
+          await bulkLinkBuildings({
+            buildings: [created.id],
+            relation: "customers",
+            targets: pendingCustomerIds,
+            mode: "link",
+          });
+        } catch (err) {
+          pushToast({
+            variant: "error",
+            title: t("building_form.create_link_failed"),
+            description: getApiError(err),
+          });
+        }
+      }
+      return created;
+    },
     updateFn: updateBuilding,
     validate: () => {
       if (isCreate && company === "") return { company: t("building_form.error_pick_company") };
@@ -186,6 +232,87 @@ export function BuildingFormPage() {
   const backLabel = isCreate
     ? t("building_form.back")
     : t("building_form.back_to_detail");
+
+  // Sprint 154 §H — the customer candidate universe and (in edit mode)
+  // the current links. Company-scoped: a customer of another provider
+  // can never be served at this building, so offering one would be a
+  // rejection waiting to happen.
+  useEffect(() => {
+    if (company === "") {
+      setCompanyCustomers([]);
+      return;
+    }
+    let cancelled = false;
+    listAllCustomers({ is_active: "true", company })
+      .then((rows) => {
+        if (!cancelled) setCompanyCustomers(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCompanyCustomers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [company]);
+
+  useEffect(() => {
+    if (isCreate || form.numericId === null) return;
+    let cancelled = false;
+    listBuildingCustomers(form.numericId)
+      .then((rows) => {
+        if (!cancelled) setLinkedCustomers(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedCustomers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCreate, form.numericId, customerLinkToken]);
+
+  const availableCustomersToLink = useMemo(() => {
+    const linked = new Set(linkedCustomers.map((l) => l.customer));
+    return companyCustomers.filter((c) => !linked.has(c.id));
+  }, [companyCustomers, linkedCustomers]);
+
+  async function handleAddCustomerLinks() {
+    if (form.numericId === null || customersToLink.length === 0) return;
+    setCustomerLinkError("");
+    setCustomerLinkBusy(true);
+    try {
+      await bulkLinkBuildings({
+        buildings: [form.numericId],
+        relation: "customers",
+        targets: customersToLink,
+        mode: "link",
+      });
+      setCustomersToLink([]);
+      setCustomerLinkToken((n) => n + 1);
+    } catch (err) {
+      setCustomerLinkError(getApiError(err));
+    } finally {
+      setCustomerLinkBusy(false);
+    }
+  }
+
+  async function handleRemoveCustomerLink(customerId: number) {
+    if (form.numericId === null) return;
+    setCustomerLinkError("");
+    setCustomerLinkBusy(true);
+    try {
+      await bulkLinkBuildings({
+        buildings: [form.numericId],
+        relation: "customers",
+        targets: [customerId],
+        mode: "unlink",
+      });
+      setCustomerLinkToken((n) => n + 1);
+    } catch (err) {
+      setCustomerLinkError(getApiError(err));
+    } finally {
+      setCustomerLinkBusy(false);
+    }
+  }
 
   return (
     <div>
@@ -463,6 +590,135 @@ export function BuildingFormPage() {
           </form>
         </section>
       )}
+
+      {/* Sprint 154 §H — the linked-customers section, in BOTH modes.
+          In create mode the links cannot be written yet (there is no
+          building id), so the choice is held and applied straight after
+          the create; see the `createFn` wrapper above. */}
+      <section
+        className="card"
+        data-testid="section-building-customers"
+        style={{ marginTop: 16, padding: "20px 22px" }}
+      >
+        <h3 className="section-title">
+          {t("building_form.section_customers_title")}
+        </h3>
+        <p className="muted small" style={{ marginBottom: 12 }}>
+          {isCreate
+            ? company === ""
+              ? t("customer_form.select_company_first")
+              : t("building_form.create_link_customers_hint")
+            : t("building_form.section_customers_desc")}
+        </p>
+
+        {customerLinkError && (
+          <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+            {customerLinkError}
+          </div>
+        )}
+
+        {isCreate ? (
+          company !== "" && (
+            <EntityPicker
+              options={companyCustomers.map((c) => ({
+                id: c.id,
+                label: c.name,
+                sublabel: c.contact_email,
+              }))}
+              selectedIds={pendingCustomerIds}
+              onChange={setPendingCustomerIds}
+              disabled={form.submitting}
+              emptyText={t("building_form.no_eligible_customers")}
+              testIdPrefix="building-form-create-customers"
+              size="sm"
+            />
+          )
+        ) : (
+          <>
+            <BoundedList
+              size="md"
+              count={linkedCustomers.length}
+              ariaLabel={t("building_form.section_customers_title")}
+              testIdPrefix="building-form-linked-customers"
+              className="table-wrap"
+              emptyState={
+                <p className="muted small" style={{ padding: "12px 0" }}>
+                  {t("building_form.no_customers_linked")}
+                </p>
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("admin.col_name")}</th>
+                    <th aria-label={t("admin.col_actions")} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {linkedCustomers.map((link) => (
+                    <tr key={link.id}>
+                      <td className="td-subject">
+                        <Link to={`/admin/customers/${link.customer}`}>
+                          {link.customer_name || String(link.customer)}
+                        </Link>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleRemoveCustomerLink(link.customer)}
+                          disabled={customerLinkBusy}
+                          data-testid={`building-form-unlink-customer-${link.customer}`}
+                        >
+                          {t("admin_form.remove")}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
+
+            <div style={{ marginTop: 14 }}>
+              <div className="detail-field-label" style={{ marginBottom: 6 }}>
+                {t("building_form.add_customers")}
+              </div>
+              <EntityPicker
+                options={availableCustomersToLink.map((c) => ({
+                  id: c.id,
+                  label: c.name,
+                  sublabel: c.contact_email,
+                }))}
+                selectedIds={customersToLink}
+                onChange={setCustomersToLink}
+                disabled={customerLinkBusy}
+                emptyText={t("building_form.no_eligible_customers")}
+                testIdPrefix="building-form-add-customers"
+                size="sm"
+              />
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginTop: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleAddCustomerLinks}
+                  disabled={customerLinkBusy || customersToLink.length === 0}
+                  data-testid="building-form-add-customers-button"
+                >
+                  {customerLinkBusy
+                    ? t("admin_form.adding")
+                    : t("admin_form.add")}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       <ConfirmDialog
         ref={removeDialogRef}

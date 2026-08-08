@@ -31,6 +31,9 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
     user_id = serializers.IntegerField(source="user.id", read_only=True)
     user_email = serializers.CharField(source="user.email", read_only=True)
     user_full_name = serializers.CharField(source="user.full_name", read_only=True)
+    # Sprint 154 §K — `User.phone`, the account's own number. Not the
+    # staff-only, visibility-gated `StaffProfile.phone`.
+    user_phone = serializers.CharField(source="user.phone", read_only=True)
     user_role = serializers.CharField(source="user.role", read_only=True)
     # Per-current-user per-customer actions block. Duplicated per row
     # is acceptable: the membership list is bounded (one customer at
@@ -50,6 +53,7 @@ class CustomerUserMembershipSerializer(serializers.ModelSerializer):
             "user_id",
             "user_email",
             "user_full_name",
+            "user_phone",
             "user_role",
             # SoT Addendum A.1 — company-wide Customer Company Admin flag.
             # Read-only on the wire; toggled via the dedicated

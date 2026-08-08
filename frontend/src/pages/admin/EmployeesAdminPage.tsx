@@ -257,6 +257,7 @@ export function EmployeesAdminPage() {
               <tr>
                 <th>{t("employees.col_name")}</th>
                 <th>{t("employees.col_email")}</th>
+                <th>{t("users.col_phone")}</th>
                 <th>{t("employees.col_role")}</th>
                 <th>{t("employees.col_employment_type")}</th>
                 <th>{t("status")}</th>
@@ -284,6 +285,19 @@ export function EmployeesAdminPage() {
                   >
                     <td className="td-subject">{row.full_name || "—"}</td>
                     <td>{row.email}</td>
+                    {/* Sprint 154 §K — this is `User.phone`. The STAFF-only
+                        `StaffProfile.phone` is deliberately NOT used here:
+                        it is gated by the customer's
+                        show_assigned_staff_phone policy and this
+                        directory's serializer has a privacy floor that
+                        forbids exposing it. Empty renders an em dash. */}
+                    <td data-testid="employee-row-phone">
+                      {row.phone ? (
+                        <a href={`tel:${row.phone}`}>{row.phone}</a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td data-testid="employee-row-role">
                       <RoleBadge role={row.role} compact />
                     </td>

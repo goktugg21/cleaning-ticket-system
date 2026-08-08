@@ -2043,5 +2043,8 @@
   "building_detail.add_summary": "{{count}} selectie(s) worden aan dit gebouw gekoppeld.",
   "building_detail.no_candidates": "Niets meer om te koppelen.",
   "building_detail.select_row": "Selecteer {{name}}",
-  "building_detail.no_phone": "Geen telefoonnummer"
+  "building_detail.no_phone": "Geen telefoonnummer",
+  "users.col_phone": "Telefoon",
+  "user_form.field_phone": "Telefoon",
+  "user_form.field_phone_hint": "Optioneel. Het eigen telefoonnummer van deze gebruiker."
 }

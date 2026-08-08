@@ -947,6 +947,10 @@ export interface UserAdmin {
   id: number;
   email: string;
   full_name: string;
+  // Sprint 154 §I.1 — the user's OWN contact number. Distinct from
+  // `StaffProfile.phone`, which is staff-only and gated on the customer
+  // side by `show_assigned_staff_phone`. "" when unset, never null.
+  phone: string;
   role: Role;
   language: string;
   is_active: boolean;
@@ -978,6 +982,11 @@ export interface ProviderEmployee {
   id: number;
   full_name: string;
   email: string;
+  // Sprint 154 §K — `User.phone`, the account's own number. NOT
+  // `StaffProfile.phone`: that one is staff-only and gated by
+  // `show_assigned_staff_phone`, and this directory's serializer has a
+  // documented privacy floor that forbids it.
+  phone: string;
   role: Role;
   employment_type: EmploymentType | null;
   is_active: boolean;
@@ -1835,6 +1844,8 @@ export interface CompanyAdminMembership {
   user_id: number;
   user_email: string;
   user_full_name: string;
+  // Sprint 154 §K — `User.phone`; see UserAdmin.phone.
+  user_phone: string;
   user_role: Role;
   created_at: string;
 }
@@ -1878,6 +1889,8 @@ export interface CustomerUserMembership {
   user_id: number;
   user_email: string;
   user_full_name: string;
+  // Sprint 154 §K — `User.phone`; see UserAdmin.phone.
+  user_phone: string;
   user_role: Role;
   // SoT Addendum A.1 — company-wide Customer Company Admin flag. A
   // membership with `is_company_admin: true` is CCA across ALL of the

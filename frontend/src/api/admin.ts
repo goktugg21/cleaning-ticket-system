@@ -498,6 +498,8 @@ export async function reactivateCustomer(id: number): Promise<CustomerAdmin> {
 
 export interface UserUpdatePayload {
   full_name?: string;
+  // Sprint 154 §I.1 — writable on the admin user endpoints.
+  phone?: string;
   language?: string;
   role?: Role;
   is_active?: boolean;

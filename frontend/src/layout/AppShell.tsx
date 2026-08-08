@@ -8,9 +8,7 @@ import {
   Building2,
   CalendarCheck,
   CalendarClock,
-  ChevronDown,
   ChevronLeft,
-  ChevronRight,
   ClipboardList,
   Contact,
   Files,
@@ -183,17 +181,10 @@ export function AppShell({ children }: AppShellProps) {
     setSidebarOpen(false);
   }, [location.pathname]);
 
-  // M3 (SoT Addendum A.5) — Extra Work nav GROUP expansion. Default-
-  // expanded whenever any child route is active; a manual toggle
-  // overrides the default and lives in component state only (no
-  // persistence — a refresh re-derives from the URL).
-  const extraWorkChildActive =
-    location.pathname.startsWith("/extra-work") ||
-    location.pathname.startsWith("/planned-work");
-  const [extraWorkManualOpen, setExtraWorkManualOpen] = useState<
-    boolean | null
-  >(null);
-  const extraWorkOpen = extraWorkManualOpen ?? extraWorkChildActive;
+  // Sprint 154 §N.1 — the Extra Work nav GROUP is gone, and with it the
+  // expansion state it needed (default-open when a child route was
+  // active, overridable by a manual toggle). Three plain top-level
+  // NavLinks need none of that.
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
@@ -469,105 +460,55 @@ export function AppShell({ children }: AppShellProps) {
                 {t("nav.inbox")}
                 <InboxNavBadge />
               </NavLink>
-              {/* M3 (SoT Addendum A.5) — "Extra Work" is a nav GROUP
-                  with three indented children. Routes are unchanged;
-                  this is IA only. Group gate = the same
-                  canAccessExtraWork as the old flat link; the
-                  Recurring Work child keeps its canAccessPlannedWork
-                  gate; Request a Quote uses the same gate as the
-                  /extra-work/new entry (ExtraWorkRoute ⇒
-                  canAccessExtraWork — no new role logic). */}
+              {/* Sprint 154 §N.1 — "Extra Work" is a normal LINK to the
+                  list page again, not a collapsible group. The owner
+                  wants one click to the thing he uses, not a disclosure
+                  to open first.
+
+                  Its two former children are now top-level entries under
+                  the SAME gates they already had: Recurring Work keeps
+                  canAccessPlannedWork, Request a Quote keeps the
+                  canAccessExtraWork gate it inherited from the group
+                  (which is also what ExtraWorkRoute applies to
+                  /extra-work/new). No route changed and no new role
+                  logic was introduced — this is IA only, exactly as the
+                  M3 change that created the group was. */}
               {canAccessExtraWork(me?.role) && (
-                <>
-                  <button
-                    type="button"
-                    className="nav-item"
-                    data-testid="sidebar-extra-work-group"
-                    aria-expanded={extraWorkOpen}
-                    onClick={() =>
-                      setExtraWorkManualOpen(
-                        (current) => !(current ?? extraWorkChildActive),
-                      )
-                    }
-                    style={{
-                      width: "100%",
-                      border: "none",
-                      background: "none",
-                      font: "inherit",
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                  >
-                    <span className="nav-icon">
-                      <Receipt size={16} strokeWidth={2} />
-                    </span>
-                    {t("nav.extra_work")}
-                    <span
-                      style={{
-                        marginLeft: "auto",
-                        display: "inline-flex",
-                        alignItems: "center",
-                      }}
-                      aria-hidden="true"
-                    >
-                      {extraWorkOpen ? (
-                        <ChevronDown size={14} strokeWidth={2} />
-                      ) : (
-                        <ChevronRight size={14} strokeWidth={2} />
-                      )}
-                    </span>
-                  </button>
-                  {extraWorkOpen && (
-                    <>
-                      <NavLink
-                        to="/extra-work"
-                        className={({ isActive }) =>
-                          navClass({
-                            // The list link matches every /extra-work/*
-                            // path; carve the quote page out so only its
-                            // own child lights up there.
-                            isActive:
-                              isActive &&
-                              !location.pathname.startsWith(
-                                "/extra-work/request-quote",
-                              ),
-                          })
-                        }
-                        data-testid="sidebar-extra-work-request"
-                        style={{ paddingLeft: 34 }}
-                      >
-                        <span className="nav-icon">
-                          <ClipboardList size={16} strokeWidth={2} />
-                        </span>
-                        {t("nav.extra_work_request")}
-                      </NavLink>
-                      {canAccessPlannedWork(me?.role) && (
-                        <NavLink
-                          to="/planned-work"
-                          className={navClass}
-                          data-testid="sidebar-planned-work"
-                          style={{ paddingLeft: 34 }}
-                        >
-                          <span className="nav-icon">
-                            <CalendarClock size={16} strokeWidth={2} />
-                          </span>
-                          {t("nav.planned_work")}
-                        </NavLink>
-                      )}
-                      <NavLink
-                        to="/extra-work/request-quote"
-                        className={navClass}
-                        data-testid="sidebar-request-quote"
-                        style={{ paddingLeft: 34 }}
-                      >
-                        <span className="nav-icon">
-                          <BadgeEuro size={16} strokeWidth={2} />
-                        </span>
-                        {t("nav.request_quote")}
-                      </NavLink>
-                    </>
-                  )}
-                </>
+                <NavLink
+                  to="/extra-work"
+                  end
+                  className={navClass}
+                  data-testid="sidebar-extra-work-request"
+                >
+                  <span className="nav-icon">
+                    <Receipt size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.extra_work")}
+                </NavLink>
+              )}
+              {canAccessPlannedWork(me?.role) && (
+                <NavLink
+                  to="/planned-work"
+                  className={navClass}
+                  data-testid="sidebar-planned-work"
+                >
+                  <span className="nav-icon">
+                    <CalendarClock size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.planned_work")}
+                </NavLink>
+              )}
+              {canAccessExtraWork(me?.role) && (
+                <NavLink
+                  to="/extra-work/request-quote"
+                  className={navClass}
+                  data-testid="sidebar-request-quote"
+                >
+                  <span className="nav-icon">
+                    <BadgeEuro size={16} strokeWidth={2} />
+                  </span>
+                  {t("nav.request_quote")}
+                </NavLink>
               )}
               {/* Sprint 152 — employee hours. Every provider-side
                   role including STAFF; customer-side users see no
