@@ -457,5 +457,6 @@
   "list.filter_all_work_types": "All work types",
   "list.filter_pick_customer_hint": "Pick a customer first to filter by building, department and work type.",
   "detail.labels_locked_by_unsent": "Locked by an issued invoice that has not been sent yet.",
-  "detail.labels_saved": "Labels saved"
+  "detail.labels_saved": "Labels saved",
+  "list.filter_catalog_category": "Catalog category"
 }

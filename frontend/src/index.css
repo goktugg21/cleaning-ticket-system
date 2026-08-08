@@ -6832,7 +6832,17 @@ a.attn-row:hover {
   font-size: 11px;
   line-height: 1.2;
   color: var(--text-muted);
-  white-space: nowrap;
+  /* Sprint 154 §N.2 — WRAPS, it does not clip.
+     Measured at 1024px: with `white-space: nowrap` the longest label
+     ("Catalogus-categorie") overflowed its own 140px column
+     (scrollWidth > clientWidth) while every other label fitted. Nothing
+     OVERLAPPED a neighbour at any width — 0 overlaps and 0px horizontal
+     overflow at 1024 / 1280 / 1440 — so the fix is to let the one long
+     label take a second line rather than be cut off. Two lines of an
+     11px label cost 13px of bar height on the narrowest breakpoint
+     only. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 /* The cascade hint spans the whole row beneath the controls it
    describes, rather than floating between them as a pseudo-field. */

@@ -396,30 +396,56 @@ export function HoursAdminPage() {
   useEffect(() => {
     if (!gridOpen || filters.employee === "") return;
     let cancelled = false;
-    Promise.all([
-      listTimeEntries({
-        employee: Number(filters.employee),
-        iso_year: gridWeek.isoYear,
-        iso_week: gridWeek.isoWeek,
-        page_size: 200,
-      }),
-      fetchWeekStatus({
-        iso_year: gridWeek.isoYear,
-        iso_week: gridWeek.isoWeek,
-      }),
-    ])
-      .then(([entryPage, status]) => {
-        if (cancelled) return;
-        setGridEntries(entryPage.results);
-        setGridWeekClosed(status.is_closed);
+
+    // TWO independent reads, deliberately NOT one Promise.all.
+    //
+    // They were combined at first and it was a real bug, caught by
+    // measuring the built page: `weeks/status/` 400s for a SUPER_ADMIN
+    // who has not disambiguated a company (`timesheet_company_required`,
+    // the same shape as NEXT item 0), which rejected the combined
+    // promise and threw away the ENTRIES — whose own request had
+    // returned 200. The grid rendered empty over a week that had rows in
+    // it. Splitting them means a failure in the secondary read can never
+    // discard the primary one.
+    //
+    // `company` is now passed so the status call resolves in the first
+    // place; the split is belt-and-braces for every other reason it
+    // could fail.
+    listTimeEntries({
+      employee: Number(filters.employee),
+      iso_year: gridWeek.isoYear,
+      iso_week: gridWeek.isoWeek,
+      page_size: 200,
+    })
+      .then((entryPage) => {
+        if (!cancelled) setGridEntries(entryPage.results);
       })
       .catch(() => {
         if (!cancelled) setGridEntries([]);
       });
+
+    fetchWeekStatus({
+      iso_year: gridWeek.isoYear,
+      iso_week: gridWeek.isoWeek,
+      company,
+    })
+      .then((status) => {
+        if (!cancelled) setGridWeekClosed(status.is_closed);
+      })
+      .catch(() => {
+        // Unknown lock state defaults to OPEN, which only affects
+        // whether the cells look editable. The SERVER refuses a write
+        // into a closed week regardless, and its `week_closed` message
+        // is surfaced verbatim — so the worst case is an operator who
+        // types and is then told no, never a write that should not have
+        // happened.
+        if (!cancelled) setGridWeekClosed(false);
+      });
+
     return () => {
       cancelled = true;
     };
-  }, [gridOpen, filters.employee, gridWeek, gridToken]);
+  }, [gridOpen, filters.employee, gridWeek, gridToken, company]);
 
   function openCreateEntry() {
     setEntryMode("create");
