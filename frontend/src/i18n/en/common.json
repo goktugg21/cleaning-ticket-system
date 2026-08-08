@@ -2065,5 +2065,8 @@
   "hours_week_grid.week_closed": "This week is closed. The cells are read-only until an administrator reopens it.",
   "hours_week_grid.pick_employee": "Pick an employee first.",
   "hours_week_grid.no_hour_types": "No hour types have been set up yet.",
-  "hours_week_grid.cell_label": "{{hourType}} on {{day}}"
+  "hours_week_grid.cell_label": "{{hourType}} on {{day}}",
+  "documents.empty_folder_title": "This folder is empty",
+  "documents.empty_folder_hint": "Drag files here, or use the Upload button above. PDFs, images and Office files are supported.",
+  "documents.empty_folder_hint_readonly": "There are no files in this folder yet."
 }

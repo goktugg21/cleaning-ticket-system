@@ -1646,7 +1646,12 @@ export function CustomerPricingPage() {
                             </span>
                           )}
                         </span>
-                        <span className="muted small">
+                        {/* Sprint 154 §L.2 — the count is the card's
+                            headline figure now, not a muted sub-line. */}
+                        <span className="pricing-category-card-count">
+                          {card.count}
+                        </span>
+                        <span className="pricing-category-card-count-label">
                           {card.count === 0
                             ? t("customer_pricing.category_card_empty")
                             : t("customer_pricing.category_card_count", {
@@ -1655,6 +1660,26 @@ export function CustomerPricingPage() {
                         </span>
                       </button>
                     ))}
+                    {/* Sprint 154 §L.2 — a large "+" tile at the end of
+                        the grid, opening the EXISTING create-folder flow.
+                        Styled as a card so the grid reads as one row of
+                        tiles rather than a row plus a stray button. */}
+                    <button
+                      type="button"
+                      className="pricing-category-card pricing-category-card-add"
+                      data-testid="customer-pricing-category-add-card"
+                      onClick={openCreateFolder}
+                    >
+                      <span
+                        className="pricing-category-card-add-plus"
+                        aria-hidden="true"
+                      >
+                        +
+                      </span>
+                      <span className="pricing-category-card-name">
+                        {t("customer_pricing.folder_new_button")}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}

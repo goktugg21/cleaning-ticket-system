@@ -8351,30 +8351,71 @@ details[open] > .ew-department-tree-summary::before {
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 10px;
 }
+/* Sprint 154 §L.2 — the owner asked for these to be visibly bigger, with
+   the count as a real number rather than a muted sub-line. Roughly
+   double the vertical padding, a larger name, and the count promoted to
+   a display figure. */
 .pricing-category-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: 8px;
+  padding: 22px 22px 20px;
+  min-height: 118px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface);
   cursor: pointer;
   text-align: left;
   font: inherit;
   color: var(--text);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .pricing-category-card:hover {
   border-color: var(--green-2);
   background: var(--green-faint);
+  box-shadow: var(--shadow-sm);
 }
 .pricing-category-card-name {
-  font-weight: 600;
-  font-size: 13.5px;
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 15.5px;
+  line-height: 1.25;
   display: flex;
   align-items: center;
+  overflow-wrap: anywhere;
+}
+/* The count, promoted from a muted sub-line to the card's headline
+   number — it is the thing an operator scans the grid for. */
+.pricing-category-card-count {
+  font-family: var(--f-head);
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-top: auto;
+}
+.pricing-category-card-count-label {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+/* The trailing "+" tile. Same footprint as a real card so the grid reads
+   as one row of tiles rather than a row plus a stray button. */
+.pricing-category-card-add {
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--text-faint);
+  gap: 6px;
+}
+.pricing-category-card-add:hover { color: var(--green); }
+.pricing-category-card-add-plus {
+  font-family: var(--f-head);
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 1;
 }
 
 /* Sprint 137 item 7 — iOS-style list edit mode. The checkbox column

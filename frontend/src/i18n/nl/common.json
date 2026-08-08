@@ -2065,5 +2065,8 @@
   "hours_week_grid.week_closed": "Deze week is afgesloten. De cellen zijn alleen-lezen totdat een beheerder de week heropent.",
   "hours_week_grid.pick_employee": "Kies eerst een medewerker.",
   "hours_week_grid.no_hour_types": "Er zijn nog geen uursoorten ingesteld.",
-  "hours_week_grid.cell_label": "{{hourType}} op {{day}}"
+  "hours_week_grid.cell_label": "{{hourType}} op {{day}}",
+  "documents.empty_folder_title": "Deze map is leeg",
+  "documents.empty_folder_hint": "Sleep bestanden hierheen, of gebruik de knop Uploaden hierboven. PDF's, afbeeldingen en Office-bestanden worden ondersteund.",
+  "documents.empty_folder_hint_readonly": "Er staan nog geen bestanden in deze map."
 }

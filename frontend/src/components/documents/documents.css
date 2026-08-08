@@ -6,11 +6,22 @@
   flex-direction: column;
   gap: 12px;
 }
+/* Sprint 154 §L.1 — the owner asked for the explorer to be "bigger" and
+   better laid out. The substantive change is that both panes now FILL
+   the available viewport height instead of sitting in a short box that
+   left most of the screen empty while the file list scrolled inside a
+   220px stub.
+
+   `align-items: stretch` (not `start`) is what makes the tree match the
+   pane's height; the min-height is expressed against the viewport so a
+   tall screen gets a tall explorer. 320px of chrome above it is the
+   page header + breadcrumbs measured at 1440x900. */
 .doc-explorer-body {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  min-height: min(720px, calc(100vh - 320px));
 }
 
 /* --- folder tree --- */
@@ -18,7 +29,10 @@
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--bg-soft);
-  padding: 10px;
+  padding: 12px;
+  /* The tree is a SERVER collection, so it stays bounded — it scrolls
+     inside its own pane rather than growing the page (CLAUDE.md §8). */
+  overflow-y: auto;
 }
 .doc-tree-toolbar {
   margin-bottom: 8px;
@@ -115,8 +129,13 @@
 .doc-pane {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 14px;
-  min-height: 220px;
+  padding: 18px;
+  /* Was a 220px stub. Now fills its grid row, so the file list has the
+     screen it needs and the drop target is the whole pane rather than a
+     strip at the top. */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .doc-pane-dragover {
   outline: 2px dashed var(--green);
@@ -178,11 +197,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px;
+  padding: 9px 10px;
   border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
+/* A real hover state: the row is clickable (it opens the file), so it
+   has to look like it. */
 .doc-file-row:hover {
   background: var(--bg-soft);
+  border-color: var(--border-soft);
 }
 .doc-file-main {
   flex: 1;
@@ -198,8 +222,8 @@
   cursor: pointer;
 }
 .doc-file-thumb {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -218,14 +242,17 @@
   flex-direction: column;
 }
 .doc-file-name {
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 13.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Size and date, readable rather than whispered. */
 .doc-file-sub {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--text-muted);
+  margin-top: 1px;
 }
 .doc-file-actions {
   display: flex;
@@ -262,8 +289,42 @@
   border-color: var(--red-border);
 }
 
+/* Sprint 154 §L.1 — the empty state says what to DO, not just that the
+   folder is empty. */
+.doc-empty-state {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+}
+.doc-empty-state-icon {
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+.doc-empty-state-title {
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text);
+}
+.doc-empty-state-hint {
+  font-size: 13px;
+  max-width: 380px;
+}
+
 @media (max-width: 720px) {
   .doc-explorer-body {
     grid-template-columns: 1fr;
+    /* Stacked, the viewport-height floor would make each pane a screen
+       tall. Let them size to content instead. */
+    min-height: 0;
+  }
+  .doc-explorer-tree {
+    max-height: 320px;
   }
 }
