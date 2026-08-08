@@ -8,9 +8,12 @@ import {
   Building2,
   CalendarCheck,
   CalendarClock,
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Contact,
+  FilePlus2,
   Files,
   LayoutGrid,
   Mail,
@@ -80,6 +83,13 @@ function deriveSidebarMode(pathname: string): SidebarModeState {
 
 function navClass({ isActive }: { isActive: boolean }) {
   return isActive ? "nav-item active" : "nav-item";
+}
+
+// Sprint 155 §1 — a child row inside a nav group. A MODIFIER on the same
+// `.nav-item` class, not a parallel class: the two would drift on the
+// next hover/active tweak, and the only difference is the indent.
+function navChildClass({ isActive }: { isActive: boolean }) {
+  return isActive ? "nav-item nav-item-child active" : "nav-item nav-item-child";
 }
 
 /**
@@ -181,10 +191,20 @@ export function AppShell({ children }: AppShellProps) {
     setSidebarOpen(false);
   }, [location.pathname]);
 
-  // Sprint 154 §N.1 — the Extra Work nav GROUP is gone, and with it the
-  // expansion state it needed (default-open when a child route was
-  // active, overridable by a manual toggle). Three plain top-level
-  // NavLinks need none of that.
+  // Sprint 155 §1 — the Extra Work group is back, so it needs one bit
+  // of state again: whether its children are folded away.
+  //
+  // Default OPEN, deliberately. The M3 group defaulted CLOSED and that
+  // is what made it a two-click detour to a page the owner uses daily —
+  // the whole reason Sprint 154 flattened it. Open-by-default keeps
+  // every child one click away and leaves the chevron as tidying, not
+  // as the thing standing between the operator and the menu.
+  //
+  // Plain state, not URL-derived: it is a display preference, and
+  // deriving it from the route would re-open the group the moment the
+  // operator navigated anywhere inside it, silently undoing the
+  // collapse they just asked for.
+  const [extraWorkOpen, setExtraWorkOpen] = useState(true);
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
@@ -460,56 +480,128 @@ export function AppShell({ children }: AppShellProps) {
                 {t("nav.inbox")}
                 <InboxNavBadge />
               </NavLink>
-              {/* Sprint 154 §N.1 — "Extra Work" is a normal LINK to the
-                  list page again, not a collapsible group. The owner
-                  wants one click to the thing he uses, not a disclosure
-                  to open first.
+              {/* Sprint 155 §1 — Extra Work is a GROUP again, but the
+                  parent is a LINK, not a disclosure button.
 
-                  Its two former children are now top-level entries under
-                  the SAME gates they already had: Recurring Work keeps
-                  canAccessPlannedWork, Request a Quote keeps the
-                  canAccessExtraWork gate it inherited from the group
-                  (which is also what ExtraWorkRoute applies to
-                  /extra-work/new). No route changed and no new role
-                  logic was introduced — this is IA only, exactly as the
-                  M3 change that created the group was. */}
+                  Sprint 154 flattened the M3 group into three sibling
+                  entries because the parent was a button that only
+                  expanded: reaching the list took two clicks. The owner
+                  wants the grouping back without paying that price, so
+                  the label navigates to /extra-work and a separate
+                  chevron folds the children away. Both readings of
+                  "click the parent" now do something useful, and the
+                  children are visible by default rather than hidden
+                  behind a disclosure.
+
+                  Gates are UNCHANGED from Sprint 154 and from M3 before
+                  it: the group and its two extra-work children share
+                  canAccessExtraWork (the same gate ExtraWorkRoute
+                  applies to /extra-work/new), Recurring Work keeps
+                  canAccessPlannedWork. No route changed and no new role
+                  logic — IA only.
+
+                  `end` on the parent is the active-state carve-out: an
+                  exact match, so being on /extra-work/new or
+                  /extra-work/request-quote lights up THAT child and not
+                  the parent. Extending the existing rule rather than
+                  adding a second pathname test that could disagree with
+                  it. */}
               {canAccessExtraWork(me?.role) && (
-                <NavLink
-                  to="/extra-work"
-                  end
-                  className={navClass}
-                  data-testid="sidebar-extra-work-request"
-                >
-                  <span className="nav-icon">
-                    <Receipt size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.extra_work")}
-                </NavLink>
+                <>
+                  <div className="nav-parent-row">
+                    <NavLink
+                      to="/extra-work"
+                      end
+                      className={navClass}
+                      data-testid="sidebar-extra-work-request"
+                    >
+                      <span className="nav-icon">
+                        <Receipt size={16} strokeWidth={2} />
+                      </span>
+                      {t("nav.extra_work")}
+                    </NavLink>
+                    <button
+                      type="button"
+                      className="nav-parent-toggle"
+                      aria-expanded={extraWorkOpen}
+                      aria-label={t(
+                        extraWorkOpen
+                          ? "nav.collapse_group"
+                          : "nav.expand_group",
+                        { group: t("nav.extra_work") },
+                      )}
+                      onClick={() => setExtraWorkOpen((open) => !open)}
+                      data-testid="sidebar-extra-work-toggle"
+                    >
+                      {extraWorkOpen ? (
+                        <ChevronDown size={14} strokeWidth={2.4} />
+                      ) : (
+                        <ChevronRight size={14} strokeWidth={2.4} />
+                      )}
+                    </button>
+                  </div>
+                  {extraWorkOpen && (
+                    <>
+                      {/* Sprint 155 §1 — a nav entry for a route that
+                          already existed. /extra-work/new was only
+                          reachable from a button on the list page, so
+                          the direct-order form had no home in the
+                          menu. No new page and no new route. */}
+                      <NavLink
+                        to="/extra-work/new"
+                        className={navChildClass}
+                        data-testid="sidebar-extra-work-new"
+                      >
+                        <span className="nav-icon">
+                          <FilePlus2 size={15} strokeWidth={2} />
+                        </span>
+                        {t("nav.extra_work_request")}
+                      </NavLink>
+                      <NavLink
+                        to="/extra-work/request-quote"
+                        className={navChildClass}
+                        data-testid="sidebar-request-quote"
+                      >
+                        <span className="nav-icon">
+                          <BadgeEuro size={15} strokeWidth={2} />
+                        </span>
+                        {t("nav.request_quote")}
+                      </NavLink>
+                      {canAccessPlannedWork(me?.role) && (
+                        <NavLink
+                          to="/planned-work"
+                          className={navChildClass}
+                          data-testid="sidebar-planned-work"
+                        >
+                          <span className="nav-icon">
+                            <CalendarClock size={15} strokeWidth={2} />
+                          </span>
+                          {t("nav.planned_work")}
+                        </NavLink>
+                      )}
+                    </>
+                  )}
+                </>
               )}
-              {canAccessPlannedWork(me?.role) && (
-                <NavLink
-                  to="/planned-work"
-                  className={navClass}
-                  data-testid="sidebar-planned-work"
-                >
-                  <span className="nav-icon">
-                    <CalendarClock size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.planned_work")}
-                </NavLink>
-              )}
-              {canAccessExtraWork(me?.role) && (
-                <NavLink
-                  to="/extra-work/request-quote"
-                  className={navClass}
-                  data-testid="sidebar-request-quote"
-                >
-                  <span className="nav-icon">
-                    <BadgeEuro size={16} strokeWidth={2} />
-                  </span>
-                  {t("nav.request_quote")}
-                </NavLink>
-              )}
+              {/* Recurring Work is a child of the group above when the
+                  actor can see Extra Work at all. An actor who has
+                  canAccessPlannedWork but NOT canAccessExtraWork would
+                  otherwise lose the entry entirely, so it stays a
+                  top-level link for them — the gates are unchanged, the
+                  nesting is not a gate. */}
+              {!canAccessExtraWork(me?.role) &&
+                canAccessPlannedWork(me?.role) && (
+                  <NavLink
+                    to="/planned-work"
+                    className={navClass}
+                    data-testid="sidebar-planned-work"
+                  >
+                    <span className="nav-icon">
+                      <CalendarClock size={16} strokeWidth={2} />
+                    </span>
+                    {t("nav.planned_work")}
+                  </NavLink>
+                )}
               {/* Sprint 152 — employee hours. Every provider-side
                   role including STAFF; customer-side users see no
                   trace of the module. */}

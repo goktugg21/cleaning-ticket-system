@@ -6,7 +6,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   Clock,
@@ -37,6 +37,7 @@ import type {
 import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
+import { ChoiceDialog } from "../components/ChoiceDialog";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -132,10 +133,13 @@ export function ExtraWorkListPage() {
   // M6.3 — additive "my work" deep-link reads. With both params absent
   // these resolve to undefined below, so the fetch is unchanged.
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   // Provider-only: the billing-month picker, invoice-status filter, and the
   // invoiced column. The backend redacts the billing fields for CUSTOMER_USER
   // anyway; this also hides the controls from them.
   const isProvider = isProviderManagementRole(me?.role);
+  // Sprint 155 §1b — the create button asks which of the three.
+  const [chooserOpen, setChooserOpen] = useState(false);
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -433,16 +437,49 @@ export function ExtraWorkListPage() {
         title={t("list.page_title")}
         subtitle={t("list.page_subtitle")}
         actions={
-          <Link
+          /* Sprint 155 §1b — this button used to go straight to the
+             direct-order form, which is only ONE of the three things
+             "new extra work" can mean here. It now asks. */
+          <button
+            type="button"
             className="btn btn-primary btn-sm"
-            to="/extra-work/new"
+            onClick={() => setChooserOpen(true)}
             data-testid="extra-work-list-create-link"
           >
             <PlusCircle size={14} strokeWidth={2.2} />
             <span style={{ marginLeft: 6 }}>{t("list.create_button")}</span>
-          </Link>
+          </button>
         }
       />
+
+      {chooserOpen && (
+        <ChoiceDialog
+          title={t("list.create_chooser_title")}
+          subtitle={t("list.create_chooser_subtitle")}
+          onCancel={() => setChooserOpen(false)}
+          testIdPrefix="extra-work-create-chooser"
+          choices={[
+            {
+              key: "request",
+              label: t("list.create_chooser_request"),
+              description: t("list.create_chooser_request_desc"),
+              onSelect: () => navigate("/extra-work/new"),
+            },
+            {
+              key: "quote",
+              label: t("list.create_chooser_quote"),
+              description: t("list.create_chooser_quote_desc"),
+              onSelect: () => navigate("/extra-work/request-quote"),
+            },
+            {
+              key: "recurring",
+              label: t("list.create_chooser_recurring"),
+              description: t("list.create_chooser_recurring_desc"),
+              onSelect: () => navigate("/planned-work"),
+            },
+          ]}
+        />
+      )}
 
       {loading && (
         <div className="loading-bar">
