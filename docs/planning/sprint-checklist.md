@@ -46,7 +46,7 @@ docs-only pass — so this file always reflects where we actually are.
 - Backend is the business source of truth; **verify, don't assume**; never invent endpoints.
 - **Never stage** `docs/transkript*` or their `:Zone.Identifier`. Stage commits by **explicit path**.
 - nl + en i18n in lockstep (Dutch primary); every referenced i18n key must resolve (no raw keys on screen).
-- ESLint baseline = **48** (46 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation — baseline dropped 49 → 48; still 48 as of Sprint 122.)
+- ESLint baseline = **44** (42 errors, 2 warnings): add **no** new violations; **never** a synchronous setState in an effect body; for prop-derived state, **key the component by id** (no resync useEffect). (History: 49 → 48 when Sprint 115 removed an unused hook, `useEffectivePermissions.ts`, that carried one violation. This line then said 48 until Sprint 155, which was stale from Sprint 152 onwards — Sprints 152–154 each removed a violation without correcting it, and CLAUDE.md said 45 while this said 48. Sprint 154 §B deleted the effect that took it to **44**; Sprint 155 corrected both files to agree. When the count changes, change it in BOTH places in the same commit.)
 - **PR cadence (corrected 2026-07-27 — the old "PR per sprint" line was stale):** several sprints now land on ONE shared branch and the owner opens ONE PR after the last of them (Sprints 115–119 → PR #115; Sprints 122–124 are following the same pattern on `feat/sprint-122`). CI (+ Codex review) still gates that one PR when it opens. Migrations stay additive + back-compat regardless of when the PR opens.
 - Each prompt starts with a sync + a grep GUARD proving the right base, captures the ESLint baseline, applies any new migration to the dev DB before a FE smoke, and ends with an adversarial self-review. Screenshots/smokes via **token-inject** (the e2e login form is flaky).
 - Co-author trailer on commits: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` (the old line here named a different model — verify the current one in `CLAUDE.md` before reusing this, it has changed before).
@@ -356,7 +356,8 @@ item has moved to `## SHIPPED` or been resolved below instead.
     notice) — so that one flow is no longer completely uncovered, though
     a real unit-test runner is still the actual ask, and every other flow
     this item lists still has zero coverage. Establish the test runner +
-    a CI gate; do not regress the ESLint baseline (48). No frontend
+    a CI gate; do not regress the ESLint baseline (44 — see Conventions;
+    this line said 48 until Sprint 155 corrected it). No frontend
     component/unit test runner exists yet — backend `manage.py test` and
     Playwright e2e are the only test runners today; do not add an
     alternative opportunistically outside this planned sprint (CLAUDE.md §8).

@@ -466,5 +466,7 @@
   "list.filter_pick_customer_hint": "Kies eerst een klant om te filteren op pand, afdeling en werktype.",
   "detail.labels_locked_by_unsent": "Vergrendeld door een uitgegeven, nog niet verzonden factuur.",
   "detail.labels_saved": "Labels opgeslagen",
-  "list.filter_catalog_category": "Catalogus-categorie"
+  "list.filter_catalog_category": "Catalogus-categorie",
+  "list.filter_category_group_live": "Huidige categorieën",
+  "list.filter_category_group_historical": "Niet meer in de catalogus"
 }

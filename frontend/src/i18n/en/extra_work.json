@@ -466,5 +466,7 @@
   "list.filter_pick_customer_hint": "Pick a customer first to filter by building, department and work type.",
   "detail.labels_locked_by_unsent": "Locked by an issued invoice that has not been sent yet.",
   "detail.labels_saved": "Labels saved",
-  "list.filter_catalog_category": "Catalog category"
+  "list.filter_catalog_category": "Catalog category",
+  "list.filter_category_group_live": "Current categories",
+  "list.filter_category_group_historical": "No longer in the catalog"
 }
