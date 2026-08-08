@@ -831,6 +831,13 @@ export interface CustomerBuildingMembership {
   // buildings page and the building's customers card), so it carries the
   // customer's name too.
   customer_name: string;
+  // Sprint 155 §2 — what the customer overview's Linked buildings card
+  // fills its empty right-hand half with. All annotated server-side; the
+  // two counts are numbers, never null, because zero is a real answer.
+  building_postal_code: string;
+  building_is_active: boolean;
+  building_customer_count: number;
+  building_manager_count: number;
   created_at: string;
 }
 
@@ -916,6 +923,10 @@ export interface DocumentFolder {
   is_system: boolean;
   system_slug: string;
   origin: DocumentOrigin;
+  // Sprint 155 §3 — this folder's OWN files, not its subtree's. Annotated
+  // on the list queryset, so the number is free; it is the headline
+  // figure on the folder cards.
+  file_count: number;
   created_at: string;
 }
 

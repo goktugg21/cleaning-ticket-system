@@ -24,6 +24,31 @@
   min-height: min(720px, calc(100vh - 320px));
 }
 
+/* Sprint 155 §3 — folder CARDS, reusing `.pricing-category-*` wholesale.
+   This block is only the MODIFIER: everything about the card's size,
+   hover and count typography comes from the shared class, so tuning the
+   pricing cards tunes these too. Two independently maintained copies of
+   the same visual rule is what drifts (CLAUDE.md's frontend rule). */
+.doc-folder-card .doc-folder-card-icon {
+  margin-right: 8px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.doc-folder-card .doc-folder-card-lock {
+  margin-left: 8px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+.doc-folder-card:hover .doc-folder-card-icon { color: var(--green); }
+/* The main pane stacks the folder grid over the file list and must not
+   let either overflow the explorer's fixed height. */
+.doc-explorer-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
 /* --- folder tree --- */
 .doc-explorer-tree {
   border: 1px solid var(--border);

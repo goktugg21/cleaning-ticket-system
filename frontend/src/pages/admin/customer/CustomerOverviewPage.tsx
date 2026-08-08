@@ -527,32 +527,69 @@ export function CustomerOverviewPage() {
                     </p>
                   }
                 >
+                  {/* Sprint 155 §2 — the card used to show a name and a
+                      city and stop, so its right-hand half was visibly
+                      empty next to About. It now carries the full
+                      address line, what is at that building, and an
+                      inactive marker — every field annotated on the row
+                      the card already fetched, so filling it costs no
+                      extra request (`test_sprint155_linked_buildings`
+                      pins that with assertNumQueries).
+
+                      The row is a LINK to the building. The prompt said
+                      Sprint 154 had already made it one; it had not —
+                      154 §G.3 added the click-through on the customer's
+                      Buildings SUB-PAGE, and this preview card was
+                      still plain divs. Adding it here rather than
+                      "keeping" it. */}
                   <div className="bld-list">
                     {linkedBuildings.map((link) => (
-                      <div
+                      <Link
                         key={link.id}
-                        className="bld-row-head"
-                        style={{ alignItems: "flex-start" }}
+                        to={`/admin/buildings/${link.building_id}`}
+                        className="linked-building-row"
+                        data-testid={`customer-overview-building-${link.building_id}`}
                       >
-                        <div
-                          style={{ display: "flex", flexDirection: "column" }}
-                        >
+                        <span className="linked-building-main">
                           <span className="bld-row-name">
                             {link.building_name}
+                            {!link.building_is_active && (
+                              <span
+                                className="badge badge-normal"
+                                style={{ marginLeft: 8 }}
+                                data-testid="customer-overview-building-inactive"
+                              >
+                                {t("admin.status_inactive")}
+                              </span>
+                            )}
                           </span>
-                          {/* City first — it is what an operator scans
-                              for. Falls back to the street address when
-                              the building has no city on file. */}
-                          {(link.building_city || link.building_address) && (
-                            <span
-                              className="muted small"
-                              style={{ marginTop: 2 }}
-                            >
-                              {link.building_city || link.building_address}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                          {/* City AND postal code on one line — a Dutch
+                              city alone does not locate a building.
+                              Falls back to the street address when the
+                              building has neither on file. */}
+                          <span className="muted small">
+                            {[link.building_city, link.building_postal_code]
+                              .filter(Boolean)
+                              .join(" · ") ||
+                              link.building_address ||
+                              "—"}
+                          </span>
+                        </span>
+                        <span className="linked-building-counts">
+                          <span>
+                            {t(
+                              "customer_view.overview.building_customer_count",
+                              { count: link.building_customer_count },
+                            )}
+                          </span>
+                          <span>
+                            {t(
+                              "customer_view.overview.building_manager_count",
+                              { count: link.building_manager_count },
+                            )}
+                          </span>
+                        </span>
+                      </Link>
                     ))}
                   </div>
                 </BoundedList>

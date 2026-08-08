@@ -29,6 +29,7 @@ import type { ConfirmDialogHandle } from "../ConfirmDialog";
 import { PdfPreviewDialog } from "../PdfPreviewDialog";
 import type { PdfPreviewDialogHandle } from "../PdfPreviewDialog";
 import { DocumentsFilePane } from "./DocumentsFilePane";
+import { DocumentsFolderGrid } from "./DocumentsFolderGrid";
 import { DocumentsFolderTree } from "./DocumentsFolderTree";
 import {
   DocumentMoveDialog,
@@ -79,10 +80,15 @@ type DeleteTarget =
   | { kind: "file"; file: DocumentFile }
   | null;
 
-function firstFolderId(folders: DocumentFolder[]): number | null {
-  const tree = buildFolderTree(folders);
-  return tree[0]?.id ?? null;
-}
+// Sprint 155 §3 — `firstFolderId` is gone. The explorer used to
+// auto-select the first root folder so the file pane had something to
+// show; it now OPENS at the root level on a grid of folder cards, the
+// way the pricing page opens on its category grid, and drills in from
+// there. `null` is a real, first-class level here, not "nothing chosen".
+//
+// Nothing is lost by not auto-selecting: every file lives in a folder
+// (`Document.folder` is non-null), so the root level has no files of its
+// own to hide.
 
 /** depth-indented select options for the "Move to…" dialog. */
 function moveOptions(
@@ -136,10 +142,11 @@ export function DocumentsExplorer({
       .then((rows) => {
         if (cancelled) return;
         setFolders(rows);
+        // Keep the operator where they were across a reload, but drop
+        // back to the root level if the folder they were in is gone
+        // (they just deleted it, or another session moved it).
         setSelectedFolderId((prev) =>
-          prev !== null && rows.some((f) => f.id === prev)
-            ? prev
-            : firstFolderId(rows),
+          prev !== null && rows.some((f) => f.id === prev) ? prev : null,
         );
       })
       .catch(() => {
@@ -164,6 +171,15 @@ export function DocumentsExplorer({
   );
   const breadcrumbs = useMemo(
     () => folderPath(folders ?? [], selectedFolderId),
+    [folders, selectedFolderId],
+  );
+  // Sprint 155 §3 — the folders AT the current level. At the root that
+  // is every parentless folder; inside one it is that folder's own
+  // children. Derived, not state: it is a pure function of the folder
+  // list and where the operator is, and holding it would need an effect
+  // to resync (which this codebase forbids).
+  const childFolders = useMemo(
+    () => (folders ?? []).filter((f) => f.parent === selectedFolderId),
     [folders, selectedFolderId],
   );
 
@@ -408,22 +424,32 @@ export function DocumentsExplorer({
 
         <section className="doc-explorer-main">
           <div className="doc-breadcrumbs" data-testid="doc-breadcrumbs">
-            {breadcrumbs.length === 0 ? (
-              <span className="muted">{t("documents.no_selection")}</span>
-            ) : (
-              breadcrumbs.map((crumb, index) => (
-                <span key={crumb.id} className="doc-crumb">
-                  {index > 0 && <span className="doc-crumb-sep">/</span>}
-                  <button
-                    type="button"
-                    className="doc-crumb-btn"
-                    onClick={() => setSelectedFolderId(crumb.id)}
-                  >
-                    {crumb.name}
-                  </button>
-                </span>
-              ))
-            )}
+            {/* Sprint 155 §3 — a root crumb. The explorer now opens at
+                the root level, so there has to be a way back UP to it
+                from inside a folder; without one the card grid would be
+                a one-way trip. */}
+            <span className="doc-crumb">
+              <button
+                type="button"
+                className="doc-crumb-btn"
+                onClick={() => setSelectedFolderId(null)}
+                data-testid="doc-crumb-root"
+              >
+                {t("documents.root_crumb")}
+              </button>
+            </span>
+            {breadcrumbs.map((crumb) => (
+              <span key={crumb.id} className="doc-crumb">
+                <span className="doc-crumb-sep">/</span>
+                <button
+                  type="button"
+                  className="doc-crumb-btn"
+                  onClick={() => setSelectedFolderId(crumb.id)}
+                >
+                  {crumb.name}
+                </button>
+              </span>
+            ))}
             {selectedFolder && (
               <span className="doc-folder-actions">
                 {canRename && (
@@ -463,9 +489,17 @@ export function DocumentsExplorer({
             )}
           </div>
 
-          {selectedFolderId === null ? (
-            <p className="muted">{t("documents.no_folders")}</p>
-          ) : (
+          {/* Sprint 155 §3 — the folder cards, in the pricing page's
+              visual language. They sit ABOVE the file list so the pane
+              reads top-down as "where can I go" then "what is here",
+              which is the order a file explorer is read in. */}
+          <DocumentsFolderGrid
+            folders={childFolders}
+            onOpen={(folder) => setSelectedFolderId(folder.id)}
+            onCreate={openCreateFolder}
+          />
+
+          {selectedFolderId !== null && (
             <DocumentsFilePane
               key={`${selectedFolderId}:${reloadKey}`}
               customerId={customerId}
