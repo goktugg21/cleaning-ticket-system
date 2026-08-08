@@ -238,10 +238,7 @@ export function BuildingFormPage() {
   // can never be served at this building, so offering one would be a
   // rejection waiting to happen.
   useEffect(() => {
-    if (company === "") {
-      setCompanyCustomers([]);
-      return;
-    }
+    if (company === "") return;
     let cancelled = false;
     listAllCustomers({ is_active: "true", company })
       .then((rows) => {
@@ -254,6 +251,17 @@ export function BuildingFormPage() {
       cancelled = true;
     };
   }, [company]);
+
+  // DERIVED, not cleared in the effect above. Clearing the fetched list
+  // when `company` goes back to "" would be a synchronous setState in an
+  // effect body — the exact thing CLAUDE.md §3 and the ESLint baseline
+  // forbid. Deriving the empty case here is equivalent for the reader
+  // and costs no render pass: a stale list can never be shown, because
+  // "no company chosen" always resolves to [].
+  const companyCustomerOptions = useMemo(
+    () => (company === "" ? [] : companyCustomers),
+    [company, companyCustomers],
+  );
 
   useEffect(() => {
     if (isCreate || form.numericId === null) return;
@@ -272,8 +280,8 @@ export function BuildingFormPage() {
 
   const availableCustomersToLink = useMemo(() => {
     const linked = new Set(linkedCustomers.map((l) => l.customer));
-    return companyCustomers.filter((c) => !linked.has(c.id));
-  }, [companyCustomers, linkedCustomers]);
+    return companyCustomerOptions.filter((c) => !linked.has(c.id));
+  }, [companyCustomerOptions, linkedCustomers]);
 
   async function handleAddCustomerLinks() {
     if (form.numericId === null || customersToLink.length === 0) return;
@@ -620,7 +628,7 @@ export function BuildingFormPage() {
         {isCreate ? (
           company !== "" && (
             <EntityPicker
-              options={companyCustomers.map((c) => ({
+              options={companyCustomerOptions.map((c) => ({
                 id: c.id,
                 label: c.name,
                 sublabel: c.contact_email,
