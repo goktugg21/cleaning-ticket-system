@@ -38,6 +38,8 @@ import {
   toDateString,
 } from "../lib/isoWeek";
 import type { IsoWeek } from "../lib/isoWeek";
+import { HoursWeekGrid } from "../components/timesheets/HoursWeekGrid";
+import { useAuth } from "../auth/AuthContext";
 
 interface EntryFormState {
   date: string;
@@ -85,6 +87,13 @@ export function MyHoursPage() {
 
   const [week, setWeek] = useState<IsoWeek>(() => currentIsoWeek());
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  // Sprint 154 §M — the week grid, collapsed by default.
+  const [gridOpen, setGridOpen] = useState(false);
+  const { me } = useAuth();
+  // On THIS page the employee is always the signed-in user. The server
+  // enforces that independently (a non-manager naming someone else is a
+  // 403), so this only decides what the grid writes, never what it may.
+  const myEmployeeId = me?.id ?? null;
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [weekClosed, setWeekClosed] = useState(false);
@@ -443,6 +452,46 @@ export function MyHoursPage() {
           <div className="loading-bar-fill" />
         </div>
       ) : (
+        <>
+        {/* Sprint 154 §M — the week grid, collapsed by default so the
+            page still opens on the list it always showed. `employee` is
+            omitted: a non-manager may only ever write their own hours,
+            and the server forces that regardless of what is sent. */}
+        <div
+          className="card"
+          style={{ marginBottom: 16, padding: "16px 18px" }}
+          data-testid="my-hours-week-grid-card"
+        >
+          <div className="section-head" style={{ marginBottom: gridOpen ? 12 : 0 }}>
+            <div>
+              <div className="section-head-title">
+                {t("hours_week_grid.title")}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setGridOpen((open) => !open)}
+              data-testid="my-hours-week-grid-toggle"
+            >
+              {gridOpen
+                ? t("hours_week_grid.close_grid")
+                : t("hours_week_grid.open_grid")}
+            </button>
+          </div>
+          {gridOpen && (
+            <HoursWeekGrid
+              week={week}
+              employeeId={myEmployeeId}
+              hourTypes={hourTypes}
+              buildings={buildings}
+              entries={entries}
+              weekClosed={weekClosed}
+              onSaved={refresh}
+            />
+          )}
+        </div>
+
         <div className="card" data-testid="my-hours-list">
           <BoundedList
             size="lg"
@@ -521,6 +570,7 @@ export function MyHoursPage() {
             </table>
           </BoundedList>
         </div>
+        </>
       )}
 
       <section

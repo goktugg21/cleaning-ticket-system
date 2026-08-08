@@ -14,6 +14,7 @@ import {
   listTimesheetEmployees,
   updateTimeEntry,
 } from "../../api/timesheets";
+import { fetchWeekStatus } from "../../api/timesheets";
 import type {
   HourType,
   TimeEntry,
@@ -29,7 +30,16 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
-import { fromDateString, toDateString } from "../../lib/isoWeek";
+import {
+  currentIsoWeek,
+  formatIsoWeek,
+  fromDateString,
+  parseIsoWeek,
+  shiftIsoWeek,
+  toDateString,
+} from "../../lib/isoWeek";
+import type { IsoWeek } from "../../lib/isoWeek";
+import { HoursWeekGrid } from "../../components/timesheets/HoursWeekGrid";
 import {
   hourTypeLabel,
   hourTypeLabelFrom,
@@ -164,6 +174,17 @@ export function HoursAdminPage() {
   const [entryForm, setEntryForm] = useState<EntryFormState>(emptyEntryForm);
   const [entryFormError, setEntryFormError] = useState("");
   const [entryFormBusy, setEntryFormBusy] = useState(false);
+
+  // Sprint 154 §M — the week grid. It has its OWN week + entry state
+  // rather than reusing the tab's date-range filters: the grid is a week
+  // editor and the list is a range browser, and forcing one set of
+  // filters to mean both would make changing a filter silently change
+  // what Save writes.
+  const [gridOpen, setGridOpen] = useState(false);
+  const [gridWeek, setGridWeek] = useState<IsoWeek>(() => currentIsoWeek());
+  const [gridEntries, setGridEntries] = useState<TimeEntry[]>([]);
+  const [gridWeekClosed, setGridWeekClosed] = useState(false);
+  const [gridToken, setGridToken] = useState(0);
 
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
@@ -367,6 +388,38 @@ export function HoursAdminPage() {
       setLoadError(t("admin.refresh_after_save_failed"));
     }
   }, [queryFilters, page, t]);
+
+  // The grid's own read: this week's entries for the SELECTED employee,
+  // plus the week's lock. The lock is fetched ALONGSIDE the entries and
+  // never derived from them — absence of a WeekLock row means open, so
+  // an empty week has no entry to read a lock off.
+  useEffect(() => {
+    if (!gridOpen || filters.employee === "") return;
+    let cancelled = false;
+    Promise.all([
+      listTimeEntries({
+        employee: Number(filters.employee),
+        iso_year: gridWeek.isoYear,
+        iso_week: gridWeek.isoWeek,
+        page_size: 200,
+      }),
+      fetchWeekStatus({
+        iso_year: gridWeek.isoYear,
+        iso_week: gridWeek.isoWeek,
+      }),
+    ])
+      .then(([entryPage, status]) => {
+        if (cancelled) return;
+        setGridEntries(entryPage.results);
+        setGridWeekClosed(status.is_closed);
+      })
+      .catch(() => {
+        if (!cancelled) setGridEntries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gridOpen, filters.employee, gridWeek, gridToken]);
 
   function openCreateEntry() {
     setEntryMode("create");
@@ -587,6 +640,88 @@ export function HoursAdminPage() {
 
       {tab === "entries" && (
         <>
+          {/* Sprint 154 §M — the week grid, collapsed by default so the
+              tab still opens on the list it always showed. It writes for
+              the employee chosen in the filter row below. */}
+          <div
+            className="card"
+            style={{ padding: "16px 18px", marginBottom: 16 }}
+            data-testid="hours-week-grid-card"
+          >
+            <div
+              className="section-head"
+              style={{ marginBottom: gridOpen ? 12 : 0 }}
+            >
+              <div>
+                <div className="section-head-title">
+                  {t("hours_week_grid.title")}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {gridOpen && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setGridWeek((w) => shiftIsoWeek(w, -1))}
+                      aria-label={t("previous")}
+                      data-testid="hours-week-grid-prev"
+                    >
+                      ‹
+                    </button>
+                    <input
+                      className="field-input"
+                      type="week"
+                      value={formatIsoWeek(gridWeek)}
+                      onChange={(event) => {
+                        const parsed = parseIsoWeek(event.target.value);
+                        if (parsed) setGridWeek(parsed);
+                      }}
+                      style={{ width: 160 }}
+                      data-testid="hours-week-grid-week"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setGridWeek((w) => shiftIsoWeek(w, 1))}
+                      aria-label={t("next")}
+                      data-testid="hours-week-grid-next"
+                    >
+                      ›
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setGridOpen((open) => !open)}
+                  data-testid="hours-week-grid-toggle"
+                >
+                  {gridOpen
+                    ? t("hours_week_grid.close_grid")
+                    : t("hours_week_grid.open_grid")}
+                </button>
+              </div>
+            </div>
+            {gridOpen && (
+              <HoursWeekGrid
+                week={gridWeek}
+                employeeId={
+                  filters.employee === "" ? null : Number(filters.employee)
+                }
+                companyId={company === "" ? undefined : company}
+                hourTypes={activeHourTypes}
+                buildings={buildings}
+                entries={gridEntries}
+                weekClosed={gridWeekClosed}
+                onSaved={async () => {
+                  setGridToken((n) => n + 1);
+                  await refreshEntries();
+                }}
+              />
+            )}
+          </div>
+
           <div
             className="card"
             style={{ padding: "16px 18px", marginBottom: 16 }}
