@@ -12,7 +12,12 @@ from .views_memberships import (
     BuildingManagerDeleteView,
     BuildingManagerListCreateView,
 )
-from .views_summary import BuildingCustomerListView, BuildingSummaryView
+from .views_summary import (
+    BuildingContactListView,
+    BuildingCustomerListView,
+    BuildingStaffListView,
+    BuildingSummaryView,
+)
 
 
 router = DefaultRouter()
@@ -44,6 +49,20 @@ urlpatterns = [
         "<int:building_id>/customers/",
         BuildingCustomerListView.as_view(),
         name="building-customers",
+    ),
+    # Sprint 154 §G.2 — the per-building reads of two relations that
+    # have always been editable from the OTHER end (the user's page and
+    # the customer's contacts page) but were never readable from the
+    # building. Writes still go through /bulk-link/.
+    path(
+        "<int:building_id>/staff/",
+        BuildingStaffListView.as_view(),
+        name="building-staff",
+    ),
+    path(
+        "<int:building_id>/contacts/",
+        BuildingContactListView.as_view(),
+        name="building-contacts",
     ),
     # Sprint 154 §I.6 — the building detail dashboard read.
     path(

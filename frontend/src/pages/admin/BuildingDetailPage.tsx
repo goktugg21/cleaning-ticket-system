@@ -1,28 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Users } from "lucide-react";
 
 
 import { getApiError } from "../../api/client";
 import {
   deactivateBuilding,
   getBuilding,
+  getBuildingSummary,
   getCompany,
+  listAllUsersByRole,
+  listBuildingContacts,
+  listBuildingCustomers,
   listBuildingManagers,
+  listBuildingStaff,
+  listAllCustomers,
+  listCustomerContacts,
   reactivateBuilding,
 } from "../../api/admin";
 import type {
   BuildingAdmin,
+  BuildingContactRow,
   BuildingManagerMembership,
+  BuildingStaffRow,
+  BuildingSummary,
   CompanyAdmin,
+  Contact,
+  CustomerAdmin,
+  CustomerBuildingMembership,
+  UserAdmin,
 } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
-import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+
+import { BuildingRelationCard } from "./building/BuildingRelationCard";
 
 /**
  * Sprint 29 Batch 29.4 — Building Detail page (read-only view).
@@ -46,7 +60,7 @@ import { useSavedBanner } from "../../hooks/useSavedBanner";
 export function BuildingDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { t, i18n } = useTranslation("common");
+  const { t } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
@@ -64,6 +78,21 @@ export function BuildingDetailPage() {
   const [building, setBuilding] = useState<BuildingAdmin | null>(null);
   const [company, setCompany] = useState<CompanyAdmin | null>(null);
   const [members, setMembers] = useState<BuildingManagerMembership[]>([]);
+  // Sprint 154 §G.2 — the other three linked sets, plus the dashboard
+  // counts. Each fetch is individually defensive: one relation the
+  // operator cannot read must not blank the whole page.
+  const [customerLinks, setCustomerLinks] = useState<
+    CustomerBuildingMembership[]
+  >([]);
+  const [staffLinks, setStaffLinks] = useState<BuildingStaffRow[]>([]);
+  const [contactLinks, setContactLinks] = useState<BuildingContactRow[]>([]);
+  const [summary, setSummary] = useState<BuildingSummary | null>(null);
+  // Candidate universes for the four Add pickers.
+  const [allCustomers, setAllCustomers] = useState<CustomerAdmin[]>([]);
+  const [allManagers, setAllManagers] = useState<UserAdmin[]>([]);
+  const [allStaff, setAllStaff] = useState<UserAdmin[]>([]);
+  const [candidateContacts, setCandidateContacts] = useState<Contact[]>([]);
+  const [relationsToken, setRelationsToken] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -120,6 +149,73 @@ export function BuildingDetailPage() {
     };
   }, [numericId, t]);
 
+  // Sprint 154 §G.2 — the four relation sets + the summary counts +
+  // the candidate universes. Bumping `relationsToken` refetches after a
+  // card links or unlinks something.
+  useEffect(() => {
+    if (numericId === null) return;
+    let cancelled = false;
+    const company = building?.company;
+    Promise.all([
+      listBuildingCustomers(numericId).catch(() => []),
+      listBuildingManagers(numericId)
+        .then((r) => r.results)
+        .catch(() => [] as BuildingManagerMembership[]),
+      listBuildingStaff(numericId).catch(() => []),
+      listBuildingContacts(numericId).catch(() => []),
+      getBuildingSummary(numericId).catch(() => null),
+      company === undefined
+        ? Promise.resolve([] as CustomerAdmin[])
+        : listAllCustomers({ is_active: "true", company }).catch(() => []),
+      listAllUsersByRole("BUILDING_MANAGER").catch(() => [] as UserAdmin[]),
+      listAllUsersByRole("STAFF").catch(() => [] as UserAdmin[]),
+    ]).then(
+      ([
+        customersData,
+        managersData,
+        staffData,
+        contactsData,
+        summaryData,
+        customerCandidates,
+        managerCandidates,
+        staffCandidates,
+      ]) => {
+        if (cancelled) return;
+        setCustomerLinks(customersData);
+        setMembers(managersData);
+        setStaffLinks(staffData);
+        setContactLinks(contactsData);
+        setSummary(summaryData);
+        setAllCustomers(customerCandidates);
+        setAllManagers(managerCandidates);
+        setAllStaff(staffCandidates);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [numericId, building?.company, relationsToken]);
+
+  // Contact CANDIDATES are the contacts of the customers linked to this
+  // building. There is no "all contacts" endpoint and there should not
+  // be: a contact belongs to a customer, and a customer not served here
+  // has no business being offered as a site contact. One request per
+  // linked customer — a building has a handful, not hundreds.
+  useEffect(() => {
+    if (customerLinks.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      customerLinks.map((link) =>
+        listCustomerContacts(link.customer).catch(() => [] as Contact[]),
+      ),
+    ).then((lists) => {
+      if (!cancelled) setCandidateContacts(lists.flat());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerLinks]);
+
   async function handleConfirmDeactivate() {
     if (numericId === null) return;
     setActionBusy(true);
@@ -167,7 +263,6 @@ export function BuildingDetailPage() {
   const buildingName = building?.name ?? t("building_form.fallback");
   const isActive = building?.is_active ?? true;
 
-  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
   const companyLabel = (() => {
     if (!building) return "";
@@ -247,6 +342,40 @@ export function BuildingDetailPage() {
         </div>
       ) : building ? (
         <>
+          {/* Sprint 154 §G.2 — the counts, from /summary/. A null value
+              renders an em dash: `room_count` is ALWAYS null because this
+              system has no room concept at all, and showing 0 would claim
+              the building has none rather than that the idea does not
+              exist here. */}
+          <div
+            className="summary-grid summary-grid-chips"
+            data-testid="building-detail-stats"
+          >
+            {[
+              { key: "rooms", label: t("building_detail.stat_rooms"), value: summary?.room_count },
+              { key: "customers", label: t("building_detail.stat_customers"), value: summary?.customer_count },
+              { key: "managers", label: t("building_detail.stat_managers"), value: summary?.manager_count },
+              { key: "staff", label: t("building_detail.stat_staff"), value: summary?.staff_count },
+              { key: "contacts", label: t("building_detail.stat_contacts"), value: summary?.contact_count },
+              { key: "open-tickets", label: t("building_detail.stat_open_tickets"), value: summary?.open_ticket_count },
+              { key: "open-extra-work", label: t("building_detail.stat_open_extra_work"), value: summary?.open_extra_work_count },
+            ].map((stat) => (
+              <div
+                className="summary-stat"
+                key={stat.key}
+                style={{ cursor: "default" }}
+                data-testid={`building-detail-stat-${stat.key}`}
+              >
+                <span className="summary-stat-label">{stat.label}</span>
+                <span className="summary-stat-value">
+                  {stat.value === null || stat.value === undefined
+                    ? "—"
+                    : stat.value}
+                </span>
+              </div>
+            ))}
+          </div>
+
           <section
             className="card"
             data-testid="building-detail-about-card"
@@ -347,56 +476,113 @@ export function BuildingDetailPage() {
             </div>
           </section>
 
-          <section
-            className="card"
-            data-testid="building-detail-managers-card"
-            style={{ padding: "20px 22px" }}
-          >
-            <div className="section-head" style={{ marginBottom: 8 }}>
-              <div>
-                <div className="section-head-title">
-                  {t("building_detail.managers_title")}
-                </div>
-                <div className="section-head-sub">
-                  {t("building_detail.managers_desc")}
-                </div>
-              </div>
-            </div>
+          {/* Sprint 154 §G.2 — the four sets of linked people, each
+              manageable from here. None of these models are new; this is
+              the direction that was missing. */}
+          <BuildingRelationCard
+            buildingId={building.id}
+            relation="customers"
+            title={t("building_detail.customers_title")}
+            description={t("building_detail.customers_desc")}
+            emptyText={t("building_detail.customers_empty")}
+            rows={customerLinks.map((link) => ({
+              linkId: link.id,
+              targetId: link.customer,
+              name: link.customer_name || String(link.customer),
+              meta: link.building_city || undefined,
+            }))}
+            candidates={allCustomers
+              .filter((c) => !customerLinks.some((l) => l.customer === c.id))
+              .map((c) => ({
+                id: c.id,
+                label: c.name,
+                sublabel: c.contact_email,
+              }))}
+            addTitle={t("building_detail.add_customers_title")}
+            testIdPrefix="building-detail-customers"
+            disabled={!canEdit}
+            onChanged={() => setRelationsToken((n) => n + 1)}
+          />
 
-            {members.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title={t("building_detail.managers_empty")}
-                compact
-                testId="building-detail-managers-empty"
-              />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>{t("users.col_email")}</th>
-                      <th>{t("users.col_full_name")}</th>
-                      <th>{t("admin_form.col_assigned")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((membership) => (
-                      <tr key={membership.id}>
-                        <td className="td-subject">{membership.user_email}</td>
-                        <td>{membership.user_full_name || "—"}</td>
-                        <td className="td-date">
-                          {new Date(
-                            membership.assigned_at,
-                          ).toLocaleDateString(dateLocale)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          <BuildingRelationCard
+            buildingId={building.id}
+            relation="managers"
+            title={t("building_detail.managers_title")}
+            description={t("building_detail.managers_desc")}
+            emptyText={t("building_detail.managers_empty")}
+            rows={members.map((m) => ({
+              linkId: m.id,
+              targetId: m.user_id,
+              name: m.user_full_name || m.user_email,
+              email: m.user_email,
+            }))}
+            candidates={allManagers
+              .filter((u) => !members.some((m) => m.user_id === u.id))
+              .map((u) => ({
+                id: u.id,
+                label: u.full_name || u.email,
+                sublabel: u.email,
+              }))}
+            addTitle={t("building_detail.add_managers_title")}
+            testIdPrefix="building-detail-managers"
+            disabled={!canEdit}
+            onChanged={() => setRelationsToken((n) => n + 1)}
+          />
+
+          <BuildingRelationCard
+            buildingId={building.id}
+            relation="staff"
+            title={t("building_detail.staff_title")}
+            description={t("building_detail.staff_desc")}
+            emptyText={t("building_detail.staff_empty")}
+            rows={staffLinks.map((row) => ({
+              linkId: row.id,
+              targetId: row.user_id,
+              name: row.user_full_name || row.user_email,
+              email: row.user_email,
+              phone: row.user_phone,
+            }))}
+            candidates={allStaff
+              .filter((u) => !staffLinks.some((r) => r.user_id === u.id))
+              .map((u) => ({
+                id: u.id,
+                label: u.full_name || u.email,
+                sublabel: u.email,
+              }))}
+            addTitle={t("building_detail.add_staff_title")}
+            testIdPrefix="building-detail-staff"
+            disabled={!canEdit}
+            onChanged={() => setRelationsToken((n) => n + 1)}
+          />
+
+          <BuildingRelationCard
+            buildingId={building.id}
+            relation="contacts"
+            title={t("building_detail.contacts_title")}
+            description={t("building_detail.contacts_desc")}
+            emptyText={t("building_detail.contacts_empty")}
+            rows={contactLinks.map((row) => ({
+              linkId: row.id,
+              targetId: row.contact_id,
+              name: row.full_name,
+              email: row.email,
+              phone: row.phone,
+              meta: [row.role_label, row.customer_name]
+                .filter(Boolean)
+                .join(" — "),
+            }))}
+            candidates={candidateContacts
+              .filter((c) => !contactLinks.some((r) => r.contact_id === c.id))
+              .map((c) => ({
+                id: c.id,
+                label: c.full_name,
+                sublabel: [c.role_label, c.email].filter(Boolean).join(" — "),
+              }))}
+            addTitle={t("building_detail.add_contacts_title")}
+            testIdPrefix="building-detail-contacts"
+            disabled={!canEdit}
+            onChanged={() => setRelationsToken((n) => n + 1)}
+          />
 
           <ConfirmDialog
             ref={deactivateDialogRef}

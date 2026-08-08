@@ -14,7 +14,7 @@ wrapped so one module raising cannot take the page down, and `null` for
 from __future__ import annotations
 
 from django.shortcuts import get_object_or_404
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -24,11 +24,11 @@ from accounts.permissions import (
     IsSuperAdminOrCompanyAdminForCompany,
 )
 from accounts.scoping import scope_buildings_for, scope_tickets_for
-from customers.models import CustomerBuildingMembership
+from customers.models import ContactBuildingLink, CustomerBuildingMembership
 from customers.serializers_memberships import CustomerBuildingMembershipSerializer
 from config.pagination import UnboundedPagination
 
-from .models import Building
+from .models import Building, BuildingStaffVisibility
 
 
 class BuildingCustomerListView(generics.ListAPIView):
@@ -63,6 +63,134 @@ class BuildingCustomerListView(generics.ListAPIView):
             CustomerBuildingMembership.objects.filter(building=building)
             .select_related("customer", "building")
             .order_by("customer__name")
+        )
+
+
+class _BuildingStaffRowSerializer(serializers.ModelSerializer):
+    """Sprint 154 §G.2 — one staff member linked to this building.
+
+    Deliberately NOT `accounts.serializers_staff
+    .BuildingStaffVisibilitySerializer`: that one is anchored on the USER
+    (it repeats the building on every row, because it answers "which
+    buildings does this person see"). This answers the mirror question
+    and so repeats the person, not the building.
+    """
+
+    user_id = serializers.IntegerField(source="user.id", read_only=True)
+    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_full_name = serializers.CharField(
+        source="user.full_name", read_only=True
+    )
+    # Sprint 154 §I.1 — the user's own number. `StaffProfile.phone` is a
+    # DIFFERENT field (staff-only, customer-visibility-gated) and is
+    # deliberately not mixed in here.
+    user_phone = serializers.CharField(source="user.phone", read_only=True)
+
+    class Meta:
+        model = BuildingStaffVisibility
+        fields = [
+            "id",
+            "user_id",
+            "user_email",
+            "user_full_name",
+            "user_phone",
+            "visibility_level",
+            "can_request_assignment",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class _BuildingContactRowSerializer(serializers.ModelSerializer):
+    """Sprint 154 §G.2 — one contact person linked to this building.
+
+    A `Contact` may or may not have a login (`user` is nullable), which
+    is exactly why contacts are a separate concept from users; the
+    building page shows both lists side by side.
+    """
+
+    contact_id = serializers.IntegerField(source="contact.id", read_only=True)
+    full_name = serializers.CharField(source="contact.full_name", read_only=True)
+    email = serializers.CharField(source="contact.email", read_only=True)
+    phone = serializers.CharField(source="contact.phone", read_only=True)
+    role_label = serializers.CharField(
+        source="contact.role_label", read_only=True
+    )
+    customer_id = serializers.IntegerField(
+        source="contact.customer_id", read_only=True
+    )
+    customer_name = serializers.CharField(
+        source="contact.customer.name", read_only=True
+    )
+    has_login = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ContactBuildingLink
+        fields = [
+            "id",
+            "contact_id",
+            "full_name",
+            "email",
+            "phone",
+            "role_label",
+            "customer_id",
+            "customer_name",
+            "has_login",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_has_login(self, obj) -> bool:
+        return obj.contact.user_id is not None
+
+
+class BuildingStaffListView(generics.ListAPIView):
+    """GET /api/buildings/<building_id>/staff/
+
+    The per-BUILDING read of `BuildingStaffVisibility`. The relation has
+    always been editable — from the USER's page — but has never been
+    readable from the building, which is what §G.2 needs. Writes go
+    through the shared `/api/buildings/bulk-link/` endpoint.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    serializer_class = _BuildingStaffRowSerializer
+    pagination_class = UnboundedPagination
+
+    def get_queryset(self):
+        building = get_object_or_404(
+            scope_buildings_for(self.request.user), pk=self.kwargs["building_id"]
+        )
+        self.check_object_permissions(self.request, building)
+        return (
+            BuildingStaffVisibility.objects.filter(building=building)
+            .select_related("user")
+            .order_by("user__full_name", "user__email")
+        )
+
+
+class BuildingContactListView(generics.ListAPIView):
+    """GET /api/buildings/<building_id>/contacts/
+
+    The per-BUILDING read of `ContactBuildingLink`. Same story as staff:
+    the M:N has existed since Sprint 12B and is managed from the
+    customer's contacts page; this is the missing view from the
+    building's side.
+    """
+
+    permission_classes = [IsSuperAdminOrCompanyAdminForCompany]
+    serializer_class = _BuildingContactRowSerializer
+    pagination_class = UnboundedPagination
+
+    def get_queryset(self):
+        building = get_object_or_404(
+            scope_buildings_for(self.request.user), pk=self.kwargs["building_id"]
+        )
+        self.check_object_permissions(self.request, building)
+        return (
+            ContactBuildingLink.objects.filter(building=building)
+            .select_related("contact", "contact__customer", "contact__user")
+            .order_by("contact__full_name")
         )
 
 

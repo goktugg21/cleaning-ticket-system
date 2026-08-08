@@ -1,15 +1,13 @@
-import type { FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
 import {
-  addCustomerBuilding,
+  bulkLinkBuildings,
   getCustomer,
   listAllBuildings,
   listCustomerBuildings,
-  removeCustomerBuilding,
 } from "../../../api/admin";
 import type {
   BuildingAdmin,
@@ -18,6 +16,8 @@ import type {
 } from "../../../api/types";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
+import { EntityPicker } from "../../../components/EntityPicker";
+import { MultiSelectToolbar } from "../../../components/MultiSelectToolbar";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
@@ -50,13 +50,12 @@ export function CustomerBuildingsPage() {
   const [loadError, setLoadError] = useState("");
   const [buildingLinkError, setBuildingLinkError] = useState("");
   const [buildingLinkBusy, setBuildingLinkBusy] = useState(false);
-  const [selectedBuildingToLink, setSelectedBuildingToLink] = useState<
-    number | ""
-  >("");
+  // Sprint 154 §G.1 — a LIST, not one id: the add is a multi-select.
+  const [buildingsToLink, setBuildingsToLink] = useState<number[]>([]);
+  // ...and the rows carry checkboxes so several can be unlinked at once.
+  const [selectedLinkIds, setSelectedLinkIds] = useState<number[]>([]);
 
   const unlinkBuildingDialogRef = useRef<ConfirmDialogHandle>(null);
-  const [unlinkBuildingTarget, setUnlinkBuildingTarget] =
-    useState<CustomerBuildingMembership | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,14 +112,20 @@ export function CustomerBuildingsPage() {
     }
   }
 
-  async function handleAddBuildingLink(event: FormEvent) {
-    event.preventDefault();
-    if (numericId === null || selectedBuildingToLink === "") return;
+  // Sprint 154 §G.1 — ONE request for all of them, through the shared
+  // bulk endpoint. The previous version issued one POST per building.
+  async function handleAddBuildingLinks() {
+    if (numericId === null || buildingsToLink.length === 0) return;
     setBuildingLinkError("");
     setBuildingLinkBusy(true);
     try {
-      await addCustomerBuilding(numericId, Number(selectedBuildingToLink));
-      setSelectedBuildingToLink("");
+      await bulkLinkBuildings({
+        buildings: buildingsToLink,
+        relation: "customers",
+        targets: [numericId],
+        mode: "link",
+      });
+      setBuildingsToLink([]);
       await reloadLinks();
     } catch (err) {
       setBuildingLinkError(getApiError(err));
@@ -129,22 +134,26 @@ export function CustomerBuildingsPage() {
     }
   }
 
-  function openUnlinkBuildingDialog(link: CustomerBuildingMembership) {
-    setUnlinkBuildingTarget(link);
-    unlinkBuildingDialogRef.current?.open();
-  }
-
-  async function handleConfirmUnlinkBuilding() {
-    if (numericId === null || !unlinkBuildingTarget) return;
+  // Bulk unlink. The server cascades the per-user access revoke for each
+  // pair — an orphaned CustomerUserBuildingAccess row still matches the
+  // scope subquery, so skipping it would leave a customer user with
+  // visibility on a building their customer is no longer linked to.
+  async function handleConfirmUnlinkBuildings() {
+    if (numericId === null || selectedLinkIds.length === 0) return;
     setBuildingLinkBusy(true);
     setBuildingLinkError("");
     try {
-      await removeCustomerBuilding(
-        numericId,
-        unlinkBuildingTarget.building_id,
-      );
+      const buildingIds = linkedBuildings
+        .filter((l) => selectedLinkIds.includes(l.id))
+        .map((l) => l.building_id);
+      await bulkLinkBuildings({
+        buildings: buildingIds,
+        relation: "customers",
+        targets: [numericId],
+        mode: "unlink",
+      });
       unlinkBuildingDialogRef.current?.close();
-      setUnlinkBuildingTarget(null);
+      setSelectedLinkIds([]);
       await reloadLinks();
     } catch (err) {
       setBuildingLinkError(getApiError(err));
@@ -163,9 +172,24 @@ export function CustomerBuildingsPage() {
     [allCompanyBuildings, linkedBuildingIds],
   );
 
+  const allLinksSelected =
+    linkedBuildings.length > 0 &&
+    selectedLinkIds.length === linkedBuildings.length;
+
+  const toggleLink = (linkId: number) =>
+    setSelectedLinkIds((current) =>
+      current.includes(linkId)
+        ? current.filter((existing) => existing !== linkId)
+        : [...current, linkId],
+    );
+
+  const toggleAllLinks = () =>
+    setSelectedLinkIds(
+      allLinksSelected ? [] : linkedBuildings.map((l) => l.id),
+    );
+
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
-  const customerNameDisplay = customer?.name ?? "";
 
   return (
     <div data-testid="customer-buildings-page">
@@ -233,15 +257,48 @@ export function CustomerBuildingsPage() {
             </div>
           )}
 
+          {selectedLinkIds.length > 0 && (
+            <MultiSelectToolbar
+              selectedCount={selectedLinkIds.length}
+              onSelectAll={() =>
+                setSelectedLinkIds(linkedBuildings.map((l) => l.id))
+              }
+              onClearAll={() => setSelectedLinkIds([])}
+              disabled={buildingLinkBusy}
+              actions={[
+                {
+                  key: "unlink",
+                  label: t("customer_view.buildings.bulk_unlink"),
+                  destructive: true,
+                  onClick: () => unlinkBuildingDialogRef.current?.open(),
+                },
+              ]}
+              testIdPrefix="customer-buildings-bulk"
+            />
+          )}
+
           <div className="table-wrap">
             <table
-              className="data-table"
+              className="data-table data-table-dense"
               data-testid="customer-buildings-table"
             >
               <thead>
                 <tr>
+                  <th className="th-select">
+                    <input
+                      type="checkbox"
+                      checked={allLinksSelected}
+                      onChange={toggleAllLinks}
+                      disabled={
+                        linkedBuildings.length === 0 || buildingLinkBusy
+                      }
+                      aria-label={t("customer_view.buildings.select_all")}
+                      data-testid="customer-buildings-select-all"
+                    />
+                  </th>
                   <th>{t("admin.col_name")}</th>
                   <th>{t("admin.col_address")}</th>
+                  <th>{t("buildings.col_city")}</th>
                   <th>{t("customer_form.col_linked")}</th>
                   <th aria-label={t("admin.col_actions")} />
                 </tr>
@@ -249,20 +306,41 @@ export function CustomerBuildingsPage() {
               <tbody>
                 {linkedBuildings.map((link) => (
                   <tr key={link.id}>
-                    <td className="td-subject">{link.building_name}</td>
+                    <td className="td-select">
+                      <input
+                        type="checkbox"
+                        checked={selectedLinkIds.includes(link.id)}
+                        onChange={() => toggleLink(link.id)}
+                        disabled={buildingLinkBusy}
+                        aria-label={t("customer_view.buildings.select_row", {
+                          name: link.building_name,
+                        })}
+                        data-testid={`customer-buildings-select-${link.id}`}
+                      />
+                    </td>
+                    {/* Sprint 154 §G.1 — the owner asked for this
+                        explicitly: from a customer he must be able to
+                        reach the building. Every row is a link now. */}
+                    <td className="td-subject">
+                      <Link
+                        to={`/admin/buildings/${link.building_id}`}
+                        data-testid={`customer-buildings-link-${link.building_id}`}
+                      >
+                        {link.building_name}
+                      </Link>
+                    </td>
                     <td>{link.building_address || "—"}</td>
+                    <td>{link.building_city || "—"}</td>
                     <td className="td-date">
                       {new Date(link.created_at).toLocaleDateString(dateLocale)}
                     </td>
                     <td>
-                      <button
-                        type="button"
+                      <Link
                         className="btn btn-ghost btn-sm"
-                        onClick={() => openUnlinkBuildingDialog(link)}
-                        disabled={buildingLinkBusy}
+                        to={`/admin/buildings/${link.building_id}`}
                       >
-                        {t("admin_form.remove")}
-                      </button>
+                        {t("customer_view.buildings.open_building")}
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -279,69 +357,52 @@ export function CustomerBuildingsPage() {
             )}
           </div>
 
-          <form
-            onSubmit={handleAddBuildingLink}
-            style={{
-              display: "flex",
-              gap: 8,
-              marginTop: 12,
-              alignItems: "flex-end",
-            }}
-          >
-            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-              <label className="field-label" htmlFor="add-customer-building">
-                {t("customer_form.add_building")}
-              </label>
-              <select
-                id="add-customer-building"
-                className="field-select"
-                value={
-                  selectedBuildingToLink === ""
-                    ? ""
-                    : String(selectedBuildingToLink)
-                }
-                onChange={(event) => {
-                  const v = event.target.value;
-                  setSelectedBuildingToLink(v === "" ? "" : Number(v));
-                }}
-                disabled={
-                  buildingLinkBusy || availableBuildingsToLink.length === 0
-                }
-              >
-                <option value="">
-                  {availableBuildingsToLink.length === 0
-                    ? t("customer_form.no_eligible_buildings")
-                    : t("customer_form.select_building_to_add")}
-                </option>
-                {availableBuildingsToLink.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+          {/* Sprint 154 §G.1 — a MULTI-select add. Linking six
+              buildings used to be six round-trips; it is one request. */}
+          <div style={{ marginTop: 14 }}>
+            <div className="detail-field-label" style={{ marginBottom: 6 }}>
+              {t("customer_form.add_building")}
             </div>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              data-testid="building-link-add-button"
-              disabled={buildingLinkBusy || selectedBuildingToLink === ""}
+            <EntityPicker
+              options={availableBuildingsToLink.map((b) => ({
+                id: b.id,
+                label: b.name,
+                sublabel: [b.city, b.address].filter(Boolean).join(" — "),
+              }))}
+              selectedIds={buildingsToLink}
+              onChange={setBuildingsToLink}
+              disabled={buildingLinkBusy}
+              emptyText={t("customer_form.no_eligible_buildings")}
+              testIdPrefix="customer-buildings-add"
+              size="sm"
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                marginTop: 10,
+              }}
             >
-              {buildingLinkBusy
-                ? t("admin_form.adding")
-                : t("admin_form.add")}
-            </button>
-          </form>
+              <button
+                type="button"
+                className="btn btn-primary"
+                data-testid="building-link-add-button"
+                onClick={handleAddBuildingLinks}
+                disabled={buildingLinkBusy || buildingsToLink.length === 0}
+              >
+                {buildingLinkBusy ? t("admin_form.adding") : t("admin_form.add")}
+              </button>
+            </div>
+          </div>
 
           <ConfirmDialog
             ref={unlinkBuildingDialogRef}
-            title={t("customer_form.dialog_unlink_building_title", {
-              building: unlinkBuildingTarget?.building_name ?? "",
-              name: customerNameDisplay,
+            title={t("customer_view.buildings.bulk_unlink_title")}
+            body={t("customer_view.buildings.bulk_unlink_body", {
+              count: selectedLinkIds.length,
             })}
-            body={t("customer_form.dialog_unlink_building_body")}
-            confirmLabel={t("admin_form.remove")}
-            onConfirm={handleConfirmUnlinkBuilding}
-            onCancel={() => setUnlinkBuildingTarget(null)}
+            confirmLabel={t("customer_view.buildings.bulk_unlink")}
+            onConfirm={handleConfirmUnlinkBuildings}
             busy={buildingLinkBusy}
             destructive
           />

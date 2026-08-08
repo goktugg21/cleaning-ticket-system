@@ -709,6 +709,36 @@ export interface BuildingSummary {
   open_extra_work_count: number | null;
 }
 
+/** Sprint 154 §G.2 — one staff member linked to a building. The
+ *  per-BUILDING view of `BuildingStaffVisibility`; the per-USER view is
+ *  `StaffVisibilityRow`. `user_phone` is `User.phone`, NOT the
+ *  staff-only, visibility-gated `StaffProfile.phone`. */
+export interface BuildingStaffRow {
+  id: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  user_phone: string;
+  visibility_level: string;
+  can_request_assignment: boolean;
+  created_at: string;
+}
+
+/** Sprint 154 §G.2 — one contact person linked to a building. A contact
+ *  may or may not have a login, which `has_login` reports. */
+export interface BuildingContactRow {
+  id: number;
+  contact_id: number;
+  full_name: string;
+  email: string;
+  phone: string;
+  role_label: string;
+  customer_id: number;
+  customer_name: string;
+  has_login: boolean;
+  created_at: string;
+}
+
 /** Sprint 154 §I.2 — the four relations the bulk link/unlink endpoint
  *  understands. One endpoint, four bindings. */
 export type BuildingLinkRelation =
@@ -797,6 +827,10 @@ export interface CustomerBuildingMembership {
   building_address: string;
   // Sprint 153 §4.3 — "" when the building has no city on file.
   building_city: string;
+  // Sprint 154 §G.2 — the row is read from BOTH ends now (the customer's
+  // buildings page and the building's customers card), so it carries the
+  // customer's name too.
+  customer_name: string;
   created_at: string;
 }
 

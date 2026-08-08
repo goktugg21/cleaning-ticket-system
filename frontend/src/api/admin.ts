@@ -3,6 +3,8 @@ import type {
   AuditLog,
   BuildingAdmin,
   BuildingBulkLinkResult,
+  BuildingContactRow,
+  BuildingStaffRow,
   BuildingLinkRelation,
   BuildingSummary,
   BuildingManagerMembership,
@@ -329,6 +331,26 @@ export async function listBuildingCustomers(
   return Array.isArray(response.data) ? response.data : response.data.results;
 }
 
+/** §G.2 — the per-building read of BuildingStaffVisibility. */
+export async function listBuildingStaff(
+  buildingId: number,
+): Promise<BuildingStaffRow[]> {
+  const response = await api.get<
+    PaginatedResponse<BuildingStaffRow> | BuildingStaffRow[]
+  >(`/buildings/${buildingId}/staff/`);
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
+/** §G.2 — the per-building read of ContactBuildingLink. */
+export async function listBuildingContacts(
+  buildingId: number,
+): Promise<BuildingContactRow[]> {
+  const response = await api.get<
+    PaginatedResponse<BuildingContactRow> | BuildingContactRow[]
+  >(`/buildings/${buildingId}/contacts/`);
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
 /** §I.6 — the building detail dashboard read. */
 export async function getBuildingSummary(
   id: number,
@@ -493,6 +515,31 @@ export async function listUsers(
     params: cleanParams(params),
   });
   return response.data;
+}
+
+/**
+ * Sprint 154 §G.2 — every user of one role, paged EXHAUSTIVELY.
+ *
+ * The building detail page's Add pickers need the full candidate set:
+ * a provider with sixty staff must not silently see the first page.
+ * Same loop shape as `listAllCustomers` / `listAllBuildings` (the
+ * Sprint 120/135 pattern) rather than loosening the endpoint's
+ * `pagination_class`, which is a contract with every other caller.
+ */
+export async function listAllUsersByRole(
+  role: string,
+): Promise<UserAdmin[]> {
+  const all: UserAdmin[] = [];
+  let page = 1;
+  for (let i = 0; i < 100; i++) {
+    const response = await api.get<PaginatedResponse<UserAdmin>>("/users/", {
+      params: { role, is_active: "true", page_size: 200, page },
+    });
+    all.push(...response.data.results);
+    if (!response.data.next) break;
+    page += 1;
+  }
+  return all;
 }
 
 export async function getUser(id: number): Promise<UserAdminDetail> {

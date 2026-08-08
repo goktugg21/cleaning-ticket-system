@@ -131,6 +131,14 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
     building_city = serializers.CharField(
         source="building.city", read_only=True
     )
+    # Sprint 154 §G.2 — this serializer is now read from BOTH ends: the
+    # customer's buildings page (where the customer is implied by the
+    # URL) and the building's customers card (where it is not). The
+    # customer's name is what the second one renders, so it has to be on
+    # the row. Additive read-only field.
+    customer_name = serializers.CharField(
+        source="customer.name", read_only=True
+    )
 
     class Meta:
         model = CustomerBuildingMembership
@@ -141,6 +149,7 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
             "building_name",
             "building_address",
             "building_city",
+            "customer_name",
             "created_at",
         ]
         read_only_fields = fields
