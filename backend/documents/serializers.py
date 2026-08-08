@@ -16,6 +16,11 @@ from .uploads import validate_document_upload
 
 class DocumentFolderReadSerializer(serializers.ModelSerializer):
     parent = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Sprint 155 §3 — the Documents page now renders folders as cards in
+    # the pricing-card visual language, and that language's headline is a
+    # COUNT. Annotated on the list queryset (`_file_count`), never counted
+    # per row: the folder list is one request and must stay one request.
+    file_count = serializers.SerializerMethodField()
 
     class Meta:
         model = DocumentFolder
@@ -26,9 +31,19 @@ class DocumentFolderReadSerializer(serializers.ModelSerializer):
             "is_system",
             "system_slug",
             "origin",
+            "file_count",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_file_count(self, obj: DocumentFolder) -> int:
+        # `is not None`, not truthiness — an annotated 0 is the common
+        # case here (a freshly created folder) and must not fall through
+        # to a query.
+        annotated = getattr(obj, "_file_count", None)
+        if annotated is not None:
+            return annotated
+        return obj.documents.count()
 
 
 class DocumentReadSerializer(serializers.ModelSerializer):

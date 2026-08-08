@@ -25,6 +25,7 @@ from .permissions import user_can
 from .serializers import compute_customer_actions
 from .serializers_memberships import (
     CustomerBuildingMembershipSerializer,
+    annotate_building_membership_counts,
     CustomerCompanyPolicySerializer,
     CustomerEmployeeSerializer,
     CustomerUserBuildingAccessSerializer,
@@ -553,9 +554,21 @@ class CustomerBuildingListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         customer = self._get_customer()
-        return (
+        # Sprint 155 §2 — the two per-building counts the linked-buildings
+        # card renders are ANNOTATED here, so a 10-row page costs what a
+        # 2-row page costs. `test_sprint155_linked_buildings.py` pins that
+        # with assertNumQueries.
+        return annotate_building_membership_counts(
             CustomerBuildingMembership.objects.filter(customer=customer)
-            .select_related("building")
+            # `customer` as well as `building`: Sprint 154 §G.2 put
+            # `customer_name` on this serializer so the BUILDING's card
+            # could render it, but only added `select_related("customer")`
+            # on the building-side queryset. This side kept fetching the
+            # customer per row — a real N+1 that the Sprint 155 §2 query
+            # guard caught on its first run (6 queries for 2 links, 14
+            # for 10). It is the same customer on every row here, so the
+            # join is free.
+            .select_related("building", "customer")
             .order_by("building__name")
         )
 
@@ -586,8 +599,20 @@ class CustomerBuildingListCreateView(generics.ListCreateAPIView):
         link, created = CustomerBuildingMembership.objects.get_or_create(
             customer=customer, building=building
         )
+        # Re-read through the annotated queryset so the created row has the
+        # SAME shape as a row from the list — including the Sprint 155 §2
+        # counts. One extra query on a single-row create, which is not an
+        # N+1; the alternative is a create response whose counts are null
+        # while every list row's are numbers.
+        annotated = (
+            annotate_building_membership_counts(
+                CustomerBuildingMembership.objects.filter(pk=link.pk)
+            )
+            .select_related("building")
+            .first()
+        )
         return Response(
-            CustomerBuildingMembershipSerializer(link).data,
+            CustomerBuildingMembershipSerializer(annotated or link).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 

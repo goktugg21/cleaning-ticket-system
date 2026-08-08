@@ -10,13 +10,13 @@ at once.
 Body::
 
     {
-      "employee": 12,
+      "employee": 12,                     # DEFAULT for cells that omit one
       "iso_year": 2026,
       "iso_week": 32,
       "company": 3,                       # optional disambiguator
       "cells": [
         {"hour_type": 4, "building": 9, "date": "2026-08-03", "hours": "8.00"},
-        {"hour_type": 4, "building": 9, "date": "2026-08-04", "hours": "0"},
+        {"employee": 15, "hour_type": 4, "date": "2026-08-04", "hours": "6"},
         ...
       ]
     }
@@ -24,6 +24,20 @@ Body::
 Response::
 
     {"created": N, "updated": N, "deleted": N}
+
+Sprint 155 §5 — a cell may carry its OWN `employee`, so ONE request can
+file a week for SEVERAL people. The top-level `employee` stays exactly
+what it was and is now the default for cells that omit one, so every
+Sprint 154 client keeps working unchanged.
+
+That multi-employee shape is the whole point of the change: Sprint 154's
+grid used the page's employee FILTER as both "whose rows am I looking
+at" and "whose week am I writing", which meant an operator could not
+enter two people's weeks without changing the filter in between — and
+changing the filter silently changed the write target. One request per
+employee would also break the all-or-nothing property below, which is
+the reason this is a widening of the existing endpoint rather than a
+loop in the client.
 
 THE GRID IS THE AUTHORITY for the cells it sends, and only for those.
 `hours: 0` means "this cell is empty" and DELETES any existing row for
@@ -75,6 +89,15 @@ ERR_WEEK_GRID_DATE_OUTSIDE = "week_grid_date_outside_week"
 
 
 class _WeekCellSerializer(serializers.Serializer):
+    # Sprint 155 §5 — per-cell employee. Deliberately a plain IntegerField
+    # and NOT a PrimaryKeyRelatedField: resolution happens inside
+    # `TimeEntrySerializer`, whose `employee` queryset is scoped to
+    # `eligible_employees_queryset(actor)`. Resolving it here as well
+    # would be a SECOND resolution path that could drift from the scoped
+    # one, and a `PrimaryKeyRelatedField` over an unscoped queryset is
+    # exactly the existence oracle H-1 forbids — "this id exists but is
+    # not yours" and "this id does not exist" must be the same answer.
+    employee = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     hour_type = serializers.IntegerField(min_value=1)
     building = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     date = serializers.DateField()
@@ -82,6 +105,8 @@ class _WeekCellSerializer(serializers.Serializer):
 
 
 class _WeekGridInputSerializer(serializers.Serializer):
+    # The DEFAULT employee for cells that do not name one. Sprint 154 sent
+    # only this; Sprint 155 clients send it per cell. Both shapes work.
     employee = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     company = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     iso_year = serializers.IntegerField(min_value=1970, max_value=4000)
@@ -121,11 +146,22 @@ class TimeEntryWeekGridView(APIView):
         # BEFORE anything else and phrased so it leaks nothing: it says
         # "not you", never whether the id names a real user. Mirrors
         # `TimeEntryListCreateView.initial`.
+        #
+        # Sprint 155 — the check now covers the DEFAULT employee AND
+        # every per-cell one. A guard that only looked at the top-level
+        # field would be trivially bypassed by putting the other
+        # person's id on the cells instead, which is the whole new
+        # surface this sprint opened.
         supplied_employee = data.get("employee")
         if not is_timesheet_manager(request.user):
-            if supplied_employee not in (None, "") and str(
-                supplied_employee
-            ) != str(request.user.pk):
+            named = {
+                cell.get("employee")
+                for cell in data["cells"]
+                if cell.get("employee") not in (None, "")
+            }
+            if supplied_employee not in (None, ""):
+                named.add(supplied_employee)
+            if any(str(value) != str(request.user.pk) for value in named):
                 raise PermissionDenied(
                     detail={
                         "detail": "You may only record your own hours.",
@@ -181,7 +217,12 @@ class TimeEntryWeekGridView(APIView):
         # raises and rolls the entire week back.
         with transaction.atomic():
             for cell in data["cells"]:
-                result = self._apply_cell(request, cell, supplied_employee, data)
+                # Sprint 155 — the cell's own employee wins; the top-level
+                # one is the default. Both may be None, in which case the
+                # serializer resolves "me", exactly as a single-entry POST
+                # does.
+                cell_employee = cell.get("employee") or supplied_employee
+                result = self._apply_cell(request, cell, cell_employee, data)
                 if result == "created":
                     created += 1
                 elif result == "updated":

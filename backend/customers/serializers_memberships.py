@@ -143,6 +143,29 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(
         source="customer.name", read_only=True
     )
+    # Sprint 155 §2 — the customer overview's "Linked buildings" card sat
+    # beside About showing a name and a city, so its right-hand half was
+    # visibly empty. These four fields are what the card fills it with,
+    # and they are all facts about THAT link's building — not filler.
+    #
+    # `postal_code` completes the address line (a Dutch city alone does
+    # not locate a building; "Amsterdam, 1012 AB" does). `is_active`
+    # matters because a customer can stay linked to a building that has
+    # been deactivated, and today nothing on this card says so.
+    building_postal_code = serializers.CharField(
+        source="building.postal_code", read_only=True
+    )
+    building_is_active = serializers.BooleanField(
+        source="building.is_active", read_only=True
+    )
+    # The two counts are ANNOTATED by every list queryset that uses this
+    # serializer — never computed per row. `_annotated_or_count` below is
+    # the same shape `BuildingSerializer` (Sprint 154 §I.5) uses, and for
+    # the same reason: the annotation is the real path, the related-manager
+    # fallback exists only for the single-instance paths (the POST-link
+    # response) where one extra query is not an N+1.
+    building_customer_count = serializers.SerializerMethodField()
+    building_manager_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerBuildingMembership
@@ -153,10 +176,58 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
             "building_name",
             "building_address",
             "building_city",
+            "building_postal_code",
+            "building_is_active",
+            "building_customer_count",
+            "building_manager_count",
             "customer_name",
             "created_at",
         ]
         read_only_fields = fields
+
+    @staticmethod
+    def _annotated_or_count(obj, attr, related_manager_name):
+        # `is not None`, never a truthiness test: an annotated 0 is a
+        # legitimate answer and must not fall through to a query.
+        annotated = getattr(obj, attr, None)
+        if annotated is not None:
+            return annotated
+        return getattr(obj.building, related_manager_name).count()
+
+    def get_building_customer_count(self, obj) -> int:
+        return self._annotated_or_count(
+            obj, "_building_customer_count", "customer_memberships"
+        )
+
+    def get_building_manager_count(self, obj) -> int:
+        return self._annotated_or_count(
+            obj, "_building_manager_count", "manager_assignments"
+        )
+
+
+def annotate_building_membership_counts(queryset):
+    """The two Sprint 155 §2 counts, for any `CustomerBuildingMembership`
+    queryset that `CustomerBuildingMembershipSerializer` will render.
+
+    Lives here, next to the serializer that reads it, so the two cannot
+    drift: the serializer names `_building_customer_count` /
+    `_building_manager_count` and exactly one function produces them.
+    Both call sites (the customer's buildings list and the building's
+    customers list) call this.
+
+    `distinct=True` is mandatory — two joined Counts in one query
+    multiply each other's rows otherwise.
+    """
+    from django.db.models import Count
+
+    return queryset.annotate(
+        _building_customer_count=Count(
+            "building__customer_memberships", distinct=True
+        ),
+        _building_manager_count=Count(
+            "building__manager_assignments", distinct=True
+        ),
+    )
 
 
 class CustomerUserBuildingAccessSerializer(serializers.ModelSerializer):

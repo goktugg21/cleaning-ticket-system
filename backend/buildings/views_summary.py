@@ -25,7 +25,10 @@ from accounts.permissions import (
 )
 from accounts.scoping import scope_buildings_for, scope_tickets_for
 from customers.models import ContactBuildingLink, CustomerBuildingMembership
-from customers.serializers_memberships import CustomerBuildingMembershipSerializer
+from customers.serializers_memberships import (
+    CustomerBuildingMembershipSerializer,
+    annotate_building_membership_counts,
+)
 from config.pagination import UnboundedPagination
 
 from .models import Building, BuildingStaffVisibility
@@ -59,7 +62,14 @@ class BuildingCustomerListView(generics.ListAPIView):
 
     def get_queryset(self):
         building = self._get_building()
-        return (
+        # Sprint 155 §2 added two annotated counts to the shared
+        # serializer. Annotating them HERE as well is not optional: the
+        # serializer is one object read from two anchors, so an anchor
+        # that skipped the annotation would silently fall through to the
+        # per-row related-manager count and reintroduce the N+1 on this
+        # side only — the drift that having one serializer is meant to
+        # prevent.
+        return annotate_building_membership_counts(
             CustomerBuildingMembership.objects.filter(building=building)
             .select_related("customer", "building")
             .order_by("customer__name")
