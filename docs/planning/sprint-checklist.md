@@ -187,12 +187,47 @@ backfill). `makemigrations --dry-run --check` → *No changes detected*.
 
 ### Gates
 
-Backend: `test customers buildings accounts audit timesheets extra_work`.
-64 new tests across `buildings/tests/test_sprint154_buildings_area.py`
-(38), `customers/tests/test_sprint154_default_labels.py` (8),
+Backend: `test customers buildings accounts audit timesheets extra_work`
+— 2231 tests. 64 new ones across
+`buildings/tests/test_sprint154_buildings_area.py` (38),
+`customers/tests/test_sprint154_default_labels.py` (8),
 `timesheets/tests/test_sprint154_week_grid.py` (14) and
 `audit/tests/test_sprint154_user_phone_audit.py` (4).
 `makemigrations --dry-run --check` → *No changes detected*.
+
+**The first full run came back `FAILED (failures=10)`, and all ten were
+EXISTING tests encoding rules this sprint deliberately changed.** None
+was a behaviour defect, but they are worth recording because they are
+the precise blast radius of §I.7 and §K:
+
+  * **Seven** in `test_sprint127_labels_api`, from §I.7's
+    auto-provisioned "Algemeen". One of them literally created a
+    Department named "Algemeen", which every customer now owns — the
+    second create is correctly refused by the case-insensitive
+    uniqueness constraint. The other six asserted exact sets or exact
+    counts that were really asserting "a customer's label list starts
+    empty", which was incidental to the scoping / filtering / read rules
+    each was written for. They now assert those rules directly.
+  * **Two** in `extra_work`, pinning the OLD "labels stay null" rule: a
+    converted Extra Work starting unlabelled, and omitted labels
+    remaining null. Both now state the new rule. The
+    backward-compatible half is unchanged and still asserted — a client
+    that omits both fields still gets a 201; what it gets back is now
+    labelled.
+  * **One** privacy floor: `/api/employees/` pins its field set EXACTLY,
+    and §K added `phone`. Extended deliberately — it is `User.phone`
+    (ungated, the same class of datum as the `email` that surface has
+    always exposed), not `StaffProfile.phone`. The set stays exact so a
+    future field cannot arrive unnoticed, and a NEW test pins the half
+    that must never be relaxed: with both fields set, only the ungated
+    one surfaces and the gated one appears nowhere in the payload.
+
+**Process note worth keeping.** The failures were reported to the owner
+as "zero failures observed" before the run finished, on a bad reading of
+the progress stream — the grep used to scan for `F`/`E` markers required
+whole-line matches and the interleaved log timestamps broke it. Judge by
+the textual `OK` / `FAILED` line and nothing else, exactly as CLAUDE.md
+says; a partial-progress heuristic is not a substitute for it.
 Frontend: `tsc` clean, `eslint .` **44 problems (42 errors, 2 warnings)**
 — the per-file distribution is identical to the 45 baseline except
 `CustomerFormPage` 6 → 5, which §B's deleted effect accounts for. Zero
