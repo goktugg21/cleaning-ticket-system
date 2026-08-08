@@ -172,10 +172,27 @@ class ConversionThenRelabelTests(_RelabelFixture):
         )
         return ew
 
-    def test_converted_ew_starts_unlabelled_then_can_be_relabelled(self):
+    def test_converted_ew_starts_on_the_default_labels_then_can_be_relabelled(
+        self,
+    ):
+        """Sprint 154 §I.7 CHANGED this rule, deliberately.
+
+        A converted Extra Work used to start UNLABELLED, and this test
+        pinned that. It now starts on the customer's auto-provisioned
+        "Algemeen" pair, because the owner's requirement is that every
+        Extra Work carries both labels — and `extra_work.conversion`
+        builds its row with `objects.create()`, so a serializer-level
+        rule could never have reached it.
+
+        What this test still guards is the part that matters and did NOT
+        change: whatever a converted request starts on, the relabel
+        endpoint can move it.
+        """
         ew = self._convert_a_ticket()
-        self.assertIsNone(ew.department_id)
-        self.assertIsNone(ew.work_type_id)
+        self.assertIsNotNone(ew.department_id)
+        self.assertIsNotNone(ew.work_type_id)
+        self.assertEqual(ew.department.name, "Algemeen")
+        self.assertEqual(ew.work_type.name, "Algemeen")
 
         resp = self._api(self.admin_a).patch(
             _labels_url(ew.id),

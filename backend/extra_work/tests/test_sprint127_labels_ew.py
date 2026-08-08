@@ -176,12 +176,27 @@ class SameCustomerValidatorTests(_EwLabelFixture):
             resp.data["work_type"][0].code, "work_type_customer_mismatch"
         )
 
-    def test_labels_are_optional_backward_compatible(self):
+    def test_omitted_labels_fall_back_to_the_customer_default(self):
+        """Sprint 154 §I.7 CHANGED this rule, deliberately.
+
+        Omitting the labels used to leave them NULL, and this test pinned
+        that as backward compatibility. They now resolve to the
+        customer's auto-provisioned "Algemeen" pair.
+
+        The BACKWARD-COMPATIBLE half is unchanged and still asserted: a
+        client that omits both fields still gets a 201. What changed is
+        what it gets back — a labelled request instead of an unlabelled
+        one. That is the point: the owner's rule is that every Extra Work
+        carries both labels, and filling the gap here is what makes it
+        true on every write path rather than only on the form's.
+        """
         resp = self._api(self.cust_a).post(URL, self._payload(), format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         ew = ExtraWorkRequest.objects.get(pk=resp.data["id"])
-        self.assertIsNone(ew.department_id)
-        self.assertIsNone(ew.work_type_id)
+        self.assertIsNotNone(ew.department_id)
+        self.assertIsNotNone(ew.work_type_id)
+        self.assertEqual(ew.department.name, "Algemeen")
+        self.assertEqual(ew.work_type.name, "Algemeen")
 
 
 class ReadSerializerLabelTests(_EwLabelFixture):

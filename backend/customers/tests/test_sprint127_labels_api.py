@@ -114,8 +114,15 @@ class LabelCrudTests(_LabelFixture):
         self.assertEqual(dept.customer_id, self.customer_a.id)
 
     def test_sa_creates_for_any_customer(self):
+        # Sprint 154 §I.7 — the name was "Algemeen", which every customer
+        # now HAS from the moment it is created (auto-provisioned so the
+        # mandatory Extra Work label is always fillable). Creating it a
+        # second time is correctly a 409-shaped 400 from the
+        # case-insensitive uniqueness constraint. This test is about a
+        # SUPER_ADMIN writing into ANY customer, not about that name, so
+        # it uses one the fixture does not already own.
         resp = self._api(self.sa).post(
-            _dept_url(self.customer_b.id), {"name": "Algemeen"}, format="json"
+            _dept_url(self.customer_b.id), {"name": "Evenementen"}, format="json"
         )
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(
@@ -143,7 +150,13 @@ class LabelCrudTests(_LabelFixture):
         resp = self._api(self.ca_a).get(_dept_url(self.customer_a.id))
         self.assertEqual(resp.status_code, 200)
         names = {row["name"] for row in resp.data["results"]}
-        self.assertEqual(names, {"Event"})
+        # Sprint 154 §I.7 — asserts SCOPING, which is what this test is
+        # for, rather than set-equality against an empty starting list.
+        # Every customer now owns an auto-provisioned "Algemeen", so an
+        # exact-set assertion was really asserting "labels start empty",
+        # which was incidental to the rule under test.
+        self.assertIn("Event", names)
+        self.assertNotIn("Foreign", names)
 
     def test_is_active_filter(self):
         Department.objects.create(customer=self.customer_a, name="Active")
@@ -154,7 +167,11 @@ class LabelCrudTests(_LabelFixture):
             _dept_url(self.customer_a.id), {"is_active": "true"}
         )
         names = {row["name"] for row in resp.data["results"]}
-        self.assertEqual(names, {"Active"})
+        # Sprint 154 §I.7 — the ARCHIVED row must be filtered out; the
+        # active ones (the test's own plus the auto-provisioned
+        # "Algemeen") must not be.
+        self.assertIn("Active", names)
+        self.assertNotIn("Archived", names)
 
     def test_rename_department(self):
         dept = Department.objects.create(customer=self.customer_a, name="Evenement")
@@ -228,8 +245,15 @@ class LabelUniquenessTests(_LabelFixture):
                 Department.objects.create(
                     customer=self.customer_a, name="  event  "
                 )
+        # Sprint 154 §I.7 — count the "Event" family only. The customer
+        # also owns an auto-provisioned "Algemeen"; the rule under test
+        # is that the colliding variant did not land, not the customer's
+        # total label count.
         self.assertEqual(
-            Department.objects.filter(customer=self.customer_a).count(), 1
+            Department.objects.filter(
+                customer=self.customer_a, name__iexact="event"
+            ).count(),
+            1,
         )
 
     def test_rename_into_a_collision_rejected(self):
@@ -256,7 +280,10 @@ class LabelPermissionTests(_LabelFixture):
         Department.objects.create(customer=self.customer_a, name="Event")
         resp = self._api(self.cust_a).get(_dept_url(self.customer_a.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.data["results"]), 1)
+        # Sprint 154 §I.7 — the rule is that a customer user with access
+        # CAN read, not how many rows exist.
+        names = {row["name"] for row in resp.data["results"]}
+        self.assertIn("Event", names)
 
     def test_customer_user_may_not_write(self):
         dept = Department.objects.create(customer=self.customer_a, name="Event")
@@ -421,11 +448,17 @@ class WorkTypeParityTests(_LabelFixture):
         )
         resp = self._api(self.ca_a).get(_wt_url(self.customer_a.id))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(resp.data["results"]), 1)
+        # Sprint 154 §I.7 — the created row is listed; the customer also
+        # owns an auto-provisioned "Algemeen".
+        names = {row["name"] for row in resp.data["results"]}
+        self.assertIn("Opleverschoonmaak", names)
 
     def test_work_type_list_scoped_to_customer(self):
         WorkType.objects.create(customer=self.customer_a, name="Mine")
         WorkType.objects.create(customer=self.customer_b, name="Theirs")
         resp = self._api(self.ca_a).get(_wt_url(self.customer_a.id))
         names = {row["name"] for row in resp.data["results"]}
-        self.assertEqual(names, {"Mine"})
+        # Sprint 154 §I.7 — scoping, not set-equality. See the Department
+        # twin above.
+        self.assertIn("Mine", names)
+        self.assertNotIn("Theirs", names)

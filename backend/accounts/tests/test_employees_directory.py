@@ -203,12 +203,70 @@ class ProviderEmployeesTests(TestCase):
     # ---- privacy floor -------------------------------------------------
 
     def test_privacy_floor_exact_fields(self):
+        """The allow-list for `/api/employees/`. Read gate is
+        `IsProviderRosterReader` — SUPER_ADMIN, COMPANY_ADMIN and
+        BUILDING_MANAGER; STAFF and customer users are 403.
+
+        Sprint 154 §K/§I.1 added `phone`, and the addition is
+        DELIBERATE — recorded here rather than left to a reader to
+        infer from a diff:
+
+          * It is `User.phone`, the account's own contact number, added
+            in `accounts.0009`. It is ungated by design and is the same
+            class of datum as `email`, which this surface has always
+            exposed.
+          * It is NOT `StaffProfile.phone`. That one is STAFF-only and
+            its visibility is governed by
+            `Customer.show_assigned_staff_phone` / the
+            CustomerCompanyPolicy mirror, and it remains forbidden here
+            — see the assertion below, which is the half of this floor
+            that must never be relaxed.
+
+        Everything else the floor exists to keep out — `internal_note`,
+        customer linkage, any pricing field — is still absent, and the
+        set below is still EXACT, so a future field cannot arrive here
+        unnoticed.
+        """
         resp = self._api(self.super_admin).get(URL)
-        for r in self._rows(resp):
+        rows = self._rows(resp)
+        self.assertTrue(rows, "no rows to assert the privacy floor against")
+        for r in rows:
             self.assertEqual(
                 set(r.keys()),
-                {"id", "full_name", "email", "role", "employment_type", "is_active"},
+                {
+                    "id",
+                    "full_name",
+                    "email",
+                    "phone",
+                    "role",
+                    "employment_type",
+                    "is_active",
+                },
             )
+
+    def test_privacy_floor_never_exposes_the_gated_staff_phone(self):
+        """The half of the floor that must never be relaxed.
+
+        `StaffProfile.phone` is a DIFFERENT field from `User.phone` and
+        is customer-visibility-gated. A staff member with BOTH set must
+        surface only the ungated one on this directory.
+        """
+        profile = self.staff_a.staff_profile
+        profile.phone = "+31 6 9999 0000"
+        profile.save(update_fields=["phone"])
+        self.staff_a.phone = "+31 20 555 0100"
+        self.staff_a.save(update_fields=["phone"])
+
+        resp = self._api(self.super_admin).get(URL)
+        row = next(
+            r for r in self._rows(resp) if r["email"] == self.staff_a.email
+        )
+        self.assertEqual(row["phone"], "+31 20 555 0100")
+        self.assertNotIn(
+            "+31 6 9999 0000",
+            str(resp.data),
+            "StaffProfile.phone leaked onto the employees directory",
+        )
 
     # ---- employment_type EDIT (reuse the staff-profile PATCH) ----------
 
