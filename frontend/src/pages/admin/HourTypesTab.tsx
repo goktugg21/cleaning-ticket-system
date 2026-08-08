@@ -15,6 +15,7 @@ import type {
   HourTypeWritePayload,
 } from "../../api/timesheets.types";
 import { BoundedList } from "../../components/BoundedList";
+import { EditModeToggle } from "../../components/EditModeToggle";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { useToast } from "../../components/ToastProvider";
@@ -23,6 +24,7 @@ import {
   isStandardHourType,
 } from "../../lib/hourTypeLabel";
 import { Toggle } from "../../components/Toggle";
+import { useEditMode } from "../../lib/useEditMode";
 
 interface HourTypeFormState {
   name: string;
@@ -70,6 +72,11 @@ export function HourTypesTab({
   const { push: pushToast } = useToast();
 
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
+  // Sprint 155 §4 — this tab has no row selection, only per-row
+  // actions, so only the MODE is used here. It is still the shared
+  // controller: one implementation of "edit mode is meaningless
+  // over an empty list" for every screen (lib/useEditMode.ts).
+  const edit = useEditMode(hourTypes.map((h) => h.id));
   const [loadError, setLoadError] = useState("");
   const [showInactive, setShowInactive] = useState(false);
 
@@ -290,6 +297,22 @@ export function HourTypesTab({
           >
             {t("hour_types.add_button")}
           </button>
+          {/* Sprint 155 §4 — the intent step this tab was missing.
+              "Deactivate" fired straight off the row click with no
+              confirm and no mode: one mis-click took an hour type out
+              of every picker in the module. Edit / Deactivate / Delete
+              now live inside edit mode; outside it the table is a
+              clean read-only list.
+
+              Hidden, not disabled, when there is nothing to act on. */}
+          {hourTypes.length > 0 && (
+            <EditModeToggle
+              editMode={edit.editMode}
+              onToggle={edit.toggleMode}
+              disabled={loading}
+              testId="hour-types-edit-mode-toggle"
+            />
+          )}
         </div>
       </div>
 
@@ -372,6 +395,14 @@ export function HourTypesTab({
                         : t("admin.status_inactive")}
                     </td>
                     <td>
+                      {/* Sprint 155 §4 — the whole action cell is inside
+                          edit mode. An em dash keeps the column from
+                          rendering as a blank cell, which reads as a
+                          bug rather than as "not now". */}
+                      {!edit.editMode && (
+                        <span className="muted-empty">—</span>
+                      )}
+                      {edit.editMode && (
                       <div style={{ display: "flex", gap: 6 }}>
                         <button
                           type="button"
@@ -406,6 +437,7 @@ export function HourTypesTab({
                           </button>
                         )}
                       </div>
+                      )}
                     </td>
                   </tr>
                 ))}

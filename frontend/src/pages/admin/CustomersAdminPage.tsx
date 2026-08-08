@@ -22,7 +22,9 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { BulkAssignDialog } from "../../components/BulkAssignDialog";
 import { BulkEditDialog } from "../../components/BulkEditDialog";
+import { EditModeToggle } from "../../components/EditModeToggle";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { useEditMode } from "../../lib/useEditMode";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type ActiveFilter = "true" | "false" | "all";
@@ -324,6 +326,13 @@ export function CustomersAdminPage() {
         : [...new Set([...current, ...pageIds])],
     );
 
+  // Sprint 155 §4 — the checkbox column and the bulk toolbar exist only
+  // inside edit mode. Same split as the Buildings list: the MODE comes
+  // from the shared controller, the cross-page SELECTION stays this
+  // page's own, and `onExit` keeps "leaving edit mode clears the
+  // selection" true. See lib/useEditMode.ts.
+  const edit = useEditMode(pageIds, { onExit: () => setSelectedIds([]) });
+
   async function handleConfirmBulkDeactivate() {
     if (selectedIds.length === 0) return;
     setBulkBusy(true);
@@ -609,11 +618,19 @@ export function CustomersAdminPage() {
                 {t("clear")}
               </button>
             )}
+            {pageIds.length > 0 && (
+              <EditModeToggle
+                editMode={edit.editMode}
+                onToggle={edit.toggleMode}
+                disabled={bulkBusy}
+                testId="customers-edit-mode-toggle"
+              />
+            )}
           </div>
         </form>
 
         {/* Sprint 153 §3.4 — the toolbar appears only with a selection. */}
-        {selectedIds.length > 0 && (
+        {edit.editMode && (
           <MultiSelectToolbar
             selectedCount={selectedIds.length}
             onSelectAll={() =>
@@ -660,16 +677,18 @@ export function CustomersAdminPage() {
           <table className="data-table data-table-dense">
             <thead>
               <tr>
-                <th className="th-select">
-                  <input
-                    type="checkbox"
-                    checked={allOnPageSelected}
-                    onChange={togglePage}
-                    disabled={pageIds.length === 0 || bulkBusy}
-                    aria-label={t("customers.select_page")}
-                    data-testid="customers-select-page"
-                  />
-                </th>
+                {edit.editMode && (
+                  <th className="th-select">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={togglePage}
+                      disabled={pageIds.length === 0 || bulkBusy}
+                      aria-label={t("customers.select_page")}
+                      data-testid="customers-select-page"
+                    />
+                  </th>
+                )}
                 <SortableHeader
                   label={t("admin.col_name")}
                   sort={sortStateFor("name")}
@@ -721,21 +740,23 @@ export function CustomersAdminPage() {
                       }
                     }}
                   >
-                    <td
-                      className="td-select"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(customer.id)}
-                        onChange={() => toggleRow(customer.id)}
-                        disabled={bulkBusy}
-                        aria-label={t("customers.select_row", {
-                          name: customer.name,
-                        })}
-                        data-testid={`customers-select-${customer.id}`}
-                      />
-                    </td>
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(customer.id)}
+                          onChange={() => toggleRow(customer.id)}
+                          disabled={bulkBusy}
+                          aria-label={t("customers.select_row", {
+                            name: customer.name,
+                          })}
+                          data-testid={`customers-select-${customer.id}`}
+                        />
+                      </td>
+                    )}
                     <td className="td-subject">
                       <Link to={detailPath}>{customer.name}</Link>
                     </td>

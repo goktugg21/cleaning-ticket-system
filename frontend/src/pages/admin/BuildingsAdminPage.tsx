@@ -26,7 +26,9 @@ import { BulkAssignDialog } from "../../components/BulkAssignDialog";
 import { BulkEditDialog } from "../../components/BulkEditDialog";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { EditModeToggle } from "../../components/EditModeToggle";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { useEditMode } from "../../lib/useEditMode";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
 type ActiveFilter = "true" | "false" | "all";
@@ -324,6 +326,18 @@ export function BuildingsAdminPage() {
         : [...new Set([...current, ...pageIds])],
     );
 
+  // Sprint 155 §4 — nothing is directly editable. The checkbox column
+  // and the bulk toolbar exist only inside edit mode; outside it this is
+  // a clean read-only list whose rows still navigate to the detail page.
+  //
+  // The MODE comes from the shared controller so the derived-mode rule
+  // lives in one place, but the SELECTION stays this page's own: it
+  // spans pages (select-all unions the current page into what is already
+  // chosen) and the hook's selection is filtered to the keys it is
+  // handed, which here is one page. `onExit` keeps "leaving edit mode
+  // clears the selection" true anyway.
+  const edit = useEditMode(pageIds, { onExit: () => setSelectedIds([]) });
+
   // --- bulk actions ----------------------------------------------------
 
   async function handleConfirmBulkDelete() {
@@ -574,10 +588,22 @@ export function BuildingsAdminPage() {
                 {t("clear")}
               </button>
             )}
+            {/* Sprint 155 §4 — the intent step. Hidden, not disabled,
+                when the page has no rows: a control that cannot work
+                should not be offered (the running Sprint 138-143
+                theme). */}
+            {pageIds.length > 0 && (
+              <EditModeToggle
+                editMode={edit.editMode}
+                onToggle={edit.toggleMode}
+                disabled={bulkBusy}
+                testId="buildings-edit-mode-toggle"
+              />
+            )}
           </div>
         </form>
 
-        {selectedIds.length > 0 && (
+        {edit.editMode && (
           <MultiSelectToolbar
             selectedCount={selectedIds.length}
             onSelectAll={() =>
@@ -619,16 +645,18 @@ export function BuildingsAdminPage() {
           <table className="data-table data-table-dense">
             <thead>
               <tr>
-                <th className="th-select">
-                  <input
-                    type="checkbox"
-                    checked={allOnPageSelected}
-                    onChange={togglePage}
-                    disabled={pageIds.length === 0 || bulkBusy}
-                    aria-label={t("buildings.select_page")}
-                    data-testid="buildings-select-page"
-                  />
-                </th>
+                {edit.editMode && (
+                  <th className="th-select">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={togglePage}
+                      disabled={pageIds.length === 0 || bulkBusy}
+                      aria-label={t("buildings.select_page")}
+                      data-testid="buildings-select-page"
+                    />
+                  </th>
+                )}
                 <SortableHeader
                   label={t("admin.col_name")}
                   sort={sortStateFor("name")}
@@ -685,21 +713,23 @@ export function BuildingsAdminPage() {
                       }
                     }}
                   >
-                    <td
-                      className="td-select"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(building.id)}
-                        onChange={() => toggleRow(building.id)}
-                        disabled={bulkBusy}
-                        aria-label={t("buildings.select_row", {
-                          name: building.name,
-                        })}
-                        data-testid={`buildings-select-${building.id}`}
-                      />
-                    </td>
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(building.id)}
+                          onChange={() => toggleRow(building.id)}
+                          disabled={bulkBusy}
+                          aria-label={t("buildings.select_row", {
+                            name: building.name,
+                          })}
+                          data-testid={`buildings-select-${building.id}`}
+                        />
+                      </td>
+                    )}
                     <td className="td-subject">
                       <Link to={detailPath}>{building.name}</Link>
                     </td>

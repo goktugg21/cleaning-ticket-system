@@ -17,7 +17,9 @@ import type {
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EntityPicker } from "../../../components/EntityPicker";
+import { EditModeToggle } from "../../../components/EditModeToggle";
 import { MultiSelectToolbar } from "../../../components/MultiSelectToolbar";
+import { useEditMode } from "../../../lib/useEditMode";
 
 import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
 
@@ -188,6 +190,15 @@ export function CustomerBuildingsPage() {
       allLinksSelected ? [] : linkedBuildings.map((l) => l.id),
     );
 
+  // Sprint 155 §4 — the intent step. Outside edit mode this is a clean
+  // read-only list whose rows still open the building; inside it the
+  // checkboxes and the bulk unlink appear. The MODE is the shared
+  // controller's, the selection stays local (see lib/useEditMode.ts).
+  const edit = useEditMode(
+    linkedBuildings.map((l) => l.id),
+    { onExit: () => setSelectedLinkIds([]) },
+  );
+
   const customerName = customer?.name ?? "";
   const isActive = customer?.is_active ?? true;
 
@@ -240,12 +251,31 @@ export function CustomerBuildingsPage() {
           data-testid="section-customer-buildings"
           style={{ padding: "20px 22px" }}
         >
-          <h3 className="section-title">
-            {t("customer_view.buildings.title")}
-          </h3>
-          <p className="muted small" style={{ marginBottom: 12 }}>
-            {t("customer_form.section_buildings_desc")}
-          </p>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <div>
+              <h3 className="section-title">
+                {t("customer_view.buildings.title")}
+              </h3>
+              <p className="muted small" style={{ marginBottom: 12 }}>
+                {t("customer_form.section_buildings_desc")}
+              </p>
+            </div>
+            {linkedBuildings.length > 0 && (
+              <EditModeToggle
+                editMode={edit.editMode}
+                onToggle={edit.toggleMode}
+                disabled={buildingLinkBusy}
+                testId="customer-buildings-edit-mode-toggle"
+              />
+            )}
+          </div>
 
           {buildingLinkError && (
             <div
@@ -257,7 +287,7 @@ export function CustomerBuildingsPage() {
             </div>
           )}
 
-          {selectedLinkIds.length > 0 && (
+          {edit.editMode && (
             <MultiSelectToolbar
               selectedCount={selectedLinkIds.length}
               onSelectAll={() =>
@@ -284,18 +314,20 @@ export function CustomerBuildingsPage() {
             >
               <thead>
                 <tr>
-                  <th className="th-select">
-                    <input
-                      type="checkbox"
-                      checked={allLinksSelected}
-                      onChange={toggleAllLinks}
-                      disabled={
-                        linkedBuildings.length === 0 || buildingLinkBusy
-                      }
-                      aria-label={t("customer_view.buildings.select_all")}
-                      data-testid="customer-buildings-select-all"
-                    />
-                  </th>
+                  {edit.editMode && (
+                    <th className="th-select">
+                      <input
+                        type="checkbox"
+                        checked={allLinksSelected}
+                        onChange={toggleAllLinks}
+                        disabled={
+                          linkedBuildings.length === 0 || buildingLinkBusy
+                        }
+                        aria-label={t("customer_view.buildings.select_all")}
+                        data-testid="customer-buildings-select-all"
+                      />
+                    </th>
+                  )}
                   <th>{t("admin.col_name")}</th>
                   <th>{t("admin.col_address")}</th>
                   <th>{t("buildings.col_city")}</th>
@@ -306,18 +338,20 @@ export function CustomerBuildingsPage() {
               <tbody>
                 {linkedBuildings.map((link) => (
                   <tr key={link.id}>
-                    <td className="td-select">
-                      <input
-                        type="checkbox"
-                        checked={selectedLinkIds.includes(link.id)}
-                        onChange={() => toggleLink(link.id)}
-                        disabled={buildingLinkBusy}
-                        aria-label={t("customer_view.buildings.select_row", {
-                          name: link.building_name,
-                        })}
-                        data-testid={`customer-buildings-select-${link.id}`}
-                      />
-                    </td>
+                    {edit.editMode && (
+                      <td className="td-select">
+                        <input
+                          type="checkbox"
+                          checked={selectedLinkIds.includes(link.id)}
+                          onChange={() => toggleLink(link.id)}
+                          disabled={buildingLinkBusy}
+                          aria-label={t("customer_view.buildings.select_row", {
+                            name: link.building_name,
+                          })}
+                          data-testid={`customer-buildings-select-${link.id}`}
+                        />
+                      </td>
+                    )}
                     {/* Sprint 154 §G.1 — the owner asked for this
                         explicitly: from a customer he must be able to
                         reach the building. Every row is a link now. */}
