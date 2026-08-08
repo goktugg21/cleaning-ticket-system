@@ -2,6 +2,9 @@ import { api } from "./client";
 import type {
   AuditLog,
   BuildingAdmin,
+  BuildingBulkLinkResult,
+  BuildingLinkRelation,
+  BuildingSummary,
   BuildingManagerMembership,
   BuildingStaffVisibilityAdmin,
   CompanyAdmin,
@@ -252,6 +255,85 @@ export async function deactivateBuilding(id: number): Promise<void> {
 
 export async function reactivateBuilding(id: number): Promise<BuildingAdmin> {
   const response = await api.post<BuildingAdmin>(`/buildings/${id}/reactivate/`);
+  return response.data;
+}
+
+// ---- Sprint 154 bulk writes ------------------------------------------
+//
+// All four are ALL-OR-NOTHING on the server: one unresolvable id rejects
+// the whole batch with zero writes, so there is no partial-success shape
+// to handle in any caller.
+
+/** §I.2 — link or unlink N buildings against M targets of ONE relation,
+ *  in one request. Replaces the N x M client-side POST loop that the
+ *  checklist's NEXT queue records twice as an anti-pattern. */
+export async function bulkLinkBuildings(payload: {
+  buildings: number[];
+  relation: BuildingLinkRelation;
+  targets: number[];
+  mode: "link" | "unlink";
+}): Promise<BuildingBulkLinkResult> {
+  const response = await api.post<BuildingBulkLinkResult>(
+    "/buildings/bulk-link/",
+    payload,
+  );
+  return response.data;
+}
+
+/** §I.3 — archive many buildings. "Delete" in the UI; the row survives
+ *  (tickets and extra work PROTECT it) and a Super Admin can restore it. */
+export async function bulkDeactivateBuildings(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  const response = await api.post<{ deactivated: number }>(
+    "/buildings/bulk-deactivate/",
+    { buildings: ids },
+  );
+  return response.data;
+}
+
+/** §I.4 — patch an allow-listed field set on many buildings. A key
+ *  outside the server's allow-list is a 400, never a silent skip. */
+export async function bulkUpdateBuildings(
+  ids: number[],
+  patch: Record<string, string>,
+): Promise<{ updated: number }> {
+  const response = await api.post<{ updated: number }>(
+    "/buildings/bulk-update/",
+    { buildings: ids, patch },
+  );
+  return response.data;
+}
+
+/** §I.4 — the customer twin of `bulkUpdateBuildings`. */
+export async function bulkUpdateCustomers(
+  ids: number[],
+  patch: Record<string, string>,
+): Promise<{ updated: number }> {
+  const response = await api.post<{ updated: number }>(
+    "/customers/bulk-update/",
+    { customers: ids, patch },
+  );
+  return response.data;
+}
+
+/** §I.5 — the inverse of `listCustomerBuildings`: which customers are
+ *  linked to THIS building. Saves the building page fetching every
+ *  customer and filtering in the browser. */
+export async function listBuildingCustomers(
+  buildingId: number,
+): Promise<CustomerBuildingMembership[]> {
+  const response = await api.get<
+    PaginatedResponse<CustomerBuildingMembership> | CustomerBuildingMembership[]
+  >(`/buildings/${buildingId}/customers/`);
+  return Array.isArray(response.data) ? response.data : response.data.results;
+}
+
+/** §I.6 — the building detail dashboard read. */
+export async function getBuildingSummary(
+  id: number,
+): Promise<BuildingSummary> {
+  const response = await api.get<BuildingSummary>(`/buildings/${id}/summary/`);
   return response.data;
 }
 

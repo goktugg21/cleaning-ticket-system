@@ -6,6 +6,8 @@ import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
 import {
   bulkDeactivateCustomers,
+  bulkLinkBuildings,
+  bulkUpdateCustomers,
   deactivateCustomer,
   listAllBuildings,
   listAllCompanies,
@@ -18,6 +20,8 @@ import type { BuildingAdmin, CompanyAdmin, CustomerAdmin } from "../../api/types
 import { useAuth } from "../../auth/AuthContext";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { BulkAssignDialog } from "../../components/BulkAssignDialog";
+import { BulkEditDialog } from "../../components/BulkEditDialog";
 import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
 
@@ -102,6 +106,13 @@ export function CustomersAdminPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkDialogRef = useRef<ConfirmDialogHandle>(null);
+
+  // Sprint 154 §D/§F — bulk edit and bulk assign-buildings.
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignBuildingIds, setAssignBuildingIds] = useState<number[]>([]);
+  const [assignOptions, setAssignOptions] = useState<BuildingAdmin[]>([]);
+  const [assignError, setAssignError] = useState("");
 
   // Sprint 153 §3.5 — edit-in-place. `editTarget` is the row being
   // edited; the form component is KEYED by its id so the seed values
@@ -346,6 +357,72 @@ export function CustomersAdminPage() {
     }
   }
 
+  // --- bulk edit (§D) --------------------------------------------------
+
+  async function handleBulkEdit(patch: Record<string, string>) {
+    setBulkBusy(true);
+    setError("");
+    const targeted = [...selectedIds];
+    try {
+      const result = await bulkUpdateCustomers(targeted, patch);
+      setBulkEditOpen(false);
+      setSelectedIds([]);
+      setSavedBanner(t("bulk_edit.updated", { count: result.updated }));
+      setCountsReloadToken((token) => token + 1);
+      await load();
+    } catch (err) {
+      // Verbatim, and the dialog STAYS OPEN so the operator can correct
+      // the field rather than losing their selection.
+      setError(getApiError(err));
+      setBulkEditOpen(false);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  // --- assign buildings (§F, the customers-side direction) -------------
+
+  function openAssignBuildings() {
+    setAssignBuildingIds([]);
+    setAssignError("");
+    setAssignOpen(true);
+    // Exhaustive paging (the Sprint 120/135 pattern), so a provider with
+    // hundreds of buildings gets all of them and not a truncated first
+    // page. `listAllBuildings` loops until `next` is null.
+    const company =
+      companyFilter !== ""
+        ? companyFilter
+        : customers.find((c) => selectedIds.includes(c.id))?.company;
+    listAllBuildings(
+      company === undefined
+        ? { is_active: "true" }
+        : { is_active: "true", company },
+    )
+      .then(setAssignOptions)
+      .catch((err) => setAssignError(getApiError(err)));
+  }
+
+  async function handleConfirmAssignBuildings() {
+    setBulkBusy(true);
+    setAssignError("");
+    try {
+      const result = await bulkLinkBuildings({
+        buildings: assignBuildingIds,
+        relation: "customers",
+        targets: selectedIds,
+        mode: "link",
+      });
+      setAssignOpen(false);
+      setSelectedIds([]);
+      setSavedBanner(t("bulk_link.linked", { count: result.created }));
+      await load();
+    } catch (err) {
+      setAssignError(getApiError(err));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   // --- edit in place ---------------------------------------------------
   function handleEditSaved(updated: CustomerAdmin) {
     setEditTarget(null);
@@ -547,11 +624,26 @@ export function CustomersAdminPage() {
             onClearAll={() => setSelectedIds([])}
             disabled={bulkBusy}
             actions={[
+              // Sprint 154 §D — the label says Delete because that is what
+              // an operator means, but the server DEACTIVATES: customers
+              // are never hard-deleted (invoices and extra work PROTECT
+              // the row). The confirm body says so in plain words, so the
+              // label and the behaviour do not disagree.
               {
-                key: "deactivate",
-                label: t("customers.bulk_deactivate"),
+                key: "delete",
+                label: t("customers.bulk_delete"),
                 destructive: true,
                 onClick: () => bulkDialogRef.current?.open(),
+              },
+              {
+                key: "edit",
+                label: t("customers.bulk_edit"),
+                onClick: () => setBulkEditOpen(true),
+              },
+              {
+                key: "assign-buildings",
+                label: t("customers.assign_buildings"),
+                onClick: () => openAssignBuildings(),
               },
             ]}
             testIdPrefix="customers-bulk"
@@ -810,15 +902,72 @@ export function CustomersAdminPage() {
           leave the page inert (Sprint 118). CLAUDE.md §3. */}
       <ConfirmDialog
         ref={bulkDialogRef}
-        title={t("customers.bulk_deactivate_title")}
-        body={t("customers.bulk_deactivate_body", {
+        title={t("customers.bulk_delete_title")}
+        body={t("customers.bulk_delete_body", {
           count: selectedIds.length,
         })}
-        confirmLabel={t("customers.bulk_deactivate")}
+        confirmLabel={t("customers.bulk_delete")}
         onConfirm={handleConfirmBulkDeactivate}
         busy={bulkBusy}
         destructive
       />
+
+      {bulkEditOpen && (
+        <BulkEditDialog
+          title={t("customers.bulk_edit_title", { count: selectedIds.length })}
+          intro={t("customers.bulk_edit_intro")}
+          fields={[
+            {
+              key: "language",
+              label: t("customers.field_language"),
+              options: [
+                { value: "nl", label: `${t("language_dutch")} (nl)` },
+                { value: "en", label: `${t("language_english")} (en)` },
+              ],
+            },
+            {
+              key: "status",
+              label: t("customers.field_status"),
+              options: [
+                { value: "active", label: t("admin.status_active") },
+                { value: "inactive", label: t("admin.status_inactive") },
+              ],
+            },
+          ]}
+          onCancel={() => setBulkEditOpen(false)}
+          onSubmit={handleBulkEdit}
+          busy={bulkBusy}
+          testIdPrefix="customers-bulk-edit"
+        />
+      )}
+
+      {assignOpen && (
+        <BulkAssignDialog
+          title={t("customers.assign_buildings_title")}
+          summary={t("customers.assign_buildings_summary", {
+            buildings: assignBuildingIds.length,
+            customers: selectedIds.length,
+          })}
+          options={assignOptions.map((b) => ({
+            id: b.id,
+            label: b.name,
+            sublabel: [b.city, b.address].filter(Boolean).join(" — "),
+          }))}
+          selectedIds={assignBuildingIds}
+          onChange={setAssignBuildingIds}
+          onCancel={() => setAssignOpen(false)}
+          onConfirm={handleConfirmAssignBuildings}
+          confirmLabel={t("bulk_link.confirm")}
+          busy={bulkBusy}
+          error={assignError}
+          emptyText={t("customers.assign_buildings_empty")}
+          contextTitle={t("customers.selected_customers")}
+          contextItems={customers
+            .filter((c) => selectedIds.includes(c.id))
+            .map((c) => c.name)}
+          testIdPrefix="customers-assign-buildings"
+        />
+      )}
 
       {editTarget && (
         <CustomerQuickEditDialog

@@ -6,6 +6,7 @@ import {
   Receipt,
   ShieldCheck,
   Tag,
+  Ticket,
   UserCog,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -46,10 +47,16 @@ import { CustomerSubPageHeader } from "./CustomerSubPageHeader";
  *      invoiced.
  *   4. About and Linked buildings SIDE BY SIDE — each was spending a
  *      full-width card on half a card of content.
- *   5. The quicklink grid.
+ *
+ * Sprint 154 §A removed the quicklink grid that used to repeat the SAME
+ * six destinations at the bottom of the page as icon-and-description
+ * cards. Each chip now carries all four things the pair used to split
+ * between them — icon, count, name, description — so a destination
+ * appears exactly once, driven off one `chips` array rather than two
+ * independently-maintained lists.
  *
  * Gone: the `section-explainer` paragraph (the chips say it better) and
- * the Facturatie section, which moved to the Settings tab (§4.2).
+ * the Facturatie section, which moved to the Settings tab.
  *
  * Nothing on this page mutates a permission, a policy, or a per-building
  * access row — those affordances live exclusively on the Permissions
@@ -199,6 +206,77 @@ export function CustomerOverviewPage() {
   const chipValue = (value: number | null | undefined) =>
     value === null || value === undefined ? "—" : value;
 
+  // Sprint 154 §A — the six (now seven) destinations, ONCE. Driven off
+  // one array so a chip cannot exist with a count but no description, or
+  // a destination appear twice with two different labels — which is what
+  // the separate stat-strip + quicklink-grid pair had drifted into.
+  //
+  // `value: undefined` means "this chip has no count", which is
+  // different from `null` ("there is a count but it is not yours to
+  // read"). Permissions is the only one: there is no countable thing
+  // behind it, so it renders with no number at all rather than a 0.
+  const chips = customer
+    ? [
+        {
+          testId: "customer-overview-stat-buildings",
+          path: "buildings",
+          Icon: MapPin,
+          label: t("customer_view.overview.stat_linked_buildings"),
+          description: t("customer_view.overview.quicklink_buildings_desc"),
+          value:
+            summary?.linked_building_count ?? customer.linked_building_count,
+        },
+        {
+          testId: "customer-overview-stat-users",
+          path: "users",
+          Icon: UserCog,
+          label: t("customer_view.overview.stat_customer_users"),
+          description: t("customer_view.overview.quicklink_users_desc"),
+          value: summary?.user_count ?? customer.user_count,
+        },
+        {
+          testId: "customer-overview-stat-contacts",
+          path: "contacts",
+          Icon: Mail,
+          label: t("customer_view.overview.stat_contacts"),
+          description: t("customer_view.overview.quicklink_contacts_desc"),
+          value: summary?.contact_count ?? customer.contact_count,
+        },
+        {
+          testId: "customer-overview-stat-pricing",
+          path: "pricing",
+          Icon: Tag,
+          label: t("customer_view.overview.stat_pricing"),
+          description: t("customer_view.overview.quicklink_pricing_desc"),
+          value: summary?.pricing_rule_count,
+        },
+        {
+          testId: "customer-overview-stat-extra-work",
+          path: "extra-work",
+          Icon: Receipt,
+          label: t("customer_view.overview.stat_extra_work"),
+          description: t("customer_view.overview.quicklink_extra_work_desc"),
+          value: summary?.extra_work_count,
+        },
+        {
+          testId: "customer-overview-stat-tickets",
+          path: "tickets",
+          Icon: Ticket,
+          label: t("customer_view.overview.stat_tickets"),
+          description: t("customer_view.overview.quicklink_tickets_desc"),
+          value: summary?.ticket_count,
+        },
+        {
+          testId: "customer-overview-stat-permissions",
+          path: "permissions",
+          Icon: ShieldCheck,
+          label: t("customer_view.overview.quicklink_permissions"),
+          description: t("customer_view.overview.quicklink_permissions_desc"),
+          value: undefined,
+        },
+      ]
+    : [];
+
   return (
     <div data-testid="customer-overview-page">
       <CustomerSubPageHeader
@@ -219,86 +297,38 @@ export function CustomerOverviewPage() {
         </div>
       ) : customer ? (
         <>
-          {/* 1. The chips, first thing on the page. */}
+          {/* 1. The chips — the page's ONE navigation surface.
+              Sprint 154 §A: the quicklink grid that used to repeat these
+              same six destinations at the bottom of the page is gone.
+              Each chip now carries everything both used to say between
+              them — icon, count, name and the one-line description —
+              so a destination appears exactly once. */}
           <div
-            className="summary-grid summary-grid-6"
+            className="summary-grid summary-grid-chips"
             data-testid="customer-overview-stat-strip"
           >
-            <Link
-              to={`/admin/customers/${customer.id}/buildings`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-buildings"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_linked_buildings")}
-              </span>
-              <span className="summary-stat-value">
-                {chipValue(
-                  summary?.linked_building_count ??
-                    customer.linked_building_count,
+            {chips.map((chip) => (
+              <Link
+                key={chip.testId}
+                to={`/admin/customers/${customer.id}/${chip.path}`}
+                className="summary-stat summary-stat-chip"
+                data-testid={chip.testId}
+              >
+                <span className="summary-stat-chip-head">
+                  <chip.Icon size={16} strokeWidth={2} aria-hidden="true" />
+                  <span className="summary-stat-label">{chip.label}</span>
+                </span>
+                {/* Permissions has no count. It renders with NO number
+                    rather than a 0, which would be a lie: there is no
+                    countable thing behind it. */}
+                {chip.value !== undefined && (
+                  <span className="summary-stat-value">
+                    {chipValue(chip.value)}
+                  </span>
                 )}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/users`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-users"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_customer_users")}
-              </span>
-              <span className="summary-stat-value">
-                {chipValue(summary?.user_count ?? customer.user_count)}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/contacts`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-contacts"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_contacts")}
-              </span>
-              <span className="summary-stat-value">
-                {chipValue(summary?.contact_count ?? customer.contact_count)}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/pricing`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-pricing"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_pricing")}
-              </span>
-              <span className="summary-stat-value">
-                {chipValue(summary?.pricing_rule_count)}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/extra-work`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-extra-work"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_extra_work")}
-              </span>
-              <span className="summary-stat-value">
-                {chipValue(summary?.extra_work_count)}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/tickets`}
-              className="summary-stat"
-              data-testid="customer-overview-stat-tickets"
-            >
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_tickets")}
-              </span>
-              <span className="summary-stat-value">
-                {chipValue(summary?.ticket_count)}
-              </span>
-            </Link>
+                <span className="summary-stat-meta">{chip.description}</span>
+              </Link>
+            ))}
           </div>
 
           {/* 2. The dashboard row. Numbers with a label, not links to
@@ -528,90 +558,6 @@ export function CustomerOverviewPage() {
                 </BoundedList>
               </div>
             </div>
-          </div>
-
-          <div
-            className="quicklink-grid"
-            data-testid="customer-overview-quicklinks"
-          >
-            <Link
-              to={`/admin/customers/${customer.id}/contacts`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-contacts"
-            >
-              <span className="quicklink-card-head">
-                <Mail size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_contacts")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_contacts_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/buildings`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-buildings"
-            >
-              <span className="quicklink-card-head">
-                <MapPin size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_buildings")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_buildings_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/users`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-users"
-            >
-              <span className="quicklink-card-head">
-                <UserCog size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_users")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_users_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/permissions`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-permissions"
-            >
-              <span className="quicklink-card-head">
-                <ShieldCheck size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_permissions")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_permissions_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/pricing`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-pricing"
-            >
-              <span className="quicklink-card-head">
-                <Tag size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_pricing")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_pricing_desc")}
-              </span>
-            </Link>
-            <Link
-              to={`/admin/customers/${customer.id}/extra-work`}
-              className="quicklink-card"
-              data-testid="customer-overview-quicklink-extra-work"
-            >
-              <span className="quicklink-card-head">
-                <Receipt size={18} strokeWidth={2} />
-                {t("customer_view.overview.quicklink_extra_work")}
-              </span>
-              <span className="quicklink-card-desc">
-                {t("customer_view.overview.quicklink_extra_work_desc")}
-              </span>
-            </Link>
           </div>
 
           <ConfirmDialog

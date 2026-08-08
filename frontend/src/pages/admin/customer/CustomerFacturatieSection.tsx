@@ -1,26 +1,29 @@
-// Invoicing Phase 4b — the "Facturatie" section: the informational contract
-// PDF (upload / view / replace / remove) + the billing-schedule settings
+// The "Facturatie" section: the billing-schedule settings
 // (invoice_day_rule + invoice_granularity_default). Provider-admin-gated in
 // the UI (the backend enforces OSIUS-admin on write; the controls hide for
 // non-admins). Self-contained so the host page only imports + mounts it.
 //
-// Sprint 153 §4.2 — this section now mounts on the customer SETTINGS page,
-// not the Overview. The file keeps its name and location; only the mount
-// moved. The inline contract-PDF preview was removed at the same time: the
-// owner does not want a PDF rendering inside a settings screen. "View PDF"
-// stays and is unaffected — `handleView` always fetched its OWN blob and
-// object URL and never read the preview's, so deleting the preview effect
-// cannot break the download.
-import { useRef, useState } from "react";
+// Sprint 153 §4.2 — this section mounts on the customer SETTINGS page, not
+// the Overview. The file keeps its name and location; only the mount moved.
+//
+// Sprint 154 §C — the contract-PDF half is GONE from this UI: the upload
+// input, the View / Replace / Remove buttons and the media imports. Sprint
+// 153 had removed only the inline preview; the owner wants the whole thing
+// off the screen.
+//
+// THIS IS A UI REMOVAL, NOT DATA LOSS. `CustomerContractPdfView`, the
+// `Customer.contract_pdf` model field, the upload path and every stored
+// file are untouched — `contract_pdf_url` is still on the serializer and
+// still populated. Any PDF a customer already has is still on disk and
+// still reachable through the API; there is simply no button for it here
+// any more. Restoring the UI is a frontend change with no migration.
+//
+// What remains is the half that does something: the billing schedule.
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
 import { updateCustomer } from "../../../api/admin";
-import {
-  deleteCustomerContractPdf,
-  fetchCustomerContractPdf,
-  uploadCustomerContractPdf,
-} from "../../../api/media";
 import type {
   CustomerAdmin,
   InvoiceDayRule,
@@ -70,7 +73,6 @@ export function CustomerFacturatieSection({
   const { push: pushToast } = useToast();
   const canManage = isProviderAdmin(me?.role);
 
-  const fileRef = useRef<HTMLInputElement>(null);
   const [daySelection, setDaySelection] = useState<string>(() =>
     initialDaySelection(customer),
   );
@@ -78,10 +80,7 @@ export function CustomerFacturatieSection({
     customer.invoice_granularity_default ?? "CUSTOMER",
   );
   const [savingSchedule, setSavingSchedule] = useState(false);
-  const [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState("");
-
-  const hasContract = Boolean(customer.contract_pdf_url);
 
   async function handleSaveSchedule() {
     setSavingSchedule(true);
@@ -97,49 +96,6 @@ export function CustomerFacturatieSection({
       setError(getApiError(err));
     } finally {
       setSavingSchedule(false);
-    }
-  }
-
-  async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploadBusy(true);
-    setError("");
-    try {
-      const url = await uploadCustomerContractPdf(customer.id, file);
-      onUpdated({ ...customer, contract_pdf_url: url });
-      pushToast({ variant: "success", title: t("facturatie.contract_uploaded") });
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setUploadBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  async function handleRemove() {
-    setUploadBusy(true);
-    setError("");
-    try {
-      await deleteCustomerContractPdf(customer.id);
-      onUpdated({ ...customer, contract_pdf_url: null });
-      pushToast({ variant: "success", title: t("facturatie.contract_removed") });
-    } catch (err) {
-      setError(getApiError(err));
-    } finally {
-      setUploadBusy(false);
-    }
-  }
-
-  async function handleView() {
-    setError("");
-    try {
-      const blob = await fetchCustomerContractPdf(customer.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err) {
-      setError(getApiError(err));
     }
   }
 
@@ -240,65 +196,6 @@ export function CustomerFacturatieSection({
           </div>
         )}
 
-        {/* Contract PDF. */}
-        <div className="detail-field-label" style={{ marginBottom: 4 }}>
-          {t("facturatie.contract_title")}
-        </div>
-        <p className="muted small" style={{ marginBottom: 8 }}>
-          {t("facturatie.contract_hint")}
-        </p>
-        <div
-          style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
-          data-testid="facturatie-contract-controls"
-        >
-          {hasContract ? (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleView}
-              data-testid="facturatie-contract-view"
-            >
-              {t("facturatie.contract_view")}
-            </button>
-          ) : (
-            <span className="muted small">{t("facturatie.contract_none")}</span>
-          )}
-          {canManage && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="application/pdf"
-                hidden
-                onChange={handleFile}
-                data-testid="facturatie-contract-input"
-              />
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => fileRef.current?.click()}
-                disabled={uploadBusy}
-                data-testid="facturatie-contract-upload"
-              >
-                {hasContract
-                  ? t("facturatie.contract_replace")
-                  : t("facturatie.contract_upload")}
-              </button>
-              {hasContract && (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  style={{ color: "var(--red)" }}
-                  onClick={handleRemove}
-                  disabled={uploadBusy}
-                  data-testid="facturatie-contract-remove"
-                >
-                  {t("facturatie.contract_remove")}
-                </button>
-              )}
-            </>
-          )}
-        </div>
       </div>
     </section>
   );

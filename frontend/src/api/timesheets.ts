@@ -175,6 +175,38 @@ export async function deleteTimeEntry(id: number): Promise<void> {
   await api.delete(`/timesheets/entries/${id}/`);
 }
 
+/**
+ * Sprint 154 §M — save a whole week of hours in ONE request.
+ *
+ * All-or-nothing on the server: one invalid cell rolls the entire week
+ * back, so there is no partial-success shape to handle here. A closed
+ * week refuses the whole grid with the server's own `week_closed`
+ * message, which the caller surfaces verbatim.
+ *
+ * `hours: "0"` CLEARS a cell (deletes the row). A cell the grid does not
+ * send is left untouched, so saving a filtered view can never wipe rows
+ * the operator could not see.
+ */
+export async function saveWeekGrid(payload: {
+  employee?: number | null;
+  company?: number | null;
+  iso_year: number;
+  iso_week: number;
+  cells: {
+    hour_type: number;
+    building?: number | null;
+    date: string;
+    hours: string;
+  }[];
+}): Promise<{ created: number; updated: number; deleted: number }> {
+  const response = await api.post<{
+    created: number;
+    updated: number;
+    deleted: number;
+  }>("/timesheets/entries/bulk-week/", payload);
+  return response.data;
+}
+
 // ---------------------------------------------------------------------------
 // Week locks
 // ---------------------------------------------------------------------------

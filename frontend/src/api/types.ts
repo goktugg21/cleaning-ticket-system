@@ -672,8 +672,56 @@ export interface BuildingAdmin {
   country: string;
   postal_code: string;
   is_active: boolean;
+  // Sprint 154 §I.5 — per-row counts, annotated on the list queryset (no
+  // N+1). Optional because the create/update responses and older cached
+  // payloads may predate them.
+  customer_count?: number;
+  manager_count?: number;
+  staff_count?: number;
+  contact_count?: number;
+  /** Bounded preview for the list's Customers column: the first few
+   *  names plus the TRUE total, so the cell can render "A, B +3" without
+   *  a second request and without an unbounded list. */
+  customer_names?: { names: string[]; total: number };
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Sprint 154 §I.6 — GET /api/buildings/<id>/summary/.
+ *
+ * Same contract as `CustomerSummary`: `null` means "this module is not
+ * yours to read" and renders an em dash; `0` means "readable and empty".
+ * Never collapse the two with `?? 0`.
+ *
+ * `room_count` is ALWAYS null: this system has no room concept — no
+ * model, no app, no field. The key exists so the shape is stable.
+ */
+export interface BuildingSummary {
+  room_count: number | null;
+  customer_count: number | null;
+  manager_count: number | null;
+  staff_count: number | null;
+  contact_count: number | null;
+  ticket_count: number | null;
+  open_ticket_count: number | null;
+  extra_work_count: number | null;
+  open_extra_work_count: number | null;
+}
+
+/** Sprint 154 §I.2 — the four relations the bulk link/unlink endpoint
+ *  understands. One endpoint, four bindings. */
+export type BuildingLinkRelation =
+  | "customers"
+  | "managers"
+  | "staff"
+  | "contacts";
+
+export interface BuildingBulkLinkResult {
+  created: number;
+  removed: number;
+  already_linked: number;
+  not_linked: number;
 }
 
 export interface CustomerAdmin {

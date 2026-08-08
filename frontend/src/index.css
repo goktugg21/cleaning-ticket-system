@@ -1413,6 +1413,45 @@ table.data-table {
 
 .data-table tbody tr:hover .td-select { cursor: default; }
 
+/* Sprint 154 — the shared EntityPicker's row list. Sits inside a
+   BoundedList, so the scroll cap comes from there; this is only the row
+   shape. */
+.entity-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entity-picker-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.entity-picker-row:hover { background: var(--green-faint); }
+
+.entity-picker-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.entity-picker-label {
+  font-size: 13px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.entity-picker-sublabel {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
+
 .td-id {
   font-family: 'DM Mono', 'SF Mono', ui-monospace, monospace;
   font-size: 11px;
@@ -4848,22 +4887,46 @@ a.attn-row:hover {
   color: var(--text-faint);
 }
 
-/* Sprint 153 §4.1 — the count-chip strip carries six chips now
-   (Buildings / Users / Contacts / Pricing / Extra work / Tickets). The
-   base .summary-grid is a hard `repeat(4, 1fr)` used by a dozen other
-   pages, so this is a MODIFIER, not an edit to the base rule. */
-.summary-grid-6 { grid-template-columns: repeat(6, 1fr); }
-
-@media (max-width: 1400px) {
-  .summary-grid-6 { grid-template-columns: repeat(3, 1fr); }
+/* Sprint 153 §4.1 / Sprint 154 §A — the count-chip strip. It carries
+   SEVEN chips now and each one holds an icon, a count, a name and a
+   description, because §A folded the duplicate quicklink grid into it.
+   The base .summary-grid is a hard `repeat(4, 1fr)` used by a dozen
+   other pages, so this is a MODIFIER, not an edit to the base rule.
+   `auto-fit` + a minimum rather than a fixed count: seven does not
+   divide evenly into any sensible column count, and a fixed grid would
+   leave a ragged orphan at most widths. */
+.summary-grid-chips {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
-@media (max-width: 900px) {
-  .summary-grid-6 { grid-template-columns: repeat(2, 1fr); }
+.summary-stat-chip {
+  gap: 4px;
 }
 
-@media (max-width: 560px) {
-  .summary-grid-6 { grid-template-columns: 1fr; }
+.summary-stat-chip-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-faint);
+}
+
+.summary-stat-chip-head .summary-stat-label {
+  /* The label sits beside the icon rather than above the number, so it
+     must not also carry the block-level spacing the base class has. */
+  margin: 0;
+}
+
+.summary-stat-chip:hover .summary-stat-chip-head {
+  color: var(--green);
+}
+
+.summary-stat-chip .summary-stat-meta {
+  /* Two lines of description at most; a longer one is a writing problem,
+     not a layout one, and letting it grow makes the chips ragged. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* Sprint 153 §4.1 — About and Linked buildings side by side. Each was
@@ -5895,13 +5958,13 @@ a.attn-row:hover {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
-/* Sprint 129 — a lone last card (odd count, e.g. the 5th "manage documents"
-   toggle) spans the full width instead of sitting orphaned in a half-width
-   column. Only matches when the last card is the odd one out, so the even
-   (4-card) case and the single-column responsive mode are untouched. */
-.policy-toggle-grid > .policy-toggle-card:last-child:nth-child(odd) {
-  grid-column: 1 / -1;
-}
+/* Sprint 154 §J — the Sprint 129 rule that made a lone last card span
+   both columns is GONE. The owner's complaint was exactly that: the
+   "Allow customer users to manage documents" toggle rendered at double
+   width and read as more important than the four above it, which it is
+   not. An odd last card now sits at normal width in the left column.
+   Deliberately NOT replaced with a 3-column or auto-fit grid — the
+   complaint was the double width, nothing else. */
 .policy-toggle-card {
   position: relative;
   display: grid;
