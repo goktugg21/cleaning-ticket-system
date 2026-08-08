@@ -1413,6 +1413,23 @@ table.data-table {
 
 .data-table tbody tr:hover .td-select { cursor: default; }
 
+/* Sprint 154 §E — the "+N" chip in the buildings list' Customers cell.
+   Muted on purpose: it is an overflow indicator, not a status, and must
+   not compete with the real cell-tag-open / cell-tag-closed badges in
+   the same row. */
+.cell-tag-muted {
+  background: var(--surface-2);
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+}
+
+.building-customers-cell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
 /* Sprint 154 — the shared EntityPicker's row list. Sits inside a
    BoundedList, so the scroll cap comes from there; this is only the row
    shape. */

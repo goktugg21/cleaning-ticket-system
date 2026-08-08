@@ -23,7 +23,14 @@ export interface BulkEditField {
   /** The wire key. Must be on the server's allow-list. */
   key: string;
   label: string;
-  options: { value: string; label: string }[];
+  /** A picker (default) or a free-text box. A text field's "leave
+   *  unchanged" is simply an empty box — which is why a bulk edit can
+   *  never CLEAR a text field to "", only set it to something. Clearing
+   *  one row's city is a single-row edit; doing it to twenty at once is
+   *  almost always a mistake, so the affordance is deliberately absent. */
+  type?: "select" | "text";
+  placeholder?: string;
+  options?: { value: string; label: string }[];
 }
 
 export function BulkEditDialog({
@@ -52,7 +59,7 @@ export function BulkEditDialog({
   const patch = useMemo(() => {
     const out: Record<string, string> = {};
     for (const field of fields) {
-      const value = values[field.key];
+      const value = (values[field.key] ?? "").trim();
       if (value) out[field.key] = value;
     }
     return out;
@@ -94,7 +101,32 @@ export function BulkEditDialog({
           </div>
         )}
 
-        {fields.map((field) => (
+        {fields.map((field) =>
+          field.type === "text" ? (
+            <div className="field" key={field.key}>
+              <label
+                className="field-label"
+                htmlFor={`${testIdPrefix}-${field.key}`}
+              >
+                {field.label}
+              </label>
+              <input
+                id={`${testIdPrefix}-${field.key}`}
+                className="field-input"
+                type="text"
+                value={values[field.key] ?? ""}
+                placeholder={field.placeholder}
+                onChange={(event) =>
+                  setValues((prev) => ({
+                    ...prev,
+                    [field.key]: event.target.value,
+                  }))
+                }
+                disabled={busy}
+                data-testid={`${testIdPrefix}-field-${field.key}`}
+              />
+            </div>
+          ) : (
           <div className="field" key={field.key}>
             <label
               className="field-label"
@@ -117,14 +149,15 @@ export function BulkEditDialog({
             >
               {/* Always first, always the default. */}
               <option value="">{t("bulk_edit.leave_unchanged")}</option>
-              {field.options.map((option) => (
+              {(field.options ?? []).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
           </div>
-        ))}
+          ),
+        )}
 
         {nothingChosen && (
           <p className="muted small" style={{ marginTop: 4 }}>
