@@ -94,6 +94,26 @@ export function MyHoursPage() {
   // enforces that independently (a non-manager naming someone else is a
   // 403), so this only decides what the grid writes, never what it may.
   const myEmployeeId = me?.id ?? null;
+  // Sprint 155 §5 — the grid's two props, for a one-person page. Both
+  // are derived (no effect, no second copy of `entries` to keep in
+  // step): the block list is this user, and every entry on the page is
+  // already theirs.
+  const gridEmployees = useMemo(
+    () =>
+      myEmployeeId === null
+        ? []
+        : [
+            {
+              id: myEmployeeId,
+              name: me?.full_name?.trim() || me?.email || "",
+            },
+          ],
+    [myEmployeeId, me?.full_name, me?.email],
+  );
+  const gridEntries = useMemo(
+    () => (myEmployeeId === null ? {} : { [myEmployeeId]: entries }),
+    [myEmployeeId, entries],
+  );
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
   const [weekClosed, setWeekClosed] = useState(false);
@@ -482,10 +502,15 @@ export function MyHoursPage() {
           {gridOpen && (
             <HoursWeekGrid
               week={week}
-              employeeId={myEmployeeId}
+              /* Sprint 155 §5 — the grid renders a block per employee it
+                 is given. Here that is exactly one person: this page
+                 writes only the signed-in user's own hours, so there is
+                 no selector and nothing to choose. Same component as the
+                 admin page, one member in the list. */
+              employees={gridEmployees}
               hourTypes={hourTypes}
               buildings={buildings}
-              entries={entries}
+              entriesByEmployee={gridEntries}
               weekClosed={weekClosed}
               onSaved={refresh}
             />

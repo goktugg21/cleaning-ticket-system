@@ -188,11 +188,15 @@ export async function deleteTimeEntry(id: number): Promise<void> {
  * the operator could not see.
  */
 export async function saveWeekGrid(payload: {
+  /** The DEFAULT employee for cells that omit one. Sprint 154 sent only
+   *  this; Sprint 155 sends it per cell so one request can file several
+   *  people's weeks. Both shapes are accepted by the endpoint. */
   employee?: number | null;
   company?: number | null;
   iso_year: number;
   iso_week: number;
   cells: {
+    employee?: number | null;
     hour_type: number;
     building?: number | null;
     date: string;

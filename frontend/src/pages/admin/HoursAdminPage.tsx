@@ -39,6 +39,7 @@ import {
   toDateString,
 } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
+import { EntityPicker } from "../../components/EntityPicker";
 import { HoursWeekGrid } from "../../components/timesheets/HoursWeekGrid";
 import {
   hourTypeLabel,
@@ -182,9 +183,35 @@ export function HoursAdminPage() {
   // what Save writes.
   const [gridOpen, setGridOpen] = useState(false);
   const [gridWeek, setGridWeek] = useState<IsoWeek>(() => currentIsoWeek());
-  const [gridEntries, setGridEntries] = useState<TimeEntry[]>([]);
+  const [gridEntries, setGridEntries] = useState<Record<number, TimeEntry[]>>(
+    {},
+  );
   const [gridWeekClosed, setGridWeekClosed] = useState(false);
   const [gridToken, setGridToken] = useState(0);
+  // Sprint 155 §5 — THE headline fix. The grid's employees are its own
+  // state, multi-select, and have nothing to do with `filters.employee`.
+  //
+  // Sprint 154 passed `filters.employee` straight in, so one
+  // single-select control was both "whose rows am I looking at" and
+  // "whose week am I writing": changing the filter to read someone
+  // else's entries silently retargeted Save, and two people's weeks
+  // could not be entered without switching in between. The two concerns
+  // are now separate state and neither touches the other.
+  const [gridEmployeeIds, setGridEmployeeIds] = useState<number[]>([]);
+  // The blocks the grid renders, derived from the selection and the
+  // employee list. Derived so a selected employee who disappears from
+  // the list (company switch, deactivation) simply stops having a
+  // block, with no effect to resync and no stale name on screen.
+  const gridEmployees = useMemo(
+    () =>
+      employees
+        .filter((employee) => gridEmployeeIds.includes(employee.id))
+        .map((employee) => ({
+          id: employee.id,
+          name: employee.full_name || employee.email,
+        })),
+    [employees, gridEmployeeIds],
+  );
 
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
@@ -394,7 +421,7 @@ export function HoursAdminPage() {
   // never derived from them — absence of a WeekLock row means open, so
   // an empty week has no entry to read a lock off.
   useEffect(() => {
-    if (!gridOpen || filters.employee === "") return;
+    if (!gridOpen || gridEmployeeIds.length === 0) return;
     let cancelled = false;
 
     // TWO independent reads, deliberately NOT one Promise.all.
@@ -411,18 +438,32 @@ export function HoursAdminPage() {
     // `company` is now passed so the status call resolves in the first
     // place; the split is belt-and-braces for every other reason it
     // could fail.
-    listTimeEntries({
-      employee: Number(filters.employee),
-      iso_year: gridWeek.isoYear,
-      iso_week: gridWeek.isoWeek,
-      page_size: 200,
-    })
-      .then((entryPage) => {
-        if (!cancelled) setGridEntries(entryPage.results);
-      })
-      .catch(() => {
-        if (!cancelled) setGridEntries([]);
-      });
+    // Sprint 155 §5 — one read PER selected employee, and
+    // `allSettled` so a failure for one person cannot discard anybody
+    // else's rows. That is the same discipline the entries/lock split
+    // below exists for; here the blast radius is one block instead of
+    // the whole grid. The selection is what the operator picked, so the
+    // request count is bounded by their own choice.
+    Promise.allSettled(
+      gridEmployeeIds.map((employeeId) =>
+        listTimeEntries({
+          employee: employeeId,
+          iso_year: gridWeek.isoYear,
+          iso_week: gridWeek.isoWeek,
+          page_size: 200,
+        }).then((entryPage) => [employeeId, entryPage.results] as const),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<number, TimeEntry[]> = {};
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          const [employeeId, rows] = result.value;
+          next[employeeId] = rows;
+        }
+      }
+      setGridEntries(next);
+    });
 
     fetchWeekStatus({
       iso_year: gridWeek.isoYear,
@@ -445,7 +486,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [gridOpen, filters.employee, gridWeek, gridToken, company]);
+  }, [gridOpen, gridEmployeeIds, gridWeek, gridToken, company]);
 
   function openCreateEntry() {
     setEntryMode("create");
@@ -730,21 +771,46 @@ export function HoursAdminPage() {
               </div>
             </div>
             {gridOpen && (
-              <HoursWeekGrid
-                week={gridWeek}
-                employeeId={
-                  filters.employee === "" ? null : Number(filters.employee)
-                }
-                companyId={company === "" ? undefined : company}
-                hourTypes={activeHourTypes}
-                buildings={buildings}
-                entries={gridEntries}
-                weekClosed={gridWeekClosed}
-                onSaved={async () => {
-                  setGridToken((n) => n + 1);
-                  await refreshEntries();
-                }}
-              />
+              <>
+                {/* Sprint 155 §5 — the grid's OWN employee selector.
+                    Multi-select, and deliberately not the filter row
+                    below: the filter decides what the table shows, this
+                    decides whose week Save writes, and Sprint 154's bug
+                    was making one control mean both. Changing either one
+                    now leaves the other exactly as it was. */}
+                <div className="field" style={{ marginBottom: 12 }}>
+                  <span className="field-label">
+                    {t("hours_week_grid.employees_label")}
+                  </span>
+                  <EntityPicker
+                    options={employees.map((employee) => ({
+                      id: employee.id,
+                      label: employee.full_name || employee.email,
+                      sublabel: employee.email,
+                    }))}
+                    selectedIds={gridEmployeeIds}
+                    onChange={setGridEmployeeIds}
+                    emptyText={t("hours_week_grid.no_employees")}
+                    testIdPrefix="hours-week-grid-employees"
+                  />
+                  <p className="field-hint muted small">
+                    {t("hours_week_grid.employees_hint")}
+                  </p>
+                </div>
+                <HoursWeekGrid
+                  week={gridWeek}
+                  employees={gridEmployees}
+                  companyId={company === "" ? undefined : company}
+                  hourTypes={activeHourTypes}
+                  buildings={buildings}
+                  entriesByEmployee={gridEntries}
+                  weekClosed={gridWeekClosed}
+                  onSaved={async () => {
+                    setGridToken((n) => n + 1);
+                    await refreshEntries();
+                  }}
+                />
+              </>
             )}
           </div>
 
