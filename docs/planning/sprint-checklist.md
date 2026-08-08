@@ -55,220 +55,156 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-153-customers-area` — Sprint 153, the Customers
-area. Cut from `main`@`a7c37f6`. **CC did NOT open a PR and did NOT
-deploy this branch.**
+**Branch:** `feat/sprint-154-owner-feedback` — Sprint 154, the whole owner
+feedback list on one branch. **CC did NOT open a PR and did NOT deploy.**
 
-**Last shipped PR on `main`: #130** — Sprint 152, employee hours. Its
-SHIPPED line was appended by this branch (a PR cannot cite its own
-number). **Read that line: #130's CI never ran.**
+**Cut from `origin/feat/sprint-153-customers-area`, NOT from `main`.**
+PR #131 (Sprint 153) was still unmerged when this branch was cut, and the
+prompt's fallback said to branch from 153 and say so. That means #131 and
+#154 must merge IN ORDER: #154 contains all of #153.
 
-**What this sprint is.** The first round of an owner-driven frontend
-polishing phase. The owner compared our Customers area against a
-reference system he uses daily and it lost on three counts: density,
-bulk actions, and an overview page that said nothing useful. Later
-rounds cover Buildings, a polish batch and the Hours week-grid; none of
-them were pulled forward.
+**What this sprint is.** Not a scoped round. The owner gave one large
+feedback list, the previous sprint delivered a fraction of it, and he was
+right to be unhappy. Everything below shipped together.
 
-### Backend — additive only, no migration
+### The owner-visible changes, in plain words
 
-`makemigrations --dry-run --check` → *No changes detected*, as intended:
-nothing here touches a model.
+- The customer page has ONE row of tiles instead of the same six links
+  twice — each tile now carries its icon, its number, its name and its
+  description.
+- The dead "Building" dropdown is gone from the customer form. A customer
+  belongs to many buildings; the list further down is the real one.
+- The Contract PDF box is gone from the customer settings screen.
+- The customers list has a Delete button and an Edit button that work on
+  several customers at once, plus a button that attaches buildings to
+  several customers in one go.
+- The buildings list got all of the same, plus a Customers column and a
+  button that attaches customers to several buildings at once.
+- A building's page now lists its customers, managers, staff and contact
+  persons, and lets an admin add or remove any of them.
+- From a customer you can now click straight through to a building.
+- Buildings and customers can be linked while you are still creating
+  them, not only afterwards.
+- Everyone can have a phone number, and it shows in the people lists.
+- Hours can be typed in as a whole week on one screen instead of one
+  entry at a time.
+- "Extra Work" in the menu is a normal link again instead of a folder you
+  have to open.
+- The Documents screen uses the whole window instead of a small box.
+- The permissions screen no longer has one toggle stretched across two
+  columns.
 
-- **§2.1 Sortable columns.** `CustomerViewSet.ordering_fields` extended
-  to `["name", "created_at", "contact_email", "is_active"]`.
-  `OrderingFilter` was already in `DEFAULT_FILTER_BACKENDS`, so that is
-  the whole change. Every entry is a concrete column; nothing annotated
-  or traversed is exposed through `?ordering=`.
-- **§2.2 Three annotated counts** on `CustomerSerializer`
-  (`linked_building_count` / `user_count` / `contact_count`), added to
-  `get_queryset()` as `Count(..., distinct=True)`. `distinct=True` is
-  load-bearing: three joined Counts in one query multiply each other's
-  row sets otherwise. The serializer reads the annotation and falls back
-  to `.count()` only for the single-object paths that re-serialise a
-  bare `Customer` (`reactivate`). `linked_building_count` counts M:N
-  membership rows and deliberately ignores the deprecated
-  `Customer.building` anchor (CLAUDE.md §8) — the 0003 backfill means
-  they agree on real data.
-- **A pre-existing N+1 next door, found by the guard test.**
-  `compute_customer_actions` ran a `CompanyUserMembership .exists()`
-  once PER ROW, so a COMPANY_ADMIN paid one extra query per customer on
-  every page of every customer list — invisible on seed data, and
-  nothing to do with this sprint's counts. Memoised on the user instance
-  (request-lifetime; nothing in a GET mutates the caller's own
-  memberships). The response is byte-identical. Without this the
-  `assertNumQueries` guard could not have passed no matter how the
-  counts were computed.
-- **§2.3 `POST /api/customers/bulk-deactivate/`.** Shape mirrors
-  `CustomerServicePriceBulkRaiseView`, the house bulk-write pattern.
-  All-or-nothing in one `transaction.atomic()`; every id resolved
-  through `scope_customers_for` BEFORE any write. **A foreign id and a
-  fictional id return the byte-identical body** — asserted by equality
-  of the two rendered responses, not by "both are 400" (H-1, the Sprint
-  142.1 existence-oracle class). That is also why the message is a
-  constant and never names the offending id. Deactivate is
-  `is_active=False`, matching `perform_destroy`; a Customer is never
-  hard-deleted. Each row goes through a real `save()` — a queryset
-  `.update()` fires no signals and would write **no** AuditLog row at
-  all (H-10), the `ServiceCategoryArchiveView` precedent and the Sprint
-  152 timesheets trap.
-- **§2.4 `GET /api/customers/<id>/summary/`** (new `views_summary.py`).
-  One read instead of the overview firing six list calls and counting
-  array lengths. Same gate as the customer detail, so an out-of-scope
-  customer **404s, never 403s**. Each sub-count is re-scoped through its
-  own module's helper (`scope_tickets_for`, `scope_extra_work_for`,
-  `scope_invoices_for` / `scope_customer_invoices_for`), so a
-  COMPANY_ADMIN can never see a number that includes rows they cannot
-  open. A module the caller cannot read degrades to **`null`, not `0`**
-  — `0` claims "readable and empty", which for STAFF and extra work
-  would be a lie.
-- **§2.5 Audit.** `audit/signals.py` is untouched, as the prompt
-  predicted: `Customer` is already in the full-CRUD trio with generic
-  field introspection, so a real save on `is_active` audits itself. The
-  new test in `backend/audit/tests/` pins it: 3 customers → 3 AuditLog
-  rows, each carrying `is_active: true → false` and the actor.
+### Backend (§I) — additive, two migrations
 
-**Two things in the prompt did not survive contact with the code**, and
-were deliberately not followed as written:
+`accounts.0009` (`User.phone`) and `customers.0017` (the Algemeen label
+backfill). `makemigrations --dry-run --check` → *No changes detected*.
 
-1. **The terminal-status authority is `tickets/models.py`, not
-   `tickets/state_machine.py`.** The prompt said to import the terminal
-   set from the state machine, or add an "is terminal" helper there. The
-   state machine has no such export — its only terminal set is a
-   two-element local (`{APPROVED, CLOSED}`) inside the extra-work
-   auto-sync helper, which answers a NARROWER question ("has this
-   ticket's work finished") than "has this ticket left every operational
-   queue". The four-element `TERMINAL_TICKET_STATUSES` frozenset in
-   `tickets/models.py` is the real shared authority — already imported
-   by `views_sub_tasks` and `views_staff_assignments` — and is what
-   `/summary/` imports. Adding a second helper in `state_machine.py`
-   would have created exactly the duplicate definition the instruction
-   was trying to prevent. (Worth a future round: FIVE copies of this
-   same four-status set exist — `tickets/models.py`, `tickets/views.py`,
-   `tickets/filters.py`, `tickets/views_manager_assignments.py`,
-   `sla/services.py`. All five currently agree.)
-2. **`unpaid_invoice_total` is not computed with the earned-amount
-   rule.** The prompt said to reuse it from `invoicing/selectors.py`.
-   That rule (`is_earned` / `rowAmounts()`) applies to EXTRA WORK rows;
-   an invoice's amount is `Invoice.total_amount`, which
-   `invoicing/models.py` calls "the SOURCE OF TRUTH once issued".
-   Recomputing it from the earned rule would contradict that freeze,
-   which is the entire point of issuing an invoice. What IS reused from
-   that module is the scope helper and the
-   `invoice__reversed_by__isnull=True` liveness predicate CLAUDE.md §2A
-   says to preserve. **Note the wire name is inherited, not accurate:
-   there is no payment tracking anywhere in the system** — no paid flag,
-   no payment model — so "unpaid" here means OUTSTANDING: SENT, not
-   itself a reversal, and not reversed by a later credit note. If the
-   owner wants true unpaid-vs-paid, that is a new model and a new
-   sprint.
+- **§I.1 `User.phone`** — additive, blank, no backfill. Exposed on the
+  serializers that already carry `full_name`. **`StaffProfile.phone` is a
+  DIFFERENT field and stays untouched**: it is staff-only and gated by
+  `Customer.show_assigned_staff_phone` / the CustomerCompanyPolicy
+  mirror. The two are deliberately not merged and not mirrored.
+- **§I.2 ONE bulk link/unlink family.** `POST /api/buildings/bulk-link/`
+  serves customers / managers / staff / contacts through one
+  `_RELATION_SPECS` table — four thin specs, one implementation.
+  All-or-nothing; every id resolved through its own scoping helper before
+  any write; a foreign id, a fictional id and a cross-company pair all
+  produce the same constant body (H-1). Rows go through
+  `objects.create()` / instance `.delete()` so the audit handlers fire
+  (H-10). Unlinking a customer cascades the
+  `CustomerUserBuildingAccess` revoke — skipping it leaves a customer
+  user with visibility on a building their customer is no longer linked
+  to, which is a scope leak, not untidiness.
+- **§I.3/§I.4** bulk deactivate (mirrors the Sprint 153 customer view)
+  and bulk update. The update allow-lists its fields and 400s on
+  anything else rather than silently ignoring it. `is_active` is NOT
+  patchable — it is read-only on both serializers — so status routes
+  through the lifecycle path and reactivation stays SUPER_ADMIN-only.
+- **§I.5/§I.6** building ordering, four annotated counts, a bounded
+  `customer_names` preview, the inverse `/customers/` read and
+  `/summary/`. `assertNumQueries` proves a 10-row page costs what a
+  2-row page costs.
+- **§G.2 needed two reads that did not exist**:
+  `GET /api/buildings/<id>/staff/` and `.../contacts/`. Both relations
+  have been editable for many sprints — from the USER's page and the
+  CUSTOMER's contacts page — but were never readable from the building.
+- **§I.7 Department + Work Type.** Every customer now gets an "Algemeen"
+  Department and WorkType on creation and by backfill. One
+  operator-typed name column, Dutch, per the Sprint 152.3 HourType
+  precedent.
+- **§M** `POST /api/timesheets/entries/bulk-week/`, all-or-nothing, every
+  row through the normal `TimeEntrySerializer` + `TimeEntry.save()` path
+  so `multiplier_snapshot` and the derived `iso_year`/`iso_week` are
+  written. `timesheets` still imports nothing from `tickets`,
+  `extra_work` or `planned_work`.
 
-### Frontend — the Customers list (`/admin/customers`)
+### Four instructions that did not survive contact with the code
 
-**Density is measured, not asserted** (built `dist/` through
-`vite preview`, Playwright reading real boxes, 24 rows at 1440x900):
+1. **There is no `_USER_TRACKED_FIELDS`.** §I.1 said to add `phone` to
+   it. `accounts.User` is one of the four models audited by GENERIC
+   FIELD INTROSPECTION — `audit.diff._snapshot` walks every concrete
+   field — so `phone` is picked up with no registry edit at all. The
+   test in `audit/tests/` was still added, and it asserts the DIFF, not
+   just a row count, plus that `phone` is not caught by
+   `SENSITIVE_FIELD_TOKENS`.
+2. **`StaffProfile.phone` must not go on the Employees directory.**
+   §K asked for "prefer StaffProfile.phone, fall back to User.phone".
+   `ProviderEmployeeSerializer`'s docstring carries an explicit privacy
+   floor — "MUST NOT leak internal_note, phone, customer linkage" —
+   because it is the BM/CA read surface, and that number's visibility is
+   governed by the customer's policy. Every phone column added is
+   `User.phone`, which is ungated by design.
+3. **This system has no rooms.** §I.6/§G.2 asked for a room count. There
+   is no `Room` model, no rooms app, and no field subdividing a
+   building. `room_count` is present and always `null` so the contract
+   is stable and the UI renders an em dash rather than a misleading `0`.
+4. **§I.7's `required=True` was not applied as written.** Making the two
+   labels required on the create serializer would break 17 test files
+   and every existing API client, AND would still leave
+   `extra_work.conversion` — which builds its row with
+   `objects.create()` — producing unlabelled Extra Work. Instead the
+   serializer FILLS an omitted label with the customer's "Algemeen" pair
+   and the conversion path stamps it too, through one shared helper. The
+   data invariant ("no unlabelled Extra Work") now holds on every write
+   path rather than only on the form's, and the UI is where the field is
+   required.
 
-| | before | after |
-| --- | --- | --- |
-| row pitch | 55px | **47px** |
-| cell padding | 12px 18px | **8px 14px** |
-| font size | 13px | 13px (floor held) |
-| table height | 1354px | **1159px** |
-| document height | 1661px | **1583px** |
-| horizontal overflow | none | none (at 9 columns) |
+### Two bugs the measured pass caught that a clean build would not have
 
-The document got SHORTER even though two stat tiles were added, which
-push the table 117px further down (277.8px → 394.8px).
+- **§N.2 was a missing translation, not a layout overlap** — and not
+  where the prompt looked. `ExtraWorkListPage` defaults to the
+  `extra_work` namespace; `list.filter_catalog_category` lived only in
+  `common.json`. Right key, wrong bundle. Measured after the fix at
+  1024/1280/1440: **zero overlapping controls and zero px of horizontal
+  overflow at every width.** One residue fixed: at 1024px the longest
+  label overflowed its own box under `white-space: nowrap`; it wraps
+  now (1280/1440 unchanged at 3 rows / 156px; 1024 grows 213 → 226px).
+- **The week grid saved but reloaded empty.** The entries read and the
+  week-lock read were one `Promise.all`, and `weeks/status/` 400s for a
+  SUPER_ADMIN who has not disambiguated a company — the rejection threw
+  away entries whose own request had returned 200. `company` is now
+  passed AND the two reads are independent.
 
-- **§3.1** Two tiles (total / active) reusing `.summary-grid` /
-  `.summary-stat`, inside the list card above the filter bar. Active
-  gets its own count (`is_active=true&page_size=1`, read `count`) — NOT
-  the rendered rows, which are one page. **`pagination_class` was not
-  loosened** to make that easier; Sprint 134 did that to three viewsets
-  and broke the list pages' own prev/next, and Sprint 135 reverted it.
-- **§3.2** The Building column is gone from BOTH renderings — the
-  `<table>` and the parallel `.admin-card-list` phone list. It read
-  `customer.building`, the deprecated single-building anchor. The
-  building FILTER stays (it is genuinely useful), so the `buildings`
-  state and its effect stay with it. Final columns: select, Name,
-  Company, Contact e-mail, Buildings, Users, Contacts, Status, Actions.
-- **§3.3** Sortable Name / Contact e-mail / Status. The clickable thing
-  is a real `<button>` inside the `<th>`, so it works from the keyboard;
-  `aria-sort` sits on the `<th>`, where ARIA puts it. Page reset and
-  selection reset happen in the CLICK HANDLER — Sprint 152 §10 added six
-  set-state-in-effect violations of exactly that shape on its first
-  draft.
-- **§3.4** Bulk selection through the existing `MultiSelectToolbar` (no
-  second selection primitive), one destructive action, behind a
-  `ConfirmDialog` that names the count. The dialog is rendered
-  UNCONDITIONALLY and driven through the ref (Sprint 128 / Sprint 118).
-  Local row state is updated BEFORE the refetch. Selection clears after
-  a successful action and on every filter change — a hidden-but-selected
-  row being deactivated is a real surprise.
-- **§3.5** Row Edit opens a dialog on the page. The full
-  `CustomerFormPage` route is untouched and still linked from the dialog
-  and the detail page. Keyed by customer id, so state seeds from the
-  prop on mount rather than from a syncing effect.
-  **`is_active` is READ-ONLY on `CustomerSerializer`**, so the Status
-  field could not ride along on the PATCH — DRF would drop it silently
-  and the dialog would report a save that never happened. Status is
-  routed through the real lifecycle endpoints instead (DELETE to
-  deactivate, `POST /reactivate/` to restore), with reactivation offered
-  only to a SUPER_ADMIN, matching the gate already on the Settings and
-  Overview pages. Basics are PATCHed first, because a COMPANY_ADMIN's
-  scope excludes inactive customers and a patch after a deactivate would
-  404 on the row it just deactivated.
+### Gates
 
-### Frontend — the Customer overview (`/admin/customers/:id`)
+Backend: `test customers buildings accounts audit timesheets extra_work`.
+64 new tests across `buildings/tests/test_sprint154_buildings_area.py`
+(38), `customers/tests/test_sprint154_default_labels.py` (8),
+`timesheets/tests/test_sprint154_week_grid.py` (14) and
+`audit/tests/test_sprint154_user_phone_audit.py` (4).
+`makemigrations --dry-run --check` → *No changes detected*.
+Frontend: `tsc` clean, `eslint .` **44 problems (42 errors, 2 warnings)**
+— the per-file distribution is identical to the 45 baseline except
+`CustomerFormPage` 6 → 5, which §B's deleted effect accounts for. Zero
+added; one draft violation was introduced and removed before commit. No
+new `eslint-disable`. i18n `common` **nl 2070 / en 2070 / equal True**;
+`extra_work` **nl 460 / en 460 / equal True**.
 
-New order: header → the six count-chips → an operational dashboard row →
-About and Linked buildings side by side → quicklinks. The
-`section-explainer` paragraph is gone; the chips say it better.
-Measured at 1440x900: chip strip at y=188, About at y=517; About and
-Linked buildings share a row (both top=517, left 284 / 856) and stack
-below 900px (tops 707 / 1038, same left).
-
-- The page makes **three reads instead of five** — the per-module counts
-  that came from `listCustomerUsers().count` /
-  `listCustomerContacts().length` / `listCustomerPrices().length` all
-  arrive in the one `/summary/` call, which also brings the dashboard
-  numbers. A `/summary/` failure degrades the row to em dashes rather
-  than taking the page down.
-- Linked buildings uses `BoundedList` instead of a hand-rolled
-  `.slice(0, 5)` (CLAUDE.md §8), always offers the view-all link, and
-  shows the building's city under the name — which needed one additive
-  read-only `building_city` on `CustomerBuildingMembershipSerializer`.
-- **Facturatie moved to the Settings tab.** The component file keeps its
-  name and location; only the mount moved, and its provider-admin gate
-  is untouched. Its inline contract-PDF preview is deleted — the owner
-  does not want a PDF rendering on a settings screen. The prompt flagged
-  a risk that the preview's blob URL was shared with the download
-  button: **it is not.** `handleView` always fetched its own blob and
-  its own object URL, so removing the preview effect cannot break
-  download; verified in the running app.
-  **One part of §4.2 could not be delivered: "with the filename".**
-  There is no filename to show. `customer_contract_upload_path` stores
-  the PDF as `{uuid4().hex}.pdf` and comments "never trust the client
-  name" — the original filename is deliberately discarded and is not on
-  the model. Surfacing it needs a new column and a migration, and this
-  sprint has none. Queued in `## NEXT`.
-
-**Verified in the real UI, not inferred from a clean build.** A
-Playwright pass over the built `dist/` drove all eight §0 acceptance
-items plus the layout claims: **15/15 checks passed**, including a bulk
-deactivate re-read from the API afterwards to confirm the server really
-wrote it, and real dashboard numbers (5 open tickets, 1 open extra work,
-€ 181,50 outstanding on the demo customer).
-
-**Gates.** `python manage.py test customers audit` → **OK**. `audit` was
-run because a test was added to `backend/audit/tests/`;
-`audit/signals.py` itself is untouched. `makemigrations --dry-run
---check` → *No changes detected*. Frontend gate in `node:22-alpine`:
-`tsc --noEmit` clean, `eslint .` **45 problems (43 errors, 2 warnings) =
-the baseline**, all three in `CustomersAdminPage.tsx` pre-existing and
-carried over unchanged, no new `eslint-disable`, `npm run build`
-succeeded. i18n **nl 1938 / en 1938 / equal True** (from a 1899 / 1899
-baseline: 40 keys added, 1 removed as dead).
+**Verified in the built app, not inferred:** 13 of 14 UI checks passed on
+the first pass; the fourteenth (`/my-hours`) redirects for a SUPER_ADMIN
+by design (Sprint 152.1), so the week grid was verified on
+`/admin/hours` instead — including a full save round-trip read back from
+the API.
 
 ---
 
@@ -515,6 +451,14 @@ item has moved to `## SHIPPED` or been resolved below instead.
     alongside the bulk-raise view, this one all-or-nothing rather than
     per-id-result. The three lists named above are still N sequential
     requests.)*
+    *(Sprint 154 added four more — `buildings/bulk-link/`,
+    `bulk-deactivate/`, `bulk-update/` and `customers/bulk-update/` —
+    and settled the shape question: ALL-OR-NOTHING with one constant
+    rejection body, never a per-id result array, because a per-id array
+    over a top-level tenant list is an existence oracle. The pricing /
+    Services / Units lists are STILL N sequential requests; their ids
+    are already URL-scoped to one customer, so a per-id array is safe
+    there and the shape question above still applies to them.)*
 18. **`ExtraWorkRequest.category` and `ServiceCategory` are two
     unrelated "category" concepts, and both are still live.**
     `ExtraWorkRequest.category` is the fixed `ExtraWorkCategory` enum
@@ -647,6 +591,16 @@ item has moved to `## SHIPPED` or been resolved below instead.
     field + list column, and a decision about whether `StaffProfile
     .phone` then becomes redundant or stays as the work number. Queued
     for the polish round.
+    ***CLOSED by Sprint 154 §I.1/§K.*** `User.phone` shipped (additive,
+    `accounts.0009`), with columns on the Users / Employees /
+    Customer-users lists and an input on the user form. The decision on
+    `StaffProfile.phone` was made and is NOT "redundant": it STAYS, as a
+    genuinely different field. It is staff-only and its visibility is
+    governed by `Customer.show_assigned_staff_phone` / the
+    CustomerCompanyPolicy mirror, and `ProviderEmployeeSerializer`
+    carries an explicit privacy floor forbidding it on the BM/CA read
+    surface. The two are not merged and not mirrored into each other;
+    every read site picks one explicitly.
 
 26. **Five copies of the terminal-ticket-status set.** (Found in the
     Sprint 153 recon while wiring `open_ticket_count`.) The same four
@@ -665,6 +619,58 @@ item has moved to `## SHIPPED` or been resolved below instead.
     `tickets.models.TERMINAL_TICKET_STATUSES`, checking each call site's
     intent first — `sla/services.py` additionally defines
     `PAUSED_STATUS` and may genuinely mean something narrower.
+    *(Sprint 154's `buildings/views_summary.py` imported the exported
+    `tickets.models.TERMINAL_TICKET_STATUSES` rather than adding a
+    seventh copy. Still five.)*
+
+27. **This system has no ROOM concept, and §I.6 asked for a room
+    count.** (Found in the Sprint 154 recon.) There is no `Room` model,
+    no rooms app, and no field subdividing a `Building` — it is an
+    indivisible location everywhere: tickets, extra work, planned work
+    and staff visibility all anchor on `building_id` with nothing below
+    it. `GET /api/buildings/<id>/summary/` returns `room_count: null`
+    unconditionally so the contract is stable and the UI renders an em
+    dash rather than a misleading `0`. If the owner wants rooms it is a
+    new model, a migration, and a product decision about what a room
+    means for ticketing and for staff visibility — not something to
+    infer from a stat tile.
+
+28. **Two i18n bundles, one namespace default, and no check that
+    catches the gap.** (Found by MEASURING in Sprint 154 §N.2.) The
+    §P i18n gate compares `nl/common.json` against `en/common.json`
+    only. That is a lockstep check BETWEEN LANGUAGES; it says nothing
+    about whether a key is in the bundle the calling page actually
+    reads. `ExtraWorkListPage` defaults to the `extra_work` namespace,
+    `list.filter_catalog_category` lived only in `common.json`, and the
+    raw key rendered on screen for at least a sprint while the gate
+    stayed green. Fix shape: a check that every `t("...")` literal in a
+    page resolves in one of the namespaces that page passes to
+    `useTranslation`. Cheap to write, and it closes a class of bug the
+    current gate is structurally blind to. Note the other seven bundles
+    (`extra_work`, `dashboard`, `tickets`, ...) are not lockstep-checked
+    between languages at all either.
+
+29. **The two sortable-header components are duplicated verbatim.**
+    (Sprint 154 §E.) `CustomersAdminPage` and `BuildingsAdminPage` each
+    define an identical `SortableHeader` plus the same
+    `sortStateFor` / `handleSort` trio. They were kept separate because
+    their `SortField` unions are page-specific and TypeScript checks
+    each against its own endpoint's `ordering_fields`; a shared generic
+    would either lose that or need a type parameter threaded through
+    every call site. Worth extracting when a THIRD list needs sorting —
+    two copies is a coincidence, three is a pattern, and the Sprint 126
+    lesson applies from there on.
+
+30. **A COMPANY_ADMIN in more than one provider company gets an
+    unfiltered candidate list on the building detail Add pickers.**
+    (Sprint 154 §G.2.) `listAllUsersByRole` fetches every
+    BUILDING_MANAGER / STAFF the caller may administer, which for a
+    multi-company CA spans all their companies. The bulk-link endpoint
+    still refuses anything out of scope, so nothing unsafe can be
+    created — but the picker offers names from a company that has
+    nothing to do with the building being edited. Fix shape: pass the
+    building's `company` to the candidate fetch. Same family as NEXT
+    item 0.
 
 ---
 
