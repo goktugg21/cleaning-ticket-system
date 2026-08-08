@@ -27,6 +27,8 @@ class UserListSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            # Sprint 154 §I.1 — the admin Users list shows a phone column.
+            "phone",
             "role",
             "language",
             "is_active",
@@ -125,6 +127,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "full_name",
+            "phone",
             "role",
             "language",
             "is_active",
@@ -153,7 +156,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["full_name", "language", "role", "is_active"]
+        fields = ["full_name", "phone", "language", "role", "is_active"]
 
     def to_representation(self, instance):
         # PATCH/PUT must return the canonical detail shape so the

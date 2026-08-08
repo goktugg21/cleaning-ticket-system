@@ -50,6 +50,27 @@ def validate_labels_for_customer(customer, *, department=None, work_type=None):
         raise serializers.ValidationError(errors)
 
 
+def default_labels_for_customer(customer):
+    """Sprint 154 §I.7 — return `(department, work_type)`, the customer's
+    "Algemeen" fallback pair, provisioning it if it is somehow absent.
+
+    Lives here, next to the same-customer invariant, because it has the
+    same "two callers must not drift" property: the Extra Work create
+    serializer fills an omitted label with it, and
+    `extra_work.conversion` stamps a converted ticket's Extra Work with
+    it. One definition.
+
+    Delegates to `customers.signals.ensure_default_labels` — which is
+    idempotent and case-insensitive — so this can never be the thing that
+    creates a duplicate the model's uniqueness constraint would reject.
+    The import is function-local to keep the `extra_work` <-> `customers`
+    module load order tolerant.
+    """
+    from customers.signals import ensure_default_labels
+
+    return ensure_default_labels(customer)
+
+
 def issued_invoice_locking_labels(extra_work):
     """Sprint 127.2 — return the live, ISSUED/SENT invoice whose line locks
     this Extra Work's labels, or None if the labels are free to change.

@@ -25,6 +25,7 @@ from rest_framework.exceptions import ErrorDetail
 
 from tickets.models import Ticket, TicketStatus, TicketStatusHistory
 
+from .label_validation import default_labels_for_customer
 from .classification import (
     ACTOR_PROVIDER,
     IntentValidationError,
@@ -98,7 +99,19 @@ def convert_ticket_to_extra_work(
             )
 
         # 3. Create the parent ExtraWorkRequest from the source ticket.
+        #
+        # Sprint 154 §I.7 — a converted request is labelled like any
+        # other. This path builds its row with `objects.create()` and
+        # never touches `ExtraWorkRequestCreateSerializer`, so a
+        # serializer-level rule could not reach it; stamping the
+        # customer's "Algemeen" pair here is what makes "every Extra Work
+        # has a Department and a Work Type" true on EVERY write path
+        # rather than only on the form's. Both callers resolve the pair
+        # through the one helper in `label_validation`.
         source_label = ticket.ticket_no or ticket.id
+        default_department, default_work_type = default_labels_for_customer(
+            ticket.customer
+        )
         ew = ExtraWorkRequest.objects.create(
             company=ticket.company,
             building=ticket.building,
@@ -108,6 +121,8 @@ def convert_ticket_to_extra_work(
             description=ticket.description,
             category=ExtraWorkCategory.OTHER,
             category_other_text=f"Converted from ticket {source_label}",
+            department=default_department,
+            work_type=default_work_type,
             request_intent=request_intent,
             customer_visible_note=customer_visible_note,
             manager_note=internal_note,

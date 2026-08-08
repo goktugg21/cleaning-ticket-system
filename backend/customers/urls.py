@@ -19,6 +19,8 @@ from documents.views import (
     DocumentListCreateView,
 )
 
+from buildings.views_bulk import CustomerBulkUpdateView
+
 from .views import CustomerBulkDeactivateView, CustomerViewSet
 from .views_summary import CustomerSummaryView
 from .views_labels import (
@@ -60,6 +62,15 @@ urlpatterns = [
         "bulk-deactivate/",
         CustomerBulkDeactivateView.as_view(),
         name="customer-bulk-deactivate",
+    ),
+    # Sprint 154 §I.4 — bulk edit. The view lives in
+    # `buildings/views_bulk.py` next to its building twin so the two
+    # cannot drift apart: they share one mixin and differ only in id
+    # field, allow-list and scope.
+    path(
+        "bulk-update/",
+        CustomerBulkUpdateView.as_view(),
+        name="customer-bulk-update",
     ),
     # Sprint 153 §2.4 — the customer overview dashboard read.
     path(

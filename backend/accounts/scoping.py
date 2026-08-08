@@ -212,6 +212,73 @@ def scope_customers_for(user):
     ).distinct()
 
 
+def manageable_user_ids_for(actor) -> set[int] | None:
+    """Sprint 154 §I.2 — the set of USER ids `actor` may administer.
+
+    Returns `None` for a SUPER_ADMIN, meaning "no restriction" — the
+    caller must treat that as unrestricted rather than as an empty set.
+    (`set()` would mean "nobody", which is the opposite answer.)
+
+    A COMPANY_ADMIN sees a user iff that user is attached to one of the
+    actor's provider companies through ANY of the four membership axes.
+    All four are needed, and each one is load-bearing:
+
+      * `CompanyUserMembership`      — other provider admins.
+      * `BuildingManagerAssignment`  — building managers.
+      * `CustomerUserMembership`     — customer-side users.
+      * `BuildingStaffVisibility`    — STAFF. Sprint 24A: a staff member
+        belongs to a company through this table and NOTHING else, so
+        omitting it hides exactly the role the buildings page most needs.
+
+    Extracted verbatim from `accounts.views_users.UserViewSet
+    .get_queryset`, which now calls this instead of keeping its own copy.
+    One definition, per the Sprint 126 lesson — a second
+    independently-maintained copy of a scope rule is how a surface
+    silently drifts out of sync with the rule it is supposed to enforce.
+
+    Every other role gets `set()` — they administer nobody.
+    """
+    if _is_anonymous(actor):
+        return set()
+    if actor.role == UserRole.SUPER_ADMIN:
+        return None
+
+    from buildings.models import BuildingStaffVisibility
+
+    if actor.role != UserRole.COMPANY_ADMIN:
+        return set()
+
+    actor_company_ids = list(
+        CompanyUserMembership.objects.filter(user=actor).values_list(
+            "company_id", flat=True
+        )
+    )
+    if not actor_company_ids:
+        return set()
+
+    ids = set(
+        CompanyUserMembership.objects.filter(
+            company_id__in=actor_company_ids
+        ).values_list("user_id", flat=True)
+    )
+    ids |= set(
+        BuildingManagerAssignment.objects.filter(
+            building__company_id__in=actor_company_ids
+        ).values_list("user_id", flat=True)
+    )
+    ids |= set(
+        CustomerUserMembership.objects.filter(
+            customer__company_id__in=actor_company_ids
+        ).values_list("user_id", flat=True)
+    )
+    ids |= set(
+        BuildingStaffVisibility.objects.filter(
+            building__company_id__in=actor_company_ids
+        ).values_list("user_id", flat=True)
+    )
+    return ids
+
+
 def scope_tickets_for(user):
     """
     Return the queryset of tickets visible to `user`.

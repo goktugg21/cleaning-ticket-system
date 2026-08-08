@@ -55,6 +55,7 @@ from .models import (
     Service,
 )
 from .label_validation import (
+    default_labels_for_customer,
     issued_invoice_locking_labels,
     validate_labels_for_customer,
 )
@@ -1295,6 +1296,34 @@ class ExtraWorkRequestCreateSerializer(serializers.ModelSerializer):
             department=attrs.get("department"),
             work_type=attrs.get("work_type"),
         )
+
+        # Sprint 154 §I.7 — every Extra Work carries BOTH labels.
+        #
+        # The owner's requirement is that Department and Work Type are
+        # mandatory, with an "Algemeen" option always available when a
+        # customer has defined none of their own. `customers.signals
+        # .ensure_default_labels` guarantees that row exists for every
+        # customer (and migration 0017 backfilled the existing ones), so
+        # the UI can always offer a valid pick and defaults to it.
+        #
+        # Here we resolve an OMITTED label to that same "Algemeen" row
+        # rather than rejecting the request. See the sprint report for
+        # the full reasoning; the short version is that this makes the
+        # data invariant ("no unlabelled Extra Work") hold on EVERY write
+        # path, including `extra_work.conversion`, which builds its row
+        # with `objects.create()` and never sees this serializer at all.
+        # A serializer-level `required=True` would leave that path
+        # unlabelled while breaking every existing API client.
+        #
+        # An explicitly-supplied label always wins; this only fills a gap.
+        if attrs.get("department") is None or attrs.get("work_type") is None:
+            default_department, default_work_type = default_labels_for_customer(
+                customer
+            )
+            if attrs.get("department") is None:
+                attrs["department"] = default_department
+            if attrs.get("work_type") is None:
+                attrs["work_type"] = default_work_type
 
         # Sprint 3B — every catalog-linked line's service must be
         # owned by the same provider company as the customer.

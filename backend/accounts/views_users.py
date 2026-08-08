@@ -26,6 +26,7 @@ from .effective_actions import (
 )
 from .models import User, UserRole
 from .permissions import CanManageUser, IsSuperAdmin
+from .scoping import manageable_user_ids_for
 from .permissions_effective import effective_permissions as compose_effective_permissions
 from .serializers_users import (
     UserDetailSerializer,
@@ -70,32 +71,14 @@ class UserViewSet(viewsets.ModelViewSet):
             )
             if not actor_company_ids:
                 return User.objects.none()
-            in_scope_user_ids = (
-                CompanyUserMembership.objects.filter(
-                    company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            in_scope_user_ids = set(in_scope_user_ids).union(
-                BuildingManagerAssignment.objects.filter(
-                    building__company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            in_scope_user_ids = in_scope_user_ids.union(
-                CustomerUserMembership.objects.filter(
-                    customer__company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            # Sprint 24A — STAFF users with visibility on any of the
-            # actor's buildings are in scope. Pairs with the
-            # `_user_in_actor_company` extension in scoping.py so the
-            # Users admin page surfaces the company's STAFF persona
-            # alongside the Sprint-7 membership rows.
-            in_scope_user_ids = in_scope_user_ids.union(
-                BuildingStaffVisibility.objects.filter(
-                    building__company_id__in=actor_company_ids
-                ).values_list("user_id", flat=True)
-            )
-            base = qs.filter(id__in=in_scope_user_ids)
+            # Sprint 154 §I.2 — the four-axis union (company membership,
+            # building-manager assignment, customer membership and the
+            # Sprint 24A STAFF `BuildingStaffVisibility` axis) moved to
+            # `accounts.scoping.manageable_user_ids_for` so the new bulk
+            # link/unlink endpoint enforces the SAME rule instead of
+            # carrying a second copy of it. Behaviour here is unchanged.
+            in_scope_user_ids = manageable_user_ids_for(actor)
+            base = qs.filter(id__in=in_scope_user_ids or set())
         else:
             return User.objects.none()
 

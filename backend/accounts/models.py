@@ -69,6 +69,23 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
 
     full_name = models.CharField(max_length=255, blank=True)
+    # Sprint 154 §I.1 — a phone number for ANY user, so the Users /
+    # Employees / Customer-users lists can show one. Additive, blank by
+    # default, no backfill: empty IS the correct value for every existing
+    # row, because nobody has ever been asked for it.
+    #
+    # NOT the same field as `StaffProfile.phone`, which stays exactly as
+    # it is. That one is STAFF-ONLY and is gated on the customer side by
+    # `Customer.show_assigned_staff_phone` / the CustomerCompanyPolicy
+    # mirror — it is the number a customer may or may not be allowed to
+    # see for the cleaner assigned to their building. This one is the
+    # user's own contact number on their account record, with no
+    # customer-visibility rule attached. The two are deliberately NOT
+    # merged and NOT mirrored into each other: merging them would either
+    # leak a staff member's gated number onto an ungated surface, or drag
+    # the visibility gate onto every provider user who has nothing to do
+    # with it. Read sites choose explicitly (see EmployeesAdminPage).
+    phone = models.CharField(max_length=64, blank=True)
     role = models.CharField(
         max_length=32,
         choices=UserRole.choices,

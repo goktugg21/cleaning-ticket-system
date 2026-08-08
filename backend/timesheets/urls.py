@@ -19,6 +19,7 @@ from .views_hour_types import (
     HourTypeStandardSetView,
 )
 from .views_summary import TimesheetSummaryCSVView, TimesheetSummaryView
+from .views_week_grid import TimeEntryWeekGridView
 from .views_weeks import (
     WeekCloseView,
     WeekLockListView,
@@ -50,6 +51,15 @@ urlpatterns = [
         "employees/",
         TimesheetEmployeeListView.as_view(),
         name="timesheet-employee-list",
+    ),
+    # Sprint 154 §M — the week grid. Declared BEFORE `entries/<int:...>/`
+    # for the same reason as the other literal-segment routes in this
+    # file: the ordering documents the intent, so a later change to a
+    # converter cannot quietly let the detail route swallow it.
+    path(
+        "entries/bulk-week/",
+        TimeEntryWeekGridView.as_view(),
+        name="timesheet-entry-bulk-week",
     ),
     path(
         "entries/",
