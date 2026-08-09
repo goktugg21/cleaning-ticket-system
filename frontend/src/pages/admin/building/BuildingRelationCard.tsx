@@ -22,6 +22,7 @@
  * can have dozens of contacts.
  */
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../../api/client";
@@ -90,6 +91,15 @@ export function BuildingRelationCard({
   const selectedTargetIds = rows
     .filter((r) => edit.isSelected(r.linkId))
     .map((r) => r.targetId);
+
+  /** Where a row's NAME links to, per relation. Null = no detail page
+   *  exists for that kind of row, and none is invented. */
+  const detailPath: ((row: RelationRow) => string) | null =
+    relation === "customers"
+      ? (row) => `/admin/customers/${row.targetId}`
+      : relation === "managers" || relation === "staff"
+        ? (row) => `/admin/users/${row.targetId}`
+        : null;
 
   async function runLink(targets: number[], mode: "link" | "unlink") {
     setBusy(true);
@@ -268,7 +278,27 @@ export function BuildingRelationCard({
                   </td>
                 )}
                 <td className="td-subject">
-                  {row.name}
+                  {/* Sprint 156 §7 — the row reaches the thing it names.
+                      These four cards listed people and customers with
+                      no way to open any of them, so "who is this staff
+                      member" meant leaving the building page and
+                      searching the Users list by hand.
+
+                      `detailPath` is null for contacts: a Contact is not
+                      a User and has no detail page of its own — it is
+                      edited on the customer's Contacts sub-page — so
+                      linking one would be inventing a route. Reported
+                      rather than faked. */}
+                  {detailPath ? (
+                    <Link
+                      to={detailPath(row)}
+                      data-testid={`${testIdPrefix}-open-${row.targetId}`}
+                    >
+                      {row.name}
+                    </Link>
+                  ) : (
+                    row.name
+                  )}
                   {row.meta && (
                     <span
                       className="muted small"

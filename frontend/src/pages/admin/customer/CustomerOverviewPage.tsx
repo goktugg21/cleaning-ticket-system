@@ -27,6 +27,10 @@ import type {
 } from "../../../api/types";
 import { useAuth } from "../../../auth/AuthContext";
 import { BoundedList } from "../../../components/BoundedList";
+import {
+  LinkedBuildingCounts,
+  LinkedBuildingIdentity,
+} from "../../../components/LinkedBuildingCell";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 
@@ -550,45 +554,8 @@ export function CustomerOverviewPage() {
                         className="linked-building-row"
                         data-testid={`customer-overview-building-${link.building_id}`}
                       >
-                        <span className="linked-building-main">
-                          <span className="bld-row-name">
-                            {link.building_name}
-                            {!link.building_is_active && (
-                              <span
-                                className="badge badge-normal"
-                                style={{ marginLeft: 8 }}
-                                data-testid="customer-overview-building-inactive"
-                              >
-                                {t("admin.status_inactive")}
-                              </span>
-                            )}
-                          </span>
-                          {/* City AND postal code on one line — a Dutch
-                              city alone does not locate a building.
-                              Falls back to the street address when the
-                              building has neither on file. */}
-                          <span className="muted small">
-                            {[link.building_city, link.building_postal_code]
-                              .filter(Boolean)
-                              .join(" · ") ||
-                              link.building_address ||
-                              "—"}
-                          </span>
-                        </span>
-                        <span className="linked-building-counts">
-                          <span>
-                            {t(
-                              "customer_view.overview.building_customer_count",
-                              { count: link.building_customer_count },
-                            )}
-                          </span>
-                          <span>
-                            {t(
-                              "customer_view.overview.building_manager_count",
-                              { count: link.building_manager_count },
-                            )}
-                          </span>
-                        </span>
+                        <LinkedBuildingIdentity link={link} />
+                        <LinkedBuildingCounts link={link} />
                       </Link>
                     ))}
                   </div>

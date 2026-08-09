@@ -18,6 +18,10 @@ import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../../components/ConfirmDialog";
 import { EntityPicker } from "../../../components/EntityPicker";
 import { EditModeToggle } from "../../../components/EditModeToggle";
+import {
+  LinkedBuildingCounts,
+  LinkedBuildingIdentity,
+} from "../../../components/LinkedBuildingCell";
 import { MultiSelectToolbar } from "../../../components/MultiSelectToolbar";
 import { useEditMode } from "../../../lib/useEditMode";
 
@@ -328,9 +332,15 @@ export function CustomerBuildingsPage() {
                       />
                     </th>
                   )}
+                  {/* Sprint 156 §3 — the same enriched row the customer
+                      OVERVIEW card has carried since Sprint 155 §2. The
+                      owner reported this list still looking half-empty
+                      while the overview looked full; separate Name /
+                      Address / City columns were why. Name and address
+                      collapse into one identity cell and the counts get
+                      their own column. */}
                   <th>{t("admin.col_name")}</th>
-                  <th>{t("admin.col_address")}</th>
-                  <th>{t("buildings.col_city")}</th>
+                  <th>{t("customer_view.overview.stat_linked_buildings")}</th>
                   <th>{t("customer_form.col_linked")}</th>
                   <th aria-label={t("admin.col_actions")} />
                 </tr>
@@ -359,12 +369,14 @@ export function CustomerBuildingsPage() {
                       <Link
                         to={`/admin/buildings/${link.building_id}`}
                         data-testid={`customer-buildings-link-${link.building_id}`}
+                        style={{ display: "inline-flex", minWidth: 0 }}
                       >
-                        {link.building_name}
+                        <LinkedBuildingIdentity link={link} />
                       </Link>
                     </td>
-                    <td>{link.building_address || "—"}</td>
-                    <td>{link.building_city || "—"}</td>
+                    <td>
+                      <LinkedBuildingCounts link={link} align="start" />
+                    </td>
                     <td className="td-date">
                       {new Date(link.created_at).toLocaleDateString(dateLocale)}
                     </td>

@@ -481,7 +481,27 @@ export function CustomerUsersPage() {
                     return (
                       <Fragment key={membership.id}>
                         <tr data-testid="customer-user-row">
-                          <td className="td-subject">{membership.user_email}</td>
+                          {/* Sprint 156 §7 — the row reaches the person.
+                              The page showed a name and an e-mail with
+                              no way to open the user, so answering "who
+                              is this and what else do they have access
+                              to" meant going to the Users admin list and
+                              searching for them by hand.
+
+                              The NAME cell is the link, not the whole
+                              row: this row already carries Manage and
+                              Remove buttons, and a row-level click
+                              handler under those is the mis-click
+                              hazard §4 of last sprint existed to
+                              remove. */}
+                          <td className="td-subject">
+                            <Link
+                              to={`/admin/users/${membership.user_id}`}
+                              data-testid={`customer-user-link-${membership.user_id}`}
+                            >
+                              {membership.user_email}
+                            </Link>
+                          </td>
                           <td>{membership.user_full_name || "—"}</td>
                           {/* Sprint 154 §K — empty renders an em dash. */}
                           <td data-testid="customer-user-phone">
