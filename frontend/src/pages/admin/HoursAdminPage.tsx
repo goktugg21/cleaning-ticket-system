@@ -925,6 +925,169 @@ export function HoursAdminPage() {
               buy discoverability and put that property at risk the first
               time the two drifted. Made unmissable with a titled section
               instead. */}
+          {loading ? (
+            <div className="loading-bar">
+              <div className="loading-bar-fill" />
+            </div>
+          ) : (
+            <div className="card" data-testid="hours-entries-list">
+              <BoundedList
+                size="lg"
+                count={entries.length}
+                ariaLabel={t("hours_admin.list_aria")}
+                testIdPrefix="hours-entries"
+                className="table-wrap"
+                emptyState={
+                  <div
+                    style={{ padding: "32px 24px", textAlign: "center" }}
+                    data-testid="hours-entries-empty"
+                  >
+                    <h3 style={{ marginBottom: 8 }}>
+                      {t("hours_admin.empty_title")}
+                    </h3>
+                    <p className="muted" style={{ margin: 0 }}>
+                      {t("hours_admin.empty_description")}
+                    </p>
+                  </div>
+                }
+              >
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>{t("hours_admin.col_date")}</th>
+                      <th>{t("hours_admin.col_week")}</th>
+                      <th>{t("hours_admin.col_employee")}</th>
+                      <th>{t("hours_admin.col_hour_type")}</th>
+                      <th>{t("hours_admin.col_hours")}</th>
+                      <th>{t("hours_admin.col_weighted")}</th>
+                      <th>{t("hours_admin.col_building")}</th>
+                      <th>{t("hours_admin.col_note")}</th>
+                      <th>{t("hours_admin.col_actions")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry) => (
+                      <tr
+                        key={entry.id}
+                        data-testid="hours-entry-row"
+                        data-entry-id={entry.id}
+                        data-locked={entry.is_locked ? "true" : "false"}
+                      >
+                        <td>{formatDate(entry.date, dateLocale)}</td>
+                        <td className="muted small">
+                          {entry.iso_year}-W
+                          {String(entry.iso_week).padStart(2, "0")}
+                          {entry.is_locked && (
+                            <span
+                              className="badge badge-closed"
+                              style={{ marginLeft: 6 }}
+                            >
+                              {t("weeks.status_closed")}
+                            </span>
+                          )}
+                        </td>
+                        <td>{entry.employee_name}</td>
+                        <td>
+                          {hourTypeLabelFrom(
+                            entry.hour_type_name,
+                            entry.hour_type_standard_slot,
+                            t,
+                          )}
+                        </td>
+                        <td>{entry.hours}</td>
+                        <td className="muted">{entry.weighted_hours}</td>
+                        <td className="muted small">
+                          {entry.building_name ?? "—"}
+                        </td>
+                        <td className="muted small">{entry.note || "—"}</td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {/* Disabled on a locked week: the server
+                                refuses the write either way, this only
+                                avoids offering an action that cannot
+                                succeed. */}
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              data-testid="hours-entry-edit-button"
+                              onClick={() => openEditEntry(entry)}
+                              disabled={entry.is_locked}
+                            >
+                              {t("hours_admin.edit_button")}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              data-testid="hours-entry-delete-button"
+                              onClick={() => openDeleteEntry(entry)}
+                              disabled={entry.is_locked}
+                            >
+                              {t("hours_admin.delete_button")}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </BoundedList>
+
+              {/* Real prev/next off the endpoint's own pagination — the
+                  list is `StandardResultsSetPagination`, so a company's
+                  year of hours is never all in one response. */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "12px 16px",
+                }}
+                data-testid="hours-entries-pagination"
+              >
+                <span className="muted small">
+                  {t("hours_admin.pagination_summary", {
+                    shown: entries.length,
+                    total: entryCount,
+                  })}
+                </span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-testid="hours-entries-prev"
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    disabled={page <= 1}
+                  >
+                    {t("hours_admin.prev_page")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    data-testid="hours-entries-next"
+                    onClick={() => setPage((current) => current + 1)}
+                    disabled={!hasNext}
+                  >
+                    {t("hours_admin.next_page")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sprint 156 §9 — the LIST comes before the REPORT.
+
+              Measured at 1440 before this swap: tabs at 173px, company
+              selector 217, week grid 336, filters 449, then a 406px-tall
+              report card at 600 — so the hours themselves did not start
+              until 1022px and the operator scrolled past a report to
+              reach the data they came for. Every other list page in the
+              app starts its table around 200-350px.
+
+              Nothing is hidden and nothing moves off the page: the
+              report is the same card, still expanded, one screen
+              further down. That is the §9 rule — reorder, never
+              conceal. */}
           {summary && (
             <section
               className="card"
@@ -1118,156 +1281,6 @@ export function HoursAdminPage() {
                 </>
               )}
             </section>
-          )}
-
-          {loading ? (
-            <div className="loading-bar">
-              <div className="loading-bar-fill" />
-            </div>
-          ) : (
-            <div className="card" data-testid="hours-entries-list">
-              <BoundedList
-                size="lg"
-                count={entries.length}
-                ariaLabel={t("hours_admin.list_aria")}
-                testIdPrefix="hours-entries"
-                className="table-wrap"
-                emptyState={
-                  <div
-                    style={{ padding: "32px 24px", textAlign: "center" }}
-                    data-testid="hours-entries-empty"
-                  >
-                    <h3 style={{ marginBottom: 8 }}>
-                      {t("hours_admin.empty_title")}
-                    </h3>
-                    <p className="muted" style={{ margin: 0 }}>
-                      {t("hours_admin.empty_description")}
-                    </p>
-                  </div>
-                }
-              >
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>{t("hours_admin.col_date")}</th>
-                      <th>{t("hours_admin.col_week")}</th>
-                      <th>{t("hours_admin.col_employee")}</th>
-                      <th>{t("hours_admin.col_hour_type")}</th>
-                      <th>{t("hours_admin.col_hours")}</th>
-                      <th>{t("hours_admin.col_weighted")}</th>
-                      <th>{t("hours_admin.col_building")}</th>
-                      <th>{t("hours_admin.col_note")}</th>
-                      <th>{t("hours_admin.col_actions")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {entries.map((entry) => (
-                      <tr
-                        key={entry.id}
-                        data-testid="hours-entry-row"
-                        data-entry-id={entry.id}
-                        data-locked={entry.is_locked ? "true" : "false"}
-                      >
-                        <td>{formatDate(entry.date, dateLocale)}</td>
-                        <td className="muted small">
-                          {entry.iso_year}-W
-                          {String(entry.iso_week).padStart(2, "0")}
-                          {entry.is_locked && (
-                            <span
-                              className="badge badge-closed"
-                              style={{ marginLeft: 6 }}
-                            >
-                              {t("weeks.status_closed")}
-                            </span>
-                          )}
-                        </td>
-                        <td>{entry.employee_name}</td>
-                        <td>
-                          {hourTypeLabelFrom(
-                            entry.hour_type_name,
-                            entry.hour_type_standard_slot,
-                            t,
-                          )}
-                        </td>
-                        <td>{entry.hours}</td>
-                        <td className="muted">{entry.weighted_hours}</td>
-                        <td className="muted small">
-                          {entry.building_name ?? "—"}
-                        </td>
-                        <td className="muted small">{entry.note || "—"}</td>
-                        <td>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            {/* Disabled on a locked week: the server
-                                refuses the write either way, this only
-                                avoids offering an action that cannot
-                                succeed. */}
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              data-testid="hours-entry-edit-button"
-                              onClick={() => openEditEntry(entry)}
-                              disabled={entry.is_locked}
-                            >
-                              {t("hours_admin.edit_button")}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              data-testid="hours-entry-delete-button"
-                              onClick={() => openDeleteEntry(entry)}
-                              disabled={entry.is_locked}
-                            >
-                              {t("hours_admin.delete_button")}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </BoundedList>
-
-              {/* Real prev/next off the endpoint's own pagination — the
-                  list is `StandardResultsSetPagination`, so a company's
-                  year of hours is never all in one response. */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  padding: "12px 16px",
-                }}
-                data-testid="hours-entries-pagination"
-              >
-                <span className="muted small">
-                  {t("hours_admin.pagination_summary", {
-                    shown: entries.length,
-                    total: entryCount,
-                  })}
-                </span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="hours-entries-prev"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={page <= 1}
-                  >
-                    {t("hours_admin.prev_page")}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="hours-entries-next"
-                    onClick={() => setPage((current) => current + 1)}
-                    disabled={!hasNext}
-                  >
-                    {t("hours_admin.next_page")}
-                  </button>
-                </div>
-              </div>
-            </div>
           )}
         </>
       )}
