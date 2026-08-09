@@ -7,6 +7,9 @@
 import { api } from "./client";
 import type {
   EwMessage,
+  ExtraWorkAssignment,
+  ExtraWorkAssignmentRole,
+  ExtraWorkBulkAssignResult,
   EwMessageRecipient,
   EwMessageType,
   EwMessageVisibility,
@@ -553,3 +556,33 @@ export async function getEwMessageRecipients(
 }
 
 
+
+
+// ---- Sprint 157 §2 — people on a request -----------------------------
+
+export async function listExtraWorkAssignments(
+  id: number,
+): Promise<ExtraWorkAssignment[]> {
+  const response = await api.get<ExtraWorkAssignment[]>(
+    `/extra-work/${id}/assignments/`,
+  );
+  return response.data;
+}
+
+/** Assign (or unassign) many people to many requests in ONE call.
+ *
+ *  All-or-nothing server-side: one unresolvable id rejects the whole
+ *  batch with zero writes, so there is no partial state for the caller
+ *  to reconcile. */
+export async function bulkAssignExtraWork(payload: {
+  requests: number[];
+  users: number[];
+  role: ExtraWorkAssignmentRole;
+  mode: "assign" | "unassign";
+}): Promise<ExtraWorkBulkAssignResult> {
+  const response = await api.post<ExtraWorkBulkAssignResult>(
+    "/extra-work/bulk-assign/",
+    payload,
+  );
+  return response.data;
+}

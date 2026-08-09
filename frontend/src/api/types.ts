@@ -876,6 +876,34 @@ export interface CompanyCustomerRow {
   user_count: number;
 }
 
+/** Sprint 157 §2 — who is assigned to an Extra Work request.
+ *
+ *  `role` is the ASSIGNMENT role (what they are doing on this request),
+ *  deliberately not the same thing as `user_role`, the account role. A
+ *  BUILDING_MANAGER may be assigned as a WORKER on a small job. */
+export type ExtraWorkAssignmentRole = "WORKER" | "MANAGER";
+
+export interface ExtraWorkAssignment {
+  id: number;
+  extra_work_request: number;
+  user_id: number;
+  user_email: string;
+  user_full_name: string;
+  /** `User.phone` — the ungated account field, never the
+   *  visibility-gated `StaffProfile.phone`. */
+  user_phone: string;
+  user_role: string;
+  role: ExtraWorkAssignmentRole;
+  assigned_at: string;
+}
+
+export interface ExtraWorkBulkAssignResult {
+  created: number;
+  removed: number;
+  already_assigned: number;
+  not_assigned: number;
+}
+
 export interface CustomerBuildingMembership {
   id: number;
   customer: number;

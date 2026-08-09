@@ -468,5 +468,22 @@
   "detail.labels_saved": "Labels opgeslagen",
   "list.filter_catalog_category": "Catalogus-categorie",
   "list.filter_category_group_live": "Huidige categorieën",
-  "list.filter_category_group_historical": "Niet meer in de catalogus"
+  "list.filter_category_group_historical": "Niet meer in de catalogus",
+  "assign.title": "Mensen toewijzen",
+  "assign.summary": "{{people}} geselecteerde personen worden toegewezen aan {{requests}} geselecteerde aanvragen.",
+  "assign.role_worker": "Uitvoerder",
+  "assign.role_worker_desc": "Doet het werk op locatie.",
+  "assign.role_manager": "Beheerder",
+  "assign.role_manager_desc": "Bewaakt de aanvraag en is er aanspreekbaar op.",
+  "assign.no_candidates": "Geen mensen beschikbaar voor het bedrijf van deze aanvraag.",
+  "assign.confirm": "Toewijzen",
+  "assign.button": "Mensen toewijzen",
+  "assign.card_title": "Mensen op deze aanvraag",
+  "assign.card_desc": "Wie het werk doet en wie het bewaakt.",
+  "assign.empty": "Er is nog niemand toegewezen.",
+  "assign.col_role": "Op deze aanvraag",
+  "assign.remove": "Verwijderen",
+  "assign.removed": "Verwijderd.",
+  "assign.assigned_one": "{{count}} toewijzing toegevoegd.",
+  "assign.assigned_other": "{{count}} toewijzingen toegevoegd."
 }

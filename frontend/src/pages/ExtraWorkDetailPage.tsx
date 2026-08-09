@@ -61,6 +61,7 @@ import {
   updateExtraWorkBilling,
 } from "../api/extraWork";
 import { useAuth } from "../auth/AuthContext";
+import { ExtraWorkAssignmentCard } from "../components/extra-work/ExtraWorkAssignmentCard";
 import { isCustomerUser, isProviderManagementRole } from "../auth/permissions";
 import type {
   Contact,
@@ -2504,6 +2505,16 @@ export function ExtraWorkDetailPage() {
                 </div>
               </div>
             )}
+
+          {/* Sprint 157 §2 — who is on this request. Provider-side
+              only: assignment is a provider operation end to end, and
+              the endpoint refuses a customer user at the door. */}
+          {isProvider && ew !== null && (
+            <ExtraWorkAssignmentCard
+              extraWorkId={ew.id}
+              companyId={ew.company}
+            />
+          )}
 
           {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders
               read-only when the EW has at least one ticket spawned

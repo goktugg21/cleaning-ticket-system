@@ -18,15 +18,22 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { listAllCustomers, listCustomerBuildings } from "../api/admin";
+import {
+  listAllCustomers,
+  listCompanyEmployees,
+  listCustomerBuildings,
+} from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import {
+  bulkAssignExtraWork,
   listAllExtraWork,
   listExtraWorkCategoryOptions,
 } from "../api/extraWork";
 import type { ExtraWorkCategoryOptions } from "../api/extraWork";
 import type {
+  CompanyEmployee,
   CustomerAdmin,
+  ExtraWorkAssignmentRole,
   CustomerBuildingMembership,
   CustomerLabel,
   ExtraWorkCategory,
@@ -38,6 +45,10 @@ import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { ChoiceDialog } from "../components/ChoiceDialog";
+import { EditModeToggle } from "../components/EditModeToggle";
+import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
+import { AssignPeopleDialog } from "../components/extra-work/AssignPeopleDialog";
+import { useEditMode } from "../lib/useEditMode";
 import { ClickableRow } from "../components/ClickableRow";
 import { EmptyState } from "../components/EmptyState";
 import { PageHeader } from "../components/PageHeader";
@@ -140,6 +151,14 @@ export function ExtraWorkListPage() {
   const isProvider = isProviderManagementRole(me?.role);
   // Sprint 155 §1b — the create button asks which of the three.
   const [chooserOpen, setChooserOpen] = useState(false);
+  // Sprint 157 §2 — assign people to several requests at once, behind
+  // the Sprint 155 §4 edit gate like every other list.
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+  const [assignError, setAssignError] = useState("");
+  const [assignCandidates, setAssignCandidates] = useState<CompanyEmployee[]>(
+    [],
+  );
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -360,6 +379,57 @@ export function ExtraWorkListPage() {
     });
   }, [rows, searchInput, statusFilter]);
 
+
+  // Sprint 157 §2 — the Edit gate + the bulk assign handlers. The
+  // controller is keyed on the CURRENTLY VISIBLE rows, so a selection
+  // cannot outlive a filter change (lib/useEditMode.ts derives both the
+  // mode and the selection for exactly this reason).
+  const edit = useEditMode(visibleRows.map((row) => row.id));
+
+  async function openAssign() {
+    setAssignError("");
+    setAssignOpen(true);
+    if (assignCandidates.length === 0) {
+      // The people offered are the employees of the company the selected
+      // requests belong to. Every selected row shares a company in
+      // practice (the list is provider-scoped), and the server rejects
+      // any pair that crosses one anyway with the same body as an
+      // invalid id — so a wrong guess here fails safe rather than
+      // writing something.
+      const companyId = visibleRows.find((row) =>
+        edit.isSelected(row.id),
+      )?.company;
+      if (!companyId) return;
+      try {
+        setAssignCandidates(await listCompanyEmployees(companyId));
+      } catch (err) {
+        setAssignError(getApiError(err));
+      }
+    }
+  }
+
+  async function runAssign(
+    userIds: number[],
+    role: ExtraWorkAssignmentRole,
+  ) {
+    setAssignBusy(true);
+    setAssignError("");
+    try {
+      await bulkAssignExtraWork({
+        requests: edit.selection,
+        users: userIds,
+        role,
+        mode: "assign",
+      });
+      setAssignOpen(false);
+      edit.exit();
+    } catch (err) {
+      setAssignError(getApiError(err));
+    } finally {
+      setAssignBusy(false);
+    }
+  }
+
   // M4 (3c) — client-side itemized CSV of the in-view rows. Mirrors the
   // proposal-PDF Blob + object-URL + synthetic <a download> pattern. UTF-8
   // BOM so Excel reads Dutch characters, CRLF line endings, quoted fields.
@@ -451,6 +521,21 @@ export function ExtraWorkListPage() {
           </button>
         }
       />
+
+      {assignOpen && (
+        <AssignPeopleDialog
+          requestCount={edit.selection.length}
+          candidates={assignCandidates.map((person) => ({
+            id: person.id,
+            label: person.full_name || person.email,
+            sublabel: person.email,
+          }))}
+          busy={assignBusy}
+          error={assignError}
+          onCancel={() => setAssignOpen(false)}
+          onConfirm={runAssign}
+        />
+      )}
 
       {chooserOpen && (
         <ChoiceDialog
@@ -827,12 +912,53 @@ export function ExtraWorkListPage() {
         />
       )}
 
+      {isProvider && visibleRows.length > 0 && (
+        <div className="ew-list-edit-bar">
+          {edit.editMode && (
+            <MultiSelectToolbar
+              selectedCount={edit.selection.length}
+              onSelectAll={edit.selectAll}
+              onClearAll={edit.clear}
+              disabled={assignBusy}
+              actions={[
+                {
+                  key: "assign",
+                  label: t("assign.button"),
+                  onClick: openAssign,
+                },
+              ]}
+              testIdPrefix="extra-work-bulk"
+            />
+          )}
+          <EditModeToggle
+            editMode={edit.editMode}
+            onToggle={edit.toggleMode}
+            disabled={assignBusy}
+            testId="extra-work-edit-mode-toggle"
+          />
+        </div>
+      )}
+
       {visibleRows.length > 0 && (
         <div className="responsive-table-wrap">
           <div className="card" style={{ overflow: "hidden" }}>
             <table className="data-table">
               <thead>
                 <tr>
+                  {edit.editMode && (
+                    <th className="th-select">
+                      <input
+                        type="checkbox"
+                        checked={edit.allSelected}
+                        onChange={() =>
+                          edit.allSelected ? edit.clear() : edit.selectAll()
+                        }
+                        disabled={assignBusy}
+                        aria-label={t("assign.button")}
+                        data-testid="extra-work-select-all"
+                      />
+                    </th>
+                  )}
                   <th>{t("list.column_title")}</th>
                   <th>{t("list.column_status")}</th>
                   <th>{t("list.column_route")}</th>
@@ -853,6 +979,21 @@ export function ExtraWorkListPage() {
                     to={`/extra-work/${row.id}`}
                     testId="extra-work-row"
                   >
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={edit.isSelected(row.id)}
+                          onChange={() => edit.toggle(row.id)}
+                          disabled={assignBusy}
+                          aria-label={row.title}
+                          data-testid={`extra-work-select-${row.id}`}
+                        />
+                      </td>
+                    )}
                     <td className="td-subject">
                       <Link to={`/extra-work/${row.id}`}>{row.title}</Link>
                     </td>

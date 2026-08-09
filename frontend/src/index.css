@@ -8550,6 +8550,56 @@ details[open] > .ew-department-tree-summary::before {
 
 /* Sprint 155 §5 — the multi-employee week grid: an apply-to-all bar over
    one block per employee. */
+/* Sprint 157 §2 — the Extra Work list's edit bar. Sits above the table
+   with the toggle at the far end, so the read view keeps the geometry it
+   had. */
+.ew-list-edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.ew-list-edit-bar .list-edit-bar,
+.ew-list-edit-bar > :first-child:not(button) { flex: 1 1 auto; }
+
+/* Sprint 157 §2 — the worker/manager choice. Two options with their
+   meanings written out, not two bare words: which of the pair you want
+   is not inferable from the labels alone. */
+.assign-role-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.assign-role-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.assign-role-option:hover { border-color: var(--green-2); }
+.assign-role-option-active {
+  border-color: var(--green);
+  background: var(--green-faint);
+}
+.assign-role-label {
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 14px;
+}
+.assign-role-desc { font-size: 12.5px; color: var(--text-faint); }
+
 /* Sprint 157 §7 — chip groups (ROLES / ACCESS ROLES) share one
    full-width row of the filter bar, in equal columns, so they line up
    with each other and with Search and Status above rather than growing
