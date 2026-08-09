@@ -380,3 +380,72 @@ class CompanyBuildingManagerVisibilityTests(TenantFixtureMixin, APITestCase):
         self.authenticate(self.manager)
         response = self.client.get(summary_url(self.other_company.id))
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class CompanyBulkDeactivateTests(TenantFixtureMixin, APITestCase):
+    """Sprint 157 §3 — mirrors `CustomerBulkDeactivateView`."""
+
+    URL = "/api/companies/bulk-deactivate/"
+
+    def test_super_admin_deactivates_many(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            self.URL,
+            {"companies": [self.company.id, self.other_company.id]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(response.data["deactivated"], 2)
+        self.company.refresh_from_db()
+        self.assertFalse(self.company.is_active)
+
+    def test_one_bad_id_rejects_the_whole_batch(self):
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            self.URL,
+            {"companies": [self.company.id, 999_999]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.company.refresh_from_db()
+        self.assertTrue(
+            self.company.is_active,
+            "a good id was deactivated despite a bad id in the batch",
+        )
+
+    def test_company_admin_cannot_deactivate_companies(self):
+        """`Company` IS the tenant.
+
+        Letting a COMPANY_ADMIN deactivate one would let them switch off
+        their own tenant, and reactivation is already SUPER_ADMIN-only —
+        so the pair would be a one-way door for everybody else.
+        """
+        self.authenticate(self.company_admin)
+        response = self.client.post(
+            self.URL, {"companies": [self.company.id]}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.is_active)
+
+    def test_an_already_inactive_company_is_not_counted(self):
+        self.other_company.is_active = False
+        self.other_company.save(update_fields=["is_active"])
+        self.authenticate(self.super_admin)
+        response = self.client.post(
+            self.URL,
+            {"companies": [self.company.id, self.other_company.id]},
+            format="json",
+        )
+        self.assertEqual(response.data["deactivated"], 1)
+
+    def test_ordering_by_the_new_fields_is_accepted(self):
+        """§3 extended `ordering_fields` ADDITIVELY; every value the list
+        page can send must resolve rather than 400."""
+        self.authenticate(self.super_admin)
+        for field in ("name", "slug", "is_active", "created_at"):
+            for value in (field, f"-{field}"):
+                response = self.client.get("/api/companies/", {"ordering": value})
+                self.assertEqual(
+                    response.status_code, status.HTTP_200_OK, f"ordering={value}"
+                )

@@ -1,7 +1,7 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import CompanyViewSet
+from .views import CompanyBulkDeactivateView, CompanyViewSet
 from .views_media import CompanyLogoView
 from .views_memberships import CompanyAdminDeleteView, CompanyAdminListCreateView
 from .views_summary import (
@@ -20,6 +20,13 @@ router.register(r"", CompanyViewSet, basename="company")
 # Listed before router.urls so the nested admin routes take priority over the
 # router's pk + action pattern when both could match a `/{id}/<word>/` URL.
 urlpatterns = [
+    # Sprint 157 §3 — BEFORE the router, whose detail route would
+    # otherwise swallow "bulk-deactivate" as a pk.
+    path(
+        "bulk-deactivate/",
+        CompanyBulkDeactivateView.as_view(),
+        name="company-bulk-deactivate",
+    ),
     path(
         "<int:company_id>/admins/",
         CompanyAdminListCreateView.as_view(),
