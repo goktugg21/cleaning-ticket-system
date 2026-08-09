@@ -2155,5 +2155,7 @@
   "companies.select_page": "Alle bedrijven op deze pagina selecteren",
   "companies.bulk_deactivate": "Deactiveren",
   "companies.bulk_deactivate_title": "Geselecteerde bedrijven deactiveren?",
-  "companies.bulk_deactivate_body": "{{count}} bedrijven worden uitgezet. Hun gebouwen, klanten en historie blijven bewaard, en een superbeheerder kan ze weer aanzetten."
+  "companies.bulk_deactivate_body": "{{count}} bedrijven worden uitgezet. Hun gebouwen, klanten en historie blijven bewaard, en een superbeheerder kan ze weer aanzetten.",
+  "company_detail.policy_off": "Uit",
+  "company_detail.field_logo": "Logo"
 }

@@ -289,6 +289,76 @@ export function CompanyDetailPage() {
               </div>
               <div className="detail-field-value">{languageLabel}</div>
             </div>
+            {/* Sprint 157 §4 — the four provider-policy switches and the
+                logo. The Edit action already reached ALL of them: it
+                opens `CompanyFormPage`, which edits name, slug, default
+                language, logo and these four booleans, i.e. every
+                writable field `Company` has. What was missing was the
+                other half — the DETAIL page displayed four fields while
+                the form edited nine, so the Edit looked thin because the
+                page did not show what it changes.
+
+                Showing them here also makes the switches discoverable:
+                they govern what a provider ADMIN may do to a customer's
+                company admins, catalog and prices, and they were
+                previously invisible unless you opened the edit form. */}
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.manage_cca_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_manage_customer_company_admins
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.manage_catalog_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_manage_catalog
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.manage_prices_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_manage_customer_prices
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_policy.quote_override_label")}
+              </div>
+              <div className="detail-field-value">
+                {company.provider_admin_may_quote_override_start
+                  ? t("admin.status_active")
+                  : t("company_detail.policy_off")}
+              </div>
+            </div>
+            <div className="detail-field-row">
+              <div className="detail-field-label">
+                {t("company_detail.field_logo")}
+              </div>
+              <div className="detail-field-value">
+                {company.logo_url ? (
+                  <img
+                    src={company.logo_url}
+                    alt=""
+                    style={{ maxHeight: 40, maxWidth: 160 }}
+                    data-testid="company-detail-logo"
+                  />
+                ) : (
+                  <span className="muted-empty">—</span>
+                )}
+              </div>
+            </div>
             <div className="detail-field-row">
               <div className="detail-field-label">
                 {t("company_detail.field_status")}

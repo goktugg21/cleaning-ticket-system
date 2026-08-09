@@ -2155,5 +2155,7 @@
   "companies.select_page": "Select every company on this page",
   "companies.bulk_deactivate": "Deactivate",
   "companies.bulk_deactivate_title": "Deactivate the selected companies?",
-  "companies.bulk_deactivate_body": "{{count}} companies will be switched off. Their buildings, customers and history are kept, and a super admin can switch them back on."
+  "companies.bulk_deactivate_body": "{{count}} companies will be switched off. Their buildings, customers and history are kept, and a super admin can switch them back on.",
+  "company_detail.policy_off": "Off",
+  "company_detail.field_logo": "Logo"
 }
