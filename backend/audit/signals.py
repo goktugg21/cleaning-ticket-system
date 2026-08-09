@@ -56,6 +56,7 @@ from documents.models import MAX_FOLDER_DEPTH, Document, DocumentFolder
 from extra_work.models import (
     CustomerCustomPrice,
     CustomerServicePrice,
+    ExtraWorkAssignment,
     ExtraWorkRequestItem,
     Proposal,
     ProposalLine,
@@ -1570,6 +1571,20 @@ def _connect():
         # CREATE/DELETE). Contact itself stays in the full-CRUD trio; the
         # new user/contact_type/is_primary fields are auto-introspected.
         ContactBuildingLink,
+        # Sprint 157 §2 — who is assigned to an Extra Work request.
+        # Membership shape rather than the full CRUD trio, and that is
+        # the correct shape rather than a shortcut: the row has NO
+        # editable field. `role` is part of `unique_together`, so
+        # changing it is a delete plus a create, which is two audit rows
+        # that each say what happened — an UPDATE handler here would
+        # have nothing to diff. Exactly how TicketStaffAssignment is
+        # registered, which §2 asked this to mirror.
+        #
+        # Not added to `_MEMBERSHIP_ENTITY_ATTR` for the same reason
+        # TicketStaffAssignment is not: `ExtraWorkRequest` has no
+        # `.name`, so the row is audited with the correct target_model /
+        # target_id / actor and an empty `changes` payload.
+        ExtraWorkAssignment,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).

@@ -1956,3 +1956,83 @@ class ExtraWorkMessage(models.Model):
 
     def __str__(self):
         return f"{self.extra_work_id}: {self.message_type}"
+
+
+class ExtraWorkAssignmentRole(models.TextChoices):
+    """Which hat a person wears on a request.
+
+    Deliberately NOT the same thing as `User.role`. A BUILDING_MANAGER
+    may be assigned as a WORKER on a small job, and a STAFF member is
+    never a MANAGER here — the assignment role says what they are doing
+    on THIS request, and the endpoint checks the account role separately.
+    """
+
+    WORKER = "WORKER", "Worker"
+    MANAGER = "MANAGER", "Manager"
+
+
+class ExtraWorkAssignment(models.Model):
+    """
+    Sprint 157 §2 — who is doing an Extra Work request.
+
+    `ExtraWorkRequest` had NO people-assignment of any kind before this:
+    no field, no through-model. `tickets.TicketStaffAssignment` is the
+    equivalent for tickets and this mirrors its SHAPE — a thin link row
+    with the role gate and the scoping enforced above it — while
+    importing nothing from `tickets`. The two modules are separate and
+    stay separate; sharing a model would couple an extra-work change to
+    the ticket state machine.
+
+    What this deliberately does NOT copy from `TicketStaffAssignment`:
+    its dated operational slots (Sprint 14E's scheduled_start_at /
+    time_window_label / per-slot completion evidence). Extra work has no
+    slot concept, and inventing one here would be building a scheduling
+    subsystem nobody asked for.
+
+    `unique_together (extra_work_request, user, role)` — the same person
+    may be BOTH a worker and a manager on one request, which is why
+    `role` is in the key. Assigning somebody twice in the same role is a
+    no-op rather than an error; the bulk endpoint counts it as
+    `already_assigned`.
+
+    `user` is PROTECT: an assignment is a record of who was put on a job,
+    and deleting the account should not silently erase it. The request
+    side is CASCADE — if the request itself is gone there is nothing to
+    be assigned to.
+    """
+
+    extra_work_request = models.ForeignKey(
+        ExtraWorkRequest,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="extra_work_assignments",
+    )
+    role = models.CharField(
+        max_length=16,
+        choices=ExtraWorkAssignmentRole.choices,
+        default=ExtraWorkAssignmentRole.WORKER,
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="extra_work_assignments_made",
+    )
+
+    class Meta:
+        unique_together = [("extra_work_request", "user", "role")]
+        ordering = ["role", "id"]
+        indexes = [
+            models.Index(fields=["extra_work_request", "role"]),
+            # The "what am I assigned to" query, from the person's side.
+            models.Index(fields=["user", "role"]),
+        ]
+
+    def __str__(self):
+        return f"{self.extra_work_request_id}: {self.user_id} ({self.role})"
