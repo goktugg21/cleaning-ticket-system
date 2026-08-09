@@ -232,22 +232,78 @@ export function CustomerBuildingsPage() {
             {t("customer_view.buildings.explainer", { customer: customerName })}
           </p>
 
+          {/* Sprint 157 §8 — the strip held ONE card and left the rest
+              of the row empty. Every figure here is derived from rows
+              the page has ALREADY fetched, so filling it costs no extra
+              request; the third count (contacts) was added to the same
+              annotation pass server-side rather than fetched separately.
+
+              The three link counts are labelled "links", not
+              "customers" / "managers" / "contacts": a customer at two of
+              this customer's buildings is counted twice, and a label
+              that said "customers" would be quietly wrong. Naming them
+              for what they actually are is cheaper than pretending to a
+              precision the numbers do not have. */}
           <div
-            className="summary-grid"
-            style={{ gridTemplateColumns: "minmax(220px, 320px)" }}
+            className="summary-grid summary-grid-chips"
             data-testid="customer-buildings-stat"
           >
-            <div className="summary-stat" style={{ cursor: "default" }}>
-              <span className="summary-stat-label">
-                {t("customer_view.overview.stat_linked_buildings")}
-              </span>
-              <span className="summary-stat-value">{linkedBuildings.length}</span>
-              <span className="summary-stat-meta">
-                {t("customer_view.buildings.count_summary", {
-                  count: linkedBuildings.length,
-                })}
-              </span>
-            </div>
+            {[
+              {
+                key: "linked",
+                label: t("customer_view.overview.stat_linked_buildings"),
+                value: linkedBuildings.length,
+              },
+              {
+                key: "active",
+                label: t("customer_view.buildings.stat_active"),
+                value: linkedBuildings.filter((l) => l.building_is_active)
+                  .length,
+              },
+              {
+                key: "cities",
+                label: t("customer_view.buildings.stat_cities"),
+                value: new Set(
+                  linkedBuildings
+                    .map((l) => l.building_city)
+                    .filter(Boolean),
+                ).size,
+              },
+              {
+                key: "customer-links",
+                label: t("customer_view.buildings.stat_customer_links"),
+                value: linkedBuildings.reduce(
+                  (sum, l) => sum + l.building_customer_count,
+                  0,
+                ),
+              },
+              {
+                key: "manager-links",
+                label: t("customer_view.buildings.stat_manager_links"),
+                value: linkedBuildings.reduce(
+                  (sum, l) => sum + l.building_manager_count,
+                  0,
+                ),
+              },
+              {
+                key: "contact-links",
+                label: t("customer_view.buildings.stat_contact_links"),
+                value: linkedBuildings.reduce(
+                  (sum, l) => sum + l.building_contact_count,
+                  0,
+                ),
+              },
+            ].map((stat) => (
+              <div
+                className="summary-stat"
+                key={stat.key}
+                style={{ cursor: "default" }}
+                data-testid={`customer-buildings-stat-${stat.key}`}
+              >
+                <span className="summary-stat-label">{stat.label}</span>
+                <span className="summary-stat-value">{stat.value}</span>
+              </div>
+            ))}
           </div>
 
         <section
@@ -340,7 +396,11 @@ export function CustomerBuildingsPage() {
                       collapse into one identity cell and the counts get
                       their own column. */}
                   <th>{t("admin.col_name")}</th>
-                  <th>{t("customer_view.overview.stat_linked_buildings")}</th>
+                  {/* Sprint 157 §8 — this header said "LINKED
+                      BUILDINGS" over cells reading "2 customers /
+                      2 managers". A header has to describe its column;
+                      that one described the table. */}
+                  <th>{t("customer_view.buildings.col_at_this_building")}</th>
                   <th>{t("customer_form.col_linked")}</th>
                   <th aria-label={t("admin.col_actions")} />
                 </tr>

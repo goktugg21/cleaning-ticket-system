@@ -89,6 +89,23 @@ class LinkedBuildingRowFieldsTests(TenantFixtureMixin, APITestCase):
         self.assertEqual(row["building_customer_count"], 2)
         self.assertEqual(row["building_manager_count"], 2)
 
+    def test_the_row_carries_the_contact_count_too(self):
+        """Sprint 157 §8 — the third count, for the Buildings page's
+        stat strip. Annotated in the SAME pass as the other two, which is
+        what the query guard below proves."""
+        from customers.models import Contact, ContactBuildingLink
+
+        contact = Contact.objects.create(
+            customer=self.customer,
+            full_name="Site contact",
+            email="c@example.com",
+        )
+        ContactBuildingLink.objects.create(
+            contact=contact, building=self.building
+        )
+        row = self._row()
+        self.assertEqual(row["building_contact_count"], 1)
+
     def test_a_building_with_nothing_at_it_reports_zero_not_null(self):
         """Zero is an answer; null would render as a missing field.
 
@@ -110,6 +127,7 @@ class LinkedBuildingRowFieldsTests(TenantFixtureMixin, APITestCase):
         )
         self.assertEqual(row["building_customer_count"], 1)
         self.assertEqual(row["building_manager_count"], 0)
+        self.assertEqual(row["building_contact_count"], 0)
 
     def test_the_link_create_response_has_the_same_shape_as_a_list_row(self):
         """A created row must not come back with null counts.

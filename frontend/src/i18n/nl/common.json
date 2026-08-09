@@ -2141,5 +2141,11 @@
   "week_setup.current": "{{employees}} medewerkers op {{buildings}} gebouwen",
   "customer_permissions.modules.meldingen.description": "Laat de mensen van deze klant problemen melden en volgen tot ze zijn afgehandeld.",
   "customer_permissions.modules.extra_werk.description": "Laat de mensen van deze klant werk buiten het contract aanvragen en de prijs afspreken voordat het begint.",
-  "customer_permissions.modules.documenten.description": "Laat de mensen van deze klant de pagina Documenten openen: ze zien de bestanden die u met hen deelt en kunnen hun eigen bestanden uploaden, hernoemen, verplaatsen en verwijderen. Zet u dit uit, dan verdwijnt de pagina voor hen allemaal, inclusief uw bestanden."
+  "customer_permissions.modules.documenten.description": "Laat de mensen van deze klant de pagina Documenten openen: ze zien de bestanden die u met hen deelt en kunnen hun eigen bestanden uploaden, hernoemen, verplaatsen en verwijderen. Zet u dit uit, dan verdwijnt de pagina voor hen allemaal, inclusief uw bestanden.",
+  "customer_view.buildings.stat_active": "Actief",
+  "customer_view.buildings.stat_cities": "Plaatsen",
+  "customer_view.buildings.stat_customer_links": "Klantkoppelingen",
+  "customer_view.buildings.stat_manager_links": "Beheerderkoppelingen",
+  "customer_view.buildings.stat_contact_links": "Contactkoppelingen",
+  "customer_view.buildings.col_at_this_building": "Op dit gebouw"
 }

@@ -166,6 +166,11 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
     # response) where one extra query is not an N+1.
     building_customer_count = serializers.SerializerMethodField()
     building_manager_count = serializers.SerializerMethodField()
+    # Sprint 157 §8 — the third count the customer's Buildings page's
+    # stat strip needed. Annotated in the same pass as the other two, so
+    # it costs nothing extra: the strip is filled from rows the page had
+    # already fetched, not from a new request.
+    building_contact_count = serializers.SerializerMethodField()
 
     class Meta:
         model = CustomerBuildingMembership
@@ -180,6 +185,7 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
             "building_is_active",
             "building_customer_count",
             "building_manager_count",
+            "building_contact_count",
             "customer_name",
             "created_at",
         ]
@@ -202,6 +208,11 @@ class CustomerBuildingMembershipSerializer(serializers.ModelSerializer):
     def get_building_manager_count(self, obj) -> int:
         return self._annotated_or_count(
             obj, "_building_manager_count", "manager_assignments"
+        )
+
+    def get_building_contact_count(self, obj) -> int:
+        return self._annotated_or_count(
+            obj, "_building_contact_count", "contact_links"
         )
 
 
@@ -227,6 +238,7 @@ def annotate_building_membership_counts(queryset):
         _building_manager_count=Count(
             "building__manager_assignments", distinct=True
         ),
+        _building_contact_count=Count("building__contact_links", distinct=True),
     )
 
 

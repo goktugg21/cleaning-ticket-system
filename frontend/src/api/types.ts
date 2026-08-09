@@ -895,6 +895,8 @@ export interface CustomerBuildingMembership {
   building_is_active: boolean;
   building_customer_count: number;
   building_manager_count: number;
+  // Sprint 157 §8 — the third count, annotated in the same pass.
+  building_contact_count: number;
   created_at: string;
 }
 
