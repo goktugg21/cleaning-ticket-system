@@ -1345,16 +1345,58 @@ p { line-height: 1.6; }
    them. */
 
 /* Filter bar */
+/* Sprint 156 §5 — the four controls read as ONE group.
+   MEASURED before the change, at 1440px on /admin/customers: the grid
+   was `160px 160px 1fr auto`, so the THIRD control absorbed the 1fr and
+   rendered 608px wide — 3.8x its neighbours — which pushed the fourth
+   (Building) out to x=978 and made it look detached. The gutter was
+   never the problem; every gap measured exactly the 10px gutter. A
+   dropdown 608px wide is the problem.
+   The Users page was worse and nobody had reported it: five controls
+   against four tracks wrapped the bar to FOUR rows at every width.
+   Flex with a fixed basis fixes both at once. Every filter control is
+   the same width, SEARCH is the only one that grows (width helps a text
+   field and does nothing for a select), and the actions are pushed to
+   the far end where they belong. `.filter-bar` is shared by nine
+   screens, so all four representative ones were measured before and
+   after rather than only the page that prompted the change (the Sprint
+   134/135 lesson about changing a shared thing for one caller). */
 .filter-bar {
-  display: grid;
-  grid-template-columns: 160px 160px 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
-  align-items: end;
+  align-items: flex-end;
   padding: 14px 20px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft);
 }
-.filter-field { display: flex; flex-direction: column; gap: 5px; }
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* Fixed basis, no grow: consistent control sizes across every list
+     page, which is also §9's "same control, same size, everywhere". */
+  flex: 0 0 180px;
+  min-width: 0;
+}
+/* Search gets a wider basis but does NOT grow. Letting it grow was
+   measurably worse: at 1024px on /admin/customers it stretched to 290px
+   and pushed the fourth control onto a THIRD row, where the old grid
+   managed two. Fixed widths keep the group aligned and the actions are
+   pushed to the far end by `margin-left: auto` instead. */
+.filter-field.search { flex: 0 1 240px; }
+/* Narrower desktops get a narrower basis. MEASURED: at 1024px the 180px
+   basis pushed the actions off the row on /admin/buildings (bar height
+   80 -> 120px) and cost /admin/customers 21px. The bar has ~670px of
+   inner width there, and 200 + 160 + 160 + the actions fits it. */
+@media (max-width: 1200px) {
+  .filter-field { flex: 0 0 145px; }
+  .filter-field.search { flex: 0 1 190px; }
+}
+/* The controls inside must fill the field, or a select keeps its
+   intrinsic content width and the alignment is undone by the widest
+   option's text. */
+.filter-field > .filter-control { width: 100%; }
 .filter-label {
   font-family: var(--f-head);
   font-size: 10px;
@@ -1375,12 +1417,21 @@ p { line-height: 1.6; }
   transition: border-color 0.14s;
 }
 .filter-control:focus { outline: none; border-color: var(--green); }
-.filter-actions { display: flex; gap: 6px; align-items: flex-end; }
+
+.filter-actions {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  /* Pushed to the far end of whichever row it lands on. */
+  margin-left: auto;
+}
 
 @media (max-width: 760px) {
-  .filter-bar { grid-template-columns: 1fr 1fr; }
-  .filter-field.search { grid-column: 1 / -1; }
-  .filter-actions { grid-column: 1 / -1; }
+  /* Phone: two per row, search and the actions full width. The old rules
+     were grid-column spans, which do nothing under flex. */
+  .filter-field { flex: 1 1 calc(50% - 5px); }
+  .filter-field.search { flex: 1 1 100%; }
+  .filter-actions { flex: 1 1 100%; margin-left: 0; }
 }
 
 /* Table */
@@ -4101,9 +4152,11 @@ a.attn-row:hover {
 @media (max-width: 480px) {
   .kpi-row { grid-template-columns: 1fr; gap: 10px; }
   .page-canvas { padding: 10px; }
-  .filter-bar { grid-template-columns: 1fr; }
-  .filter-field.search { grid-column: auto; }
-  .filter-actions { grid-column: auto; }
+  /* Sprint 156 §5 — one per row on the narrowest phones. These were
+     grid-column resets, which do nothing now the bar is flex. */
+  .filter-field,
+  .filter-field.search,
+  .filter-actions { flex: 1 1 100%; }
   .page-header-actions { width: 100%; }
   .page-header-actions .btn { flex: 1 0 auto; justify-content: center; }
 }

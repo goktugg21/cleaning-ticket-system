@@ -191,20 +191,26 @@ export function AppShell({ children }: AppShellProps) {
     setSidebarOpen(false);
   }, [location.pathname]);
 
-  // Sprint 155 §1 — the Extra Work group is back, so it needs one bit
-  // of state again: whether its children are folded away.
+  // Sprint 156 §2 — the Extra Work group defaults to CLOSED, every load.
   //
-  // Default OPEN, deliberately. The M3 group defaulted CLOSED and that
-  // is what made it a two-click detour to a page the owner uses daily —
-  // the whole reason Sprint 154 flattened it. Open-by-default keeps
-  // every child one click away and leaves the chevron as tidying, not
-  // as the thing standing between the operator and the menu.
+  // Sprint 155 defaulted it OPEN on the reasoning that closed-by-default
+  // was what made the old M3 group a two-click detour. That reasoning
+  // does not apply once the parent LABEL navigates: the list is one
+  // click away whether the group is open or shut, so the children being
+  // folded costs nothing and the sidebar is shorter. The owner asked for
+  // closed; there is no longer an argument against it.
   //
-  // Plain state, not URL-derived: it is a display preference, and
-  // deriving it from the route would re-open the group the moment the
-  // operator navigated anywhere inside it, silently undoing the
-  // collapse they just asked for.
-  const [extraWorkOpen, setExtraWorkOpen] = useState(true);
+  // What keeps this from hiding anything (the §9 rule, and `## NEXT`
+  // item 19's standing objection to disclosure groups): clicking the
+  // label BOTH navigates and opens the group. So the one gesture an
+  // operator naturally makes reveals the children — they can never end
+  // up on /extra-work with the group shut and no idea the other three
+  // entries exist.
+  //
+  // Plain state, not URL-derived: deriving it from the route would
+  // re-open the group the moment the operator navigated inside it,
+  // silently undoing the collapse they just asked for.
+  const [extraWorkOpen, setExtraWorkOpen] = useState(false);
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
@@ -513,6 +519,11 @@ export function AppShell({ children }: AppShellProps) {
                       to="/extra-work"
                       end
                       className={navClass}
+                      // Sprint 156 §2 — the label navigates AND opens the
+                      // group. With the group closed by default this is
+                      // what stops the three children being genuinely
+                      // hidden: the natural gesture reveals them.
+                      onClick={() => setExtraWorkOpen(true)}
                       data-testid="sidebar-extra-work-request"
                     >
                       <span className="nav-icon">

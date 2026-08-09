@@ -475,7 +475,12 @@ export function ExtraWorkListPage() {
               key: "recurring",
               label: t("list.create_chooser_recurring"),
               description: t("list.create_chooser_recurring_desc"),
-              onSelect: () => navigate("/planned-work"),
+              // Sprint 156 §2 — the recurring option was the odd one
+              // out: the other two open a FORM and this one opened the
+              // LIST, so "create" landed the operator on a page with
+              // nothing created. /planned-work/new is the existing
+              // create route (App.tsx) — no new route, no new page.
+              onSelect: () => navigate("/planned-work/new"),
             },
           ]}
         />
