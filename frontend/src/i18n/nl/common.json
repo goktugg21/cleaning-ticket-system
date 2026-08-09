@@ -2119,5 +2119,9 @@
   "company_detail.customers_title": "Klanten",
   "company_detail.customers_desc": "Alle klanten van dit bedrijf. Open er een voor de gebouwen, mensen en prijzen.",
   "company_detail.customers_empty": "Dit bedrijf heeft nog geen klanten.",
-  "customer_view.overview.stat_users": "Gebruikers"
+  "customer_view.overview.stat_users": "Gebruikers",
+  "employees.assign_buildings": "Aan gebouwen koppelen",
+  "employees.assign_summary": "{{people}} geselecteerde personen worden gekoppeld aan {{buildings}} geselecteerde gebouwen.",
+  "employees.assign_no_buildings": "Geen actieve gebouwen beschikbaar.",
+  "employees.bulk_selected_count": "{{count}} van {{total}} geselecteerd"
 }

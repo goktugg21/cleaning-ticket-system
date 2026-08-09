@@ -2119,5 +2119,9 @@
   "company_detail.customers_title": "Customers",
   "company_detail.customers_desc": "Every customer of this company. Open one to see its buildings, people and pricing.",
   "company_detail.customers_empty": "This company has no customers yet.",
-  "customer_view.overview.stat_users": "Users"
+  "customer_view.overview.stat_users": "Users",
+  "employees.assign_buildings": "Assign to buildings",
+  "employees.assign_summary": "{{people}} selected people will be assigned to {{buildings}} selected buildings.",
+  "employees.assign_no_buildings": "No active buildings available.",
+  "employees.bulk_selected_count": "{{count}} of {{total}} selected"
 }
