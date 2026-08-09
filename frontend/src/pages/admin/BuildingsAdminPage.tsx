@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
+import { SortableHeader } from "../../components/SortableHeader";
+import type { SortState } from "../../components/SortableHeader";
 import {
   bulkDeactivateBuildings,
   bulkLinkBuildings,
@@ -40,7 +42,6 @@ type ActiveFilter = "true" | "false" | "all";
  */
 type SortField = "name" | "city" | "created_at" | "is_active";
 type SortDirection = "asc" | "desc";
-type SortState = "ascending" | "descending" | "none";
 
 const DEBOUNCE_MS = 300;
 
@@ -56,45 +57,6 @@ function formatDate(value: string, locale: string): string {
   }
 }
 
-/**
- * A sortable column header. `aria-sort` lives on the `<th>` (the
- * columnheader is what ARIA sorts) and the clickable thing is a real
- * `<button>` inside it, so the header works from the keyboard — an
- * `onClick` on the `<th>` would not. Same shape as the customers list;
- * see the note in the sprint report about why it is duplicated rather
- * than shared.
- */
-function SortableHeader({
-  label,
-  sort,
-  testId,
-  onSort,
-  sortByLabel,
-}: {
-  label: string;
-  sort: SortState;
-  testId: string;
-  onSort: () => void;
-  sortByLabel: string;
-}) {
-  return (
-    <th aria-sort={sort === "none" ? undefined : sort}>
-      <button
-        type="button"
-        className="th-sort"
-        data-sort={sort}
-        aria-label={sortByLabel}
-        data-testid={testId}
-        onClick={onSort}
-      >
-        {label}
-        <span className="th-sort-caret" aria-hidden="true">
-          {sort === "descending" ? "▼" : "▲"}
-        </span>
-      </button>
-    </th>
-  );
-}
 
 /**
  * The Customers cell: the first two names plus a "+N" chip. Bounded on

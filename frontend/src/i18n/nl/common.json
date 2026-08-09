@@ -2147,5 +2147,13 @@
   "customer_view.buildings.stat_customer_links": "Klantkoppelingen",
   "customer_view.buildings.stat_manager_links": "Beheerderkoppelingen",
   "customer_view.buildings.stat_contact_links": "Contactkoppelingen",
-  "customer_view.buildings.col_at_this_building": "Op dit gebouw"
+  "customer_view.buildings.col_at_this_building": "Op dit gebouw",
+  "companies.stat_total": "Bedrijven",
+  "companies.stat_active": "Actief op deze pagina",
+  "companies.stat_inactive": "Inactief op deze pagina",
+  "companies.sort_by": "Sorteren op {{column}}",
+  "companies.select_page": "Alle bedrijven op deze pagina selecteren",
+  "companies.bulk_deactivate": "Deactiveren",
+  "companies.bulk_deactivate_title": "Geselecteerde bedrijven deactiveren?",
+  "companies.bulk_deactivate_body": "{{count}} bedrijven worden uitgezet. Hun gebouwen, klanten en historie blijven bewaard, en een superbeheerder kan ze weer aanzetten."
 }

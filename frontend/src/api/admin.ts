@@ -496,6 +496,18 @@ export async function getCustomerSummary(
 
 // ---- Companies: the Sprint 156 §1 detail reads ------------------------
 
+/** Sprint 157 §3 — deactivate many companies. All-or-nothing
+ *  server-side; SUPER_ADMIN only, because `Company` IS the tenant. */
+export async function bulkDeactivateCompanies(
+  ids: number[],
+): Promise<{ deactivated: number }> {
+  const response = await api.post<{ deactivated: number }>(
+    "/companies/bulk-deactivate/",
+    { companies: ids },
+  );
+  return response.data;
+}
+
 export async function getCompanySummary(id: number): Promise<CompanySummary> {
   const response = await api.get<CompanySummary>(`/companies/${id}/summary/`);
   return response.data;

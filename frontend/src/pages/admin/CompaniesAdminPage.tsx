@@ -1,13 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { getApiError } from "../../api/client";
-import { listCompanies } from "../../api/admin";
+import { bulkDeactivateCompanies, listCompanies } from "../../api/admin";
 import type { AdminListParams } from "../../api/admin";
 import type { CompanyAdmin } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useSavedBanner } from "../../hooks/useSavedBanner";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
+import { EditModeToggle } from "../../components/EditModeToggle";
+import { MultiSelectToolbar } from "../../components/MultiSelectToolbar";
+import { SortableHeader } from "../../components/SortableHeader";
+import type { SortState } from "../../components/SortableHeader";
+import { useEditMode } from "../../lib/useEditMode";
+
+/** Every value here MUST exist in `CompanyViewSet.ordering_fields`;
+ *  the backend allowlist is the authority and rejects anything else. */
+type SortField = "name" | "slug" | "is_active" | "created_at";
 
 type ActiveFilter = "true" | "false" | "all";
 
@@ -39,6 +50,13 @@ export function CompaniesAdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Sprint 157 §3 — sorting, selection and bulk deactivate, brought to
+  // the same standard as the buildings list.
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const bulkDialogRef = useRef<ConfirmDialogHandle>(null);
   const [searchInput, setSearchInput] = useState("");
   const [searchActive, setSearchActive] = useState("");
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("true");
@@ -62,8 +80,39 @@ export function CompaniesAdminPage() {
     const params: AdminListParams = { page };
     if (searchActive) params.search = searchActive;
     if (activeFilter !== "all") params.is_active = activeFilter;
+    // The backend allowlist is the authority — `CompanyViewSet
+    // .ordering_fields` was extended additively in the same sprint, and
+    // a value it does not know is a 400 rather than a soft fallback.
+    params.ordering = sortDirection === "desc" ? `-${sortField}` : sortField;
     return params;
-  }, [page, searchActive, activeFilter]);
+  }, [page, searchActive, activeFilter, sortField, sortDirection]);
+
+  const pageIds = useMemo(() => companies.map((c) => c.id), [companies]);
+  const edit = useEditMode(pageIds, { onExit: () => setSelectedIds([]) });
+
+  const allOnPageSelected =
+    pageIds.length > 0 &&
+    pageIds.every((id) => selectedIds.includes(id));
+
+  const handleSort = useCallback(
+    (field: SortField) => {
+      if (sortField === field) {
+        setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      } else {
+        setSortField(field);
+        setSortDirection("asc");
+      }
+      setPage(1);
+    },
+    [sortField],
+  );
+
+  const sortStateFor = (field: SortField): SortState =>
+    sortField !== field
+      ? "none"
+      : sortDirection === "asc"
+        ? "ascending"
+        : "descending";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,6 +183,39 @@ export function CompaniesAdminPage() {
         </div>
       )}
 
+      {/* Sprint 157 §3 — the tiles the buildings and customers lists
+          already had. `count` is the SERVER's total for the current
+          filter, not `companies.length`, which is one page. */}
+      <div
+        className="summary-grid summary-grid-chips"
+        data-testid="companies-stats"
+        style={{ marginBottom: 16 }}
+      >
+        {[
+          { key: "total", label: t("companies.stat_total"), value: count },
+          {
+            key: "active",
+            label: t("companies.stat_active"),
+            value: companies.filter((c) => c.is_active).length,
+          },
+          {
+            key: "inactive",
+            label: t("companies.stat_inactive"),
+            value: companies.filter((c) => !c.is_active).length,
+          },
+        ].map((stat) => (
+          <div
+            className="summary-stat"
+            key={stat.key}
+            style={{ cursor: "default" }}
+            data-testid={`companies-stat-${stat.key}`}
+          >
+            <span className="summary-stat-label">{stat.label}</span>
+            <span className="summary-stat-value">{stat.value}</span>
+          </div>
+        ))}
+      </div>
+
       <div className="card" style={{ overflow: "hidden" }}>
         <form
           className="filter-bar"
@@ -183,8 +265,36 @@ export function CompaniesAdminPage() {
                 {t("clear")}
               </button>
             )}
+            {pageIds.length > 0 && (
+              <EditModeToggle
+                editMode={edit.editMode}
+                onToggle={edit.toggleMode}
+                disabled={bulkBusy}
+                testId="companies-edit-mode-toggle"
+              />
+            )}
           </div>
         </form>
+
+        {edit.editMode && (
+          <MultiSelectToolbar
+            selectedCount={selectedIds.length}
+            onSelectAll={() =>
+              setSelectedIds((current) => [...new Set([...current, ...pageIds])])
+            }
+            onClearAll={() => setSelectedIds([])}
+            disabled={bulkBusy}
+            actions={[
+              {
+                key: "deactivate",
+                label: t("companies.bulk_deactivate"),
+                destructive: true,
+                onClick: () => bulkDialogRef.current?.open(),
+              },
+            ]}
+            testIdPrefix="companies-bulk"
+          />
+        )}
 
         {loading && (
           <div className="loading-bar" style={{ margin: 0 }}>
@@ -193,14 +303,60 @@ export function CompaniesAdminPage() {
         )}
 
         <div className="table-wrap admin-list-wrap">
-          <table className="data-table">
+          <table className="data-table data-table-dense">
             <thead>
               <tr>
-                <th>{t("admin.col_name")}</th>
-                <th>{t("companies.col_slug")}</th>
+                {edit.editMode && (
+                  <th className="th-select">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={() =>
+                        setSelectedIds((current) =>
+                          allOnPageSelected
+                            ? current.filter((id) => !pageIds.includes(id))
+                            : [...new Set([...current, ...pageIds])],
+                        )
+                      }
+                      disabled={pageIds.length === 0 || bulkBusy}
+                      aria-label={t("companies.select_page")}
+                      data-testid="companies-select-page"
+                    />
+                  </th>
+                )}
+                <SortableHeader
+                  label={t("admin.col_name")}
+                  sort={sortStateFor("name")}
+                  testId="companies-sort-name"
+                  onSort={() => handleSort("name")}
+                  sortByLabel={t("companies.sort_by", {
+                    column: t("admin.col_name"),
+                  })}
+                />
+                <SortableHeader
+                  label={t("companies.col_slug")}
+                  sort={sortStateFor("slug")}
+                  testId="companies-sort-slug"
+                  onSort={() => handleSort("slug")}
+                  sortByLabel={t("companies.sort_by", {
+                    column: t("companies.col_slug"),
+                  })}
+                />
                 <th>{t("companies.col_default_language")}</th>
-                <th>{t("created")}</th>
-                <th>{t("status")}</th>
+                <SortableHeader
+                  label={t("created")}
+                  sort={sortStateFor("created_at")}
+                  testId="companies-sort-created_at"
+                  onSort={() => handleSort("created_at")}
+                  sortByLabel={t("companies.sort_by", { column: t("created") })}
+                />
+                <SortableHeader
+                  label={t("status")}
+                  sort={sortStateFor("is_active")}
+                  testId="companies-sort-is_active"
+                  onSort={() => handleSort("is_active")}
+                  sortByLabel={t("companies.sort_by", { column: t("status") })}
+                />
                 <th aria-label={t("admin.col_actions")} />
               </tr>
             </thead>
@@ -224,6 +380,27 @@ export function CompaniesAdminPage() {
                       }
                     }}
                   >
+                    {edit.editMode && (
+                      <td
+                        className="td-select"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(company.id)}
+                          onChange={() =>
+                            setSelectedIds((current) =>
+                              current.includes(company.id)
+                                ? current.filter((id) => id !== company.id)
+                                : [...current, company.id],
+                            )
+                          }
+                          disabled={bulkBusy}
+                          aria-label={company.name}
+                          data-testid={`companies-select-${company.id}`}
+                        />
+                      </td>
+                    )}
                     <td className="td-subject">
                       <Link to={detailPath}>{company.name}</Link>
                     </td>
@@ -359,6 +536,34 @@ export function CompaniesAdminPage() {
           </div>
         )}
       </div>
+
+      {/* Rendered UNCONDITIONALLY and ref-driven (CLAUDE.md §3). */}
+      <ConfirmDialog
+        ref={bulkDialogRef}
+        title={t("companies.bulk_deactivate_title")}
+        body={t("companies.bulk_deactivate_body", {
+          count: selectedIds.length,
+        })}
+        confirmLabel={t("companies.bulk_deactivate")}
+        onConfirm={async () => {
+          if (selectedIds.length === 0) return;
+          setBulkBusy(true);
+          setError("");
+          try {
+            await bulkDeactivateCompanies(selectedIds);
+            bulkDialogRef.current?.close();
+            edit.exit();
+            await load();
+          } catch (err) {
+            setError(getApiError(err));
+            bulkDialogRef.current?.close();
+          } finally {
+            setBulkBusy(false);
+          }
+        }}
+        busy={bulkBusy}
+        destructive
+      />
     </div>
   );
 }

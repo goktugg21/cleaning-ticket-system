@@ -2147,5 +2147,13 @@
   "customer_view.buildings.stat_customer_links": "Customer links",
   "customer_view.buildings.stat_manager_links": "Manager links",
   "customer_view.buildings.stat_contact_links": "Contact links",
-  "customer_view.buildings.col_at_this_building": "At this building"
+  "customer_view.buildings.col_at_this_building": "At this building",
+  "companies.stat_total": "Companies",
+  "companies.stat_active": "Active on this page",
+  "companies.stat_inactive": "Inactive on this page",
+  "companies.sort_by": "Sort by {{column}}",
+  "companies.select_page": "Select every company on this page",
+  "companies.bulk_deactivate": "Deactivate",
+  "companies.bulk_deactivate_title": "Deactivate the selected companies?",
+  "companies.bulk_deactivate_body": "{{count}} companies will be switched off. Their buildings, customers and history are kept, and a super admin can switch them back on."
 }
