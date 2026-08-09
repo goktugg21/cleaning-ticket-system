@@ -511,6 +511,11 @@ export function MyHoursPage() {
               hourTypes={hourTypes}
               buildings={buildings}
               entriesByEmployee={gridEntries}
+              /* Sprint 157 §1 — no setup modal on this page: it writes
+                 only the signed-in user's own hours, and there is
+                 nothing to choose. Rows come from the week's existing
+                 entries plus Add row, exactly as before. */
+              seedBuildingIds={[]}
               weekClosed={weekClosed}
               onSaved={refresh}
             />

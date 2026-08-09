@@ -8550,6 +8550,31 @@ details[open] > .ew-department-tree-summary::before {
 
 /* Sprint 155 §5 — the multi-employee week grid: an apply-to-all bar over
    one block per employee. */
+/* Sprint 157 §1 — the one-line reminder of what the week is set up for,
+   sitting above the grid with the button that changes it. */
+.hours-week-setup-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.week-setup-summary {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--green-faint);
+  font-family: var(--f-head);
+  font-weight: 700;
+  font-size: 13.5px;
+}
+
 /* Sprint 156 §6a — ONE row. The owner's colleague works along this bar
    left to right, and a wrapped bar makes that a hunt. `nowrap` plus a
    horizontal scroll on the bar itself: if the viewport genuinely cannot

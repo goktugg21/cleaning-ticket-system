@@ -2125,5 +2125,18 @@
   "employees.assign_no_buildings": "No active buildings available.",
   "employees.bulk_selected_count": "{{count}} of {{total}} selected",
   "company_detail.add_customer": "Add customer",
-  "employees.open_account": "Open the account of {{name}}"
+  "employees.open_account": "Open the account of {{name}}",
+  "week_setup.title": "Set up week",
+  "week_setup.subtitle": "Pick the people and the buildings. One row is created for each combination, and you type the hours straight into it.",
+  "week_setup.week_label": "Week",
+  "week_setup.employees_label": "Employees",
+  "week_setup.buildings_label": "Buildings",
+  "week_setup.no_buildings": "No buildings available.",
+  "week_setup.no_building_hint": "For hours that are not tied to a location",
+  "week_setup.summary": "{{employees}} employees x {{buildings}} buildings = {{rows}} rows",
+  "week_setup.confirm": "Build the week",
+  "week_setup.open": "Set up week",
+  "week_setup.change": "Change setup",
+  "week_setup.not_set_up": "No week set up yet. Pick the people and the buildings to begin.",
+  "week_setup.current": "{{employees}} employees at {{buildings}} buildings"
 }

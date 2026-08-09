@@ -2125,5 +2125,18 @@
   "employees.assign_no_buildings": "Geen actieve gebouwen beschikbaar.",
   "employees.bulk_selected_count": "{{count}} van {{total}} geselecteerd",
   "company_detail.add_customer": "Klant toevoegen",
-  "employees.open_account": "Account van {{name}} openen"
+  "employees.open_account": "Account van {{name}} openen",
+  "week_setup.title": "Week instellen",
+  "week_setup.subtitle": "Kies de mensen en de gebouwen. Voor elke combinatie komt er een rij, waarin u de uren direct invult.",
+  "week_setup.week_label": "Week",
+  "week_setup.employees_label": "Medewerkers",
+  "week_setup.buildings_label": "Gebouwen",
+  "week_setup.no_buildings": "Geen gebouwen beschikbaar.",
+  "week_setup.no_building_hint": "Voor uren die niet aan een locatie hangen",
+  "week_setup.summary": "{{employees}} medewerkers x {{buildings}} gebouwen = {{rows}} rijen",
+  "week_setup.confirm": "Week opbouwen",
+  "week_setup.open": "Week instellen",
+  "week_setup.change": "Instelling wijzigen",
+  "week_setup.not_set_up": "Nog geen week ingesteld. Kies de mensen en de gebouwen om te beginnen.",
+  "week_setup.current": "{{employees}} medewerkers op {{buildings}} gebouwen"
 }

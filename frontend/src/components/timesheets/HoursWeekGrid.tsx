@@ -61,6 +61,10 @@ interface GridRow {
   key: string;
   hourTypeId: number | "";
   buildingId: number | "";
+  /** True for a row the SETUP created rather than the operator or the
+   *  server. Seeded rows are retargetable and droppable exactly like
+   *  added ones — they have no saved entry behind them either. */
+  seeded?: boolean;
   /** "YYYY-MM-DD" -> the raw text in the cell. Text, not number, so a
    *  half-typed "1." survives a re-render. */
   cells: Record<string, string>;
@@ -99,6 +103,7 @@ export function HoursWeekGrid({
   hourTypes,
   buildings,
   entriesByEmployee,
+  seedBuildingIds,
   weekClosed,
   onSaved,
 }: {
@@ -111,6 +116,15 @@ export function HoursWeekGrid({
   /** The week's EXISTING entries per employee, so the grid opens
    *  pre-filled. Missing key = that employee's week is empty. */
   entriesByEmployee: Record<number, TimeEntry[]>;
+  /** Sprint 157 §1 — the buildings chosen in the Set up week modal.
+   *  `null` is a legitimate member ("no building"), which is why this is
+   *  `(number | null)[]` and not `number[]`.
+   *
+   *  The grid opens one row per (employee, building) pair, exactly as
+   *  the reference system opens one row per worker-building pair. Rows
+   *  that ALREADY have entries this week are reconciled rather than
+   *  duplicated — see `rowsByEmployee`. */
+  seedBuildingIds: (number | null)[];
   weekClosed: boolean;
   onSaved: () => void | Promise<void>;
 }) {
@@ -128,6 +142,13 @@ export function HoursWeekGrid({
   const [bulkBuilding, setBulkBuilding] = useState<number | "">("");
   const [bulkHours, setBulkHours] = useState("");
   const [bulkScope, setBulkScope] = useState<"week" | "weekdays">("weekdays");
+
+  // The hour type a SEEDED row opens on. The first active type, which
+  // for every company that has run the standard set is "Normale uren" —
+  // the one an operator would have picked anyway. It is editable on the
+  // row (Sprint 156 §6c), so this is a starting point and not a
+  // decision made on their behalf.
+  const defaultHourType = hourTypes[0];
 
   const days = useMemo(() => isoWeekDays(week), [week]);
   const dayKeys = useMemo(() => days.map(toDateString), [days]);
@@ -152,13 +173,41 @@ export function HoursWeekGrid({
         }
         byKey.get(key)!.cells[entry.date] = String(entry.hours);
       }
+      // Sprint 157 §1 — one row per (employee, building) pair from the
+      // setup modal.
+      //
+      // RECONCILED, not appended: if this employee already has any row
+      // at that building this week — because they have saved entries
+      // there — the pair is already represented and a blank second row
+      // would be a duplicate of it. That is §1.5, and it is why the
+      // check is on the BUILDING rather than on the full row key: the
+      // hour type of the existing rows is whatever was really worked,
+      // and the seed's default type has no claim to displace it.
+      if (defaultHourType) {
+        for (const buildingId of seedBuildingIds) {
+          const seatId = buildingId ?? "";
+          const alreadyThere = [...byKey.values()].some(
+            (row) => row.buildingId === seatId,
+          );
+          if (alreadyThere) continue;
+          const key = rowKey(defaultHourType.id, seatId);
+          if (byKey.has(key)) continue;
+          byKey.set(key, {
+            key,
+            hourTypeId: defaultHourType.id,
+            buildingId: seatId,
+            cells: {},
+            seeded: true,
+          });
+        }
+      }
       for (const extra of extraRows[employee.id] ?? []) {
         if (!byKey.has(extra.key)) byKey.set(extra.key, extra);
       }
       out[employee.id] = [...byKey.values()];
     }
     return out;
-  }, [employees, entriesByEmployee, extraRows]);
+  }, [employees, entriesByEmployee, extraRows, seedBuildingIds, defaultHourType]);
 
   const cellValue = (employeeId: number, row: GridRow, dayKey: string) =>
     edits[cellKey(employeeId, row.key, dayKey)] ?? row.cells[dayKey] ?? "";
@@ -198,7 +247,10 @@ export function HoursWeekGrid({
    *  behind it yet — the only rows whose hour type and building may be
    *  retargeted, and the only ones that can simply be dropped. */
   const isAddedRow = (employeeId: number, key: string) =>
-    (extraRows[employeeId] ?? []).some((r) => r.key === key);
+    (extraRows[employeeId] ?? []).some((r) => r.key === key) ||
+    (rowsByEmployee[employeeId] ?? []).some(
+      (r) => r.key === key && r.seeded,
+    );
 
   const buildingName = (id: number | "") =>
     id === ""

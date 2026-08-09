@@ -210,7 +210,44 @@ export function AppShell({ children }: AppShellProps) {
   // Plain state, not URL-derived: deriving it from the route would
   // re-open the group the moment the operator navigated inside it,
   // silently undoing the collapse they just asked for.
-  const [extraWorkOpen, setExtraWorkOpen] = useState(false);
+  // Sprint 157 §6 — three rules at once: CLOSED when the app loads, OPEN
+  // while the current route is one of the group's children, and the
+  // operator's own toggle winning over both until they navigate away.
+  //
+  // All three fall out of ONE derived value, which is the point: the
+  // override carries the path it was made on, so it simply stops
+  // applying when the pathname changes. No effect resets it — and a
+  // resync effect here would be a synchronous setState in an effect
+  // body, which CLAUDE.md forbids and which §6 rules out explicitly.
+  //
+  // (§6 describes `AppShell` as already holding
+  // `extraWorkManualOpen ?? extraWorkChildActive`. It did not — it held
+  // a plain boolean from Sprint 156. The behaviour asked for is what is
+  // built here.)
+  const [extraWorkManual, setExtraWorkManual] = useState<{
+    path: string;
+    open: boolean;
+  } | null>(null);
+
+  // A CHILD route, not the parent: `/extra-work` itself is the group's
+  // own destination and `end`-matched in the nav, so it is deliberately
+  // not in this test — otherwise the parent could never be visited with
+  // the group shut.
+  const extraWorkChildActive =
+    location.pathname.startsWith("/extra-work/") ||
+    location.pathname.startsWith("/planned-work");
+
+  const extraWorkOpen =
+    extraWorkManual && extraWorkManual.path === location.pathname
+      ? extraWorkManual.open
+      : extraWorkChildActive;
+
+  /** Toggle for THIS route. Navigating anywhere else lets it lapse. */
+  const toggleExtraWork = () =>
+    setExtraWorkManual({
+      path: location.pathname,
+      open: !extraWorkOpen,
+    });
 
   const userName =
     me?.full_name?.trim() || me?.email || t("topbar.user_fallback");
@@ -523,7 +560,14 @@ export function AppShell({ children }: AppShellProps) {
                       // group. With the group closed by default this is
                       // what stops the three children being genuinely
                       // hidden: the natural gesture reveals them.
-                      onClick={() => setExtraWorkOpen(true)}
+                      // The label navigates AND opens the group. The
+                      // override is stamped with the DESTINATION path,
+                      // because /extra-work is the parent and so is not
+                      // "child active" — without this the group would
+                      // shut itself the moment the click landed.
+                      onClick={() =>
+                        setExtraWorkManual({ path: "/extra-work", open: true })
+                      }
                       data-testid="sidebar-extra-work-request"
                     >
                       <span className="nav-icon">
@@ -541,7 +585,7 @@ export function AppShell({ children }: AppShellProps) {
                           : "nav.expand_group",
                         { group: t("nav.extra_work") },
                       )}
-                      onClick={() => setExtraWorkOpen((open) => !open)}
+                      onClick={toggleExtraWork}
                       data-testid="sidebar-extra-work-toggle"
                     >
                       {extraWorkOpen ? (

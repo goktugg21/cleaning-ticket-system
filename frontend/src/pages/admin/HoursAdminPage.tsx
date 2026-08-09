@@ -39,8 +39,8 @@ import {
   toDateString,
 } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
-import { EntityPicker } from "../../components/EntityPicker";
 import { HoursWeekGrid } from "../../components/timesheets/HoursWeekGrid";
+import { WeekSetupDialog } from "../../components/timesheets/WeekSetupDialog";
 import {
   hourTypeLabel,
   hourTypeLabelFrom,
@@ -198,6 +198,11 @@ export function HoursAdminPage() {
   // could not be entered without switching in between. The two concerns
   // are now separate state and neither touches the other.
   const [gridEmployeeIds, setGridEmployeeIds] = useState<number[]>([]);
+  // Sprint 157 §1 — the buildings chosen alongside the employees, and
+  // the modal that chooses both. `null` is a legitimate member of the
+  // list ("no building"), which is why it is not `number[]`.
+  const [gridBuildingIds, setGridBuildingIds] = useState<(number | null)[]>([]);
+  const [setupOpen, setSetupOpen] = useState(false);
   // The blocks the grid renders, derived from the selection and the
   // employee list. Derived so a selected employee who disappears from
   // the list (company switch, deactivation) simply stops having a
@@ -772,30 +777,35 @@ export function HoursAdminPage() {
             </div>
             {gridOpen && (
               <>
-                {/* Sprint 155 §5 — the grid's OWN employee selector.
-                    Multi-select, and deliberately not the filter row
-                    below: the filter decides what the table shows, this
-                    decides whose week Save writes, and Sprint 154's bug
-                    was making one control mean both. Changing either one
-                    now leaves the other exactly as it was. */}
-                <div className="field" style={{ marginBottom: 12 }}>
-                  <span className="field-label">
-                    {t("hours_week_grid.employees_label")}
+                {/* Sprint 157 §1 — the setup happens in a MODAL, up
+                    front: pick the people AND the buildings, then the
+                    table is built from that choice. Sprint 155's inline
+                    employee picker lived here and chose only half of
+                    the pair, which is why a building could only be
+                    attached to a row afterwards.
+
+                    What is chosen here is still completely separate
+                    from the entries FILTER below — that separation is
+                    Sprint 155 §5's fix and is not being re-merged. */}
+                <div className="hours-week-setup-summary">
+                  <span data-testid="hours-week-setup-line">
+                    {gridEmployeeIds.length === 0
+                      ? t("week_setup.not_set_up")
+                      : t("week_setup.current", {
+                          employees: gridEmployeeIds.length,
+                          buildings: gridBuildingIds.length,
+                        })}
                   </span>
-                  <EntityPicker
-                    options={employees.map((employee) => ({
-                      id: employee.id,
-                      label: employee.full_name || employee.email,
-                      sublabel: employee.email,
-                    }))}
-                    selectedIds={gridEmployeeIds}
-                    onChange={setGridEmployeeIds}
-                    emptyText={t("hours_week_grid.no_employees")}
-                    testIdPrefix="hours-week-grid-employees"
-                  />
-                  <p className="field-hint muted small">
-                    {t("hours_week_grid.employees_hint")}
-                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setSetupOpen(true)}
+                    data-testid="hours-week-setup-open"
+                  >
+                    {gridEmployeeIds.length === 0
+                      ? t("week_setup.open")
+                      : t("week_setup.change")}
+                  </button>
                 </div>
                 <HoursWeekGrid
                   week={gridWeek}
@@ -804,6 +814,7 @@ export function HoursAdminPage() {
                   hourTypes={activeHourTypes}
                   buildings={buildings}
                   entriesByEmployee={gridEntries}
+                  seedBuildingIds={gridBuildingIds}
                   weekClosed={gridWeekClosed}
                   onSaved={async () => {
                     setGridToken((n) => n + 1);
@@ -1535,6 +1546,26 @@ export function HoursAdminPage() {
       {/* Unconditionally rendered and ref-driven (CLAUDE.md §3): a
           native <dialog> wrapped in a condition mounts INVISIBLE and its
           trigger button looks dead. */}
+      {/* Sprint 157 §1 — conditionally mounted overlay, like every
+          other editing modal here. `ConfirmDialog` below stays native
+          and ref-driven; the two are deliberately different things. */}
+      {setupOpen && (
+        <WeekSetupDialog
+          employees={employees}
+          buildings={buildings}
+          initialWeek={gridWeek}
+          initialEmployeeIds={gridEmployeeIds}
+          initialBuildingIds={gridBuildingIds}
+          onCancel={() => setSetupOpen(false)}
+          onConfirm={(setup) => {
+            setGridEmployeeIds(setup.employeeIds);
+            setGridBuildingIds(setup.buildingIds);
+            setGridWeek(setup.week);
+            setSetupOpen(false);
+          }}
+        />
+      )}
+
       <ConfirmDialog
         ref={deleteDialogRef}
         title={t("hours_admin.delete_confirm_title")}
