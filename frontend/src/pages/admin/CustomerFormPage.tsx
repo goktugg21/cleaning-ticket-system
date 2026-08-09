@@ -571,8 +571,19 @@ export function CustomerFormPage() {
       .then((response) => {
         if (cancelled) return;
         setCompanies(response);
-        if (isCreate && response.length === 1) {
-          setCompany(response[0].id);
+        // Sprint 156 §1b — `?company=<id>` pre-selects the provider on a
+        // CREATE, which is what the company page's "Add customer" action
+        // sends. Validated against the list the actor may actually see,
+        // so a hand-edited URL naming a company out of scope simply does
+        // not pre-select rather than pre-selecting something they cannot
+        // use. Falls back to the existing single-company convenience.
+        if (isCreate) {
+          const requested = Number(
+            new URLSearchParams(window.location.search).get("company"),
+          );
+          const allowed = response.some((c) => c.id === requested);
+          if (allowed) setCompany(requested);
+          else if (response.length === 1) setCompany(response[0].id);
         }
       })
       .finally(() => {

@@ -2123,5 +2123,7 @@
   "employees.assign_buildings": "Assign to buildings",
   "employees.assign_summary": "{{people}} selected people will be assigned to {{buildings}} selected buildings.",
   "employees.assign_no_buildings": "No active buildings available.",
-  "employees.bulk_selected_count": "{{count}} of {{total}} selected"
+  "employees.bulk_selected_count": "{{count}} of {{total}} selected",
+  "company_detail.add_customer": "Add customer",
+  "employees.open_account": "Open the account of {{name}}"
 }

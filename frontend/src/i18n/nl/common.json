@@ -2123,5 +2123,7 @@
   "employees.assign_buildings": "Aan gebouwen koppelen",
   "employees.assign_summary": "{{people}} geselecteerde personen worden gekoppeld aan {{buildings}} geselecteerde gebouwen.",
   "employees.assign_no_buildings": "Geen actieve gebouwen beschikbaar.",
-  "employees.bulk_selected_count": "{{count}} van {{total}} geselecteerd"
+  "employees.bulk_selected_count": "{{count}} van {{total}} geselecteerd",
+  "company_detail.add_customer": "Klant toevoegen",
+  "employees.open_account": "Account van {{name}} openen"
 }

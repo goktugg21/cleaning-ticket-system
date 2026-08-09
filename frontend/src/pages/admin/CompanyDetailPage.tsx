@@ -583,6 +583,28 @@ export function CompanyDetailPage() {
                   {t("company_detail.customers_desc")}
                 </div>
               </div>
+              {/* Sprint 156 §1b — "Add customers to a company" is a
+                  scoped CREATE, not a link.
+
+                  `Customer.company` is a single ForeignKey: a customer
+                  belongs to exactly ONE provider. There is no
+                  company<->customer link table to add a row to, so the
+                  only two readings of "add a customer to this company"
+                  are (a) create one under it, or (b) MOVE an existing
+                  customer from another provider — and (b) would drag its
+                  buildings, users, access rows, prices, tickets and
+                  invoices across a tenant boundary, which is the H-1
+                  breach §1b itself calls non-negotiable. So: (a), with
+                  the company pre-filled and locked to this one. */}
+              {isSuperAdmin && (
+                <Link
+                  to={`/admin/customers/new?company=${company.id}`}
+                  className="btn btn-secondary btn-sm"
+                  data-testid="company-detail-add-customer"
+                >
+                  {t("company_detail.add_customer")}
+                </Link>
+              )}
             </div>
 
             <BoundedList
