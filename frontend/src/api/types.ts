@@ -819,6 +819,63 @@ export interface CustomerSummary {
 }
 
 // Sprint 14 — Customer ↔ Building (M:N) link.
+/** Sprint 156 §1 — the company detail page's stat tiles.
+ *
+ * Every count may be `null`, and `null` is NOT `0`: it means the block
+ * was not answerable for this actor (the server wraps each one so a
+ * single unreadable module degrades rather than 500s). The page renders
+ * an em dash for null, never a zero. */
+export interface CompanySummary {
+  building_count: number | null;
+  customer_count: number | null;
+  admin_count: number | null;
+  employee_count: number | null;
+  ticket_count: number | null;
+  open_ticket_count: number | null;
+  extra_work_count: number | null;
+  open_extra_work_count: number | null;
+}
+
+/** One COMPANY_ADMIN of a company. `phone` is `User.phone` — the ungated
+ *  account field, never the visibility-gated `StaffProfile.phone`. */
+export interface CompanyAdminPerson {
+  id: number;
+  email: string;
+  full_name: string;
+  phone: string;
+  is_active: boolean;
+}
+
+/** One provider-side employee, with the buildings they are on — the
+ *  "who can do what, where" row. */
+export interface CompanyEmployee {
+  id: number;
+  email: string;
+  full_name: string;
+  phone: string;
+  role: string;
+  is_active: boolean;
+  buildings: { id: number; name: string }[];
+}
+
+export interface CompanyBuildingRow {
+  id: number;
+  name: string;
+  address: string;
+  city: string;
+  postal_code: string;
+  is_active: boolean;
+  customer_count: number;
+}
+
+export interface CompanyCustomerRow {
+  id: number;
+  name: string;
+  is_active: boolean;
+  building_count: number;
+  user_count: number;
+}
+
 export interface CustomerBuildingMembership {
   id: number;
   customer: number;

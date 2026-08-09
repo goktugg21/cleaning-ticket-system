@@ -7,14 +7,25 @@ import { getApiError } from "../../api/client";
 import {
   deactivateCompany,
   getCompany,
-  listCompanyAdmins,
+  getCompanySummary,
+  listCompanyAdminPeople,
+  listCompanyBuildings,
+  listCompanyCustomers,
+  listCompanyEmployees,
   reactivateCompany,
 } from "../../api/admin";
 import type {
   CompanyAdmin,
-  CompanyAdminMembership,
+  CompanyAdminPerson,
+  CompanyBuildingRow,
+  CompanyCustomerRow,
+  CompanyEmployee,
+  CompanySummary,
 } from "../../api/types";
+import { BoundedList } from "../../components/BoundedList";
 import { useAuth } from "../../auth/AuthContext";
+import { roleLabelKey } from "../../auth/permissions";
+import type { Role } from "../../api/types";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { EmptyState } from "../../components/EmptyState";
@@ -38,7 +49,7 @@ import { useSavedBanner } from "../../hooks/useSavedBanner";
 export function CompanyDetailPage() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { t, i18n } = useTranslation("common");
+  const { t } = useTranslation("common");
 
   const { me } = useAuth();
   const isSuperAdmin = me?.role === "SUPER_ADMIN";
@@ -54,7 +65,19 @@ export function CompanyDetailPage() {
   });
 
   const [company, setCompany] = useState<CompanyAdmin | null>(null);
-  const [members, setMembers] = useState<CompanyAdminMembership[]>([]);
+  // Sprint 156 §1 — the four relation lists and the tile counts. Each is
+  // its OWN read with its own catch, so one unreadable block leaves the
+  // rest of the page intact; that mirrors the server, which wraps each
+  // summary block for the same reason.
+  const [summary, setSummary] = useState<CompanySummary | null>(null);
+  const [admins, setAdmins] = useState<CompanyAdminPerson[]>([]);
+  const [employees, setEmployees] = useState<CompanyEmployee[]>([]);
+  const [companyBuildings, setCompanyBuildings] = useState<CompanyBuildingRow[]>(
+    [],
+  );
+  const [companyCustomers, setCompanyCustomers] = useState<CompanyCustomerRow[]>(
+    [],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -74,19 +97,25 @@ export function CompanyDetailPage() {
     }
     setLoading(true); // eslint-disable-line react-hooks/set-state-in-effect
     setError("");
+    // The company itself is the only read that may fail the page; every
+    // other one degrades to an empty card or an em dash. A company whose
+    // extra-work module cannot be read must still show its buildings.
     Promise.all([
       getCompany(numericId),
-      listCompanyAdmins(numericId).catch(() => ({
-        count: 0,
-        next: null,
-        previous: null,
-        results: [] as CompanyAdminMembership[],
-      })),
+      getCompanySummary(numericId).catch(() => null),
+      listCompanyAdminPeople(numericId).catch(() => []),
+      listCompanyEmployees(numericId).catch(() => []),
+      listCompanyBuildings(numericId).catch(() => []),
+      listCompanyCustomers(numericId).catch(() => []),
     ])
-      .then(([companyData, membersResponse]) => {
+      .then(([companyData, summaryData, adminRows, employeeRows, buildingRows, customerRows]) => {
         if (cancelled) return;
         setCompany(companyData);
-        setMembers(membersResponse.results);
+        setSummary(summaryData);
+        setAdmins(adminRows);
+        setEmployees(employeeRows);
+        setCompanyBuildings(buildingRows);
+        setCompanyCustomers(customerRows);
       })
       .catch((err) => {
         if (!cancelled) setError(getApiError(err));
@@ -142,8 +171,6 @@ export function CompanyDetailPage() {
 
   const companyName = company?.name ?? t("company_form.fallback");
   const isActive = company?.is_active ?? true;
-
-  const dateLocale = i18n.language === "nl" ? "nl-NL" : "en-US";
 
   const languageLabel = (() => {
     if (!company) return "";
@@ -282,10 +309,45 @@ export function CompanyDetailPage() {
             </div>
           </section>
 
+          {/* Sprint 156 §1 — the tiles. A null count renders an em
+              dash, never a zero: the server returns null when a block is
+              not answerable for this actor, and 0 would be the different
+              and false claim that there are none. */}
+          <div
+            className="summary-grid summary-grid-chips"
+            data-testid="company-detail-stats"
+          >
+            {[
+              { key: "buildings", label: t("company_detail.stat_buildings"), value: summary?.building_count },
+              { key: "customers", label: t("company_detail.stat_customers"), value: summary?.customer_count },
+              { key: "admins", label: t("company_detail.stat_admins"), value: summary?.admin_count },
+              { key: "employees", label: t("company_detail.stat_employees"), value: summary?.employee_count },
+              { key: "open-tickets", label: t("company_detail.stat_open_tickets"), value: summary?.open_ticket_count },
+              { key: "open-extra-work", label: t("company_detail.stat_open_extra_work"), value: summary?.open_extra_work_count },
+            ].map((stat) => (
+              <div
+                className="summary-stat"
+                key={stat.key}
+                style={{ cursor: "default" }}
+                data-testid={`company-detail-stat-${stat.key}`}
+              >
+                <span className="summary-stat-label">{stat.label}</span>
+                <span className="summary-stat-value">
+                  {stat.value === null || stat.value === undefined
+                    ? "—"
+                    : stat.value}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Company admins. E-mail AND phone, and the name reaches the
+              person — the old card showed three columns of text with no
+              way to open anybody (§7). */}
           <section
             className="card"
             data-testid="company-detail-admins-card"
-            style={{ padding: "20px 22px" }}
+            style={{ padding: "20px 22px", marginBottom: 16 }}
           >
             <div className="section-head" style={{ marginBottom: 8 }}>
               <div>
@@ -298,39 +360,275 @@ export function CompanyDetailPage() {
               </div>
             </div>
 
-            {members.length === 0 ? (
-              <EmptyState
-                icon={Users}
-                title={t("company_detail.admins_empty")}
-                compact
-                testId="company-detail-admins-empty"
-              />
-            ) : (
-              <div className="table-wrap">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>{t("users.col_email")}</th>
-                      <th>{t("users.col_full_name")}</th>
-                      <th>{t("admin_form.col_added")}</th>
+            <BoundedList
+              size="md"
+              count={admins.length}
+              ariaLabel={t("company_detail.admins_title")}
+              testIdPrefix="company-detail-admins"
+              className="table-wrap"
+              emptyState={
+                <EmptyState
+                  icon={Users}
+                  title={t("company_detail.admins_empty")}
+                  compact
+                  testId="company-detail-admins-empty"
+                />
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("users.col_full_name")}</th>
+                    <th>{t("users.col_email")}</th>
+                    <th>{t("customer_contacts.field_phone")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {admins.map((person) => (
+                    <tr key={person.id}>
+                      <td className="td-subject">
+                        <Link to={`/admin/users/${person.id}`}>
+                          {person.full_name || person.email}
+                        </Link>
+                      </td>
+                      <td>
+                        <a href={`mailto:${person.email}`}>{person.email}</a>
+                      </td>
+                      <td>
+                        {person.phone ? (
+                          <a href={`tel:${person.phone}`}>{person.phone}</a>
+                        ) : (
+                          <span className="muted-empty">—</span>
+                        )}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((membership) => (
-                      <tr key={membership.id}>
-                        <td className="td-subject">{membership.user_email}</td>
-                        <td>{membership.user_full_name || "—"}</td>
-                        <td className="td-date">
-                          {new Date(
-                            membership.created_at,
-                          ).toLocaleDateString(dateLocale)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
+          </section>
+
+          {/* Employees — the "who can do what, where" card. The
+              buildings column is the reason this list exists; without it
+              the page says who works here but not where. */}
+          <section
+            className="card"
+            data-testid="company-detail-employees-card"
+            style={{ padding: "20px 22px", marginBottom: 16 }}
+          >
+            <div className="section-head" style={{ marginBottom: 8 }}>
+              <div>
+                <div className="section-head-title">
+                  {t("company_detail.employees_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("company_detail.employees_desc")}
+                </div>
               </div>
-            )}
+            </div>
+
+            <BoundedList
+              size="md"
+              count={employees.length}
+              ariaLabel={t("company_detail.employees_title")}
+              testIdPrefix="company-detail-employees"
+              className="table-wrap"
+              emptyState={
+                <p className="muted small" style={{ padding: "12px 0", margin: 0 }}>
+                  {t("company_detail.employees_empty")}
+                </p>
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("users.col_full_name")}</th>
+                    <th>{t("users.col_role")}</th>
+                    <th>{t("users.col_email")}</th>
+                    <th>{t("customer_contacts.field_phone")}</th>
+                    <th>{t("company_detail.col_buildings")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((person) => (
+                    <tr key={person.id}>
+                      <td className="td-subject">
+                        <Link to={`/admin/users/${person.id}`}>
+                          {person.full_name || person.email}
+                        </Link>
+                      </td>
+                      <td>
+                        {/* `role` comes off the wire as a string; the
+                            label helper wants the Role union. Cast at
+                            the boundary rather than widening the helper,
+                            which every other caller relies on. */}
+                        {t(roleLabelKey(person.role as Role))}
+                      </td>
+                      <td>
+                        <a href={`mailto:${person.email}`}>{person.email}</a>
+                      </td>
+                      <td>
+                        {person.phone ? (
+                          <a href={`tel:${person.phone}`}>{person.phone}</a>
+                        ) : (
+                          <span className="muted-empty">—</span>
+                        )}
+                      </td>
+                      <td>
+                        {person.buildings.length === 0 ? (
+                          <span className="muted-empty">—</span>
+                        ) : (
+                          <span
+                            style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+                          >
+                            {person.buildings.map((b) => (
+                              <Link
+                                key={b.id}
+                                to={`/admin/buildings/${b.id}`}
+                                className="badge badge-normal"
+                              >
+                                {b.name}
+                              </Link>
+                            ))}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
+          </section>
+
+          {/* Buildings, each row a link to the building detail page. */}
+          <section
+            className="card"
+            data-testid="company-detail-buildings-card"
+            style={{ padding: "20px 22px", marginBottom: 16 }}
+          >
+            <div className="section-head" style={{ marginBottom: 8 }}>
+              <div>
+                <div className="section-head-title">
+                  {t("company_detail.buildings_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("company_detail.buildings_desc")}
+                </div>
+              </div>
+            </div>
+
+            <BoundedList
+              size="md"
+              count={companyBuildings.length}
+              ariaLabel={t("company_detail.buildings_title")}
+              testIdPrefix="company-detail-buildings"
+              className="table-wrap"
+              emptyState={
+                <p className="muted small" style={{ padding: "12px 0", margin: 0 }}>
+                  {t("company_detail.buildings_empty")}
+                </p>
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("admin.col_name")}</th>
+                    <th>{t("buildings.col_city")}</th>
+                    <th>{t("buildings.col_customers")}</th>
+                    <th>{t("status")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {companyBuildings.map((row) => (
+                    <tr key={row.id}>
+                      <td className="td-subject">
+                        <Link
+                          to={`/admin/buildings/${row.id}`}
+                          data-testid={`company-detail-building-${row.id}`}
+                        >
+                          {row.name}
+                        </Link>
+                      </td>
+                      <td>
+                        {[row.city, row.postal_code].filter(Boolean).join(" · ") ||
+                          row.address ||
+                          "—"}
+                      </td>
+                      <td>{row.customer_count}</td>
+                      <td>
+                        {row.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
+          </section>
+
+          {/* Customers, each row a link to that customer's OVERVIEW page
+              — the owner asked for this click-through explicitly. */}
+          <section
+            className="card"
+            data-testid="company-detail-customers-card"
+            style={{ padding: "20px 22px", marginBottom: 16 }}
+          >
+            <div className="section-head" style={{ marginBottom: 8 }}>
+              <div>
+                <div className="section-head-title">
+                  {t("company_detail.customers_title")}
+                </div>
+                <div className="section-head-sub">
+                  {t("company_detail.customers_desc")}
+                </div>
+              </div>
+            </div>
+
+            <BoundedList
+              size="md"
+              count={companyCustomers.length}
+              ariaLabel={t("company_detail.customers_title")}
+              testIdPrefix="company-detail-customers"
+              className="table-wrap"
+              emptyState={
+                <p className="muted small" style={{ padding: "12px 0", margin: 0 }}>
+                  {t("company_detail.customers_empty")}
+                </p>
+              }
+            >
+              <table className="data-table data-table-dense">
+                <thead>
+                  <tr>
+                    <th>{t("admin.col_name")}</th>
+                    <th>{t("customer_view.overview.stat_linked_buildings")}</th>
+                    <th>{t("customer_view.overview.stat_users")}</th>
+                    <th>{t("status")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {companyCustomers.map((row) => (
+                    <tr key={row.id}>
+                      <td className="td-subject">
+                        <Link
+                          to={`/admin/customers/${row.id}`}
+                          data-testid={`company-detail-customer-${row.id}`}
+                        >
+                          {row.name}
+                        </Link>
+                      </td>
+                      <td>{row.building_count}</td>
+                      <td>{row.user_count}</td>
+                      <td>
+                        {row.is_active
+                          ? t("admin.status_active")
+                          : t("admin.status_inactive")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </BoundedList>
           </section>
 
           <ConfirmDialog

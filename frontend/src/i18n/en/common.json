@@ -2102,5 +2102,22 @@
   "hours_week_grid.fill_row_label": "All rows",
   "hours_week_grid.fill_row_hint": "fill",
   "hours_week_grid.fill_row_aria": "Fill every row for {{person}} on {{day}}",
-  "hours_week_grid.row_exists": "That hour type and building are already a row in this week."
+  "hours_week_grid.row_exists": "That hour type and building are already a row in this week.",
+  "company_detail.stat_buildings": "Buildings",
+  "company_detail.stat_customers": "Customers",
+  "company_detail.stat_admins": "Company admins",
+  "company_detail.stat_employees": "Employees",
+  "company_detail.stat_open_tickets": "Open tickets",
+  "company_detail.stat_open_extra_work": "Open extra work",
+  "company_detail.employees_title": "Employees",
+  "company_detail.employees_desc": "Staff and building managers working for this company, and which buildings each one is on.",
+  "company_detail.employees_empty": "No staff or building managers are attached to this company yet.",
+  "company_detail.col_buildings": "Buildings",
+  "company_detail.buildings_title": "Buildings",
+  "company_detail.buildings_desc": "Every building this company looks after.",
+  "company_detail.buildings_empty": "This company has no buildings yet.",
+  "company_detail.customers_title": "Customers",
+  "company_detail.customers_desc": "Every customer of this company. Open one to see its buildings, people and pricing.",
+  "company_detail.customers_empty": "This company has no customers yet.",
+  "customer_view.overview.stat_users": "Users"
 }

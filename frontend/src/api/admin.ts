@@ -11,6 +11,11 @@ import type {
   BuildingStaffVisibilityAdmin,
   CompanyAdmin,
   CompanyAdminMembership,
+  CompanyAdminPerson,
+  CompanyBuildingRow,
+  CompanyCustomerRow,
+  CompanyEmployee,
+  CompanySummary,
   Contact,
   ContactCreatePayload,
   ContactUpdatePayload,
@@ -487,6 +492,53 @@ export async function getCustomerSummary(
 ): Promise<CustomerSummary> {
   const response = await api.get<CustomerSummary>(`/customers/${id}/summary/`);
   return response.data;
+}
+
+// ---- Companies: the Sprint 156 §1 detail reads ------------------------
+
+export async function getCompanySummary(id: number): Promise<CompanySummary> {
+  const response = await api.get<CompanySummary>(`/companies/${id}/summary/`);
+  return response.data;
+}
+
+/** Every one of these four is UnboundedPagination server-side, so the
+ *  response is `{count, results}` and one request is the whole list. The
+ *  UI still bounds each list — the page must not grow with a company
+ *  that has ninety buildings (CLAUDE.md §8). */
+export async function listCompanyAdminPeople(
+  id: number,
+): Promise<CompanyAdminPerson[]> {
+  const response = await api.get<{ results: CompanyAdminPerson[] }>(
+    `/companies/${id}/admins-detail/`,
+  );
+  return response.data.results ?? [];
+}
+
+export async function listCompanyEmployees(
+  id: number,
+): Promise<CompanyEmployee[]> {
+  const response = await api.get<{ results: CompanyEmployee[] }>(
+    `/companies/${id}/employees/`,
+  );
+  return response.data.results ?? [];
+}
+
+export async function listCompanyBuildings(
+  id: number,
+): Promise<CompanyBuildingRow[]> {
+  const response = await api.get<{ results: CompanyBuildingRow[] }>(
+    `/companies/${id}/buildings/`,
+  );
+  return response.data.results ?? [];
+}
+
+export async function listCompanyCustomers(
+  id: number,
+): Promise<CompanyCustomerRow[]> {
+  const response = await api.get<{ results: CompanyCustomerRow[] }>(
+    `/companies/${id}/customers/`,
+  );
+  return response.data.results ?? [];
 }
 
 export async function reactivateCustomer(id: number): Promise<CustomerAdmin> {

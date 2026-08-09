@@ -2102,5 +2102,22 @@
   "hours_week_grid.fill_row_label": "Alle rijen",
   "hours_week_grid.fill_row_hint": "vul",
   "hours_week_grid.fill_row_aria": "Vul elke rij voor {{person}} op {{day}}",
-  "hours_week_grid.row_exists": "Die uursoort en dat gebouw zijn al een rij in deze week."
+  "hours_week_grid.row_exists": "Die uursoort en dat gebouw zijn al een rij in deze week.",
+  "company_detail.stat_buildings": "Gebouwen",
+  "company_detail.stat_customers": "Klanten",
+  "company_detail.stat_admins": "Bedrijfsbeheerders",
+  "company_detail.stat_employees": "Medewerkers",
+  "company_detail.stat_open_tickets": "Open tickets",
+  "company_detail.stat_open_extra_work": "Open extra werk",
+  "company_detail.employees_title": "Medewerkers",
+  "company_detail.employees_desc": "Medewerkers en gebouwbeheerders van dit bedrijf, en op welke gebouwen ze staan.",
+  "company_detail.employees_empty": "Er zijn nog geen medewerkers of gebouwbeheerders aan dit bedrijf gekoppeld.",
+  "company_detail.col_buildings": "Gebouwen",
+  "company_detail.buildings_title": "Gebouwen",
+  "company_detail.buildings_desc": "Alle gebouwen die dit bedrijf verzorgt.",
+  "company_detail.buildings_empty": "Dit bedrijf heeft nog geen gebouwen.",
+  "company_detail.customers_title": "Klanten",
+  "company_detail.customers_desc": "Alle klanten van dit bedrijf. Open er een voor de gebouwen, mensen en prijzen.",
+  "company_detail.customers_empty": "Dit bedrijf heeft nog geen klanten.",
+  "customer_view.overview.stat_users": "Gebruikers"
 }
