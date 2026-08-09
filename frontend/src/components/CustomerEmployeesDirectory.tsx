@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Contact, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -281,8 +282,23 @@ export function CustomerEmployeesDirectory({
           <tbody>
             {employees.map((row) => (
               <tr key={row.id} data-testid="customer-employee-row">
-                <td className="td-subject">{row.full_name || "—"}</td>
-                <td>{row.email}</td>
+                {/* Sprint 157 §9 — the last list Sprint 156's sweep
+                    reported as still lacking click-through. The NAME
+                    cell is the link, not the row: this table carries a
+                    per-row action column, and a row-level handler
+                    underneath it is the mis-click hazard the Sprint 155
+                    §4 edit gate exists to remove. */}
+                <td className="td-subject">
+                  <Link
+                    to={`/admin/users/${row.id}`}
+                    data-testid={`customer-employee-link-${row.id}`}
+                  >
+                    {row.full_name || row.email}
+                  </Link>
+                </td>
+                <td>
+                  <a href={`mailto:${row.email}`}>{row.email}</a>
+                </td>
                 <td data-testid="customer-employee-access-role">
                   <AccessRoleBadge accessRole={row.customer_access_role} />
                 </td>

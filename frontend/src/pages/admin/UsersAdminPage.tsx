@@ -317,17 +317,24 @@ export function UsersAdminPage() {
               <option value="all">{t("admin.status_all")}</option>
             </select>
           </div>
-          {/* Sprint 156 §5 — these two are horizontal chip groups, not
-              single controls, so they need a wide basis. The inline
-              `flexBasis: "100%"` they carried was written against a
-              flex container that did not exist — `.filter-bar` was a
-              GRID, where flex-basis is inert — so it silently did
-              nothing. Now that the bar really is flex it would take a
-              full row each and make this the tallest filter bar in the
-              app (measured 124 -> 204px at 1440). A grow basis lets the
-              two sit side by side when there is room and stack when
-              there is not. */}
-          <div className="filter-field" style={{ flex: "1 1 340px" }}>
+          {/* Sprint 157 §7 — the two chip groups share ONE full-width
+              row, in equal columns.
+
+              Sprint 156 gave them `flex: 1 1 340px` each, so they grew
+              into whatever was left on the line and came out ragged:
+              measured 486 vs 916px at 1280 and 646 vs 1076 at 1440,
+              with the ROLES chips wrapping to two lines inside the
+              narrower one. Two groups of unequal width, each wrapping
+              differently, is what "reads as two ragged groups" means.
+
+              A wrapper that takes the whole row and lays the two out on
+              an equal grid fixes the raggedness at the cause. They stay
+              fully VISIBLE — Sprint 156 proposed collapsing them behind
+              a disclosure and §7 explicitly rules that out, as does
+              `## NEXT` item 19: a collapsed group can hide an ACTIVE
+              filter. */}
+          <div className="filter-chip-groups">
+                    <div className="filter-field">
             <span className="filter-label">{t("users.roles_label")}</span>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {availableRoles.map((role) => {
@@ -347,17 +354,7 @@ export function UsersAdminPage() {
               })}
             </div>
           </div>
-          {/* Sprint 156 §5 — these two are horizontal chip groups, not
-              single controls, so they need a wide basis. The inline
-              `flexBasis: "100%"` they carried was written against a
-              flex container that did not exist — `.filter-bar` was a
-              GRID, where flex-basis is inert — so it silently did
-              nothing. Now that the bar really is flex it would take a
-              full row each and make this the tallest filter bar in the
-              app (measured 124 -> 204px at 1440). A grow basis lets the
-              two sit side by side when there is room and stack when
-              there is not. */}
-          <div className="filter-field" style={{ flex: "1 1 340px" }}>
+                    <div className="filter-field">
             <span className="filter-label">
               {t("users.access_roles_label")}
             </span>
@@ -379,7 +376,8 @@ export function UsersAdminPage() {
               })}
             </div>
           </div>
-          <div className="filter-actions">
+                    </div>
+<div className="filter-actions">
             {hasActiveFilters && (
               <button
                 type="button"

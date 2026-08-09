@@ -2138,5 +2138,8 @@
   "week_setup.open": "Set up week",
   "week_setup.change": "Change setup",
   "week_setup.not_set_up": "No week set up yet. Pick the people and the buildings to begin.",
-  "week_setup.current": "{{employees}} employees at {{buildings}} buildings"
+  "week_setup.current": "{{employees}} employees at {{buildings}} buildings",
+  "customer_permissions.modules.meldingen.description": "Lets this customer's people report problems and follow them until they are closed.",
+  "customer_permissions.modules.extra_werk.description": "Lets this customer's people ask for work outside the contract and agree the price before it starts.",
+  "customer_permissions.modules.documenten.description": "Lets this customer's people open the Documents page: they see the files you share with them, and can upload, rename, move and delete their own. Turn it off and the page disappears for all of them, including your files."
 }

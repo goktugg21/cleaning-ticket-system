@@ -8550,6 +8550,30 @@ details[open] > .ew-department-tree-summary::before {
 
 /* Sprint 155 §5 — the multi-employee week grid: an apply-to-all bar over
    one block per employee. */
+/* Sprint 157 §7 — chip groups (ROLES / ACCESS ROLES) share one
+   full-width row of the filter bar, in equal columns, so they line up
+   with each other and with Search and Status above rather than growing
+   into whatever slack is left on the line. `auto-fit` stacks them on a
+   narrow viewport instead of squeezing the chips. */
+.filter-chip-groups {
+  flex: 1 1 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.filter-chip-groups > .filter-field { flex: 1 1 auto; min-width: 0; }
+
+/* Sprint 157 §5 — the module card's description line. Sits between the
+   header and the sub-toggles, so a card with no sub-toggles (Documents)
+   still says what the module is. */
+.module-bundle-description {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
 /* Sprint 157 §1 — the one-line reminder of what the week is set up for,
    sitting above the grid with the button that changes it. */
 .hours-week-setup-summary {

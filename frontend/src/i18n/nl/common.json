@@ -2138,5 +2138,8 @@
   "week_setup.open": "Week instellen",
   "week_setup.change": "Instelling wijzigen",
   "week_setup.not_set_up": "Nog geen week ingesteld. Kies de mensen en de gebouwen om te beginnen.",
-  "week_setup.current": "{{employees}} medewerkers op {{buildings}} gebouwen"
+  "week_setup.current": "{{employees}} medewerkers op {{buildings}} gebouwen",
+  "customer_permissions.modules.meldingen.description": "Laat de mensen van deze klant problemen melden en volgen tot ze zijn afgehandeld.",
+  "customer_permissions.modules.extra_werk.description": "Laat de mensen van deze klant werk buiten het contract aanvragen en de prijs afspreken voordat het begint.",
+  "customer_permissions.modules.documenten.description": "Laat de mensen van deze klant de pagina Documenten openen: ze zien de bestanden die u met hen deelt en kunnen hun eigen bestanden uploaden, hernoemen, verplaatsen en verwijderen. Zet u dit uit, dan verdwijnt de pagina voor hen allemaal, inclusief uw bestanden."
 }
