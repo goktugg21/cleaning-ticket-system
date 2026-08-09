@@ -2095,8 +2095,12 @@
   "hours_week_grid.apply_hours": "Hours per day",
   "hours_week_grid.hours_placeholder": "Hours",
   "hours_week_grid.apply_scope": "Which days",
-  "hours_week_grid.apply_scope_weekdays": "Mon-Fri",
-  "hours_week_grid.apply_scope_week": "Every day",
+  "hours_week_grid.apply_scope_weekdays": "{{from}} to {{to}} (5 days)",
+  "hours_week_grid.apply_scope_week": "{{from}} to {{to}} (all 7 days)",
   "hours_week_grid.apply_button_one": "Fill for {{count}} employee",
-  "hours_week_grid.apply_button_other": "Fill for {{count}} employees"
+  "hours_week_grid.apply_button_other": "Fill for {{count}} employees",
+  "hours_week_grid.fill_row_label": "All rows",
+  "hours_week_grid.fill_row_hint": "fill",
+  "hours_week_grid.fill_row_aria": "Fill every row for {{person}} on {{day}}",
+  "hours_week_grid.row_exists": "That hour type and building are already a row in this week."
 }

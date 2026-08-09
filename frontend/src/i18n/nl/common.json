@@ -2095,8 +2095,12 @@
   "hours_week_grid.apply_hours": "Uren per dag",
   "hours_week_grid.hours_placeholder": "Uren",
   "hours_week_grid.apply_scope": "Welke dagen",
-  "hours_week_grid.apply_scope_weekdays": "Ma-vr",
-  "hours_week_grid.apply_scope_week": "Elke dag",
+  "hours_week_grid.apply_scope_weekdays": "{{from}} t/m {{to}} (5 dagen)",
+  "hours_week_grid.apply_scope_week": "{{from}} t/m {{to}} (alle 7 dagen)",
   "hours_week_grid.apply_button_one": "Vul voor {{count}} medewerker",
-  "hours_week_grid.apply_button_other": "Vul voor {{count}} medewerkers"
+  "hours_week_grid.apply_button_other": "Vul voor {{count}} medewerkers",
+  "hours_week_grid.fill_row_label": "Alle rijen",
+  "hours_week_grid.fill_row_hint": "vul",
+  "hours_week_grid.fill_row_aria": "Vul elke rij voor {{person}} op {{day}}",
+  "hours_week_grid.row_exists": "Die uursoort en dat gebouw zijn al een rij in deze week."
 }

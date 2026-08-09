@@ -194,6 +194,12 @@ export function HoursWeekGrid({
   const hourTypeName = (id: number | "") =>
     hourTypes.find((h) => h.id === id)?.name ?? String(id);
 
+  /** True for a row the operator just added, which has no saved entry
+   *  behind it yet — the only rows whose hour type and building may be
+   *  retargeted, and the only ones that can simply be dropped. */
+  const isAddedRow = (employeeId: number, key: string) =>
+    (extraRows[employeeId] ?? []).some((r) => r.key === key);
+
   const buildingName = (id: number | "") =>
     id === ""
       ? t("hours_week_grid.no_building")
@@ -216,6 +222,79 @@ export function HoursWeekGrid({
         },
       ],
     }));
+  }
+
+  /** Sprint 156 §6c — retarget an ADDED row's hour type or building.
+   *
+   * Sprint 155 picked both for you at Add-row time and gave you no way
+   * to change either, so a row could not be pointed at a building at all
+   * — which made the optional `TimeEntry.building` unreachable from the
+   * one surface that fills a whole week.
+   *
+   * ADDED rows only. A row that already has saved entries behind it
+   * keeps its type and building as text: changing them there would not
+   * move the existing entries (they are keyed on the old pair
+   * server-side), it would silently leave them where they were and open
+   * a second row, which looks exactly like data loss.
+   *
+   * The row's key encodes the pair, so retargeting means re-keying — and
+   * the pending edits under the old key have to move with it or the
+   * numbers the operator already typed would vanish.
+   */
+  function retargetRow(
+    employeeId: number,
+    row: GridRow,
+    next: { hourTypeId?: number | ""; buildingId?: number | "" },
+  ) {
+    const hourTypeId = next.hourTypeId ?? row.hourTypeId;
+    const buildingId = next.buildingId ?? row.buildingId;
+    const nextKey = rowKey(hourTypeId, buildingId);
+    if (nextKey === row.key) return;
+    // Refuse a collision rather than merging two rows silently.
+    if ((rowsByEmployee[employeeId] ?? []).some((r) => r.key === nextKey)) {
+      setError(t("hours_week_grid.row_exists"));
+      return;
+    }
+    setError("");
+    setExtraRows((current) => ({
+      ...current,
+      [employeeId]: (current[employeeId] ?? []).map((r) =>
+        r.key === row.key ? { ...r, key: nextKey, hourTypeId, buildingId } : r,
+      ),
+    }));
+    setEdits((current) => {
+      const moved: Record<string, string> = {};
+      for (const [key, value] of Object.entries(current)) {
+        const prefix = cellKey(employeeId, row.key, "");
+        moved[
+          key.startsWith(prefix)
+            ? cellKey(employeeId, nextKey, key.slice(prefix.length))
+            : key
+        ] = value;
+      }
+      return moved;
+    });
+  }
+
+  /** Sprint 156 §6d — the TOP box of a day column: one value into that
+   *  weekday for every row of this employee at once.
+   *
+   *  The reference system the owner sent stacks two boxes per day, and
+   *  the distinction is the point: the top one is "everybody on this
+   *  day", the ones below are the individual rows. Writing into `edits`
+   *  for every row makes the per-row boxes update visibly, so the
+   *  relationship is shown rather than described.
+   */
+  function fillDayForEmployee(employeeId: number, dayKey: string, value: string) {
+    const rows = rowsByEmployee[employeeId] ?? [];
+    setEdits((current) => {
+      const next = { ...current };
+      for (const row of rows) {
+        if (row.hourTypeId === "") continue;
+        next[cellKey(employeeId, row.key, dayKey)] = value;
+      }
+      return next;
+    });
   }
 
   /** The reference system's most useful control: one value, every day,
@@ -325,6 +404,13 @@ export function HoursWeekGrid({
       setBusy(false);
     }
   }
+
+  /** Just the weekday name — "ma" / "Mon". Used by the §6b scope
+   *  labels, which name the day span instead of a category. */
+  const dayShort = (date: Date) =>
+    date.toLocaleDateString(i18n.language === "nl" ? "nl-NL" : "en-US", {
+      weekday: "short",
+    });
 
   const dayLabel = (date: Date) =>
     date.toLocaleDateString(i18n.language === "nl" ? "nl-NL" : "en-US", {
@@ -455,10 +541,23 @@ export function HoursWeekGrid({
           aria-label={t("hours_week_grid.apply_scope")}
           data-testid="hours-week-apply-scope"
         >
+          {/* Sprint 156 §6b — the labels name the DAYS now. "Every
+              day" against "Mon-Friday" made the operator work out
+              which was which, and a control whose meaning you have to
+              infer is a broken control. The literal span plus the
+              count removes the inference entirely. */}
           <option value="weekdays">
-            {t("hours_week_grid.apply_scope_weekdays")}
+            {t("hours_week_grid.apply_scope_weekdays", {
+              from: dayShort(days[0]),
+              to: dayShort(days[4]),
+            })}
           </option>
-          <option value="week">{t("hours_week_grid.apply_scope_week")}</option>
+          <option value="week">
+            {t("hours_week_grid.apply_scope_week", {
+              from: dayShort(days[0]),
+              to: dayShort(days[6]),
+            })}
+          </option>
         </select>
         <button
           type="button"
@@ -516,12 +615,119 @@ export function HoursWeekGrid({
                       </td>
                     </tr>
                   )}
+                  {/* Sprint 156 §6d — the TOP box of every day column.
+                      Typing here writes that day into EVERY row below at
+                      once; the boxes underneath stay the individual
+                      per-row values.
+
+                      The distinction is made visible rather than left to
+                      be discovered: its own tinted band, a label that
+                      says "all rows", and a divider under it. The
+                      owner's §6b complaint was that a control whose
+                      meaning you must infer is a broken control, and a
+                      second row of identical-looking boxes would be
+                      exactly that. */}
+                  {rows.length > 0 && (
+                    <tr className="hours-week-fill-row">
+                      <td className="td-subject" colSpan={2}>
+                        {t("hours_week_grid.fill_row_label")}
+                      </td>
+                      {dayKeys.map((dayKey, index) => (
+                        <td key={dayKey} style={{ textAlign: "right" }}>
+                          <input
+                            className="field-input hours-week-grid-cell"
+                            type="text"
+                            inputMode="decimal"
+                            // Deliberately NOT bound to state: this box
+                            // is a verb, not a value. It pushes what you
+                            // type into the rows below, and those rows
+                            // are where the value then lives — so it
+                            // holds nothing of its own to get out of
+                            // step with them.
+                            defaultValue=""
+                            placeholder={t("hours_week_grid.fill_row_hint")}
+                            onChange={(event) =>
+                              fillDayForEmployee(
+                                employee.id,
+                                dayKey,
+                                event.target.value,
+                              )
+                            }
+                            disabled={busy || weekClosed}
+                            aria-label={t("hours_week_grid.fill_row_aria", {
+                              person: employee.name,
+                              day: dayLabel(days[index]),
+                            })}
+                            data-testid={`hours-week-fill-${employee.id}-${dayKey}`}
+                          />
+                        </td>
+                      ))}
+                      <td />
+                      <td />
+                    </tr>
+                  )}
                   {rows.map((row) => (
                     <tr key={row.key}>
                       <td className="td-subject">
-                        {hourTypeName(row.hourTypeId)}
+                        {isAddedRow(employee.id, row.key) ? (
+                          <select
+                            className="field-input hours-week-row-select"
+                            value={String(row.hourTypeId)}
+                            onChange={(event) =>
+                              retargetRow(employee.id, row, {
+                                hourTypeId: Number(event.target.value),
+                              })
+                            }
+                            disabled={busy || weekClosed}
+                            aria-label={t("hours_week_grid.hour_type")}
+                            data-testid={`hours-week-row-hour-type-${employee.id}-${row.key}`}
+                          >
+                            {hourTypes.map((hourType) => (
+                              <option key={hourType.id} value={hourType.id}>
+                                {hourType.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          hourTypeName(row.hourTypeId)
+                        )}
                       </td>
-                      <td>{buildingName(row.buildingId)}</td>
+                      <td>
+                        {/* Sprint 156 §6c — a row can carry a building.
+                            `TimeEntry.building` has always been optional
+                            and stays optional ("No building" is the
+                            first option), but Sprint 155 gave no way to
+                            set it, so the field was unreachable from the
+                            one surface that fills a whole week. */}
+                        {isAddedRow(employee.id, row.key) ? (
+                          <select
+                            className="field-input hours-week-row-select"
+                            value={String(row.buildingId)}
+                            onChange={(event) =>
+                              retargetRow(employee.id, row, {
+                                buildingId:
+                                  event.target.value === ""
+                                    ? ""
+                                    : Number(event.target.value),
+                              })
+                            }
+                            disabled={busy || weekClosed}
+                            aria-label={t("hours_week_grid.building")}
+                            data-testid={`hours-week-row-building-${employee.id}-${row.key}`}
+                          >
+                            <option value="">
+                              {t("hours_week_grid.no_building")}
+                            </option>
+                            {buildings.map((building) => (
+                              <option key={building.id} value={building.id}>
+                                {building.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          buildingName(row.buildingId)
+                        )}
+                      </td>
                       {dayKeys.map((dayKey, index) => (
                         <td key={dayKey} style={{ textAlign: "right" }}>
                           <input
@@ -559,9 +765,7 @@ export function HoursWeekGrid({
                             zeroing its cells, not by removing it from
                             the grid — removing it here would look like a
                             delete that never happened. */}
-                        {(extraRows[employee.id] ?? []).some(
-                          (r) => r.key === row.key,
-                        ) && (
+                        {isAddedRow(employee.id, row.key) && (
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"

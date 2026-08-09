@@ -8550,16 +8550,52 @@ details[open] > .ew-department-tree-summary::before {
 
 /* Sprint 155 §5 — the multi-employee week grid: an apply-to-all bar over
    one block per employee. */
+/* Sprint 156 §6a — ONE row. The owner's colleague works along this bar
+   left to right, and a wrapped bar makes that a hunt. `nowrap` plus a
+   horizontal scroll on the bar itself: if the viewport genuinely cannot
+   hold six controls, the bar scrolls rather than the page (CLAUDE.md —
+   wide content scrolls inside its own container, the body never does). */
 .hours-week-apply-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   gap: 8px;
   padding: 10px 12px;
   margin-bottom: 14px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
+}
+.hours-week-apply-bar > * { flex-shrink: 0; }
+.hours-week-apply-bar select.field-input { max-width: 170px; }
+
+/* Sprint 156 §6d — the "all rows" band. Tinted, labelled and divided
+   from the rows below, so the two levels of entry are visibly two
+   levels rather than two rows of identical boxes. */
+.hours-week-fill-row {
+  background: var(--surface-2);
+}
+.hours-week-fill-row > td {
+  border-bottom: 2px solid var(--border);
+}
+.hours-week-fill-row .td-subject {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.hours-week-fill-row .hours-week-grid-cell {
+  border-style: dashed;
+}
+
+/* Sprint 156 §6c — the per-row hour-type / building selects on an added
+   row. Sized to the cell so the grid keeps its column rhythm. */
+.hours-week-row-select {
+  max-width: 150px;
+  height: 28px;
+  font-size: 12.5px;
 }
 .hours-week-apply-label {
   font-family: var(--f-head);
