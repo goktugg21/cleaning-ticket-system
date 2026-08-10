@@ -203,7 +203,21 @@ export function BuildingFormPage() {
       .then((response) => {
         if (cancelled) return;
         setCompanies(response);
-        if (isCreate && response.length === 1) {
+        if (!isCreate) return;
+        // Sprint 159 §4 — `?company=<id>` pre-selects the provider on a
+        // CREATE, which is what the company page's "Add building" action
+        // needs. Validated against the list the ACTOR can see, so a
+        // hand-edited URL naming a company out of scope simply does
+        // nothing rather than seeding a value the form would then use —
+        // the same rule `CustomerFormPage` already applies to its own
+        // `?company=`. Falls back to the single-company convenience.
+        const requested = Number(
+          new URLSearchParams(window.location.search).get("company"),
+        );
+        const seeded = response.find((row) => row.id === requested);
+        if (seeded) {
+          setCompany(seeded.id);
+        } else if (response.length === 1) {
           setCompany(response[0].id);
         }
       })
