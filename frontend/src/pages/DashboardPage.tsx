@@ -347,11 +347,11 @@ export function DashboardPage({
     loadTickets();
   }, [loadTickets]);
 
-  // Sprint 7 — bulk manager-confirm. The affordance only appears for
-  // provider management while the list is filtered to the
-  // WAITING_MANAGER_REVIEW queue. The submittable set is always derived
-  // from the currently-visible rows, so changing filters/pages can
-  // never bulk-confirm a ticket that is no longer on screen.
+  // Sprint 7 — bulk manager-confirm, for provider management. The
+  // submittable set is always derived from the currently-visible rows,
+  // so changing filters or pages can never bulk-confirm a ticket that is
+  // no longer on screen.
+  //
   // Sprint 159 §2 — the selection is behind the Sprint 155 §4 Edit gate
   // now, like every other list. The hook supplies only the MODE: this
   // page owns `selectedIds` because the set may legitimately span pages,

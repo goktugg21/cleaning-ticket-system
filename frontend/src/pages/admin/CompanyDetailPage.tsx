@@ -252,7 +252,16 @@ export function CompanyDetailPage() {
    */
   async function removeEmployees(ids: number[]) {
     const buildingIds = companyBuildings.map((row) => row.id);
-    if (buildingIds.length === 0) return;
+    if (buildingIds.length === 0) {
+      // Reachable: `_company_employee_queryset` also admits a
+      // STAFF/BUILDING_MANAGER attached by `CompanyUserMembership`
+      // alone, and that person has no building link to cut. Say so
+      // rather than letting the button do nothing, which is the
+      // "control that lies" defect this sprint is about.
+      setCardError(t("company_detail.employees_remove_no_buildings"));
+      removeEmployeesDialogRef.current?.close();
+      return;
+    }
     const chosen = employees.filter((row) => ids.includes(row.id));
     const managers = chosen
       .filter((row) => row.role === "BUILDING_MANAGER")

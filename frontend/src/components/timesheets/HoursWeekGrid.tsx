@@ -399,8 +399,15 @@ export function HoursWeekGrid({
    */
   function addRows() {
     if (barHourType === "") return;
+    // "All buildings" over an EMPTY grid has no buildings to enumerate,
+    // so it falls back to the no-building row rather than doing nothing
+    // and reporting that every row already existed.
     const targetBuildings: (number | "")[] =
-      barBuildingId === null ? gridBuildingIds : [barBuildingId];
+      barBuildingId !== null
+        ? [barBuildingId]
+        : gridBuildingIds.length > 0
+          ? gridBuildingIds
+          : [""];
     // Counted OUTSIDE the updater, for the same reason as Fill.
     const missing: GridRow[] = [];
     for (const employee of employees) {
