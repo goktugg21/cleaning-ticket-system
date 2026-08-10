@@ -5,8 +5,14 @@ sibling got in Sprint 157.
     POST /api/tickets/bulk-assign/
     Body: {"tickets": [id,...], "users": [id,...],
            "role": "WORKER"|"MANAGER", "mode": "assign"|"unassign"}
+      or: {"tickets": [id,...], "workers": [id,...],
+           "managers": [id,...], "mode": "assign"|"unassign"}
     Response: {"created": N, "removed": N,
                "already_assigned": N, "not_assigned": N}
+
+Sprint 159 §2 — the second shape puts BOTH roles in one request, so
+staffing a job is one confirm and one transaction rather than two of
+each with a half-crew state in between.
 
     GET  /api/tickets/<id>/assignments/candidates/?role=WORKER|MANAGER
 
@@ -86,16 +92,52 @@ def _reject():
 
 
 class _TicketBulkAssignInputSerializer(serializers.Serializer):
+    """Sprint 159 §2 — managers AND workers in ONE request.
+
+    Same two accepted shapes as the extra-work sibling, for the same
+    reason: the owner wants one dialog and one confirm to staff a job,
+    and the Sprint 158 shape stays working so nothing that already
+    speaks it breaks.
+    """
+
     tickets = serializers.ListField(
         child=serializers.IntegerField(min_value=1), allow_empty=False
     )
     users = serializers.ListField(
-        child=serializers.IntegerField(min_value=1), allow_empty=False
+        child=serializers.IntegerField(min_value=1), required=False
     )
-    role = serializers.ChoiceField(choices=[ROLE_WORKER, ROLE_MANAGER])
+    role = serializers.ChoiceField(
+        choices=[ROLE_WORKER, ROLE_MANAGER], required=False
+    )
+    workers = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False
+    )
+    managers = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False
+    )
     mode = serializers.ChoiceField(
         choices=["assign", "unassign"], default="assign"
     )
+
+    def validate(self, attrs):
+        groups: dict[str, list[int]] = {}
+
+        def add(role: str, ids) -> None:
+            if not ids:
+                return
+            merged = groups.setdefault(role, [])
+            merged.extend(i for i in ids if i not in merged)
+
+        add(attrs.get("role") or ROLE_WORKER, attrs.get("users"))
+        add(ROLE_WORKER, attrs.get("workers"))
+        add(ROLE_MANAGER, attrs.get("managers"))
+
+        if not groups:
+            raise serializers.ValidationError(
+                {"users": ["Name at least one person to assign."]}
+            )
+        attrs["groups"] = groups
+        return attrs
 
 
 class TicketBulkAssignView(APIView):
@@ -113,8 +155,7 @@ class TicketBulkAssignView(APIView):
         payload = _TicketBulkAssignInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         ticket_ids = list(dict.fromkeys(payload.validated_data["tickets"]))
-        user_ids = list(dict.fromkeys(payload.validated_data["users"]))
-        role = payload.validated_data["role"]
+        groups: dict[str, list[int]] = payload.validated_data["groups"]
         mode = payload.validated_data["mode"]
 
         tickets = {
@@ -124,36 +165,40 @@ class TicketBulkAssignView(APIView):
         if len(tickets) != len(ticket_ids):
             _reject()
 
-        # Eligibility is a property of each TICKET's building, so it is
-        # resolved per ticket rather than once for the batch. Assigning
-        # one person across two buildings therefore requires them to be
-        # authorised at both.
+        # Eligibility is a property of each TICKET's building and differs
+        # per role, so it is resolved per (ticket, role) rather than once
+        # for the batch. Assigning one person across two buildings
+        # therefore requires them to be authorised at both.
+        #
+        # Sprint 159 §2 — every group resolves BEFORE any write, so a
+        # body naming both roles is still all-or-nothing.
         pairs = []
         for ticket in tickets.values():
-            eligible = resolve_assignable_users(
-                ticket.building, role, user_ids, request.user
-            )
-            if len(eligible) != len(user_ids):
-                _reject()
-            for user in eligible.values():
-                pairs.append((ticket, user))
+            for role, user_ids in groups.items():
+                eligible = resolve_assignable_users(
+                    ticket.building, role, user_ids, request.user
+                )
+                if len(eligible) != len(user_ids):
+                    _reject()
+                for user in eligible.values():
+                    pairs.append((ticket, user, role))
 
         try:
             audit_context.set_current_reason(
-                f"ticket_bulk_{mode}_{role.lower()}"
+                f"ticket_bulk_{mode}_"
+                + "_".join(sorted(role.lower() for role in groups))
             )
         except Exception:  # pragma: no cover - defensive
             pass
 
-        model = (
-            TicketManagerAssignment
-            if role == ROLE_MANAGER
-            else TicketStaffAssignment
-        )
-
         created = removed = already = not_assigned = 0
         with transaction.atomic():
-            for ticket, user in pairs:
+            for ticket, user, role in pairs:
+                model = (
+                    TicketManagerAssignment
+                    if role == ROLE_MANAGER
+                    else TicketStaffAssignment
+                )
                 existing = model.objects.filter(
                     ticket=ticket, user=user
                 ).first()

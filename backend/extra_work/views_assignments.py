@@ -4,8 +4,15 @@ Sprint 157 §2 — assign workers and managers to Extra Work, in bulk.
     POST /api/extra-work/bulk-assign/
     Body: {"requests": [id,...], "users": [id,...],
            "role": "WORKER"|"MANAGER", "mode": "assign"|"unassign"}
+      or: {"requests": [id,...], "workers": [id,...],
+           "managers": [id,...], "mode": "assign"|"unassign"}
     Response: {"created": N, "removed": N,
                "already_assigned": N, "not_assigned": N}
+
+Sprint 159 §2 — the second shape puts BOTH roles in one request. The
+owner's complaint was that the UI took one role per operation, so
+staffing a job meant two confirms and, if the second failed, half a
+crew. One body, one transaction, one all-or-nothing answer.
 
 Same discipline as the Sprint 154 building bulk-link family, for the
 same reasons, and stated here rather than assumed because this is a NEW
@@ -92,16 +99,64 @@ def _reject():
 
 
 class _BulkAssignInputSerializer(serializers.Serializer):
+    """Sprint 159 §2 — managers AND workers in ONE request.
+
+    Two shapes are accepted and both resolve to the same thing, a map of
+    role -> user ids:
+
+      {"users": [...], "role": "WORKER"}          the Sprint 157 shape
+      {"workers": [...], "managers": [...]}       both roles at once
+
+    The old shape is kept working rather than migrated, because the
+    detail page's remove path and the tests already speak it, and a
+    write endpoint that changes shape under its existing callers is a
+    worse problem than one that accepts two.
+
+    They compose: a body carrying `users` AND `workers` merges them,
+    de-duplicated, so no caller has to know which field the other half
+    of the UI used.
+    """
+
     requests = serializers.ListField(
         child=serializers.IntegerField(min_value=1), allow_empty=False
     )
     users = serializers.ListField(
-        child=serializers.IntegerField(min_value=1), allow_empty=False
+        child=serializers.IntegerField(min_value=1), required=False
     )
-    role = serializers.ChoiceField(choices=ExtraWorkAssignmentRole.values)
+    role = serializers.ChoiceField(
+        choices=ExtraWorkAssignmentRole.values, required=False
+    )
+    workers = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False
+    )
+    managers = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False
+    )
     mode = serializers.ChoiceField(
         choices=["assign", "unassign"], default="assign"
     )
+
+    def validate(self, attrs):
+        groups: dict[str, list[int]] = {}
+
+        def add(role: str, ids) -> None:
+            if not ids:
+                return
+            merged = groups.setdefault(role, [])
+            merged.extend(i for i in ids if i not in merged)
+
+        add(attrs.get("role") or ExtraWorkAssignmentRole.WORKER, attrs.get("users"))
+        add(ExtraWorkAssignmentRole.WORKER, attrs.get("workers"))
+        add(ExtraWorkAssignmentRole.MANAGER, attrs.get("managers"))
+
+        if not groups:
+            # About an EMPTY body, not about any id — so it says what is
+            # missing without becoming an existence oracle.
+            raise serializers.ValidationError(
+                {"users": ["Name at least one person to assign."]}
+            )
+        attrs["groups"] = groups
+        return attrs
 
 
 class ExtraWorkBulkAssignView(APIView):
@@ -132,8 +187,7 @@ class ExtraWorkBulkAssignView(APIView):
         payload = _BulkAssignInputSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         request_ids = list(dict.fromkeys(payload.validated_data["requests"]))
-        user_ids = list(dict.fromkeys(payload.validated_data["users"]))
-        role = payload.validated_data["role"]
+        groups: dict[str, list[int]] = payload.validated_data["groups"]
         mode = payload.validated_data["mode"]
 
         # (1) Requests, through the actor's own extra-work scope.
@@ -144,36 +198,43 @@ class ExtraWorkBulkAssignView(APIView):
         if len(requests) != len(request_ids):
             _reject()
 
-        # (2) People, per REQUEST, because eligibility is a property of
-        # the request's BUILDING and not of the batch. Assigning the same
-        # person to two requests at different buildings therefore
-        # requires them to be eligible at BOTH — which is the correct
-        # reading of "the authorised people at that building", and the
-        # reason this loop is not hoisted out.
+        # (2) People, per REQUEST and per ROLE, because eligibility is a
+        # property of the request's BUILDING and differs between the two
+        # roles. Assigning the same person to two requests at different
+        # buildings therefore requires them to be eligible at BOTH —
+        # which is the correct reading of "the authorised people at that
+        # building", and the reason this loop is not hoisted out.
         #
         # An id that is not eligible is rejected with the SAME body as an
         # id that does not exist. That is not a nicety: a distinguishable
         # answer here would let a caller enumerate who works where (H-1).
+        #
+        # Sprint 159 §2 — every group is resolved BEFORE any write, so a
+        # body naming both roles is still all-or-nothing: an ineligible
+        # manager rejects the workers with it rather than leaving half a
+        # crew on the job.
         pairs = []
         for extra_work in requests.values():
-            eligible = resolve_assignable_users(
-                extra_work.building, role, user_ids, request.user
-            )
-            if len(eligible) != len(user_ids):
-                _reject()
-            for user in eligible.values():
-                pairs.append((extra_work, user))
+            for role, user_ids in groups.items():
+                eligible = resolve_assignable_users(
+                    extra_work.building, role, user_ids, request.user
+                )
+                if len(eligible) != len(user_ids):
+                    _reject()
+                for user in eligible.values():
+                    pairs.append((extra_work, user, role))
 
         try:
             audit_context.set_current_reason(
-                f"extra_work_bulk_{mode}_{role.lower()}"
+                f"extra_work_bulk_{mode}_"
+                + "_".join(sorted(role.lower() for role in groups))
             )
         except Exception:  # pragma: no cover - defensive
             pass
 
         created = removed = already = not_assigned = 0
         with transaction.atomic():
-            for extra_work, user in pairs:
+            for extra_work, user, role in pairs:
                 existing = ExtraWorkAssignment.objects.filter(
                     extra_work_request=extra_work, user=user, role=role
                 ).first()
