@@ -2,7 +2,139 @@
 
 **Purpose.** The living plan to close every remaining gap between the
 system and the Ramazan transcripts + Source of Truth, ending with a
-premium UI/UX polish. **CC updates `## NOW` / `## NEXT` / `## SHIPPED`
+premium UI/UX polish. **CC updates `## NOW
+
+**Branch:** `feat/sprint-159-owner-feedback-6`. **CC did NOT open a PR
+and did NOT deploy.** Cut from the tip of `feat/sprint-158-owner-feedback-5`
+(`efa9c9d`). Merge order: **#153 → … → #158 → #159.** Sprint 160
+(Contracts) is being built in PARALLEL from the same base — the two are
+siblings off #158, not a chain, and this branch touches no `contracts`
+code.
+
+### The owner-visible changes, in plain words
+
+- **The hours page has been rebuilt to the shape of the reference
+  system, by taking things away.** One page, one table, one modal.
+  The week grid that used to sit ON the page is gone — the grid now
+  lives only in the modal the single top-right button opens, and having
+  one of each was the duplication that made the area confusing. Also
+  gone: the "Set up week" strip, the per-row Add/Edit pop-up, the two
+  report tables that the Overview tab already showed, the row of boxes
+  above everybody, the per-employee row of boxes, and the row
+  checkboxes with their own hours box.
+- **Editing hours no longer opens anything.** Press Edit and the whole
+  table becomes editable; change as many rows as you like and press
+  Save once.
+- **The bulk-add bug is fixed, and it was real.** Choosing an hour type
+  and pressing "Add row" with the building box left alone did nothing
+  and said "0 rows added". The building box meant "every building" to
+  the Fill button and "no building" to the Add row button — one control,
+  two meanings. It now means the same thing to both, and "no building"
+  is its own entry in the list.
+- **Managers and workers are assigned together.** One window with a
+  managers list and a workers list side by side, one confirm, for extra
+  work and for tickets. If one of the two is refused, neither is
+  written — you can no longer end up with half a crew on a job.
+- **Tickets and Extra Work now look the same.** Both open on a row of
+  status tiles carrying real counts; the tile is the filter, the
+  selected one is obvious, and clearing it is a click rather than a
+  sentence of text underneath. The customer's own Tickets and Extra Work
+  pages got the same tiles.
+- **A company's people, buildings and customers can be changed from the
+  company page.** Press Edit on a card: attach employees to the
+  company's buildings, take them off again, start a new building or
+  customer under this company, or archive ones that are finished.
+
+### §1 — hours, rebuilt by removal
+
+Three files, before → after: `HoursAdminPage.tsx` **1587 → 1162**,
+`HoursWeekGrid.tsx` **1129 → 870**, `WeekSetupDialog.tsx` **289 →
+deleted** and replaced by `WeekEntryDialog.tsx` **321**. Total **3005 →
+2353 (−652)**. The controls removed are listed above; the grid is now
+ONE table with an Employee column rather than a table per person.
+
+**The bug, reproduced before it was touched.** Driving the built Sprint
+158 app: set a week up with two employees and two buildings, pick an
+hour type, press **Add row** with the building select on its default →
+banner *"0 rows added"*, nothing happens. Cause: Sprint 158 §5c
+relabelled the empty option "Every building" so FILL would read it as
+"do not narrow", and left ADD ROW reading the same value as "no
+building" — so with a no-building row already seeded, nothing was
+missing and it reported zero; without one it would have silently made a
+*no-building* row while the control said "every building". Fixed by
+giving the value ONE meaning in both directions ("all buildings") and
+making "No building" an explicit option. Re-driven after the change: 4
+rows added across both buildings, for both employees.
+
+**A second defect found while measuring**, fixed here: the page fired
+`/timesheets/employees/` and `/timesheets/summary/` before a
+SUPER_ADMIN's company was known and took two 400s
+(`company is required when more than one provider Company exists`)
+plus a red banner on every first load. The reads now wait for the
+company.
+
+### §2 — both roles, one request
+
+Both bulk-assign endpoints accept `{"workers": [...], "managers": [...]}`
+alongside the Sprint 157/158 `{"users": [...], "role": ...}` shape,
+which keeps working (the per-row remove speaks it). Every group is
+resolved through `buildings.assignment_eligibility` BEFORE any write, so
+the all-or-nothing property now spans both roles. The role toggle in the
+dialog is gone; the dialog moved to `components/AssignPeopleDialog.tsx`
+because tickets use it too, and the tickets LIST gained the selection
+(behind the standard Edit gate) it needed to reach it.
+
+### §3 — one status control, two lists
+
+`StatusFilterChips` is replaced by `StatusTiles` and deleted. The
+tickets tiles carry SERVER counts from `/tickets/stats/` `by_status` —
+the same source the "Status breakdown" panel on that page already
+renders, so no extra request and no number that describes one page. The
+Sprint 158 prose notice is gone: the filled tile and the × on it say
+what the sentence used to.
+
+The customer-detail Tickets and Extra Work pages get the same tiles but
+open on **All**, not on the un-actioned status. Those pages are one
+customer's history rather than a work queue, and defaulting them would
+hide most of a customer's rows behind a filter nobody asked for.
+
+### §4 — the company cards, delivered
+
+Employees, buildings and customers each get their own Edit gate.
+"Employee of this company" is not a row anywhere — it is a building
+attachment (`BuildingStaffVisibility` / `BuildingManagerAssignment`), so
+the Add dialog asks for buildings AND managers AND workers and writes
+through `/api/buildings/bulk-link/`; removal unlinks from every building
+of the company. Buildings and customers cannot be *moved* between
+providers (required FK; H-1), so their destructive action is **Archive**
+and it is labelled that way. `BuildingFormPage` learned to read
+`?company=` so "Add building" pre-fills the company, the way
+`CustomerFormPage` already did.
+
+### Measured, on the built app
+
+Driven end to end with Playwright at 1024 / 1280 / 1440: the modal set
+up, filled, saved, and the rows read back from the API carrying their
+`multiplier_snapshot` and derived ISO week. 40 assertions pass, 0 fail,
+0 console errors; no page scrolls sideways at any width; the hours
+filters measured as ONE line (6 fields, same top). The company cards
+were driven both ways — a worker attached, the card re-read, then
+removed again — and the dev data left exactly as it was found.
+
+### Gates
+
+Backend: `test timesheets extra_work tickets companies`. New tests:
+`extra_work/test_sprint159_combined_assign` (10) and
+`tickets/test_sprint159_combined_assign` (7).
+`makemigrations --dry-run --check` → *No changes detected*; no migration
+this sprint.
+
+Frontend: `tsc` clean, `eslint .` **44 (42 errors, 2 warnings)** — the
+baseline, unchanged — build ✓. i18n: 11/11 namespace pairs equal.
+
+---
+
+## NEXT` / `## SHIPPED`
 for a sprint as part of that sprint's own commit(s)** — not in a later
 docs-only pass — so this file always reflects where we actually are.
 
@@ -207,22 +339,17 @@ milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
 
-0. **Sprint 158 leftovers, recorded rather than dropped.**
-   - **§4 — the company detail cards are not editable yet.** Employees,
-     buildings and customers are read-only on that page. The BACKEND
-     already exists: `/api/buildings/bulk-link/` (Sprint 154) covers
-     customers<->buildings and staff/managers<->buildings, and
-     `CompanyAdminListCreateView` covers admins. So this is frontend
-     work behind the `useEditMode` gate on the three cards, not new
-     endpoints. Cut for time, not for a reason.
-   - **Ticket status chips have no per-status counts.** The ticket list
-     is server-filtered and paginated, so the client only holds the page
-     it is on; showing those numbers would be showing wrong ones. Fix
-     shape: an aggregate on the ticket list endpoint
-     (`?counts=status`, one grouped query) that returns
-     `{status: count}` for the CURRENT non-status filters, so the chips
-     stay honest when a search or building filter is also on. The Extra
-     Work list needs nothing — Sprint 120 made it fetch the full set.
+0. **Sprint 158 leftovers.** The first two are CLOSED by Sprint 159 —
+   §4 shipped (the three company cards are editable), and the ticket
+   tiles now carry SERVER counts from `/tickets/stats/` `by_status`.
+   One caveat on the second, recorded rather than glossed: those counts
+   describe the actor's whole scope, **not** the current search /
+   priority / SLA / customer filters, because that is what the stats
+   endpoint answers and what the "Status breakdown" panel beside them
+   has always shown. If a tile reading 6 next to a searched list showing
+   2 ever confuses somebody, the fix is the aggregate shape recorded
+   earlier: `?counts=status` on the LIST endpoint, honouring the other
+   filters. Not worth a request today.
    - **The demo seed gives one user staff visibility in TWO provider
      companies** (`noah-staff-bright@bright-facilities.demo` is on both
      Bright Facilities and Osius Demo buildings). That is LEGAL and the
@@ -232,11 +359,13 @@ item has moved to `## SHIPPED` or been resolved below instead.
      Consider splitting them in the seed, or showing the company beside
      the name in assignment pickers.
 
-0. **THE AGREED SEQUENCE AFTER #158.** (Owner, carried forward and
-   renumbered.) **#159 Contracts** (a prompt exists), then **#160**
-   contract invoices become real, **#161** contract hours plus the
-   comparison against worked hours, **#162** Worker Hour Reports,
-   **#163** Schedule — compare `frontend/src/pages/AgendaPage.tsx`
+0. **THE AGREED SEQUENCE AFTER #159.** (Owner, carried forward and
+   renumbered — #159 took the hours rebuild and the three carried-over
+   fixes, so Contracts moves to #160 and is being built in parallel with
+   it.) **#160 Contracts** (a prompt exists, in flight), then **#161**
+   contract invoices become real, **#162** contract hours plus the
+   comparison against worked hours, **#163** Worker Hour Reports,
+   **#164** Schedule — compare `frontend/src/pages/AgendaPage.tsx`
    against the reference and report the GAP before building anything.
    The detail behind each of these is in the entry below, which #157
    wrote and which stays authoritative for scope.
