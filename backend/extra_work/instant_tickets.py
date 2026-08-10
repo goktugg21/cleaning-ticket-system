@@ -260,9 +260,9 @@ def spawn_tickets_for_request(
 
         # Sprint 158 §1 — the request's MANAGERS follow it onto the
         # ticket. See `assignment_carryover` for why workers do not.
-        from .assignment_carryover import carry_managers_to_ticket
+        from .assignment_carryover import carry_assignments_to_ticket
 
-        carry_managers_to_ticket(request, ticket, actor=actor)
+        carry_assignments_to_ticket(request, ticket, actor=actor)
 
         created.append(ticket)
 

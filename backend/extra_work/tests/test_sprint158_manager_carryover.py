@@ -14,13 +14,13 @@ A fourth `Ticket.objects.create` lives in `planned_work/generation.py`
 and is deliberately not a caller: planned work does not come from an
 extra-work request, so there is nothing to carry.
 
-**Workers are NOT carried over**, and that is a decision rather than an
-omission. `TicketStaffAssignment` has been a dated operational SLOT since
-Sprint 14E — `scheduled_start_at`, `time_window_label`, per-slot status,
-completion evidence — so copying a worker into one would create a slot
-with no schedule that reads on the agenda as planned work nobody planned.
-`TicketManagerAssignment` is a plain responsibility link, so carrying it
-is one-to-one with nothing invented.
+**Workers were NOT carried over when this file was written.** Sprint 161
+§5 changed that, once it was established that the slot can inherit the
+TICKET's own schedule, so `test_workers_are_NOT_copied` below has been
+replaced by `test_workers_are_copied_by_the_combined_entry_point`. The
+new behaviour and its three cases live in
+`test_sprint161_worker_carryover.py`; what stays here is the manager
+side, unchanged.
 """
 from rest_framework.test import APITestCase
 
@@ -99,15 +99,29 @@ class ManagerCarryoverTests(TenantFixtureMixin, APITestCase):
             [self.site_manager.id],
         )
 
-    def test_workers_are_NOT_copied(self):
-        """A deliberate decision — see the module docstring."""
+    def test_the_manager_helper_alone_still_touches_no_slots(self):
+        """`carry_managers_to_ticket` does the MANAGER side and nothing
+        else. Sprint 161 added workers as a separate function rather
+        than widening this one, so this assertion still holds and is
+        what keeps the two sides independently testable."""
         ticket = self._ticket()
         carry_managers_to_ticket(self.ew, ticket, actor=self.super_admin)
         self.assertEqual(
-            TicketStaffAssignment.objects.filter(ticket=ticket).count(),
-            0,
-            "a worker was copied into a dated operational slot with no "
-            "schedule",
+            TicketStaffAssignment.objects.filter(ticket=ticket).count(), 0
+        )
+
+    def test_workers_are_copied_by_the_combined_entry_point(self):
+        """Sprint 161 §5 — the spawn paths call
+        `carry_assignments_to_ticket`, which does both sides."""
+        from extra_work.assignment_carryover import carry_assignments_to_ticket
+
+        ticket = self._ticket()
+        managers, workers = carry_assignments_to_ticket(
+            self.ew, ticket, actor=self.super_admin
+        )
+        self.assertEqual((managers, workers), (1, 1))
+        self.assertEqual(
+            TicketStaffAssignment.objects.filter(ticket=ticket).count(), 1
         )
 
     def test_running_it_twice_creates_nothing_extra(self):

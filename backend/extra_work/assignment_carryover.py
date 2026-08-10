@@ -14,16 +14,34 @@ A fourth `Ticket.objects.create` exists in `planned_work/generation.py`.
 It is deliberately NOT a caller: planned work does not come from an
 extra-work request, so there are no extra-work managers to carry.
 
-**Workers are NOT carried over, deliberately.**
+**Sprint 161 §5 — workers ARE carried over now, WITH their schedule.**
+
+Sprint 158's objection was sound and is worth keeping in view:
 `TicketStaffAssignment` is not a thin link — since Sprint 14E each row is
 a dated operational SLOT carrying `scheduled_start_at`,
-`time_window_label`, a per-slot status and completion evidence. Copying
-an extra-work worker into one would create a slot with no schedule and no
-window that reads, on the agenda, as planned work nobody planned. The
-manager side has no such shape: `TicketManagerAssignment` is a plain
-responsibility link, so carrying it over is a clean one-to-one with no
-invented data. Assigning the workers is a scheduling decision and stays a
-deliberate act.
+`time_window_label`, a per-slot status and completion evidence. A worker
+copied into an undated slot reads on the agenda as planned work nobody
+planned, which is worse than no row at all.
+
+What that objection missed is that the ticket ALREADY knows when the work
+is. Sprint 9B seeds `Ticket.scheduled_start_at` from the extra-work
+line's requested date on all three spawn paths, and the slot's own
+`scheduled_start_at` / `scheduled_end_at` are nullable with
+`default=None`. So the slot is seeded FROM THE TICKET'S OWN SCHEDULE:
+the slot is dated exactly as the work is dated, the agenda shows it where
+it belongs, and nothing is invented.
+
+Where the ticket has no schedule (the line carried no requested date, so
+`seed_start` was None), the slot's dates stay None. That is the honest
+state — it matches what the ticket says about itself — and it is not
+papered over with today's date.
+
+An extra-work worker who is no longer ELIGIBLE at the ticket's building
+is skipped rather than carried. `buildings.assignment_eligibility` is
+the authority, the same one the assign endpoint uses, so the carry-over
+can never create a row the assign endpoint would refuse. The skip is
+logged: a silently missing worker is exactly the kind of absence nobody
+notices.
 
 Idempotent by construction (`get_or_create`): a request whose ticket is
 respawned, or a manager already named on the ticket, produces no
@@ -76,3 +94,93 @@ def carry_managers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
             getattr(ticket, "pk", None),
         )
     return created
+
+
+def carry_workers_to_ticket(extra_work_request, ticket, *, actor=None) -> int:
+    """Copy the request's WORKER assignments onto `ticket` as dated
+    operational slots.
+
+    Returns how many rows were created. Never raises, for the same
+    reason `carry_managers_to_ticket` does not: a spawn that succeeded
+    must not be rolled back because pre-filling its crew failed.
+
+    The slot inherits the TICKET's schedule (`scheduled_start_at` /
+    `scheduled_end_at`), which is what makes carrying a worker over safe
+    — see the module docstring. A worker who is not eligible at the
+    ticket's building is skipped and logged.
+    """
+    from buildings.assignment_eligibility import (
+        ROLE_WORKER,
+        eligible_users_for_building,
+    )
+    from tickets.models import TicketStaffAssignment
+
+    created = 0
+    try:
+        workers = ExtraWorkAssignment.objects.filter(
+            extra_work_request=extra_work_request,
+            role=ExtraWorkAssignmentRole.WORKER,
+        ).select_related("user")
+        if not workers:
+            return 0
+
+        # Resolved ONCE for the ticket's building, not per worker: the
+        # eligibility query is the expensive part and the answer is the
+        # same for everyone on this ticket.
+        #
+        # `actor=None` on purpose — this is the system acting, not a
+        # user, so the result is the raw eligibility set rather than
+        # "who may this actor administer". Passing the actor would make
+        # the carry-over depend on who happened to trigger the spawn.
+        eligible_ids = set(
+            eligible_users_for_building(
+                ticket.building, ROLE_WORKER, actor=None
+            ).values_list("id", flat=True)
+        )
+
+        for assignment in workers:
+            if assignment.user_id not in eligible_ids:
+                logger.info(
+                    "extra_work: worker carry-over skipped user #%s for "
+                    "ticket #%s - not eligible at building #%s",
+                    assignment.user_id,
+                    ticket.pk,
+                    ticket.building_id,
+                )
+                continue
+            # `get_or_create` rather than `bulk_create`: the audit rows
+            # for TicketStaffAssignment come from post_save receivers,
+            # and a bulk insert fires none of them (H-10). Keyed on
+            # (ticket, user, scheduled_start_at) because a slot is dated
+            # — the same person may legitimately hold two slots on one
+            # ticket, and Sprint 14E dropped unique_together(ticket,
+            # user) for exactly that reason.
+            _, was_created = TicketStaffAssignment.objects.get_or_create(
+                ticket=ticket,
+                user=assignment.user,
+                scheduled_start_at=ticket.scheduled_start_at,
+                defaults={
+                    "assigned_by": actor,
+                    "scheduled_end_at": ticket.scheduled_end_at,
+                },
+            )
+            if was_created:
+                created += 1
+    except Exception:  # pragma: no cover - defensive
+        logger.exception(
+            "extra_work: worker carry-over failed for request #%s -> "
+            "ticket #%s",
+            getattr(extra_work_request, "pk", None),
+            getattr(ticket, "pk", None),
+        )
+    return created
+
+
+def carry_assignments_to_ticket(extra_work_request, ticket, *, actor=None):
+    """Carry BOTH sides over. The single entry point the three spawn
+    paths call, so a future change to what "carry over" means lands in
+    one place rather than three.
+    """
+    managers = carry_managers_to_ticket(extra_work_request, ticket, actor=actor)
+    workers = carry_workers_to_ticket(extra_work_request, ticket, actor=actor)
+    return managers, workers
