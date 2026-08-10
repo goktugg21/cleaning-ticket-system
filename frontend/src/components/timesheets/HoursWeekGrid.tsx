@@ -1,44 +1,69 @@
 /**
- * Sprint 155 §5 — enter a whole week, for SEVERAL people, at once.
+ * Sprint 159 §1 — the week grid, rebuilt to the reference shape.
  *
- * Sprint 154 shipped this grid with one fault the owner put his finger
- * on precisely: the Hours page's employee FILTER was also the target of
- * "enter a week". One single-select control answered two different
- * questions — "whose rows am I looking at" and "whose week am I
- * writing" — so changing the filter silently changed what Save would
- * write, and entering two people's weeks was impossible without
- * switching in between.
+ * ## What this is now
  *
- * The fix is structural, not cosmetic. This component no longer knows
- * anything about the filter: it renders a BLOCK per employee it is
- * given, and the caller owns which employees those are. On the admin
- * page that is a multi-select of its own; on My hours it is exactly one
- * person, which is why the same component serves both.
+ * ONE table. One row per (employee, building, hour type), seven day
+ * columns, a row total, a grand total, Save. That is the shape of the
+ * system the owner sent, and it is what four previous rounds kept
+ * adding controls around instead of arriving at.
  *
- * Shape, per employee block: one ROW per (hour type, building) pair, one
- * COLUMN per day Mon-Sun, a row total, an employee total, and a grand
- * total across every block. "Apply to all" fills one value across every
- * day of every selected employee — the single most useful control in
- * the reference system the owner sent, and the reason multi-select is
- * worth having at all.
+ * ## What was REMOVED, and why removal was the fix
  *
- * What is deliberately NOT copied from that reference system: contract
- * hours, "valid from" windows, and a work type on the hour row. We have
- * no such model. A `TimeEntry` is employee + date + hour type + hours +
- * optional building + note, and inventing the rest here would put a
- * second, fictional model in front of the real one.
+ * Sprints 155-158 each answered a complaint by adding a control, and
+ * the result was three surfaces that filled cells and two that added
+ * rows:
  *
- * Date handling goes through `lib/isoWeek.ts` exclusively — it already
- * matches Python's `isocalendar()`, and `toDateString` formats in LOCAL
- * time. `toISOString()` is never used: it converts to UTC first, so
- * anywhere east of Greenwich a local midnight becomes the previous day
- * and the entry lands in the wrong day, sometimes the wrong week.
+ *  - a per-employee BLOCK with its own table, name row and total
+ *    (155 §5) — now one table with an Employee column;
+ *  - a per-employee "fill this weekday for all my rows" input row
+ *    (156 §6d);
+ *  - a GLOBAL "fill this weekday for everybody" row above the blocks
+ *    (158 §5b) — the same idea a second time, one level up;
+ *  - row-selection checkboxes plus a second hours box and an "apply to
+ *    N selected" button (158 §5e) — a third way to fill;
+ *  - a per-employee "Add row" button (155) alongside the bar's own.
  *
- * The server stays the authority. A closed week is refused there
- * (`week_closed`) and this grid surfaces that message VERBATIM rather
- * than paraphrasing it. The read-only state below is a courtesy so the
- * operator is not invited to type into cells that cannot be saved — it
- * is not the enforcement.
+ * Nothing they did is lost: Fill writes a value across the rows it
+ * matches, which is what all three fill surfaces were for, and Add row
+ * adds rows, which is what both add surfaces were for. Sprint 158's
+ * split of those two verbs was right and is kept — it is the one thing
+ * from those rounds that survives unchanged.
+ *
+ * ## The bug the owner reported ("bulk adding works oddly")
+ *
+ * Reproduced on the built app before it was touched, driving the real
+ * UI: set the week up with two employees and two buildings, choose an
+ * hour type in the bar, leave the building select on its default, press
+ * **Add row** — the banner says *"0 rows added"* and nothing happens.
+ *
+ * The cause: Sprint 158 §5c relabelled the building select's empty
+ * option "Every building" so FILL would read it as "do not narrow", and
+ * left ADD ROW reading the same value as "no building". So one control
+ * meant two different things depending on which button you pressed.
+ * With a "no building" row already seeded, Add row found nothing
+ * missing and reported zero; without one, it would have silently
+ * created a *no-building* row while the control said "every building".
+ *
+ * The fix is to give the empty value ONE meaning, "all buildings", in
+ * both directions: Fill does not narrow, and Add row adds the hour type
+ * at every building already in the grid. "No building" is now its own
+ * explicit option rather than a value you reach by choosing nothing.
+ *
+ * ## Rules that do not bend
+ *
+ * Every cell is written through the normal `TimeEntry` save path
+ * (`saveWeekGrid` -> the serializer), so `multiplier_snapshot` and the
+ * derived `iso_year`/`iso_week` are written server-side. A closed week
+ * is refused THERE (`week_closed`) and this grid surfaces that message
+ * verbatim; the read-only state below is a courtesy, not the
+ * enforcement.
+ *
+ * Date handling goes through `lib/isoWeek.ts` exclusively — it matches
+ * Python's `isocalendar()` and `toDateString` formats in LOCAL time.
+ * `toISOString()` is never used: it converts to UTC first, so east of
+ * Greenwich a local midnight becomes the previous day and the entry
+ * lands in the wrong day, sometimes the wrong week.
  */
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -56,17 +81,34 @@ export interface GridEmployee {
   name: string;
 }
 
-/** One row inside one employee's block. */
+/**
+ * The bar's "no building" choice. `TimeEntry.building` is nullable BY
+ * DESIGN and stays that way — this is a UI value for choosing null, and
+ * it never leaves this component.
+ *
+ * It is a STRING sentinel and not `""` on purpose: `""` is "all
+ * buildings", and the whole reported bug was those two sharing a value.
+ */
+const NO_BUILDING = "none";
+
+/** One row of the table: one employee, one hour type, one building. */
 interface GridRow {
+  /** Unique across the table. Employee first, because the same (hour
+   *  type, building) pair exists under several people. */
+  id: string;
+  employeeId: number;
+  employeeName: string;
+  /** The (hourType, building) part of the id — the row's identity
+   *  WITHIN one employee, which is what Add row and Fill match on. */
   key: string;
   hourTypeId: number | "";
   buildingId: number | "";
-  /** True for a row the SETUP created rather than the operator or the
-   *  server. Seeded rows are retargetable and droppable exactly like
-   *  added ones — they have no saved entry behind them either. */
-  seeded?: boolean;
-  /** "YYYY-MM-DD" -> the raw text in the cell. Text, not number, so a
-   *  half-typed "1." survives a re-render. */
+  /** True for a row the SETUP or Add row created, which has no saved
+   *  entry behind it: those are the only rows that may be retargeted or
+   *  simply dropped. */
+  added?: boolean;
+  /** "YYYY-MM-DD" -> the raw text of the saved entry. Text, not number,
+   *  so a half-typed "1." survives a re-render. */
   cells: Record<string, string>;
 }
 
@@ -74,22 +116,12 @@ function rowKey(hourTypeId: number | "", buildingId: number | "") {
   return `${hourTypeId}:${buildingId}`;
 }
 
-/** The edit map's key. Employee FIRST, because the same (hour type,
- *  building) row exists under several people and their cells must never
- *  collide — that collision is the multi-employee version of the exact
- *  bug this sprint is fixing. */
-function cellKey(employeeId: number, row: string, day: string) {
-  return `${employeeId}|${row}|${day}`;
+function rowId(employeeId: number, key: string) {
+  return `${employeeId}|${key}`;
 }
 
-/** Sprint 158 §5e — a selected row, across employees. */
-function rowSelectionKey(employeeId: number, row: string) {
-  return `${employeeId}|${row}`;
-}
-
-function splitRowSelection(composite: string): [number, string] {
-  const cut = composite.indexOf("|");
-  return [Number(composite.slice(0, cut)), composite.slice(cut + 1)];
+function cellKey(rowIdValue: string, day: string) {
+  return `${rowIdValue}|${day}`;
 }
 
 function parseHours(raw: string): number {
@@ -117,6 +149,7 @@ export function HoursWeekGrid({
   seedHourTypeIds,
   weekClosed,
   onSaved,
+  onCancel,
 }: {
   week: IsoWeek;
   /** Whose weeks this grid writes. Empty = nothing chosen yet. */
@@ -127,111 +160,100 @@ export function HoursWeekGrid({
   /** The week's EXISTING entries per employee, so the grid opens
    *  pre-filled. Missing key = that employee's week is empty. */
   entriesByEmployee: Record<number, TimeEntry[]>;
-  /** Sprint 157 §1 — the buildings chosen in the Set up week modal.
-   *  `null` is a legitimate member ("no building"), which is why this is
-   *  `(number | null)[]` and not `number[]`.
-   *
-   *  The grid opens one row per (employee, building) pair, exactly as
-   *  the reference system opens one row per worker-building pair. Rows
+  /** The buildings chosen in the setup. `null` is a legitimate member
+   *  ("no building"), which is why this is `(number | null)[]`. Rows
    *  that ALREADY have entries this week are reconciled rather than
-   *  duplicated — see `rowsByEmployee`. */
+   *  duplicated. */
   seedBuildingIds: (number | null)[];
-  /** Sprint 158 §5d — the hour types chosen in the setup modal. Empty
-   *  falls back to the first active type, which is what Sprint 157 did
-   *  implicitly. */
+  /** The hour types chosen in the setup. Empty falls back to the first
+   *  active type. */
   seedHourTypeIds: number[];
   weekClosed: boolean;
-  onSaved: () => void | Promise<void>;
+  onSaved: (changed: number) => void | Promise<void>;
+  /** Rendered next to Save when given. The modal supplies it so the
+   *  footer reads "Cancel / Save"; My hours does not. */
+  onCancel?: () => void;
 }) {
   const { t, i18n } = useTranslation("common");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
-  // Rows the operator added that have no entry behind them yet, keyed by
-  // employee.
+  /** Rows the operator added, keyed by employee. No saved entry behind
+   *  them yet. */
   const [extraRows, setExtraRows] = useState<Record<number, GridRow[]>>({});
   const [edits, setEdits] = useState<Record<string, string>>({});
-  // Sprint 158 §5e — inline bulk edit. A selected row is identified by
-  // "employeeId|rowKey", because a row key alone is not unique across
-  // employees.
-  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
-  const [inlineValue, setInlineValue] = useState("");
 
-  // The apply-to-all bar's own inputs. Not part of the grid's data.
-  const [bulkHourType, setBulkHourType] = useState<number | "">("");
-  const [bulkBuilding, setBulkBuilding] = useState<number | "">("");
-  const [bulkHours, setBulkHours] = useState("");
-  const [bulkScope, setBulkScope] = useState<"week" | "weekdays">("weekdays");
+  // The Fill / Add row bar's own inputs. Not part of the grid's data.
+  const [barHourType, setBarHourType] = useState<number | "">("");
+  const [barBuilding, setBarBuilding] = useState<string>("");
+  const [barHours, setBarHours] = useState("");
+  const [barScope, setBarScope] = useState<"week" | "weekdays">("weekdays");
 
-  // The hour type a SEEDED row opens on. The first active type, which
-  // for every company that has run the standard set is "Normale uren" —
-  // the one an operator would have picked anyway. It is editable on the
-  // row (Sprint 156 §6c), so this is a starting point and not a
-  // decision made on their behalf.
+  // The hour type a SEEDED row opens on: the first active type, which
+  // for every company that has run the standard set is "Normale uren".
   const defaultHourType = hourTypes[0];
 
   const days = useMemo(() => isoWeekDays(week), [week]);
   const dayKeys = useMemo(() => days.map(toDateString), [days]);
 
-  // Rows DERIVED from the existing entries, plus whatever the operator
-  // added. Derived rather than held in state, so re-fetching after a
-  // save cannot leave a stale grid behind — and so no effect has to sync
-  // props into state (CLAUDE.md §3).
-  const rowsByEmployee: Record<number, GridRow[]> = useMemo(() => {
-    const out: Record<number, GridRow[]> = {};
+  /**
+   * Every row of the table, DERIVED from the existing entries plus the
+   * setup's seeds plus whatever was added. Derived rather than held in
+   * state, so re-fetching after a save cannot leave a stale grid behind
+   * — and so no effect has to sync props into state (CLAUDE.md §3).
+   */
+  const rows: GridRow[] = useMemo(() => {
+    const seedTypes =
+      seedHourTypeIds.length > 0
+        ? hourTypes.filter((h) => seedHourTypeIds.includes(h.id))
+        : defaultHourType
+          ? [defaultHourType]
+          : [];
+
+    const out: GridRow[] = [];
     for (const employee of employees) {
       const byKey = new Map<string, GridRow>();
+      const put = (row: GridRow) => {
+        if (!byKey.has(row.key)) byKey.set(row.key, row);
+      };
+
       for (const entry of entriesByEmployee[employee.id] ?? []) {
         const key = rowKey(entry.hour_type, entry.building ?? "");
-        if (!byKey.has(key)) {
-          byKey.set(key, {
-            key,
-            hourTypeId: entry.hour_type,
-            buildingId: entry.building ?? "",
-            cells: {},
-          });
-        }
+        put({
+          id: rowId(employee.id, key),
+          employeeId: employee.id,
+          employeeName: employee.name,
+          key,
+          hourTypeId: entry.hour_type,
+          buildingId: entry.building ?? "",
+          cells: {},
+        });
         byKey.get(key)!.cells[entry.date] = String(entry.hours);
       }
-      // Sprint 157 §1 — one row per (employee, building) pair from the
-      // setup modal.
-      //
-      // RECONCILED, not appended: if this employee already has any row
-      // at that building this week — because they have saved entries
-      // there — the pair is already represented and a blank second row
-      // would be a duplicate of it. That is §1.5, and it is why the
-      // check is on the BUILDING rather than on the full row key: the
-      // hour type of the existing rows is whatever was really worked,
-      // and the seed's default type has no claim to displace it.
-      // Sprint 158 §5d — one row per (building, hour type) from the
-      // setup. With no hour type chosen this falls back to the first
-      // active one, which is exactly Sprint 157's behaviour.
-      const seedTypes =
-        seedHourTypeIds.length > 0
-          ? hourTypes.filter((h) => seedHourTypeIds.includes(h.id))
-          : defaultHourType
-            ? [defaultHourType]
-            : [];
+
+      // One row per (building, hour type) from the setup. RECONCILED,
+      // never appended: a pair that already has entries this week is the
+      // operator's real data and a blank second row would be a duplicate
+      // of it.
       for (const buildingId of seedBuildingIds) {
-        const seatId = buildingId ?? "";
+        const seat = buildingId ?? "";
         for (const hourType of seedTypes) {
-          const key = rowKey(hourType.id, seatId);
-          // RECONCILE: an existing row for this exact pair is the
-          // operator's real data and is never duplicated.
-          if (byKey.has(key)) continue;
-          byKey.set(key, {
+          const key = rowKey(hourType.id, seat);
+          put({
+            id: rowId(employee.id, key),
+            employeeId: employee.id,
+            employeeName: employee.name,
             key,
             hourTypeId: hourType.id,
-            buildingId: seatId,
+            buildingId: seat,
             cells: {},
-            seeded: true,
+            added: true,
           });
         }
       }
-      for (const extra of extraRows[employee.id] ?? []) {
-        if (!byKey.has(extra.key)) byKey.set(extra.key, extra);
-      }
-      out[employee.id] = [...byKey.values()];
+
+      for (const extra of extraRows[employee.id] ?? []) put(extra);
+      out.push(...byKey.values());
     }
     return out;
   }, [
@@ -244,92 +266,48 @@ export function HoursWeekGrid({
     defaultHourType,
   ]);
 
-  const cellValue = (employeeId: number, row: GridRow, dayKey: string) =>
-    edits[cellKey(employeeId, row.key, dayKey)] ?? row.cells[dayKey] ?? "";
+  const cellValue = (row: GridRow, dayKey: string) =>
+    edits[cellKey(row.id, dayKey)] ?? row.cells[dayKey] ?? "";
 
-  const setCell = (
-    employeeId: number,
-    row: GridRow,
-    dayKey: string,
-    value: string,
-  ) =>
-    setEdits((current) => ({
-      ...current,
-      [cellKey(employeeId, row.key, dayKey)]: value,
-    }));
+  const setCell = (row: GridRow, dayKey: string, value: string) =>
+    setEdits((current) => ({ ...current, [cellKey(row.id, dayKey)]: value }));
 
-  const rowTotal = (employeeId: number, row: GridRow) =>
-    dayKeys.reduce(
-      (sum, key) => sum + parseHours(cellValue(employeeId, row, key)),
-      0,
-    );
+  const rowTotal = (row: GridRow) =>
+    dayKeys.reduce((sum, key) => sum + parseHours(cellValue(row, key)), 0);
 
-  const employeeTotal = (employeeId: number) =>
-    (rowsByEmployee[employeeId] ?? []).reduce(
-      (sum, row) => sum + rowTotal(employeeId, row),
-      0,
-    );
-
-  const grandTotal = employees.reduce(
-    (sum, employee) => sum + employeeTotal(employee.id),
-    0,
-  );
+  const grandTotal = rows.reduce((sum, row) => sum + rowTotal(row), 0);
 
   const hourTypeName = (id: number | "") =>
     hourTypes.find((h) => h.id === id)?.name ?? String(id);
-
-  /** True for a row the operator just added, which has no saved entry
-   *  behind it yet — the only rows whose hour type and building may be
-   *  retargeted, and the only ones that can simply be dropped. */
-  const isAddedRow = (employeeId: number, key: string) =>
-    (extraRows[employeeId] ?? []).some((r) => r.key === key) ||
-    (rowsByEmployee[employeeId] ?? []).some(
-      (r) => r.key === key && r.seeded,
-    );
 
   const buildingName = (id: number | "") =>
     id === ""
       ? t("hours_week_grid.no_building")
       : (buildings.find((b) => b.id === id)?.name ?? String(id));
 
-  function addRow(employeeId: number) {
-    const used = new Set((rowsByEmployee[employeeId] ?? []).map((r) => r.key));
-    // First hour type that does not already have a no-building row.
-    const candidate = hourTypes.find((h) => !used.has(rowKey(h.id, "")));
-    if (!candidate) return;
-    setExtraRows((current) => ({
-      ...current,
-      [employeeId]: [
-        ...(current[employeeId] ?? []),
-        {
-          key: rowKey(candidate.id, ""),
-          hourTypeId: candidate.id,
-          buildingId: "",
-          cells: {},
-        },
-      ],
-    }));
-  }
+  /** The buildings this grid is actually about: every distinct building
+   *  already on a row. That is what "all buildings" means HERE — the
+   *  ones in front of the operator, not every building the company owns. */
+  const gridBuildingIds = useMemo(() => {
+    const seen = new Set<number | "">();
+    for (const row of rows) seen.add(row.buildingId);
+    return [...seen];
+  }, [rows]);
 
-  /** Sprint 156 §6c — retarget an ADDED row's hour type or building.
-   *
-   * Sprint 155 picked both for you at Add-row time and gave you no way
-   * to change either, so a row could not be pointed at a building at all
-   * — which made the optional `TimeEntry.building` unreachable from the
-   * one surface that fills a whole week.
+  /**
+   * Retarget an ADDED row's hour type or building.
    *
    * ADDED rows only. A row that already has saved entries behind it
    * keeps its type and building as text: changing them there would not
    * move the existing entries (they are keyed on the old pair
-   * server-side), it would silently leave them where they were and open
-   * a second row, which looks exactly like data loss.
+   * server-side), it would leave them where they were and open a second
+   * row, which looks exactly like data loss.
    *
    * The row's key encodes the pair, so retargeting means re-keying — and
-   * the pending edits under the old key have to move with it or the
-   * numbers the operator already typed would vanish.
+   * the pending edits under the old key move with it, or the numbers
+   * already typed would vanish.
    */
   function retargetRow(
-    employeeId: number,
     row: GridRow,
     next: { hourTypeId?: number | ""; buildingId?: number | "" },
   ) {
@@ -338,108 +316,69 @@ export function HoursWeekGrid({
     const nextKey = rowKey(hourTypeId, buildingId);
     if (nextKey === row.key) return;
     // Refuse a collision rather than merging two rows silently.
-    if ((rowsByEmployee[employeeId] ?? []).some((r) => r.key === nextKey)) {
+    if (rows.some((r) => r.employeeId === row.employeeId && r.key === nextKey)) {
       setError(t("hours_week_grid.row_exists"));
       return;
     }
     setError("");
+    const nextId = rowId(row.employeeId, nextKey);
     setExtraRows((current) => ({
       ...current,
-      [employeeId]: (current[employeeId] ?? []).map((r) =>
-        r.key === row.key ? { ...r, key: nextKey, hourTypeId, buildingId } : r,
+      [row.employeeId]: (current[row.employeeId] ?? []).map((r) =>
+        r.key === row.key
+          ? { ...r, id: nextId, key: nextKey, hourTypeId, buildingId }
+          : r,
       ),
     }));
     setEdits((current) => {
       const moved: Record<string, string> = {};
+      const prefix = `${row.id}|`;
       for (const [key, value] of Object.entries(current)) {
-        const prefix = cellKey(employeeId, row.key, "");
         moved[
-          key.startsWith(prefix)
-            ? cellKey(employeeId, nextKey, key.slice(prefix.length))
-            : key
+          key.startsWith(prefix) ? cellKey(nextId, key.slice(prefix.length)) : key
         ] = value;
       }
       return moved;
     });
   }
 
-  /** Sprint 156 §6d — the TOP box of a day column: one value into that
-   *  weekday for every row of this employee at once.
-   *
-   *  The reference system the owner sent stacks two boxes per day, and
-   *  the distinction is the point: the top one is "everybody on this
-   *  day", the ones below are the individual rows. Writing into `edits`
-   *  for every row makes the per-row boxes update visibly, so the
-   *  relationship is shown rather than described.
-   */
-  function fillDayForEmployee(employeeId: number, dayKey: string, value: string) {
-    const rows = rowsByEmployee[employeeId] ?? [];
-    setEdits((current) => {
-      const next = { ...current };
-      for (const row of rows) {
-        if (row.hourTypeId === "") continue;
-        next[cellKey(employeeId, row.key, dayKey)] = value;
-      }
-      return next;
-    });
-  }
+  /** The building the bar names, as a row value. `""` (all buildings)
+   *  has no single answer and is handled by each caller. */
+  const barBuildingId: number | "" | null =
+    barBuilding === "" ? null : barBuilding === NO_BUILDING ? "" : Number(barBuilding);
 
-  /** Sprint 158 §5a/§5c — **FILL**. Writes the value into cells that
-   *  ALREADY EXIST. It adds nothing.
+  /**
+   * **FILL** — write the value into cells that ALREADY EXIST. It adds
+   * nothing; that is Add row's job, and Sprint 158 split them because
+   * one button doing both meant the operator could not tell which they
+   * were getting.
    *
-   *  What it used to do, and why the owner called it misleading: it
-   *  added a row to every selected employee that did not already have
-   *  the chosen (hour type, building) pair, and then filled it. Pressing
-   *  a button labelled "apply to all" and getting new rows is not what
-   *  the words say.
+   * The matching rows are worked out HERE, not inside the setState
+   * updater: a counter incremented inside the updater is still zero when
+   * the next line runs, and Sprint 158's first measured run proved it —
+   * ten cells filled and a banner reading "no row has that hour type".
    *
-   *  §5c, reproduced from the code before changing it: the old version
-   *  keyed on the PAIR, and the bar's building defaults to "no
-   *  building" while seeded rows carry a real one. So applying to an
-   *  hour type that already existed at a building produced a SECOND row
-   *  for the same hour type — `Normale uren` twice, one with a building
-   *  and one without — because `hourType:building` and `hourType:` are
-   *  different keys. That is the misbehaviour; matching on hour type and
-   *  treating the building as an optional narrowing is the fix.
-   *
-   *  Nothing here reaches the server. Everything lands in `edits` and is
-   *  written by Save, so a mis-click is undone by not saving.
+   * Nothing here reaches the server. Everything lands in `edits` and is
+   * written by Save, so a mis-click is undone by not saving.
    */
   function fillMatchingRows() {
-    if (bulkHourType === "") return;
-    const targetDays = bulkScope === "weekdays" ? dayKeys.slice(0, 5) : dayKeys;
-
-    // The matching rows are worked out HERE, not inside the setState
-    // updater. A counter incremented inside the updater is still zero
-    // when the next line runs — React has not invoked it yet — and the
-    // first measured run of this code proved it: ten cells were filled
-    // and the banner said "no row has that hour type". A control that
-    // misreports what it did is the same class of defect as the one
-    // §5a/§5c are about, so it is fixed rather than left as cosmetic.
+    if (barHourType === "") return;
+    const targetDays = barScope === "weekdays" ? dayKeys.slice(0, 5) : dayKeys;
     const targets: string[] = [];
-    for (const employee of employees) {
-      for (const row of rowsByEmployee[employee.id] ?? []) {
-        if (row.hourTypeId !== bulkHourType) continue;
-        // A chosen building NARROWS; an empty choice means "every row of
-        // this hour type", not "only the row that has no building". That
-        // is the §5c fix.
-        if (bulkBuilding !== "" && row.buildingId !== bulkBuilding) continue;
-        for (const day of targetDays) {
-          targets.push(cellKey(employee.id, row.key, day));
-        }
-      }
+    for (const row of rows) {
+      if (row.hourTypeId !== barHourType) continue;
+      // A chosen building NARROWS. "All buildings" does not.
+      if (barBuildingId !== null && row.buildingId !== barBuildingId) continue;
+      for (const day of targetDays) targets.push(cellKey(row.id, day));
     }
 
     if (targets.length > 0) {
       setEdits((current) => {
         const next = { ...current };
-        for (const key of targets) next[key] = bulkHours;
+        for (const key of targets) next[key] = barHours;
         return next;
       });
     }
-
-    // Say so rather than doing nothing silently: with no matching row
-    // there is nothing to fill, and the operator wants Add row.
     setBanner(
       targets.length === 0
         ? t("hours_week_grid.fill_no_match")
@@ -447,71 +386,56 @@ export function HoursWeekGrid({
     );
   }
 
-  /** Sprint 158 §5a — **ADD ROW**, the other half, now separate and
-   *  labelled for what it does. Adds the chosen (hour type, building)
-   *  row to every selected employee that does not already have it, and
-   *  does NOT fill anything. */
-  function addRowToAll() {
-    if (bulkHourType === "") return;
-    const key = rowKey(bulkHourType, bulkBuilding);
-    // Counted OUTSIDE the updater, for the same reason as Fill above.
-    const missing = employees.filter(
-      (employee) =>
-        !(rowsByEmployee[employee.id] ?? []).some((r) => r.key === key),
-    );
+  /**
+   * **ADD ROW** — the other half. Adds the chosen (hour type, building)
+   * to every employee that does not already have it, and fills nothing.
+   *
+   * With "all buildings" chosen it adds the hour type at every building
+   * already in the grid, which is what the words say. That is the fix
+   * for the reported bug: the empty value used to mean "no building"
+   * here and "every building" in Fill, so pressing Add row with the
+   * default selection either did nothing or quietly produced a
+   * no-building row.
+   */
+  function addRows() {
+    if (barHourType === "") return;
+    const targetBuildings: (number | "")[] =
+      barBuildingId === null ? gridBuildingIds : [barBuildingId];
+    // Counted OUTSIDE the updater, for the same reason as Fill.
+    const missing: GridRow[] = [];
+    for (const employee of employees) {
+      for (const buildingId of targetBuildings) {
+        const key = rowKey(barHourType, buildingId);
+        const exists =
+          rows.some((r) => r.employeeId === employee.id && r.key === key) ||
+          missing.some((r) => r.employeeId === employee.id && r.key === key);
+        if (exists) continue;
+        missing.push({
+          id: rowId(employee.id, key),
+          employeeId: employee.id,
+          employeeName: employee.name,
+          key,
+          hourTypeId: barHourType,
+          buildingId,
+          cells: {},
+          added: true,
+        });
+      }
+    }
     if (missing.length > 0) {
       setExtraRows((current) => {
         const next = { ...current };
-        for (const employee of missing) {
-          next[employee.id] = [
-            ...(next[employee.id] ?? []),
-            {
-              key,
-              hourTypeId: bulkHourType,
-              buildingId: bulkBuilding,
-              cells: {},
-            },
-          ];
+        for (const row of missing) {
+          next[row.employeeId] = [...(next[row.employeeId] ?? []), row];
         }
         return next;
       });
     }
-    setBanner(t("hours_week_grid.rows_added", { count: missing.length }));
-  }
-
-  /** Sprint 158 §5b — the GLOBAL row, above the names. One value into
-   *  that weekday for EVERY row of EVERY employee in the grid.
-   *
-   *  Sprint 156 put a box at the top of each employee's own table; this
-   *  is that idea finished — it belongs to no employee and reads as
-   *  global because it sits above all of them. */
-  function fillDayForEveryone(dayKey: string, value: string) {
-    setEdits((current) => {
-      const next = { ...current };
-      for (const employee of employees) {
-        for (const row of rowsByEmployee[employee.id] ?? []) {
-          if (row.hourTypeId === "") continue;
-          next[cellKey(employee.id, row.key, dayKey)] = value;
-        }
-      }
-      return next;
-    });
-  }
-
-  /** Sprint 158 §5e — inline bulk edit. Set every SELECTED row's chosen
-   *  days at once, on the page, without opening anything. */
-  function fillSelectedRows(value: string) {
-    const targetDays = bulkScope === "weekdays" ? dayKeys.slice(0, 5) : dayKeys;
-    setEdits((current) => {
-      const next = { ...current };
-      for (const composite of selectedRowKeys) {
-        const [employeeId, rowKeyPart] = splitRowSelection(composite);
-        for (const day of targetDays) {
-          next[cellKey(employeeId, rowKeyPart, day)] = value;
-        }
-      }
-      return next;
-    });
+    setBanner(
+      missing.length === 0
+        ? t("hours_week_grid.rows_all_present")
+        : t("hours_week_grid.rows_added", { count: missing.length }),
+    );
   }
 
   async function handleSave() {
@@ -520,9 +444,9 @@ export function HoursWeekGrid({
     setError("");
     setBanner("");
 
-    // Send only the cells that CHANGED. A grid that resent every cell
-    // would rewrite untouched rows — pointless writes, and every one of
-    // them re-snapshots the multiplier for no reason.
+    // Send only the cells that CHANGED. Resending every cell would
+    // rewrite untouched rows — pointless writes, each one re-snapshotting
+    // the multiplier for no reason.
     const cells: {
       employee: number;
       hour_type: number;
@@ -530,23 +454,21 @@ export function HoursWeekGrid({
       date: string;
       hours: string;
     }[] = [];
-    for (const employee of employees) {
-      for (const row of rowsByEmployee[employee.id] ?? []) {
-        if (row.hourTypeId === "") continue;
-        for (const dayKey of dayKeys) {
-          const key = cellKey(employee.id, row.key, dayKey);
-          if (!(key in edits)) continue;
-          const original = row.cells[dayKey] ?? "";
-          if (parseHours(edits[key]) === parseHours(original)) continue;
-          cells.push({
-            employee: employee.id,
-            hour_type: row.hourTypeId,
-            building: row.buildingId === "" ? null : row.buildingId,
-            date: dayKey,
-            // "0" is meaningful: it CLEARS the cell server-side.
-            hours: String(parseHours(edits[key])),
-          });
-        }
+    for (const row of rows) {
+      if (row.hourTypeId === "") continue;
+      for (const dayKey of dayKeys) {
+        const key = cellKey(row.id, dayKey);
+        if (!(key in edits)) continue;
+        const original = row.cells[dayKey] ?? "";
+        if (parseHours(edits[key]) === parseHours(original)) continue;
+        cells.push({
+          employee: row.employeeId,
+          hour_type: row.hourTypeId,
+          building: row.buildingId === "" ? null : row.buildingId,
+          date: dayKey,
+          // "0" is meaningful: it CLEARS the cell server-side.
+          hours: String(parseHours(edits[key])),
+        });
       }
     }
 
@@ -559,8 +481,7 @@ export function HoursWeekGrid({
     try {
       // ONE request for the whole grid, however many people are in it.
       // The endpoint is all-or-nothing, so a week that half-saved across
-      // three employees — leaving the operator to work out which — is
-      // not a state this can reach.
+      // three employees is not a state this can reach.
       const result = await saveWeekGrid({
         company: companyId ?? undefined,
         iso_year: week.isoYear,
@@ -571,7 +492,7 @@ export function HoursWeekGrid({
       setEdits({});
       setExtraRows({});
       setBanner(t("hours_week_grid.saved", { count: changed }));
-      await onSaved();
+      await onSaved(changed);
     } catch (err) {
       // Verbatim — including the server's own `week_closed` wording.
       setError(getApiError(err));
@@ -580,8 +501,7 @@ export function HoursWeekGrid({
     }
   }
 
-  /** Just the weekday name — "ma" / "Mon". Used by the §6b scope
-   *  labels, which name the day span instead of a category. */
+  /** Just the weekday name — "ma" / "Mon", for the scope labels. */
   const dayShort = (date: Date) =>
     date.toLocaleDateString(i18n.language === "nl" ? "nl-NL" : "en-US", {
       weekday: "short",
@@ -610,12 +530,12 @@ export function HoursWeekGrid({
     );
   }
 
+  // My hours renders this for exactly one person, where a column
+  // repeating their own name on every row is noise.
+  const showEmployeeColumn = employees.length > 1;
+
   return (
     <div data-testid="hours-week-grid">
-      <p className="muted small" style={{ marginTop: 0, marginBottom: 12 }}>
-        {t("hours_week_grid.intro")}
-      </p>
-
       {weekClosed && (
         <div
           className="alert-info"
@@ -649,24 +569,17 @@ export function HoursWeekGrid({
         </div>
       )}
 
-      {/* Apply to all. Offered whenever the grid has more than one row's
-          worth of work to do — which for a single person is still the
-          fastest way to file a normal week. */}
-      {/* Sprint 158 §5a/§5f — ONE line, and the two actions are now
-          two buttons that say what they do. "Fill" writes into cells
-          that exist; "Add row" creates a row. Sprint 157's single
-          "Apply to all" did both and the owner could not tell which he
-          was getting. §5f: the strip stays on one line — it scrolls
-          inside itself rather than wrapping. */}
+      {/* The apply-to-all line. Two verbs, two buttons, and the building
+          select means the same thing to both of them. */}
       <div className="hours-week-apply-bar" data-testid="hours-week-apply-bar">
         <span className="hours-week-apply-label">
           {t("hours_week_grid.bar_label")}
         </span>
         <select
           className="field-input"
-          value={bulkHourType === "" ? "" : String(bulkHourType)}
+          value={barHourType === "" ? "" : String(barHourType)}
           onChange={(event) =>
-            setBulkHourType(
+            setBarHourType(
               event.target.value === "" ? "" : Number(event.target.value),
             )
           }
@@ -683,22 +596,21 @@ export function HoursWeekGrid({
         </select>
         <select
           className="field-input"
-          value={bulkBuilding === "" ? "" : String(bulkBuilding)}
-          onChange={(event) =>
-            setBulkBuilding(
-              event.target.value === "" ? "" : Number(event.target.value),
-            )
-          }
+          value={barBuilding}
+          onChange={(event) => setBarBuilding(event.target.value)}
           disabled={busy || weekClosed}
           aria-label={t("hours_week_grid.building")}
           data-testid="hours-week-apply-building"
         >
-          {/* "Every building" rather than "no building": in the FILL
-              direction an empty choice means "do not narrow", which is
-              the §5c fix. */}
+          {/* ONE meaning for each value, in both directions. "All
+              buildings" does not narrow a Fill and adds the hour type at
+              every building in the grid; "No building" is its own
+              explicit choice rather than a value you reach by choosing
+              nothing. That pairing is the reported bug's fix. */}
           <option value="">{t("hours_week_grid.every_building")}</option>
+          <option value={NO_BUILDING}>{t("hours_week_grid.no_building")}</option>
           {buildings.map((building) => (
-            <option key={building.id} value={building.id}>
+            <option key={building.id} value={String(building.id)}>
               {building.name}
             </option>
           ))}
@@ -707,8 +619,8 @@ export function HoursWeekGrid({
           className="field-input"
           type="text"
           inputMode="decimal"
-          value={bulkHours}
-          onChange={(event) => setBulkHours(event.target.value)}
+          value={barHours}
+          onChange={(event) => setBarHours(event.target.value)}
           placeholder={t("hours_week_grid.hours_placeholder")}
           disabled={busy || weekClosed}
           aria-label={t("hours_week_grid.apply_hours")}
@@ -717,9 +629,9 @@ export function HoursWeekGrid({
         />
         <select
           className="field-input"
-          value={bulkScope}
+          value={barScope}
           onChange={(event) =>
-            setBulkScope(event.target.value as "week" | "weekdays")
+            setBarScope(event.target.value as "week" | "weekdays")
           }
           disabled={busy || weekClosed}
           aria-label={t("hours_week_grid.apply_scope")}
@@ -742,7 +654,7 @@ export function HoursWeekGrid({
           type="button"
           className="btn btn-primary btn-sm"
           onClick={fillMatchingRows}
-          disabled={busy || weekClosed || bulkHourType === ""}
+          disabled={busy || weekClosed || barHourType === ""}
           data-testid="hours-week-fill-button"
         >
           {t("hours_week_grid.fill_button")}
@@ -750,349 +662,168 @@ export function HoursWeekGrid({
         <button
           type="button"
           className="btn btn-secondary btn-sm"
-          onClick={addRowToAll}
-          disabled={busy || weekClosed || bulkHourType === ""}
+          onClick={addRows}
+          disabled={busy || weekClosed || barHourType === ""}
           data-testid="hours-week-add-row-button"
         >
           {t("hours_week_grid.add_row_button")}
         </button>
-        {/* §5e — the inline bulk edit, on the SAME line. */}
-        <span className="hours-week-bar-sep" aria-hidden="true" />
-        <input
-          className="field-input"
-          type="text"
-          inputMode="decimal"
-          value={inlineValue}
-          onChange={(event) => setInlineValue(event.target.value)}
-          placeholder={t("hours_week_grid.hours_placeholder")}
-          disabled={busy || weekClosed || selectedRowKeys.length === 0}
-          aria-label={t("hours_week_grid.selected_value")}
-          style={{ width: 80 }}
-          data-testid="hours-week-inline-value"
-        />
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => fillSelectedRows(inlineValue)}
-          disabled={busy || weekClosed || selectedRowKeys.length === 0}
-          data-testid="hours-week-inline-apply"
-        >
-          {t("hours_week_grid.apply_to_selected", {
-            count: selectedRowKeys.length,
-          })}
-        </button>
       </div>
 
-      {/* Sprint 158 §5b — the GLOBAL row. It belongs to no employee and
-          sits above every block, so what it does is legible from where
-          it is: type a number and that weekday is set for everybody. */}
-      <div className="hours-week-global-row" data-testid="hours-week-global-row">
-        <span className="hours-week-global-label">
-          {t("hours_week_grid.global_row_label")}
-        </span>
-        {dayKeys.map((dayKey, index) => (
-          <label key={dayKey} className="hours-week-global-cell">
-            <span className="hours-week-global-day">{dayShort(days[index])}</span>
-            <input
-              className="field-input hours-week-grid-cell"
-              type="text"
-              inputMode="decimal"
-              // Not bound to state: this box is a verb, not a value. It
-              // pushes into the rows below, and those rows are where the
-              // number then lives.
-              defaultValue=""
-              onChange={(event) =>
-                fillDayForEveryone(dayKey, event.target.value)
-              }
-              disabled={busy || weekClosed}
-              aria-label={t("hours_week_grid.global_cell_label", {
-                day: dayLabel(days[index]),
-              })}
-              data-testid={`hours-week-global-${dayKey}`}
-            />
-          </label>
-        ))}
-      </div>
-
-      {employees.map((employee) => {
-        const rows = rowsByEmployee[employee.id] ?? [];
-        return (
-          <div
-            key={employee.id}
-            className="hours-week-block"
-            data-testid={`hours-week-block-${employee.id}`}
-          >
-            <div className="hours-week-block-head">
-              <span className="hours-week-block-name">{employee.name}</span>
-              <span
-                className="hours-week-block-total"
-                data-testid={`hours-week-employee-total-${employee.id}`}
-              >
-                {t("hours_week_grid.employee_total", {
-                  hours: formatTotal(employeeTotal(employee.id)),
-                })}
-              </span>
-            </div>
-
-            <div className="table-wrap">
-              <table className="data-table data-table-dense hours-week-grid-table">
-                <thead>
-                  <tr>
-                    {/* Sprint 158 §5e — row selection, for the inline
-                        bulk edit in the bar above. */}
-                    <th className="th-select">
-                      <input
-                        type="checkbox"
-                        checked={
-                          rows.length > 0 &&
-                          rows.every((r) =>
-                            selectedRowKeys.includes(
-                              rowSelectionKey(employee.id, r.key),
-                            ),
-                          )
+      <div className="table-wrap">
+        <table className="data-table data-table-dense hours-week-grid-table">
+          <thead>
+            <tr>
+              {showEmployeeColumn && <th>{t("hours_week_grid.employee")}</th>}
+              <th>{t("hours_week_grid.hour_type")}</th>
+              <th>{t("hours_week_grid.building")}</th>
+              {days.map((day, index) => (
+                <th key={dayKeys[index]} style={{ textAlign: "right" }}>
+                  {dayLabel(day)}
+                </th>
+              ))}
+              <th style={{ textAlign: "right" }}>
+                {t("hours_week_grid.total")}
+              </th>
+              <th aria-label={t("hours_week_grid.remove_row")} />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={dayKeys.length + (showEmployeeColumn ? 5 : 4)}
+                  className="muted small"
+                >
+                  {t("hours_week_grid.empty_block")}
+                </td>
+              </tr>
+            )}
+            {rows.map((row, index) => {
+              // The name is printed once per person, not once per row:
+              // four rows all repeating "Ahmet Yilmaz" is the noise the
+              // per-employee blocks used to avoid, and this keeps that
+              // without keeping five tables.
+              const firstOfEmployee =
+                index === 0 || rows[index - 1].employeeId !== row.employeeId;
+              return (
+                <tr key={row.id} data-testid={`hours-week-row-${row.id}`}>
+                  {showEmployeeColumn && (
+                    <td className="td-subject">
+                      {firstOfEmployee ? row.employeeName : ""}
+                    </td>
+                  )}
+                  <td className="td-subject">
+                    {row.added ? (
+                      <select
+                        className="field-input hours-week-row-select"
+                        value={String(row.hourTypeId)}
+                        onChange={(event) =>
+                          retargetRow(row, {
+                            hourTypeId: Number(event.target.value),
+                          })
                         }
-                        onChange={(event) => {
-                          const keys = rows.map((r) =>
-                            rowSelectionKey(employee.id, r.key),
-                          );
-                          setSelectedRowKeys((current) =>
-                            event.target.checked
-                              ? [...new Set([...current, ...keys])]
-                              : current.filter((k) => !keys.includes(k)),
-                          );
-                        }}
-                        disabled={busy || weekClosed || rows.length === 0}
-                        aria-label={employee.name}
-                        data-testid={`hours-week-select-all-${employee.id}`}
-                      />
-                    </th>
-                    <th>{t("hours_week_grid.hour_type")}</th>
-                    <th>{t("hours_week_grid.building")}</th>
-                    {days.map((day, index) => (
-                      <th key={dayKeys[index]} style={{ textAlign: "right" }}>
-                        {dayLabel(day)}
-                      </th>
-                    ))}
-                    <th style={{ textAlign: "right" }}>
-                      {t("hours_week_grid.total")}
-                    </th>
-                    <th aria-label={t("hours_week_grid.remove_row")} />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 && (
-                    <tr>
-                      <td colSpan={dayKeys.length + 5} className="muted small">
-                        {t("hours_week_grid.empty_block")}
-                      </td>
-                    </tr>
-                  )}
-                  {/* Sprint 156 §6d — the TOP box of every day column.
-                      Typing here writes that day into EVERY row below at
-                      once; the boxes underneath stay the individual
-                      per-row values.
-
-                      The distinction is made visible rather than left to
-                      be discovered: its own tinted band, a label that
-                      says "all rows", and a divider under it. The
-                      owner's §6b complaint was that a control whose
-                      meaning you must infer is a broken control, and a
-                      second row of identical-looking boxes would be
-                      exactly that. */}
-                  {rows.length > 0 && (
-                    <tr className="hours-week-fill-row">
-                      <td className="td-subject" colSpan={3}>
-                        {t("hours_week_grid.fill_row_label")}
-                      </td>
-                      {dayKeys.map((dayKey, index) => (
-                        <td key={dayKey} style={{ textAlign: "right" }}>
-                          <input
-                            className="field-input hours-week-grid-cell"
-                            type="text"
-                            inputMode="decimal"
-                            // Deliberately NOT bound to state: this box
-                            // is a verb, not a value. It pushes what you
-                            // type into the rows below, and those rows
-                            // are where the value then lives — so it
-                            // holds nothing of its own to get out of
-                            // step with them.
-                            defaultValue=""
-                            placeholder={t("hours_week_grid.fill_row_hint")}
-                            onChange={(event) =>
-                              fillDayForEmployee(
-                                employee.id,
-                                dayKey,
-                                event.target.value,
-                              )
-                            }
-                            disabled={busy || weekClosed}
-                            aria-label={t("hours_week_grid.fill_row_aria", {
-                              person: employee.name,
-                              day: dayLabel(days[index]),
-                            })}
-                            data-testid={`hours-week-fill-${employee.id}-${dayKey}`}
-                          />
-                        </td>
-                      ))}
-                      <td />
-                      <td />
-                    </tr>
-                  )}
-                  {rows.map((row) => (
-                    <tr key={row.key}>
-                      <td className="td-select">
-                        <input
-                          type="checkbox"
-                          checked={selectedRowKeys.includes(
-                            rowSelectionKey(employee.id, row.key),
-                          )}
-                          onChange={() => {
-                            const key = rowSelectionKey(employee.id, row.key);
-                            setSelectedRowKeys((current) =>
-                              current.includes(key)
-                                ? current.filter((k) => k !== key)
-                                : [...current, key],
-                            );
-                          }}
-                          disabled={busy || weekClosed}
-                          aria-label={hourTypeName(row.hourTypeId)}
-                          data-testid={`hours-week-row-select-${employee.id}-${row.key}`}
-                        />
-                      </td>
-                      <td className="td-subject">
-                        {isAddedRow(employee.id, row.key) ? (
-                          <select
-                            className="field-input hours-week-row-select"
-                            value={String(row.hourTypeId)}
-                            onChange={(event) =>
-                              retargetRow(employee.id, row, {
-                                hourTypeId: Number(event.target.value),
-                              })
-                            }
-                            disabled={busy || weekClosed}
-                            aria-label={t("hours_week_grid.hour_type")}
-                            data-testid={`hours-week-row-hour-type-${employee.id}-${row.key}`}
-                          >
-                            {hourTypes.map((hourType) => (
-                              <option key={hourType.id} value={hourType.id}>
-                                {hourType.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          hourTypeName(row.hourTypeId)
-                        )}
-                      </td>
-                      <td>
-                        {/* Sprint 156 §6c — a row can carry a building.
-                            `TimeEntry.building` has always been optional
-                            and stays optional ("No building" is the
-                            first option), but Sprint 155 gave no way to
-                            set it, so the field was unreachable from the
-                            one surface that fills a whole week. */}
-                        {isAddedRow(employee.id, row.key) ? (
-                          <select
-                            className="field-input hours-week-row-select"
-                            value={String(row.buildingId)}
-                            onChange={(event) =>
-                              retargetRow(employee.id, row, {
-                                buildingId:
-                                  event.target.value === ""
-                                    ? ""
-                                    : Number(event.target.value),
-                              })
-                            }
-                            disabled={busy || weekClosed}
-                            aria-label={t("hours_week_grid.building")}
-                            data-testid={`hours-week-row-building-${employee.id}-${row.key}`}
-                          >
-                            <option value="">
-                              {t("hours_week_grid.no_building")}
-                            </option>
-                            {buildings.map((building) => (
-                              <option key={building.id} value={building.id}>
-                                {building.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          buildingName(row.buildingId)
-                        )}
-                      </td>
-                      {dayKeys.map((dayKey, index) => (
-                        <td key={dayKey} style={{ textAlign: "right" }}>
-                          <input
-                            className="field-input hours-week-grid-cell"
-                            type="text"
-                            inputMode="decimal"
-                            value={cellValue(employee.id, row, dayKey)}
-                            onChange={(event) =>
-                              setCell(
-                                employee.id,
-                                row,
-                                dayKey,
-                                event.target.value,
-                              )
-                            }
-                            disabled={busy || weekClosed}
-                            aria-label={t("hours_week_grid.cell_label_person", {
-                              person: employee.name,
-                              hourType: hourTypeName(row.hourTypeId),
-                              day: dayLabel(days[index]),
-                            })}
-                            data-testid={`hours-week-cell-${employee.id}-${row.key}-${dayKey}`}
-                          />
-                        </td>
-                      ))}
-                      <td
-                        style={{ textAlign: "right", fontWeight: 700 }}
-                        data-testid={`hours-week-row-total-${employee.id}-${row.key}`}
+                        disabled={busy || weekClosed}
+                        aria-label={t("hours_week_grid.hour_type")}
+                        data-testid={`hours-week-row-hour-type-${row.id}`}
                       >
-                        {formatTotal(rowTotal(employee.id, row))}
-                      </td>
-                      <td>
-                        {/* An added-but-unsaved row can be dropped; a row
-                            that exists on the server is cleared by
-                            zeroing its cells, not by removing it from
-                            the grid — removing it here would look like a
-                            delete that never happened. */}
-                        {isAddedRow(employee.id, row.key) && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() =>
-                              setExtraRows((current) => ({
-                                ...current,
-                                [employee.id]: (
-                                  current[employee.id] ?? []
-                                ).filter((r) => r.key !== row.key),
-                              }))
-                            }
-                            disabled={busy}
-                          >
-                            {t("hours_week_grid.remove_row")}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                        {hourTypes.map((hourType) => (
+                          <option key={hourType.id} value={hourType.id}>
+                            {hourType.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      hourTypeName(row.hourTypeId)
+                    )}
+                  </td>
+                  <td>
+                    {row.added ? (
+                      <select
+                        className="field-input hours-week-row-select"
+                        value={String(row.buildingId)}
+                        onChange={(event) =>
+                          retargetRow(row, {
+                            buildingId:
+                              event.target.value === ""
+                                ? ""
+                                : Number(event.target.value),
+                          })
+                        }
+                        disabled={busy || weekClosed}
+                        aria-label={t("hours_week_grid.building")}
+                        data-testid={`hours-week-row-building-${row.id}`}
+                      >
+                        <option value="">
+                          {t("hours_week_grid.no_building")}
+                        </option>
+                        {buildings.map((building) => (
+                          <option key={building.id} value={building.id}>
+                            {building.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      buildingName(row.buildingId)
+                    )}
+                  </td>
+                  {dayKeys.map((dayKey, dayIndex) => (
+                    <td key={dayKey} style={{ textAlign: "right" }}>
+                      <input
+                        className="field-input hours-week-grid-cell"
+                        type="text"
+                        inputMode="decimal"
+                        value={cellValue(row, dayKey)}
+                        onChange={(event) =>
+                          setCell(row, dayKey, event.target.value)
+                        }
+                        disabled={busy || weekClosed}
+                        aria-label={t("hours_week_grid.cell_label_person", {
+                          person: row.employeeName,
+                          hourType: hourTypeName(row.hourTypeId),
+                          day: dayLabel(days[dayIndex]),
+                        })}
+                        data-testid={`hours-week-cell-${row.id}-${dayKey}`}
+                      />
+                    </td>
                   ))}
-                </tbody>
-              </table>
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => addRow(employee.id)}
-              disabled={busy || weekClosed}
-              style={{ marginTop: 8 }}
-              data-testid={`hours-week-add-row-${employee.id}`}
-            >
-              {t("hours_week_grid.add_row")}
-            </button>
-          </div>
-        );
-      })}
+                  <td
+                    style={{ textAlign: "right", fontWeight: 700 }}
+                    data-testid={`hours-week-row-total-${row.id}`}
+                  >
+                    {formatTotal(rowTotal(row))}
+                  </td>
+                  <td>
+                    {/* An added-but-unsaved row can be dropped; a row
+                        that exists on the server is cleared by zeroing
+                        its cells, not by removing it from the grid —
+                        removing it here would look like a delete that
+                        never happened. */}
+                    {row.added && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() =>
+                          setExtraRows((current) => ({
+                            ...current,
+                            [row.employeeId]: (
+                              current[row.employeeId] ?? []
+                            ).filter((r) => r.key !== row.key),
+                          }))
+                        }
+                        disabled={busy}
+                        data-testid={`hours-week-remove-row-${row.id}`}
+                      >
+                        {t("hours_week_grid.remove_row")}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
 
       <div
         style={{
@@ -1104,25 +835,35 @@ export function HoursWeekGrid({
           flexWrap: "wrap",
         }}
       >
-        <span
-          className="hours-week-grand-total"
-          data-testid="hours-week-total"
-        >
+        <span className="hours-week-grand-total" data-testid="hours-week-total">
           {t("hours_week_grid.grand_total", {
             hours: formatTotal(grandTotal),
             count: employees.length,
           })}
         </span>
-        {/* ONE Save for the whole grid — every employee, every row. */}
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={handleSave}
-          disabled={busy || weekClosed}
-          data-testid="hours-week-grid-save"
-        >
-          {busy ? t("admin_form.saving") : t("hours_week_grid.save")}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {onCancel && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={onCancel}
+              disabled={busy}
+              data-testid="hours-week-grid-cancel"
+            >
+              {t("cancel")}
+            </button>
+          )}
+          {/* ONE Save for the whole grid — every employee, every row. */}
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={busy || weekClosed}
+            data-testid="hours-week-grid-save"
+          >
+            {busy ? t("admin_form.saving") : t("hours_week_grid.save")}
+          </button>
+        </div>
       </div>
     </div>
   );

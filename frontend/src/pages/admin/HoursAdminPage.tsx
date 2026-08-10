@@ -1,11 +1,9 @@
-import type { FormEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { listAllBuildings, listAllCompanies } from "../../api/admin";
 import { getApiError } from "../../api/client";
 import {
-  createTimeEntry,
   deleteTimeEntry,
   downloadTimesheetSummaryCsv,
   fetchTimesheetSummary,
@@ -14,12 +12,10 @@ import {
   listTimesheetEmployees,
   updateTimeEntry,
 } from "../../api/timesheets";
-import { fetchWeekStatus } from "../../api/timesheets";
 import type {
   HourType,
   TimeEntry,
   TimeEntryFilters,
-  TimeEntryWritePayload,
   TimesheetEmployee,
   TimesheetSummary,
 } from "../../api/timesheets.types";
@@ -30,21 +26,9 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import type { ConfirmDialogHandle } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/ToastProvider";
-import {
-  currentIsoWeek,
-  formatIsoWeek,
-  fromDateString,
-  parseIsoWeek,
-  shiftIsoWeek,
-  toDateString,
-} from "../../lib/isoWeek";
-import type { IsoWeek } from "../../lib/isoWeek";
-import { HoursWeekGrid } from "../../components/timesheets/HoursWeekGrid";
-import { WeekSetupDialog } from "../../components/timesheets/WeekSetupDialog";
-import {
-  hourTypeLabel,
-  hourTypeLabelFrom,
-} from "../../lib/hourTypeLabel";
+import { currentIsoWeek, fromDateString } from "../../lib/isoWeek";
+import { WeekEntryDialog } from "../../components/timesheets/WeekEntryDialog";
+import { hourTypeLabel, hourTypeLabelFrom } from "../../lib/hourTypeLabel";
 import { HourTypesTab } from "./HourTypesTab";
 import { HoursFilterRow } from "./HoursFilterRow";
 import { HoursOverviewTab } from "./HoursOverviewTab";
@@ -60,9 +44,7 @@ type Tab = "entries" | "hour_types" | "weeks";
 // visits. Its OWN key, not shared with the catalog's
 // (`osius.catalog.company`): the two surfaces are navigated
 // independently, and making a choice in one silently move the other is
-// the kind of coupling that reads as a bug. Same rationale as Sprint
-// 150's: localStorage, not a server-side preference — a view
-// convenience, not a permission and not something anyone else inherits.
+// the kind of coupling that reads as a bug.
 const HOURS_COMPANY_STORAGE_KEY = "osius.hours.company";
 
 interface EntryFilterState {
@@ -81,12 +63,10 @@ const EMPTY_FILTERS: EntryFilterState = {
   date_to: "",
 };
 
-// Sprint 152.1 — the admin entry form. Every field is a STRING here and
-// converted at submit: a `<select>`/`<input>` value is a string, and
-// keeping numbers in form state means a parse on every render plus an
-// empty-string special case at each one.
-interface EntryFormState {
-  employee: string;
+/** One row's pending inline edit. Every field is a STRING: a `<select>`
+ *  / `<input>` value is a string, and keeping numbers here means a parse
+ *  on every render plus an empty-string special case at each one. */
+interface EntryDraft {
   date: string;
   hour_type: string;
   hours: string;
@@ -94,15 +74,24 @@ interface EntryFormState {
   note: string;
 }
 
-function emptyEntryForm(): EntryFormState {
+function draftOf(entry: TimeEntry): EntryDraft {
   return {
-    employee: "",
-    date: toDateString(new Date()),
-    hour_type: "",
-    hours: "",
-    building: "",
-    note: "",
+    date: entry.date,
+    hour_type: String(entry.hour_type),
+    hours: entry.hours,
+    building: entry.building === null ? "" : String(entry.building),
+    note: entry.note,
   };
+}
+
+function draftsDiffer(a: EntryDraft, b: EntryDraft): boolean {
+  return (
+    a.date !== b.date ||
+    a.hour_type !== b.hour_type ||
+    a.hours.trim() !== b.hours.trim() ||
+    a.building !== b.building ||
+    a.note !== b.note
+  );
 }
 
 function formatDate(value: string, locale: string): string {
@@ -119,18 +108,46 @@ function formatDate(value: string, locale: string): string {
 }
 
 /**
- * Sprint 152 — the "Uren" admin area (SUPER_ADMIN / COMPANY_ADMIN).
- * Three tabs: the company-wide entries overview with its totals panel
- * and CSV export, the hour-type catalog, and week close/reopen.
+ * Sprint 159 §1 — the "Uren" admin area, rebuilt to the shape of the
+ * reference system the owner sent.
  *
- * Follows the `ServicesAdminPage` conventions, including the Sprint
- * 149/150 company model for a SUPER_ADMIN: exactly ONE provider company
- * is in view at a time, seeded from the operator's remembered choice
- * and otherwise from the LOWEST id (the deployment's first tenant, not
- * an alphabetical accident). The seed is set inside the fetch's
- * `.then()`, never in an effect body — CLAUDE.md bans a synchronous
- * setState there, and that exact pattern caused the Sprint 143
- * customer-lock regression.
+ * ## What the entries tab is now
+ *
+ *   title + ONE primary button (enter a week)
+ *   one line of filters
+ *   a row of stat tiles
+ *   ONE table, with an Edit toggle that makes its cells editable and
+ *   saves every change at once
+ *
+ * ## What was REMOVED
+ *
+ * The in-page week grid and its "Set up week" / "Close grid" panel: the
+ * grid now lives ONLY in the modal, and having one on the page as well
+ * is the duplication the owner called confusing. The per-row "Add
+ * entry" / "Edit entry" modal: a modal per row is exactly what the
+ * inline Edit toggle exists to replace, and a week — including a single
+ * day of it — is entered in the one modal. The per-hour-type and
+ * per-week report tables: the Overview tab has rendered both, over the
+ * same summary payload, since Sprint 152.2, so they were a second copy
+ * of an existing surface sitting under the list. The CSV export they
+ * carried is kept, next to the tiles it describes.
+ *
+ * ## Company resolution
+ *
+ * Sprint 149/150's model for a SUPER_ADMIN: exactly ONE provider
+ * company is in view at a time, seeded from the operator's remembered
+ * choice and otherwise from the LOWEST id (the deployment's first
+ * tenant, not an alphabetical accident). The seed is set inside the
+ * fetch's `.then()`, never in an effect body — CLAUDE.md bans a
+ * synchronous setState there.
+ *
+ * Sprint 159 adds the gate that was missing: for a SUPER_ADMIN the
+ * reads WAIT until the company is known. Measured on the built Sprint
+ * 158 page, the first render fired `/timesheets/employees/` and
+ * `/timesheets/summary/` with no company and took two 400s
+ * (`company is required when more than one provider Company exists`)
+ * before the retry, which put a red error banner on screen for as long
+ * as it took the company list to resolve.
  *
  * A COMPANY_ADMIN sees no selector at all: they have one company and
  * `""` means "let the backend resolve it", which is what every write
@@ -146,11 +163,11 @@ export function HoursAdminPage() {
   const [tab, setTab] = useState<Tab>("entries");
 
   const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companiesResolved, setCompaniesResolved] = useState(!isSuperAdmin);
   const [company, setCompany] = useState<number | "">("");
   // Its own error state, not shared with the list's: a missing SELECTOR
-  // blocks creates and needs a reload, a stale LIST fixes itself on the
-  // next mutation. Sharing one made Sprint 142's carry-overs cancel each
-  // other out (see ServicesAdminPage's `companyLoadError`).
+  // blocks writes and needs a reload, a stale LIST fixes itself on the
+  // next mutation.
   const [companyLoadError, setCompanyLoadError] = useState("");
 
   const [entries, setEntries] = useState<TimeEntry[]>([]);
@@ -166,65 +183,26 @@ export function HoursAdminPage() {
   const [hourTypes, setHourTypes] = useState<HourType[]>([]);
   const [buildings, setBuildings] = useState<BuildingAdmin[]>([]);
 
-  // Sprint 152.1 — the entry form. Sprint 152 shipped this tab READ-ONLY
-  // because the sprint prompt asked only for an overview, which left the
-  // module unable to do the thing it exists for: an admin recording
-  // hours for an employee. The backend accepted it all along.
-  const [entryMode, setEntryMode] = useState<"create" | "edit" | null>(null);
-  const [editingEntry, setEditingEntry] = useState<TimeEntry | null>(null);
-  const [entryForm, setEntryForm] = useState<EntryFormState>(emptyEntryForm);
-  const [entryFormError, setEntryFormError] = useState("");
-  const [entryFormBusy, setEntryFormBusy] = useState(false);
+  const [weekModalOpen, setWeekModalOpen] = useState(false);
 
-  // Sprint 154 §M — the week grid. It has its OWN week + entry state
-  // rather than reusing the tab's date-range filters: the grid is a week
-  // editor and the list is a range browser, and forcing one set of
-  // filters to mean both would make changing a filter silently change
-  // what Save writes.
-  const [gridOpen, setGridOpen] = useState(false);
-  const [gridWeek, setGridWeek] = useState<IsoWeek>(() => currentIsoWeek());
-  const [gridEntries, setGridEntries] = useState<Record<number, TimeEntry[]>>(
-    {},
-  );
-  const [gridWeekClosed, setGridWeekClosed] = useState(false);
-  const [gridToken, setGridToken] = useState(0);
-  // Sprint 155 §5 — THE headline fix. The grid's employees are its own
-  // state, multi-select, and have nothing to do with `filters.employee`.
-  //
-  // Sprint 154 passed `filters.employee` straight in, so one
-  // single-select control was both "whose rows am I looking at" and
-  // "whose week am I writing": changing the filter to read someone
-  // else's entries silently retargeted Save, and two people's weeks
-  // could not be entered without switching in between. The two concerns
-  // are now separate state and neither touches the other.
-  const [gridEmployeeIds, setGridEmployeeIds] = useState<number[]>([]);
-  // Sprint 157 §1 — the buildings chosen alongside the employees, and
-  // the modal that chooses both. `null` is a legitimate member of the
-  // list ("no building"), which is why it is not `number[]`.
-  const [gridBuildingIds, setGridBuildingIds] = useState<(number | null)[]>([]);
-  // Sprint 158 §5d — hour types are part of the setup now.
-  const [gridHourTypeIds, setGridHourTypeIds] = useState<number[]>([]);
-  const [setupOpen, setSetupOpen] = useState(false);
-  // The blocks the grid renders, derived from the selection and the
-  // employee list. Derived so a selected employee who disappears from
-  // the list (company switch, deactivation) simply stops having a
-  // block, with no effect to resync and no stale name on screen.
-  const gridEmployees = useMemo(
-    () =>
-      employees
-        .filter((employee) => gridEmployeeIds.includes(employee.id))
-        .map((employee) => ({
-          id: employee.id,
-          name: employee.full_name || employee.email,
-        })),
-    [employees, gridEmployeeIds],
-  );
+  // The inline table editor. `drafts` holds ONLY the rows the operator
+  // has touched, so "what changed" is the map itself and no diffing of
+  // the whole page is needed.
+  const [editing, setEditing] = useState(false);
+  const [drafts, setDrafts] = useState<Record<number, EntryDraft>>({});
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const deleteDialogRef = useRef<ConfirmDialogHandle>(null);
   const [deleteTarget, setDeleteTarget] = useState<TimeEntry | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const showCompanySelector = isSuperAdmin && companies.length > 1;
+  /** True while a SUPER_ADMIN's company is still unknown. Every read
+   *  waits on it — see the class docstring. */
+  const companyPending =
+    isSuperAdmin &&
+    (!companiesResolved || (companies.length > 1 && company === ""));
 
   useEffect(() => {
     if (!isSuperAdmin) return;
@@ -248,12 +226,15 @@ export function HoursAdminPage() {
             current === "" ? (remembered ?? primary.id) : current,
           );
         }
+        setCompaniesResolved(true);
       })
       .catch(() => {
         // Fail loudly. A silently absent selector leaves a SUPER_ADMIN on
         // a multi-tenant deployment with no control and then a
         // `timesheet_company_required` 400 they cannot act on.
-        if (!cancelled) setCompanyLoadError(t("catalog.company_load_failed"));
+        if (cancelled) return;
+        setCompanyLoadError(t("catalog.company_load_failed"));
+        setCompaniesResolved(true);
       });
     return () => {
       cancelled = true;
@@ -264,15 +245,13 @@ export function HoursAdminPage() {
   // SUPER_ADMIN switching tenants does not keep the previous one's
   // employees in the dropdown.
   useEffect(() => {
+    if (companyPending) return;
     let cancelled = false;
     Promise.all([
-      // Sprint 152.1 — the module's OWN picker endpoint, narrowed to the
-      // selected company. Sprint 152 used `/api/employees/` here, which
-      // takes no `?company=` and returns no company either: for a
-      // SUPER_ADMIN that mixed several providers' people into one
-      // dropdown where every wrong pick 400s. That was tolerable while
-      // the field was only a FILTER; it is not once the same list names
-      // the employee on a write. See `views_employees.py`.
+      // The module's OWN picker endpoint, narrowed to the selected
+      // company. `/api/employees/` takes no `?company=` and returns
+      // none either, so for a SUPER_ADMIN it mixes several providers'
+      // people into one dropdown where every wrong pick 400s.
       listTimesheetEmployees(company),
       listHourTypes(company === "" ? {} : { company }),
       listAllBuildings({
@@ -293,7 +272,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [company]);
+  }, [company, companyPending]);
 
   /**
    * Change a filter AND return to page 1.
@@ -308,6 +287,10 @@ export function HoursAdminPage() {
   const patchFilters = useCallback((patch: Partial<EntryFilterState>) => {
     setFilters((prev) => ({ ...prev, ...patch }));
     setPage(1);
+    // A filter change replaces the rows under the editor, so pending
+    // drafts would be pointing at rows that are no longer on screen.
+    setEditing(false);
+    setDrafts({});
   }, []);
 
   const queryFilters: TimeEntryFilters = useMemo(
@@ -326,13 +309,14 @@ export function HoursAdminPage() {
   // state and set from the effect body.
   const fetchKey = `${tab}|${JSON.stringify(queryFilters)}|${page}`;
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const loading = tab === "entries" && loadedKey !== fetchKey;
+  const loading =
+    tab === "entries" && (companyPending || loadedKey !== fetchKey);
 
   useEffect(() => {
-    if (tab !== "entries") return;
+    if (tab !== "entries" || companyPending) return;
     let cancelled = false;
-    // The table and its totals come from the SAME filter object, so the
-    // panel under the table always describes the table.
+    // The table and its tiles come from the SAME filter object, so the
+    // numbers always describe the rows on screen.
     Promise.all([
       listTimeEntries({ ...queryFilters, page }),
       fetchTimesheetSummary(queryFilters),
@@ -354,7 +338,7 @@ export function HoursAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, queryFilters, page, fetchKey]);
+  }, [tab, queryFilters, page, fetchKey, companyPending]);
 
   // Only ACTIVE hour types are offerable for a write — an archived one
   // is rejected server-side (`hour_type_archived`). The unfiltered list
@@ -366,46 +350,14 @@ export function HoursAdminPage() {
   );
 
   /**
-   * A form value that no longer names anything offerable collapses HERE,
-   * at the point of use — never through a resync effect that writes back
-   * into form state. That pattern is what produced the Sprint 143
-   * customer-lock regression, and CLAUDE.md bans the synchronous
-   * setState it needs.
-   *
-   * It happens for real: a SUPER_ADMIN switching company reloads the
-   * employee, hour-type and building lists underneath an open form, and
-   * an edit form seeded from an entry whose hour type has since been
-   * archived would otherwise show a value with no matching <option> —
-   * which a <select> renders as a blank box that silently submits the
-   * stale id.
-   */
-  const effectiveFormEmployee = employees.some(
-    (employee) => String(employee.id) === entryForm.employee,
-  )
-    ? entryForm.employee
-    : "";
-  const effectiveFormHourType = activeHourTypes.some(
-    (hourType) => String(hourType.id) === entryForm.hour_type,
-  )
-    ? entryForm.hour_type
-    : "";
-  const effectiveFormBuilding = buildings.some(
-    (building) => String(building.id) === entryForm.building,
-  )
-    ? entryForm.building
-    : "";
-
-  /**
    * Re-read the entries page and its totals after a mutation. NEVER
    * THROWS: the write already committed, so a failed re-read must not
-   * turn a saved row into a form error or wedge a busy flag. Stale list
-   * plus a visible page-level message, never silence. (Same contract as
-   * `HourTypesTab.refresh`.)
+   * turn a saved row into a form error or wedge a busy flag.
    *
    * Re-reads rather than merging locally, because a write can move a row
    * OUT of the current view entirely — a date edit past the filtered
-   * range, or an employee change under an employee filter. A local merge
-   * can drop a row but never bring one back.
+   * range, or an hour-type change under an hour-type filter. A local
+   * merge can drop a row but never bring one back.
    */
   const refreshEntries = useCallback(async () => {
     try {
@@ -423,153 +375,109 @@ export function HoursAdminPage() {
     }
   }, [queryFilters, page, t]);
 
-  // The grid's own read: this week's entries for the SELECTED employee,
-  // plus the week's lock. The lock is fetched ALONGSIDE the entries and
-  // never derived from them — absence of a WeekLock row means open, so
-  // an empty week has no entry to read a lock off.
-  useEffect(() => {
-    if (!gridOpen || gridEmployeeIds.length === 0) return;
-    let cancelled = false;
+  // ---- the inline editor -------------------------------------------
 
-    // TWO independent reads, deliberately NOT one Promise.all.
-    //
-    // They were combined at first and it was a real bug, caught by
-    // measuring the built page: `weeks/status/` 400s for a SUPER_ADMIN
-    // who has not disambiguated a company (`timesheet_company_required`,
-    // the same shape as NEXT item 0), which rejected the combined
-    // promise and threw away the ENTRIES — whose own request had
-    // returned 200. The grid rendered empty over a week that had rows in
-    // it. Splitting them means a failure in the secondary read can never
-    // discard the primary one.
-    //
-    // `company` is now passed so the status call resolves in the first
-    // place; the split is belt-and-braces for every other reason it
-    // could fail.
-    // Sprint 155 §5 — one read PER selected employee, and
-    // `allSettled` so a failure for one person cannot discard anybody
-    // else's rows. That is the same discipline the entries/lock split
-    // below exists for; here the blast radius is one block instead of
-    // the whole grid. The selection is what the operator picked, so the
-    // request count is bounded by their own choice.
-    Promise.allSettled(
-      gridEmployeeIds.map((employeeId) =>
-        listTimeEntries({
-          employee: employeeId,
-          iso_year: gridWeek.isoYear,
-          iso_week: gridWeek.isoWeek,
-          page_size: 200,
-        }).then((entryPage) => [employeeId, entryPage.results] as const),
-      ),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<number, TimeEntry[]> = {};
-      for (const result of results) {
-        if (result.status === "fulfilled") {
-          const [employeeId, rows] = result.value;
-          next[employeeId] = rows;
-        }
-      }
-      setGridEntries(next);
-    });
+  /** The row's current state: the pending draft if it has one, the
+   *  saved values otherwise. Read at the point of USE rather than
+   *  seeded into state on entering edit mode — a draft per row for a
+   *  page nobody edited is state that can go stale against a refresh. */
+  const draftFor = (entry: TimeEntry): EntryDraft =>
+    drafts[entry.id] ?? draftOf(entry);
 
-    fetchWeekStatus({
-      iso_year: gridWeek.isoYear,
-      iso_week: gridWeek.isoWeek,
-      company,
-    })
-      .then((status) => {
-        if (!cancelled) setGridWeekClosed(status.is_closed);
-      })
-      .catch(() => {
-        // Unknown lock state defaults to OPEN, which only affects
-        // whether the cells look editable. The SERVER refuses a write
-        // into a closed week regardless, and its `week_closed` message
-        // is surfaced verbatim — so the worst case is an operator who
-        // types and is then told no, never a write that should not have
-        // happened.
-        if (!cancelled) setGridWeekClosed(false);
-      });
+  const patchDraft = (entry: TimeEntry, patch: Partial<EntryDraft>) =>
+    setDrafts((current) => ({
+      ...current,
+      [entry.id]: { ...(current[entry.id] ?? draftOf(entry)), ...patch },
+    }));
 
-    return () => {
-      cancelled = true;
-    };
-  }, [gridOpen, gridEmployeeIds, gridWeek, gridToken, company]);
+  /** Only the rows whose draft actually DIFFERS from what is stored.
+   *  Touching a field and putting it back is not a change, and sending
+   *  it would re-snapshot the multiplier for nothing. */
+  const changedEntries = entries.filter(
+    (entry) =>
+      entry.id in drafts && draftsDiffer(drafts[entry.id], draftOf(entry)),
+  );
 
-  function openCreateEntry() {
-    setEntryMode("create");
-    setEditingEntry(null);
-    setEntryForm(emptyEntryForm());
-    setEntryFormError("");
+  function cancelEditing() {
+    setEditing(false);
+    setDrafts({});
+    setSaveError("");
   }
 
-  function openEditEntry(entry: TimeEntry) {
-    setEntryMode("edit");
-    setEditingEntry(entry);
-    setEntryForm({
-      employee: String(entry.employee),
-      date: entry.date,
-      hour_type: String(entry.hour_type),
-      hours: entry.hours,
-      building: entry.building === null ? "" : String(entry.building),
-      note: entry.note,
-    });
-    setEntryFormError("");
-  }
-
-  function closeEntryModal() {
-    setEntryMode(null);
-    setEditingEntry(null);
-    setEntryFormError("");
-  }
-
-  async function handleEntrySubmit(event: FormEvent) {
-    event.preventDefault();
-    // The EFFECTIVE values, not the raw ones: a select whose value
-    // collapsed above must not still submit the stale id it is no longer
-    // displaying.
-    if (
-      !effectiveFormEmployee ||
-      !entryForm.date ||
-      !effectiveFormHourType ||
-      !entryForm.hours.trim()
-    ) {
-      setEntryFormError(t("hours_admin.entry_error_required_fields"));
+  /**
+   * Save every changed row, then leave edit mode.
+   *
+   * One PATCH per row, deliberately: `updateTimeEntry` is the normal
+   * `TimeEntry` save path, so the serializer re-snapshots
+   * `multiplier_snapshot` and re-derives `iso_year`/`iso_week` for each
+   * one. The week-grid bulk endpoint cannot serve this — it is keyed on
+   * (employee, hour type, building, date) and carries no note, so it
+   * can neither move a row's date nor edit its text.
+   *
+   * `allSettled`, not `all`: a row the server refuses (a closed week
+   * reached while the page was open) must not discard the rows that
+   * saved. The ones that failed keep their drafts and their error, and
+   * edit mode stays open on exactly those.
+   */
+  async function saveAll() {
+    if (changedEntries.length === 0) {
+      cancelEditing();
       return;
     }
-    setEntryFormBusy(true);
-    setEntryFormError("");
-    const payload: TimeEntryWritePayload = {
-      employee: Number(effectiveFormEmployee),
-      date: entryForm.date,
-      hour_type: Number(effectiveFormHourType),
-      hours: entryForm.hours.trim(),
-      building:
-        effectiveFormBuilding === "" ? null : Number(effectiveFormBuilding),
-      note: entryForm.note.trim(),
-      // The page's selected company, as the DISAMBIGUATOR the serializer
-      // documents. On UPDATE the field is read-only server-side (the
-      // tenant anchor never moves), so sending it there is harmless.
-      ...(company === "" ? {} : { company }),
-    };
-    try {
-      if (entryMode === "create") {
-        await createTimeEntry(payload);
-      } else if (entryMode === "edit" && editingEntry) {
-        await updateTimeEntry(editingEntry.id, payload);
+    setSaveBusy(true);
+    setSaveError("");
+    const results = await Promise.allSettled(
+      changedEntries.map((entry) => {
+        const draft = drafts[entry.id];
+        return updateTimeEntry(entry.id, {
+          date: draft.date,
+          hour_type: Number(draft.hour_type),
+          hours: draft.hours.trim(),
+          building: draft.building === "" ? null : Number(draft.building),
+          note: draft.note.trim(),
+        }).then(() => entry.id);
+      }),
+    );
+
+    const failed: number[] = [];
+    let firstError = "";
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        failed.push(changedEntries[index].id);
+        // The server's message VERBATIM — including `week_closed`,
+        // which names the week and says what to do about it.
+        if (!firstError) firstError = getApiError(result.reason);
       }
-      await refreshEntries();
-      closeEntryModal();
-    } catch (err) {
-      // The server's message VERBATIM — including `week_closed`, which
-      // names the week and says what to do about it. The UI avoids
-      // offering doomed actions (`is_locked` disables the row buttons)
-      // but the server is the authority, and a page that was open while
-      // an admin closed the week will still get here.
-      setEntryFormError(getApiError(err));
-    } finally {
-      setEntryFormBusy(false);
+    });
+
+    const saved = results.length - failed.length;
+    await refreshEntries();
+
+    if (failed.length === 0) {
+      setDrafts({});
+      setEditing(false);
+      pushToast({
+        variant: "success",
+        title: t("hours_admin.edit_saved", { count: saved }),
+      });
+    } else {
+      setDrafts((current) => {
+        const kept: Record<number, EntryDraft> = {};
+        for (const id of failed) if (current[id]) kept[id] = current[id];
+        return kept;
+      });
+      setSaveError(
+        t("hours_admin.edit_partly_failed", {
+          saved,
+          failed: failed.length,
+          detail: firstError,
+        }),
+      );
     }
+    setSaveBusy(false);
   }
+
+  // ---- delete -------------------------------------------------------
 
   function openDeleteEntry(entry: TimeEntry) {
     setDeleteTarget(entry);
@@ -609,6 +517,38 @@ export function HoursAdminPage() {
     }
   }, [queryFilters, pushToast, t]);
 
+  // The four tiles. Every number comes off the SAME summary the table
+  // was filtered with; `by_employee` / `by_building` are the buckets the
+  // endpoint has returned since Sprint 152.2.
+  const tiles = summary
+    ? [
+        {
+          key: "hours",
+          label: t("hours_admin.tile_hours"),
+          value: summary.total_hours,
+        },
+        {
+          key: "workers",
+          label: t("hours_admin.tile_workers"),
+          value: String(summary.by_employee.length),
+        },
+        {
+          key: "buildings",
+          label: t("hours_admin.tile_buildings"),
+          // The "no building" bucket is a real bucket but not a
+          // building, so it does not count as one.
+          value: String(
+            summary.by_building.filter((b) => b.building !== null).length,
+          ),
+        },
+        {
+          key: "entries",
+          label: t("hours_admin.tile_entries"),
+          value: String(summary.total_entries),
+        },
+      ]
+    : [];
+
   return (
     <div className="page">
       <PageHeader
@@ -619,11 +559,11 @@ export function HoursAdminPage() {
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              data-testid="hours-add-entry-button"
-              onClick={openCreateEntry}
-              disabled={loading || hourTypes.length === 0}
+              data-testid="hours-enter-week-button"
+              onClick={() => setWeekModalOpen(true)}
+              disabled={loading || activeHourTypes.length === 0}
             >
-              {t("hours_admin.add_entry_button")}
+              {t("hours_admin.enter_week_button")}
             </button>
           ) : undefined
         }
@@ -675,245 +615,142 @@ export function HoursAdminPage() {
         </button>
       </div>
 
-      {showCompanySelector && (
-        <div className="field" style={{ maxWidth: 320, marginBottom: 16 }}>
-          <label className="field-label" htmlFor="hours-company-selector">
-            {t("catalog.company_selector_label")}
-          </label>
-          <select
-            id="hours-company-selector"
-            className="field-select"
-            value={company === "" ? "" : String(company)}
-            onChange={(event) => {
-              const value = event.target.value;
-              setCompany(value === "" ? "" : Number(value));
-              setPage(1);
-              if (value !== "") {
-                window.localStorage.setItem(HOURS_COMPANY_STORAGE_KEY, value);
-              }
-            }}
-            data-testid="hours-company-selector"
-          >
-            {/* Disabled placeholder: there is no "all companies" state.
-                It renders only before the list resolves, so the select
-                never shows a blank box or a company nobody picked. */}
-            <option value="" disabled>
-              {t("catalog.company_selector_placeholder")}
-            </option>
-            {companies.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-          <p className="field-hint muted small">
-            {t("hours_admin.company_selector_hint")}
-          </p>
-        </div>
-      )}
-
       {tab === "entries" && (
         <>
-          {/* Sprint 154 §M — the week grid, collapsed by default so the
-              tab still opens on the list it always showed. It writes for
-              the employee chosen in the filter row below. */}
+          {/* ONE line of filters — the company (when there is a choice),
+              the three shared pickers and the period. Sprint 156 §6a's
+              rule, and the reason the company selector is no longer a
+              card of its own above them. */}
           <div
-            className="card"
-            style={{ padding: "16px 18px", marginBottom: 16 }}
-            data-testid="hours-week-grid-card"
-          >
-            <div
-              className="section-head"
-              style={{ marginBottom: gridOpen ? 12 : 0 }}
-            >
-              <div>
-                <div className="section-head-title">
-                  {t("hours_week_grid.title")}
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                {gridOpen && (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setGridWeek((w) => shiftIsoWeek(w, -1))}
-                      aria-label={t("previous")}
-                      data-testid="hours-week-grid-prev"
-                    >
-                      ‹
-                    </button>
-                    <input
-                      className="field-input"
-                      type="week"
-                      value={formatIsoWeek(gridWeek)}
-                      onChange={(event) => {
-                        const parsed = parseIsoWeek(event.target.value);
-                        if (parsed) setGridWeek(parsed);
-                      }}
-                      style={{ width: 160 }}
-                      data-testid="hours-week-grid-week"
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setGridWeek((w) => shiftIsoWeek(w, 1))}
-                      aria-label={t("next")}
-                      data-testid="hours-week-grid-next"
-                    >
-                      ›
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setGridOpen((open) => !open)}
-                  data-testid="hours-week-grid-toggle"
-                >
-                  {gridOpen
-                    ? t("hours_week_grid.close_grid")
-                    : t("hours_week_grid.open_grid")}
-                </button>
-              </div>
-            </div>
-            {gridOpen && (
-              <>
-                {/* Sprint 157 §1 — the setup happens in a MODAL, up
-                    front: pick the people AND the buildings, then the
-                    table is built from that choice. Sprint 155's inline
-                    employee picker lived here and chose only half of
-                    the pair, which is why a building could only be
-                    attached to a row afterwards.
-
-                    What is chosen here is still completely separate
-                    from the entries FILTER below — that separation is
-                    Sprint 155 §5's fix and is not being re-merged. */}
-                <div className="hours-week-setup-summary">
-                  <span data-testid="hours-week-setup-line">
-                    {gridEmployeeIds.length === 0
-                      ? t("week_setup.not_set_up")
-                      : t("week_setup.current", {
-                          employees: gridEmployeeIds.length,
-                          buildings: gridBuildingIds.length,
-                        })}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => setSetupOpen(true)}
-                    data-testid="hours-week-setup-open"
-                  >
-                    {gridEmployeeIds.length === 0
-                      ? t("week_setup.open")
-                      : t("week_setup.change")}
-                  </button>
-                </div>
-                <HoursWeekGrid
-                  week={gridWeek}
-                  employees={gridEmployees}
-                  companyId={company === "" ? undefined : company}
-                  hourTypes={activeHourTypes}
-                  buildings={buildings}
-                  entriesByEmployee={gridEntries}
-                  seedBuildingIds={gridBuildingIds}
-                  seedHourTypeIds={gridHourTypeIds}
-                  weekClosed={gridWeekClosed}
-                  onSaved={async () => {
-                    setGridToken((n) => n + 1);
-                    await refreshEntries();
-                  }}
-                />
-              </>
-            )}
-          </div>
-
-          <div
-            className="card"
-            style={{ padding: "16px 18px", marginBottom: 16 }}
+            className="card hours-filter-line"
             data-testid="hours-filters"
           >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 12,
+            {showCompanySelector && (
+              <div className="field" style={{ margin: 0 }}>
+                <label className="field-label" htmlFor="hours-company-selector">
+                  {t("catalog.company_selector_label")}
+                </label>
+                <select
+                  id="hours-company-selector"
+                  className="field-select"
+                  value={company === "" ? "" : String(company)}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setCompany(value === "" ? "" : Number(value));
+                    setPage(1);
+                    setEditing(false);
+                    setDrafts({});
+                    if (value !== "") {
+                      window.localStorage.setItem(
+                        HOURS_COMPANY_STORAGE_KEY,
+                        value,
+                      );
+                    }
+                  }}
+                  data-testid="hours-company-selector"
+                >
+                  {/* Disabled placeholder: there is no "all companies"
+                      state. It renders only before the list resolves. */}
+                  <option value="" disabled>
+                    {t("catalog.company_selector_placeholder")}
+                  </option>
+                  {companies.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Sprint 152.2 — the SHARED filter row. The Overview tab
+                filters the same collection with the same three
+                controls; a second hand-maintained copy is the "written
+                once, omitted elsewhere" defect this project keeps
+                paying for. */}
+            <HoursFilterRow
+              values={{
+                employee: filters.employee,
+                hour_type: filters.hour_type,
+                building: filters.building,
               }}
-            >
-              {/* Sprint 152.2 — the SHARED filter row. The Overview tab
-                  filters the same collection with the same three
-                  controls; a second hand-maintained copy is the
-                  "written once, omitted elsewhere" defect this project
-                  keeps paying for. */}
-              <HoursFilterRow
-                values={{
-                  employee: filters.employee,
-                  hour_type: filters.hour_type,
-                  building: filters.building,
-                }}
-                onChange={patchFilters}
-                employees={employees}
-                hourTypes={hourTypes}
-                buildings={buildings}
-                idPrefix="hours"
+              onChange={patchFilters}
+              employees={employees}
+              hourTypes={hourTypes}
+              buildings={buildings}
+              idPrefix="hours"
+            />
+
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label" htmlFor="hours-filter-from">
+                {t("hours_admin.filter_date_from")}
+              </label>
+              <input
+                id="hours-filter-from"
+                className="field-input"
+                type="date"
+                value={filters.date_from}
+                onChange={(event) =>
+                  patchFilters({ date_from: event.target.value })
+                }
+                data-testid="hours-filter-date-from"
               />
-
-              <div className="field" style={{ margin: 0 }}>
-                <label className="field-label" htmlFor="hours-filter-from">
-                  {t("hours_admin.filter_date_from")}
-                </label>
-                <input
-                  id="hours-filter-from"
-                  className="field-input"
-                  type="date"
-                  value={filters.date_from}
-                  onChange={(event) =>
-                    patchFilters({ date_from: event.target.value })
-                  }
-                  data-testid="hours-filter-date-from"
-                />
-              </div>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label className="field-label" htmlFor="hours-filter-to">
-                  {t("hours_admin.filter_date_to")}
-                </label>
-                <input
-                  id="hours-filter-to"
-                  className="field-input"
-                  type="date"
-                  value={filters.date_to}
-                  onChange={(event) =>
-                    patchFilters({ date_to: event.target.value })
-                  }
-                  data-testid="hours-filter-date-to"
-                />
-              </div>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-                marginTop: 12,
+            <div className="field" style={{ margin: 0 }}>
+              <label className="field-label" htmlFor="hours-filter-to">
+                {t("hours_admin.filter_date_to")}
+              </label>
+              <input
+                id="hours-filter-to"
+                className="field-input"
+                type="date"
+                value={filters.date_to}
+                onChange={(event) =>
+                  patchFilters({ date_to: event.target.value })
+                }
+                data-testid="hours-filter-date-to"
+              />
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm hours-filter-reset"
+              data-testid="hours-filters-reset"
+              onClick={() => {
+                setFilters(EMPTY_FILTERS);
+                setPage(1);
+                cancelEditing();
               }}
             >
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                data-testid="hours-filters-reset"
-                onClick={() => {
-                  setFilters(EMPTY_FILTERS);
-                  setPage(1);
-                }}
+              {t("hours_admin.filter_reset")}
+            </button>
+          </div>
+
+          {/* The tiles. They describe the filtered set, because they are
+              computed from the same filter object as the table. */}
+          <div className="hours-tile-row" data-testid="hours-tiles">
+            {tiles.map((tile) => (
+              <div
+                key={tile.key}
+                className="hours-tile"
+                data-testid={`hours-tile-${tile.key}`}
               >
-                {t("hours_admin.filter_reset")}
-              </button>
-              {/* The CSV button moved into the report heading (Sprint
-                  152.1) — it exports the REPORT, and sitting among the
-                  filters made it read as "export the table". */}
-            </div>
+                <span className="hours-tile-label">{tile.label}</span>
+                <span className="hours-tile-value">{tile.value}</span>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm hours-tile-export"
+              data-testid="hours-export-csv"
+              onClick={() => void handleExport()}
+              disabled={exportBusy || loading}
+            >
+              {exportBusy
+                ? t("hours_admin.export_busy")
+                : t("hours_admin.export_csv")}
+            </button>
           </div>
 
           {loadError && (
@@ -926,25 +763,81 @@ export function HoursAdminPage() {
             </div>
           )}
 
-          {/* Sprint 152.1 — the REPORT section. `build_summary` has
-              computed `by_week` since Sprint 152 and the frontend typed
-              it, but nothing rendered it: the per-week breakdown is one
-              of the five things the agreed design asked for and the
-              owner could not find it.
-
-              Kept on the entries tab rather than given its own "Rapport"
-              tab, deliberately. The totals are computed from the SAME
-              filter object as the table above them, so the numbers
-              always describe the rows on screen — a separate tab would
-              buy discoverability and put that property at risk the first
-              time the two drifted. Made unmissable with a titled section
-              instead. */}
           {loading ? (
             <div className="loading-bar">
               <div className="loading-bar-fill" />
             </div>
           ) : (
             <div className="card" data-testid="hours-entries-list">
+              {/* The Edit toggle. Sprint 155 §4's rule holds — nothing
+                  on this table is directly editable; the operator asks
+                  for edit mode first, and only then do the cells become
+                  inputs and the row actions appear. What is new is that
+                  leaving it is ONE Save for the whole table rather than
+                  a modal per row. */}
+              <div className="section-head" style={{ padding: "14px 16px 0" }}>
+                <div>
+                  <div className="section-head-title">
+                    {t("hours_admin.list_title")}
+                  </div>
+                  <div className="section-head-sub">
+                    {t("hours_admin.pagination_summary", {
+                      shown: entries.length,
+                      total: entryCount,
+                    })}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {editing ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={cancelEditing}
+                        disabled={saveBusy}
+                        data-testid="hours-edit-cancel"
+                      >
+                        {t("cancel")}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={() => void saveAll()}
+                        disabled={saveBusy}
+                        data-testid="hours-edit-save-all"
+                      >
+                        {saveBusy
+                          ? t("admin_form.saving")
+                          : t("hours_admin.save_all", {
+                              count: changedEntries.length,
+                            })}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setEditing(true)}
+                      disabled={entries.length === 0}
+                      data-testid="hours-edit-toggle"
+                    >
+                      {t("hours_admin.edit_button")}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {saveError && (
+                <div
+                  className="alert-error"
+                  role="alert"
+                  style={{ margin: "12px 16px 0" }}
+                  data-testid="hours-edit-error"
+                >
+                  {saveError}
+                </div>
+              )}
+
               <BoundedList
                 size="lg"
                 count={entries.length}
@@ -976,72 +869,199 @@ export function HoursAdminPage() {
                       <th>{t("hours_admin.col_weighted")}</th>
                       <th>{t("hours_admin.col_building")}</th>
                       <th>{t("hours_admin.col_note")}</th>
-                      <th>{t("hours_admin.col_actions")}</th>
+                      {/* The actions column EXISTS only inside edit
+                          mode, so the read view keeps exactly the
+                          geometry it had — the same rule the building
+                          relation cards follow. */}
+                      {editing && <th>{t("hours_admin.col_actions")}</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {entries.map((entry) => (
-                      <tr
-                        key={entry.id}
-                        data-testid="hours-entry-row"
-                        data-entry-id={entry.id}
-                        data-locked={entry.is_locked ? "true" : "false"}
-                      >
-                        <td>{formatDate(entry.date, dateLocale)}</td>
-                        <td className="muted small">
-                          {entry.iso_year}-W
-                          {String(entry.iso_week).padStart(2, "0")}
-                          {entry.is_locked && (
-                            <span
-                              className="badge badge-closed"
-                              style={{ marginLeft: 6 }}
-                            >
-                              {t("weeks.status_closed")}
-                            </span>
+                    {entries.map((entry) => {
+                      const draft = draftFor(entry);
+                      // A locked row stays text even in edit mode: the
+                      // server refuses the write either way, and
+                      // offering an input that cannot be saved is the
+                      // "control that lies" defect this sprint is
+                      // about.
+                      const cellsEditable = editing && !entry.is_locked;
+                      return (
+                        <tr
+                          key={entry.id}
+                          data-testid="hours-entry-row"
+                          data-entry-id={entry.id}
+                          data-locked={entry.is_locked ? "true" : "false"}
+                        >
+                          <td>
+                            {cellsEditable ? (
+                              <input
+                                className="field-input hours-inline-input"
+                                type="date"
+                                value={draft.date}
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    date: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_date")}
+                                data-testid={`hours-inline-date-${entry.id}`}
+                              />
+                            ) : (
+                              formatDate(entry.date, dateLocale)
+                            )}
+                          </td>
+                          <td className="muted small">
+                            {entry.iso_year}-W
+                            {String(entry.iso_week).padStart(2, "0")}
+                            {entry.is_locked && (
+                              <span
+                                className="badge badge-closed"
+                                style={{ marginLeft: 6 }}
+                              >
+                                {t("weeks.status_closed")}
+                              </span>
+                            )}
+                          </td>
+                          <td>{entry.employee_name}</td>
+                          <td>
+                            {cellsEditable ? (
+                              <select
+                                className="field-input hours-inline-input"
+                                value={
+                                  activeHourTypes.some(
+                                    (h) => String(h.id) === draft.hour_type,
+                                  )
+                                    ? draft.hour_type
+                                    : ""
+                                }
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    hour_type: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_hour_type")}
+                                data-testid={`hours-inline-hour-type-${entry.id}`}
+                              >
+                                {/* An archived type the row still
+                                    points at has no <option>, which a
+                                    <select> renders as a blank box —
+                                    so it collapses to this placeholder
+                                    instead of silently submitting a
+                                    stale id. */}
+                                <option value="">
+                                  {t("my_hours.field_hour_type_empty")}
+                                </option>
+                                {activeHourTypes.map((hourType) => (
+                                  <option key={hourType.id} value={hourType.id}>
+                                    {hourTypeLabel(hourType, t)} (x
+                                    {hourType.multiplier})
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              hourTypeLabelFrom(
+                                entry.hour_type_name,
+                                entry.hour_type_standard_slot,
+                                t,
+                              )
+                            )}
+                          </td>
+                          <td>
+                            {cellsEditable ? (
+                              <input
+                                className="field-input hours-inline-input hours-inline-hours"
+                                type="number"
+                                min="0.25"
+                                max="24"
+                                step="0.25"
+                                value={draft.hours}
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    hours: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_hours")}
+                                data-testid={`hours-inline-hours-${entry.id}`}
+                              />
+                            ) : (
+                              entry.hours
+                            )}
+                          </td>
+                          {/* Weighted is derived server-side from the
+                              snapshot; it updates on the refresh after
+                              Save, never optimistically. */}
+                          <td className="muted">{entry.weighted_hours}</td>
+                          <td className="muted small">
+                            {cellsEditable ? (
+                              <select
+                                className="field-input hours-inline-input"
+                                value={
+                                  buildings.some(
+                                    (b) => String(b.id) === draft.building,
+                                  )
+                                    ? draft.building
+                                    : ""
+                                }
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    building: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_building")}
+                                data-testid={`hours-inline-building-${entry.id}`}
+                              >
+                                <option value="">
+                                  {t("my_hours.field_building_empty")}
+                                </option>
+                                {buildings.map((building) => (
+                                  <option key={building.id} value={building.id}>
+                                    {building.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              (entry.building_name ?? "—")
+                            )}
+                          </td>
+                          <td className="muted small">
+                            {cellsEditable ? (
+                              <input
+                                className="field-input hours-inline-input"
+                                type="text"
+                                value={draft.note}
+                                onChange={(event) =>
+                                  patchDraft(entry, {
+                                    note: event.target.value,
+                                  })
+                                }
+                                disabled={saveBusy}
+                                aria-label={t("hours_admin.col_note")}
+                                data-testid={`hours-inline-note-${entry.id}`}
+                              />
+                            ) : (
+                              entry.note || "—"
+                            )}
+                          </td>
+                          {editing && (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                data-testid="hours-entry-delete-button"
+                                onClick={() => openDeleteEntry(entry)}
+                                disabled={entry.is_locked || saveBusy}
+                              >
+                                {t("hours_admin.delete_button")}
+                              </button>
+                            </td>
                           )}
-                        </td>
-                        <td>{entry.employee_name}</td>
-                        <td>
-                          {hourTypeLabelFrom(
-                            entry.hour_type_name,
-                            entry.hour_type_standard_slot,
-                            t,
-                          )}
-                        </td>
-                        <td>{entry.hours}</td>
-                        <td className="muted">{entry.weighted_hours}</td>
-                        <td className="muted small">
-                          {entry.building_name ?? "—"}
-                        </td>
-                        <td className="muted small">{entry.note || "—"}</td>
-                        <td>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            {/* Disabled on a locked week: the server
-                                refuses the write either way, this only
-                                avoids offering an action that cannot
-                                succeed. */}
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              data-testid="hours-entry-edit-button"
-                              onClick={() => openEditEntry(entry)}
-                              disabled={entry.is_locked}
-                            >
-                              {t("hours_admin.edit_button")}
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              data-testid="hours-entry-delete-button"
-                              onClick={() => openDeleteEntry(entry)}
-                              disabled={entry.is_locked}
-                            >
-                              {t("hours_admin.delete_button")}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </BoundedList>
@@ -1053,248 +1073,38 @@ export function HoursAdminPage() {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
+                  justifyContent: "flex-end",
+                  gap: 8,
                   padding: "12px 16px",
                 }}
                 data-testid="hours-entries-pagination"
               >
-                <span className="muted small">
-                  {t("hours_admin.pagination_summary", {
-                    shown: entries.length,
-                    total: entryCount,
-                  })}
-                </span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="hours-entries-prev"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={page <= 1}
-                  >
-                    {t("hours_admin.prev_page")}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    data-testid="hours-entries-next"
-                    onClick={() => setPage((current) => current + 1)}
-                    disabled={!hasNext}
-                  >
-                    {t("hours_admin.next_page")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Sprint 156 §9 — the LIST comes before the REPORT.
-
-              Measured at 1440 before this swap: tabs at 173px, company
-              selector 217, week grid 336, filters 449, then a 406px-tall
-              report card at 600 — so the hours themselves did not start
-              until 1022px and the operator scrolled past a report to
-              reach the data they came for. Every other list page in the
-              app starts its table around 200-350px.
-
-              Nothing is hidden and nothing moves off the page: the
-              report is the same card, still expanded, one screen
-              further down. That is the §9 rule — reorder, never
-              conceal. */}
-          {summary && (
-            <section
-              className="card"
-              style={{ padding: "18px 22px", marginBottom: 16 }}
-              data-testid="hours-summary"
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  marginBottom: 12,
-                }}
-              >
-                <div>
-                  <h3 className="section-title" style={{ margin: 0 }}>
-                    {t("hours_admin.report_title")}
-                  </h3>
-                  <p className="muted small" style={{ margin: "4px 0 0" }}>
-                    {t("hours_admin.report_subtitle")}
-                  </p>
-                </div>
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm"
-                  data-testid="hours-export-csv"
-                  onClick={() => void handleExport()}
-                  disabled={exportBusy || loading}
+                  className="btn btn-ghost btn-sm"
+                  data-testid="hours-entries-prev"
+                  onClick={() => {
+                    cancelEditing();
+                    setPage((current) => Math.max(1, current - 1));
+                  }}
+                  disabled={page <= 1}
                 >
-                  {exportBusy
-                    ? t("hours_admin.export_busy")
-                    : t("hours_admin.export_csv")}
+                  {t("hours_admin.prev_page")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-testid="hours-entries-next"
+                  onClick={() => {
+                    cancelEditing();
+                    setPage((current) => current + 1);
+                  }}
+                  disabled={!hasNext}
+                >
+                  {t("hours_admin.next_page")}
                 </button>
               </div>
-
-              {summary.total_entries === 0 ? (
-                /* Words, not a wall of 0.00 — a grid of zeroes reads as
-                   a broken feature rather than an empty filter. */
-                <p className="muted" style={{ margin: 0 }}
-                   data-testid="hours-summary-empty">
-                  {t("hours_admin.report_empty")}
-                </p>
-              ) : (
-                <>
-                  <div className="detail-kv-list">
-                    <div className="detail-kv-row">
-                      <span className="detail-kv-label">
-                        {t("hours_admin.summary_entries")}
-                      </span>
-                      <span
-                        className="detail-kv-val"
-                        data-testid="hours-summary-entries"
-                      >
-                        {summary.total_entries}
-                      </span>
-                    </div>
-                    <div className="detail-kv-row">
-                      <span className="detail-kv-label">
-                        {t("hours_admin.summary_hours")}
-                      </span>
-                      <span
-                        className="detail-kv-val"
-                        data-testid="hours-summary-hours"
-                      >
-                        {summary.total_hours}
-                      </span>
-                    </div>
-                    <div className="detail-kv-row">
-                      <span className="detail-kv-label">
-                        {t("hours_admin.summary_weighted")}
-                      </span>
-                      <span
-                        className="detail-kv-val"
-                        data-testid="hours-summary-weighted"
-                      >
-                        {summary.total_weighted_hours}
-                      </span>
-                    </div>
-                  </div>
-
-                  <h4
-                    className="eyebrow"
-                    style={{ margin: "18px 0 8px" }}
-                  >
-                    {t("hours_admin.report_by_hour_type")}
-                  </h4>
-                  <div className="table-wrap">
-                    <table
-                      className="data-table"
-                      data-testid="hours-report-by-hour-type"
-                    >
-                      <thead>
-                        <tr>
-                          <th>{t("hours_admin.col_hour_type")}</th>
-                          {/* Labelled "current" because it is: the
-                              weighted total beside it comes from the
-                              SNAPSHOTS, so after a multiplier edit that
-                              left closed weeks alone the two can
-                              legitimately disagree. Naming the column
-                              is what stops an operator concluding the
-                              numbers are wrong. */}
-                          <th>{t("hours_admin.col_current_multiplier")}</th>
-                          <th>{t("hours_admin.col_entries")}</th>
-                          <th>{t("hours_admin.col_hours")}</th>
-                          <th>{t("hours_admin.col_weighted_from_snapshot")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {summary.by_hour_type.map((bucket) => (
-                          <tr
-                            key={bucket.hour_type}
-                            data-testid="hours-report-hour-type-row"
-                          >
-                            <td>
-                              {hourTypeLabelFrom(
-                                bucket.hour_type_name,
-                                bucket.standard_slot,
-                                t,
-                              )}
-                            </td>
-                            <td className="muted small">
-                              x{bucket.current_multiplier}
-                            </td>
-                            <td className="muted small">{bucket.entries}</td>
-                            <td>{bucket.hours}</td>
-                            <td className="muted">{bucket.weighted_hours}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <h4
-                    className="eyebrow"
-                    style={{ margin: "18px 0 8px" }}
-                  >
-                    {t("hours_admin.report_by_week")}
-                  </h4>
-                  <div className="table-wrap">
-                    <table
-                      className="data-table"
-                      data-testid="hours-report-by-week"
-                    >
-                      <thead>
-                        <tr>
-                          <th>{t("hours_admin.col_week")}</th>
-                          <th>{t("hours_admin.col_period")}</th>
-                          <th>{t("hours_admin.col_entries")}</th>
-                          <th>{t("hours_admin.col_hours")}</th>
-                          <th>{t("hours_admin.col_weighted")}</th>
-                          <th>{t("hours_admin.col_week_status")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {summary.by_week.map((bucket) => (
-                          <tr
-                            key={`${bucket.iso_year}-${bucket.iso_week}`}
-                            data-testid="hours-report-week-row"
-                            data-closed={bucket.is_closed ? "true" : "false"}
-                          >
-                            <td>
-                              {bucket.iso_year}-W
-                              {String(bucket.iso_week).padStart(2, "0")}
-                            </td>
-                            <td className="muted small">
-                              {formatDate(bucket.week_start, dateLocale)} –{" "}
-                              {formatDate(bucket.week_end, dateLocale)}
-                            </td>
-                            <td className="muted small">{bucket.entries}</td>
-                            <td>{bucket.hours}</td>
-                            <td className="muted">{bucket.weighted_hours}</td>
-                            <td>
-                              <span
-                                className={
-                                  bucket.is_closed
-                                    ? "badge badge-closed"
-                                    : "badge badge-approved"
-                                }
-                              >
-                                {bucket.is_closed
-                                  ? t("weeks.status_closed")
-                                  : t("weeks.status_open")}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </section>
+            </div>
           )}
         </>
       )}
@@ -1315,259 +1125,24 @@ export function HoursAdminPage() {
         />
       )}
 
-      {entryMode !== null && (
-        <div
-          data-testid="hours-entry-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label={
-            entryMode === "create"
-              ? t("hours_admin.add_entry_modal_title")
-              : t("hours_admin.edit_entry_modal_title")
-          }
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-            padding: 16,
-          }}
-        >
-          <form
-            onSubmit={handleEntrySubmit}
-            className="card"
-            style={{
-              maxWidth: 560,
-              width: "100%",
-              padding: 24,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
-          >
-            <h3 style={{ marginTop: 0, marginBottom: 12 }}>
-              {entryMode === "create"
-                ? t("hours_admin.add_entry_modal_title")
-                : t("hours_admin.edit_entry_modal_title")}
-            </h3>
-
-            {entryFormError && (
-              <div
-                className="alert-error"
-                role="alert"
-                style={{ marginBottom: 12 }}
-                data-testid="hours-entry-modal-error"
-              >
-                {entryFormError}
-              </div>
-            )}
-
-            <div className="field">
-              <label className="field-label" htmlFor="hours-entry-employee">
-                {t("hours_admin.field_employee")} *
-              </label>
-              <select
-                id="hours-entry-employee"
-                className="field-select"
-                value={effectiveFormEmployee}
-                onChange={(event) =>
-                  setEntryForm((prev) => ({
-                    ...prev,
-                    employee: event.target.value,
-                  }))
-                }
-                data-testid="hours-entry-input-employee"
-                required
-                disabled={entryFormBusy}
-              >
-                <option value="">
-                  {t("hours_admin.field_employee_empty")}
-                </option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.full_name || employee.email}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="hours-entry-date">
-                {t("my_hours.field_date")} *
-              </label>
-              <input
-                id="hours-entry-date"
-                className="field-input"
-                type="date"
-                value={entryForm.date}
-                onChange={(event) =>
-                  setEntryForm((prev) => ({
-                    ...prev,
-                    date: event.target.value,
-                  }))
-                }
-                data-testid="hours-entry-input-date"
-                required
-                disabled={entryFormBusy}
-              />
-              <div className="muted small" style={{ marginTop: 4 }}>
-                {t("my_hours.field_date_hint")}
-              </div>
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="hours-entry-hour-type">
-                {t("my_hours.field_hour_type")} *
-              </label>
-              <select
-                id="hours-entry-hour-type"
-                className="field-select"
-                value={effectiveFormHourType}
-                onChange={(event) =>
-                  setEntryForm((prev) => ({
-                    ...prev,
-                    hour_type: event.target.value,
-                  }))
-                }
-                data-testid="hours-entry-input-hour-type"
-                required
-                disabled={entryFormBusy}
-              >
-                <option value="">
-                  {t("my_hours.field_hour_type_empty")}
-                </option>
-                {activeHourTypes.map((hourType) => (
-                  <option key={hourType.id} value={hourType.id}>
-                    {hourTypeLabel(hourType, t)} (x{hourType.multiplier})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="hours-entry-hours">
-                {t("my_hours.field_hours")} *
-              </label>
-              <input
-                id="hours-entry-hours"
-                className="field-input"
-                type="number"
-                min="0.25"
-                max="24"
-                step="0.25"
-                value={entryForm.hours}
-                onChange={(event) =>
-                  setEntryForm((prev) => ({
-                    ...prev,
-                    hours: event.target.value,
-                  }))
-                }
-                data-testid="hours-entry-input-hours"
-                required
-                disabled={entryFormBusy}
-              />
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="hours-entry-building">
-                {t("my_hours.field_building")}
-              </label>
-              <select
-                id="hours-entry-building"
-                className="field-select"
-                value={effectiveFormBuilding}
-                onChange={(event) =>
-                  setEntryForm((prev) => ({
-                    ...prev,
-                    building: event.target.value,
-                  }))
-                }
-                data-testid="hours-entry-input-building"
-                disabled={entryFormBusy}
-              >
-                <option value="">{t("my_hours.field_building_empty")}</option>
-                {buildings.map((building) => (
-                  <option key={building.id} value={building.id}>
-                    {building.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="field-label" htmlFor="hours-entry-note">
-                {t("my_hours.field_note")}
-              </label>
-              <textarea
-                id="hours-entry-note"
-                className="field-input"
-                rows={3}
-                value={entryForm.note}
-                onChange={(event) =>
-                  setEntryForm((prev) => ({
-                    ...prev,
-                    note: event.target.value,
-                  }))
-                }
-                data-testid="hours-entry-input-note"
-                disabled={entryFormBusy}
-              />
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 8,
-                marginTop: 12,
-              }}
-            >
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={closeEntryModal}
-                disabled={entryFormBusy}
-                data-testid="hours-entry-modal-cancel"
-              >
-                {t("my_hours.cancel")}
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary btn-sm"
-                disabled={entryFormBusy}
-                data-testid="hours-entry-modal-save"
-              >
-                {entryFormBusy ? t("admin_form.saving") : t("my_hours.save")}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Unconditionally rendered and ref-driven (CLAUDE.md §3): a
-          native <dialog> wrapped in a condition mounts INVISIBLE and its
-          trigger button looks dead. */}
-      {/* Sprint 157 §1 — conditionally mounted overlay, like every
-          other editing modal here. `ConfirmDialog` below stays native
-          and ref-driven; the two are deliberately different things. */}
-      {setupOpen && (
-        <WeekSetupDialog
+      {/* Conditionally mounted overlay, like every other editing modal
+          here. `ConfirmDialog` below stays native and ref-driven; the
+          two are deliberately different things (CLAUDE.md §3). */}
+      {weekModalOpen && (
+        <WeekEntryDialog
           employees={employees}
           buildings={buildings}
           hourTypes={activeHourTypes}
-          initialWeek={gridWeek}
-          initialEmployeeIds={gridEmployeeIds}
-          initialBuildingIds={gridBuildingIds}
-          initialHourTypeIds={gridHourTypeIds}
-          onCancel={() => setSetupOpen(false)}
-          onConfirm={(setup) => {
-            setGridEmployeeIds(setup.employeeIds);
-            setGridBuildingIds(setup.buildingIds);
-            setGridHourTypeIds(setup.hourTypeIds);
-            setGridWeek(setup.week);
-            setSetupOpen(false);
+          companyId={company === "" ? undefined : company}
+          initialWeek={currentIsoWeek()}
+          onClose={() => setWeekModalOpen(false)}
+          onSaved={async (changed) => {
+            setWeekModalOpen(false);
+            await refreshEntries();
+            pushToast({
+              variant: "success",
+              title: t("hours_week_grid.saved", { count: changed }),
+            });
           }}
         />
       )}
