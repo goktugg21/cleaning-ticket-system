@@ -6,6 +6,7 @@
 // the `/api` prefix).
 import { api } from "./client";
 import type {
+  AssignmentCandidate,
   EwMessage,
   ExtraWorkAssignment,
   ExtraWorkAssignmentRole,
@@ -583,6 +584,25 @@ export async function bulkAssignExtraWork(payload: {
   const response = await api.post<ExtraWorkBulkAssignResult>(
     "/extra-work/bulk-assign/",
     payload,
+  );
+  return response.data;
+}
+
+
+/** Sprint 158 §1 — the people who may be assigned to THIS request in
+ *  THIS role, from the server's own eligibility helper.
+ *
+ *  Deliberately not "the company's employees" (Sprint 157's source):
+ *  eligibility comes from the request's BUILDING and differs per role,
+ *  and the picker must call the same helper the write validator uses or
+ *  it will offer options that always fail (Sprint 152.1 §1a). */
+export async function listExtraWorkAssignmentCandidates(
+  id: number,
+  role: ExtraWorkAssignmentRole,
+): Promise<AssignmentCandidate[]> {
+  const response = await api.get<AssignmentCandidate[]>(
+    `/extra-work/${id}/assignments/candidates/`,
+    { params: { role } },
   );
   return response.data;
 }

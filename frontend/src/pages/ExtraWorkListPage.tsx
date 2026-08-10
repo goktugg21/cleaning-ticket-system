@@ -5,7 +5,7 @@
 //   Functional contract is unchanged; only the presentation layer moves.
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
@@ -18,20 +18,17 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import {
-  listAllCustomers,
-  listCompanyEmployees,
-  listCustomerBuildings,
-} from "../api/admin";
+import { listAllCustomers, listCustomerBuildings } from "../api/admin";
 import { listLabels } from "../api/customerLabels";
 import {
   bulkAssignExtraWork,
   listAllExtraWork,
+  listExtraWorkAssignmentCandidates,
   listExtraWorkCategoryOptions,
 } from "../api/extraWork";
 import type { ExtraWorkCategoryOptions } from "../api/extraWork";
 import type {
-  CompanyEmployee,
+  AssignmentCandidate,
   CustomerAdmin,
   ExtraWorkAssignmentRole,
   CustomerBuildingMembership,
@@ -156,8 +153,11 @@ export function ExtraWorkListPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState("");
-  const [assignCandidates, setAssignCandidates] = useState<CompanyEmployee[]>(
-    [],
+  const [assignCandidates, setAssignCandidates] = useState<
+    AssignmentCandidate[]
+  >([]);
+  const [assignRole, setAssignRole] = useState<ExtraWorkAssignmentRole>(
+    "WORKER",
   );
   const [rows, setRows] = useState<ExtraWorkRequestList[]>([]);
   const [loading, setLoading] = useState(true);
@@ -386,26 +386,39 @@ export function ExtraWorkListPage() {
   // mode and the selection for exactly this reason).
   const edit = useEditMode(visibleRows.map((row) => row.id));
 
+  // Sprint 158 §1 — eligibility is per (request, role) and comes from
+  // the SERVER. With several requests selected the offer is the
+  // INTERSECTION: somebody eligible at one building but not another
+  // would be rejected for the whole batch (the endpoint is
+  // all-or-nothing), so offering them would be offering a guaranteed
+  // failure.
+  const loadAssignCandidates = useCallback(
+    async (role: ExtraWorkAssignmentRole, requestIds: number[]) => {
+      if (requestIds.length === 0) {
+        setAssignCandidates([]);
+        return;
+      }
+      try {
+        const lists = await Promise.all(
+          requestIds.map((id) => listExtraWorkAssignmentCandidates(id, role)),
+        );
+        const [first, ...rest] = lists;
+        const common = first.filter((person) =>
+          rest.every((list) => list.some((other) => other.id === person.id)),
+        );
+        setAssignCandidates(common);
+      } catch (err) {
+        setAssignError(getApiError(err));
+        setAssignCandidates([]);
+      }
+    },
+    [],
+  );
+
   async function openAssign() {
     setAssignError("");
     setAssignOpen(true);
-    if (assignCandidates.length === 0) {
-      // The people offered are the employees of the company the selected
-      // requests belong to. Every selected row shares a company in
-      // practice (the list is provider-scoped), and the server rejects
-      // any pair that crosses one anyway with the same body as an
-      // invalid id — so a wrong guess here fails safe rather than
-      // writing something.
-      const companyId = visibleRows.find((row) =>
-        edit.isSelected(row.id),
-      )?.company;
-      if (!companyId) return;
-      try {
-        setAssignCandidates(await listCompanyEmployees(companyId));
-      } catch (err) {
-        setAssignError(getApiError(err));
-      }
-    }
+    await loadAssignCandidates(assignRole, edit.selection);
   }
 
   async function runAssign(
@@ -530,6 +543,11 @@ export function ExtraWorkListPage() {
             label: person.full_name || person.email,
             sublabel: person.email,
           }))}
+          role={assignRole}
+          onRoleChange={(role) => {
+            setAssignRole(role);
+            void loadAssignCandidates(role, edit.selection);
+          }}
           busy={assignBusy}
           error={assignError}
           onCancel={() => setAssignOpen(false)}

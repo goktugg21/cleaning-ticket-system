@@ -2510,10 +2510,7 @@ export function ExtraWorkDetailPage() {
               only: assignment is a provider operation end to end, and
               the endpoint refuses a customer user at the door. */}
           {isProvider && ew !== null && (
-            <ExtraWorkAssignmentCard
-              extraWorkId={ew.id}
-              companyId={ew.company}
-            />
+            <ExtraWorkAssignmentCard extraWorkId={ew.id} />
           )}
 
           {/* Sprint 29 Batch 29.8 — spawned tickets panel. Renders

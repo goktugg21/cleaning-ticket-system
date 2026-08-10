@@ -19,13 +19,13 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { getApiError } from "../../api/client";
-import { listCompanyEmployees } from "../../api/admin";
 import {
   bulkAssignExtraWork,
+  listExtraWorkAssignmentCandidates,
   listExtraWorkAssignments,
 } from "../../api/extraWork";
 import type {
-  CompanyEmployee,
+  AssignmentCandidate,
   ExtraWorkAssignment,
   ExtraWorkAssignmentRole,
 } from "../../api/types";
@@ -34,16 +34,16 @@ import { EditModeToggle } from "../EditModeToggle";
 import { useEditMode } from "../../lib/useEditMode";
 import { AssignPeopleDialog } from "./AssignPeopleDialog";
 
-export function ExtraWorkAssignmentCard({
-  extraWorkId,
-  companyId,
-}: {
-  extraWorkId: number;
-  companyId: number;
-}) {
+export function ExtraWorkAssignmentCard({ extraWorkId }: { extraWorkId: number }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [rows, setRows] = useState<ExtraWorkAssignment[]>([]);
-  const [candidates, setCandidates] = useState<CompanyEmployee[]>([]);
+  // Keyed by ROLE: the eligible people differ per role, so one
+  // cached list would show a worker in the manager picker.
+  const [candidates, setCandidates] = useState<
+    Partial<Record<ExtraWorkAssignmentRole, AssignmentCandidate[]>>
+  >({});
+  const [pickerRole, setPickerRole] =
+    useState<ExtraWorkAssignmentRole>("WORKER");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -75,18 +75,26 @@ export function ExtraWorkAssignmentCard({
     };
   }, [extraWorkId, reloadKey]);
 
-  async function openAdd() {
-    setError("");
-    setAddOpen(true);
-    if (candidates.length === 0) {
-      // On first open only: most visits to a request never assign
-      // anybody, and this pages the company's whole employee list.
+  // Sprint 158 §1 — the SERVER decides who is eligible, per role, from
+  // the request's building. The client never computes it, which is what
+  // makes "offerable" and "acceptable" the same list.
+  const loadCandidates = useCallback(
+    async (role: ExtraWorkAssignmentRole) => {
+      if (candidates[role]) return;
       try {
-        setCandidates(await listCompanyEmployees(companyId));
+        const rows = await listExtraWorkAssignmentCandidates(extraWorkId, role);
+        setCandidates((current) => ({ ...current, [role]: rows }));
       } catch (err) {
         setError(getApiError(err));
       }
-    }
+    },
+    [candidates, extraWorkId],
+  );
+
+  async function openAdd() {
+    setError("");
+    setAddOpen(true);
+    await loadCandidates(pickerRole);
   }
 
   async function runAssign(
@@ -116,7 +124,11 @@ export function ExtraWorkAssignmentCard({
   // count a repeat as `already_assigned` rather than failing, so this is
   // tidiness rather than correctness — but an option that provably does
   // nothing should not be in the list.
-  const assignedIds = new Set(rows.map((r) => r.user_id));
+  // Already-assigned people are not offered again — per ROLE, because
+  // the same person may legitimately be a worker and a manager.
+  const assignedIdsForRole = new Set(
+    rows.filter((r) => r.role === pickerRole).map((r) => r.user_id),
+  );
 
   return (
     <section
@@ -229,13 +241,18 @@ export function ExtraWorkAssignmentCard({
       {addOpen && (
         <AssignPeopleDialog
           requestCount={1}
-          candidates={candidates
-            .filter((person) => !assignedIds.has(person.id))
+          candidates={(candidates[pickerRole] ?? [])
+            .filter((person) => !assignedIdsForRole.has(person.id))
             .map((person) => ({
               id: person.id,
               label: person.full_name || person.email,
               sublabel: person.email,
             }))}
+          role={pickerRole}
+          onRoleChange={(role) => {
+            setPickerRole(role);
+            void loadCandidates(role);
+          }}
           busy={busy}
           error={error}
           onCancel={() => setAddOpen(false)}

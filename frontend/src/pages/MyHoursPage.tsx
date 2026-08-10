@@ -516,6 +516,7 @@ export function MyHoursPage() {
                  nothing to choose. Rows come from the week's existing
                  entries plus Add row, exactly as before. */
               seedBuildingIds={[]}
+              seedHourTypeIds={[]}
               weekClosed={weekClosed}
               onSaved={refresh}
             />

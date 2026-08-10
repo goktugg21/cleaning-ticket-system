@@ -8624,6 +8624,51 @@ details[open] > .ew-department-tree-summary::before {
   color: var(--text-faint);
 }
 
+/* Sprint 158 §5b — the GLOBAL row: seven day boxes belonging to no
+   employee, above every block. Tinted and labelled so what it does is
+   legible from where it sits. */
+.hours-week-global-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--green-2);
+  border-radius: var(--r-md);
+  background: var(--green-faint);
+}
+.hours-week-global-label {
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.hours-week-global-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.hours-week-global-day {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+}
+/* Sprint 158 §5e — a divider between the bulk controls and the
+   selected-rows controls, on the same line. */
+.hours-week-bar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
 /* Sprint 157 §1 — the one-line reminder of what the week is set up for,
    sitting above the grid with the button that changes it. */
 .hours-week-setup-summary {

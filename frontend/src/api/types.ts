@@ -897,6 +897,16 @@ export interface ExtraWorkAssignment {
   assigned_at: string;
 }
 
+/** Sprint 158 §1 — one eligible person for a given (request, role) or
+ *  (ticket, role). The server decides eligibility from the BUILDING; the
+ *  client never computes it. */
+export interface AssignmentCandidate {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
+}
+
 export interface ExtraWorkBulkAssignResult {
   created: number;
   removed: number;

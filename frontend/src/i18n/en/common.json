@@ -2157,5 +2157,21 @@
   "companies.bulk_deactivate_title": "Deactivate the selected companies?",
   "companies.bulk_deactivate_body": "{{count}} companies will be switched off. Their buildings, customers and history are kept, and a super admin can switch them back on.",
   "company_detail.policy_off": "Off",
-  "company_detail.field_logo": "Logo"
+  "company_detail.field_logo": "Logo",
+  "hours_week_grid.bar_label": "Bulk",
+  "hours_week_grid.every_building": "Every building",
+  "hours_week_grid.fill_button": "Fill",
+  "hours_week_grid.add_row_button": "Add row",
+  "hours_week_grid.fill_done": "Filled {{count}} cells.",
+  "hours_week_grid.fill_no_match": "No row has that hour type yet. Use Add row first.",
+  "hours_week_grid.rows_added_one": "{{count}} row added.",
+  "hours_week_grid.rows_added_other": "{{count}} rows added.",
+  "hours_week_grid.selected_value": "Hours for the selected rows",
+  "hours_week_grid.apply_to_selected_one": "Set {{count}} selected row",
+  "hours_week_grid.apply_to_selected_other": "Set {{count}} selected rows",
+  "hours_week_grid.global_row_label": "Everyone",
+  "hours_week_grid.global_cell_label": "Set {{day}} for every employee",
+  "week_setup.hour_types_label": "Hour types",
+  "week_setup.hour_types_hint": "Which hour types the grid starts with. You can still add more later.",
+  "week_setup.no_hour_types": "No hour types have been set up yet."
 }

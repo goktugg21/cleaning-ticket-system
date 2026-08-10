@@ -31,7 +31,7 @@ import { useTranslation } from "react-i18next";
 
 import { EntityPicker } from "../EntityPicker";
 import type { BuildingAdmin } from "../../api/types";
-import type { TimesheetEmployee } from "../../api/timesheets.types";
+import type { HourType, TimesheetEmployee } from "../../api/timesheets.types";
 import { formatIsoWeek, parseIsoWeek } from "../../lib/isoWeek";
 import type { IsoWeek } from "../../lib/isoWeek";
 
@@ -45,6 +45,9 @@ export const NO_BUILDING_ID = 0;
 
 export interface WeekSetup {
   employeeIds: number[];
+  /** Sprint 158 §5d — the hour types the grid starts with. Empty means
+   *  "the first one", which is what Sprint 157 did implicitly. */
+  hourTypeIds: number[];
   /** `null` means "no building" — never `0`, which is the picker's
    *  private sentinel and must not leak past this dialog. */
   buildingIds: (number | null)[];
@@ -54,17 +57,24 @@ export interface WeekSetup {
 export function WeekSetupDialog({
   employees,
   buildings,
+  hourTypes,
   initialWeek,
   initialEmployeeIds,
   initialBuildingIds,
+  initialHourTypeIds,
   onCancel,
   onConfirm,
 }: {
   employees: TimesheetEmployee[];
   buildings: BuildingAdmin[];
+  /** Sprint 158 §5d — the rest of the initial configuration moves in
+   *  here, so the page itself is a grid you type into rather than a
+   *  page of setup controls. */
+  hourTypes: HourType[];
   initialWeek: IsoWeek;
   initialEmployeeIds: number[];
   initialBuildingIds: (number | null)[];
+  initialHourTypeIds: number[];
   onCancel: () => void;
   onConfirm: (setup: WeekSetup) => void;
 }) {
@@ -75,6 +85,7 @@ export function WeekSetupDialog({
   const [buildingIds, setBuildingIds] = useState<number[]>(
     initialBuildingIds.map((id) => id ?? NO_BUILDING_ID),
   );
+  const [hourTypeIds, setHourTypeIds] = useState<number[]>(initialHourTypeIds);
   const [week, setWeek] = useState<IsoWeek>(initialWeek);
 
   // Escape closes. One effect, and it touches only a listener — no
@@ -107,7 +118,12 @@ export function WeekSetupDialog({
     [buildings, t],
   );
 
-  const rowCount = employeeIds.length * buildingIds.length;
+  // One row per (employee, building, hour type). Sprint 157 counted
+  // employees x buildings because the hour type was implicit; now that
+  // it is chosen, the count has to say so or the number on the button
+  // would not match the table it builds.
+  const typeCount = Math.max(1, hourTypeIds.length);
+  const rowCount = employeeIds.length * buildingIds.length * typeCount;
   const canConfirm = employeeIds.length > 0 && buildingIds.length > 0;
 
   return (
@@ -196,6 +212,25 @@ export function WeekSetupDialog({
               testIdPrefix="week-setup-buildings"
             />
           </div>
+
+          <div className="field">
+            <span className="field-label">
+              {t("week_setup.hour_types_label")}
+            </span>
+            <EntityPicker
+              options={hourTypes.map((hourType) => ({
+                id: hourType.id,
+                label: hourType.name,
+              }))}
+              selectedIds={hourTypeIds}
+              onChange={setHourTypeIds}
+              emptyText={t("week_setup.no_hour_types")}
+              testIdPrefix="week-setup-hour-types"
+            />
+            <p className="field-hint muted small">
+              {t("week_setup.hour_types_hint")}
+            </p>
+          </div>
         </div>
 
         {/* The live count. Never omitted — see the header comment. */}
@@ -234,6 +269,7 @@ export function WeekSetupDialog({
             onClick={() =>
               onConfirm({
                 employeeIds,
+                hourTypeIds,
                 // The sentinel is translated back to null HERE, so
                 // nothing downstream ever sees a building id of 0.
                 buildingIds: buildingIds.map((id) =>

@@ -2157,5 +2157,21 @@
   "companies.bulk_deactivate_title": "Geselecteerde bedrijven deactiveren?",
   "companies.bulk_deactivate_body": "{{count}} bedrijven worden uitgezet. Hun gebouwen, klanten en historie blijven bewaard, en een superbeheerder kan ze weer aanzetten.",
   "company_detail.policy_off": "Uit",
-  "company_detail.field_logo": "Logo"
+  "company_detail.field_logo": "Logo",
+  "hours_week_grid.bar_label": "Bulk",
+  "hours_week_grid.every_building": "Elk gebouw",
+  "hours_week_grid.fill_button": "Invullen",
+  "hours_week_grid.add_row_button": "Rij toevoegen",
+  "hours_week_grid.fill_done": "{{count}} vakjes ingevuld.",
+  "hours_week_grid.fill_no_match": "Geen enkele rij heeft die uursoort. Gebruik eerst Rij toevoegen.",
+  "hours_week_grid.rows_added_one": "{{count}} rij toegevoegd.",
+  "hours_week_grid.rows_added_other": "{{count}} rijen toegevoegd.",
+  "hours_week_grid.selected_value": "Uren voor de geselecteerde rijen",
+  "hours_week_grid.apply_to_selected_one": "Zet {{count}} geselecteerde rij",
+  "hours_week_grid.apply_to_selected_other": "Zet {{count}} geselecteerde rijen",
+  "hours_week_grid.global_row_label": "Iedereen",
+  "hours_week_grid.global_cell_label": "Zet {{day}} voor elke medewerker",
+  "week_setup.hour_types_label": "Uursoorten",
+  "week_setup.hour_types_hint": "Met welke uursoorten het raster begint. U kunt er later meer toevoegen.",
+  "week_setup.no_hour_types": "Er zijn nog geen uursoorten ingesteld."
 }

@@ -27,6 +27,8 @@ import type { ExtraWorkAssignmentRole } from "../../api/types";
 export function AssignPeopleDialog({
   requestCount,
   candidates,
+  role,
+  onRoleChange,
   busy,
   error,
   onCancel,
@@ -35,6 +37,12 @@ export function AssignPeopleDialog({
   /** How many requests the people will be put on. Drives the summary. */
   requestCount: number;
   candidates: EntityPickerOption[];
+  /** Sprint 158 §1 — CONTROLLED by the parent, because changing it has
+   *  to refetch: the eligible people differ per role and the server is
+   *  the only thing that knows who they are. Keeping it internal would
+   *  leave the picker showing the previous role's list. */
+  role: ExtraWorkAssignmentRole;
+  onRoleChange: (role: ExtraWorkAssignmentRole) => void;
   busy?: boolean;
   error?: string;
   onCancel: () => void;
@@ -42,7 +50,6 @@ export function AssignPeopleDialog({
 }) {
   const { t } = useTranslation(["extra_work", "common"]);
   const [userIds, setUserIds] = useState<number[]>([]);
-  const [role, setRole] = useState<ExtraWorkAssignmentRole>("WORKER");
   const firstRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -117,7 +124,14 @@ export function AssignPeopleDialog({
                   : "assign-role-option"
               }
               aria-pressed={role === option}
-              onClick={() => setRole(option)}
+              onClick={() => {
+                // Switching role changes WHO is eligible, so the
+                // selection cannot survive it — a worker kept selected
+                // while switching to MANAGER would be rejected on
+                // confirm.
+                setUserIds([]);
+                onRoleChange(option);
+              }}
               disabled={busy}
               data-testid={`assign-role-${option.toLowerCase()}`}
             >

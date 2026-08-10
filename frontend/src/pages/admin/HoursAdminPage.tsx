@@ -202,6 +202,8 @@ export function HoursAdminPage() {
   // the modal that chooses both. `null` is a legitimate member of the
   // list ("no building"), which is why it is not `number[]`.
   const [gridBuildingIds, setGridBuildingIds] = useState<(number | null)[]>([]);
+  // Sprint 158 §5d — hour types are part of the setup now.
+  const [gridHourTypeIds, setGridHourTypeIds] = useState<number[]>([]);
   const [setupOpen, setSetupOpen] = useState(false);
   // The blocks the grid renders, derived from the selection and the
   // employee list. Derived so a selected employee who disappears from
@@ -815,6 +817,7 @@ export function HoursAdminPage() {
                   buildings={buildings}
                   entriesByEmployee={gridEntries}
                   seedBuildingIds={gridBuildingIds}
+                  seedHourTypeIds={gridHourTypeIds}
                   weekClosed={gridWeekClosed}
                   onSaved={async () => {
                     setGridToken((n) => n + 1);
@@ -1553,13 +1556,16 @@ export function HoursAdminPage() {
         <WeekSetupDialog
           employees={employees}
           buildings={buildings}
+          hourTypes={activeHourTypes}
           initialWeek={gridWeek}
           initialEmployeeIds={gridEmployeeIds}
           initialBuildingIds={gridBuildingIds}
+          initialHourTypeIds={gridHourTypeIds}
           onCancel={() => setSetupOpen(false)}
           onConfirm={(setup) => {
             setGridEmployeeIds(setup.employeeIds);
             setGridBuildingIds(setup.buildingIds);
+            setGridHourTypeIds(setup.hourTypeIds);
             setGridWeek(setup.week);
             setSetupOpen(false);
           }}
