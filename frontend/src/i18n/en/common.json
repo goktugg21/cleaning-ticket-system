@@ -2183,5 +2183,8 @@
   "company_detail.employee_add_needs_building": "This company has no buildings yet to attach anybody to.",
   "company_detail.no_manager_candidates": "No managers available.",
   "company_detail.no_worker_candidates": "No workers available.",
-  "company_detail.employees_remove_no_buildings": "These people are not attached to any building of this company, so there is nothing to unlink. Manage the link from the employee's own page."
+  "company_detail.employees_remove_no_buildings": "These people are not attached to any building of this company, so there is nothing to unlink. Manage the link from the employee's own page.",
+  "users": {
+    "customer_role_all": "All customer users"
+  }
 }

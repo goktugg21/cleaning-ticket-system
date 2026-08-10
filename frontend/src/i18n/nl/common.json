@@ -2183,5 +2183,8 @@
   "company_detail.employee_add_needs_building": "Dit bedrijf heeft nog geen gebouwen om iemand aan te koppelen.",
   "company_detail.no_manager_candidates": "Geen beheerders beschikbaar.",
   "company_detail.no_worker_candidates": "Geen uitvoerders beschikbaar.",
-  "company_detail.employees_remove_no_buildings": "Deze personen hangen niet aan een gebouw van dit bedrijf, dus er is niets los te koppelen. Beheer de koppeling op de pagina van de medewerker."
+  "company_detail.employees_remove_no_buildings": "Deze personen hangen niet aan een gebouw van dit bedrijf, dus er is niets los te koppelen. Beheer de koppeling op de pagina van de medewerker.",
+  "users": {
+    "customer_role_all": "Alle klantgebruikers"
+  }
 }

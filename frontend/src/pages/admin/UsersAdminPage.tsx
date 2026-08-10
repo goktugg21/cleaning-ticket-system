@@ -382,7 +382,25 @@ export function UsersAdminPage() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {/* The customer-side ACCOUNT role first, then the three
                   access roles. Same group, because they are the same
-                  side — which is the whole point of the regrouping. */}
+                  side — which is the whole point of the regrouping.
+
+                  Sprint 161 §7 — this chip is deliberately NOT labelled
+                  `roles.customer_user`. That string is "Klantgebruiker"
+                  and so is `access_role.customer_user`, so the group
+                  showed "Customer user" twice: once for the ACCOUNT role
+                  and once for the ACCESS role. They filter different
+                  things — `?role=` matches every customer-side account,
+                  `?access_role=` matches one access level — so neither
+                  is redundant and dropping one would remove a filter.
+                  What was wrong was only the label.
+
+                  "All customer users" is also the accurate name: this
+                  chip is the whole customer side, of which the three
+                  access chips are a partition, and it is the only way to
+                  see all of them at once because the access filter is
+                  single-select. `roles.customer_user` is untouched -
+                  RoleBadge uses it everywhere else and it is right
+                  there. */}
               {customerRoles.map((role) => {
                 const active = roleFilter.includes(role);
                 return (
@@ -394,7 +412,7 @@ export function UsersAdminPage() {
                     aria-pressed={active}
                     data-role={role}
                   >
-                    {t(roleLabelKey(role))}
+                    {t("users.customer_role_all")}
                   </button>
                 );
               })}
