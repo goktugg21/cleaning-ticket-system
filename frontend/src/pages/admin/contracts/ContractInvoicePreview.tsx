@@ -64,22 +64,22 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
     <section className="contract-forecast" data-testid="contract-forecast">
       <header className="contract-forecast-header">
         <h3>{t("forecast.title")}</h3>
-        <div className="year-stepper" role="group" aria-label={t("forecast.year")}>
+        <div className="contract-year-stepper" role="group" aria-label={t("forecast.year")}>
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-secondary btn-sm"
             onClick={() => setYear((current) => current - 1)}
             aria-label={t("forecast.previousYear")}
             data-testid="forecast-year-prev"
           >
             <ChevronLeft size={16} strokeWidth={2} />
           </button>
-          <span className="year-stepper-value" data-testid="forecast-year">
+          <span className="contract-year-value" data-testid="forecast-year">
             {year}
           </span>
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-secondary btn-sm"
             onClick={() => setYear((current) => current + 1)}
             aria-label={t("forecast.nextYear")}
             data-testid="forecast-year-next"
@@ -90,7 +90,7 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
       </header>
 
       {error && (
-        <div className="alert alert-error" role="alert">
+        <div className="alert-error" role="alert">
           {error}
         </div>
       )}
@@ -116,7 +116,7 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
             <tr>
               <th>{t("forecast.invoiceDate")}</th>
               <th>{t("forecast.period")}</th>
-              <th className="num">{t("forecast.amount")}</th>
+              <th className="contract-num">{t("forecast.amount")}</th>
               <th>{t("forecast.status")}</th>
             </tr>
           </thead>
@@ -139,9 +139,9 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
                     </span>
                   )}
                 </td>
-                <td className="num">{formatMoney(row.amount, locale)}</td>
+                <td className="contract-num">{formatMoney(row.amount, locale)}</td>
                 <td>
-                  <span className="badge badge-planned">
+                  <span className="cell-tag cell-tag-normal">
                     {t("forecast.planned")}
                   </span>
                 </td>
@@ -149,7 +149,7 @@ export function ContractInvoicePreview({ contractId }: { contractId: number }) {
             ))}
             {!loading && (forecast?.rows.length ?? 0) === 0 && (
               <tr>
-                <td colSpan={4} className="empty-cell">
+                <td colSpan={4} className="muted">
                   {t("forecast.empty")}
                 </td>
               </tr>
@@ -187,10 +187,10 @@ function SummaryItem({
   hint?: string;
 }) {
   return (
-    <div className="stat-tile">
-      <span className="stat-tile-label">{label}</span>
-      <span className="stat-tile-value">{value}</span>
-      {hint && <small className="muted">{hint}</small>}
+    <div className="summary-stat">
+      <span className="summary-stat-label">{label}</span>
+      <span className="summary-stat-value">{value}</span>
+      {hint && <span className="summary-stat-meta">{hint}</span>}
     </div>
   );
 }

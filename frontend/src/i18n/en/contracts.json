@@ -4,7 +4,8 @@
   },
   "list": {
     "title": "Contracts",
-    "subtitle": "Recurring agreements, their prices, and what is going to be invoiced."
+    "eyebrow": "Admin",
+    "loading": "Loading…"
   },
   "actions": {
     "refresh": "Refresh",
@@ -72,7 +73,8 @@
     "countLabel": "{{count}} contract",
     "countLabel_other": "{{count}} contracts",
     "empty": "There are no contracts yet.",
-    "emptyFiltered": "No contracts match this filter."
+    "emptyFiltered": "No contracts match this filter.",
+    "selectPage": "Select all on this page"
   },
   "status": {
     "DRAFT": "Draft",
@@ -145,7 +147,12 @@
     "description": "Description",
     "notes": "Notes",
     "choose": "Choose…",
-    "none": "None"
+    "none": "None",
+    "company": "Company",
+    "companyHint": "You are creating this contract for this company; customers, locations and types come from it.",
+    "createIntro": "Choose the company, the customer and the locations, and set the billing.",
+    "editIntro": "Change this contract's details. Projects and prices live on the revision.",
+    "loadingOptions": "Loading…"
   },
   "projects": {
     "title": "Projects",
@@ -213,6 +220,7 @@
   },
   "errors": {
     "customerAndStartRequired": "Choose a customer and a start date.",
-    "notFound": "This contract does not exist."
+    "notFound": "This contract does not exist.",
+    "companyLoadFailed": "Companies could not be loaded."
   }
 }

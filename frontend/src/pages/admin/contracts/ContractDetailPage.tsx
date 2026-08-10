@@ -15,6 +15,7 @@ import type {
   Contract,
   ContractLine,
   ContractRevision,
+  ContractStatus,
 } from "../../../api/contracts.types";
 import { BoundedList } from "../../../components/BoundedList";
 import { ConfirmDialog } from "../../../components/ConfirmDialog";
@@ -30,6 +31,17 @@ import { formatDate, formatMoney, formatNumber } from "./contractTables";
 type Tab = "general" | "projects" | "billing" | "revisions";
 
 const TABS: Tab[] = ["general", "projects", "billing", "revisions"];
+
+// Contract statuses reuse the table's existing `cell-tag` vocabulary
+// rather than a badge palette of their own. Same mapping as
+// `ContractsAdminPage`; both read from the design system, so the two
+// screens cannot show the same contract in different colours.
+const STATUS_TAG: Record<ContractStatus, string> = {
+  ACTIVE: "cell-tag-open",
+  DRAFT: "cell-tag-muted",
+  EXPIRED: "cell-tag-closed",
+  CANCELLED: "cell-tag-rejected",
+};
 
 /**
  * Sprint 160 §4 — the contract detail page.
@@ -110,23 +122,23 @@ export function ContractDetailPage() {
   );
 
   if (!Number.isFinite(id)) {
-    return <div className="page">{t("errors.notFound")}</div>;
+    return <div className="">{t("errors.notFound")}</div>;
   }
 
   return (
-    <div className="page">
+    <div>
       <div className="page-header">
         <div>
-          <nav className="breadcrumb">
+          <nav className="eyebrow">
             <Link to="/admin/contracts">{t("list.title")}</Link>
           </nav>
-          <h1>{contract?.contract_no ?? "…"}</h1>
-          <p className="page-subtitle">
+          <h2 className="page-title">{contract?.contract_no ?? "…"}</h2>
+          <p className="page-sub">
             {contract?.customer_name ?? ""}
             {contract && (
               <>
                 {" · "}
-                <span className={`badge badge-${contract.status.toLowerCase()}`}>
+                <span className={`cell-tag ${STATUS_TAG[contract.status]}`}>
                   {t(`status.${contract.status}`)}
                 </span>
               </>
@@ -136,7 +148,7 @@ export function ContractDetailPage() {
         <div className="page-header-actions">
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-secondary btn-sm"
             onClick={reload}
             disabled={loading}
             data-testid="contract-refresh"
@@ -147,7 +159,7 @@ export function ContractDetailPage() {
           {canManage && contract && (
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
               onClick={() => setEditOpen(true)}
               data-testid="contract-edit"
             >
@@ -158,13 +170,13 @@ export function ContractDetailPage() {
       </div>
 
       {error && (
-        <div className="alert alert-error" role="alert">
+        <div className="alert-error" role="alert">
           {error}
         </div>
       )}
 
       {/* Header tiles — all four DERIVED from the active revision. */}
-      <div className="stat-strip" data-testid="contract-tiles">
+      <div className="summary-grid" data-testid="contract-tiles">
         <Tile
           label={t("tiles.monthly")}
           value={formatMoney(contract?.monthly_amount ?? "0", locale)}
@@ -183,14 +195,14 @@ export function ContractDetailPage() {
         />
       </div>
 
-      <div className="tab-row" role="tablist" data-testid="contract-tabs">
+      <div className="status-tabs" role="tablist" data-testid="contract-tabs">
         {TABS.map((key) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={tab === key}
-            className={`tab${tab === key ? " tab-active" : ""}`}
+            className={tab === key ? "active" : ""}
             onClick={() => setTab(key)}
             data-testid={`contract-tab-${key}`}
           >
@@ -201,7 +213,7 @@ export function ContractDetailPage() {
 
       {tab === "general" && contract && (
         <section className="card" data-testid="contract-general">
-          <dl className="detail-grid">
+          <dl className="contract-detail-grid">
             <Field label={t("fields.contractNo")} value={contract.contract_no} />
             <Field
               label={t("fields.customer")}
@@ -226,7 +238,7 @@ export function ContractDetailPage() {
                     ariaLabel={t("fields.locations")}
                     testIdPrefix="contract-locations"
                   >
-                    <ul className="plain-list">
+                    <ul className="contract-plain-list">
                       {contract.buildings.map((building) => (
                         <li key={building.id}>
                           <Link to={`/admin/buildings/${building.id}`}>
@@ -282,8 +294,8 @@ export function ContractDetailPage() {
 
       {tab === "projects" && (
         <section className="card" data-testid="contract-projects">
-          <header className="card-header">
-            <h2>{t("projects.title")}</h2>
+          <header className="section-head">
+            <span className="section-head-title">{t("projects.title")}</span>
             {canManage && editableRevision && (
               <EditModeToggle
                 editMode={lineEdit.editModeRequested}
@@ -305,10 +317,10 @@ export function ContractDetailPage() {
                 <tr>
                   <th>{t("projects.name")}</th>
                   <th>{t("projects.building")}</th>
-                  <th className="num">{t("projects.hours")}</th>
-                  <th className="num">{t("projects.area")}</th>
-                  <th className="num">{t("projects.amount")}</th>
-                  <th className="num">{t("projects.vat")}</th>
+                  <th className="contract-num">{t("projects.hours")}</th>
+                  <th className="contract-num">{t("projects.area")}</th>
+                  <th className="contract-num">{t("projects.amount")}</th>
+                  <th className="contract-num">{t("projects.vat")}</th>
                   {lineEdit.editMode && <th />}
                 </tr>
               </thead>
@@ -317,17 +329,17 @@ export function ContractDetailPage() {
                   <tr key={line.id}>
                     <td>{line.name}</td>
                     <td>{line.building_name ?? "—"}</td>
-                    <td className="num">{formatNumber(line.hours, locale)}</td>
-                    <td className="num">
+                    <td className="contract-num">{formatNumber(line.hours, locale)}</td>
+                    <td className="contract-num">
                       {line.area_m2 ? formatNumber(line.area_m2, locale) : "—"}
                     </td>
-                    <td className="num">{formatMoney(line.amount, locale)}</td>
-                    <td className="num">{formatNumber(line.vat_pct, locale)}%</td>
+                    <td className="contract-num">{formatMoney(line.amount, locale)}</td>
+                    <td className="contract-num">{formatNumber(line.vat_pct, locale)}%</td>
                     {lineEdit.editMode && (
                       <td>
                         <button
                           type="button"
-                          className="btn btn-link btn-danger"
+                          className="btn btn-ghost btn-sm"
                           onClick={() => {
                             setLineToDelete(line);
                             deleteLineRef.current?.open();
@@ -342,7 +354,7 @@ export function ContractDetailPage() {
                 ))}
                 {lines.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="empty-cell">
+                    <td colSpan={7} className="muted">
                       {t("projects.empty")}
                     </td>
                   </tr>
@@ -364,7 +376,7 @@ export function ContractDetailPage() {
 
       {tab === "billing" && contract && (
         <section className="card" data-testid="contract-billing">
-          <dl className="detail-grid">
+          <dl className="contract-detail-grid">
             <Field
               label={t("fields.billingPeriod")}
               value={t(`billingPeriod.${contract.billing_period}`)}
@@ -394,12 +406,12 @@ export function ContractDetailPage() {
 
       {tab === "revisions" && (
         <section className="card" data-testid="contract-revisions">
-          <header className="card-header">
-            <h2>{t("revisions.title")}</h2>
+          <header className="section-head">
+            <span className="section-head-title">{t("revisions.title")}</span>
             {canManage && (
               <button
                 type="button"
-                className="btn btn-primary"
+                className="btn btn-primary btn-sm"
                 onClick={() => setRevisionOpen(true)}
                 data-testid="contract-new-revision"
               >
@@ -410,7 +422,7 @@ export function ContractDetailPage() {
           </header>
 
           {activeRevision && (
-            <div className="stat-strip" data-testid="contract-current-status">
+            <div className="summary-grid" data-testid="contract-current-status">
               <Tile
                 label={t("revisions.activeRevision")}
                 value={activeRevision.label}
@@ -437,8 +449,8 @@ export function ContractDetailPage() {
                   <tr>
                     <th>{t("revisions.label")}</th>
                     <th>{t("revisions.effectiveFrom")}</th>
-                    <th className="num">{t("revisions.amount")}</th>
-                    <th className="num">{t("revisions.lines")}</th>
+                    <th className="contract-num">{t("revisions.amount")}</th>
+                    <th className="contract-num">{t("revisions.lines")}</th>
                     <th>{t("revisions.author")}</th>
                     <th>{t("revisions.state")}</th>
                   </tr>
@@ -448,24 +460,24 @@ export function ContractDetailPage() {
                     <tr key={revision.id}>
                       <td>{revision.label}</td>
                       <td>{formatDate(revision.effective_from, locale)}</td>
-                      <td className="num">
+                      <td className="contract-num">
                         {formatMoney(revision.amount, locale)}
                       </td>
-                      <td className="num">{revision.line_count}</td>
+                      <td className="contract-num">{revision.line_count}</td>
                       <td>{revision.created_by_name ?? "—"}</td>
                       <td>
                         {revision.is_active && (
-                          <span className="badge badge-active">
+                          <span className="cell-tag cell-tag-open">
                             {t("revisions.isActive")}
                           </span>
                         )}
                         {!revision.is_active && revision.is_locked && (
-                          <span className="badge badge-muted">
+                          <span className="cell-tag cell-tag-muted">
                             {t("revisions.isPast")}
                           </span>
                         )}
                         {!revision.is_locked && !revision.is_active && (
-                          <span className="badge badge-draft">
+                          <span className="cell-tag cell-tag-normal">
                             {t("revisions.isPlanned")}
                           </span>
                         )}
@@ -535,9 +547,9 @@ export function ContractDetailPage() {
 
 function Tile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="stat-tile">
-      <span className="stat-tile-label">{label}</span>
-      <span className="stat-tile-value">{value}</span>
+    <div className="summary-stat">
+      <span className="summary-stat-label">{label}</span>
+      <span className="summary-stat-value">{value}</span>
     </div>
   );
 }
@@ -550,7 +562,7 @@ function Field({
   value: React.ReactNode;
 }) {
   return (
-    <div className="detail-field">
+    <div className="detail-field-row">
       <dt>{label}</dt>
       <dd>{value}</dd>
     </div>
@@ -601,9 +613,9 @@ function AddLineForm({
   };
 
   return (
-    <div className="inline-form" data-testid="contract-add-line">
+    <div className="contract-inline-form" data-testid="contract-add-line">
       <input
-        className="input"
+        className="field-input"
         placeholder={t("projects.name")}
         aria-label={t("projects.name")}
         value={name}
@@ -611,7 +623,7 @@ function AddLineForm({
         data-testid="contract-line-name"
       />
       <select
-        className="input"
+        className="field-input"
         aria-label={t("projects.building")}
         value={building}
         onChange={(event) =>
@@ -629,7 +641,7 @@ function AddLineForm({
         ))}
       </select>
       <input
-        className="input"
+        className="field-input"
         type="number"
         step="0.01"
         aria-label={t("projects.hours")}
@@ -638,7 +650,7 @@ function AddLineForm({
         data-testid="contract-line-hours"
       />
       <input
-        className="input"
+        className="field-input"
         type="number"
         step="0.01"
         aria-label={t("projects.area")}
@@ -648,7 +660,7 @@ function AddLineForm({
         data-testid="contract-line-area"
       />
       <input
-        className="input"
+        className="field-input"
         type="number"
         step="0.01"
         aria-label={t("projects.amount")}
@@ -658,7 +670,7 @@ function AddLineForm({
       />
       <button
         type="button"
-        className="btn btn-primary"
+        className="btn btn-primary btn-sm"
         onClick={() => void submit()}
         disabled={busy || !name.trim()}
         data-testid="contract-line-add"
@@ -713,57 +725,70 @@ function NewRevisionDialog({
   };
 
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("revisions.create")}
+      data-testid="contract-revision-dialog"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 16,
+      }}
+    >
       <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("revisions.create")}
-        data-testid="contract-revision-dialog"
+        className="card"
+        style={{ maxWidth: 480, width: "100%", padding: 24 }}
       >
         <h2>{t("revisions.create")}</h2>
         <p className="muted">{t("revisions.createHint")}</p>
 
         {error && (
-          <div className="alert alert-error" role="alert">
+          <div className="alert-error" role="alert">
             {error}
           </div>
         )}
 
-        <label className="form-field">
-          <span>{t("revisions.label")}</span>
+        <label className="field">
+          <span className="field-label">{t("revisions.label")}</span>
           <input
-            className="input"
+            className="field-input"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             data-testid="contract-revision-label"
           />
         </label>
-        <label className="form-field">
-          <span>{t("revisions.effectiveFrom")}</span>
+        <label className="field">
+          <span className="field-label">{t("revisions.effectiveFrom")}</span>
           <input
-            className="input"
+            className="field-input"
             type="date"
             value={effectiveFrom}
             onChange={(event) => setEffectiveFrom(event.target.value)}
             data-testid="contract-revision-date"
           />
-          <small className="muted">{t("revisions.effectiveHint")}</small>
+          <span className="muted small">{t("revisions.effectiveHint")}</span>
         </label>
-        <label className="form-field form-field-inline">
+        <label className="entity-picker-row" htmlFor="contract-revision-copy">
           <input
+            id="contract-revision-copy"
             type="checkbox"
             checked={copyLines}
             onChange={(event) => setCopyLines(event.target.checked)}
             data-testid="contract-revision-copy"
           />
-          <span>{t("revisions.copyLines")}</span>
+          <span className="entity-picker-text">{t("revisions.copyLines")}</span>
         </label>
 
-        <div className="modal-actions">
+        <div className="filter-actions" style={{ justifyContent: "flex-end" }}>
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-secondary btn-sm"
             onClick={onClose}
             disabled={busy}
           >
@@ -771,7 +796,7 @@ function NewRevisionDialog({
           </button>
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-primary btn-sm"
             onClick={() => void submit()}
             disabled={busy}
             data-testid="contract-revision-save"

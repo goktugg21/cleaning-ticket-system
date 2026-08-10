@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { listAllCompanies } from "../../../api/admin";
 import { getApiError } from "../../../api/client";
 import {
   createContract,
@@ -14,6 +15,16 @@ import type {
   ContractLifecycle,
   ContractOptions,
 } from "../../../api/contracts.types";
+import type { CompanyAdmin } from "../../../api/types";
+import { useAuth } from "../../../auth/AuthContext";
+
+/**
+ * Sprint 149/150 settled how a SUPER_ADMIN picks the ONE company they
+ * are working in, and Sprint 152 gave the hours module its own
+ * remembered key. This is the contracts module's key, in the same
+ * `osius.<module>.company` shape rather than a third convention.
+ */
+const CONTRACT_COMPANY_STORAGE_KEY = "osius.contracts.company";
 
 interface FormState {
   customer: number | "";
@@ -50,22 +61,37 @@ function initialState(contract?: Contract | null): FormState {
 }
 
 /**
- * Sprint 160 §4 — the New / Edit Contract modal.
+ * Sprint 160 §4 / Sprint 161 §5b — the New / Edit Contract modal.
  *
- * The field set matches the reference screenshot's: customer,
- * locations, type, dates, status, and the five billing settings.
+ * **Sprint 161 fixed the defect that made this form unusable.** As
+ * shipped it contained no company field at all, while the backend
+ * refuses to guess one whenever more than one provider Company exists
+ * (`views_common.resolve_target_company`). On crmtest, which has three,
+ * every save returned `company is required when more than one provider
+ * Company exists`, and the locations picker was empty for the same
+ * reason: with no company resolved there was nothing to scope buildings
+ * to. That is the Sprint 152.1 §2 defect class exactly — a page that
+ * sends no company against a resolver that will not invent one.
  *
- * Two conventions worth not undoing:
+ * The company is resolved the way Sprints 149/150 settled and Sprint
+ * 152 followed:
  *
- *  * **Keyed by contract id by the CALLER**, so the form seeds from its
- *    props on mount instead of resyncing through an effect. CLAUDE.md
- *    §3 forbids the synchronous-setState-in-an-effect shape this would
- *    otherwise take, and `react-hooks/set-state-in-effect` is already
- *    at its baseline.
- *  * **The pickers come from `/contracts/options/`**, which reads the
- *    same scoped querysets the write path validates against. Nothing
- *    offered here can be rejected as out of scope, and nothing rejected
- *    was offerable.
+ *  * COMPANY_ADMIN, or a SUPER_ADMIN on a single-company deployment:
+ *    resolved silently, no picker. `/contracts/options/` answers with
+ *    the one company in scope and the payload omits the field, which
+ *    the backend then fills in itself.
+ *  * SUPER_ADMIN with several: a picker, defaulting to the remembered
+ *    company and otherwise the lowest id, and the choice is remembered
+ *    under this module's own key.
+ *
+ * Changing the company CLEARS the customer, type and locations rather
+ * than carrying them across tenants — a stale id from the previous
+ * company would be rejected as `does_not_exist`, which reads to an
+ * operator as the form losing their work for no reason.
+ *
+ * On EDIT there is no picker: a contract's company is fixed, and moving
+ * one between tenants is not an edit, it is a different operation
+ * nobody has asked for.
  */
 export function ContractFormDialog({
   open,
@@ -82,34 +108,111 @@ export function ContractFormDialog({
   onSaved?: (contract: Contract) => void;
 }) {
   const { t } = useTranslation("contracts");
+  const { me } = useAuth();
+  const isSuperAdmin = me?.role === "SUPER_ADMIN";
+
   const [form, setForm] = useState<FormState>(() => initialState(contract));
   const [options, setOptions] = useState<ContractOptions | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // The options are fetched once per opening. This effect performs an
-  // async load and sets state in its CALLBACK, not synchronously in the
-  // effect body — the distinction CLAUDE.md draws.
+  const [companies, setCompanies] = useState<CompanyAdmin[]>([]);
+  const [companiesResolved, setCompaniesResolved] = useState(false);
+  const [company, setCompany] = useState<number | "">(
+    contract?.company ?? "",
+  );
+
+  // A SUPER_ADMIN on a multi-company deployment picks one; everyone
+  // else never sees the control.
+  const showCompanySelector =
+    isSuperAdmin && !contract && companies.length > 1;
+  // True while a SUPER_ADMIN's company is still unknown. The options
+  // fetch waits on it, so the pickers are never populated from the
+  // wrong tenant.
+  const companyPending =
+    isSuperAdmin &&
+    !contract &&
+    (!companiesResolved || (companies.length > 1 && company === ""));
+
   useEffect(() => {
-    if (!open) return;
+    if (!open || !isSuperAdmin || contract) {
+      return;
+    }
     let cancelled = false;
-    void (async () => {
-      try {
-        const data = await getContractOptions();
-        if (!cancelled) setOptions(data);
-      } catch (err) {
-        if (!cancelled) setError(getApiError(err));
-      }
-    })();
+    listAllCompanies({ is_active: "true" })
+      .then((response) => {
+        if (cancelled) return;
+        setCompanies(response);
+        if (response.length > 1) {
+          const stored = Number(
+            window.localStorage.getItem(CONTRACT_COMPANY_STORAGE_KEY),
+          );
+          const remembered = response.some((c) => c.id === stored)
+            ? stored
+            : null;
+          const primary = response.reduce(
+            (lowest, c) => (c.id < lowest.id ? c : lowest),
+            response[0],
+          );
+          setCompany((current) =>
+            current === "" ? (remembered ?? primary.id) : current,
+          );
+        }
+        setCompaniesResolved(true);
+      })
+      .catch(() => {
+        // Fail loudly. A silently absent selector is what shipped in
+        // Sprint 160 and it left the operator with a 400 they could do
+        // nothing about.
+        if (cancelled) return;
+        setError(t("errors.companyLoadFailed"));
+        setCompaniesResolved(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, t]);
+  }, [open, isSuperAdmin, contract, t]);
+
+  // The pickers. Refetched when the company changes so a SUPER_ADMIN
+  // switching tenants never sees the previous one's customers.
+  useEffect(() => {
+    if (!open || companyPending) return;
+    let cancelled = false;
+    getContractOptions(contract ? contract.company : company)
+      .then((data) => {
+        if (!cancelled) setOptions(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(getApiError(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, company, companyPending, contract]);
 
   if (!open) return null;
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
+
+  const changeCompany = (next: number | "") => {
+    setCompany(next);
+    if (next !== "") {
+      window.localStorage.setItem(
+        CONTRACT_COMPANY_STORAGE_KEY,
+        String(next),
+      );
+    }
+    // Everything scoped to the old company goes, rather than being
+    // carried across and rejected as nonexistent on save.
+    setForm((current) => ({
+      ...current,
+      customer: "",
+      contract_type: "",
+      building_ids: [],
+    }));
+    setOptions(null);
+  };
 
   const submit = async () => {
     if (form.customer === "" || !form.start_date) {
@@ -140,6 +243,9 @@ export function ContractFormDialog({
       } else {
         const created = await createContract({
           ...payload,
+          // Sent whenever it is known. Omitted only on a single-company
+          // deployment, where the backend resolves it itself.
+          ...(company === "" ? {} : { company: company as number }),
           // Sent in the viewer's language so the first revision reads
           // naturally; the backend falls back to the Dutch default when
           // it is absent.
@@ -154,30 +260,92 @@ export function ContractFormDialog({
     }
   };
 
+  const buildings = options?.buildings ?? [];
+
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={contract ? t("form.editTitle") : t("form.createTitle")}
+      data-testid="contract-form-dialog"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 100,
+        padding: 16,
+      }}
+    >
       <div
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={contract ? t("form.editTitle") : t("form.createTitle")}
-        data-testid="contract-form-dialog"
+        className="card"
+        style={{
+          maxWidth: 640,
+          width: "100%",
+          padding: 24,
+          maxHeight: "90vh",
+          overflowY: "auto",
+        }}
       >
-        <h2>{contract ? t("form.editTitle") : t("form.createTitle")}</h2>
+        <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+          {contract ? t("form.editTitle") : t("form.createTitle")}
+        </h3>
+        <p className="muted small" style={{ marginTop: 0, marginBottom: 16 }}>
+          {contract ? t("form.editIntro") : t("form.createIntro")}
+        </p>
 
         {error && (
-          <div className="alert alert-error" role="alert">
+          <div
+            className="alert-error"
+            role="alert"
+            style={{ marginBottom: 12 }}
+            data-testid="contract-form-error"
+          >
             {error}
           </div>
         )}
 
-        <div className="form-grid">
-          <label className="form-field">
-            <span>{t("form.customer")}</span>
+        {showCompanySelector && (
+          <div className="field">
+            <label className="field-label" htmlFor="contract-company">
+              {t("form.company")}
+            </label>
             <select
-              className="input"
+              id="contract-company"
+              className="field-select"
+              value={company === "" ? "" : String(company)}
+              onChange={(event) =>
+                changeCompany(
+                  event.target.value === ""
+                    ? ""
+                    : Number(event.target.value),
+                )
+              }
+              disabled={busy}
+              data-testid="contract-form-company"
+            >
+              {companies.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+            <span className="muted small">{t("form.companyHint")}</span>
+          </div>
+        )}
+
+        <div className="form-2col">
+          <div className="field">
+            <label className="field-label" htmlFor="contract-customer">
+              {t("form.customer")} *
+            </label>
+            <select
+              id="contract-customer"
+              className="field-select"
               value={form.customer}
-              disabled={Boolean(contract)}
+              disabled={Boolean(contract) || busy || companyPending}
               onChange={(event) =>
                 set(
                   "customer",
@@ -193,13 +361,17 @@ export function ContractFormDialog({
                 </option>
               ))}
             </select>
-          </label>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.type")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-type">
+              {t("form.type")}
+            </label>
             <select
-              className="input"
+              id="contract-type"
+              className="field-select"
               value={form.contract_type}
+              disabled={busy || companyPending}
               onChange={(event) =>
                 set(
                   "contract_type",
@@ -215,36 +387,48 @@ export function ContractFormDialog({
                 </option>
               ))}
             </select>
-          </label>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.startDate")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-start">
+              {t("form.startDate")} *
+            </label>
             <input
+              id="contract-start"
               type="date"
-              className="input"
+              className="field-input"
               value={form.start_date}
+              disabled={busy}
               onChange={(event) => set("start_date", event.target.value)}
               data-testid="contract-form-start"
             />
-          </label>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.endDate")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-end">
+              {t("form.endDate")}
+            </label>
             <input
+              id="contract-end"
               type="date"
-              className="input"
+              className="field-input"
               value={form.end_date}
+              disabled={busy}
               onChange={(event) => set("end_date", event.target.value)}
               data-testid="contract-form-end"
             />
-            <small className="muted">{t("form.endDateHint")}</small>
-          </label>
+            <span className="muted small">{t("form.endDateHint")}</span>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.status")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-lifecycle">
+              {t("form.status")}
+            </label>
             <select
-              className="input"
+              id="contract-lifecycle"
+              className="field-select"
               value={form.lifecycle}
+              disabled={busy}
               onChange={(event) =>
                 set("lifecycle", event.target.value as ContractLifecycle)
               }
@@ -256,14 +440,18 @@ export function ContractFormDialog({
             </select>
             {/* EXPIRED is deliberately absent: it follows from the end
                 date and is not a choice. */}
-            <small className="muted">{t("form.statusHint")}</small>
-          </label>
+            <span className="muted small">{t("form.statusHint")}</span>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.billingPeriod")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-period">
+              {t("form.billingPeriod")}
+            </label>
             <select
-              className="input"
+              id="contract-period"
+              className="field-select"
               value={form.billing_period}
+              disabled={busy}
               onChange={(event) =>
                 set("billing_period", event.target.value as BillingPeriod)
               }
@@ -273,29 +461,37 @@ export function ContractFormDialog({
               <option value="QUARTERLY">{t("billingPeriod.QUARTERLY")}</option>
               <option value="YEARLY">{t("billingPeriod.YEARLY")}</option>
             </select>
-          </label>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.billingDay")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-billing-day">
+              {t("form.billingDay")}
+            </label>
             <input
+              id="contract-billing-day"
               type="number"
               min={1}
               max={28}
-              className="input"
+              className="field-input"
               value={form.billing_day}
+              disabled={busy}
               onChange={(event) =>
                 set("billing_day", Number(event.target.value))
               }
               data-testid="contract-form-billing-day"
             />
-            <small className="muted">{t("form.billingDayHint")}</small>
-          </label>
+            <span className="muted small">{t("form.billingDayHint")}</span>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.billingType")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-billing-type">
+              {t("form.billingType")}
+            </label>
             <select
-              className="input"
+              id="contract-billing-type"
+              className="field-select"
               value={form.billing_type}
+              disabled={busy}
               onChange={(event) =>
                 set("billing_type", event.target.value as BillingType)
               }
@@ -304,95 +500,123 @@ export function ContractFormDialog({
               <option value="ADVANCE">{t("billingType.ADVANCE")}</option>
               <option value="ARREARS">{t("billingType.ARREARS")}</option>
             </select>
-          </label>
+          </div>
 
-          <label className="form-field">
-            <span>{t("form.paymentTerms")}</span>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-terms">
+              {t("form.paymentTerms")}
+            </label>
             <input
+              id="contract-terms"
               type="number"
               min={0}
               max={365}
-              className="input"
+              className="field-input"
               value={form.payment_terms_days}
+              disabled={busy}
               onChange={(event) =>
                 set("payment_terms_days", Number(event.target.value))
               }
               data-testid="contract-form-terms"
             />
-          </label>
+          </div>
 
-          <label className="form-field form-field-inline">
-            <input
-              type="checkbox"
-              checked={form.start_proration}
-              onChange={(event) =>
-                set("start_proration", event.target.checked)
-              }
-              data-testid="contract-form-proration"
-            />
-            <span>{t("form.proration")}</span>
-            <small className="muted">{t("form.prorationHint")}</small>
-          </label>
-
-          <fieldset className="form-field form-field-wide">
-            <legend>{t("form.locations")}</legend>
-            {/* Scrollable rather than unbounded: a provider with two
-                hundred buildings would otherwise render two hundred
-                checkboxes into the dialog (CLAUDE.md §8). */}
-            <div className="multi-select-list">
-              {(options?.buildings ?? []).map((building) => (
-                <label key={building.id} className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={form.building_ids.includes(building.id)}
-                    onChange={() =>
-                      set(
-                        "building_ids",
-                        form.building_ids.includes(building.id)
-                          ? form.building_ids.filter(
-                              (id) => id !== building.id,
-                            )
-                          : [...form.building_ids, building.id],
-                      )
-                    }
-                    data-testid={`contract-form-building-${building.id}`}
-                  />
-                  <span>{building.name}</span>
-                </label>
-              ))}
-              {(options?.buildings ?? []).length === 0 && (
-                <p className="muted">{t("form.noBuildings")}</p>
-              )}
-            </div>
-          </fieldset>
-
-          <label className="form-field form-field-wide">
-            <span>{t("form.description")}</span>
-            <textarea
-              className="input"
-              rows={2}
-              value={form.description}
-              onChange={(event) => set("description", event.target.value)}
-              data-testid="contract-form-description"
-            />
-          </label>
-
-          <label className="form-field form-field-wide">
-            <span>{t("form.notes")}</span>
-            <textarea
-              className="input"
-              rows={2}
-              value={form.notes}
-              onChange={(event) => set("notes", event.target.value)}
-              data-testid="contract-form-notes"
-            />
-          </label>
+          <div className="field">
+            <label className="field-label" htmlFor="contract-proration">
+              {t("form.proration")}
+            </label>
+            <label className="entity-picker-row" htmlFor="contract-proration">
+              <input
+                id="contract-proration"
+                type="checkbox"
+                checked={form.start_proration}
+                disabled={busy}
+                onChange={(event) =>
+                  set("start_proration", event.target.checked)
+                }
+                data-testid="contract-form-proration"
+              />
+              <span className="entity-picker-text">
+                {t("form.prorationHint")}
+              </span>
+            </label>
+          </div>
         </div>
 
-        <div className="modal-actions">
+        <div className="field">
+          <span className="field-label">{t("form.locations")}</span>
+          {/* Scrollable rather than unbounded: a provider with two
+              hundred buildings would otherwise render two hundred
+              checkboxes into the dialog (CLAUDE.md §8). */}
+          <div className="multi-select-list entity-picker-list">
+            {buildings.map((building) => (
+              <label
+                key={building.id}
+                className="entity-picker-row"
+                htmlFor={`contract-building-${building.id}`}
+              >
+                <input
+                  id={`contract-building-${building.id}`}
+                  type="checkbox"
+                  checked={form.building_ids.includes(building.id)}
+                  disabled={busy}
+                  onChange={() =>
+                    set(
+                      "building_ids",
+                      form.building_ids.includes(building.id)
+                        ? form.building_ids.filter((id) => id !== building.id)
+                        : [...form.building_ids, building.id],
+                    )
+                  }
+                  data-testid={`contract-form-building-${building.id}`}
+                />
+                <span className="entity-picker-text">{building.name}</span>
+              </label>
+            ))}
+            {buildings.length === 0 && (
+              <p className="muted small" style={{ margin: 4 }}>
+                {companyPending || !options
+                  ? t("form.loadingOptions")
+                  : t("form.noBuildings")}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="field">
+          <label className="field-label" htmlFor="contract-description">
+            {t("form.description")}
+          </label>
+          <textarea
+            id="contract-description"
+            className="field-input"
+            rows={2}
+            value={form.description}
+            disabled={busy}
+            onChange={(event) => set("description", event.target.value)}
+            data-testid="contract-form-description"
+          />
+        </div>
+
+        <div className="field">
+          <label className="field-label" htmlFor="contract-notes">
+            {t("form.notes")}
+          </label>
+          <textarea
+            id="contract-notes"
+            className="field-input"
+            rows={2}
+            value={form.notes}
+            disabled={busy}
+            onChange={(event) => set("notes", event.target.value)}
+            data-testid="contract-form-notes"
+          />
+        </div>
+
+        <div className="filter-actions" style={{ justifyContent: "flex-end" }}>
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-secondary btn-sm"
             onClick={onClose}
             disabled={busy}
           >
@@ -400,9 +624,9 @@ export function ContractFormDialog({
           </button>
           <button
             type="button"
-            className="btn btn-primary"
+            className="btn btn-primary btn-sm"
             onClick={() => void submit()}
-            disabled={busy}
+            disabled={busy || companyPending}
             data-testid="contract-form-save"
           >
             {busy ? t("actions.saving") : t("actions.save")}

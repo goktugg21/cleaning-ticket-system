@@ -258,32 +258,59 @@ export function ContractsAdminPage() {
     setPage(1);
   };
 
+  // Contract statuses reuse the table's existing `cell-tag` vocabulary
+  // rather than inventing a badge palette. Mapping stated once, here, so
+  // the table and the phone cards cannot drift apart.
+  const STATUS_TAG: Record<ContractStatus, string> = {
+    ACTIVE: "cell-tag-open",
+    DRAFT: "cell-tag-muted",
+    EXPIRED: "cell-tag-closed",
+    CANCELLED: "cell-tag-rejected",
+  };
+
+  const measureLabel =
+    measure === "prices"
+      ? timeframe === "monthly"
+        ? t("table.monthly")
+        : t("table.yearly")
+      : t("table.hours");
+
+  const fixedColumnCount = 5 + (editMode.editMode ? 1 : 0);
+  const totalColumnCount =
+    fixedColumnCount + projectColumns.columns.length +
+    (projectColumns.folded > 0 ? 1 : 0) + 1;
+
   return (
-    <div className="page">
+    <div>
       <div className="page-header">
         <div>
-          <h1>{t("list.title")}</h1>
-          <p className="page-subtitle">{t("list.subtitle")}</p>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            {t("list.eyebrow")}
+          </div>
+          <h2 className="page-title">{t("list.title")}</h2>
+          <p className="page-sub">
+            {loading ? t("list.loading") : t("table.countLabel", { count })}
+          </p>
         </div>
         <div className="page-header-actions">
           <button
             type="button"
-            className="btn btn-ghost"
+            className="btn btn-secondary btn-sm"
             onClick={reload}
             disabled={loading}
             data-testid="contracts-refresh"
           >
-            <RefreshCw size={16} strokeWidth={2} />
+            <RefreshCw size={14} strokeWidth={2.5} />
             {t("actions.refresh")}
           </button>
           {canManage && (
             <button
               type="button"
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
               onClick={() => setFormOpen(true)}
               data-testid="contracts-new"
             >
-              <Plus size={16} strokeWidth={2} />
+              <Plus size={14} strokeWidth={2.5} />
               {t("actions.newContract")}
             </button>
           )}
@@ -291,339 +318,454 @@ export function ContractsAdminPage() {
       </div>
 
       {error && (
-        <div className="alert alert-error" role="alert">
+        <div className="alert-error" style={{ marginBottom: 16 }} role="alert">
           {error}
         </div>
       )}
 
-      {/* Stat tiles — six figures over the CURRENT filter set. */}
-      <div className="stat-strip" data-testid="contracts-stats">
-        <StatTile label={t("stats.total")} value={String(stats?.total ?? 0)} />
-        <StatTile
-          label={t("stats.active")}
-          value={String(stats?.active ?? 0)}
-        />
-        <StatTile label={t("stats.draft")} value={String(stats?.draft ?? 0)} />
-        <StatTile
-          label={t("stats.expired")}
-          value={String(stats?.expired ?? 0)}
-        />
-        <StatTile
-          label={t("stats.monthlyTotal")}
-          value={formatMoney(stats?.monthly_total ?? "0", locale)}
-        />
-        <StatTile
-          label={t("stats.yearlyTotal")}
-          value={formatMoney(stats?.yearly_total ?? "0", locale)}
-        />
-      </div>
-
-      {/* Filters */}
-      <div className="filter-row" data-testid="contracts-filters">
-        <input
-          type="search"
-          className="input"
-          value={searchInput}
-          placeholder={t("filters.searchPlaceholder")}
-          aria-label={t("filters.search")}
-          onChange={(event) => setSearchInput(event.target.value)}
-          data-testid="contracts-search"
-        />
-        <select
-          className="input"
-          value={statusFilter}
-          aria-label={t("filters.status")}
-          onChange={(event) => {
-            setStatusFilter(event.target.value as ContractStatus | "");
-            setPage(1);
+      {/* Tiles, filters, table and pagination live inside ONE card, so the
+          page reads as a single block — the shape BuildingsAdminPage
+          settled on rather than header-gap-filters-gap-table. */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        <div
+          className="summary-grid"
+          data-testid="contracts-stats"
+          style={{
+            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+            margin: "14px 18px 4px",
           }}
-          data-testid="contracts-status-filter"
         >
-          <option value="">{t("filters.allStatuses")}</option>
-          {STATUS_OPTIONS.map((value) => (
-            <option key={value} value={value}>
-              {t(`status.${value}`)}
-            </option>
-          ))}
-        </select>
-        <select
-          className="input"
-          value={customerFilter}
-          aria-label={t("filters.customer")}
-          onChange={(event) => {
-            setCustomerFilter(
-              event.target.value === "" ? "" : Number(event.target.value),
-            );
-            setPage(1);
-          }}
-          data-testid="contracts-customer-filter"
-        >
-          <option value="">{t("filters.allCustomers")}</option>
-          {uniqueRefs(
-            contracts.map((row) => ({
-              id: row.customer,
-              name: row.customer_name ?? "",
-            })),
-          ).map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="input"
-          value={buildingFilter}
-          aria-label={t("filters.building")}
-          onChange={(event) => {
-            setBuildingFilter(
-              event.target.value === "" ? "" : Number(event.target.value),
-            );
-            setPage(1);
-          }}
-          data-testid="contracts-building-filter"
-        >
-          <option value="">{t("filters.allBuildings")}</option>
-          {uniqueRefs(contracts.flatMap((row) => row.buildings)).map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
-        </select>
-        <select
-          className="input"
-          value={typeFilter}
-          aria-label={t("filters.type")}
-          onChange={(event) => {
-            setTypeFilter(
-              event.target.value === "" ? "" : Number(event.target.value),
-            );
-            setPage(1);
-          }}
-          data-testid="contracts-type-filter"
-        >
-          <option value="">{t("filters.allTypes")}</option>
-          {uniqueRefs(
-            contracts
-              .filter((row) => row.contract_type !== null)
-              .map((row) => ({
-                id: row.contract_type as number,
-                name: row.contract_type_name ?? "",
-              })),
-          ).map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* The filter-is-on line, with one click to clear it — the Sprint
-          158 §2 rule: a list that opens filtered must say so and must be
-          clearable in one action. */}
-      {filtersActive && (
-        <div className="filter-notice" data-testid="contracts-filter-notice">
-          <span>{t("filters.activeNotice")}</span>
-          <button
-            type="button"
-            className="btn btn-link"
-            onClick={clearFilters}
-            data-testid="contracts-clear-filters"
-          >
-            {t("filters.clear")}
-          </button>
+          <div className="summary-stat" data-testid="contracts-stat-total">
+            <span className="summary-stat-label">{t("stats.total")}</span>
+            <span className="summary-stat-value">{stats?.total ?? 0}</span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-stat-label">{t("stats.active")}</span>
+            <span className="summary-stat-value">{stats?.active ?? 0}</span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-stat-label">{t("stats.draft")}</span>
+            <span className="summary-stat-value">{stats?.draft ?? 0}</span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-stat-label">{t("stats.expired")}</span>
+            <span className="summary-stat-value">{stats?.expired ?? 0}</span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-stat-label">
+              {t("stats.monthlyTotal")}
+            </span>
+            <span className="summary-stat-value">
+              {formatMoney(stats?.monthly_total ?? "0", locale)}
+            </span>
+          </div>
+          <div className="summary-stat">
+            <span className="summary-stat-label">{t("stats.yearlyTotal")}</span>
+            <span className="summary-stat-value">
+              {formatMoney(stats?.yearly_total ?? "0", locale)}
+            </span>
+          </div>
         </div>
-      )}
 
-      {/* The three view toggles. */}
-      <div className="toggle-row" data-testid="contracts-view-toggles">
-        <ToggleGroup
-          label={t("views.groupLabel")}
-          value={groupBy}
-          options={[
-            { value: "none", label: t("views.list") },
-            { value: "customer", label: t("views.byCustomer") },
-            { value: "building", label: t("views.byBuilding") },
-          ]}
-          onChange={(value) => setGroupBy(value as GroupBy)}
-          testId="contracts-groupby"
-        />
-        <ToggleGroup
-          label={t("views.measureLabel")}
-          value={measure}
-          options={[
-            { value: "prices", label: t("views.prices") },
-            { value: "hours", label: t("views.hours") },
-          ]}
-          onChange={(value) => setMeasure(value as Measure)}
-          testId="contracts-measure"
-        />
-        <ToggleGroup
-          label={t("views.timeframeLabel")}
-          value={timeframe}
-          options={[
-            { value: "monthly", label: t("views.monthly") },
-            { value: "yearly", label: t("views.yearly") },
-          ]}
-          onChange={(value) => setTimeframe(value as Timeframe)}
-          testId="contracts-timeframe"
-        />
-        {canManage && (
-          <EditModeToggle
-            editMode={editMode.editModeRequested}
-            onToggle={editMode.toggleMode}
-            testId="contracts-edit-toggle"
-          />
-        )}
-      </div>
-
-      {editMode.editMode && (
-        <MultiSelectToolbar
-          selectedCount={editMode.selection.length}
-          onSelectAll={editMode.selectAll}
-          onClearAll={editMode.clear}
-          disabled={busy}
-          testIdPrefix="contracts"
-          actions={[
-            {
-              key: "delete",
-              label: t("actions.deleteSelected"),
-              destructive: true,
-              disabled: editMode.selection.length === 0 || busy,
-              onClick: () => deleteDialogRef.current?.open(),
-            },
-          ]}
-        />
-      )}
-
-      {projectColumns.folded > 0 && (
-        <p className="muted" data-testid="contracts-folded-notice">
-          {t("table.projectsFolded", { count: projectColumns.folded })}
-        </p>
-      )}
-
-      <div className="table-wrap">
-        <table className="data-table data-table-dense">
-          <thead>
-            <tr>
-              {editMode.editMode && <th className="col-select" />}
-              <SortableHeader
-                label={t("table.contractNo")}
-                sort={sortStateFor("contract_no")}
-                testId="contracts-sort-no"
-                sortByLabel={t("table.sortBy", { column: t("table.contractNo") })}
-                onSort={() => onSort("contract_no")}
-              />
-              <SortableHeader
-                label={t("table.customer")}
-                sort={sortStateFor("customer")}
-                testId="contracts-sort-customer"
-                sortByLabel={t("table.sortBy", { column: t("table.customer") })}
-                onSort={() => onSort("customer")}
-              />
-              <th>{t("table.locations")}</th>
-              <SortableHeader
-                label={t("table.type")}
-                sort={sortStateFor("type")}
-                testId="contracts-sort-type"
-                sortByLabel={t("table.sortBy", { column: t("table.type") })}
-                onSort={() => onSort("type")}
-              />
-              {projectColumns.columns.map((column) => (
-                <th key={column.key} className="num">
-                  {column.label}
-                </th>
+        <form
+          className="filter-bar"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setSearchActive(searchInput.trim());
+            setPage(1);
+          }}
+        >
+          <div className="filter-field search">
+            <span className="filter-label">{t("filters.search")}</span>
+            <input
+              className="filter-control"
+              type="search"
+              placeholder={t("filters.searchPlaceholder")}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              data-testid="contracts-search"
+            />
+          </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("filters.status")}</span>
+            <select
+              className="filter-control"
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value as ContractStatus | "");
+                setPage(1);
+              }}
+              data-testid="contracts-status-filter"
+            >
+              <option value="">{t("filters.allStatuses")}</option>
+              {STATUS_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {t(`status.${value}`)}
+                </option>
               ))}
-              {projectColumns.folded > 0 && (
-                <th className="num">{t("table.otherProjects")}</th>
+            </select>
+          </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("filters.customer")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              value={customerFilter}
+              onChange={(event) => {
+                setCustomerFilter(
+                  event.target.value === "" ? "" : Number(event.target.value),
+                );
+                setPage(1);
+              }}
+              data-testid="contracts-customer-filter"
+            >
+              <option value="">{t("filters.allCustomers")}</option>
+              {uniqueRefs(
+                contracts.map((row) => ({
+                  id: row.customer,
+                  name: row.customer_name ?? "",
+                })),
+              ).map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("filters.building")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 220 }}
+              value={buildingFilter}
+              onChange={(event) => {
+                setBuildingFilter(
+                  event.target.value === "" ? "" : Number(event.target.value),
+                );
+                setPage(1);
+              }}
+              data-testid="contracts-building-filter"
+            >
+              <option value="">{t("filters.allBuildings")}</option>
+              {uniqueRefs(contracts.flatMap((row) => row.buildings)).map(
+                (row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ),
               )}
-              <th className="num">
-                {measure === "prices"
-                  ? timeframe === "monthly"
-                    ? t("table.monthly")
-                    : t("table.yearly")
-                  : t("table.hours")}
-              </th>
-              <SortableHeader
-                label={t("table.status")}
-                sort={sortStateFor("status")}
-                testId="contracts-sort-status"
-                sortByLabel={t("table.sortBy", { column: t("table.status") })}
-                onSort={() => onSort("status")}
-              />
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((group) => (
-              <ContractGroup
-                key={group.key}
-                group={group}
-                groupBy={groupBy}
-                columns={projectColumns}
-                measure={measure}
-                timeframe={timeframe}
-                locale={locale}
-                editMode={editMode}
-                t={t}
-              />
+            </select>
+          </div>
+          <div className="filter-field">
+            <span className="filter-label">{t("filters.type")}</span>
+            <select
+              className="filter-control"
+              style={{ maxWidth: 180 }}
+              value={typeFilter}
+              onChange={(event) => {
+                setTypeFilter(
+                  event.target.value === "" ? "" : Number(event.target.value),
+                );
+                setPage(1);
+              }}
+              data-testid="contracts-type-filter"
+            >
+              <option value="">{t("filters.allTypes")}</option>
+              {uniqueRefs(
+                contracts
+                  .filter((row) => row.contract_type !== null)
+                  .map((row) => ({
+                    id: row.contract_type as number,
+                    name: row.contract_type_name ?? "",
+                  })),
+              ).map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </form>
+
+        {/* The filter-is-on line, one click from clear — the Sprint 158
+            §2 rule, reusing the notice style that sprint introduced. */}
+        {filtersActive && (
+          <div
+            className="status-chip-notice"
+            style={{ margin: "0 18px 10px" }}
+            data-testid="contracts-filter-notice"
+          >
+            <span>{t("filters.activeNotice")}</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={clearFilters}
+              data-testid="contracts-clear-filters"
+            >
+              {t("filters.clear")}
+            </button>
+          </div>
+        )}
+
+        <div className="contract-view-bar">
+          <div className="status-tabs" role="group" aria-label={t("views.groupLabel")}>
+            {(
+              [
+                ["none", t("views.list")],
+                ["customer", t("views.byCustomer")],
+                ["building", t("views.byBuilding")],
+              ] as [GroupBy, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={value === groupBy ? "active" : ""}
+                aria-pressed={value === groupBy}
+                onClick={() => setGroupBy(value)}
+                data-testid={`contracts-groupby-${value}`}
+              >
+                {label}
+              </button>
             ))}
-            {!loading && contracts.length === 0 && (
-              <tr>
-                <td colSpan={12} className="empty-cell">
-                  {filtersActive ? t("table.emptyFiltered") : t("table.empty")}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* The phone-width layout, kept in step with the table above. */}
-      <ul className="admin-card-list" data-testid="contracts-card-list">
-        {contracts.map((row) => (
-          <li key={row.id} className="admin-card">
-            <Link to={`/admin/contracts/${row.id}`} className="admin-card-title">
-              {row.contract_no}
-            </Link>
-            <div className="admin-card-meta">{row.customer_name}</div>
-            <div className="admin-card-meta">
-              {row.buildings.map((building) => building.name).join(", ") || "—"}
-            </div>
-            <div className="admin-card-meta">
-              {measure === "prices"
-                ? formatMoney(
-                    perPeriodValue(row, "prices", timeframe),
-                    locale,
-                  )
-                : formatNumber(perPeriodValue(row, "hours", timeframe), locale)}
-              {" · "}
-              {t(`status.${row.status}`)}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <div className="pagination-row">
-        <span className="muted">{t("table.countLabel", { count })}</span>
-        <div className="pagination-actions">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!previous || loading}
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-            data-testid="contracts-prev"
-          >
-            {t("actions.previous")}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!next || loading}
-            onClick={() => setPage((current) => current + 1)}
-            data-testid="contracts-next"
-          >
-            {t("actions.next")}
-          </button>
+          </div>
+          <div className="status-tabs" role="group" aria-label={t("views.measureLabel")}>
+            {(
+              [
+                ["prices", t("views.prices")],
+                ["hours", t("views.hours")],
+              ] as [Measure, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={value === measure ? "active" : ""}
+                aria-pressed={value === measure}
+                onClick={() => setMeasure(value)}
+                data-testid={`contracts-measure-${value}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="status-tabs" role="group" aria-label={t("views.timeframeLabel")}>
+            {(
+              [
+                ["monthly", t("views.monthly")],
+                ["yearly", t("views.yearly")],
+              ] as [Timeframe, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={value === timeframe ? "active" : ""}
+                aria-pressed={value === timeframe}
+                onClick={() => setTimeframe(value)}
+                data-testid={`contracts-timeframe-${value}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {canManage && (
+            <EditModeToggle
+              editMode={editMode.editModeRequested}
+              onToggle={editMode.toggleMode}
+              testId="contracts-edit-toggle"
+            />
+          )}
         </div>
+
+        {editMode.editMode && (
+          <div style={{ padding: "0 18px" }}>
+            <MultiSelectToolbar
+              selectedCount={editMode.selection.length}
+              onSelectAll={editMode.selectAll}
+              onClearAll={editMode.clear}
+              disabled={busy}
+              testIdPrefix="contracts"
+              actions={[
+                {
+                  key: "delete",
+                  label: t("actions.deleteSelected"),
+                  destructive: true,
+                  disabled: editMode.selection.length === 0 || busy,
+                  onClick: () => deleteDialogRef.current?.open(),
+                },
+              ]}
+            />
+          </div>
+        )}
+
+        {projectColumns.folded > 0 && (
+          <p
+            className="muted small"
+            style={{ margin: "0 18px 8px" }}
+            data-testid="contracts-folded-notice"
+          >
+            {t("table.projectsFolded", { count: projectColumns.folded })}
+          </p>
+        )}
+
+        {loading && (
+          <div className="loading-bar" style={{ margin: 0 }}>
+            <div className="loading-bar-fill" />
+          </div>
+        )}
+
+        <div className="table-wrap admin-list-wrap">
+          <table className="data-table data-table-dense">
+            <thead>
+              <tr>
+                {editMode.editMode && (
+                  <th className="th-select">
+                    <input
+                      type="checkbox"
+                      checked={editMode.allSelected}
+                      onChange={() =>
+                        editMode.allSelected
+                          ? editMode.clear()
+                          : editMode.selectAll()
+                      }
+                      aria-label={t("table.selectPage")}
+                      data-testid="contracts-select-page"
+                    />
+                  </th>
+                )}
+                <SortableHeader
+                  label={t("table.contractNo")}
+                  sort={sortStateFor("contract_no")}
+                  testId="contracts-sort-no"
+                  sortByLabel={t("table.sortBy", {
+                    column: t("table.contractNo"),
+                  })}
+                  onSort={() => onSort("contract_no")}
+                />
+                <SortableHeader
+                  label={t("table.customer")}
+                  sort={sortStateFor("customer")}
+                  testId="contracts-sort-customer"
+                  sortByLabel={t("table.sortBy", {
+                    column: t("table.customer"),
+                  })}
+                  onSort={() => onSort("customer")}
+                />
+                <th>{t("table.locations")}</th>
+                <SortableHeader
+                  label={t("table.type")}
+                  sort={sortStateFor("type")}
+                  testId="contracts-sort-type"
+                  sortByLabel={t("table.sortBy", { column: t("table.type") })}
+                  onSort={() => onSort("type")}
+                />
+                {projectColumns.columns.map((column) => (
+                  <th key={column.key} className="contract-num">
+                    {column.label}
+                  </th>
+                ))}
+                {projectColumns.folded > 0 && (
+                  <th className="contract-num">{t("table.otherProjects")}</th>
+                )}
+                <th className="contract-num">{measureLabel}</th>
+                <SortableHeader
+                  label={t("table.status")}
+                  sort={sortStateFor("status")}
+                  testId="contracts-sort-status"
+                  sortByLabel={t("table.sortBy", { column: t("table.status") })}
+                  onSort={() => onSort("status")}
+                />
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group) => (
+                <ContractGroup
+                  key={group.key}
+                  group={group}
+                  groupBy={groupBy}
+                  columns={projectColumns}
+                  measure={measure}
+                  timeframe={timeframe}
+                  locale={locale}
+                  editMode={editMode}
+                  statusTag={STATUS_TAG}
+                  totalColumnCount={totalColumnCount}
+                  t={t}
+                />
+              ))}
+              {!loading && contracts.length === 0 && (
+                <tr>
+                  <td colSpan={totalColumnCount} className="muted">
+                    {filtersActive
+                      ? t("table.emptyFiltered")
+                      : t("table.empty")}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* The phone-width layout, kept in step with the table above. */}
+        <ul className="admin-card-list" data-testid="contracts-card-list">
+          {contracts.map((row) => (
+            <li key={row.id} className="admin-card">
+              <div className="admin-card-head">
+                <Link
+                  to={`/admin/contracts/${row.id}`}
+                  className="admin-card-title admin-card-link"
+                >
+                  {row.contract_no}
+                </Link>
+                <span className={`cell-tag ${STATUS_TAG[row.status]}`}>
+                  {t(`status.${row.status}`)}
+                </span>
+              </div>
+              <div className="admin-card-meta-row">
+                <span className="admin-card-meta">{row.customer_name}</span>
+              </div>
+              <div className="admin-card-meta-row">
+                <span className="admin-card-meta">
+                  {row.buildings.map((b) => b.name).join(", ") || "—"}
+                </span>
+              </div>
+              <div className="admin-card-meta-row">
+                <span className="admin-card-meta">
+                  {measureLabel}:{" "}
+                  {measure === "prices"
+                    ? formatMoney(perPeriodValue(row, "prices", timeframe), locale)
+                    : formatNumber(perPeriodValue(row, "hours", timeframe), locale)}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {(previous || next) && (
+          <div className="pagination">
+            <span className="pagination-info">
+              {t("table.countLabel", { count })}
+            </span>
+            <div className="pagination-controls">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!previous || loading}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                data-testid="contracts-prev"
+              >
+                {t("actions.previous")}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!next || loading}
+                onClick={() => setPage((current) => current + 1)}
+                data-testid="contracts-next"
+              >
+                {t("actions.next")}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Rendered UNCONDITIONALLY and driven entirely through the ref —
@@ -651,46 +793,6 @@ export function ContractsAdminPage() {
   );
 }
 
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="stat-tile">
-      <span className="stat-tile-label">{label}</span>
-      <span className="stat-tile-value">{value}</span>
-    </div>
-  );
-}
-
-function ToggleGroup({
-  label,
-  value,
-  options,
-  onChange,
-  testId,
-}: {
-  label: string;
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
-  testId: string;
-}) {
-  return (
-    <div className="toggle-group" role="group" aria-label={label}>
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className={`chip${option.value === value ? " chip-active" : ""}`}
-          aria-pressed={option.value === value}
-          onClick={() => onChange(option.value)}
-          data-testid={`${testId}-${option.value}`}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function uniqueRefs(
   rows: { id: number; name: string }[],
 ): { id: number; name: string }[] {
@@ -711,6 +813,8 @@ function ContractGroup({
   timeframe,
   locale,
   editMode,
+  statusTag,
+  totalColumnCount,
   t,
 }: {
   group: ContractGroupRow;
@@ -720,21 +824,25 @@ function ContractGroup({
   timeframe: Timeframe;
   locale: string;
   editMode: ReturnType<typeof useEditMode<number>>;
+  statusTag: Record<ContractStatus, string>;
+  totalColumnCount: number;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   const format = measure === "prices" ? formatMoney : formatNumber;
   return (
     <>
       {groupBy !== "none" && (
-        <tr className="group-row" data-testid={`contracts-group-${group.key}`}>
-          <td colSpan={5 + columns.columns.length + (columns.folded > 0 ? 1 : 0)}>
-            <strong>{group.label}</strong>
-            <span className="muted">
-              {" "}
+        <tr
+          className="contract-group-row"
+          data-testid={`contracts-group-${group.key}`}
+        >
+          <td colSpan={totalColumnCount - 2}>
+            <strong>{group.label}</strong>{" "}
+            <span className="muted small">
               {t("table.groupCount", { count: group.rows.length })}
             </span>
           </td>
-          <td className="num">
+          <td className="contract-num">
             <strong>{format(group.total, locale)}</strong>
           </td>
           <td />
@@ -743,7 +851,7 @@ function ContractGroup({
       {group.rows.map((row) => (
         <tr key={`${group.key}-${row.id}`}>
           {editMode.editMode && (
-            <td className="col-select">
+            <td className="td-select">
               <input
                 type="checkbox"
                 checked={editMode.isSelected(row.id)}
@@ -753,10 +861,10 @@ function ContractGroup({
               />
             </td>
           )}
-          <td>
+          <td className="td-subject">
             <Link to={`/admin/contracts/${row.id}`}>{row.contract_no}</Link>
           </td>
-          <td>{row.customer_name ?? "—"}</td>
+          <td>{row.customer_name ?? <span className="muted-empty">—</span>}</td>
           <td>
             {row.buildings.length === 0 ? (
               <span className="muted-empty">—</span>
@@ -767,20 +875,22 @@ function ContractGroup({
               />
             )}
           </td>
-          <td>{row.contract_type_name ?? "—"}</td>
+          <td>
+            {row.contract_type_name ?? <span className="muted-empty">—</span>}
+          </td>
           {columns.columns.map((column) => (
-            <td key={column.key} className="num">
+            <td key={column.key} className="contract-num">
               {format(column.valueFor(row), locale)}
             </td>
           ))}
           {columns.folded > 0 && (
-            <td className="num">{format(columns.otherFor(row), locale)}</td>
+            <td className="contract-num">{format(columns.otherFor(row), locale)}</td>
           )}
-          <td className="num">
+          <td className="contract-num">
             {format(perPeriodValue(row, measure, timeframe), locale)}
           </td>
           <td>
-            <span className={`badge badge-${row.status.toLowerCase()}`}>
+            <span className={`cell-tag ${statusTag[row.status]}`}>
               {t(`status.${row.status}`)}
             </span>
           </td>

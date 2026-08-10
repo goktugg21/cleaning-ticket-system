@@ -475,6 +475,14 @@ export function CompanyDetailPage() {
               </div>
             </div>
 
+            {/* Sprint 161 §2 — a compact TWO-COLUMN field grid, not
+                nine full-width rows. Sprint 157 was right that the page
+                under-displayed what its Edit changes, and every field it
+                added stays; what changed here is only the layout, which
+                had turned the About block into a 417px column of single
+                lines and pushed the stat tiles and relation cards - the
+                things that actually carry the page - below the fold. */}
+            <div className="detail-field-grid">
             <div className="detail-field-row">
               <div className="detail-field-label">
                 {t("company_detail.field_name")}
@@ -580,6 +588,7 @@ export function CompanyDetailPage() {
                   </span>
                 )}
               </div>
+            </div>
             </div>
           </section>
 

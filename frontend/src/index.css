@@ -7607,6 +7607,21 @@ a.attn-row:hover {
    Used by the new view-first detail surfaces (CompanyDetailPage first;
    29.4 / 29.5 will reuse). Falls back to the existing --border-soft
    token when the optional --border-faint token isn't defined. */
+/* Sprint 161 §2 — the two-column layout for a block of detail fields.
+   Lives next to its family (`.detail-field-row` / `-label` / `-value`)
+   because it is the same primitive laid out differently, not a new one.
+   Collapses to a single column on phones, where two columns of
+   label/value would be unreadable. */
+.detail-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+}
+@media (max-width: 860px) {
+  .detail-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .detail-field-row {
   display: grid;
   grid-template-columns: 200px 1fr;
@@ -8606,19 +8621,36 @@ details[open] > .ew-department-tree-summary::before {
    on the active one) rather than a sentence of prose underneath. The
    Sprint 158 chip rules below are kept only for `status-chip-*` users
    outside the two work lists. */
+/* Sprint 161 §4 — the status tiles sit on ONE row.
+   They used to `flex-wrap: wrap`, which put nine tiles across two rows
+   at 1440 and three at 1024, with REOPENED stranded on a line of its
+   own. The owner wants one row that looks deliberate.
+
+   So the tile SHRINKS and the row does not wrap: `min-width` drops from
+   132px to 88px, the padding and the count size come down, and each
+   tile is allowed to flex down to its content. `overflow-x: auto` is
+   the honest escape hatch for a viewport that genuinely cannot hold
+   nine of them — it scrolls sideways rather than hiding a status, which
+   is the standing rule that a feature must not become hard to find
+   (## NEXT item 19). No status is ever collapsed behind a "more"
+   control. */
 .status-tile-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-bottom: 14px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 2px;
 }
 .status-tile {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  min-width: 132px;
-  padding: 10px 14px;
+  gap: 1px;
+  min-width: 88px;
+  flex: 0 1 auto;
+  padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -8637,9 +8669,10 @@ details[open] > .ew-department-tree-summary::before {
 .status-tile-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-family: var(--f-head);
-  font-size: 11.5px;
+  font-size: 10px;
+  white-space: nowrap;
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -8653,7 +8686,7 @@ details[open] > .ew-department-tree-summary::before {
 }
 .status-tile-count {
   font-family: var(--f-head);
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: -0.01em;
   line-height: 1.15;
@@ -8948,4 +8981,128 @@ details[open] > .ew-department-tree-summary::before {
 .list-row-archived {
   color: var(--text-muted);
   background: var(--surface-2);
+}
+
+/* ------------------------------------------------------------------
+   Sprint 161 §1 — contracts.
+
+   Sprint 160 shipped the contracts pages against a class vocabulary it
+   INVENTED: 41 class names with zero definitions in this file, so the
+   pages rendered as unstyled text while tsc, ESLint and vite all passed
+   (none of them can know a class is undefined). The fix was to rewrite
+   that markup against the existing system - page-header / card /
+   filter-bar / summary-grid / data-table / admin-card-list - not to
+   write 41 rules here.
+
+   What remains below is only what the system genuinely had no
+   equivalent for, and every class is prefixed so it reads as belonging
+   to this feature. `.contract-num` is the one that comes close to being
+   general: no numeric-cell class existed, and adding a global one is a
+   change every table would inherit, which is not this sprint's call to
+   make.
+   ------------------------------------------------------------------ */
+
+/* Right-aligned, tabular-figure money and hours cells. */
+.contract-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The Customer / Building summary group header row. */
+.contract-group-row td {
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
+/* The row carrying the three view toggles and the edit-mode gate. */
+.contract-view-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 12px;
+}
+
+/* The invoice forecast block on the contract detail Billing tab. */
+.contract-forecast {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.contract-forecast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.contract-forecast-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.contract-forecast-caption {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.contract-forecast-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+/* The year stepper above the forecast table. */
+.contract-year-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.contract-year-value {
+  min-width: 56px;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The add-a-project row on the Projects tab. */
+.contract-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 12px;
+}
+.contract-inline-form .field {
+  margin-bottom: 0;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+/* The contract detail General Info grid: two columns of compact
+   label/value rows, so the tab reads as a dense card rather than a
+   column of full-width lines. Collapses to one column on phones. */
+.contract-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 24px;
+  margin: 0;
+}
+@media (max-width: 720px) {
+  .contract-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The locations list inside a BoundedList on the detail page. */
+.contract-plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
