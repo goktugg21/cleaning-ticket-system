@@ -66,6 +66,10 @@ urlpatterns = [
     # Sprint 152 — employee hours (urenregistratie). Provider-side only;
     # every endpoint 403s CUSTOMER_* roles.
     path("api/timesheets/", include("timesheets.urls")),
+    # Sprint 160 — contracts. Provider-side only; STAFF and every
+    # CUSTOMER_* role are 403'd on every endpoint (a contract carries
+    # the customer's negotiated prices).
+    path("api/contracts/", include("contracts.urls")),
     path("api/invoices/", include("invoicing.urls")),
     path("api/", include("audit.urls")),
     path("api/", include(users_router.urls)),

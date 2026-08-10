@@ -79,6 +79,13 @@ from tickets.models import (
     TicketStaffAssignment,
 )
 from timesheets.models import HourType, TimeEntry, WeekLock
+from contracts.models import (
+    Contract,
+    ContractBuilding,
+    ContractLine,
+    ContractRevision,
+    ContractType,
+)
 
 from . import context
 from .diff import (
@@ -1538,6 +1545,34 @@ def _connect():
         HourType,
         TimeEntry,
         WeekLock,
+        # Sprint 160 — contracts. Four of the five models take the full
+        # CRUD trio; the fifth (`ContractBuilding`) is membership-shaped
+        # and is registered below.
+        #
+        #   * `ContractType` mirrors `HourType` exactly — a per-company
+        #     catalog whose `name` renames are the point of auditing it.
+        #   * `Contract` carries the commercial terms. A change to
+        #     `billing_day`, `billing_type` or `start_proration` moves
+        #     real money, and `lifecycle` is how a contract is cancelled,
+        #     so the before/after diff is what makes any of that
+        #     attributable.
+        #   * `ContractRevision` and `ContractLine` are the agreed scope
+        #     and its prices. These need auditing MORE than most rows
+        #     here, not less: a revision is immutable once it is in
+        #     force, so any UPDATE that does land on one is either a
+        #     future-dated edit (legitimate, and worth a record) or a
+        #     bug, and the audit row is how the difference is told
+        #     afterwards.
+        #
+        # The generic introspection covers every field on all four —
+        # they carry no FileField (the reason `Document` needs
+        # hand-written handlers) and no `*StatusHistory` to double-write
+        # against (H-11): this module has no state machine, and a
+        # revision is a business version rather than a status history.
+        ContractType,
+        Contract,
+        ContractRevision,
+        ContractLine,
     ):
         pre_save.connect(_on_pre_save, sender=model, weak=False, dispatch_uid=f"audit:pre:{model.__name__}")
         post_save.connect(_on_post_save, sender=model, weak=False, dispatch_uid=f"audit:post:{model.__name__}")
@@ -1585,6 +1620,15 @@ def _connect():
         # `.name`, so the row is audited with the correct target_model /
         # target_id / actor and an empty `changes` payload.
         ExtraWorkAssignment,
+        # Sprint 160 — which buildings ("locations") a contract covers.
+        # Membership shape, and correct rather than convenient: the row
+        # has NO editable field (contract + building is its whole
+        # content and its uniqueness constraint), so adding or removing
+        # a location is a create or a delete, each of which says what
+        # happened on its own. An UPDATE handler would have nothing to
+        # diff. Same registration as ContactBuildingLink, which is the
+        # closest existing analogue.
+        ContractBuilding,
     ):
         # Memberships use a different handler set — see comment above.
         # No pre_save (no editable fields, no UPDATE shape).
