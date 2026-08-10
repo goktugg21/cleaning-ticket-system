@@ -2,139 +2,7 @@
 
 **Purpose.** The living plan to close every remaining gap between the
 system and the Ramazan transcripts + Source of Truth, ending with a
-premium UI/UX polish. **CC updates `## NOW
-
-**Branch:** `feat/sprint-159-owner-feedback-6`. **CC did NOT open a PR
-and did NOT deploy.** Cut from the tip of `feat/sprint-158-owner-feedback-5`
-(`efa9c9d`). Merge order: **#153 → … → #158 → #159.** Sprint 160
-(Contracts) is being built in PARALLEL from the same base — the two are
-siblings off #158, not a chain, and this branch touches no `contracts`
-code.
-
-### The owner-visible changes, in plain words
-
-- **The hours page has been rebuilt to the shape of the reference
-  system, by taking things away.** One page, one table, one modal.
-  The week grid that used to sit ON the page is gone — the grid now
-  lives only in the modal the single top-right button opens, and having
-  one of each was the duplication that made the area confusing. Also
-  gone: the "Set up week" strip, the per-row Add/Edit pop-up, the two
-  report tables that the Overview tab already showed, the row of boxes
-  above everybody, the per-employee row of boxes, and the row
-  checkboxes with their own hours box.
-- **Editing hours no longer opens anything.** Press Edit and the whole
-  table becomes editable; change as many rows as you like and press
-  Save once.
-- **The bulk-add bug is fixed, and it was real.** Choosing an hour type
-  and pressing "Add row" with the building box left alone did nothing
-  and said "0 rows added". The building box meant "every building" to
-  the Fill button and "no building" to the Add row button — one control,
-  two meanings. It now means the same thing to both, and "no building"
-  is its own entry in the list.
-- **Managers and workers are assigned together.** One window with a
-  managers list and a workers list side by side, one confirm, for extra
-  work and for tickets. If one of the two is refused, neither is
-  written — you can no longer end up with half a crew on a job.
-- **Tickets and Extra Work now look the same.** Both open on a row of
-  status tiles carrying real counts; the tile is the filter, the
-  selected one is obvious, and clearing it is a click rather than a
-  sentence of text underneath. The customer's own Tickets and Extra Work
-  pages got the same tiles.
-- **A company's people, buildings and customers can be changed from the
-  company page.** Press Edit on a card: attach employees to the
-  company's buildings, take them off again, start a new building or
-  customer under this company, or archive ones that are finished.
-
-### §1 — hours, rebuilt by removal
-
-Three files, before → after: `HoursAdminPage.tsx` **1587 → 1162**,
-`HoursWeekGrid.tsx` **1129 → 870**, `WeekSetupDialog.tsx` **289 →
-deleted** and replaced by `WeekEntryDialog.tsx` **321**. Total **3005 →
-2353 (−652)**. The controls removed are listed above; the grid is now
-ONE table with an Employee column rather than a table per person.
-
-**The bug, reproduced before it was touched.** Driving the built Sprint
-158 app: set a week up with two employees and two buildings, pick an
-hour type, press **Add row** with the building select on its default →
-banner *"0 rows added"*, nothing happens. Cause: Sprint 158 §5c
-relabelled the empty option "Every building" so FILL would read it as
-"do not narrow", and left ADD ROW reading the same value as "no
-building" — so with a no-building row already seeded, nothing was
-missing and it reported zero; without one it would have silently made a
-*no-building* row while the control said "every building". Fixed by
-giving the value ONE meaning in both directions ("all buildings") and
-making "No building" an explicit option. Re-driven after the change: 4
-rows added across both buildings, for both employees.
-
-**A second defect found while measuring**, fixed here: the page fired
-`/timesheets/employees/` and `/timesheets/summary/` before a
-SUPER_ADMIN's company was known and took two 400s
-(`company is required when more than one provider Company exists`)
-plus a red banner on every first load. The reads now wait for the
-company.
-
-### §2 — both roles, one request
-
-Both bulk-assign endpoints accept `{"workers": [...], "managers": [...]}`
-alongside the Sprint 157/158 `{"users": [...], "role": ...}` shape,
-which keeps working (the per-row remove speaks it). Every group is
-resolved through `buildings.assignment_eligibility` BEFORE any write, so
-the all-or-nothing property now spans both roles. The role toggle in the
-dialog is gone; the dialog moved to `components/AssignPeopleDialog.tsx`
-because tickets use it too, and the tickets LIST gained the selection
-(behind the standard Edit gate) it needed to reach it.
-
-### §3 — one status control, two lists
-
-`StatusFilterChips` is replaced by `StatusTiles` and deleted. The
-tickets tiles carry SERVER counts from `/tickets/stats/` `by_status` —
-the same source the "Status breakdown" panel on that page already
-renders, so no extra request and no number that describes one page. The
-Sprint 158 prose notice is gone: the filled tile and the × on it say
-what the sentence used to.
-
-The customer-detail Tickets and Extra Work pages get the same tiles but
-open on **All**, not on the un-actioned status. Those pages are one
-customer's history rather than a work queue, and defaulting them would
-hide most of a customer's rows behind a filter nobody asked for.
-
-### §4 — the company cards, delivered
-
-Employees, buildings and customers each get their own Edit gate.
-"Employee of this company" is not a row anywhere — it is a building
-attachment (`BuildingStaffVisibility` / `BuildingManagerAssignment`), so
-the Add dialog asks for buildings AND managers AND workers and writes
-through `/api/buildings/bulk-link/`; removal unlinks from every building
-of the company. Buildings and customers cannot be *moved* between
-providers (required FK; H-1), so their destructive action is **Archive**
-and it is labelled that way. `BuildingFormPage` learned to read
-`?company=` so "Add building" pre-fills the company, the way
-`CustomerFormPage` already did.
-
-### Measured, on the built app
-
-Driven end to end with Playwright at 1024 / 1280 / 1440: the modal set
-up, filled, saved, and the rows read back from the API carrying their
-`multiplier_snapshot` and derived ISO week. 40 assertions pass, 0 fail,
-0 console errors; no page scrolls sideways at any width; the hours
-filters measured as ONE line (6 fields, same top). The company cards
-were driven both ways — a worker attached, the card re-read, then
-removed again — and the dev data left exactly as it was found.
-
-### Gates
-
-Backend: `test timesheets extra_work tickets companies`. New tests:
-`extra_work/test_sprint159_combined_assign` (10) and
-`tickets/test_sprint159_combined_assign` (7).
-`makemigrations --dry-run --check` → *No changes detected*; no migration
-this sprint.
-
-Frontend: `tsc` clean, `eslint .` **44 (42 errors, 2 warnings)** — the
-baseline, unchanged — build ✓. i18n: 11/11 namespace pairs equal.
-
----
-
-## NEXT` / `## SHIPPED`
+premium UI/UX polish. **CC updates `## NOW` / `## NEXT` / `## SHIPPED`
 for a sprint as part of that sprint's own commit(s)** — not in a later
 docs-only pass — so this file always reflects where we actually are.
 
@@ -187,96 +55,94 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-160-contracts`. **CC did NOT open a PR and did
-NOT deploy.** Cut from the tip of `feat/sprint-158-owner-feedback-5`
-(`efa9c9d`) — NOT from 159.
+**Branch:** `feat/sprint-161-fixes`, cut from `integ/159-160` (`ca324d3`,
+the local merge of #159 and #160 that is deployed to crmtest). **CC did
+NOT open a PR and did NOT deploy.**
 
-**Sprints 159 and 160 were built IN PARALLEL, by two sessions, as
-SIBLINGS off #158 rather than as a chain.** Merge order:
-**#153 → #154 → #155 → #156 → #157 → #158, then #159 and #160 in either
-order.** To keep the two out of each other's way, #160 created its own
-i18n namespace (`i18n/{nl,en}/contracts.json`) instead of adding to
-`common.json`, ran its suites against an isolated `test_s160contracts`
-database, and stayed inside `backend/contracts/` +
-`frontend/src/pages/admin/contracts/` apart from four small additive
-touches (`config/settings.py`, `config/urls.py`, `App.tsx`,
-`AppShell.tsx`) and this file.
+A fix list, not a design sprint. Two of its items are Sprint 160's own
+defects and are recorded as such.
+
+**This file was BROKEN at `integ/159-160` and is repaired here.** The
+merge of #159's and #160's checklist edits truncated the header sentence
+mid-word (`**CC updates \`## NOW`) and spliced #159's NOW body in above
+the maintenance section, leaving the real `## NOW` further down holding
+#160's. The Sprint 160 prompt predicted this conflict and asked for a
+trivial resolution; the resolution was not trivial and nobody re-read
+the result. Rebuilt from #158's preamble, this NOW, and the NEXT /
+SHIPPED that #159 and #160 left.
 
 ### The owner-visible changes, in plain words
 
-- The system now has **contracts**. Until this sprint it had none at all
-  — only an informational PDF field on the customer.
-- A contract says which customer, which locations, which projects, how
-  many hours, what it costs, and on what rhythm it is invoiced.
-- **Prices can be raised without rewriting history.** A change is a new
-  VERSION of the contract that starts on a date you choose. What was
-  agreed last month stays agreed last month, so old invoices keep
-  meaning what they meant.
-- The **Invoice Preview** shows what will be billed and when, for any
-  year, and says so plainly: it lists the invoices still to come, and it
-  writes nothing.
-- Building managers can SEE the contracts covering their own buildings
-  and change nothing. Field staff and every customer-side role see
-  nothing at all — a contract carries negotiated prices.
+- **The contracts pages have styling now.** They shipped rendering as
+  unstyled text because they were written against class names that do
+  not exist. They look like the other admin pages again.
+- **A contract can actually be created.** The form had no company field
+  while the backend refuses to guess one, so on a deployment with more
+  than one company every save failed and the locations list was empty.
+- **The company page is dense again**, without losing any field Sprint
+  157 added.
+- **The status tiles sit on one row** on Tickets and Extra Work.
+- **The people on an extra-work request follow it onto the ticket** —
+  workers as well as managers, and dated, so the agenda shows them where
+  the work actually is.
+- Old assignment rows that today's rules would refuse are cleaned up.
+- The Users page no longer shows "Customer user" twice.
 
-### What is new and why it is shaped that way
+### The lesson this sprint adds to the gates
 
-**`backend/contracts/` is an independent app** (the `timesheets` rule):
-no FK into and no import from `extra_work`, `tickets` or `invoicing`.
+**A whole feature shipped rendering as raw text and every gate passed
+it.** TypeScript, ESLint and Vite cannot know a CSS class is undefined,
+so nothing caught 41 invented class names. The undefined-class check is
+now a standing gate (recorded in `## NEXT`), and it earned its place
+immediately: it caught `cell-tag-waiting`, which does not exist — only
+`cell-tag-waiting_customer_approval` does.
 
-**Two price sources, one clear division.** A contract carries its OWN
-prices on its own lines and does NOT read `CustomerServicePrice`. Extra
-Work keeps using `resolve_price` exactly as before and was not touched.
-The division is written into the model docstrings so the next person
-does not "unify" them.
+### Per item
 
-**A revision is a VERSION, not an audit log.** `AuditLog` answers "who
-changed this field"; a revision answers "what is the agreed scope as of
-this date" — a business fact with money attached and possibly a future
-effective date. The lines hang off the REVISION, the active one is
-DERIVED, and a revision locks the moment its effective date arrives (a
-correction is a new revision, exactly as a SENT invoice is corrected by
-reversal).
-
-**Status cannot contradict the dates.** A CHECK constraint makes
-`EXPIRED` unstorable; `Contract.status()` derives it from `end_date`.
-The same rule ruled out an `is_active` flag on revisions.
-
-**The forecast writes nothing.** `contracts/billing.py` is a pure
-function; the endpoint has no POST. Yearly is the SUM OF ACTUAL PERIOD
-AMOUNTS, never monthly x 12 — with proration on and a mid-period start
-the two legitimately differ, and both directions are asserted.
-
-Full description: **[Addendum C](../product/sot-addendum-c-contracts.md)**
-(added to `docs/README.md` in the same commit, per the index's own rule).
-
-### Gates
-
-Backend, isolated DB (`test_s160contracts`):
-`contracts` alone — **90 tests, OK, exit 0**. The §7 gate list
-(`contracts customers buildings audit invoicing`) — see the sprint
-report for the literal tail.
-`makemigrations --dry-run --check` → *No changes detected*, exit 0.
-
-Frontend: `tsc --noEmit` clean; `eslint .` **44 (42 errors, 2
-warnings)** — the baseline exactly, zero contracts files listed;
-`npm run build` ✓. i18n: nl/en `contracts` bundles **178 keys each,
-identical sets**; **203 `t()` call sites resolved against the namespace
-their component declares, 0 misses.**
-
-### Not done in this sprint, deliberately
-
-- **No real invoices.** Turning a due forecast row into an `Invoice` is
-  its own sprint; `invoicing/` was not edited, and a test asserts the
-  forecast leaves both invoicing tables empty.
-- **The three list views group the FETCHED PAGE, not the whole result
-  set** — a server-side aggregate is the honest fix, not a client-side
-  loop over every page.
-- **No Playwright geometry run.** Nothing here makes a measured layout
-  claim; the two new pages reuse the existing `.data-table-dense` /
-  `.admin-card-list` shapes rather than introducing a new one.
+- **§1 contracts styling — DONE.** Rewritten onto `page-header` / `card`
+  / `filter-bar` / `summary-grid` / `data-table` / `admin-card-list` /
+  `pagination`, `status-tabs` for the toggles, `cell-tag` for statuses.
+  Nine prefixed rules remain where the system had no equivalent. Class
+  check clean on all four files. Measured on the BUILT app at 1024 /
+  1280 / 1440: 6 stat tiles in a grid, filter bar, 3 tab groups, real
+  table, **zero horizontal overflow at every width**, no console errors.
+- **§5b contract form — DONE.** Company field on the Sprint 149/150
+  model (`osius.contracts.company`); pickers narrow to it; changing
+  company clears the now-foreign selections. **Created a contract end to
+  end against the dev database**: 4 companies offered, saved as
+  CNT-2027-0001, project line added, reopened and persisted, forecast
+  computed 9 invoices / EUR 124.200 for 2027.
+- **§2 company detail density — DONE.** About block is a two-column
+  grid: 9 fields in 5 visual rows instead of 9, block height 417 → 261,
+  page height 1837 → 1681. Every field kept.
+- **§4 status tiles — DONE.** One row at every width (was 2–3). The tile
+  shrank; nothing hid behind a "more" control. The strip is 840px and
+  scrolls sideways where a container is narrower — which on the Tickets
+  page it is (608–768px), a property of that page's own layout.
+- **§5 worker carry-over — DONE.** The slot inherits the TICKET's
+  schedule, so nothing is invented; no schedule means the slot's dates
+  stay None; an ineligible worker is skipped and logged. All three spawn
+  paths go through one entry point. 23 tests OK.
+- **§6 eligibility cleanup — DONE.** Data migration importing the
+  eligibility helper rather than restating it, logging every removal.
+  Applied to dev: "examined 2 assignment rows, removed 0" — both are
+  legitimate there; the rows the brief names are on crmtest, untouched.
+  6 tests OK.
+- **§7 duplicate chip — DONE.** The two chips filter different things
+  (`?role=` vs `?access_role=`), so the label changed and no filter was
+  dropped.
+- **§3 company detail EDIT — ALREADY SHIPPED, VERIFIED.** The brief says
+  the cards are still read-only. They are not: Sprint 159 landed it and
+  it works. Driven in a browser — three Edit buttons, each revealing row
+  checkboxes and an Add control on Medewerkers, Gebouwen and Klanten.
+  Nothing to finish. Only the affordance was exercised, not a full
+  add-then-remove round trip.
+- **§8 Hours — NOT DONE.** The hour-type selector is still in the setup
+  wizard and the non-working in-grid dropdown was not investigated. Ran
+  out of sprint; carried to `## NEXT` rather than quietly dropped.
 
 ---
+
 
 ## NEXT
 
@@ -285,6 +151,48 @@ across ("Owner's forward queue", "Deferred / undecided items", "Standing
 milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
+
+
+0. **THE GATE LIST NOW INCLUDES AN UNDEFINED-CSS-CLASS CHECK.** Run it
+   over every file a sprint touches, and paste its output:
+
+   ```bash
+   cd frontend/src && for c in $(grep -ohE 'className="[^"{]+"' <FILES> \
+     | sed 's/className="//;s/"//' | tr ' ' '\n' | sort -u); do
+     grep -q "\.$c[^a-zA-Z0-9_-]" index.css || echo "UNDEFINED: $c"; done
+   ```
+
+   **Why:** Sprint 160 shipped the whole contracts feature rendering as
+   raw text, and every existing gate passed it. TypeScript, ESLint and
+   Vite cannot know that a class name has no rule behind it, so 41
+   invented names — including `page`, `input` and `alert` — reached the
+   owner's screen. No gate we had could have caught it, which is what
+   makes this a gate rather than a note.
+
+   Two things learned running it: it catches real mistakes immediately
+   (`cell-tag-waiting` does not exist; only
+   `cell-tag-waiting_customer_approval` does, and a looser grep made it
+   look defined), and it only sees STATIC `className="..."`. Template
+   and conditional class names are invisible to it, so it is a floor,
+   not a proof.
+
+0. **HOURS — Sprint 161 §8, NOT DONE.** Carried forward whole rather
+   than half-reported:
+   - **Remove the hour-type selector from the setup wizard.** The owner:
+     it complicates matters. The grid should start with a sensible
+     default row per (employee, building) and the type chosen in the
+     grid.
+   - **The hour-type dropdown in the generated table changes nothing.**
+     Reproduce it first, then fix it. That fix is also what makes
+     removing the wizard selector safe, so the two are one piece of
+     work and should not be split.
+
+0. **COMPANY DETAIL EDIT IS DONE — do not re-request it.** Sprint 161
+   §3 asked for it a third time. It shipped in Sprint 159 and it works:
+   verified in a browser, three Edit buttons, each revealing row
+   checkboxes and an Add control on employees, buildings and customers.
+   What has NOT been exercised is a full add-then-remove round trip
+   through the API, which is the only thing left worth checking.
 
 0. **Sprint 158 leftovers.** The first two are CLOSED by Sprint 159 —
    §4 shipped (the three company cards are editable), and the ticket
