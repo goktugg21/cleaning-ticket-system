@@ -55,147 +55,94 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-158-owner-feedback-5`. **CC did NOT open a PR
-and did NOT deploy.** Cut from `feat/sprint-157-owner-feedback-4`
-(`c895500`). Merge order: **#153 → #154 → #155 → #156 → #157 → #158.**
+**Branch:** `feat/sprint-160-contracts`. **CC did NOT open a PR and did
+NOT deploy.** Cut from the tip of `feat/sprint-158-owner-feedback-5`
+(`efa9c9d`) — NOT from 159.
+
+**Sprints 159 and 160 were built IN PARALLEL, by two sessions, as
+SIBLINGS off #158 rather than as a chain.** Merge order:
+**#153 → #154 → #155 → #156 → #157 → #158, then #159 and #160 in either
+order.** To keep the two out of each other's way, #160 created its own
+i18n namespace (`i18n/{nl,en}/contracts.json`) instead of adding to
+`common.json`, ran its suites against an isolated `test_s160contracts`
+database, and stayed inside `backend/contracts/` +
+`frontend/src/pages/admin/contracts/` apart from four small additive
+touches (`config/settings.py`, `config/urls.py`, `App.tsx`,
+`AppShell.tsx`) and this file.
 
 ### The owner-visible changes, in plain words
 
-- Only the right people can be put on a job now: managers are chosen from
-  the people authorised at that building, workers from the people who
-  work there. The picker offers nobody who would be refused.
-- A request's managers automatically become the managers of the ticket it
-  turns into.
-- Tickets can have people assigned in bulk, the same way extra work can.
-- Extra Work and Tickets now open showing what has not been actioned yet,
-  with every other status as a button beside it. A line says the filter
-  is on and one click clears it.
-- The Users page groups the role buttons as "provider" and "customer"
-  instead of mixing them.
-- Hours: "Apply to all" is now two clearly-labelled buttons — Fill, which
-  fills the boxes, and Add row, which adds a row. They used to be the
-  same button.
-- Hours: a row of boxes above everybody sets a day for every employee at
-  once; hour types are chosen in the setup window; and several rows can
-  be selected and set together without opening anything.
+- The system now has **contracts**. Until this sprint it had none at all
+  — only an informational PDF field on the customer.
+- A contract says which customer, which locations, which projects, how
+  many hours, what it costs, and on what rhythm it is invoiced.
+- **Prices can be raised without rewriting history.** A change is a new
+  VERSION of the contract that starts on a date you choose. What was
+  agreed last month stays agreed last month, so old invoices keep
+  meaning what they meant.
+- The **Invoice Preview** shows what will be billed and when, for any
+  year, and says so plainly: it lists the invoices still to come, and it
+  writes nothing.
+- Building managers can SEE the contracts covering their own buildings
+  and change nothing. Field staff and every customer-side role see
+  nothing at all — a contract carries negotiated prices.
 
-### §1 — eligibility, and what was NOT a bug
+### What is new and why it is shaped that way
 
-`buildings/assignment_eligibility.py` holds the rule once:
-**WORKER** = staff visibility on the request's building; **MANAGER** =
-a manager assignment on it, or a COMPANY_ADMIN of its company. Sprint 157
-used one role set for both, so a field worker could be made the MANAGER.
+**`backend/contracts/` is an independent app** (the `timesheets` rule):
+no FK into and no import from `extra_work`, `tickets` or `invoicing`.
 
-COMPANY_ADMIN is admitted as a MANAGER candidate and NOT as a WORKER —
-stated because §1 asked for a decision, and tested both ways. An admin is
-authoritative over every building of their company by construction;
-doing the work on site is a different claim.
+**Two price sources, one clear division.** A contract carries its OWN
+prices on its own lines and does NOT read `CustomerServicePrice`. Extra
+Work keeps using `resolve_price` exactly as before and was not touched.
+The division is written into the model docstrings so the next person
+does not "unify" them.
 
-Eligibility is resolved PER REQUEST, so assigning one person across two
-buildings requires them to be authorised at both.
+**A revision is a VERSION, not an audit log.** `AuditLog` answers "who
+changed this field"; a revision answers "what is the agreed scope as of
+this date" — a business fact with money attached and possibly a future
+effective date. The lines hang off the REVISION, the active one is
+DERIVED, and a revision locks the moment its effective date arrives (a
+correction is a new revision, exactly as a SENT invoice is corrected by
+reversal).
 
-`GET …/assignments/candidates/?role=` is the picker's source and calls
-the SAME helper as the validator. A test walks the endpoint's ENTIRE
-output through the assign endpoint for both roles — "offerable" equals
-"acceptable" by construction (Sprint 152.1 §1a).
+**Status cannot contradict the dates.** A CHECK constraint makes
+`EXPIRED` unstorable; `Contract.status()` derives it from `end_date`.
+The same rule ruled out an `is_active` flag on revisions.
 
-An ineligible-but-real id is indistinguishable from a fictional one,
-including the wrong-role case, asserted by comparing bodies for EQUALITY
-(H-1).
+**The forecast writes nothing.** `contracts/billing.py` is a pure
+function; the endpoint has no POST. Yearly is the SUM OF ACTUAL PERIOD
+AMOUNTS, never monthly x 12 — with proration on and a mid-period start
+the two legitimately differ, and both directions are asserted.
 
-**The crmtest report was NOT a bug and the tenant check was not
-touched.** A user may legitimately hold staff visibility on buildings of
-two provider companies — the demo seed does exactly that — so both
-companies accept them. A test now pins it.
-
-**Manager carry-over: THREE spawn paths, all handled.**
-`instant_tickets.spawn_tickets_for_request`,
-`proposal_tickets.spawn_tickets_for_proposal`, and
-`proposal_tickets.spawn_tickets_for_extra_work_request`. A fourth
-`Ticket.objects.create` in `planned_work/generation.py` is deliberately
-not a caller — planned work has no extra-work request behind it.
-
-**Workers are NOT carried over, by decision.** `TicketStaffAssignment`
-has been a dated operational SLOT since Sprint 14E, so copying a worker
-into one creates a slot with no schedule that reads on the agenda as
-planned work nobody planned. `TicketManagerAssignment` is a plain link,
-so carrying it is one-to-one with nothing invented.
-
-Tickets get the same bulk surface reusing the same helper. One
-ticket-specific rule: a bulk assign makes ONE unscheduled slot per pair
-and refuses a second; unassign removes every slot that person holds.
-
-### §2 — the statuses, read out of the state machines
-
-Extra work defaults to **REQUESTED**, tickets to **OPEN** — both the
-genuinely-untouched status. The DASHBOARD keeps no default: it is a
-summary of everything and defaulting it would make it disagree with its
-own attention cards.
-
-The default is **visible and clearable in one click**. That is the part
-that makes it safe: a silent default filter looks exactly like an empty
-system, and an operator opening a quiet week would conclude the data is
-gone.
-
-**The tickets chips carry no per-status counts, deliberately.** That list
-is server-paginated, so the only numbers the client holds are for the
-page it is on; a chip reading "3" when the status holds ninety is worse
-than no number. Extra Work shows real counts because Sprint 120 made it
-fetch the full set. Recorded in NEXT with the fix shape.
-
-### §5 — the hours grid, and the bug my own code had
-
-§5a — "Apply to all" became **Fill** (writes into existing cells, adds
-nothing) and **Add row** (creates the row, fills nothing).
-
-§5c, reproduced from the code before changing it: the old version keyed
-on the (hour type, building) PAIR, and the bar's building defaults to
-"no building" while seeded rows carry a real one — so applying to an
-hour type that already existed produced a SECOND row for the same hour
-type. Fill now matches on hour type and treats the building as an
-optional narrowing; the empty choice is relabelled "Every building".
-
-§5b — a global row above the names, belonging to no employee.
-§5d — hour types moved into the setup modal; the summary counts
-employees x buildings x hour types.
-§5e — row checkboxes plus a value box and "Set N selected rows", inline.
-§5f — the strip stays one line; it scrolls inside itself.
-
-**A defect in my own code, found by measuring rather than reading:** the
-first run filled ten cells and the banner said "no row has that hour
-type". The counter was incremented INSIDE a setState updater and read on
-the next line, before React had invoked it. Both `fillMatchingRows` and
-`addRowToAll` now compute before setting state.
-
-### §3 — measured
-
-Regrouped by SIDE. Bar height against Sprint 157's numbers: 1024
-**223 → 185px**, 1280 185 → 185px, 1440 **185 → 147px**. It recovers most
-of the height Sprint 157 traded for alignment, without giving up the
-alignment.
-
-### NOT DELIVERED
-
-**§4 — the company's employees / buildings / customers cards are not yet
-editable.** The backend for it exists (Sprint 154's
-`/api/buildings/bulk-link/` covers customers↔buildings and
-staff/managers↔buildings; `CompanyAdminListCreateView` covers admins),
-so this is frontend work behind the `useEditMode` gate on the three
-cards. It was cut for time, not for a reason — nothing was learned that
-argues against it.
+Full description: **[Addendum C](../product/sot-addendum-c-contracts.md)**
+(added to `docs/README.md` in the same commit, per the index's own rule).
 
 ### Gates
 
-Backend: `test extra_work tickets timesheets companies customers audit`.
-New tests: `test_sprint158_assignment_eligibility` (18),
-`test_sprint158_manager_carryover` + `tickets/test_sprint158_bulk_assign`
-(16), and three Sprint 157 tests corrected to the new rule (21 total).
-`makemigrations --dry-run --check` → *No changes detected*; no migration
-this sprint.
+Backend, isolated DB (`test_s160contracts`):
+`contracts` alone — **90 tests, OK, exit 0**. The §7 gate list
+(`contracts customers buildings audit invoicing`) — see the sprint
+report for the literal tail.
+`makemigrations --dry-run --check` → *No changes detected*, exit 0.
 
-Frontend: `tsc` clean, `eslint .` **44 (42 errors, 2 warnings)**, build ✓.
-i18n: 11/11 namespace pairs equal; **627 `t()` call sites across 13
-changed files, 0 misses.**
+Frontend: `tsc --noEmit` clean; `eslint .` **44 (42 errors, 2
+warnings)** — the baseline exactly, zero contracts files listed;
+`npm run build` ✓. i18n: nl/en `contracts` bundles **178 keys each,
+identical sets**; **203 `t()` call sites resolved against the namespace
+their component declares, 0 misses.**
+
+### Not done in this sprint, deliberately
+
+- **No real invoices.** Turning a due forecast row into an `Invoice` is
+  its own sprint; `invoicing/` was not edited, and a test asserts the
+  forecast leaves both invoicing tables empty.
+- **The three list views group the FETCHED PAGE, not the whole result
+  set** — a server-side aggregate is the honest fix, not a client-side
+  loop over every page.
+- **No Playwright geometry run.** Nothing here makes a measured layout
+  claim; the two new pages reuse the existing `.data-table-dense` /
+  `.admin-card-list` shapes rather than introducing a new one.
 
 ---
 
@@ -231,6 +178,37 @@ item has moved to `## SHIPPED` or been resolved below instead.
      the e-mail domain says one company and the assignment says another.
      Consider splitting them in the seed, or showing the company beside
      the name in assignment pickers.
+
+0. **THE TWO FOLLOW-UPS THE CONTRACTS SPRINT LEAVES OPEN.** Cited by
+   NAME, not by number, per this file's own cross-reference rule — and
+   in this case the numbers genuinely do not agree. The prompt that
+   built the contracts subsystem called it "Sprint 160" and called its
+   two follow-ups "Sprint 158" and "Sprint 159", while the entry below
+   (written by #157) reserves #159 for Contracts itself. **#158 has
+   already SHIPPED as `feat/sprint-158-owner-feedback-5` and is this
+   branch's base**, so it cannot also be a future sprint. Treat the
+   names below as authoritative and renumber deliberately, once,
+   whenever the owner next fixes the sequence.
+
+   - **CONTRACT INVOICES BECOME REAL.** Turn a due row of the
+     `contracts/billing.py` forecast into an actual `invoicing.Invoice`.
+     The forecast was deliberately built as a pure function so this is a
+     small step: it already yields invoice date, period, amount and due
+     date per period. Verified groundwork — `InvoiceLine.extra_work` is
+     NULLABLE and its docstring already anticipates a hand-added
+     free-text line, so a contract invoice needs no schema change. The
+     open design question is idempotency: what stops the same period
+     being invoiced twice, and where that claim is recorded.
+   - **CONTRACT HOURS vs WORKED HOURS.** Per worker per building,
+     compared — the owner has confirmed he wants the COMPARISON, not two
+     independent lists. The groundwork is in place and was shaped for
+     this on purpose: `ContractLine.hours` is a per-billing-period
+     budget (so the period basis is well defined) and carries an
+     optional `building` FK (so there is something to group by) without
+     needing a schema change. The worked side is
+     `timesheets.TimeEntry`. Note the module-independence rule on both
+     apps — the comparison belongs in a reporting surface that reads
+     both, not in an FK between them.
 
 0. **THE AGREED SEQUENCE AFTER #158.** (Owner, carried forward and
    renumbered.) **#159 Contracts** (a prompt exists), then **#160**
