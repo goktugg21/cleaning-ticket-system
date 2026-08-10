@@ -14,7 +14,7 @@ role are 403'd on every method.
 
 **Query cost is constant in the page size.** The active revision of
 every contract on the page is resolved in ONE query
-(`revisions.active_revision_ids`), its totals arrive as annotations
+(`revisions.display_revision_ids`), its totals arrive as annotations
 rather than per-row aggregates, and the buildings and lines are
 prefetched. `tests/test_query_counts.py` pins this: a 10-row page costs
 exactly what a 2-row page costs.
@@ -45,11 +45,7 @@ from .models import (
     ContractType,
 )
 from .permissions import IsContractManager, IsContractReader, enforce_contract_management
-from .revisions import (
-    active_revision_ids,
-    annotate_revision_totals,
-    display_revision_ids,
-)
+from .revisions import annotate_revision_totals, display_revision_ids
 from .scope import (
     filter_buildings_for_contracts,
     filter_contract_types_for,
