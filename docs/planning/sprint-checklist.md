@@ -55,179 +55,147 @@ docs-only pass — so this file always reflects where we actually are.
 
 ## NOW
 
-**Branch:** `feat/sprint-157-owner-feedback-4` — Sprint 157, the owner's
-fourth feedback round plus the extra-work assignment model. **CC did NOT
-open a PR and did NOT deploy.**
-
-**Cut from the tip of `feat/sprint-156-owner-feedback-3` (`76ecae8`).**
-Five branches must merge IN ORDER: **#153 → #154 → #155 → #156 → #157.**
+**Branch:** `feat/sprint-158-owner-feedback-5`. **CC did NOT open a PR
+and did NOT deploy.** Cut from `feat/sprint-157-owner-feedback-4`
+(`c895500`). Merge order: **#153 → #154 → #155 → #156 → #157 → #158.**
 
 ### The owner-visible changes, in plain words
 
-- Hours: a "Set up week" window. Pick the people and the buildings
-  together, press one button, and the table is built with a row for every
-  combination. Then you type.
-- Extra work can now have people on it. Pick several requests, choose
-  workers or managers, assign them in one go — and each request's page
-  shows who is on it.
-- The companies list now looks like the buildings list: counters at the
-  top, sortable columns, and an Edit button that lets you tick several
-  companies and switch them off at once.
-- A company's page now also shows its logo and the four switches that say
-  what an administrator may change for its customers.
-- The Documents card on the permissions page now says what the module
-  actually does, like the two cards beside it.
-- "Extra Work" in the menu starts closed, but opens by itself while you
-  are on one of its pages.
-- The roles filters on the Users page line up as one block instead of two
-  ragged ones.
-- The customer's Buildings page has a full row of counters instead of one,
-  and the column that lists what is at each building is named for that.
-- Clicking a person's name opens that person, everywhere.
+- Only the right people can be put on a job now: managers are chosen from
+  the people authorised at that building, workers from the people who
+  work there. The picker offers nobody who would be refused.
+- A request's managers automatically become the managers of the ticket it
+  turns into.
+- Tickets can have people assigned in bulk, the same way extra work can.
+- Extra Work and Tickets now open showing what has not been actioned yet,
+  with every other status as a button beside it. A line says the filter
+  is on and one click clears it.
+- The Users page groups the role buttons as "provider" and "customer"
+  instead of mixing them.
+- Hours: "Apply to all" is now two clearly-labelled buttons — Fill, which
+  fills the boxes, and Add row, which adds a row. They used to be the
+  same button.
+- Hours: a row of boxes above everybody sets a day for every employee at
+  once; hour types are chosen in the setup window; and several rows can
+  be selected and set together without opening anything.
 
-### §1 — the week grid, asked three times, built this time
+### §1 — eligibility, and what was NOT a bug
 
-Sprint 154 gave one employee and an implicit building. Sprint 155 made
-the employee side multi-select and separated it from the page's filter.
-Sprint 156 let a building be attached to a row AFTER adding it. None of
-those is *pick the users, pick the buildings, build the table* — they all
-built the table first and asked about the building second.
+`buildings/assignment_eligibility.py` holds the rule once:
+**WORKER** = staff visibility on the request's building; **MANAGER** =
+a manager assignment on it, or a COMPANY_ADMIN of its company. Sprint 157
+used one role set for both, so a field worker could be made the MANAGER.
 
-The setup is a MODAL, the owner's own suggestion: employees
-multi-select, buildings multi-select, the ISO week, and a live
-`employees x buildings = rows` line. Confirm builds one row per pair.
+COMPANY_ADMIN is admitted as a MANAGER candidate and NOT as a WORKER —
+stated because §1 asked for a decision, and tested both ways. An admin is
+authoritative over every building of their company by construction;
+doing the work on site is a different claim.
 
-**RECONCILED, not appended** (§1.5). If an employee already has a row at
-a chosen building this week, no blank second row is created. The check is
-on the BUILDING rather than the full row key on purpose: an existing
-row's hour type is whatever was really worked, and a seeded default has
-no claim to displace it.
+Eligibility is resolved PER REQUEST, so assigning one person across two
+buildings requires them to be authorised at both.
 
-`TimeEntry.building` stays nullable. "No building" is offered FIRST in
-the picker, as a sentinel translated back to `null` inside the dialog —
-a UI affordance, not a model change.
+`GET …/assignments/candidates/?role=` is the picker's source and calls
+the SAME helper as the validator. A test walks the endpoint's ENTIRE
+output through the assign endpoint for both roles — "offerable" equals
+"acceptable" by construction (Sprint 152.1 §1a).
 
-**Measured end to end:** before setup 0 blocks; the modal opens on
-2026-W32 with a disabled confirm reading `0 x 0 = 0 rijen`; picking two
-and two reads `2 medewerkers x 2 gebouwen = 4 rijen`; confirm builds two
-employee blocks each carrying both buildings. One block shows THREE rows,
-not two — the reconciliation working on a real saved entry from an
-earlier test.
+An ineligible-but-real id is indistinguishable from a fictional one,
+including the wrong-role case, asserted by comparing bodies for EQUALITY
+(H-1).
 
-### §2 — extra work gets a people-assignment model
+**The crmtest report was NOT a bug and the tenant check was not
+touched.** A user may legitimately hold staff visibility on buildings of
+two provider companies — the demo seed does exactly that — so both
+companies accept them. A test now pins it.
 
-Sprint 156 reported this needed a new model rather than building it
-unreviewed. Built here.
+**Manager carry-over: THREE spawn paths, all handled.**
+`instant_tickets.spawn_tickets_for_request`,
+`proposal_tickets.spawn_tickets_for_proposal`, and
+`proposal_tickets.spawn_tickets_for_extra_work_request`. A fourth
+`Ticket.objects.create` in `planned_work/generation.py` is deliberately
+not a caller — planned work has no extra-work request behind it.
 
-`ExtraWorkAssignment` mirrors `tickets.TicketStaffAssignment`'s SHAPE and
-imports nothing from `tickets`. It deliberately does NOT copy that
-model's dated operational slots — extra work has no slot concept, and
-inventing one would be building a scheduling subsystem nobody asked for.
-`unique_together (request, user, role)` because one person may be both a
-worker and a manager; `user` is PROTECT because an assignment records who
-was put on a job.
+**Workers are NOT carried over, by decision.** `TicketStaffAssignment`
+has been a dated operational SLOT since Sprint 14E, so copying a worker
+into one creates a slot with no schedule that reads on the agenda as
+planned work nobody planned. `TicketManagerAssignment` is a plain link,
+so carrying it is one-to-one with nothing invented.
 
-Audit uses the MEMBERSHIP shape, correctly rather than as a shortcut: the
-row has no editable field, `role` is part of the key, so changing it is a
-delete plus a create and an UPDATE handler would have nothing to diff.
+Tickets get the same bulk surface reusing the same helper. One
+ticket-specific rule: a bulk assign makes ONE unscheduled slot per pair
+and refuses a second; unassign removes every slot that person holds.
 
-`POST /api/extra-work/bulk-assign/` follows the Sprint 154 discipline —
-every id resolved before any write, one `transaction.atomic()`, real
-`objects.create()`/`.delete()` so audit fires (H-10), re-assigning counted
-rather than erroring. **A foreign id, a fictional id AND a cross-company
-pair all produce one constant body**, compared for EQUALITY in tests. The
-cross-company case matters most: both ids are real and both resolve for a
-SUPER_ADMIN, so a different answer there would map which company a person
-belongs to.
+### §2 — the statuses, read out of the state machines
 
-CUSTOMER_* can neither call it nor be assigned in either role, not even by
-a SUPER_ADMIN. STAFF can be assigned but cannot assign. A SUPER_ADMIN is
-not a provider employee and is not assignable.
+Extra work defaults to **REQUESTED**, tickets to **OPEN** — both the
+genuinely-untouched status. The DASHBOARD keeps no default: it is a
+summary of everything and defaulting it would make it disagree with its
+own attention cards.
 
-Additive migration `extra_work/0028`.
+The default is **visible and clearable in one click**. That is the part
+that makes it safe: a silent default filter looks exactly like an empty
+system, and an operator opening a quiet week would conclude the data is
+gone.
 
-### §4 — the premise was wrong, and the fix is the mirror image
+**The tickets chips carry no per-status counts, deliberately.** That list
+is server-paginated, so the only numbers the client holds are for the
+page it is on; a chip reading "3" when the status holds ninety is worse
+than no number. Extra Work shows real counts because Sprint 120 made it
+fetch the full set. Recorded in NEXT with the fix shape.
 
-"Do not leave an Edit that only touches two fields." The Edit was never
-thin: it opens `CompanyFormPage`, which edits every writable field
-`Company` has — name, slug, default language, logo and four policy
-booleans, plus admin memberships. The DETAIL page displayed four of them,
-so the Edit *looked* thin because the page did not show what it changes.
-The page now displays all nine. Nothing was added to the Edit, because
-nothing was missing from it.
+### §5 — the hours grid, and the bug my own code had
 
-### §6 — the described state did not exist
+§5a — "Apply to all" became **Fill** (writes into existing cells, adds
+nothing) and **Add row** (creates the row, fills nothing).
 
-§6 says AppShell "already holds `extraWorkManualOpen ?? extraWorkChildActive`".
-It held a plain boolean from Sprint 156. The behaviour asked for is built:
-closed on load, open while inside, manual toggle winning until you
-navigate away — all from ONE derived value, because the override carries
-the path it was made on and simply stops applying when the pathname
-changes. No effect resets it, which §6 also required.
+§5c, reproduced from the code before changing it: the old version keyed
+on the (hour type, building) PAIR, and the bar's building defaults to
+"no building" while seeded rows carry a real one — so applying to an
+hour type that already existed produced a SECOND row for the same hour
+type. Fill now matches on hour type and treats the building as an
+optional narrowing; the empty choice is relabelled "Every building".
 
-### §7 — the trade, measured
+§5b — a global row above the names, belonging to no employee.
+§5d — hour types moved into the setup modal; the summary counts
+employees x buildings x hour types.
+§5e — row checkboxes plus a value box and "Set N selected rows", inline.
+§5f — the strip stays one line; it scrolls inside itself.
 
-The chip groups grew into whatever slack was left on the line, so they
-came out ragged: 486 vs 916px at 1280, 646 vs 1076 at 1440, with ROLES
-wrapping to two lines inside the narrower one. They now share one
-full-width row in equal columns.
+**A defect in my own code, found by measuring rather than reading:** the
+first run filled ten cells and the banner said "no row has that hour
+type". The counter was incremented INSIDE a setState updater and read on
+the next line, before React had invoked it. Both `fillMatchingRows` and
+`addRowToAll` now compute before setting state.
 
-  1024  bar 194 -> 223px, rows 4 -> 3, groups [670,660] -> [330,330]
-  1280  bar 171 -> 185px, rows 3 -> 3, groups [486,916] -> [458,458]
-  1440  bar 137 -> 185px, rows 3 -> 3, groups [646,1076] -> [538,538]
+### §3 — measured
 
-Raggedness gone at every width; 1024 loses a row; the bar is TALLER at
-1280 and 1440 and that is a real trade. Aligned means they must share a
-row; at 1440 the bar has 1086px of inner width against natural widths of
-~646 and ~430, which do not both fit, so the chips wrap. Sprint 156's
-137px was bought precisely by NOT aligning them. Content-sized tracks
-were tried and measured identically. Zero overflow throughout.
+Regrouped by SIDE. Bar height against Sprint 157's numbers: 1024
+**223 → 185px**, 1280 185 → 185px, 1440 **185 → 147px**. It recovers most
+of the height Sprint 157 traded for alignment, without giving up the
+alignment.
 
-They stay VISIBLE — collapsing them is ruled out by §7 and by item 19.
+### NOT DELIVERED
 
-### §3 — and one duplication finally removed
-
-The companies list gets tiles, sortable headers, the edit gate, a bulk
-toolbar and bulk deactivate. `CompanyBulkDeactivateView` mirrors the
-customer one but is **SUPER_ADMIN only**: `Company` IS the tenant, so
-letting a COMPANY_ADMIN switch it off — with reactivation already
-SUPER_ADMIN-only — would be a one-way door.
-
-`SortableHeader` is now defined ONCE. Customers and buildings each had a
-copy, the buildings one commented as duplicated "rather than shared"; a
-third for companies is where that stops being defensible.
-
-**Measured:** tiles 4/4/0, four sortable headers, Name flips the order
-with `aria-sort="descending"` on the `<th>`, edit gate 0 -> 5 checkboxes,
-zero overflow at three widths, zero raw keys.
-
-### The bug the tests could not have caught
-
-The §2 UI measurement failed on its first run with a server error:
-migration `0028` had not been applied to the DEV database. The gate builds
-its own test database from scratch, so it was never affected — "it passes
-the tests" would have hidden it completely. Applied, re-driven, verified.
+**§4 — the company's employees / buildings / customers cards are not yet
+editable.** The backend for it exists (Sprint 154's
+`/api/buildings/bulk-link/` covers customers↔buildings and
+staff/managers↔buildings; `CompanyAdminListCreateView` covers admins),
+so this is frontend work behind the `useEditMode` gate on the three
+cards. It was cut for time, not for a reason — nothing was learned that
+argues against it.
 
 ### Gates
 
-Backend: `test extra_work timesheets companies customers accounts audit`.
-New tests: `extra_work/tests/test_sprint157_assignments.py` (21) and six
-added to `companies/tests/test_sprint156_company_area.py` (27 total).
-Both were run on an ISOLATED database (`-e POSTGRES_DB=s157`) while the
-Sprint 156 gate still held the shared one — the collision this project
-has been bitten by twice.
+Backend: `test extra_work tickets timesheets companies customers audit`.
+New tests: `test_sprint158_assignment_eligibility` (18),
+`test_sprint158_manager_carryover` + `tickets/test_sprint158_bulk_assign`
+(16), and three Sprint 157 tests corrected to the new rule (21 total).
+`makemigrations --dry-run --check` → *No changes detected*; no migration
+this sprint.
 
-`makemigrations --dry-run --check` → *No changes detected* (one migration
-added, `extra_work/0028`).
-
-Frontend: `tsc` clean, `eslint .` **44 (42 errors, 2 warnings)** —
-baseline held. One violation was introduced and removed before commit
-(an async loader called from an effect body); rewritten as an inlined
-fetch with a `cancelled` flag rather than an eslint-disable.
-
-i18n: **11/11 namespace pairs equal**, then **835 `t()` call sites across
-20 changed files resolved against the namespace each component declares —
-0 misses.**
+Frontend: `tsc` clean, `eslint .` **44 (42 errors, 2 warnings)**, build ✓.
+i18n: 11/11 namespace pairs equal; **627 `t()` call sites across 13
+changed files, 0 misses.**
 
 ---
 
@@ -238,6 +206,40 @@ across ("Owner's forward queue", "Deferred / undecided items", "Standing
 milestones", "Deferred"). All four are now retired; every genuinely-open
 item from them lives here, and every already-shipped or already-decided
 item has moved to `## SHIPPED` or been resolved below instead.
+
+0. **Sprint 158 leftovers, recorded rather than dropped.**
+   - **§4 — the company detail cards are not editable yet.** Employees,
+     buildings and customers are read-only on that page. The BACKEND
+     already exists: `/api/buildings/bulk-link/` (Sprint 154) covers
+     customers<->buildings and staff/managers<->buildings, and
+     `CompanyAdminListCreateView` covers admins. So this is frontend
+     work behind the `useEditMode` gate on the three cards, not new
+     endpoints. Cut for time, not for a reason.
+   - **Ticket status chips have no per-status counts.** The ticket list
+     is server-filtered and paginated, so the client only holds the page
+     it is on; showing those numbers would be showing wrong ones. Fix
+     shape: an aggregate on the ticket list endpoint
+     (`?counts=status`, one grouped query) that returns
+     `{status: count}` for the CURRENT non-status filters, so the chips
+     stay honest when a search or building filter is also on. The Extra
+     Work list needs nothing — Sprint 120 made it fetch the full set.
+   - **The demo seed gives one user staff visibility in TWO provider
+     companies** (`noah-staff-bright@bright-facilities.demo` is on both
+     Bright Facilities and Osius Demo buildings). That is LEGAL and the
+     tenant check correctly allows it — Sprint 158 §1 confirmed the
+     reported "bug" was not one — but it is confusing on screen, because
+     the e-mail domain says one company and the assignment says another.
+     Consider splitting them in the seed, or showing the company beside
+     the name in assignment pickers.
+
+0. **THE AGREED SEQUENCE AFTER #158.** (Owner, carried forward and
+   renumbered.) **#159 Contracts** (a prompt exists), then **#160**
+   contract invoices become real, **#161** contract hours plus the
+   comparison against worked hours, **#162** Worker Hour Reports,
+   **#163** Schedule — compare `frontend/src/pages/AgendaPage.tsx`
+   against the reference and report the GAP before building anything.
+   The detail behind each of these is in the entry below, which #157
+   wrote and which stays authoritative for scope.
 
 0. **THE AGREED SEQUENCE AFTER #157.** (Owner, Sprint 157 §11.) These
    are the remaining pieces, in the order they must be built, because
