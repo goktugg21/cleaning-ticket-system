@@ -8624,6 +8624,55 @@ details[open] > .ew-department-tree-summary::before {
   color: var(--text-faint);
 }
 
+/* Sprint 158 §2 — the status chips. Every status visible with its
+   count, the active one marked, and a clearable notice under them so a
+   default filter can never be mistaken for an empty system. */
+.status-chip-bar { margin-bottom: 14px; }
+.status-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-2);
+  transition: border-color 0.14s, background 0.14s, color 0.14s;
+}
+.status-chip:hover { border-color: var(--green-2); color: var(--text); }
+.status-chip-active {
+  border-color: var(--green);
+  background: var(--green-faint);
+  color: var(--text);
+  font-weight: 700;
+}
+.status-chip-count {
+  font-family: var(--f-head);
+  font-weight: 800;
+  font-size: 12px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.status-chip-active .status-chip-count { background: #fff; }
+.status-chip-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
 /* Sprint 158 §5b — the GLOBAL row: seven day boxes belonging to no
    employee, above every block. Tinted and labelled so what it does is
    legible from where it sits. */

@@ -32,6 +32,7 @@ import {
   isStaffRole,
 } from "../auth/permissions";
 import { SLABadge } from "../components/sla/SLABadge";
+import { StatusFilterChips } from "../components/StatusFilterChips";
 import { useToast } from "../components/ToastProvider";
 import { currentMonth, splitOpenInvoiced, sumRows } from "../lib/billing";
 import { formatDate, formatDateTime, formatMoney } from "../lib/intl";
@@ -185,11 +186,26 @@ export function DashboardPage({
   // presets so the dashboard's attention cards can deep-link into the
   // full list with the right filter applied (read once at mount; the
   // dropdowns own the state afterwards).
+  // Sprint 158 §2 — the TICKETS page opens on what has not been
+  // actioned. `OPEN` is the genuinely-untouched status in
+  // `TicketStatus`: every spawn path creates a ticket OPEN and writes
+  // the initial history row at that status, so nothing has happened to
+  // an OPEN ticket yet.
+  //
+  // The DASHBOARD variant keeps "" — it is a summary of everything by
+  // definition, and defaulting it would make the dashboard disagree with
+  // its own attention cards.
+  //
+  // `?status=` still wins, and `?status=ALL` is how a link asks for
+  // everything, so the existing deep links from the dashboard widgets
+  // are unaffected.
   const [statusFilter, setStatusFilter] = useState<TicketStatus | "">(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
-    return raw && (STATUS_OPTIONS as string[]).includes(raw)
-      ? (raw as TicketStatus)
-      : "";
+    if (raw === "ALL") return "";
+    if (raw && (STATUS_OPTIONS as string[]).includes(raw)) {
+      return raw as TicketStatus;
+    }
+    return variant === "tickets-page" ? "OPEN" : "";
   });
   const [unassignedFilter, setUnassignedFilter] = useState(
     () => new URLSearchParams(window.location.search).get("unassigned") === "1",
@@ -1551,6 +1567,36 @@ export function DashboardPage({
                     {t("rows_label", { count: tickets.length })}
                   </span>
                 </div>
+
+                {/* Sprint 158 §2 — the statuses as chips, with the
+                    default visible and clearable in one click.
+
+                    NO per-status counts here, deliberately: this list is
+                    SERVER-filtered and paginated, so the only numbers the
+                    client holds are for the page it is looking at.
+                    Showing those would be worse than showing none — a
+                    chip reading "3" when the status holds ninety is a
+                    number the operator would act on. The Extra Work list
+                    shows real counts because Sprint 120 made it fetch
+                    the full set. Recorded in `## NEXT` with the fix
+                    shape. */}
+                <StatusFilterChips
+                  chips={STATUS_OPTIONS.map((value) => ({
+                    value,
+                    // The page's OWN status label helper, the same one
+                    // the dropdown below uses — a second labelling path
+                    // here rendered raw enum names on the chips.
+                    label: tStatus(value),
+                    count: -1,
+                  }))}
+                  active={statusFilter}
+                  onChange={(value: string) => {
+                    setStatusFilter(value as TicketStatus | "");
+                    setPage(1);
+                  }}
+                  totalCount={count}
+                  testIdPrefix="tickets-status"
+                />
 
                 <form className="filter-bar" onSubmit={handleSearchSubmit}>
                   <div className="filter-field">

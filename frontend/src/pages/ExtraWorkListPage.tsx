@@ -42,6 +42,7 @@ import { getApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isProviderManagementRole } from "../auth/permissions";
 import { ChoiceDialog } from "../components/ChoiceDialog";
+import { StatusFilterChips } from "../components/StatusFilterChips";
 import { EditModeToggle } from "../components/EditModeToggle";
 import { MultiSelectToolbar } from "../components/MultiSelectToolbar";
 import { AssignPeopleDialog } from "../components/extra-work/AssignPeopleDialog";
@@ -171,11 +172,17 @@ export function ExtraWorkListPage() {
   const [searchInput, setSearchInput] = useState("");
   // RF-18 (#107) — dashboard widgets deep-link with ?status=<EW status>;
   // read once at mount (validated), the dropdown owns the state after.
+  // Sprint 158 §2 — the list opens on what has not been actioned.
+  // `REQUESTED` is the genuinely-untouched status in
+  // `ExtraWorkStatus` (the customer has asked, nobody has picked it up),
+  // and the owner named it. A `?status=` deep link still wins, and
+  // `?status=ALL` is how a link asks for everything.
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
     const raw = new URLSearchParams(window.location.search).get("status");
+    if (raw === "ALL") return "ALL";
     return raw && (STATUS_FILTER_OPTIONS as readonly string[]).includes(raw)
       ? (raw as StatusFilter)
-      : "ALL";
+      : "REQUESTED";
   });
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [categoryOptions, setCategoryOptions] =
@@ -341,6 +348,17 @@ export function ExtraWorkListPage() {
   // these totals no longer silently undercount past 100 rows. A backend
   // aggregation endpoint remains a future option if request volume on
   // very large tenants becomes a real cost; not needed for correctness.
+  // Sprint 158 §2 — counts per status over the FULL set. Computed from
+  // `rows` and not from `visibleRows`, or every chip but the active one
+  // would read zero.
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of rows) {
+      counts[row.status] = (counts[row.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [rows]);
+
   const kpis = useMemo<ExtraWorkKpis>(() => {
     let open = 0;
     let awaiting = 0;
@@ -632,6 +650,26 @@ export function ExtraWorkListPage() {
           testId="extra-work-list-kpi-value"
         />
       </div>
+
+      {/* Sprint 158 §2 — the statuses as CHIPS, above the filter bar.
+          Every one visible with its count, the active one marked, and a
+          clearable notice underneath so the default filter can never be
+          mistaken for an empty system. The status dropdown below stays:
+          it is the same state, and removing a control an operator may
+          already be using would be hiding a feature. */}
+      <StatusFilterChips
+        chips={STATUS_FILTER_OPTIONS.map((value) => ({
+          value,
+          label: t(STATUS_I18N_KEY[value]),
+          count: statusCounts[value] ?? 0,
+        }))}
+        active={statusFilter === "ALL" ? "" : statusFilter}
+        onChange={(value) =>
+          setStatusFilter((value === "" ? "ALL" : value) as StatusFilter)
+        }
+        totalCount={rows.length}
+        testIdPrefix="extra-work-status"
+      />
 
       {/* Filter bar */}
       <div

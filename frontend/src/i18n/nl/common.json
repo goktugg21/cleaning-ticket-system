@@ -2173,5 +2173,9 @@
   "hours_week_grid.global_cell_label": "Zet {{day}} voor elke medewerker",
   "week_setup.hour_types_label": "Uursoorten",
   "week_setup.hour_types_hint": "Met welke uursoorten het raster begint. U kunt er later meer toevoegen.",
-  "week_setup.no_hour_types": "Er zijn nog geen uursoorten ingesteld."
+  "week_setup.no_hour_types": "Er zijn nog geen uursoorten ingesteld.",
+  "status_chips.all": "Alle",
+  "status_chips.filtered_notice": "{{shown}} van {{total}} getoond — gefilterd op {{status}}.",
+  "status_chips.show_all": "Alles tonen",
+  "status_chips.filtered_notice_simple": "Gefilterd op {{status}}."
 }

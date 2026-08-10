@@ -2173,5 +2173,9 @@
   "hours_week_grid.global_cell_label": "Set {{day}} for every employee",
   "week_setup.hour_types_label": "Hour types",
   "week_setup.hour_types_hint": "Which hour types the grid starts with. You can still add more later.",
-  "week_setup.no_hour_types": "No hour types have been set up yet."
+  "week_setup.no_hour_types": "No hour types have been set up yet.",
+  "status_chips.all": "All",
+  "status_chips.filtered_notice": "Showing {{shown}} of {{total}} — filtered to {{status}}.",
+  "status_chips.show_all": "Show all",
+  "status_chips.filtered_notice_simple": "Filtered to {{status}}."
 }
